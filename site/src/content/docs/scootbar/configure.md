@@ -204,8 +204,10 @@ plain reload.
 > (or keep them on purpose) to let the look show through.
 
 > **Symptom:** a reload is refused naming `bar.radius`. The look's
-> radius does not fit the file's `height` (at most half of it). Set the
-> file's own `radius`, or raise `height`.
+> radius does not fit the file's `height` (at most half of it). A layer
+> value that is invalid against the file refuses the whole layer at
+> startup (a note, the bar starts without it) and the whole reload on a
+> swap. Set the file's own `radius`, or raise `height`.
 
 
 

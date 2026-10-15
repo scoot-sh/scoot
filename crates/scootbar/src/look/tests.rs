@@ -53,6 +53,19 @@ fn origin() -> Origin {
     ))
 }
 
+/// Commits a successful reload, as the daemon does after its apply
+/// succeeds: the look functions only compute, they never move state. A
+/// refused apply drops the pending value and the snapshot stays.
+fn commit(look: &mut LookState, pending: Reloaded) -> (Config, Vec<String>) {
+    let Reloaded {
+        config,
+        notes,
+        look: next,
+    } = pending;
+    *look = next;
+    (config, notes)
+}
+
 const FULL: Features = Features::all();
 
 /// No state dir: fixed-layer tests prove the state link is never read.
@@ -263,11 +276,13 @@ fn scoped_reload_ignores_pending_edits() {
     .unwrap();
     // Scoped: the new layer under the snapshot. The background stays
     // the snapshot's; the accent follows the layer.
-    let (config, _) = reload_look(Some(&user), &mut look, &FULL, NO_STATE).expect("scoped reloads");
+    let pending = reload_look(Some(&user), &look, &FULL, NO_STATE).expect("scoped reloads");
+    let (config, _) = commit(&mut look, pending);
     assert_eq!(config.theme.background.to_string(), "#111111");
     assert_eq!(config.theme.accent.to_string(), "#bbbbbb");
     // Plain: the pending edits land.
-    let (config, _) = reload_user(Some(&user), &mut look, &FULL, NO_STATE).expect("plain reloads");
+    let pending = reload_user(Some(&user), &look, &FULL, NO_STATE).expect("plain reloads");
+    let (config, _) = commit(&mut look, pending);
     assert_eq!(config.theme.background.to_string(), "#aaaaaa");
     assert_eq!(config.theme.accent.to_string(), "#bbbbbb");
 }
@@ -295,13 +310,15 @@ fn scoped_reload_keeps_a_pending_module_list() {
         format!("left = []\n[look]\nlayer = \"{}\"\n", layer.display()),
     )
     .unwrap();
-    let (config, _) = reload_look(Some(&user), &mut look, &FULL, NO_STATE).expect("scoped reloads");
+    let pending = reload_look(Some(&user), &look, &FULL, NO_STATE).expect("scoped reloads");
+    let (config, _) = commit(&mut look, pending);
     assert_eq!(
         config.layout.left,
         vec![module],
         "the scoped reload applied a pending module-list edit"
     );
-    let (config, _) = reload_user(Some(&user), &mut look, &FULL, NO_STATE).expect("plain reloads");
+    let pending = reload_user(Some(&user), &look, &FULL, NO_STATE).expect("plain reloads");
+    let (config, _) = commit(&mut look, pending);
     assert!(
         config.layout.left.is_empty(),
         "the plain reload did not pick the edit up"
@@ -312,8 +329,8 @@ fn scoped_reload_keeps_a_pending_module_list() {
 fn plain_reload_without_a_file_is_a_loud_refusal() {
     // Same refusal as before the layer: no usable config home means no
     // reload, whatever the look state.
-    let mut look = LookState::new(value(""), false);
-    let error = reload_user(None, &mut look, &FULL, NO_STATE).expect_err("reloads without a file");
+    let look = LookState::new(value(""), false);
+    let error = reload_user(None, &look, &FULL, NO_STATE).expect_err("reloads without a file");
     assert!(error.contains("no config file to reload"), "{error}");
 }
 
@@ -380,26 +397,10 @@ fn dangling_state_link_starts_without_a_layer_and_refuses_scoped() {
         startup.config.theme.accent.to_string(),
         Config::default().theme.accent.to_string()
     );
-    let mut look_state = startup.look;
-    let error = reload_look(Some(&user), &mut look_state, &FULL, Some(&state))
+    let look_state = startup.look;
+    let error = reload_look(Some(&user), &look_state, &FULL, Some(&state))
         .expect_err("scoped over dangling");
     assert!(error.contains("dangling"), "{error}");
-}
-
-#[test]
-fn active_layer_lost_refuses_plain_reload() {
-    let scratch = Scratch::new("lost");
-    let state = scratch.path.join("state");
-    let look = state.join("look");
-    std::fs::create_dir_all(&look).unwrap();
-    std::fs::write(look.join("bar.toml"), "[colors]\naccent = \"#222222\"\n").unwrap();
-    let user = scratch.write("bar.toml", "[colors]\nbackground = \"#111111\"\n");
-    let startup = load_startup(Some(&user), Some(&state)).expect("starts");
-    let mut look_state = startup.look;
-    std::fs::remove_file(look.join("bar.toml")).unwrap();
-    let error = reload_user(Some(&user), &mut look_state, &FULL, Some(&state))
-        .expect_err("plain over lost layer");
-    assert!(error.contains("gone"), "{error}");
 }
 
 #[test]
@@ -457,14 +458,12 @@ fn malformed_layer_refuses_without_panic() {
         ),
     );
     let startup = load_startup(Some(&user), NO_STATE).expect("starts");
-    let mut look = startup.look;
+    let look = startup.look;
     for garbage in ["[[[", "\x00", "x = ", "[colors]\naccent = 5\n"] {
         std::fs::write(&layer, garbage).unwrap();
-        let error =
-            reload_look(Some(&user), &mut look, &FULL, NO_STATE).expect_err("garbage passes");
+        let error = reload_look(Some(&user), &look, &FULL, NO_STATE).expect_err("garbage passes");
         assert!(!error.is_empty(), "empty refusal for {garbage:?}");
-        let error =
-            reload_user(Some(&user), &mut look, &FULL, NO_STATE).expect_err("garbage passes");
+        let error = reload_user(Some(&user), &look, &FULL, NO_STATE).expect_err("garbage passes");
         assert!(!error.is_empty(), "empty refusal for {garbage:?}");
     }
 }
@@ -483,13 +482,13 @@ fn broken_layer_refuses_and_keeps_the_snapshot() {
     let startup = load_startup(Some(&user), NO_STATE).expect("starts");
     let mut look = startup.look;
     std::fs::write(&layer, "[bar]\nedge = \"top\"\n").unwrap();
-    let error =
-        reload_look(Some(&user), &mut look, &FULL, NO_STATE).expect_err("broken layer passes");
+    let error = reload_look(Some(&user), &look, &FULL, NO_STATE).expect_err("broken layer passes");
     assert!(error.contains("not a look key"), "{error}");
     // The snapshot still holds the old file: a fixed layer heals the
     // next scoped reload.
     std::fs::write(&layer, "[colors]\naccent = \"#444444\"\n").unwrap();
-    let (config, _) = reload_look(Some(&user), &mut look, &FULL, NO_STATE).expect("heals");
+    let pending = reload_look(Some(&user), &look, &FULL, NO_STATE).expect("heals");
+    let (config, _) = commit(&mut look, pending);
     assert_eq!(config.theme.background.to_string(), "#111111");
     assert_eq!(config.theme.accent.to_string(), "#444444");
 }
@@ -546,4 +545,163 @@ fn renderer_font_rides_the_layer() {
     let layer = value("[bar]\nfont = \"relative.ttf\"\n");
     let error = merge(&user, &layer, &FULL, &origin()).expect_err("relative font passes");
     assert!(error.contains("bar.font"), "{error}");
+}
+
+#[test]
+fn an_unapplied_plain_reload_leaves_the_snapshot() {
+    // Valid at parse but refused at apply (a flag clash, a font that
+    // vanished in `stage`): the snapshot must not move until the apply
+    // succeeds, or a later scoped reload merges the new layer under edits
+    // that never applied.
+    let scratch = Scratch::new("stale-snapshot");
+    let layer = scratch.write("one.toml", "[colors]\naccent = \"#222222\"\n");
+    let wrote = |background: &str| {
+        std::fs::write(
+            scratch.path.join("bar.toml"),
+            format!(
+                "[colors]\nbackground = \"{background}\"\n[look]\nlayer = \"{}\"\n",
+                layer.display()
+            ),
+        )
+        .unwrap()
+    };
+    wrote("#111111");
+    let user = scratch.path.join("bar.toml");
+    let startup = load_startup(Some(&user), NO_STATE).expect("starts");
+    let look = startup.look;
+    // The edit parses (a scoped-apply refusal happens later, in the
+    // daemon): the caller drops it, as a refused apply would, without
+    // committing.
+    wrote("#aaaaaa");
+    let _ = reload_user(Some(&user), &look, &FULL, NO_STATE).expect("parses");
+    assert_eq!(
+        look.snapshot["colors"]["background"].as_str(),
+        Some("#111111"),
+        "computing a reload must not move the snapshot"
+    );
+    // The apply refused: the file is reverted.
+    wrote("#111111");
+    // The scoped reload must see the reverted file, not the edit that
+    // never applied.
+    let pending = reload_look(Some(&user), &look, &FULL, NO_STATE).expect("scoped reloads");
+    assert_eq!(
+        pending.config.theme.background.to_string(),
+        "#111111",
+        "the reverted file must win over the unapplied edit"
+    );
+}
+
+#[test]
+fn plain_reload_over_a_lost_layer_applies_the_edits() {
+    // The state link is gone: a plain reload still applies the user's
+    // edits, degrading to no layer with a loud note and clearing
+    // `active`. Only the look-scoped reload stays a refusal.
+    let scratch = Scratch::new("lost-applies");
+    let state = scratch.path.join("state");
+    let look = state.join("look");
+    std::fs::create_dir_all(&look).unwrap();
+    std::fs::write(look.join("bar.toml"), "[colors]\naccent = \"#222222\"\n").unwrap();
+    let user = scratch.write("bar.toml", "[colors]\nbackground = \"#111111\"\n");
+    let startup = load_startup(Some(&user), Some(&state)).expect("starts");
+    let mut look_state = startup.look;
+    assert!(look_state.active, "the layer applied at start");
+    // The link goes away; the user edits meanwhile.
+    std::fs::remove_file(look.join("bar.toml")).unwrap();
+    std::fs::write(&user, "[colors]\nbackground = \"#aaaaaa\"\n").unwrap();
+    let pending = reload_user(Some(&user), &look_state, &FULL, Some(&state))
+        .expect("plain applies the edits");
+    assert_eq!(pending.config.theme.background.to_string(), "#aaaaaa");
+    assert_eq!(
+        pending.config.theme.accent.to_string(),
+        Config::default().theme.accent.to_string(),
+        "no layer: the accent is the default, not the lost layer's"
+    );
+    assert!(
+        pending
+            .notes
+            .iter()
+            .any(|note| note.contains("without a look layer")),
+        "the loss is loud: {:?}",
+        pending.notes
+    );
+    commit(&mut look_state, pending);
+    assert!(!look_state.active, "active is cleared");
+}
+
+#[test]
+fn plain_reload_over_a_dangling_link_applies_the_edits() {
+    // Same as above, but the link dangles (its target went away) while
+    // the layer was active.
+    let scratch = Scratch::new("dangling-active");
+    let state = scratch.path.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let look = state.join("look");
+    let target = scratch.path.join("render");
+    std::fs::create_dir_all(&target).unwrap();
+    std::fs::write(target.join("bar.toml"), "[colors]\naccent = \"#222222\"\n").unwrap();
+    std::os::unix::fs::symlink(&target, &look).unwrap();
+    let user = scratch.write("bar.toml", "[colors]\nbackground = \"#111111\"\n");
+    let startup = load_startup(Some(&user), Some(&state)).expect("starts");
+    let mut look_state = startup.look;
+    assert!(look_state.active, "the layer applied at start");
+    std::fs::remove_dir_all(&target).unwrap();
+    std::fs::write(&user, "[colors]\nbackground = \"#aaaaaa\"\n").unwrap();
+    let pending = reload_user(Some(&user), &look_state, &FULL, Some(&state))
+        .expect("plain applies the edits");
+    assert_eq!(pending.config.theme.background.to_string(), "#aaaaaa");
+    assert!(
+        pending.notes.iter().any(|note| note.contains("dangling")),
+        "the loss is loud: {:?}",
+        pending.notes
+    );
+    commit(&mut look_state, pending);
+    assert!(!look_state.active, "active is cleared");
+}
+
+#[test]
+fn merged_value_errors_name_the_file_once() {
+    // The layer's radius passes the allowlist (0-512) but not the user's
+    // own height (at most half of it): the refusal names the file once,
+    // not twice.
+    let scratch = Scratch::new("double-path");
+    let layer = scratch.write("one.toml", "[bar]\nradius = 500\n");
+    let user = scratch.write(
+        "bar.toml",
+        &format!(
+            "[bar]\nheight = 24\n[look]\nlayer = \"{}\"\n",
+            layer.display()
+        ),
+    );
+    // At startup the whole layer is refused (a note), and the bar starts
+    // without it.
+    let startup = load_startup(Some(&user), NO_STATE).expect("starts without the layer");
+    assert_eq!(
+        startup.config.radius, 0,
+        "the layer's radius must not apply"
+    );
+    assert!(
+        startup.notes.iter().any(|note| note.contains("bar.radius")),
+        "{:?}",
+        startup.notes
+    );
+    let look = startup.look;
+    assert!(!look.active);
+    // On a swap the whole reload is refused, naming the file once.
+    std::fs::write(&layer, "[bar]\nradius = 500\n").unwrap();
+    let error =
+        reload_look(Some(&user), &look, &FULL, NO_STATE).expect_err("swap refuses the layer");
+    assert!(error.contains("bar.radius"), "{error}");
+    let needle = layer.display().to_string();
+    assert_eq!(
+        error.matches(needle.as_str()).count(),
+        1,
+        "the path is named twice: {error}"
+    );
+    let error =
+        reload_user(Some(&user), &look, &FULL, NO_STATE).expect_err("plain refuses the layer");
+    assert_eq!(
+        error.matches(needle.as_str()).count(),
+        1,
+        "the path is named twice: {error}"
+    );
 }

@@ -309,10 +309,9 @@ fn an_explicit_missing_file_is_a_refusal() {
 fn reload_without_a_file_is_a_refusal() {
     // The same refusal through the look layer's plain reload: no usable
     // config home means no reload, whatever the look state.
-    let mut look = crate::look::LookState::new(toml::from_str("").expect("empty parses"), false);
+    let look = crate::look::LookState::new(toml::from_str("").expect("empty parses"), false);
     assert!(
-        crate::look::reload_user(None, &mut look, &crate::look::Features::compiled(), None)
-            .is_err()
+        crate::look::reload_user(None, &look, &crate::look::Features::compiled(), None).is_err()
     );
 }
 

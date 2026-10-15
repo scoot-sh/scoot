@@ -18,8 +18,10 @@
 //! A scoped reload (`scope = "look"`) merges the new layer under a
 //! snapshot of the user file's raw table from the last successful plain
 //! load, so a swap never applies pending edits. A plain reload re-reads
-//! both. Startup with a missing or broken layer starts without one and
-//! says so; it never fails over a look.
+//! both; a layer that went missing while it was active degrades to no
+//! layer with a note, so the user's edits still apply. Startup with a
+//! missing or broken layer starts without one and says so; it never
+//! fails over a look.
 //!
 //! All of this runs at start-up and on reloads only: nothing here touches
 //! a per-frame path.
@@ -103,6 +105,18 @@ impl LookState {
     pub(crate) fn new(snapshot: toml::Value, active: bool) -> Self {
         Self { snapshot, active }
     }
+}
+
+/// What a reload computed: the merged config, its notes, and the look
+/// state to commit. The caller commits `look` only after the whole reload
+/// (the flags overlay, the apply) succeeds, so a refused reload leaves
+/// the snapshot exactly as it was: a later scoped reload never merges a
+/// new layer under edits that never applied.
+#[derive(Debug)]
+pub struct Reloaded {
+    pub config: Config,
+    pub notes: Vec<String>,
+    pub look: LookState,
 }
 
 /// What starting with the look layer gives: the merged config, the file a
@@ -245,7 +259,7 @@ fn start_layer(
     notes.append(&mut layer_notes);
     let path = layer_path(&origin);
     let mut config = config::config_from_value(merged.clone(), &path)
-        .map_err(|error| format!("look layer {}: {error}", path.display()))?;
+        .map_err(|error| format!("look layer: {error}"))?;
     // A layer font that fails to load drops the layer's font keys: the
     // bar falls back to its well-known paths, and the start is not lost
     // over a look. (A reload refuses instead, with the running bar kept.)
@@ -258,20 +272,25 @@ fn start_layer(
         ));
         merged = drop_layer_fonts(merged, &staged, user);
         config = config::config_from_value(merged, &path)
-            .map_err(|error| format!("look layer {}: {error}", path.display()))?;
+            .map_err(|error| format!("look layer: {error}"))?;
     }
     Ok(Some(config))
 }
 
 /// Re-reads the user file and the layer, and merges them: the plain
-/// reload. Updates the snapshot only on success; any failure leaves the
-/// running bar (and the snapshot) exactly as they were.
+/// reload. Returns the merged config with the snapshot to commit; the
+/// caller commits it only after the apply succeeds. Any failure leaves
+/// the running bar (and the snapshot) exactly as they were.
+///
+/// A layer that is gone while it was active degrades to no layer with a
+/// loud note (as at startup) and clears `active`, so the user's edits
+/// still apply. Only the look-scoped reload refuses a missing layer.
 pub fn reload_user(
     file: Option<&Path>,
-    look: &mut LookState,
+    look: &LookState,
     features: &Features,
     state: Option<&Path>,
-) -> Result<(Config, Vec<String>), String> {
+) -> Result<Reloaded, String> {
     let mut notes = Vec::new();
     let Some(path) = file else {
         return Err(
@@ -284,40 +303,42 @@ pub fn reload_user(
     let user: toml::Value = toml::from_slice(&bytes)
         .map_err(|error| config::Error::parse_error(path.to_owned(), error.to_string()))
         .map_err(|error| error.to_string())?;
+    let ready =
+        |config: Config, notes: Vec<String>, snapshot: toml::Value, active: bool| Reloaded {
+            config,
+            notes,
+            look: LookState::new(snapshot, active),
+        };
     let origin = match resolve_origin(&user, file, state)? {
         None => {
-            look.snapshot = user;
-            look.active = false;
-            return Ok((alone, notes));
+            return Ok(ready(alone, notes, user, false));
         }
         Some(origin) => origin,
     };
     let layer = match read_layer(&origin) {
         Layer::Absent if look.active => {
-            return Err(format!(
-                "look layer {} is gone, refusing: the running bar keeps its look",
+            notes.push(format!(
+                "look layer {} is gone, reloading without a look layer",
                 layer_path(&origin).display()
             ));
+            return Ok(ready(alone, notes, user, false));
         }
         Layer::Absent => {
-            look.snapshot = user;
-            look.active = false;
-            return Ok((alone, notes));
+            return Ok(ready(alone, notes, user, false));
         }
         Layer::Dangling(path) if look.active => {
-            return Err(format!(
-                "look layer {} is a dangling link, refusing: the running bar keeps its look",
+            notes.push(format!(
+                "look layer: {} is a dangling link, reloading without a look layer",
                 path.display()
             ));
+            return Ok(ready(alone, notes, user, false));
         }
         Layer::Dangling(path) => {
             notes.push(format!(
                 "look layer: {} is a dangling link, reloading without a look layer",
                 path.display()
             ));
-            look.snapshot = user;
-            look.active = false;
-            return Ok((alone, notes));
+            return Ok(ready(alone, notes, user, false));
         }
         Layer::Broken(reason) => return Err(reason),
         Layer::Table(layer) => layer,
@@ -325,22 +346,22 @@ pub fn reload_user(
     let (merged, _, mut layer_notes) = merge(&user, &layer, features, &origin)?;
     notes.append(&mut layer_notes);
     let path = layer_path(&origin);
-    let config = config::config_from_value(merged, &path)
-        .map_err(|error| format!("look layer {}: {error}", path.display()))?;
-    look.snapshot = user;
-    look.active = true;
-    Ok((config, notes))
+    let config =
+        config::config_from_value(merged, &path).map_err(|error| format!("look layer: {error}"))?;
+    Ok(ready(config, notes, user, true))
 }
 
 /// Merges the new layer under the snapshot: the look-scoped reload. The
 /// user file is never re-read, so pending edits wait for a plain reload.
-/// A missing or broken layer refuses; nothing moves.
+/// Returns the merged config with the state to commit; the caller commits
+/// it only after the apply succeeds. A missing or broken layer refuses;
+/// nothing moves.
 pub fn reload_look(
     file: Option<&Path>,
-    look: &mut LookState,
+    look: &LookState,
     features: &Features,
     state: Option<&Path>,
-) -> Result<(Config, Vec<String>), String> {
+) -> Result<Reloaded, String> {
     let mut notes = Vec::new();
     let origin = match resolve_origin(&look.snapshot, file, state)? {
         None => {
@@ -367,10 +388,13 @@ pub fn reload_look(
     let (merged, _, mut layer_notes) = merge(&look.snapshot, &layer, features, &origin)?;
     notes.append(&mut layer_notes);
     let path = layer_path(&origin);
-    let config = config::config_from_value(merged, &path)
-        .map_err(|error| format!("look layer {}: {error}", path.display()))?;
-    look.active = true;
-    Ok((config, notes))
+    let config =
+        config::config_from_value(merged, &path).map_err(|error| format!("look layer: {error}"))?;
+    Ok(Reloaded {
+        config,
+        notes,
+        look: LookState::new(look.snapshot.clone(), true),
+    })
 }
 
 /// Resolves where the layer comes from: `[look] layer` when the user's

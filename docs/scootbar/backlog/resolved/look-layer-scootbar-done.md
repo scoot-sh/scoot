@@ -87,3 +87,18 @@ end-to-end `scoot-look build` plus `scootbar daemon --check` over the
 state link on the dev VM. Deviations from the design (font as a
 fragment key only, array icon levels user-only, no protocol bump, the
 item-gap bound) are listed with reasons in the PR.
+
+Review follow-up (still #612): the look functions return the new
+snapshot and `active` for the daemon to commit after the apply
+succeeds, so a reload refused at apply (a flag clash, a font that
+vanished in `stage`) leaves the snapshot on the last applied file; a
+plain reload over a gone or dangling layer while it was active applies
+the user's edits with a loud note and clears `active` (only the
+look-scoped reload refuses a missing layer); merged-value refusals name
+the file once.
+
+A layer value that is valid on its own but invalid against the user's
+own file (user `bar.height = 24` with layer `bar.radius = 500`)
+refuses the whole layer at startup (a note, the bar starts without it)
+and refuses the whole reload on a swap. The `bar.radius` symptom box in
+`site/src/content/docs/scootbar/configure.md` says so.

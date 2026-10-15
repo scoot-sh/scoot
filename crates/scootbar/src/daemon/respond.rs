@@ -189,11 +189,12 @@ impl Handler for Responder<'_> {
 impl Responder<'_> {
     /// Re-reads the config file and the look layer, and live-applies
     /// them, with the daemon flags overlaid as at start-up. `Err` is the
-    /// reply, and the running bar stands exactly as it was.
+    /// reply, and the running bar stands exactly as it was: the look
+    /// snapshot moves only after the apply succeeds.
     fn reload(&mut self) -> Result<(), String> {
         let features = crate::look::Features::compiled();
         let state = crate::look::state_dir();
-        let (mut config, notes) = crate::look::reload_user(
+        let pending = crate::look::reload_user(
             self.file.map(PathBuf::as_path),
             self.look,
             &features,
@@ -202,13 +203,16 @@ impl Responder<'_> {
         // The flags over the file, as at start-up: a clash between them
         // (a module the file and a flag place together) refuses the
         // reload with the running bar untouched, like a bad file.
+        let mut config = pending.config;
         self.given
             .overlay(&mut config)
             .map_err(|error| error.to_string())?;
         self.apply(config)?;
-        // Said only once the reload is known good: a refused reload
-        // stays silent.
-        for note in notes {
+        // Committed only once the reload is known good: a refused reload
+        // (a flag clash above, a font that vanished in `stage`) leaves
+        // the snapshot holding the last applied file.
+        *self.look = pending.look;
+        for note in pending.notes {
             warn(format_args!("scootbar: note: {note}"));
         }
         Ok(())
@@ -217,21 +221,23 @@ impl Responder<'_> {
     /// Merges the new look layer under the snapshot: the look-scoped
     /// reload. The user file is never re-read, so pending edits wait for
     /// a plain reload. `Err` is the reply, and the running bar stands
-    /// exactly as it was.
+    /// exactly as it was: `active` is set only after the apply succeeds.
     fn reload_scoped(&mut self) -> Result<(), String> {
         let features = crate::look::Features::compiled();
         let state = crate::look::state_dir();
-        let (mut config, notes) = crate::look::reload_look(
+        let pending = crate::look::reload_look(
             self.file.map(PathBuf::as_path),
             self.look,
             &features,
             state.as_deref(),
         )?;
+        let mut config = pending.config;
         self.given
             .overlay(&mut config)
             .map_err(|error| error.to_string())?;
         self.apply(config)?;
-        for note in notes {
+        *self.look = pending.look;
+        for note in pending.notes {
             warn(format_args!("scootbar: note: {note}"));
         }
         Ok(())
