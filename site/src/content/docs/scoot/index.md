@@ -63,8 +63,8 @@ default shown); `--write` places it directly, refusing to overwrite.
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
-| `--width N`, `--height N` | int | `1600x1000` | the `--headless`/`--nested` output size, 1–65535 per axis. Out of range is a startup error naming the range. Under `--nested` it is only the size scoot *asks* for — the host's configure decides. An `[[outputs]]` entry's `mode` overrides it for the output it names. |
-| `--outputs N` | int | `1` | how many outputs `--headless` creates, 1–8, laid left to right. `--nested` and `--tty` warn and ignore it. |
+| `--width N`, `--height N` | int | `1600x1000` | the `--headless`/`--nested` output size, 1–65535 per axis. Out of range is a startup error naming the range. Under `--headless`, an `[[outputs]]` entry's `mode` overrides it for the output it names (`--nested` ignores every entry: the host owns the size). |
+| `--outputs N` | int | `1` | how many outputs `--headless` creates, 1–8, laid left to right. Outside `--headless` it is ignored — with a warning when `N` is not 1. |
 | `--renderer cpu\|gpu\|auto` | enum | `auto` | which renderer composites each frame: `auto` picks the GPU renderer on real hardware and the CPU renderer everywhere else (config: `[renderer] backend`). An explicit `cpu` or `gpu` always wins. |
 | `--gpu PATH` | path | automatic search | which DRM device `--tty` drives (config: `[tty] gpu`). Ignored with a warning outside `--tty`. |
 | `--mode WxH` | mode | connector preferred | which connector mode `--tty` picks. Ignored with a warning outside `--tty`. An `[[outputs]]` entry's `mode` overrides it per connector. |
@@ -72,7 +72,7 @@ default shown); `--write` places it directly, refusing to overwrite.
 | `--socket PATH` | path | `$SCOOT_SOCKET`, else `$XDG_RUNTIME_DIR/scoot.sock` | where the IPC control socket lives. |
 | `--config PATH` | path | `$XDG_CONFIG_HOME/scoot/config.toml` | load this TOML file instead of searching. |
 | `--version` | switch | — | print `scoot <version> (ipc protocol <N>)` and exit; needs no compositor. |
-| `--help` | switch | — | usage, every request and every action. |
+| `--help` | switch | — | usage, every request and every action, plus examples, exit codes, environment and see-also (with `help <topic>` per topic and `--help --json` for the machine-readable form). |
 
 `scoot msg REQUEST` is the remote-control client — everything under
 `REQUEST` is documented in [scoot msg](../msg/index.md), not duplicated here.
@@ -199,9 +199,9 @@ second output's own pixels). Under `--tty` every connected monitor is
 an output like these, named after its connector, placed left to right,
 added and removed as monitors plug and unplug.
 
-What it is not yet: outputs line up left to right (no position
-setting; scale and mode are set per output in the file, not from
-`wlr-randr`); new windows open on the output under the pointer.
+What it is not yet: outputs place themselves left to right unless a
+`position` pins one (positions, scale and mode are set per output in
+the file, not from `wlr-randr`); new windows open on the output under the pointer.
 Stepping across outputs is bound by default (`Super+comma` /
 `Super+period`, wrapping left and right — see [Outputs](./outputs.md)).
 A returning monitor gets its windows back: when an output is removed

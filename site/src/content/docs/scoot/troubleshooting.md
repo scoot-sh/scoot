@@ -43,8 +43,8 @@ description: "Compositor symptoms and their fixes — picture, keys, config, out
   and logs. Those two are deliberate startup errors naming the key.
   See [failure semantics](./configure.md#failure-semantics).
 - *Reload changed nothing.* Both lists empty means file and session
-  agree. `tty.gpu`, `renderer.backend`, `xwayland.enabled` and output
-  `mode` need a restart — each refusal says so.
+  agree. `tty.gpu`, `renderer.backend`, `xwayland.enabled` and
+  `virtual_input` need a restart — each refusal says so.
 
 ## Windows and outputs
 

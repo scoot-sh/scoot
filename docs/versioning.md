@@ -35,7 +35,7 @@ compatibility; these numbers do.
 
 | Contract | Constant (today) | Between | Enforced |
 |---|---|---|---|
-| scoot IPC | `scoot_ipc::PROTOCOL_VERSION` (10) | scoot and any IPC client: `scoot msg` from another build (a Mac client driving a VM), agents, scripts | Advertised, not enforced. `scoot --version` prints it (`scoot 0.2.0 (ipc protocol 10)`) and the `version` reply carries it. A client compares it before relying on newer requests. `scoot msg` itself does not refuse a mismatch yet. |
+| scoot IPC | `scoot_ipc::PROTOCOL_VERSION` (10) | scoot and any IPC client: `scoot msg` from another build (a Mac client driving a VM), agents, scripts | Advertised, not enforced. `scoot --version` prints it (`scoot 0.2.1 (ipc protocol 10)`) and the `version` reply carries it. A client compares it before relying on newer requests. `scoot msg` itself does not refuse a mismatch yet. |
 | scootbg control | `scootbg::protocol::PROTOCOL_VERSION` (1) | scoot (`[wallpaper]` through `scootbg apply-config`) or the `scootbg` CLI, and the scootbg daemon | Yes, both ends. Every request names its protocol and the daemon refuses another one. `apply-config` opens with a `version` request: a different protocol is an error with the fix (`scootbg kill`, then reload), a different version only a warning. |
 | scootbar control | `scootbar::control::protocol::PROTOCOL_VERSION` (1) | `scootbar msg` and the scootbar daemon | Yes. A request whose protocol differs is refused. |
 | Looks `schema` | not landed yet | the looks a desktop profile reads | To be numbered and checked when it lands. |
@@ -148,16 +148,17 @@ exists. The site's
 [cut a release](https://www.scoot.sh/reference/cut-a-release/) page has the
 steps.
 
-## The first tag is v0.2.0, cut by hand
+## The first tag was v0.2.0, cut by hand
 
 FlakeHub already carries rolling releases numbered `0.1.<commit count>`
-(`0.1.1861` and up). A `v0.1.x` tag would sort below them, so the first tag
-is **v0.2.0**, and the workspace already reads `0.2.0`.
+(`0.1.1861` and up). A `v0.1.x` tag would have sorted below them, so the first tag
+was **v0.2.0**, cut by hand on 2026-10-14, and the workspace now reads `0.2.1`
+(`CHANGELOG.md` shows `[0.2.0]` and `[0.2.1]`, both dated 2026-10-14).
 
 release-plz waits for a first `v*` tag. With none it would treat the whole
-history as one first release, so the workflow skips until a tag exists. The
-maintainer cuts v0.2.0 by hand (the cut-a-release page has the commands): a
-small PR that adds `## [0.2.0] - <date>` under the Unreleased heading, then
+history as one first release, so the workflow skipped until that tag existed. The
+maintainer cut v0.2.0 by hand (the cut-a-release page has the commands): a
+small PR that added `## [0.2.0] - <date>` under the Unreleased heading, then
 an annotated `v0.2.0` tag on its merge commit, pushed. From then on
 release-plz proposes every release.
 
@@ -168,7 +169,7 @@ SemVer build metadata: `<last tag>+<commits since it>.g<commit>`.
 
 ```console
 $ scoot --version
-scoot 0.2.0+14.g615608c (ipc protocol 10)
+scoot 0.2.1+14.g615608c (ipc protocol 10)
 ```
 
 The line keeps its shape (`scoot X (ipc protocol N)`). Only `X` grows the
@@ -176,7 +177,7 @@ suffix, and the IPC `version` reply carries the same string. Each binary's
 build script works it out from `git describe` (`crates/scoot-ipc/build_label.rs`):
 
 - At a `vX.Y.Z` tag, or from a tree with no `.git` (the release tarball, a
-  Nix build), the plain version: `0.2.0`.
+  Nix build), the plain version: `0.2.1`.
 - Before the first tag exists: the workspace version and every commit,
   `0.2.0+1863.g5159f75`.
 - A tree unpacked inside some other repository (an AUR clone) gets the plain
@@ -194,8 +195,8 @@ Packages built from main use the same numbers in their own spelling:
 
 | Where | Spelling |
 |---|---|
-| `--version` (cargo builds from a checkout, `-git` packages) | `0.2.0+14.g615608c` |
-| Arch `-git` `pkgver` | `0.2.0.r14.g615608c` |
+| `--version` (cargo builds from a checkout, `-git` packages) | `0.2.1+14.g615608c` |
+| Arch `-git` `pkgver` | `0.2.1.r14.g615608c` |
 | FlakeHub rolling release | `0.3.<commits on main>+rev-<commit>` |
 
 ## FlakeHub's rolling numbers
@@ -211,11 +212,11 @@ an older main.
 ## The tools
 
 ```sh
-scripts/workspace-version            # 0.2.0
+scripts/workspace-version            # 0.2.1
 scripts/workspace-version --rolling  # 0.3, the FlakeHub rolling prefix
 scripts/workspace-version --check    # fails if a crate sets its own version
-scripts/release-resolve v0.2.0 --no-github   # the release gate, run locally
-scripts/release-notes 0.2.0          # that version's CHANGELOG.md section
+scripts/release-resolve v0.2.1 --no-github   # the release gate, run locally
+scripts/release-notes 0.2.1          # that version's CHANGELOG.md section
 ```
 
 All are stdlib Python with tests in `scripts/test_release_resolve.py`, which

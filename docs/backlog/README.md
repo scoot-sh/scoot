@@ -400,6 +400,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Later: opt-in automatic look switching](./core/look-auto-switch.md) (low, later)
 
 ### Core / config / rendering
+- [`scoot --help`/JSON config section list omits `[virtual_input]`](./core/help-config-sections-omit-virtual-input.md) — low, filed 2026-10-14 (docs1 slice review): help text and `config_sections` JSON list eleven sections; the compositor implements twelve.
 - [CPU-tier output swap with empty bindings can strand a headless output reporting live:true](./core/cpu-swap-empty-bindings-strand.md) — found in the #551 seat-reconnect review; the next win heals it
 - [`scoot --version`](./resolved/cli-version-flag-done.md) — RESOLVED 2026-09-21: `scoot --version` and `scootctl --version` print `scoot <version> (ipc protocol <N>)` from one shared helper (no drift, no session needed); the bare `version` word stays the remote IPC request by deliberate spelling decision.
 - [[nested] top-layer content missing from frames with no toplevels](./resolved/layer-content-without-toplevels-done.md) — CLOSED 2026-09-21 as could-not-reproduce (gh #183): a real Top-layer bar with a committed buffer draws with zero toplevels on current `main` and on the reported rev alike (live `--nested` matrix + harness pixel pins); the field symptom is the designed bufferless-bar shape (zone reserved, nothing painted), so the client had almost certainly committed no buffer — no compositor change.
