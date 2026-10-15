@@ -120,6 +120,14 @@ impl Wallpaper {
     pub(super) fn queue_mut(&mut self) -> &mut Queue {
         &mut self.queue
     }
+
+    /// The section last handed over, for the look layer's unit test: what a
+    /// reload with a user `[wallpaper]` section runs when a look layer is in
+    /// force.
+    #[cfg(test)]
+    pub(super) fn live_section(&self) -> Option<&Section> {
+        self.live.as_ref()
+    }
 }
 
 /// What a reload did to the section, for its reply.

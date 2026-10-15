@@ -200,7 +200,8 @@ const WAIT_WALLPAPER_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 
 /// The look layer as a reload sees it: absent, broken (refuse whole), or
 /// present with the fragment bytes to strictly validate.
-enum LookLayerState {
+#[derive(Debug)]
+pub(crate) enum LookLayerState {
     Absent,
     Broken(String),
     Present(Fragment),
@@ -218,14 +219,13 @@ fn look_layer_state() -> LookLayerState {
     ) else {
         return LookLayerState::Absent;
     };
-    match look_layer::load(&dir) {
-        look_layer::LoadOutcome { load, warn } => match load {
-            FragmentLoad::Absent(FragmentAbsent::Missing) => LookLayerState::Absent,
-            FragmentLoad::Absent(FragmentAbsent::Broken) => LookLayerState::Broken(
-                warn.unwrap_or_else(|| "the look layer cannot be read".to_owned()),
-            ),
-            FragmentLoad::Present(fragment) => LookLayerState::Present(fragment),
-        },
+    let look_layer::LoadOutcome { load, warn } = look_layer::load(&dir);
+    match load {
+        FragmentLoad::Absent(FragmentAbsent::Missing) => LookLayerState::Absent,
+        FragmentLoad::Absent(FragmentAbsent::Broken) => LookLayerState::Broken(
+            warn.unwrap_or_else(|| "the look layer cannot be read".to_owned()),
+        ),
+        FragmentLoad::Present(fragment) => LookLayerState::Present(fragment),
     }
 }
 
@@ -285,6 +285,20 @@ impl State {
     /// the whole reload -- everything kept. A reload that sees the layer's
     /// identity change emits `EventKind::Look`.
     pub fn reload(&mut self, wait_wallpaper: bool) -> Response {
+        self.reload_with_state(wait_wallpaper, look_layer_state())
+    }
+
+    /// Serves a reload against an explicit look layer state. The live edge
+    /// ([`State::reload`], SIGHUP) resolves the state through
+    /// [`look_layer_state`]; tests pass their layer (or its absence)
+    /// directly, so no test depends on ambient `SCOOT_LOOK_STATE` /
+    /// `XDG_STATE_HOME` and no layer test can leak into another test
+    /// through process-global environment state.
+    pub(crate) fn reload_with_state(
+        &mut self,
+        wait_wallpaper: bool,
+        layer: LookLayerState,
+    ) -> Response {
         let Some(path) = self.config_path.clone() else {
             // Logged as well as answered: over IPC the client sees the
             // error, but a SIGHUP trigger has no reply channel, so without
@@ -298,7 +312,7 @@ impl State {
                  file to reload; keeping the running config",
             );
         };
-        let layer_text = match look_layer_state() {
+        let layer_text = match layer {
             LookLayerState::Absent => None,
             LookLayerState::Broken(reason) => {
                 tracing::error!(%reason, "config reload failed");

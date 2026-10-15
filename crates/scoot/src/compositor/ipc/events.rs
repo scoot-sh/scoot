@@ -125,7 +125,7 @@ impl State {
     pub fn subscribe(&mut self, conn: u64, stream: UnixStream, events: Vec<EventKind>) -> Response {
         if events.is_empty() {
             return Response::error(
-                "subscribe names no event kinds; name at least one (\"output\", \"keyboard\", \"workspace\", \"lock\"), \
+                "subscribe names no event kinds; name at least one (\"output\", \"keyboard\", \"workspace\", \"lock\", \"look\"), \
                  or open a connection for requests instead",
             );
         }

@@ -5290,4 +5290,204 @@ mod tests {
             "the written [appearance] drifted from Appearance::default()"
         );
     }
+
+    /// The look layer merges under the user's file on raw keys, before
+    /// derivation (design section 4.3). These tests pin the three merge
+    /// rules, the strict layer parse, and the bad-user-value fallback; the
+    /// reload reply and the `Look` event ride on top in `reload/tests.rs`.
+
+    fn layer(text: &str) -> LayerFile {
+        parse_layer(text).expect("a valid test layer parses")
+    }
+
+    fn user_file(text: &str) -> FileConfig {
+        toml::from_str(text).expect("a valid test user file parses")
+    }
+
+    #[test]
+    fn a_user_cursor_size_alone_keeps_the_look_theme_and_accent() {
+        let layer = layer(
+            r#"
+            [appearance]
+            focus_ring_width = 2
+            focus_ring_inactive_width = 2
+            focus_ring_active_color = "#FF9A49"
+            focus_ring_inactive_color = "#5E4B5B"
+            background_color = "#2B3648"
+            corner_radius = 14
+            cursor_size = 24
+            cursor_color = "#FF9A49"
+            cursor_theme = "Mocu"
+            "#,
+        );
+        let (merged, shadowed) = merge_layer(user_file("[appearance]\ncursor_size = 32\n"), &layer);
+        let appearance = merged.appearance.expect("the layer supplies appearance");
+        assert_eq!(appearance.cursor_size, Some(32), "the user's size wins");
+        assert_eq!(
+            appearance.cursor_theme.as_deref(),
+            Some("Mocu"),
+            "the look's theme survives a lone user size"
+        );
+        assert_eq!(
+            appearance.cursor_color.as_deref(),
+            Some("#FF9A49"),
+            "the look's accent survives a lone user size"
+        );
+        assert_eq!(
+            appearance.focus_ring_width,
+            Some(2),
+            "an unset user key takes the look's"
+        );
+        assert_eq!(
+            shadowed,
+            vec!["appearance.cursor_size"],
+            "only the overridden key is shadowed"
+        );
+    }
+
+    #[test]
+    fn wallpaper_merges_as_one_unit_never_per_key() {
+        let layer = layer(
+            "[wallpaper]\nimage = \"/looks/moonrise.png\"\nmode = \"fill\"\n",
+        );
+        // A user color with a look image yields the user's section whole:
+        // per-key merging would hand scootbg both and lose the wallpaper.
+        let (merged, shadowed) = merge_layer(
+            user_file("[wallpaper]\ncolor = \"#112233\"\n"),
+            &layer,
+        );
+        let wallpaper = merged.wallpaper.expect("a merged section");
+        assert_eq!(
+            wallpaper.top.color.as_deref(),
+            Some("#112233"),
+            "the user's color stands"
+        );
+        assert_eq!(
+            wallpaper.top.image, None,
+            "the look's image does not leak into the user's section"
+        );
+        assert_eq!(shadowed, vec!["wallpaper"]);
+
+        // A look-only section passes through whole.
+        let (merged, shadowed) = merge_layer(user_file("[layout]\ngap = 20\n"), &layer);
+        let wallpaper = merged.wallpaper.expect("the look's section passes through");
+        assert_eq!(
+            wallpaper.top.image.as_deref(),
+            Some("/looks/moonrise.png")
+        );
+        assert_eq!(wallpaper.top.mode.as_deref(), Some("fill"));
+        assert!(shadowed.is_empty());
+    }
+
+    #[test]
+    fn a_derived_inactive_width_follows_the_layer_that_supplied_its_base() {
+        let layer = layer(
+            "[appearance]\nfocus_ring_width = 2\nfocus_ring_inactive_width = 1\n",
+        );
+        // User active width alone: the look's inactive width is dropped so
+        // the unset value follows the user's width.
+        let (merged, _) = merge_layer(
+            user_file("[appearance]\nfocus_ring_width = 5\n"),
+            &layer,
+        );
+        let appearance = merged.appearance.expect("merged appearance");
+        assert_eq!(appearance.focus_ring_width, Some(5));
+        assert_eq!(
+            appearance.focus_ring_inactive_width, None,
+            "the look's inactive width is dropped, not paired with the user's base"
+        );
+
+        // User inactive width alone: the look's active width stays.
+        let (merged, shadowed) = merge_layer(
+            user_file("[appearance]\nfocus_ring_inactive_width = 4\n"),
+            &layer,
+        );
+        let appearance = merged.appearance.expect("merged appearance");
+        assert_eq!(appearance.focus_ring_width, Some(2));
+        assert_eq!(appearance.focus_ring_inactive_width, Some(4));
+        assert_eq!(shadowed, vec!["appearance.focus_ring_inactive_width"]);
+    }
+
+    #[test]
+    fn a_forbidden_key_refuses_the_whole_layer() {
+        for fragment in [
+            "[binds]\n\"super+h\" = \"close\"\n",
+            "[layout]\ngap = 20\n",
+            "[appearance]\nprefer_no_csd = true\n",
+            "[appearance]\ncursor_hide_after_ms = 100\n",
+            "[wallpaper]\ncommand = \"scootbg\"\n",
+            "[wallpaper]\nfilter = \"lanczos\"\n",
+        ] {
+            assert!(
+                parse_layer(fragment).is_err(),
+                "a non-look key must refuse the layer: {fragment}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bad_layer_value_refuses_the_whole_layer() {
+        for fragment in [
+            "[appearance]\nfocus_ring_width = 99\n",
+            "[appearance]\nbackground_color = \"not-a-color\"\n",
+            "[appearance]\nbackground_color = \"#11223344\"\n",
+            "[appearance]\ncursor_theme = \"..\"\n",
+            "[wallpaper]\nmode = \"spin\"\n",
+            "[wallpaper]\nimage = \"relative.png\"\n",
+            "[wallpaper.output.HDMI-1]\nimage = \"/x.png\"\n",
+        ] {
+            assert!(
+                parse_layer(fragment).is_err(),
+                "a bad look value must refuse the layer: {fragment}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_per_output_color_override_is_a_valid_layer_key() {
+        let layer = layer("[wallpaper.output.HDMI-1]\ncolor = \"#112233\"\n");
+        let (merged, _) = merge_layer(user_file("[layout]\ngap = 20\n"), &layer);
+        let wallpaper = merged.wallpaper.expect("the look's section passes through");
+        let output = wallpaper
+            .outputs
+            .as_ref()
+            .expect("outputs")
+            .get("HDMI-1")
+            .expect("the named output");
+        assert_eq!(output.table.color.as_deref(), Some("#112233"));
+    }
+
+    #[test]
+    fn a_bad_user_color_falls_back_to_the_layer_not_the_default() {
+        let layer = layer("[appearance]\nbackground_color = \"#2B3648\"\n");
+        let layered = LoadedConfig::from_file_with_layer(
+            user_file("[appearance]\nbackground_color = \"nope\"\n"),
+            Path::new("/config.toml"),
+            false,
+            Some(&layer),
+        );
+        assert_eq!(
+            hex(layered.loaded.appearance.background_color),
+            "#2b3648",
+            "the bad user value falls back to the layer's, not the default"
+        );
+        assert_eq!(layered.invalid, vec!["appearance.background_color"]);
+        assert_eq!(layered.shadowed, vec!["appearance.background_color"]);
+    }
+
+    #[test]
+    fn a_bad_user_color_without_a_layer_key_falls_back_to_the_default() {
+        let layered = LoadedConfig::from_file_with_layer(
+            user_file("[appearance]\nbackground_color = \"nope\"\n"),
+            Path::new("/config.toml"),
+            false,
+            None,
+        );
+        assert_eq!(
+            layered.loaded.appearance.background_color,
+            Appearance::default().background_color
+        );
+        assert!(layered.invalid.is_empty());
+        assert!(layered.shadowed.is_empty());
+    }
 }
