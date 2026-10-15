@@ -14,8 +14,9 @@
 #   3. installs them and the `scoot-session` launcher into a bin directory,
 #      the session's systemd user units, and the portal config;
 #   4. with --system, also adds "scoot" to your login screen;
-#   5. with --look, writes that look's config to ~/.config/scoot, never
-#      over a file you already have;
+#   5. with --look, installs the shipped looks under the prefix's share
+#      dir and applies one with `scoot look apply` (your config files are
+#      never written, only read);
 #   6. lists any system library or font scoot still needs, with the one
 #      command to install them (it stays confirmation-based: add -y or
 #      --noconfirm yourself for a non-interactive run);
@@ -26,7 +27,8 @@
 #      for the same destination can say it is already up to date
 #      instead of downloading again (a different destination, or
 #      binaries gone from the recorded one, reinstalls). A re-run
-#      with --look still applies the look when already up to date.
+#      with --look still installs the catalog, migrates old look configs
+#      and applies the look when already up to date.
 #      It never replaces a file it did not
 #      install itself, such as one from a distro package.
 #
@@ -68,8 +70,9 @@ Usage: install.sh [options]
   --system            install under /usr/local and add scoot to the login
                       screen (asks for sudo); default is ~/.local, started
                       with `scoot-session` from a text console
-  --look NAME         also write a look's config: ginger-night, moonrise,
-                      music-desk, radial-burst or vinyl-sunset
+  --look NAME         install the shipped looks and apply one:
+                      ginger-night, moonrise, music-desk, radial-burst
+                      or vinyl-sunset
   --version V         install scoot V (a tag vV, else scoot-vV, must exist)
   --bar-version V     install scootbar V (a tag scootbar-vV must exist;
                       retired once releases share one vV tag: use --version)
@@ -215,6 +218,16 @@ write_manifest() {
     : >"$tmp/manifest.new"
 }
 
+# Remove DIR when it is empty (a look directory the manifest emptied).
+# Anything else in it keeps it: rmdir refuses a non-empty directory.
+rmdir_empty() {
+    if [ "$dry_run" = 1 ]; then
+        say "would run: rmdir $1"
+    else
+        $sudo rmdir -- "$1" >/dev/null 2>&1 || true
+    fi
+}
+
 have_systemd_user() {
     command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1
 }
@@ -223,6 +236,8 @@ have_systemd_user() {
 
 if [ "$uninstall" = 1 ]; then
     [ -f "$manifest" ] || die "nothing to uninstall: no record at $manifest (installed with --system? add --system)"
+    # The look entries, before the manifest itself is removed below.
+    look_paths=$(grep '/share/scoot/looks/' "$manifest" || true)
     if have_systemd_user && systemctl --user is-enabled scootbar.service >/dev/null 2>&1; then
         run systemctl --user disable scootbar.service
     fi
@@ -234,6 +249,17 @@ if [ "$uninstall" = 1 ]; then
         fi
     done <"$manifest"
     run $sudo rm -f -- "$manifest"
+    # Drop the look directories the manifest emptied: only files were
+    # recorded, and rmdir removes solely empty directories, so one
+    # holding anything else stays.
+    if [ -n "$look_paths" ]; then
+        printf '%s\n' "$look_paths" | while IFS= read -r look_path; do
+            [ -n "$look_path" ] || continue
+            look_dir=$(dirname "$look_path")
+            rmdir_empty "$look_dir"
+            rmdir_empty "$(dirname "$look_dir")"
+        done
+    fi
     if [ -e "$version_file" ] || [ -L "$version_file" ]; then
         run $sudo rm -f -- "$version_file"
         say "removed $version_file"
@@ -532,63 +558,281 @@ fi
 
 # --- a look -------------------------------------------------------------------
 
-# Write SRC to the user's config path DEST unless a file is already there.
-place_config() {
-    if [ -e "$2" ]; then
-        note "kept your $2 (the look's version was not written)"
-        return 0
+# The shipped catalog as plain files under the prefix's share dir: `scoot
+# look` finds `<prefix>/share/scoot/looks` beside its own binary, so the
+# installed scoot sees exactly this tree. Recorded in the manifest, so
+# --uninstall removes it.
+looks_dest=$(dirname "$bin_dir")/share/scoot/looks
+
+# The user --look acts for: this user, or the invoking user under sudo
+# (root's own config and look state are not the desktop being
+# installed). The config dir honors XDG only for this user: under sudo
+# the invoking user's variables did not survive, so it is the plain
+# ~/.config.
+look_home=$HOME
+if [ -n "${SUDO_USER:-}" ]; then
+    look_home=/home/$SUDO_USER
+    if command -v getent >/dev/null 2>&1; then
+        sudo_home=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)
+        if [ -n "$sudo_home" ]; then look_home=$sudo_home; fi
     fi
-    if [ "$dry_run" = 1 ]; then
-        say "would write $2"
-        return 0
+fi
+user_config_home=$config_home
+if [ -n "${SUDO_USER:-}" ]; then user_config_home=$look_home/.config; fi
+
+# Fetch REL (a path under looks/) into the catalog, unless it is already
+# there from this script: an up-to-date re-run with --look then needs no
+# download, and a file this script did not install (a distro package, a
+# hand copy) is never replaced.
+place_look() {
+    rel=$1
+    dest=$looks_dest/$rel
+    if [ -e "$dest" ] || [ -L "$dest" ]; then
+        if ours "$dest"; then
+            [ "$skip_install" = 1 ] && return 0
+        else
+            note "kept $dest (it was not installed by this script)"
+            return 0
+        fi
     fi
-    mkdir -p "$(dirname "$2")"
-    cp -p "$1" "$2"
+    fetch "$RAW_URL/$source_ref/looks/$rel" "$tmp/lookfile" || die "could not download the look catalog ($rel)"
+    place "$tmp/lookfile" "$dest" 644
 }
 
-if [ -n "$look" ]; then
-    base=$RAW_URL/$source_ref/docs/examples/$look
-    fetch "$base/scoot.toml" "$tmp/look-scoot.toml" || die "could not download the $look look"
-    fetch "$base/bar.toml" "$tmp/look-bar.toml" || die "could not download the $look bar config"
-    image=$(sed -n 's/^image *= *"\([^"]*\)".*/\1/p' "$tmp/look-scoot.toml" | head -n 1)
-    case "$image" in
-    "" | "~"* | /* | http*) ;;
-    *)
-        # A path relative to the look's directory: fetch it and keep it
-        # next to the config, where a relative path resolves.
-        ext=${image##*.}
-        src=$(printf '%s' "docs/examples/$look/$image" |
-            awk -F/ '{n=0; for(i=1;i<=NF;i++){ if($i==".."){n--} else if($i!="."){p[++n]=$i} } s=p[1]; for(i=2;i<=n;i++) s=s"/"p[i]; print s}')
-        if fetch "$RAW_URL/$source_ref/$src" "$tmp/look-wallpaper.$ext"; then
-            place_config "$tmp/look-wallpaper.$ext" "$config_home/scoot/wallpaper.$ext"
-            sed "s|^image *= *\"[^\"]*\"|image = \"wallpaper.$ext\"|" "$tmp/look-scoot.toml" >"$tmp/look-scoot.toml.out"
-            mv "$tmp/look-scoot.toml.out" "$tmp/look-scoot.toml"
-        else
-            note "could not download the $look wallpaper; set [wallpaper] image yourself"
+# The image a look.toml names under [wallpaper], when it is a file in
+# the look directory (a color look names none; a URL is scootbg's to
+# fetch, never the installer's).
+look_image() {
+    sed -n '/^\[wallpaper\]/,/^\[/s/^[ \t]*image[ \t]*=[ \t]*"\([^"]*\)".*/\1/p' "$1" | head -n 1
+}
+
+install_look_catalog() {
+    for l in $LOOKS; do
+        place_look "$l/look.toml"
+        toml=$looks_dest/$l/look.toml
+        # A dry run installs nothing: read the image name from the
+        # download still sitting in $tmp instead (place_look's fetch is
+        # the most recent write there whenever the destination was
+        # missing).
+        if [ ! -f "$toml" ] && [ -f "$tmp/lookfile" ]; then toml=$tmp/lookfile; fi
+        [ -f "$toml" ] || continue
+        image=$(look_image "$toml")
+        case "$image" in
+        "" | "~"* | /* | http* | *://*) ;;
+        *) place_look "$l/$image" ;;
+        esac
+    done
+}
+
+# What an earlier --look run wrote for look L: the example's whole
+# configs with the installer's rewrites (the wallpaper image pointed at
+# the config dir, the bar's helper scripts by full path). Reproduced
+# byte for byte: a user file still identical to one of these has its
+# look keys removed so the layer shows through; anything else is left
+# alone, and `scoot look apply` names the keys shadowing the look. A
+# template that no longer downloads is skipped with a note, never a
+# failure: the file is then simply left alone.
+old_look_file() {
+    l=$1
+    which=$2
+    out=$3
+    fetch "$RAW_URL/$source_ref/docs/examples/$l/$which" "$out" || {
+        note "could not download the $l example for comparison; its configs are left alone"
+        return 1
+    }
+    if [ "$which" = "scoot.toml" ]; then
+        image=$(sed -n 's/^image *= *"\([^"]*\)".*/\1/p' "$out" | head -n 1)
+        case "$image" in
+        "" | "~"* | /* | http*) ;;
+        *)
+            ext=${image##*.}
+            sed "s|^image *= *\"[^\"]*\"|image = \"wallpaper.$ext\"|" "$out" >"$out.out"
+            mv "$out.out" "$out"
+            ;;
+        esac
+    else
+        for s in cpu.sh load.sh; do
+            grep -q "\"$s\"" "$out" || continue
+            esc=$(printf '%s' "$user_config_home/scoot/$s" | sed 's/[|&\\]/\\&/g')
+            sed "s|\"$s\"|\"$esc\"|" "$out" >"$out.out"
+            mv "$out.out" "$out"
+        done
+    fi
+}
+
+# Delete a look's keys from a config that is still byte-identical to an
+# earlier --look run's output: whole look-owned sections (`appearance`,
+# `wallpaper`, `colors`), the look's `[bar]` style keys, and the look's
+# per-app overrides (`"section.key" = ...` in the look.toml). Layout
+# (module lists, binds, commands, geometry) stays. Reads the config on
+# stdin, writes the stripped config on stdout.
+strip_look_keys() {
+    kind=$1
+    toml=$2
+    whole=""
+    keys=""
+    case "$kind" in
+    scoot.toml) whole="appearance wallpaper" ;;
+    bar.toml)
+        whole="colors"
+        keys="bar:radius bar:popup-radius bar:opacity bar:font bar:fallback-fonts bar:font-size"
+        if [ -f "$toml" ]; then
+            extra=$(awk '/^\[apps\.scootbar\]/{s=1;next} /^\[/{s=0} s' "$toml" |
+                sed -n 's/^"\([^."]*\)\.\([^"]*\)".*/\1:\2/p')
+            for e in $extra; do keys="$keys $e"; done
         fi
         ;;
     esac
-    place_config "$tmp/look-scoot.toml" "$config_home/scoot/config.toml"
-    if [ "$with_bar" = 1 ]; then
-        # The bar's helper scripts live beside its config (your files, like
-        # the config), and the bar runs them by full path.
-        for s in cpu.sh load.sh; do
-            grep -q "\"$s\"" "$tmp/look-bar.toml" || continue
-            if fetch "$base/$s" "$tmp/$s"; then
-                chmod 755 "$tmp/$s"
-                place_config "$tmp/$s" "$config_home/scoot/$s"
-                esc=$(printf '%s' "$config_home/scoot/$s" | sed 's/[|&\\]/\\&/g')
-                sed "s|\"$s\"|\"$esc\"|" "$tmp/look-bar.toml" >"$tmp/look-bar.toml.out"
-                mv "$tmp/look-bar.toml.out" "$tmp/look-bar.toml"
+    awk -v whole="$whole" -v keys="$keys" '
+        function linekey(s) {
+            sub(/^[ \t]+/, "", s)
+            if (s == "" || substr(s, 1, 1) == "#" || substr(s, 1, 1) == "[") return ""
+            p = index(s, "=")
+            if (p == 0) return ""
+            key = substr(s, 1, p - 1)
+            sub(/[ \t]+$/, "", key)
+            return key
+        }
+        BEGIN {
+            split(whole, w, " ")
+            for (i in w) { if (w[i] != "") WS[w[i]] = 1 }
+            split(keys, ka, " ")
+            for (i in ka) {
+                if (ka[i] == "") continue
+                p = index(ka[i], ":")
+                KK[substr(ka[i], 1, p - 1) SUBSEP substr(ka[i], p + 1)] = 1
+            }
+            cur = ""
+        }
+        /^[ \t]*\[/ {
+            h = $0
+            sub(/^[ \t]*\[/, "", h)
+            sub(/\].*$/, "", h)
+            gsub(/[ \t]/, "", h)
+            cur = h
+            if (cur in WS) next
+            print
+            next
+        }
+        {
+            if (cur in WS) next
+            key = linekey($0)
+            if (key != "" && ((cur SUBSEP key) in KK)) next
+            print
+        }
+    '
+}
+
+migrate_look_configs() {
+    for cfg in scoot.toml:config.toml bar.toml:bar.toml; do
+        which=${cfg%%:*}
+        name=${cfg##*:}
+        file=$user_config_home/scoot/$name
+        [ -f "$file" ] || continue
+        for l in $LOOKS; do
+            old_look_file "$l" "$which" "$tmp/old-$l-$which" || continue
+            if cmp -s "$file" "$tmp/old-$l-$which"; then
+                if [ "$dry_run" = 1 ]; then
+                    say "would migrate $file (still the $l example: remove its look keys)"
+                    break
+                fi
+                strip_look_keys "$which" "$looks_dest/$l/look.toml" <"$file" >"$tmp/stripped"
+                cat "$tmp/stripped" >"$file"
+                note "migrated $file: it was still the $l example config, so its look keys were removed and the look layer shows through (layout kept)"
+                break
             fi
         done
-        place_config "$tmp/look-bar.toml" "$config_home/scoot/bar.toml"
+    done
+}
+
+# Apply the look with the binary just installed (its helpers resolve
+# beside it, so no PATH is needed). With SUDO_USER set the apply runs as
+# the invoking user, whose config and state this is; the environment it
+# gets is built from their home (see run_as_invoker). As root this drops
+# privileges first: root-owned files would lock the user out of their
+# own look state.
+shquote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+
+# Run the apply as the invoking user: $sudo -u (proven passwordless by
+# the install above, or prompting like any sudo use on a look-only
+# re-run), else sudo, su, doas, runuser or setpriv when root. Every
+# variable is assigned, never unset or emptied: some toolchains lack
+# `env -u`, and fontconfig reads an empty XDG_DATA_HOME as set, hiding
+# ~/.local/share/fonts. The XDG variables name the standard defaults
+# under the user's home (their own values did not survive sudo); the
+# runtime dir points at their session, so a running compositor still
+# reloads live. SCOOT_LOOK_STATE and SCOOT_SOCKET stay empty, which the
+# tool reads as unset.
+run_as_invoker() {
+    tool=$1
+    shift
+    case "$tool" in
+    sudo | doas) "$tool" -u "$SUDO_USER" "$@" ;;
+    su)
+        cmd=""
+        for a in "$@"; do cmd="$cmd $(shquote "$a")"; done
+        su -s /bin/sh "$SUDO_USER" -c "$cmd"
+        ;;
+    runuser) runuser -u "$SUDO_USER" -- "$@" ;;
+    setpriv) setpriv --reuid="$SUDO_USER" --regid="$(id -g "$SUDO_USER")" --clear-groups "$@" ;;
+    *) die "cannot apply the look as $SUDO_USER: no sudo, su, doas, runuser or setpriv here" ;;
+    esac
+}
+
+invoker_tool() {
+    if [ -n "$sudo" ]; then printf '%s' "$sudo"; return 0; fi
+    if [ "$(id -u)" = 0 ]; then
+        for t in sudo su doas runuser setpriv; do
+            if command -v "$t" >/dev/null 2>&1; then printf '%s' "$t"; return 0; fi
+        done
     fi
+    return 1
+}
+
+run_look_apply() {
+    bin=$bin_dir/scoot
+    tool=""
+    if [ -n "${SUDO_USER:-}" ]; then tool=$(invoker_tool || true); fi
+    if [ "$dry_run" = 1 ]; then
+        if [ "$tool" = sudo ] || [ "$tool" = doas ]; then
+            say "would run: $tool -u $SUDO_USER env HOME=$look_home (standard XDG defaults) $bin look apply $look"
+        elif [ -n "$tool" ]; then
+            say "would run: $bin look apply $look (as $SUDO_USER via $tool)"
+        else
+            say "would run: $bin look apply $look"
+        fi
+        return 0
+    fi
+    [ -x "$bin" ] || die "$bin is not executable"
+    if [ -n "${SUDO_USER:-}" ]; then
+        if [ -n "$tool" ]; then
+            run_uid=$(id -u "$SUDO_USER" 2>/dev/null || true)
+            run_runtime=
+            if [ -n "$run_uid" ]; then run_runtime=/run/user/$run_uid; fi
+            run run_as_invoker "$tool" env HOME="$look_home" XDG_CONFIG_HOME="$look_home/.config" XDG_DATA_HOME="$look_home/.local/share" XDG_CACHE_HOME="$look_home/.cache" XDG_STATE_HOME="$look_home/.local/state" XDG_RUNTIME_DIR="$run_runtime" SCOOT_LOOK_STATE= SCOOT_SOCKET= "$bin" look apply "$look"
+        else
+            note "cannot reach $SUDO_USER here: applying the look as this user"
+            run "$bin" look apply "$look"
+        fi
+    else
+        if [ "$(id -u)" = 0 ]; then note "no invoking user found: applying the look for root"; fi
+        run "$bin" look apply "$look"
+    fi
+}
+
+look_error=""
+if [ -n "$look" ]; then
+    install_look_catalog
+    migrate_look_configs
+    run_look_apply || look_error="the look was not applied (see above); the binaries and the catalog are installed, so fix the cause and re-run with --look"
 fi
 
 # A look-only re-run stops here: the record is already current, and
 # there is nothing to enable or report.
-if [ "$skip_install" = 1 ]; then exit 0; fi
+if [ "$skip_install" = 1 ]; then
+    if [ -n "$look_error" ]; then die "$look_error"; fi
+    exit 0
+fi
 
 # --- record, enable --------------------------------------------------------------
 
@@ -735,3 +979,9 @@ else
 fi
 say ""
 say "Next: https://www.scoot.sh/start/first-session/  ·  Remove: install.sh --uninstall$([ "$system" = 1 ] && printf ' --system')"
+
+# A refused `scoot look apply` never stopped the install above: the
+# binaries, the catalog, the units and the library report are all done.
+# Fail here instead, so the cause (a missing font, usually) and its fix
+# print first.
+if [ -n "$look_error" ]; then die "$look_error"; fi

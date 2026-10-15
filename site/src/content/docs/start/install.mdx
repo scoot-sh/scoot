@@ -270,11 +270,15 @@ Then log out and pick **scoot** on your login screen.
   screen; it asks for `sudo`. Leave it off to install into `~/.local`
   with no root, and start a session from a text console with
   `scoot-session`.
-- `--look` writes one of the five [looks](../../scoot/theming/) to
-  `~/.config/scoot`. A file you already have is never overwritten.
-  A re-run that is already up to date still applies a `--look` you
-  name (without downloading anything); without `--look` it changes
-  nothing.
+- `--look` installs the five [looks](../../scoot/theming/) under
+  `<prefix>/share/scoot/looks` and applies one with `scoot look apply`.
+  Your `config.toml` and `bar.toml` are never written, only read: a file
+  still identical to an older `--look` run has its look keys removed so
+  the layer shows through, and anything else is left alone while `apply`
+  names the keys shadowing the look. Under `sudo` the apply runs as the
+  invoking user. A re-run that is already up to date still installs the
+  catalog and applies a `--look` you name (without downloading
+  anything); without `--look` it changes nothing.
 - Re-running the script updates: it installs the newest tagged release,
   or says `already up to date (<version>)` and changes nothing
   (`--force` reinstalls anyway). "Up to date" is per destination:
