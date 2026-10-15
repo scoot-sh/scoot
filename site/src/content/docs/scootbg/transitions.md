@@ -103,8 +103,9 @@ copies) into a full-size frame buffer — the third buffer the ticket
 budgets, 33 MB at 4K, with a second where the compositor releases
 lazily — and commits it with damage limited to what changed (the
 whole buffer for a fade, the sweeping band for a wipe, the disc's box
-for a grow). Frames are paced by frame callbacks;
-the eased progress always comes from the clock, so a slow frame drops
+for a grow). Frames are paced by frame callbacks and, where the compositor offers
+`wp_presentation`, presentation feedback; a ~60 Hz timer covers a compositor that
+sends neither. The eased progress always comes from the clock, so a slow frame drops
 frames rather than falling behind, and a frame past its 8 ms budget
 skips the next one. At 1080p every kind holds 60 fps outright (2.4–5.4
 ms a frame, measured); at 4K a fade blends in 21.6 ms, a wipe in
