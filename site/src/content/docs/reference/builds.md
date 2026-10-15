@@ -5,9 +5,9 @@ description: "The one scoot package, how the renderer is chosen, and the CPU-onl
 
 There is one build: `scoot`. It runs everywhere — on real hardware it
 scans out from the GPU, in a VM or container it renders on the CPU —
-and its default (`auto`) picks the right renderer per session. How that
-choice works, how to override it, X11 apps, and the CPU-only minimal
-build:
+and its default (`auto`) picks the right renderer per session. This page
+is about how that choice works, how to override it, and the one
+special case: X11 apps and the CPU-only minimal build.
 
 ## Which build do I need?
 
@@ -19,7 +19,8 @@ same binary starts with and without a GPU stack installed.
 The only remaining knob for X11 apps is **whether you turn them on**,
 not which package you install: every `scoot` already carries the
 `xwayland` build feature, and only if you run X11 apps should you pay
-Xwayland's own ~344 MiB of closure and its trust decision — any X client can read
+Xwayland's own ~344 MiB of closure (all but ~12 MiB of it Xwayland's
+own, which links Mesa) and its trust decision — any X client can read
 other X clients' keys by design. To run X11 apps: install the `Xwayland`
 binary beside scoot (the Nix package already has it on `PATH` via its
 wrapper) and turn the knob on (`--xwayland` or `[xwayland] enabled`).
@@ -40,8 +41,9 @@ ls /dev/dri/renderD*
 ```
 
 - **No output (no such directory, no matches)** → no GPU to use.
-  In VMs and containers `auto`
-  resolves to the CPU renderer.
+  The VM and container case is first-class, not degraded: `auto`
+  resolves to the CPU renderer there — no GPU is a supported
+  configuration, not a fallback tier.
 - **A render node listed (for example `renderD128`)** → a GPU exists.
   On real hardware, `auto` picks the GPU renderer under `--tty`. On a
   VM the node is usually software (llvmpipe) — there the GPU renderer
@@ -52,7 +54,8 @@ ls /dev/dri/renderD*
 ### Say it in the config
 
 The package knob is `programs.scoot.package` (home-manager and NixOS
-alike). Leave the default (omit `package`): there is only one package now.
+alike; the desktop profile never sets it — the choice stays yours).
+Leave the default (omit `package`): there is only one package now.
 
 ```nix title="configuration.nix"
 programs.scoot = {

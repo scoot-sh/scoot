@@ -40,9 +40,11 @@ cargo build --workspace --locked --offline
 ```
 
 `--locked` is not optional: `Cargo.lock` is committed, and every build
-here and in CI uses it. The two git dependencies — the Smithay fork and the `wayland-backend`
+here and in CI uses it, so the tree you audit is the tree that builds.
+The two git dependencies — the Smithay fork and the `wayland-backend`
 fork — resolve out of `vendor/` through this snippet (already in the
-tarball's `.cargo/config.toml`, and re-proved by CI's vendor job on every dependency change):
+tarball's `.cargo/config.toml`; the part most likely to break, and the
+part CI's vendor job re-proves on every dependency change):
 
 ```toml
 [source.crates-io]
@@ -66,7 +68,8 @@ directory = "vendor"
 
 A Rust toolchain at or past the workspace floor, and the system
 libraries below. Versions are what `ldd` reported on a release build
-(aarch64); sonames are what your package depends on, store paths are NixOS's and not yours.
+(`cargo build --release -p scoot`, aarch64, 2026-10-07); sonames are
+what your package depends on, store paths are NixOS's and not yours.
 
 | Feature set | Links (sonames) | Release `scoot` |
 |---|---|---|
@@ -76,7 +79,9 @@ libraries below. Versions are what `ldd` reported on a release build
 Notes on the table: sizes are `cargo build --release -p scoot` on
 aarch64; the 8.3 MB default includes `xwayland`. The single default build deliberately links no GPU stack even though it
 compiles the scanout tier — it must run on a box with no GPU libraries
-installed, and CI fails a default build that references `libgbm`. `libEGL`/`libGLESv2`
+installed, and CI fails a default build that references `libgbm` (with a
+positive control: the default binary must carry the stub's `libgbm.so.1`
+`dlopen` literal, or the negative check is vacuous). `libEGL`/`libGLESv2`
 never appear in `ldd` for any build:
 the GLES renderer reaches them through `dlopen`. What the scanout tier
 buys is the [GBM scanout tier](../scoot/backends.md#which-renderer-draws-the-frames):
@@ -109,7 +114,8 @@ metadata — verify again at packaging time, toolchains move):
 | Nix / NixOS | the flake's pinned toolchain | Yes (never the distro's) |
 
 Debian stable and Ubuntu up to 25.10 cannot build scoot from their own
-toolchain: use rustup or a newer distro.
+toolchain today: that is a rustup (or newer distro) requirement, not a
+place to relax the floor.
 
 ## Forks: what is pinned and why
 

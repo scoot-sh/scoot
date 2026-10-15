@@ -21,10 +21,10 @@ theme nothing.
 | [`lazygit.yml`](lazygit.yml) | lazygit: the palette, rounded borders |
 | [`load.sh`](load.sh), [`cpu.sh`](cpu.sh) | the bar's `load` and `cpu` modules: load average and CPU percent on stdout |
 | [`regreet.css`](regreet.css) | ReGreet: the login screen in near-black, cream and ginger (NixOS greeter) |
-| [`wallpaper.png`](wallpaper.png) | the session wallpaper: a byte-identical copy of `docs/assets/CatPeeking.png` (the source PNG already beats a max-compression re-encode, so the copy is the optimization) |
+| [`wallpaper.png`](wallpaper.png) | the session wallpaper: a byte-identical copy of `docs/assets/CatPeeking.png` (the source PNG already beats a max-compression re-encode — re-encodes were larger, see [the sampling note](../../../dev/research/ginger-night-palette.md) — so the copy is the optimization) |
 
 It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
-modules install it when the settings have a `[wallpaper]` table, otherwise
+modules install it when the settings have a `[wallpaper]` table, or, from source,
 `cargo install --path crates/scootbg`), a font file
 for scootbar (see the comment in [`bar.toml`](bar.toml)), and `load.sh` and
 `cpu.sh` somewhere on your `PATH` (see the comment in [`bar.toml`](bar.toml)).
@@ -84,20 +84,21 @@ one-screen default and the other knobs.
 ## The palette
 
 Role-named, so the look registry absorbs this look without rework.
-Every hex below was sampled from `docs/assets/CatPeeking.png`,
-not eyedroppered:
+Every hex below was sampled from `docs/assets/CatPeeking.png`
+(1672x941) with a stdlib PNG decoder, not eyedroppered (full
+coordinates, counts and byte sizes: [the sampling note](../../../dev/research/ginger-night-palette.md)):
 
 | Role | Color | Sampled from |
 | --- | --- | --- |
 | `surface` | near-black `#0E0E0E` | the field's center |
 | `ink` | warm cream `#F5EAD6` | the two eye-catchlights, softened warm so body text does not glare on black |
-| `accent` | ginger `#E57F29` | the median of the glyph pixels |
+| `accent` | ginger `#E57F29` | the median of all glyph pixels with R>150, 90≤G≤190, B<120 |
 | `ring` | bright ginger `#FF9A30` | the most common glyph-stroke colors |
 | `glow` | amber `#FFB14B` | a bright stroke variant: hover, prompt success, highlights |
 | `hush` | dark umber `#4E2913` | shadowed fur: the inactive ring, entry fields |
 | `mist` | ginger taupe `#8F7A63` | dimmed ginger for separators, dimmed numbers, line numbers |
 | `ember` | ember red `#E05A4E` | hand-placed away from ginger so urgent never reads as accent: errors, deletions |
-| `sand` | dusty sand `#C9A87A` | git branch, graph text |
+| `sand` | dusty sand `#C9A87A` | git branch, graph text: the pale-glyph mid-tones warmed |
 | `ridge` | slate taupe `#7E8AA0` | ANSI blue/cyan family (kept cool so code keeps a second temperature) |
 | `moss` | muted sage `#8FA07A` | ANSI green family (kept desaturated to stay calm) |
 
@@ -109,7 +110,8 @@ role moonrise's mauve ring plays.
 
 ## What it costs
 
-Each piece is opt-in — drop any of them:
+The defaults stay light on purpose; this look spends some of that, so each piece is
+opt-in and you can drop any of them:
 
 - **The wallpaper** makes scootbg hold the decoded image: about 8 MB RSS at 1920x1080
   (1672x941 RGBA, output-sized buffer, not file-sized;
@@ -132,7 +134,8 @@ Each piece is opt-in — drop any of them:
 
 ## Image credit and license
 
-`wallpaper.png` is a byte-identical copy of `docs/assets/CatPeeking.png`.
+`wallpaper.png` is a byte-identical copy of `docs/assets/CatPeeking.png`
+(byte sizes and re-encode measurements: [the sampling note](../../../dev/research/ginger-night-palette.md)).
 The image is the
 maintainer's own asset, already committed in this repository, so it
 ships with the look under the repository's MIT license — unlike the

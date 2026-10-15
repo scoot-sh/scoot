@@ -14,7 +14,7 @@ scootbar or scootbg changes unless you use these files.
 | [`regreet.css`](regreet.css) | ReGreet: the login screen in plum, ray blue and burst orange (NixOS greeter) |
 
 It needs `scootbg` on your `PATH` for the wallpaper (scoot starts it itself; the Nix
-modules install it when the settings have a `[wallpaper]` table, otherwise
+modules install it when the settings have a `[wallpaper]` table, or, from source,
 `cargo install --path crates/scootbg`), and a font file
 for scootbar (see the comment in [`bar.toml`](bar.toml)). Without `scootbg` scoot logs one
 warning and carries on with the background color.
@@ -71,12 +71,14 @@ for the ring, `#fa9233` in foot), hot pink `#bf128d`, purple `#6d1d98`, yellow `
 and olive `#99911d`.
 The focused window's ring is blue and the others' orange; the bar, foot and scoot all
 read from the same set. They came from Stylix's palette generator run on the image,
-with two changes by hand: the terminal's ANSI slots are spread across the six hues, and
-scoot's ring colors are set here.
+with two changes by hand: the terminal's ANSI slots are spread across the six hues (the
+generator reuses a few for several slots, so blue and cyan came out the same), and
+scoot's ring colors are set here because scoot's Nix module has no Stylix defaults.
 
 ## What it costs
 
-Each piece is opt-in — drop any of them:
+The defaults stay light on purpose; this look spends some of that, so each piece is
+opt-in and you can drop any of them:
 
 - **The wallpaper** makes scootbg hold the decoded image: about 12 MB RSS at 1920x1080
   and about 37 MB on two 4K outputs, against about 4 MB for a solid color (measured with
@@ -99,9 +101,9 @@ Each piece is opt-in — drop any of them:
 ## Image credit and license
 
 `docs/assets/wallpapers/radial-burst.png` is "Colorful radial lines exploding on a dark
-background" by Sufyan pir, published on Unsplash:
+background" by Sufyan pir, published on Unsplash on June 18, 2026:
 <https://unsplash.com/illustrations/colorful-radial-lines-exploding-on-a-dark-background-ETTtKnva9MM>.
-Its page says "Free to use under the Unsplash License"
+Its page (checked 2026-09-30) says "Free to use under the Unsplash License"
 (<https://unsplash.com/license>), which lets you download, copy, modify and distribute
 it, commercially and without attribution, but not compile images to build a similar or
 competing service; the credit here is a courtesy. **The image is not covered by this

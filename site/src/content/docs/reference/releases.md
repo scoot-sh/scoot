@@ -27,7 +27,8 @@ A release holds one set of files per architecture (`x86_64-linux`,
 The binaries are the default feature build: one binary that scans out
 from the GPU on real hardware and renders on the CPU everywhere else
 (the GPU scanout tier is compiled in and reaches the GPU libraries at
-run time via `dlopen`), with `xwayland` compiled in (needs the `Xwayland`
+run time via `dlopen`, so the same binary starts with and without a GPU
+stack installed), with `xwayland` compiled in (needs the `Xwayland`
 binary on `PATH` at run time to drive X11 apps). They are built with cargo from the
 vendored tree on Debian 12 (glibc 2.36) with Rust 1.97.0 (the rustup
 pin in `release.yml`), so they run on any glibc distro at or past that
@@ -47,7 +48,8 @@ script](../../start/install/#use-it-every-day) installs them: by
 default the newest tag, or the version `--version` names. When no
 tagged release exists yet the script fails instead of installing
 `main` — it never follows a moving build. To run `main`, use the Nix
-flake (rolling release) — see
+flake: every merge to `main` already lands tested binaries in the
+Cachix cache with the flake on FlakeHub (rolling release) — see
 [Install](../start/install.md). Verify a file with
 `--signer-workflow scoot-sh/scoot/.github/workflows/release.yml` in
 the command below.
@@ -98,7 +100,9 @@ sha256sum -c SHA256SUMS
 
 Every line must report `OK`. Then the provenance: each file carries a
 keyless GitHub attestation — no signing key to fetch, nothing to
-rotate. You need a recent `gh` CLI:
+rotate. You need the `gh` CLI (the flag spelling below is
+checked against `gh attestation verify --help` at gh 2.92.0 and
+2.100.0; `ubuntu-latest` runners provide a recent `gh`):
 
 ```sh
 gh attestation verify scoot-0.2.1-x86_64-linux --owner scoot-sh --signer-workflow scoot-sh/scoot/.github/workflows/release.yml
@@ -122,7 +126,9 @@ workflow](https://github.com/scoot-sh/scoot/blob/main/.github/workflows/release.
 it refuses a tag that disagrees with the workspace version, a tag not
 on main, and a re-publish of an existing release; builds the tarball,
 both architectures, the SBOM and the checksums; and publishes the GitHub
-Release with that version's changelog section as its notes.
-Cutting a release yourself is a
+Release with that version's changelog section as its notes. Nix users can
+skip the verification section above: every merge to main already lands tested
+binaries in the Cachix cache with the flake on FlakeHub — see
+[Install](../start/install.md). Cutting a release yourself is a
 maintainer task, described on the [cut a release](./cut-a-release.md)
 page.
