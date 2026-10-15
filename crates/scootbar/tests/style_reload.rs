@@ -14,6 +14,7 @@ mod common;
 
 use std::fs;
 use std::path::PathBuf;
+#[cfg(feature = "network")]
 use std::process::{Command, Stdio};
 
 use common::{Reaper, Session, rgb};
