@@ -184,6 +184,18 @@ impl Handler for Responder<'_> {
                     Err(message) => write_reply(out, &Reply::Error { message: &message }),
                 },
             },
+            // The same scoped reload under its own verb (see
+            // [`Request::ReloadLook`]): kept beside the `scope` form so a
+            // client speaking either is answered the same way.
+            Request::ReloadLook => match self.reload_scoped() {
+                Ok(()) => write_reply(
+                    out,
+                    &Reply::Ok {
+                        scope: Some(ReloadScope::Look.name()),
+                    },
+                ),
+                Err(message) => write_reply(out, &Reply::Error { message: &message }),
+            },
             Request::Hide | Request::Show | Request::Toggle => {
                 // Only the flag: the loop makes or destroys the surfaces
                 // once the turn's requests are all served, so a burst of

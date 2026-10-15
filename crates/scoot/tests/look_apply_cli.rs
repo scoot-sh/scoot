@@ -293,6 +293,42 @@ fn offline_commands_list_show_validate_and_build() {
 }
 
 #[test]
+fn json_failure_shapes_are_documents_on_stdout() {
+    // `--json` always prints a document on stdout, even when the run
+    // fails (exit 1, with the text error on stderr): `validate` with
+    // effectful refusals, and `apply` with an unknown or refused look.
+    let scratch = Scratch::new("json-fail");
+    let session = Session::start(&scratch);
+    // An invalid look directory: parses, but names a font that is not
+    // installed, so validation fails with errors (not a bare refusal).
+    let bad = scratch.dir.join("look-bad");
+    std::fs::create_dir_all(&bad).expect("a look dir");
+    let mut toml = look_toml("look-bad", 2);
+    toml = toml.replace("DejaVu Sans", "ScootNoSuchFont");
+    toml = toml.replace("JetBrains Mono", "ScootNoSuchFontMono");
+    std::fs::write(bad.join("look.toml"), toml).expect("a look.toml");
+    let out = session.look(&["validate", &bad.to_string_lossy(), "--json"]);
+    assert_eq!(out.status.code(), Some(1), "validate fails");
+    let doc: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).expect("UTF-8")).expect("a JSON doc");
+    assert_eq!(doc["valid"], false);
+    assert!(
+        doc["errors"].as_array().expect("an errors list").len() >= 3,
+        "font refusals land in errors: {doc}"
+    );
+    // An unknown look: apply refuses, with the failure document.
+    let out = session.look(&["apply", "nosuchlook", "--json"]);
+    assert_eq!(out.status.code(), Some(1), "apply fails");
+    let doc: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).expect("UTF-8")).expect("a JSON doc");
+    assert_eq!(doc["applied"], false);
+    assert_eq!(doc["target"], "nosuchlook");
+    assert!(
+        doc["error"].as_str().unwrap_or_default().contains("unknown look"),
+        "{doc}"
+    );
+}
+#[test]
 fn a_swap_applies_two_looks_through_the_scoped_reload() {
     let scratch = Scratch::new("swap");
     let session = Session::start(&scratch);

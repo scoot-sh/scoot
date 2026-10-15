@@ -8,13 +8,13 @@
 //! The bar client here is deliberately the wire and nothing else (one JSON
 //! line each way over the bar's socket): `scootbar` is a binary crate, so
 //! its control module cannot be imported, and the compositor half goes
-//! through `scoot-ipc`'s client. A compositor older than the look-scoped
-//! tag answers it with an ordinary error, which is a refusal, never a
-//! plain reload (a plain reload would apply the pending edits the scope
-//! exists to skip). A bar older than the look scope answers a plain `ok`
-//! without the `"scope":"look"` receipt: the CLI refuses it with one
-//! clear line ("the running bar predates the look-scoped reload: restart
-//! it"), never retrying as a plain reload.
+//! through `scoot-ipc`'s client. The scoped reload travels as its own
+//! `reload-look` verb, as the compositor's `reload_look` tag does: a bar
+//! older than the look scope answers the unknown verb with an ordinary
+//! error, which is a refusal, never a plain reload (a `reload` carrying a
+//! `scope` field would be misread by an old bar, which ignores unknown
+//! fields and runs a plain reload, applying the pending edits the scope
+//! exists to skip, before the CLI could refuse).
 
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -238,8 +238,12 @@ pub fn bar_reload_outcome(socket: &Path) -> Result<bool, String> {
         .set_read_timeout(Some(TIMEOUT))
         .and_then(|()| stream.set_write_timeout(Some(TIMEOUT)))
         .map_err(|error| format!("cannot set a timeout on {}: {error}", socket.display()))?;
+    // The scoped reload as its own verb: an old bar has no such `type` and
+    // answers `unknown request`, with nothing applied. Never `reload` with
+    // a `scope` field: an old bar ignores the unknown field and runs a
+    // plain reload first.
     stream
-        .write_all(b"{\"protocol\":1,\"type\":\"reload\",\"scope\":\"look\"}\n")
+        .write_all(b"{\"protocol\":1,\"type\":\"reload-look\"}\n")
         .map_err(|error| format!("cannot ask the bar on {}: {error}", socket.display()))?;
     let mut reader = BufReader::new((&stream).take(MAX_REPLY));
     let mut line = String::new();
@@ -261,22 +265,32 @@ pub fn bar_reload_outcome(socket: &Path) -> Result<bool, String> {
     match reply.get("type").and_then(|kind| kind.as_str()) {
         Some("ok") => {
             // The scoped reload must carry its scope receipt: a plain
-            // `ok` answers a different request (an older bar that ignores
-            // the unknown `scope` field and runs a plain reload, applying
-            // pending edits). Refuse it loudly, never retry as plain.
+            // `ok` answers a different request (a bar that answered the
+            // new verb without the receipt it must carry). Refuse it
+            // loudly, never retry as plain.
             match reply.get("scope").and_then(|scope| scope.as_str()) {
                 Some("look") => Ok(true),
-                _ => Err("the running bar predates the look-scoped reload: restart it".to_owned()),
+                _ => Err(
+                    "the bar answered the look reload without its scope receipt: refusing it"
+                        .to_owned(),
+                ),
             }
         }
-        Some("bar") => Ok(true),
-        Some("error") => Err(format!(
-            "the bar refused the look reload: {}",
-            reply
+        Some("error") => {
+            let message = reply
                 .get("message")
                 .and_then(|message| message.as_str())
-                .unwrap_or("(no message)")
-        )),
+                .unwrap_or("(no message)");
+            // An old bar has no `reload-look` verb and answers the unknown
+            // request with an ordinary error: map it to one clear line.
+            // Nothing was applied; nothing else is sent.
+            if message.contains("unknown request") {
+                return Err(
+                    "the running bar predates the look-scoped reload: restart it".to_owned(),
+                );
+            }
+            Err(format!("the bar refused the look reload: {message}"))
+        }
         other => Err(format!(
             "the bar answered the look reload with an unexpected reply: {}",
             other.unwrap_or("(no type)")

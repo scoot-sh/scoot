@@ -210,12 +210,13 @@ fn run_msg(msg: cli::Msg) -> ExitCode {
         cli::Msg::Subscribe { events } => {
             subscribe(&control::protocol::Request::Subscribe { events })
         }
-        cli::Msg::Reload { look } => send(
-            &control::protocol::Request::Reload {
-                scope: look.then_some(control::protocol::ReloadScope::Look),
-            },
-            true,
-        ),
+        cli::Msg::Reload { look: false } => {
+            send(&control::protocol::Request::Reload { scope: None }, true)
+        }
+        // The scoped reload as its own verb: an old daemon answers the
+        // unknown verb with an error, never a plain reload of the pending
+        // edits (see [`control::protocol::Request::ReloadLook`]).
+        cli::Msg::Reload { look: true } => send(&control::protocol::Request::ReloadLook, true),
         cli::Msg::Hide => send(&control::protocol::Request::Hide, true),
         cli::Msg::Show => send(&control::protocol::Request::Show, true),
         cli::Msg::Toggle => send(&control::protocol::Request::Toggle, true),

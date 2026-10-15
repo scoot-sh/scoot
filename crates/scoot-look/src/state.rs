@@ -437,6 +437,44 @@ fn sync_dir(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The following read the no-follow policy does not cover: the user's own
+/// config files (home-manager/stow link them into the store) and catalog
+/// manifests in per-file symlink farms may be symlinks, and the `<state>/look`
+/// link itself is intentional. Same size cap as [`read_capped`], symlinks
+/// followed. The opened handle is still required to be a regular file (a
+/// FIFO refuses instead of hanging), and non-UTF-8 still refuses. Never
+/// for the record, the render cache, or look-dir inputs under validation:
+/// those keep [`read_capped`].
+pub fn read_capped_follow(path: &Path) -> Result<String, std::io::Error> {
+    use std::io::Read as _;
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::NONBLOCK
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NOCTTY,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    let stat = rustix::fs::fstat(&fd).map_err(std::io::Error::from)?;
+    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "not a regular file: refusing to read it",
+        ));
+    }
+    let mut buf = Vec::new();
+    File::from(fd).take(MAX_FILE + 1).read_to_end(&mut buf)?;
+    if buf.len() as u64 > MAX_FILE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("larger than {MAX_FILE} bytes: refusing to read it"),
+        ));
+    }
+    String::from_utf8(buf)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
 /// The gated read the record (and the compositor's fragment loader) share:
 /// opened `O_NONBLOCK|O_NOFOLLOW` and required to be a regular file by
 /// `fstat`, with a

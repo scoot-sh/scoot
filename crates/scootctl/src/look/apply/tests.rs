@@ -135,6 +135,10 @@ struct FakeChecks {
     font_dir: Option<PathBuf>,
     font_refuse: Option<String>,
     bar_refuse: Option<String>,
+    /// Models a bar built `--no-default-features`: refuses only fragments
+    /// carrying `popup-radius`, recording every fragment seen.
+    popup_only: bool,
+    bar_seen: RefCell<Vec<String>>,
 }
 
 impl FakeChecks {
@@ -146,6 +150,8 @@ impl FakeChecks {
             font_dir: Some(dir.to_owned()),
             font_refuse: None,
             bar_refuse: None,
+            popup_only: false,
+            bar_seen: RefCell::new(Vec::new()),
         }
     }
 }
@@ -171,6 +177,18 @@ impl Checks for FakeChecks {
     }
 
     fn bar_fragment(&self, fragment: &Path) -> Result<Availability<()>, String> {
+        let text = std::fs::read_to_string(fragment).unwrap_or_default();
+        self.bar_seen.borrow_mut().push(text.clone());
+        if self.popup_only {
+            // The shape a real `--no-default-features` bar answers with:
+            // a TOML parse summary line plus the unknown-field detail naming
+            // `popup-radius` (captured from a real binary; the CLI keys its
+            // popup-less re-render off that name in the whole stderr).
+            if text.contains("popup-radius") {
+                return Err("scootbar: bar.toml: TOML parse error at line 8, column 1\nunknown field `popup-radius`, expected `radius`".to_owned());
+            }
+            return Ok(Availability::Available(()));
+        }
         if let Some(refusal) = &self.bar_refuse {
             return Err(refusal.clone());
         }
@@ -201,8 +219,8 @@ impl Dconf for FakeDconf {
         !self.missing
     }
 
-    fn read(&self, _key: &str) -> Option<String> {
-        self.live.clone()
+    fn read(&self, _key: &str) -> Result<Option<String>, String> {
+        Ok(self.live.clone())
     }
 
     fn write(&self, key: &str, value: &str) -> Result<(), String> {
@@ -561,10 +579,7 @@ fn a_rollback_that_also_refuses_reports_both_errors() {
         Ok(Reloaded::default()),
         Err(ReloadError::Refused("the old layer is bad too".to_owned())),
     ]);
-    let bar = FakeBar::with_script(
-        "wayland-0",
-        vec![Err("the new layer is bad".to_owned()), Ok(true)],
-    );
+    let bar = FakeBar::with_script("wayland-0", vec![Err("the new layer is bad".to_owned())]);
     let bars: Vec<&dyn BarReload> = vec![&bar];
     let failure = apply_with(
         "look-b",
@@ -611,10 +626,11 @@ fn a_failed_first_apply_removes_what_it_wrote() {
     let fonts = fixture._root.join("fonts");
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
-    // Nothing to restore to, so what the failed swap wrote is removed and
-    // no rollback reload runs (it would refuse with "no look layer is
-    // configured"): the message says plainly the apps still show the new
-    // look while nothing is recorded.
+    // Nothing to restore to and nothing positively reloaded (the
+    // compositor refused, never accepted): what the failed swap wrote is
+    // removed, no rollback reload runs, and the message is the refusal
+    // alone — with no compositor and nothing reloaded, nothing reloaded,
+    // so no split-brain note either.
     let mut compositor =
         FakeCompositor::with_script(vec![Err(ReloadError::Refused("nope".to_owned()))]);
     let failure = apply_with(
@@ -631,13 +647,58 @@ fn a_failed_first_apply_removes_what_it_wrote() {
     )
     .expect_err("the first apply fails");
     assert!(failure.rolled_back_to.is_none());
-    assert!(failure.to_string().contains("ROLLED BACK WITH ERRORS"));
+    assert_eq!(failure.message, "nope");
+    assert!(failure.rollback_errors.is_empty());
     assert!(
-        failure.to_string().contains("still show the new look"),
+        !failure.to_string().contains("still show the new look"),
         "{}",
         failure
     );
     assert_eq!(compositor.calls.get(), 1);
+    assert!(!fixture.state.join("look.json").exists());
+    assert!(!fixture.state.join(LINK_NAME).exists());
+}
+
+#[test]
+fn a_failed_first_apply_names_only_what_actually_reloaded() {
+    // The compositor positively reloaded, then a bar refused: the
+    // compositor still shows the new look while nothing is recorded, and
+    // the note names the compositor only. The bar merely refused — it
+    // never left its old layer — so it is not counted.
+    let fixture = fixture("first-split");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::ok(&[], &[]);
+    let bar = FakeBar::with_script("wayland-0", vec![Err("bad layer".to_owned())]);
+    let bars: Vec<&dyn BarReload> = vec![&bar];
+    let failure = apply_with(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &bars,
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect_err("the first apply fails");
+    assert!(failure.rolled_back_to.is_none());
+    assert!(
+        failure
+            .to_string()
+            .contains("the compositor still shows the new look"),
+        "{}",
+        failure
+    );
+    assert!(
+        !failure.to_string().contains("wayland-0 still shows"),
+        "{}",
+        failure
+    );
+    assert_eq!(bar.calls.get(), 1, "a refusing bar is never re-run");
     assert!(!fixture.state.join("look.json").exists());
     assert!(!fixture.state.join(LINK_NAME).exists());
 }
@@ -706,7 +767,10 @@ fn a_bar_refusal_rolls_back_the_compositor_too() {
     let mut compositor =
         FakeCompositor::with_script(vec![Ok(Reloaded::default()), Ok(Reloaded::default())]);
     let bar0 = FakeBar::with_script("wayland-0", vec![Ok(true), Ok(true)]);
-    let bar1 = FakeBar::with_script("wayland-1", vec![Err("bad layer".to_owned()), Ok(true)]);
+    // A refusing bar never accepted the new layer, so the rollback never
+    // re-runs it (one call, not two): no second refusal, no retry as a
+    // plain reload.
+    let bar1 = FakeBar::with_script("wayland-1", vec![Err("bad layer".to_owned())]);
     let bars: Vec<&dyn BarReload> = vec![&bar0, &bar1];
     let failure = apply_with(
         "look-b",
@@ -725,7 +789,7 @@ fn a_bar_refusal_rolls_back_the_compositor_too() {
     assert_eq!(failure.rolled_back_to.as_deref(), Some("look-a"));
     assert_eq!(compositor.calls.get(), 2, "the compositor rolls back too");
     assert_eq!(bar0.calls.get(), 2, "the reloaded bar rolls back");
-    assert_eq!(bar1.calls.get(), 2, "the refusing bar rolls back too");
+    assert_eq!(bar1.calls.get(), 1, "a refusing bar is never re-run");
     assert_eq!(record_of(&fixture.state).name, "look-a");
 }
 
@@ -1373,6 +1437,8 @@ fn a_font_refusal_refuses_before_anything_is_touched() {
         font_dir: None,
         font_refuse: Some("font `DejaVu Sans` resolves to nothing".to_owned()),
         bar_refuse: None,
+        popup_only: false,
+        bar_seen: RefCell::new(Vec::new()),
     };
     let mut compositor = FakeCompositor::not_running();
     let failure = apply_with(
@@ -1455,6 +1521,8 @@ fn effectful_refusals_are_structured_not_bare_errors() {
         font_dir: None,
         font_refuse: Some("font `DejaVu Sans` resolves to nothing".to_owned()),
         bar_refuse: None,
+        popup_only: false,
+        bar_seen: RefCell::new(Vec::new()),
     };
     let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
     assert_eq!(validation.errors.len(), 3, "{:?}", validation.errors);
@@ -1476,4 +1544,219 @@ fn helpers_run_with_a_timeout() {
     let error =
         run_with_timeout(Path::new("/nonexistent-helper-xyz"), &[]).expect_err("missing refuses");
     assert!(error.contains("cannot run"), "{error}");
+}
+
+#[test]
+fn validate_accepts_a_nameless_dir_path() {
+    // `scoot look validate .`: a path with no file name (`.`, `./`,
+    // `..`) falls back to the canonical basename for the
+    // name-matches-directory check. (`dir/.` still has a file name —
+    // Rust ignores the trailing dot — so the probe below ends in `..`,
+    // the same `None` case.) A symlink's own entry name still wins (see
+    // the catalog's entry-name test); this is only the no-name case.
+    let root = scratch("dotdir");
+    // `<root>/wd/look.toml`, manifest name `wd`: the probe path
+    // `<root>/wd/inner/..` has no file name, reads `<root>/wd/look.toml`,
+    // and canonicalizes to `<root>/wd`.
+    let wd = root.join("wd");
+    std::fs::create_dir_all(wd.join("inner")).expect("a look dir");
+    std::fs::write(wd.join("look.toml"), look_toml("wd")).expect("a look.toml");
+    let probe = wd.join("inner").join("..");
+    assert!(
+        probe.file_name().is_none(),
+        "the probe path has no file name"
+    );
+    // No `extends`: the catalog is only the base lookup.
+    let catalog = Catalog::default();
+    let fonts = root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let validation = validate_dir(&probe, Origin::User, &catalog, &checks).expect("validatable");
+    assert!(validation.errors.is_empty(), "{:?}", validation.errors);
+}
+
+#[test]
+fn validate_and_apply_agree_on_the_bar_fragment() {
+    // A bar fragment its own bar refuses must not validate: `validate`
+    // runs the same bar-fragment check `apply` does (against the installed
+    // binary's features), instead of printing valid while `apply` refuses.
+    let fixture = fixture("bar-agree");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    // For font files the fake dir stands in: write what it resolves.
+    for family in ["DejaVu Sans", "DejaVu Sans Mono"] {
+        std::fs::write(fonts.join(format!("{family}.otf")), b"font").expect("a font file");
+    }
+    let checks = FakeChecks {
+        font_dir: Some(fonts),
+        font_refuse: None,
+        bar_refuse: Some("bar fragment refused by scootbar daemon --check: bad radius".to_owned()),
+        popup_only: false,
+        bar_seen: RefCell::new(Vec::new()),
+    };
+    let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
+    assert!(
+        validation
+            .errors
+            .iter()
+            .any(|error| error.contains("bad radius")),
+        "{:?}",
+        validation.errors
+    );
+    let mut compositor = FakeCompositor::not_running();
+    let failure = apply_with(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect_err("apply refuses too");
+    assert!(
+        failure.message.contains("bad radius"),
+        "{}",
+        failure.message
+    );
+}
+
+#[test]
+fn validate_retries_a_popup_refusal_without_popup_keys() {
+    // A bar built `--no-default-features` refuses `popup-radius`: like
+    // `apply` and `build`, `validate` re-renders without the popup keys
+    // instead of refusing every look. The fake models that bar faithfully:
+    // it refuses only fragments carrying `popup-radius`.
+    let fixture = fixture("bar-popup");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    for family in ["DejaVu Sans", "DejaVu Sans Mono"] {
+        std::fs::write(fonts.join(format!("{family}.otf")), b"font").expect("a font file");
+    }
+    let checks = FakeChecks {
+        font_dir: Some(fonts),
+        font_refuse: None,
+        bar_refuse: None,
+        popup_only: true,
+        bar_seen: RefCell::new(Vec::new()),
+    };
+    let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
+    assert!(validation.errors.is_empty(), "{:?}", validation.errors);
+    let seen = checks.bar_seen.borrow();
+    assert_eq!(
+        seen.len(),
+        2,
+        "the check ran, then ran again without popup keys"
+    );
+    assert!(
+        seen[0].contains("popup-radius"),
+        "the first render carries popup-radius"
+    );
+    assert!(
+        !seen[1].contains("popup-radius"),
+        "the retry renders without popup-radius"
+    );
+    assert!(
+        validation
+            .notes
+            .iter()
+            .any(|note| note.contains("without popup-radius")),
+        "{:?}",
+        validation.notes
+    );
+}
+
+#[test]
+fn symlinked_user_configs_still_report_shadowed_keys() {
+    // Home-manager/stow link the user's own config files into the store:
+    // following those links for the offline shadow detection is correct
+    // (the no-follow policy is for look-dir inputs, not the user's files).
+    let root = scratch("shadow-link");
+    let render = root.join("render");
+    std::fs::create_dir_all(&render).expect("a render dir");
+    std::fs::write(
+        render.join("scoot.toml"),
+        "[appearance]\nbackground_color = \"#2B3648\"\n",
+    )
+    .expect("a fragment");
+    std::fs::write(render.join("bar.toml"), "[colors]\n").expect("a bar fragment");
+    let store = root.join("store");
+    std::fs::create_dir_all(&store).expect("a store dir");
+    std::fs::write(
+        store.join("config.toml"),
+        "[appearance]\nbackground_color = \"#000000\"\n",
+    )
+    .expect("a user file");
+    let config = root.join("config");
+    std::fs::create_dir_all(config.join("scoot")).expect("a config dir");
+    std::os::unix::fs::symlink(store.join("config.toml"), config.join("scoot/config.toml"))
+        .expect("a config link");
+    let (shadowed, _) = shadowed_from_files_in(&render, Some(&config));
+    assert!(
+        shadowed.contains(&"appearance.background_color".to_owned()),
+        "{shadowed:?}"
+    );
+}
+
+#[test]
+fn build_into_an_empty_out_writes_three_files_and_leaves_no_litter() {
+    // The old stage lived in `out`'s parent, so `--out .` refused citing
+    // the tool's own stage file; the stage now lives in a tool-owned temp
+    // dir, gone on every exit path. An empty dir (what `--out .` is from
+    // a clean cwd) builds, and neither success nor failure litters.
+    let fixture = fixture("build-clean");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let out = fixture._root.join("out");
+    std::fs::create_dir_all(&out).expect("an out dir");
+    let report = build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+    )
+    .expect("an empty out builds");
+    assert_eq!(report.name, "look-a");
+    for file in ["scoot.toml", "bar.toml", "render.json"] {
+        assert!(out.join(file).is_file(), "{file} renders");
+    }
+    assert_no_build_litter(&fixture._root);
+    // A refused build leaves no stage behind either.
+    let failing = fixture._root.join("failing-out");
+    std::fs::create_dir_all(&failing).expect("an out dir");
+    std::fs::write(failing.join("notes.txt"), b"mine").expect("a foreign file");
+    build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &failing,
+        &fixture.catalog,
+        &checks,
+    )
+    .expect_err("a foreign out refuses");
+    assert_no_build_litter(&fixture._root);
+}
+
+/// No `.X.build-tmp.*` stage dir survives anywhere under `root`.
+fn assert_no_build_litter(root: &Path) {
+    let mut litter = Vec::new();
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.contains("build-tmp") {
+                litter.push(entry.path());
+            }
+            if entry.path().is_dir() {
+                dirs.push(entry.path());
+            }
+        }
+    }
+    assert!(litter.is_empty(), "stage litter survives: {litter:?}");
 }

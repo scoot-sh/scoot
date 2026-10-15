@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use scoot_look::state::read_capped;
+use scoot_look::state::read_capped_follow;
 use scoot_look::{
     Origin, RawLook, check_name_matches_dir, parse_look_toml, validate_apps_allowlist,
     validate_for_origin,
@@ -28,6 +28,13 @@ pub struct Entry {
     pub name: String,
     /// The canonicalized source directory.
     pub dir: PathBuf,
+    /// The canonical directory of the `look.toml` file itself: usually
+    /// `dir`, but a home-manager `recursive` farm links each file into the
+    /// store, so the manifest (and the files it names) live elsewhere.
+    /// Look-relative files (wallpaper, `[fonts.files]`) resolve against
+    /// this directory — the directory of the look that names them — so
+    /// per-file farms catalog with the same inside-check as plain ones.
+    pub manifest_dir: PathBuf,
     /// Decided by the directory, never by the manifest.
     pub origin: Origin,
     /// The parsed manifest.
@@ -221,7 +228,12 @@ fn scan_dir(dir: &Path, origin: Origin, catalog: &mut Catalog) {
         // carries a hash prefix like `<hash>-moonrise-look`).
         let dir_name = entry.file_name().to_str().unwrap_or_default().to_owned();
         let file = canonical.join("look.toml");
-        let bytes = match read_capped(&file) {
+        // Home-manager `recursive` farms link each file into the store, so
+        // the manifest itself may be a symlink: follow it here (the trust
+        // boundary is the catalog directory, and the manifest is parsed and
+        // validated, never executed). Untrusted directory inputs under
+        // `validate`/`build` keep the no-follow read.
+        let bytes = match read_capped_follow(&file) {
             Ok(text) => text.into_bytes(),
             Err(error) => {
                 catalog.notes.push(format!(
@@ -277,9 +289,18 @@ fn scan_dir(dir: &Path, origin: Origin, catalog: &mut Catalog) {
             catalog.shadowed.push((raw.name.clone(), canonical));
             continue;
         }
+        // The manifest's own directory: the file read above may itself be
+        // a store link, and the files it names sit beside the target, not
+        // the entry. Falls back to the entry dir when the target has no
+        // parent (unreachable: it names `look.toml`).
+        let manifest_dir = std::fs::canonicalize(&file)
+            .ok()
+            .and_then(|target| target.parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| canonical.clone());
         catalog.entries.push(Entry {
             name: raw.name.clone(),
             dir: canonical,
+            manifest_dir,
             origin,
             raw,
             bytes,

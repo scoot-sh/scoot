@@ -47,10 +47,10 @@ pub fn want_for_polarity(dark: bool) -> &'static str {
 
 /// One dconf read and write, so tests script the settings backend.
 pub trait Dconf {
-    /// The live value, trimmed, or `None` when unset or unreadable.
-    /// Unreadable reads as unset: the write below either succeeds (and the
-    /// record starts) or fails loudly itself.
-    fn read(&self, key: &str) -> Option<String>;
+    /// The live value: `Ok(None)` when unset, `Ok(Some)` when set,
+    /// `Err` when unreadable. Unreadable is never "unset": callers leave
+    /// the key alone rather than recording an original they never saw.
+    fn read(&self, key: &str) -> Result<Option<String>, String>;
     /// Writes `value`, exactly as given.
     fn write(&self, key: &str, value: &str) -> Result<(), String>;
     /// Resets `key` to unset (what it was before the tool's first write).
@@ -83,19 +83,24 @@ impl Dconf for CliDconf {
         self.program.is_some()
     }
 
-    fn read(&self, key: &str) -> Option<String> {
-        let program = self.program.as_ref()?;
-        let out = super::apply::run_with_timeout(program, &["read", key]).ok()?;
+    fn read(&self, key: &str) -> Result<Option<String>, String> {
+        let program = self
+            .program
+            .as_ref()
+            .ok_or_else(|| "no `dconf`".to_owned())?;
+        let out = super::apply::run_with_timeout(program, &["read", key])
+            .map_err(|error| format!("cannot read {key}: {error}"))?;
         if !out.status.success() {
-            return None;
+            return Err(format!("`dconf read {key}` failed"));
         }
-        let text = String::from_utf8(out.stdout).ok()?;
+        let text =
+            String::from_utf8(out.stdout).map_err(|_| format!("`dconf read {key}` not UTF-8"))?;
         let trimmed = text.trim().to_owned();
         // `dconf read` prints nothing for an unset key.
         if trimmed.is_empty() {
-            None
+            Ok(None)
         } else {
-            Some(trimmed)
+            Ok(Some(trimmed))
         }
     }
 
@@ -196,13 +201,22 @@ pub fn apply_toolkit(
         return notes;
     }
     let want = want_for_polarity(dark);
+    // The live value first: an unreadable key stops here, before any
+    // record or write. It must never map to "was unset".
+    let live = match dconf.read(COLOR_SCHEME_KEY) {
+        Ok(live) => live,
+        Err(error) => {
+            notes.push(format!("color-scheme unreadable ({error}): left alone"));
+            return notes;
+        }
+    };
     // Save the original once, before the first write, so `toolkit off`
-    // can restore it. `Some("")` means it was unset.
+    // can restore it. `Some("")` means it was unset — and only a readable
+    // live value is ever saved.
     if record.color_scheme_orig.is_none() && record.color_scheme.is_none() {
-        let orig = dconf.read(COLOR_SCHEME_KEY).unwrap_or_default();
-        record.color_scheme_orig = Some(orig);
+        record.color_scheme_orig = Some(live.clone().unwrap_or_default());
     }
-    match dconf.read(COLOR_SCHEME_KEY) {
+    match live {
         // Unset, or what the tool last wrote: the tool owns the key.
         None => write_and_record(record, want, dconf, &mut notes),
         Some(live) if Some(live.as_str()) == record.color_scheme.as_deref() => {
@@ -237,6 +251,63 @@ fn write_and_record(record: &mut Record, want: &str, dconf: &dyn Dconf, notes: &
             notes.push(format!("color-scheme not written: {error}"));
         }
     }
+}
+
+/// `toolkit off`: stop owning `color-scheme`. Restores the live value from
+/// before the tool's first write (saved as `color-scheme-orig`; empty means
+/// it was unset, restored with `reset`) — but only when the tool wrote what
+/// is still live (`record.color_scheme`). A key the tool never wrote
+/// (`apply --no-toolkit` first, a private state), one someone else changed
+/// since, or one that cannot be read is left alone with a note. A private
+/// state never touches the real key at all. Either way the record clears,
+/// so after `off` then `on` the next apply adopts fresh instead of
+/// reporting "set outside `scoot look`" over a stale write. Returns the
+/// notes for the reply; a failed restore is a note, never a refusal.
+pub fn toolkit_off(state_dir: &Path, record: &mut Record, dconf: &dyn Dconf) -> Vec<String> {
+    let mut notes = Vec::new();
+    if is_private_state(state_dir) {
+        notes.push(
+            "private look state (headless or --private-look): color-scheme left alone".to_owned(),
+        );
+    } else if !dconf.available() {
+        notes.push("no `dconf` on PATH: color-scheme left alone".to_owned());
+    } else if let Some(written) = record.color_scheme.clone() {
+        match dconf.read(COLOR_SCHEME_KEY) {
+            Ok(Some(live)) if live == written => {
+                let restored = match record.color_scheme_orig.as_deref() {
+                    Some("") => dconf.reset(COLOR_SCHEME_KEY),
+                    Some(orig) => dconf.write(COLOR_SCHEME_KEY, orig),
+                    // A record that wrote before the original was saved:
+                    // the restore target is unknown, so leave it.
+                    None => {
+                        notes.push("color-scheme has no saved original: left alone".to_owned());
+                        record.color_scheme = None;
+                        record.color_scheme_orig = None;
+                        return notes;
+                    }
+                };
+                if let Err(error) = restored {
+                    notes.push(format!("color-scheme not restored: {error}"));
+                }
+            }
+            Ok(Some(live)) => {
+                notes.push(format!(
+                    "color-scheme is {live} (set outside `scoot look`): left alone"
+                ));
+            }
+            Ok(None) => {
+                notes.push("color-scheme already unset: nothing to restore".to_owned());
+            }
+            Err(error) => {
+                notes.push(format!("color-scheme unreadable ({error}): left alone"));
+            }
+        }
+    } else {
+        notes.push("no color-scheme written by `scoot look`: left alone".to_owned());
+    }
+    record.color_scheme = None;
+    record.color_scheme_orig = None;
+    notes
 }
 
 #[cfg(test)]

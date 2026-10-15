@@ -184,6 +184,30 @@ fn a_symlinked_look_uses_the_entry_name_not_the_target() {
 }
 
 #[test]
+fn a_per_file_symlink_farm_catalogs_with_store_files() {
+    // Home-manager `recursive` farms link each file into the store: the
+    // look dir is real, but `look.toml` is a symlink. The manifest
+    // follows it, and the entry's files resolve beside the manifest's
+    // target, not the entry.
+    let root = scratch("file-farm");
+    let looks = root.join("looks");
+    std::fs::create_dir_all(&looks).expect("a looks dir");
+    let store = root.join("store").join("moonrise");
+    std::fs::create_dir_all(&store).expect("a store dir");
+    std::fs::write(store.join("look.toml"), look_toml("moonrise")).expect("a manifest");
+    let entry = looks.join("moonrise");
+    std::fs::create_dir_all(&entry).expect("a look dir");
+    std::os::unix::fs::symlink(store.join("look.toml"), entry.join("look.toml"))
+        .expect("a manifest link");
+    let catalog = discover_ordered(&[(looks, Origin::User)]);
+    let found = catalog.find("moonrise").expect("the farm look catalogs");
+    let canonical_store = std::fs::canonicalize(&store).expect("a canonical store");
+    let canonical_entry = std::fs::canonicalize(&entry).expect("a canonical entry");
+    assert_eq!(found.manifest_dir, canonical_store);
+    assert_eq!(found.dir, canonical_entry, "the entry dir stays the entry");
+}
+
+#[test]
 fn a_missing_source_dir_is_skipped_quietly() {
     let catalog: Catalog =
         discover_ordered(&[(PathBuf::from("/nonexistent-scoot-looks"), Origin::User)]);

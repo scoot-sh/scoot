@@ -40,12 +40,16 @@ swap that changes nothing it was asked to still answers applied; check
 
 On refusal nothing half-applies. An invalid look refuses before anything
 is touched. A refused reload rolls the swap back: the record and the link
-go back to the previous look, the reloads that already ran run again, and
-the reply names the refusal. If a rollback reload also refuses, the reply
+go back to the previous look, the reloads with a positive receipt run
+again against the restored choice, and the reply names the refusal. A
+peer that refused — an old compositor or bar included — never accepted
+the new layer, so it is never re-run and nothing ever retries as a plain
+reload. If a rollback reload also refuses, the reply
 says `ROLLED BACK WITH ERRORS` with both reasons; each app is on its old
 or its new look, never between — except a first-ever apply with no
-previous look: there is nothing to reload back to, so reloaded apps still
-show the new look while no look is recorded, and the reply says so.
+previous look: there is nothing to reload back to, so whatever positively
+reloaded still shows the new look while no look is recorded, and the
+reply names exactly that.
 
 Every command takes `--json` (the reply as JSON on stdout, notes on
 stderr). Exit status: 0 applied, 1 the run failed, 2 the invocation was
@@ -95,9 +99,12 @@ no record adopts the key whatever it holds. A box without `dconf` gets a
 note, not a refusal.
 
 - `scoot look apply --no-toolkit` skips the write for one apply.
-- `scoot look toolkit off` persists the skip in `look.json` and restores
-  the `color-scheme` from before the tool's first write;
-  `scoot look toolkit` shows the state.
+- `scoot look toolkit off` persists the skip in `look.json`. When the tool
+  wrote what is still live, `off` restores the `color-scheme` from before
+  the tool's first write and stops owning the key; a key the tool never
+  wrote, one someone else changed since, or one that cannot be read is
+  left alone. Either way the record clears, so turning back `on` adopts
+  fresh on the next apply. `scoot look toolkit` shows the state.
 - A private look state (a headless or `--private-look` session) never
   writes `color-scheme`: its swaps must not move the real desktop.
 
@@ -141,6 +148,7 @@ bar's own parser. Your own looks live in
 
 > **Symptom:** `apply` refuses with `the running bar predates the
 > look-scoped reload: restart it`.
-> The bar is older than the look-scoped reload (it answered a plain `ok`
-> without the scope receipt, applying pending edits). Restart the bar and
-> re-apply; the swap never retries as a plain reload.
+> The bar is older than the look-scoped reload: it answered the
+> `reload-look` request with an ordinary unknown-request error, applying
+> nothing. Restart the bar and re-apply; the swap never retries as a plain
+> reload.

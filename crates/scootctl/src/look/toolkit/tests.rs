@@ -5,9 +5,15 @@ use std::collections::HashMap;
 
 use scoot_look::state::Record;
 
-use super::{COLOR_SCHEME_KEY, Dconf, PREFER_DARK, PREFER_LIGHT, apply_toolkit, toolkit_on};
+use super::{
+    COLOR_SCHEME_KEY, Dconf, PREFER_DARK, PREFER_LIGHT, apply_toolkit, toolkit_off, toolkit_on,
+};
 
 fn record(toolkit: Option<bool>, color_scheme: Option<&str>) -> Record {
+    record_orig(toolkit, color_scheme, None)
+}
+
+fn record_orig(toolkit: Option<bool>, color_scheme: Option<&str>, orig: Option<&str>) -> Record {
     Record {
         name: "moonrise".to_owned(),
         rendered: "/r/moonrise".to_owned(),
@@ -16,7 +22,7 @@ fn record(toolkit: Option<bool>, color_scheme: Option<&str>) -> Record {
         declared_default: None,
         toolkit,
         color_scheme: color_scheme.map(str::to_owned),
-        color_scheme_orig: None,
+        color_scheme_orig: orig.map(str::to_owned),
     }
 }
 
@@ -33,6 +39,7 @@ struct FakeDconf {
     writes: RefCell<Vec<(String, String)>>,
     fail_write: bool,
     missing: bool,
+    unreadable: bool,
 }
 
 impl FakeDconf {
@@ -46,8 +53,11 @@ impl Dconf for FakeDconf {
         !self.missing
     }
 
-    fn read(&self, _key: &str) -> Option<String> {
-        self.live.clone()
+    fn read(&self, _key: &str) -> Result<Option<String>, String> {
+        if self.unreadable {
+            return Err("dconf is broken".to_owned());
+        }
+        Ok(self.live.clone())
     }
 
     fn write(&self, key: &str, value: &str) -> Result<(), String> {
@@ -188,6 +198,202 @@ fn a_failed_write_is_a_note_and_keeps_no_record() {
     assert!(state.color_scheme.is_none());
     assert!(
         notes.iter().any(|note| note.contains("not written")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn an_unreadable_key_is_left_alone_and_saves_no_original() {
+    // Unreadable is not unset: nothing is written, and `Some("")`
+    // ("was unset") is never recorded for a key never seen.
+    let dconf = FakeDconf {
+        unreadable: true,
+        ..FakeDconf::default()
+    };
+    let mut state = record(None, None);
+    let notes = apply_toolkit(&state_dir(), &mut state, true, &dconf);
+    assert!(dconf.wrote().is_empty());
+    assert!(state.color_scheme.is_none());
+    assert!(state.color_scheme_orig.is_none());
+    assert!(
+        notes.iter().any(|note| note.contains("unreadable")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn off_restores_what_is_still_live_and_clears_the_record() {
+    let dconf = FakeDconf {
+        live: Some(PREFER_DARK.to_owned()),
+        ..FakeDconf::default()
+    };
+    let mut state = record_orig(None, Some(PREFER_DARK), Some(PREFER_LIGHT));
+    let notes = toolkit_off(&state_dir(), &mut state, &dconf);
+    assert_eq!(
+        dconf.wrote(),
+        vec![(COLOR_SCHEME_KEY.to_owned(), PREFER_LIGHT.to_owned())]
+    );
+    assert!(state.color_scheme.is_none());
+    assert!(state.color_scheme_orig.is_none());
+    assert!(
+        !notes.iter().any(|note| note.contains("left alone")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn off_resets_a_key_that_was_unset() {
+    let dconf = FakeDconf {
+        live: Some(PREFER_DARK.to_owned()),
+        ..FakeDconf::default()
+    };
+    let mut state = record_orig(None, Some(PREFER_DARK), Some(""));
+    toolkit_off(&state_dir(), &mut state, &dconf);
+    assert_eq!(
+        dconf.wrote(),
+        vec![(format!("reset {COLOR_SCHEME_KEY}"), String::new())]
+    );
+    assert!(state.color_scheme.is_none());
+}
+
+#[test]
+fn off_leaves_a_key_someone_else_changed() {
+    let dconf = FakeDconf {
+        live: Some(PREFER_LIGHT.to_owned()),
+        ..FakeDconf::default()
+    };
+    let mut state = record_orig(None, Some(PREFER_DARK), Some(""));
+    let notes = toolkit_off(&state_dir(), &mut state, &dconf);
+    assert!(dconf.wrote().is_empty());
+    assert!(
+        notes.iter().any(|note| note.contains("left alone")),
+        "{notes:?}"
+    );
+    // Cleared anyway: the tool no longer owns the key.
+    assert!(state.color_scheme.is_none());
+    assert!(state.color_scheme_orig.is_none());
+}
+
+#[test]
+fn off_writes_nothing_it_never_wrote() {
+    // No record of a write (`apply --no-toolkit` first): `reset` must not
+    // run against a key the tool never touched.
+    let dconf = FakeDconf::default();
+    let mut state = record(None, None);
+    let notes = toolkit_off(&state_dir(), &mut state, &dconf);
+    assert!(dconf.wrote().is_empty());
+    assert!(
+        notes.iter().any(|note| note.contains("written by")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn off_then_on_adopts_fresh_instead_of_crying_outside() {
+    // After `off` the record holds no stale write while live holds the
+    // original, so the next apply adopts (the documented first-write
+    // path) instead of reporting "set outside `scoot look`" forever.
+    // The fake backend's live value is static, so the off restores the
+    // owned write and the apply adopts over the fake's unchanged live.
+    let dconf = FakeDconf {
+        live: Some(PREFER_DARK.to_owned()),
+        ..FakeDconf::default()
+    };
+    let mut state = record_orig(None, Some(PREFER_DARK), Some(PREFER_LIGHT));
+    toolkit_off(&state_dir(), &mut state, &dconf);
+    assert!(state.color_scheme.is_none());
+    assert!(state.color_scheme_orig.is_none());
+    let notes = apply_toolkit(&state_dir(), &mut state, true, &dconf);
+    assert_eq!(dconf.wrote().len(), 2);
+    assert_eq!(state.color_scheme.as_deref(), Some(PREFER_DARK));
+    assert!(
+        notes.iter().any(|note| note.contains("adopting")),
+        "{notes:?}"
+    );
+    assert!(
+        !notes
+            .iter()
+            .any(|note| note.contains("outside `scoot look`")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn a_repeated_off_restores_nothing() {
+    let dconf = FakeDconf {
+        live: Some(PREFER_LIGHT.to_owned()),
+        ..FakeDconf::default()
+    };
+    let mut state = record_orig(None, Some(PREFER_DARK), Some(""));
+    toolkit_off(&state_dir(), &mut state, &dconf);
+    // Live now holds the restored original, and the record is clear: a
+    // second `off` must not touch the key again.
+    let dconf2 = FakeDconf {
+        live: Some(PREFER_LIGHT.to_owned()),
+        ..FakeDconf::default()
+    };
+    let notes = toolkit_off(&state_dir(), &mut state, &dconf2);
+    assert!(dconf2.wrote().is_empty());
+    assert!(
+        notes.iter().any(|note| note.contains("written by")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn apply_from_a_private_state_touches_nothing() {
+    struct Blind;
+    impl Dconf for Blind {
+        fn available(&self) -> bool {
+            panic!("a private apply must not probe the backend");
+        }
+        fn read(&self, _key: &str) -> Result<Option<String>, String> {
+            panic!("a private apply must not read the key");
+        }
+        fn write(&self, _key: &str, _value: &str) -> Result<(), String> {
+            panic!("a private apply must not write the key");
+        }
+        fn reset(&self, _key: &str) -> Result<(), String> {
+            panic!("a private apply must not reset the key");
+        }
+    }
+    let dir = std::env::temp_dir().join(format!("scoot-look-apply-{}", std::process::id()));
+    let mut state = record(None, None);
+    let notes = apply_toolkit(&dir, &mut state, true, &Blind);
+    assert!(state.color_scheme.is_none());
+    assert!(state.color_scheme_orig.is_none());
+    assert!(
+        notes.iter().any(|note| note.contains("private look state")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn off_from_a_private_state_touches_nothing() {
+    // A headless/`--private-look` session's `toolkit off` never touches
+    // the real key: no read, no write, no reset — only the record clears.
+    struct Blind;
+    impl Dconf for Blind {
+        fn available(&self) -> bool {
+            panic!("a private off must not probe the backend");
+        }
+        fn read(&self, _key: &str) -> Result<Option<String>, String> {
+            panic!("a private off must not read the key");
+        }
+        fn write(&self, _key: &str, _value: &str) -> Result<(), String> {
+            panic!("a private off must not write the key");
+        }
+        fn reset(&self, _key: &str) -> Result<(), String> {
+            panic!("a private off must not reset the key");
+        }
+    }
+    let dir = std::env::temp_dir().join(format!("scoot-look-test-{}", std::process::id()));
+    let mut state = record_orig(None, Some(PREFER_DARK), Some(""));
+    let notes = toolkit_off(&dir, &mut state, &Blind);
+    assert!(state.color_scheme.is_none());
+    assert!(state.color_scheme_orig.is_none());
+    assert!(
+        notes.iter().any(|note| note.contains("private look state")),
         "{notes:?}"
     );
 }

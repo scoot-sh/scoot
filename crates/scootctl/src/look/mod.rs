@@ -35,7 +35,8 @@ use apply::{
 };
 use catalog::{Catalog, discover, origin_name};
 use reload::{CompositorReload, IpcCompositor, bar_targets};
-use toolkit::{CliDconf, Dconf, toolkit_on};
+use scoot_look::state::Record;
+use toolkit::{CliDconf, Dconf, toolkit_off, toolkit_on};
 
 /// One `scoot look` invocation: the command, the state/socket selection,
 /// and whether the reply renders as JSON.
@@ -927,7 +928,37 @@ fn run_apply(look: &Look, name: &str, no_toolkit: bool) -> Result<(), String> {
             }
             Ok(())
         }
-        Err(failure) => Err(failure.to_string()),
+        Err(failure) => {
+            // `--json` still prints a document on stdout (like `validate`
+            // does): the failure shape is `{"target", "applied": false,
+            // "error", "rolled_back_to", "rollback_errors"}. The text error
+            // still goes to stderr and exits 1.
+            if look.json {
+                output::print_line(
+                    &serde_json::to_string_pretty(&serde_json::json!({
+                        "target": name,
+                        "applied": false,
+                        "error": failure.message,
+                        "rolled_back_to": failure.rolled_back_to,
+                        "rollback_errors": failure.rollback_errors,
+                    }))
+                    .unwrap_or_default(),
+                )
+                .map_err(|error| error.to_string())?;
+            }
+            Err(failure.to_string())
+        }
+    }
+}
+
+/// `toolkit off`: stop owning `color-scheme`. Restores the live value
+/// from before the tool's first write (see [`toolkit_off`]). Either way
+/// the record clears, so after `off` then `on` the next apply adopts
+/// fresh instead of reporting "set outside `scoot look`" over a stale
+/// write.
+fn run_toolkit_off(state_dir: &Path, record: &mut Record, dconf: &dyn Dconf) {
+    for note in toolkit_off(state_dir, record, dconf) {
+        output::warn(format_args!("note: {note}"));
     }
 }
 
@@ -956,21 +987,15 @@ fn run_toolkit(look: &Look, action: Option<bool>) -> Result<(), String> {
     };
     if let Some(on) = action {
         record.toolkit = Some(on);
-        // Turning off restores the live value from before the tool's
-        // first write (saved as `color-scheme-orig`; empty means it was
-        // unset, restored with `reset`). Best-effort: a failed restore is
-        // reported, never a refusal.
+        // Turning off stops owning the key: restore the live value from
+        // before the tool's first write, but only when the tool wrote
+        // what is still live. Anything else (never wrote, someone else
+        // changed it, unreadable, a private state) leaves the key alone.
+        // Either way the record clears, so a later `on` adopts fresh
+        // instead of crying "set outside" over a stale write.
         if !on {
             let dconf = CliDconf::new();
-            if dconf.available() {
-                let restored = match record.color_scheme_orig.as_deref() {
-                    Some("") | None => dconf.reset(crate::look::toolkit::COLOR_SCHEME_KEY),
-                    Some(orig) => dconf.write(crate::look::toolkit::COLOR_SCHEME_KEY, orig),
-                };
-                if let Err(error) = restored {
-                    output::warn(format_args!("note: color-scheme not restored: {error}"));
-                }
-            }
+            run_toolkit_off(&state_dir, &mut record, &dconf);
         }
         scoot_look::state::write_record(&state_dir, &record)
             .map_err(|error| format!("cannot record the toolkit state: {error}"))?;

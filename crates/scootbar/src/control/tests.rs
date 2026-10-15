@@ -226,6 +226,29 @@ fn reload_scope_is_plain_by_default_and_named_when_not() {
 }
 
 #[test]
+fn reload_look_is_its_own_verb_that_an_old_bar_refuses() {
+    // The look-scoped reload travels as `reload-look`, never as `reload`
+    // with a field: an old bar ignores unknown fields, so the field form
+    // would run a plain reload there (applying pending edits) before the
+    // client could refuse. The verb form carries no scope field.
+    assert!(matches!(
+        protocol::parse(b"{\"protocol\":1,\"type\":\"reload-look\"}"),
+        Ok(Request::ReloadLook)
+    ));
+    let line = Request::ReloadLook.line();
+    let wire: serde_json::Value = serde_json::from_str(&line).expect("JSON on the wire");
+    assert_eq!(wire["type"], "reload-look");
+    assert!(wire.get("scope").is_none(), "no scope field: {wire}");
+    assert_eq!(Request::ReloadLook.name(), "reload-look");
+    // And the shape an old bar actually sends for it: its parser has no
+    // such arm and answers an ordinary unknown-request error.
+    let error = protocol::parse(b"{\"protocol\":1,\"type\":\"reload-look-2\"}")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("unknown request"), "{error}");
+}
+
+#[test]
 fn a_deeply_nested_value_is_a_named_refusal_not_a_crash() {
     // A `set` value nested past any honest use (deeper than serde_json's
     // own recursion bound, far past the payload's depth 8): parsing refuses

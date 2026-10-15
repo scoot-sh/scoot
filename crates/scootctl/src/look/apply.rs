@@ -30,8 +30,8 @@ use std::time::Duration;
 
 use scoot_look::grammar::is_name;
 use scoot_look::state::{
-    LINK_NAME, Record, RecordRead, acquire_lock, ensure_link, read_capped, read_record,
-    state_dir_from_env, write_record,
+    LINK_NAME, Record, RecordRead, acquire_lock, ensure_link, read_capped, read_capped_follow,
+    read_record, state_dir_from_env, write_record,
 };
 use scoot_look::{
     Origin, RawLook, RenderInputs, check_contrast, render_bar, render_json, render_scoot, resolve,
@@ -174,7 +174,12 @@ pub fn validate_entry(
     // Effectful refusals land in `errors`, not in `Err`, so `--json`
     // always prints a document: only catalog and resolution failures
     // (unknown names, unresolvable chains) refuse the command itself.
-    let _ = check_inputs(&chain, &merged, checks, &mut validation);
+    if let Ok(inputs) = check_inputs(&chain, &merged, checks, &mut validation) {
+        // The bar's own parser over the rendered fragment, as `apply`
+        // runs it: a look whose fragment its own bar refuses must not
+        // validate.
+        check_bar_fragment(name, &merged, &inputs.inputs, checks, &mut validation);
+    }
     Ok(validation)
 }
 
@@ -199,12 +204,21 @@ pub fn validate_dir(
     let canonical = std::fs::canonicalize(dir)
         .map_err(|error| format!("cannot resolve {}: {error}", dir.display()))?;
     // The name matches the directory as named (a symlink's own name),
-    // never the store target's basename.
+    // never the store target's basename. `.`, `./` and paths ending in
+    // `/.` have no file name, so those fall back to the canonical
+    // basename (the cwd's name for `.`).
     let dir_name = dir
         .file_name()
         .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .or_else(|| {
+            canonical
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+        })
         .unwrap_or_default();
-    if let Some(error) = scoot_look::check_name_matches_dir(&raw, dir_name) {
+    if let Some(error) = scoot_look::check_name_matches_dir(&raw, &dir_name) {
         return Err(error.to_string());
     }
     let mut validation = Validation::default();
@@ -231,7 +245,14 @@ pub fn validate_dir(
             warning.name, warning.ratio, warning.threshold
         ));
     }
-    if check_inputs(&chain, &merged, checks, &mut validation).is_err() {
+    if let Ok(inputs) = check_inputs(&chain, &merged, checks, &mut validation) {
+        check_bar_fragment(
+            &merged.name,
+            &merged,
+            &inputs.inputs,
+            checks,
+            &mut validation,
+        );
         return Ok(validation);
     }
     Ok(validation)
@@ -262,7 +283,10 @@ fn resolve_dir(
     chain.push(ChainEntry {
         entry: Entry {
             name: raw.name.clone(),
-            dir,
+            dir: dir.clone(),
+            // A directly-named directory is read without following
+            // symlinks, so its manifest is the regular file inside it.
+            manifest_dir: dir,
             origin,
             raw,
             bytes: bytes.clone(),
@@ -423,20 +447,130 @@ fn write_nofollow(path: &Path, bytes: &[u8]) -> Result<(), String> {
     result
 }
 
+/// Caps `text` at `max` bytes for an error line, keeping the head (where
+/// the refusal names itself) and marking the cut. Messages here are a few
+/// lines; this only bounds a backend gone wrong.
+fn truncate_head(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_owned();
+    }
+    // Cut at a character boundary, never inside one.
+    let mut end = max.min(text.len());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…[truncated]", &text[..end])
+}
+
+/// A unique scratch dir under the system temp dir, removed on drop: every
+/// exit path (including `?` and a failed check) cleans the stage, and a
+/// crash never leaves tool droppings in the user's cwd or `--out`.
+struct ScratchDir {
+    path: PathBuf,
+}
+
+impl ScratchDir {
+    fn new(tag: &str) -> Result<Self, String> {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        // pid plus a per-process counter plus nanos: two applies (or two
+        // threads) never share a temp name, and a planted symlink at a
+        // guessable name is never opened (`create_dir` refuses it instead
+        // of writing through one).
+        let dir = std::env::temp_dir().join(format!(
+            "scoot-look-{tag}.{}-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        ));
+        std::fs::create_dir(&dir)
+            .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
+        Ok(Self { path: dir })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.path).ok();
+    }
+}
+
+/// Renders the bar fragment and runs the installed binary's own parser over
+/// it — the same check `apply` and `build` run, so `validate` and `apply`
+/// agree on the bar. A missing binary is a note. On a missing-`popup`
+/// refusal the fragment re-renders without the popup keys and checks again,
+/// as `apply` does. Refusals land in `errors`.
+fn check_bar_fragment(
+    name: &str,
+    merged: &scoot_look::ResolvedLook,
+    inputs: &RenderInputs,
+    checks: &dyn Checks,
+    validation: &mut Validation,
+) {
+    let scratch = match ScratchDir::new("validate") {
+        Ok(scratch) => scratch,
+        Err(error) => {
+            validation.errors.push(error);
+            return;
+        }
+    };
+    let mut render_inputs = inputs.clone();
+    for attempt in 0..2 {
+        let bar = match render_bar(merged, &render_inputs) {
+            Ok(bar) => bar,
+            Err(error) => {
+                validation
+                    .errors
+                    .push(format!("cannot render {name}: {error}"));
+                return;
+            }
+        };
+        let path = scratch.path().join("bar.toml");
+        if let Err(error) = std::fs::write(&path, &bar) {
+            validation.errors.push(format!(
+                "cannot stage the bar fragment {}: {error}",
+                path.display()
+            ));
+            return;
+        }
+        match checks.bar_fragment(&path) {
+            Ok(Availability::Available(())) => {
+                if attempt == 1 {
+                    validation
+                        .notes
+                        .push("bar without `popup`: validated without popup-radius".to_owned());
+                }
+                return;
+            }
+            Ok(Availability::Unavailable(note)) => {
+                validation.notes.push(note);
+                return;
+            }
+            Err(message)
+                if attempt == 0 && render_inputs.bar_popup && is_popup_refusal(&message) =>
+            {
+                render_inputs.bar_popup = false;
+            }
+            Err(message) => {
+                validation.errors.push(message);
+                return;
+            }
+        }
+    }
+}
+
 /// Whether a `bar_fragment` refusal is the missing-`popup` shape (a bar
 /// built `--no-default-features` refusing `popup-radius`): the caller
 /// re-renders with `bar_popup = false` instead of refusing every look.
 fn is_popup_refusal(message: &str) -> bool {
     let lower = message.to_lowercase();
     lower.contains("popup-radius") || (lower.contains("popup") && lower.contains("unknown field"))
-}
-
-/// Whether a refusal is the older-peer shape (a compositor or bar that
-/// predates the look-scoped request): the peer never accepted the request,
-/// so the rollback skips re-running it rather than refusing twice.
-pub(crate) fn is_predates_error(message: &str) -> bool {
-    message.contains("predates scoot look")
-        || (message.contains("unknown variant") && message.contains("reload"))
 }
 
 /// One link of an `extends` chain, base first.
@@ -614,26 +748,26 @@ fn check_inputs(
 }
 
 /// The `[fonts.files]` entry for `key` from the chain's last look that
-/// names one, with the directory that names it.
+/// names one, with the manifest directory that names it.
 fn carrier_file(chain: &[ChainEntry], key: &str) -> Option<(PathBuf, String)> {
     let mut found = None;
     for link in chain {
         if let Some(rel) = link.entry.raw.fonts.files.get(key) {
-            found = Some((link.entry.dir.clone(), rel.clone()));
+            found = Some((link.entry.manifest_dir.clone(), rel.clone()));
         }
     }
     found
 }
 
 /// The wallpaper image from the chain's last look that names a
-/// `[wallpaper]` table with one, with the directory that names it.
+/// `[wallpaper]` table with one, with the manifest directory that names it.
 fn wallpaper_image(chain: &[ChainEntry]) -> Option<(PathBuf, String)> {
     let mut found = None;
     for link in chain {
         if let Some(wallpaper) = &link.entry.raw.wallpaper
             && let Some(image) = &wallpaper.image
         {
-            found = Some((link.entry.dir.clone(), image.clone()));
+            found = Some((link.entry.manifest_dir.clone(), image.clone()));
         }
     }
     found
@@ -1193,10 +1327,14 @@ pub fn apply_with(
     point_link(state_dir, &record.rendered)
         .map_err(|error| refuse(format!("cannot repoint the look link: {error}")))?;
     // Reloads, in order: the compositor, then every bar. Each refusal
-    // rolls the swap back; a skipped app is a note. Every sent reload is
-    // recorded before its reply is read, so the rollback re-runs whatever
-    // may hold the new layer: a scoped reload only reads the link, so
-    // re-running one converges on the restored choice.
+    // rolls the swap back; a skipped app is a note. A peer joins the
+    // completed sets only on a positive receipt (it read the new link and
+    // may hold the new layer, so the rollback re-runs it against the
+    // restored choice). A peer that refused or was never reached never
+    // accepted the new layer: re-running it would only refuse twice (an
+    // old peer answers the rollback with the same wall), so the rollback
+    // skips it. A scoped reload only reads the link, so re-running one
+    // converges on the restored choice.
     let mut completed_compositor = false;
     let mut completed_bars: Vec<usize> = Vec::new();
     match compositor.reload_look() {
@@ -1236,14 +1374,9 @@ pub fn apply_with(
             report.skipped.push(format!("compositor: {note}"));
         }
         Err(ReloadError::Refused(message)) => {
-            // Sent but refused: the app may hold the new layer, so the
-            // rollback re-runs this reload against the restored choice.
-            // The one exception is a peer older than the request tag,
-            // which never accepted it: re-running would refuse again with
-            // the same wall, so the rollback skips it.
-            if !is_predates_error(&message) {
-                completed_compositor = true;
-            }
+            // Refused (an old compositor's unknown-tag wall included): the
+            // peer never accepted the new layer, so the rollback skips
+            // re-running it rather than refusing twice.
             let failure = ApplyFailure {
                 message,
                 rolled_back_to: None,
@@ -1262,9 +1395,11 @@ pub fn apply_with(
         }
     }
     for (index, bar) in bars.iter().enumerate() {
-        // Sent is completed, answered or not: the rollback re-runs every
-        // reload that may hold the new layer. An absent listener never
-        // sends, so it is skipped with a note and completes nothing.
+        // A positive receipt completes the bar; an absent listener never
+        // sends, so it is skipped with a note and completes nothing. A
+        // refusal (an old bar's unknown-verb wall included) never accepted
+        // the new layer, so the rollback skips re-running it rather than
+        // refusing twice — and nothing is ever retried as a plain reload.
         match bar.reload_look() {
             Ok(true) => {
                 completed_bars.push(index);
@@ -1276,9 +1411,6 @@ pub fn apply_with(
                     .push(format!("bar {}: nothing listens: skipped", bar.display()));
             }
             Err(message) => {
-                // Sent but refused: the bar may hold the new layer, so the
-                // rollback re-runs this reload against the restored choice.
-                completed_bars.push(index);
                 let failure = ApplyFailure {
                     message: format!("bar {}: {message}", bar.display()),
                     rolled_back_to: None,
@@ -1387,17 +1519,18 @@ fn rollback(
         None => {
             // The first choice never recorded one: remove what the failed
             // swap wrote, so no dangling choice survives it. There is no
-            // previous layer to reload back to, so the apps that already
+            // previous layer to reload back to, so the apps that positively
             // reloaded still show the new look while `current` says none:
             // say so plainly instead of re-running reloads that would
-            // refuse with "no look layer is configured".
+            // refuse with "no look layer is configured". Peers that merely
+            // refused are not named here: they never left the old layer.
             std::fs::remove_file(state_dir.join("look.json")).ok();
             std::fs::remove_file(state_dir.join(LINK_NAME)).ok();
-            if completed_compositor || !completed_bars.is_empty() {
-                failure.rollback_errors.push(
-                    "no previous look exists to roll back to: the compositor and any reloaded bars still show the new look, while no look is recorded"
-                        .to_owned(),
-                );
+            let holders = holders_text(completed_compositor, completed_bars, bars);
+            if let Some(holders) = holders {
+                failure.rollback_errors.push(format!(
+                    "no previous look exists to roll back to: {holders} while no look is recorded"
+                ));
             }
             failure.rolled_back_to = None;
             return Err(failure);
@@ -1440,6 +1573,32 @@ fn rollback(
         }
     }
     Err(failure)
+}
+
+/// Names the peers that positively reloaded the new look, for the
+/// first-apply rollback note (`None` when nothing reloaded: with no
+/// compositor and a bar that merely refused, nothing reloaded and the note
+/// says nothing). Only positive receipts count: a peer that refused never
+/// left its old layer. The verb agrees with the holder count.
+fn holders_text(
+    completed_compositor: bool,
+    completed_bars: &[usize],
+    bars: &[&dyn BarReload],
+) -> Option<String> {
+    let mut holders: Vec<String> = Vec::new();
+    if completed_compositor {
+        holders.push("the compositor".to_owned());
+    }
+    for index in completed_bars {
+        if let Some(bar) = bars.get(*index) {
+            holders.push(format!("bar {}", bar.display()));
+        }
+    }
+    match holders.len() {
+        0 => None,
+        1 => Some(format!("{} still shows the new look,", holders[0])),
+        _ => Some(format!("{} still show the new look,", holders.join(" and "))),
+    }
 }
 
 /// The unknown-look refusal, naming what the catalog holds.
@@ -1486,7 +1645,10 @@ pub(crate) fn shadowed_from_files_in(
     let user_scoot = config.map(|base| base.join("scoot/config.toml"));
     let user_bar = config.map(|base| base.join("scoot/bar.toml"));
     let mut read_table = |path: &Path| -> Option<toml::Table> {
-        match read_capped(path) {
+        // The user's own files: home-manager/stow link them into the
+        // store, so symlinks are followed here. The no-follow policy is
+        // for look-dir inputs, not the user's config.
+        match read_capped_follow(path) {
             Ok(text) => match text.parse::<toml::Table>() {
                 Ok(table) => Some(table),
                 Err(error) => {
@@ -1656,45 +1818,19 @@ pub fn build_to_out(
     let (mut scoot, mut bar, mut rendered_json) = render_once(&render_inputs)?;
     // The bar's own parser runs before anything lands in `--out`: a
     // refused fragment leaves no complete-looking output behind. The
-    // check needs a file, so the fragments stage in a unique temp dir
-    // beside the destination (never a guessable `out.build-tmp` that an
-    // existing dir could collide with, and never `remove_dir_all` on a
-    // caller-derived path), then copy over file by file with
-    // symlink-safe atomic writes.
+    // check needs a file, so the fragments stage in a tool-owned temp dir
+    // (gone on every exit path via `Drop`, even on `?` and on a crash,
+    // which leaves nothing in the cwd or `--out`), then copy over file by
+    // file with symlink-safe atomic writes. Staging anywhere under `out`'s
+    // parent is what made `--out .` unusable (the stage file itself read
+    // as foreign) and a writable `out` under an unwritable parent fail.
     //
     // `out` itself is never followed through a symlink, and a non-empty
     // foreign dir is refused: only an absent dir, an empty dir, or one
     // holding only our own three files is written into. That keeps
-    // `--out .` from wiping the cwd and `--out dist` from deleting a
-    // pre-existing `dist.build-tmp`.
-    static BUILD_COUNTER: AtomicU64 = AtomicU64::new(0);
-    let parent = out.parent().filter(|p| !p.as_os_str().is_empty());
-    let stage_parent: PathBuf = match parent {
-        Some(p) => p.to_path_buf(),
-        None => std::env::current_dir()
-            .map_err(|error| format!("cannot resolve the working directory: {error}"))?,
-    };
-    // Ensure the stage parent exists (for `--out newdir/sub`, the parent
-    // `newdir` may not exist yet — but never create `out` itself here).
-    if !stage_parent.exists() {
-        std::fs::create_dir_all(&stage_parent)
-            .map_err(|error| format!("cannot create {}: {error}", stage_parent.display()))?;
-    }
-    let stage_name = format!(
-        ".{}.build-tmp.{}-{}-{}",
-        out.file_name().and_then(|n| n.to_str()).unwrap_or("out"),
-        std::process::id(),
-        BUILD_COUNTER.fetch_add(1, Ordering::SeqCst),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos()
-    );
-    let stage = stage_parent.join(stage_name);
-    // `create_dir` (not `create_dir_all`) refuses a planted symlink at the
-    // unique temp path instead of writing through one.
-    std::fs::create_dir(&stage)
-        .map_err(|error| format!("cannot create {}: {error}", stage.display()))?;
+    // `--out .` from wiping the cwd.
+    let scratch = ScratchDir::new("build")?;
+    let stage: &Path = scratch.path();
     let mut staged: Vec<(String, String)> = [
         ("scoot.toml".to_owned(), scoot),
         ("bar.toml".to_owned(), bar),
@@ -1706,9 +1842,8 @@ pub fn build_to_out(
         std::fs::write(stage.join(file), contents)
             .map_err(|error| format!("cannot write {}: {error}", stage.join(file).display()))?;
     }
-    let stage_cleanup = |stage: &Path| {
-        std::fs::remove_dir_all(stage).ok();
-    };
+    // Every `return Err` below (and every `?` above) drops `scratch`,
+    // removing the stage: no exit path leaks it.
     match checks.bar_fragment(&stage.join("bar.toml")) {
         Ok(Availability::Available(())) => {}
         Ok(Availability::Unavailable(note)) => validation.notes.push(note),
@@ -1746,13 +1881,11 @@ pub fn build_to_out(
                 }
                 Ok(Availability::Unavailable(note)) => validation.notes.push(note),
                 Err(retry) => {
-                    stage_cleanup(&stage);
                     return Err(retry);
                 }
             }
         }
         Err(message) => {
-            stage_cleanup(&stage);
             return Err(message);
         }
     }
@@ -1761,14 +1894,12 @@ pub fn build_to_out(
     if let Ok(meta) = std::fs::symlink_metadata(out)
         && meta.file_type().is_symlink()
     {
-        stage_cleanup(&stage);
         return Err(format!(
             "refusing to build into {}: it is a symlink",
             out.display()
         ));
     }
     if out.exists() && !out.is_dir() {
-        stage_cleanup(&stage);
         return Err(format!(
             "refusing to build into {}: not a directory",
             out.display()
@@ -1789,7 +1920,6 @@ pub fn build_to_out(
                 && let Ok(meta) = std::fs::symlink_metadata(&fp)
                 && meta.file_type().is_symlink()
             {
-                stage_cleanup(&stage);
                 return Err(format!(
                     "refusing to build into {}: {} is a symlink",
                     out.display(),
@@ -1799,7 +1929,6 @@ pub fn build_to_out(
         }
         if !foreign.is_empty() {
             foreign.sort();
-            stage_cleanup(&stage);
             return Err(format!(
                 "refusing to build into {}: it holds files this build did not write ({})",
                 out.display(),
@@ -1813,11 +1942,9 @@ pub fn build_to_out(
     for (file, contents) in &staged {
         let path = out.join(file);
         if let Err(error) = write_nofollow(&path, contents.as_bytes()) {
-            stage_cleanup(&stage);
             return Err(format!("cannot write {}: {error}", path.display()));
         }
     }
-    stage_cleanup(&stage);
     Ok(BuildReport {
         name,
         out: path_to_string(out)?,
@@ -2082,13 +2209,12 @@ impl Checks for ProdChecks {
         if out.status.success() {
             Ok(Availability::Available(()))
         } else {
-            let detail = String::from_utf8(out.stderr)
-                .unwrap_or_default()
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .to_owned();
+            // The whole stderr, not just its first line: a bar built
+            // `--no-default-features` (no `popup`) names the offending key
+            // (`popup-radius`) past the first line's `TOML parse error at …
+            // ` summary, and the popup-less re-render keys off that name.
+            let detail = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+            let detail = truncate_head(&detail, 4096);
             Err(format!(
                 "bar fragment refused by scootbar daemon --check{}",
                 if detail.is_empty() {

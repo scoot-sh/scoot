@@ -73,28 +73,65 @@ fn socket_path(tag: &str) -> PathBuf {
 /// Linux (CI and the dev VM), where the bar runs too.
 #[cfg(target_os = "linux")]
 #[test]
-fn a_look_reload_sends_the_scoped_request_and_accepts_ok() {
+fn a_look_reload_sends_the_scoped_verb_and_accepts_ok() {
     let socket = socket_path("ok");
     let peer = serve_once(socket.clone(), "{\"type\":\"ok\",\"scope\":\"look\"}\n");
     send_bar_reload(&socket).expect("a scoped ok reply reloads");
     let request = peer.join().expect("the peer answered");
     let wire: serde_json::Value = serde_json::from_str(&request).expect("JSON on the wire");
     assert_eq!(wire["protocol"], 1);
-    assert_eq!(wire["type"], "reload");
-    assert_eq!(wire["scope"], "look");
+    // The scoped reload is its own verb: an old bar has no such `type`
+    // and answers `unknown request` with nothing applied. It is never
+    // `reload` with a `scope` field, which an old bar would misread as a
+    // plain reload (applying pending edits) before answering ok.
+    assert_eq!(wire["type"], "reload-look");
+    assert!(wire.get("scope").is_none(), "no scope field: {wire}");
 }
 
 #[cfg(target_os = "linux")]
 #[test]
-fn a_plain_ok_to_a_scoped_reload_is_an_old_bar_refusal() {
-    // A bar older than the look scope ignores the unknown `scope` field
-    // and answers a plain reload's `ok`: the CLI refuses it with one
-    // clear line, never retrying as a plain reload.
+fn an_old_bar_unknown_verb_is_a_predates_refusal() {
+    // A bar older than the look scope has no `reload-look` verb: this is
+    // the byte-for-byte reply a real old bar sends (its parser answers an
+    // unknown `type` with an ordinary error, applying nothing).
     let socket = socket_path("oldbar");
+    let peer = serve_once(
+        socket.clone(),
+        "{\"type\":\"error\",\"message\":\"unknown request `reload-look`\"}\n",
+    );
+    let error = send_bar_reload(&socket).expect_err("an old bar refuses");
+    assert!(
+        error.contains("predates the look-scoped reload"),
+        "unexpected refusal: {error}"
+    );
+    peer.join().expect("the peer answered");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn an_ok_without_the_scope_receipt_is_a_refusal() {
+    // A scoped reply must carry its receipt: a plain `ok` answers a
+    // different request. Refuse it loudly, never retry as plain.
+    let socket = socket_path("plainok");
     let peer = serve_once(socket.clone(), "{\"type\":\"ok\"}\n");
     let error = send_bar_reload(&socket).expect_err("a plain ok refuses");
     assert!(
-        error.contains("predates the look-scoped reload"),
+        error.contains("without its scope receipt"),
+        "unexpected refusal: {error}"
+    );
+    peer.join().expect("the peer answered");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_bar_reply_is_not_a_reload_receipt() {
+    // `{"type":"bar"}` answers a hide/show/toggle, never a reload: it must
+    // refuse as an unexpected reply, not count as reloaded.
+    let socket = socket_path("barreply");
+    let peer = serve_once(socket.clone(), "{\"type\":\"bar\",\"visible\":true}\n");
+    let error = send_bar_reload(&socket).expect_err("a bar reply refuses");
+    assert!(
+        error.contains("unexpected reply"),
         "unexpected refusal: {error}"
     );
     peer.join().expect("the peer answered");
