@@ -133,9 +133,11 @@ pub struct Startup {
 /// The look state's directory: `$SCOOT_LOOK_STATE` (a private session's),
 /// else `$XDG_STATE_HOME/scoot`, else `~/.local/state/scoot`. `None` when
 /// no home is usable: there is then no state link, only a fixed layer.
+/// The rule lives once in `scoot-look`'s `state` module (shared with scoot
+/// and scootbg); this is the bar's call site, not a second copy.
 pub fn state_dir() -> Option<PathBuf> {
     state_dir_from(
-        std::env::var_os("SCOOT_LOOK_STATE").as_deref(),
+        std::env::var_os(scoot_look::state::STATE_ENV).as_deref(),
         std::env::var_os("XDG_STATE_HOME").as_deref(),
         std::env::var_os("HOME").as_deref(),
     )
@@ -143,23 +145,13 @@ pub fn state_dir() -> Option<PathBuf> {
 
 /// [`state_dir`] over explicit values, so tests never touch the
 /// environment (whose mutation is `unsafe`, which this crate forbids).
+/// Delegates to the shared rule, like [`state_dir`].
 fn state_dir_from(
     session: Option<&OsStr>,
     xdg: Option<&OsStr>,
     home: Option<&OsStr>,
 ) -> Option<PathBuf> {
-    if let Some(dir) = session
-        && !dir.is_empty()
-    {
-        return Some(PathBuf::from(dir));
-    }
-    if let Some(dir) = xdg
-        && !dir.is_empty()
-    {
-        return Some(PathBuf::from(dir).join("scoot"));
-    }
-    home.filter(|home| !home.is_empty())
-        .map(|home| Path::new(&home).join(".local").join("state").join("scoot"))
+    scoot_look::state::resolve_state_dir(None, session, xdg, home)
 }
 
 /// Where the layer comes from: the user's file names a fixed one, or the

@@ -13,10 +13,11 @@
 //!
 //! `<state>` resolution is an explicit dir (the future `--state` flag),
 //! then `$SCOOT_LOOK_STATE`, then `$XDG_STATE_HOME/scoot`, then
-//! `~/.local/state/scoot`. Only a private session exports
+//! `~/.local/state/scoot` (the one rule in `scoot-look`'s `state` module,
+//! shared with scootbar and scootbg). Only a private session exports
 //! `SCOOT_LOOK_STATE` to its children; `--tty` and `--nested` use the user
-//! path so the choice persists, and the per-display private states arrive
-//! with `look-session-state`. Until then this module reads the user path.
+//! path so the choice persists, and `--headless` (or any backend with
+//! `--private-look`) seeds a per-display private state at startup.
 //!
 //! A missing link is "no look layer" without a warning (it is the default
 //! state for every install that never picked a look); a dangling link or an
@@ -24,13 +25,28 @@
 //! at startup, and refuses a reload whole (everything kept). Nothing here
 //! needs Nix: a plain binary install reads the same plain files.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 /// The fragment filename inside the active rendered look.
 pub const FRAGMENT: &str = "scoot.toml";
 /// The identity filename inside the active rendered look.
 pub const RENDER_JSON: &str = "render.json";
+
+/// The private state dir for a display: `$XDG_RUNTIME_DIR/scoot-look-<display>/`.
+/// Pure over its inputs, like [`state_dir`]. Refuses a missing runtime dir
+/// or a display outside the socket-name grammar (naming which), so the
+/// caller falls back to the user state loudly rather than sharing it
+/// silently or writing outside the runtime dir.
+pub fn private_state_dir(runtime_dir: Option<&OsStr>, display: &OsStr) -> Result<PathBuf, String> {
+    let Some(dir) = runtime_dir.filter(|dir| !dir.is_empty()) else {
+        return Err(
+            "$XDG_RUNTIME_DIR is not set: no private look state without a runtime dir".to_owned(),
+        );
+    };
+    let name = scoot_look::state::private_dir_name(display)?;
+    Ok(PathBuf::from(dir).join(name))
+}
 
 /// The active rendered look's fragment bytes plus its identity.
 #[derive(Debug, Clone)]
@@ -86,7 +102,9 @@ pub struct LoadOutcome {
 
 /// Resolves the look state dir: an explicit dir (the future `--state` flag),
 /// then `$SCOOT_LOOK_STATE`, then `$XDG_STATE_HOME/scoot`, then
-/// `~/.local/state/scoot`. Pure over its env vars like
+/// `~/.local/state/scoot`. The rule lives once in `scoot-look`'s
+/// [`scoot_look::state`] (shared with scootbar and scootbg); this is the
+/// compositor's call site, not a second copy. Pure over its env vars like
 /// [`crate::compositor::config::default_path`], for the same testability
 /// reason. `None` only when no home resolves at all.
 pub fn state_dir(
@@ -95,58 +113,23 @@ pub fn state_dir(
     xdg_state_home: Option<OsString>,
     home: Option<OsString>,
 ) -> Option<PathBuf> {
-    if let Some(dir) = explicit {
-        return Some(dir.to_owned());
-    }
-    let non_empty = |v: &OsString| !v.is_empty();
-    if let Some(dir) = scoot_look_state.filter(non_empty) {
-        return Some(PathBuf::from(dir));
-    }
-    if let Some(dir) = xdg_state_home.filter(non_empty) {
-        return Some(PathBuf::from(dir).join("scoot"));
-    }
-    home.filter(non_empty)
-        .map(|dir| PathBuf::from(dir).join(".local/state/scoot"))
+    scoot_look::state::resolve_state_dir(
+        explicit,
+        scoot_look_state.as_deref(),
+        xdg_state_home.as_deref(),
+        home.as_deref(),
+    )
 }
 
 /// The largest look-layer file this reads: a rendered `scoot.toml` fragment
 /// and its `render.json` are both machine-rendered and small (a few KiB), so
-/// anything past this is not a look layer. Mirrors scootbar's hardened
-/// reader (`crates/scootbar/src/config.rs::read_bytes`): opened without
-/// blocking and required to be a regular file, so a FIFO planted at the
-/// fragment path can neither hang startup nor wedge the reload path, and a
-/// huge file is refused without reading it whole.
-pub const MAX_FILE: u64 = 64 * 1024;
-
-/// The gated read both the fragment and its `render.json` share: opened
-/// `O_NONBLOCK` and required to be a regular file by `fstat`, with a size
-/// cap. A symlink is followed and judged by its target -- which is how the
-/// `look` link itself resolves, the one symlink this intentionally follows;
-/// a loop in one is the kernel's `ELOOP`.
+/// anything past `scoot-look`'s cap is not a look layer. The gated read both
+/// files share is owned by `scoot-look`'s [`scoot_look::state`] (the same
+/// read the session record goes through); a symlink is followed and judged
+/// by its target -- which is how the `look` link itself resolves, the one
+/// symlink this intentionally follows; a loop in one is the kernel's `ELOOP`.
 fn read_capped(path: &Path) -> Result<String, String> {
-    use std::io::Read as _;
-    let fd = rustix::fs::open(
-        path,
-        rustix::fs::OFlags::RDONLY
-            | rustix::fs::OFlags::NONBLOCK
-            | rustix::fs::OFlags::CLOEXEC
-            | rustix::fs::OFlags::NOCTTY,
-        rustix::fs::Mode::empty(),
-    )
-    .map_err(|errno| errno.to_string())?;
-    let stat = rustix::fs::fstat(&fd).map_err(|errno| errno.to_string())?;
-    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile {
-        return Err("not a regular file: refusing to read it".to_owned());
-    }
-    let mut buf = Vec::new();
-    std::fs::File::from(fd)
-        .take(MAX_FILE + 1)
-        .read_to_end(&mut buf)
-        .map_err(|error| error.to_string())?;
-    if buf.len() as u64 > MAX_FILE {
-        return Err(format!("larger than {MAX_FILE} bytes: refusing to read it"));
-    }
-    String::from_utf8(buf).map_err(|error| error.to_string())
+    scoot_look::state::read_capped(path).map_err(|error| error.to_string())
 }
 
 /// Loads the active rendered look's fragment from `state_dir`.

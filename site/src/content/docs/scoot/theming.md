@@ -30,6 +30,12 @@ nothing.
 
 Each look's tokens live in `looks/<name>/look.toml`, in the [look format](../reference/look-format.md): the same manifest on a Nix install and a plain binary install, with no Nix-only step anywhere in it. A check validates and renders every look there and fails on a missing role. The examples below keep their own copies of those values until the look layer lands, so they still apply as before.
 
+A headless session (`scoot --headless`, the agent and CI path) starts on
+a private copy of your look choice: swaps inside it never touch your
+desktop. `--tty` and `--nested` sessions use your choice directly, so
+their swaps survive a restart; `--private-look` gives any session a
+private copy instead. See [backends](./backends.md#private-look-state).
+
 (Previews: real screenshots of each example, captured from live
 sessions. The vinyl-sunset wallpaper illustration stays under its
 Pixabay license — the example's `[wallpaper]` table points at a copy

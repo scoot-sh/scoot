@@ -29,6 +29,7 @@ OPTIONS (backends in brackets: all means --headless, --nested and --tty):
     --mode WxH           display mode, when the preferred one is wrong [tty]
     --renderer cpu|gpu|auto  which renderer composites each frame [all]
     --xwayland           run an XWayland server inside the session [all]
+    --private-look       keep this session's look swaps off the user state [all]
     --socket PATH        where the IPC socket lives [all]
     --config PATH        which config file to read [all]
     -- COMMAND...        run once the compositor is up, with WAYLAND_DISPLAY set
@@ -217,6 +218,11 @@ pub const BACKENDS: &[BackendDoc] = &[
                 default: "off",
             },
             FlagDoc {
+                flag: "--private-look",
+                takes: "(none)",
+                default: "off (on under --headless)",
+            },
+            FlagDoc {
                 flag: "--socket",
                 takes: "PATH",
                 default: "$SCOOT_SOCKET or $XDG_RUNTIME_DIR/scoot.sock",
@@ -252,6 +258,11 @@ pub const BACKENDS: &[BackendDoc] = &[
                 default: "off",
             },
             FlagDoc {
+                flag: "--private-look",
+                takes: "(none)",
+                default: "off (on under --headless)",
+            },
+            FlagDoc {
                 flag: "--socket",
                 takes: "PATH",
                 default: "$SCOOT_SOCKET or $XDG_RUNTIME_DIR/scoot.sock",
@@ -285,6 +296,11 @@ pub const BACKENDS: &[BackendDoc] = &[
                 flag: "--xwayland",
                 takes: "(none)",
                 default: "off",
+            },
+            FlagDoc {
+                flag: "--private-look",
+                takes: "(none)",
+                default: "off (on under --headless)",
             },
             FlagDoc {
                 flag: "--socket",
@@ -716,6 +732,13 @@ pub struct CompositorOptions {
     /// lack it); without one this warns and the session runs Wayland-only,
     /// the way `--renderer gpu` degrades without `gpu-scanout`.
     pub xwayland: bool,
+    /// Keep this session's look swaps off the user state: seed a private
+    /// state under `$XDG_RUNTIME_DIR/scoot-look-<display>/` at startup and
+    /// export `SCOOT_LOOK_STATE` to direct children. On by default under
+    /// `--headless` (an agent's test session must never repoint the user's
+    /// desktop); `--tty` and `--nested` otherwise keep the user state so
+    /// their swaps survive a restart.
+    pub private_look: bool,
 }
 
 impl Default for CompositorOptions {
@@ -733,6 +756,7 @@ impl Default for CompositorOptions {
             renderer: None,
             mode: None,
             xwayland: false,
+            private_look: false,
         }
     }
 }
@@ -914,6 +938,7 @@ fn compositor(
             "--renderer" => options.renderer = Some(renderer("--renderer", args.next())?),
             "--mode" => options.mode = Some(mode("--mode", args.next())?),
             "--xwayland" => options.xwayland = true,
+            "--private-look" => options.private_look = true,
             "--" => {
                 options.command = args.by_ref().collect();
                 break;
@@ -932,6 +957,7 @@ fn compositor(
                         "--renderer",
                         "--mode",
                         "--xwayland",
+                        "--private-look",
                         "--",
                     ],
                     "scoot --help",
@@ -1435,6 +1461,38 @@ mod tests {
     }
 
     #[test]
+    fn usage_documents_private_look_for_every_backend() {
+        // The `--help` surface for the flag: the backends table carries it
+        // on all three backends, and the text documents it -- so a user
+        // reading `--help` can discover it without knowing the ticket.
+        for backend in BACKENDS {
+            assert!(
+                backend
+                    .flags
+                    .iter()
+                    .any(|flag| flag.flag == "--private-look"),
+                "{} hides --private-look",
+                backend.name
+            );
+        }
+        assert!(
+            usage().contains("--private-look"),
+            "--help hides --private-look"
+        );
+        // Off by default; any backend opts in.
+        for mode in ["--headless", "--nested", "--tty"] {
+            let Ok(Command::Compositor(options)) = parse_args(&[mode]) else {
+                panic!("expected compositor for {mode}");
+            };
+            assert!(!options.private_look, "{mode} defaults to the user state");
+            let Ok(Command::Compositor(options)) = parse_args(&[mode, "--private-look"]) else {
+                panic!("expected compositor for {mode} --private-look");
+            };
+            assert!(options.private_look, "{mode} --private-look");
+        }
+    }
+
+    #[test]
     fn renderer_is_unset_by_default_and_takes_either_name() {
         // Unset, not `Cpu`: the config file only gets a say when the
         // command line has not spoken, so "absent" and "explicitly cpu"
@@ -1595,6 +1653,7 @@ mod tests {
                 "--renderer" => vec![flag, "cpu"],
                 "--mode" => vec![flag, "1920x1080"],
                 "--xwayland" => vec![flag],
+                "--private-look" => vec![flag],
                 other => panic!("{other} has no sample value"),
             }
         }

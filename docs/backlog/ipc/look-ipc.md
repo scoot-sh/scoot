@@ -3,7 +3,7 @@ title: "IPC: look-apply and looks requests, a look event, answered off the loop"
 status: "open"
 area: "ipc"
 priority: "medium"
-blocked: "look-apply-cli, look-session-state"
+blocked: "look-apply-cli"
 ---
 
 # IPC: look-apply and looks requests, a look event, answered off the loop

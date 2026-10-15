@@ -54,6 +54,21 @@ startup, and one bound every host meets beats a tunable nobody asked for.
 > for the supervisor's next retry); the next start replaces the stale
 > state.
 
+## Private look state
+
+A `--headless` session keeps its look swaps off the user state: at
+startup it copies the user's look choice into
+`$XDG_RUNTIME_DIR/scoot-look-<display>/` and swaps there, so an agent's
+test session never repoints the real desktop. `--tty` and `--nested`
+sessions use the user state instead, so their swaps survive a restart.
+Any backend opts into a private copy with `--private-look` (a nested
+preview that must not touch the running desktop). This works the same on
+a Nix install and a plain binary install: the state is plain files, and
+no step needs Nix.
+
+Only a private session sets `SCOOT_LOOK_STATE`, for its direct children.
+Systemd user units never see it, so they always act on the user state.
+
 ## Which renderer draws the frames
 
 scoot composites every frame with either the CPU renderer or the GPU

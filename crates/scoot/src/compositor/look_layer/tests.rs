@@ -6,12 +6,12 @@
 //! behavior (precedence, shadowed keys, the `Look` event) in
 //! `reload/tests.rs`. This file pins only what this module owns.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::Path;
 
-use super::{FragmentAbsent, FragmentLoad, load, state_dir};
+use super::{FragmentAbsent, FragmentLoad, load, private_state_dir, state_dir};
 
 fn os(value: &str) -> Option<OsString> {
     Some(OsString::from(value))
@@ -57,6 +57,30 @@ fn empty_env_vars_fall_through_like_unset_ones() {
     assert_eq!(
         state_dir(None, os(""), os("/xdg"), os("/home")),
         Some(Path::new("/xdg/scoot").to_owned())
+    );
+}
+
+#[test]
+fn a_private_state_dir_joins_the_runtime_dir_and_the_display() {
+    assert_eq!(
+        private_state_dir(Some(OsStr::new("/run/user/1000")), OsStr::new("wayland-1")),
+        Ok(Path::new("/run/user/1000/scoot-look-wayland-1").to_owned())
+    );
+}
+
+#[test]
+fn a_private_state_dir_refuses_loudly_without_a_runtime_dir_or_a_name() {
+    assert!(
+        private_state_dir(None, OsStr::new("wayland-1")).is_err(),
+        "no runtime dir is no private state"
+    );
+    assert!(
+        private_state_dir(Some(OsStr::new("")), OsStr::new("wayland-1")).is_err(),
+        "empty counts as unset"
+    );
+    assert!(
+        private_state_dir(Some(OsStr::new("/run/user/1000")), OsStr::new("../x")).is_err(),
+        "a display that escapes the runtime dir is refused"
     );
 }
 
@@ -173,7 +197,7 @@ fn an_oversize_fragment_refuses_without_reading_it_whole() {
     let rendered = link_rendered_to(dir.path());
     let big = "[appearance]\nbackground_color = \"#112233\"\n".repeat(4096);
     assert!(
-        big.len() as u64 > super::MAX_FILE,
+        big.len() as u64 > scoot_look::state::MAX_FILE,
         "the test file is past the cap"
     );
     fs::write(rendered.join(super::FRAGMENT), big).expect("a big fragment");
