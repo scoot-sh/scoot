@@ -87,6 +87,14 @@ titled `chore: release vX.Y.Z`. It:
    grouped by scope (component) and labeled by kind. The hand-written notes
    that were under Unreleased now sit inside that version's section.
 
+A new crate under `crates/` needs a `[[package]]` entry in `release-plz.toml`
+with its own `git_tag_name` (for example `<crate>-v{{ version }}`) the first
+release after it lands. All packages share the `v{{ version }}` tag, so
+without it release-plz looks for the crate in the previous release's checkout,
+where it does not exist, and the release PR job fails. `scoot-look` is the
+worked example; the crate also goes in the `scoot` package's
+`changelog_include`.
+
 The maintainer reviews the PR and may change the version in `Cargo.toml` and
 the heading in `CHANGELOG.md` before merging. Merging it is the release:
 release-plz creates the `vX.Y.Z` tag and then starts
