@@ -216,8 +216,8 @@ fn sighup_reloads_the_config_and_the_session_stays_up() {
     fixture.raise_and_settle("the HUP reload to apply", |fixture| fixture.gap() == 20);
     assert_eq!(fixture.gap(), 20);
 
-    match fixture.state.handle_request(scoot_ipc::Request::Reload) {
-        Response::Reloaded { applied, refused } => assert!(
+    match fixture.state.handle_request(scoot_ipc::Request::Reload { wait_wallpaper: false }) {
+        Response::Reloaded { applied, refused, .. } => assert!(
             applied.is_empty() && refused.is_empty(),
             "the IPC reload after the HUP should change nothing: {applied:?} / {refused:?}"
         ),
@@ -245,7 +245,7 @@ fn sighup_with_a_malformed_file_keeps_the_running_config() {
         20,
         "the failed HUP reload moved the running gap"
     );
-    match fixture.state.handle_request(scoot_ipc::Request::Reload) {
+    match fixture.state.handle_request(scoot_ipc::Request::Reload { wait_wallpaper: false }) {
         Response::Error { .. } => {}
         other => panic!("a malformed file should still fail loudly: {other:?}"),
     }
@@ -287,8 +287,8 @@ fn rapid_hup_hup_is_safe_coalesced_or_sequential() {
     }
     fixture.raise_and_settle("the HUP reloads to apply", |fixture| fixture.gap() == 20);
     assert_eq!(fixture.gap(), 20);
-    match fixture.state.handle_request(scoot_ipc::Request::Reload) {
-        Response::Reloaded { applied, refused } => assert!(
+    match fixture.state.handle_request(scoot_ipc::Request::Reload { wait_wallpaper: false }) {
+        Response::Reloaded { applied, refused, .. } => assert!(
             applied.is_empty() && refused.is_empty(),
             "the burst should settle coherent: {applied:?} / {refused:?}"
         ),
@@ -303,7 +303,7 @@ fn rapid_hup_hup_is_safe_coalesced_or_sequential() {
 fn hup_racing_an_ipc_reload_runs_sequentially_on_the_shared_path() {
     let mut fixture = Fixture::with_config("");
     fixture.rewrite("[layout]\ngap = 20\n");
-    match fixture.state.handle_request(scoot_ipc::Request::Reload) {
+    match fixture.state.handle_request(scoot_ipc::Request::Reload { wait_wallpaper: false }) {
         Response::Reloaded { applied, .. } => assert!(
             applied.contains(&"layout.gap".to_owned()),
             "the IPC reload should apply first: {applied:?}"
@@ -313,8 +313,8 @@ fn hup_racing_an_ipc_reload_runs_sequentially_on_the_shared_path() {
     // The HUP now races a file that agrees with live state: served, and a
     // no-op by the shared diff.
     fixture.raise_and_settle("the session to stay dispatchable", |_| true);
-    match fixture.state.handle_request(scoot_ipc::Request::Reload) {
-        Response::Reloaded { applied, refused } => assert!(
+    match fixture.state.handle_request(scoot_ipc::Request::Reload { wait_wallpaper: false }) {
+        Response::Reloaded { applied, refused, .. } => assert!(
             applied.is_empty() && refused.is_empty(),
             "HUP and IPC should converge, not diverge: {applied:?} / {refused:?}"
         ),
@@ -556,7 +556,7 @@ fn hup_does_not_rerun_old_autostart_entries() {
     assert_eq!(raised, 0, "raising SIGHUP at the test process failed");
     fixture.settle();
     match fixture.state.handle_request(Request::Reload { wait_wallpaper: false }) {
-        Response::Reloaded { applied, refused } => assert!(
+        Response::Reloaded { applied, refused, .. } => assert!(
             applied.is_empty() && refused.is_empty(),
             "the HUP should have decided nothing new: {applied:?} / {refused:?}"
         ),

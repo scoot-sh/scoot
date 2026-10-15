@@ -125,7 +125,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         std::env::var_os("XDG_STATE_HOME"),
         std::env::var_os("HOME"),
     );
-    let look_outcome = look_dir.as_ref().map(look_layer::load);
+    let look_outcome = look_dir.as_deref().map(look_layer::load);
     let (look_text, look_identity, mut look_warn) = match look_outcome {
         Some(look_layer::LoadOutcome { load, warn }) => match load {
             look_layer::FragmentLoad::Present(fragment) => {

@@ -935,7 +935,7 @@ fn reload_shortens_an_armed_delay() {
     let path = dir.path().join("config.toml");
     fs::write(&path, "[appearance]\ncursor_hide_after_ms = 10000\n").expect("a config file");
     fixture.state.config_path = Some(path.clone());
-    fixture.state.reload();
+    fixture.state.reload(false);
     assert_eq!(
         fixture.state.appearance.cursor_hide_after_ms, 10_000,
         "the reload applied the long delay"
@@ -946,7 +946,7 @@ fn reload_shortens_an_armed_delay() {
     );
     fs::write(&path, "[appearance]\ncursor_hide_after_ms = 1000\n").expect("a config file");
     let pre = Instant::now();
-    fixture.state.reload();
+    fixture.state.reload(false);
     let post = Instant::now();
     assert_eq!(
         fixture.state.appearance.cursor_hide_after_ms, 1_000,

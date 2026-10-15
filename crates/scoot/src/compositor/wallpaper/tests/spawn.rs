@@ -360,8 +360,8 @@ fn a_reload_reports_the_section() {
     let write = |text: &str| fs::write(&path, text).unwrap();
     let command = stub.path();
     let command = command.to_str().unwrap();
-    let reload = |fixture: &mut Fixture| match fixture.state.reload() {
-        Response::Reloaded { applied, refused } => (applied, refused),
+    let reload = |fixture: &mut Fixture| match fixture.state.reload(false) {
+        Response::Reloaded { applied, refused, .. } => (applied, refused),
         other => panic!("unexpected reply {other:?}"),
     };
 

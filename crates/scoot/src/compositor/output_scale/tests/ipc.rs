@@ -223,7 +223,7 @@ fn a_reload_restores_the_config_files_scale() {
     }));
     assert_eq!(fixture.scale_of(1), 2.0);
     let response = fixture.state.handle_request(Request::Reload { wait_wallpaper: false });
-    let Response::Reloaded { applied, refused } = &response else {
+    let Response::Reloaded { applied, refused, .. } = &response else {
         panic!("a reload must report: {response:?}");
     };
     assert!(
@@ -282,7 +282,7 @@ fn a_reload_reports_exactly_the_runtime_scales_it_moved() {
     )
     .expect("the edited config");
     let response = fixture.state.handle_request(Request::Reload { wait_wallpaper: false });
-    let Response::Reloaded { applied, refused } = &response else {
+    let Response::Reloaded { applied, refused, .. } = &response else {
         panic!("a reload must report: {response:?}");
     };
     assert!(refused.is_empty(), "{response:?}");
@@ -306,6 +306,8 @@ fn a_reload_reports_exactly_the_runtime_scales_it_moved() {
         Response::Reloaded {
             applied: vec![],
             refused: vec![],
+            shadowed: vec![],
+            invalid: vec![],
         }
     );
 }

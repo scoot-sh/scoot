@@ -270,7 +270,7 @@ impl AppearanceConfig {
 /// bad-user-value fallback in [`AppearanceConfig::into_appearance`]. The
 /// layer is strictly validated before it merges, so a color key present
 /// here always parses there.
-fn layer_color_raw(appearance: &AppearanceConfig, key: &str) -> Option<&str> {
+fn layer_color_raw<'a>(appearance: &'a AppearanceConfig, key: &str) -> Option<&'a str> {
     match key {
         "focus_ring_active_color" => appearance.focus_ring_active_color.as_deref(),
         "focus_ring_inactive_color" => appearance.focus_ring_inactive_color.as_deref(),

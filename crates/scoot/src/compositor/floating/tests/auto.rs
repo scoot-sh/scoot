@@ -22,7 +22,7 @@ impl Fixture {
 /// file without that table also reports it going back to the defaults.
 fn reloaded(reply: Response) -> (Vec<String>, Vec<String>) {
     match reply {
-        Response::Reloaded { applied, refused } => (
+        Response::Reloaded { applied, refused, .. } => (
             applied
                 .into_iter()
                 .filter(|name| !name.starts_with("appearance."))

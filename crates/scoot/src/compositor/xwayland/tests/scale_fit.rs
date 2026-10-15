@@ -238,7 +238,7 @@ fn a_reload_across_the_bound_moves_the_x_scale_both_ways() {
         let response = live
             .fixture
             .state
-            .handle_request(scoot_ipc::Request::Reload);
+            .handle_request(scoot_ipc::Request::Reload { wait_wallpaper: false });
         assert!(
             format!("{response:?}").contains("output.scale"),
             "the reload did not apply the scale: {response:?}"
