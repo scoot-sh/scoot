@@ -2,7 +2,7 @@
 title: Screenshots
 description: "Capture outputs reproducibly over IPC: the request, the pointer, physical vs logical pixels, retry rules."
 ---
-Capture the screen reproducibly — the same path the docs' own screenshots use, on every backend including `--headless` with no display at all.
+Capture the screen reproducibly — the same path the docs' own screenshots use, on every backend including `--headless`.
 
 ## Take one
 
@@ -14,35 +14,32 @@ scoot msg screenshot --no-cursor --out /tmp/clean.png
 
 | Flag | Type | Default | Meaning |
 |---|---|---|---|
-| `--output ID` | int | `(primary output)` | Which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. A powered-off output is refused too, naming the recovery. |
+| `--output ID` | int | `(primary output)` | Which output to capture. An id naming no output is refused rather than answered with another output's pixels. A powered-off output is refused too, naming the recovery. |
 | `--out FILE` | path | stdout | Where the PNG goes; without it, the PNG bytes go to stdout. |
 | `--no-cursor` | switch | draw it in | Leave the pointer out (below). |
 
 A screenshot taken straight after a `scootbg set` shows it — the set
-returns once the change is on screen — the reproducible pair the docs'
-own captures use.
+returns once the change is on screen.
 
 ## Physical pixels, logical coordinates
 
 `screenshot` captures the framebuffer at full physical resolution,
 while `windows` and `outputs` report logical rectangles. Convert with
 `physical = logical * scale`, rounded down where an edge lands
-mid-pixel — and per output: two screens can run at different scales,
-so convert a window's rectangle with the scale of the output the
-window is on (its `output`), never the first output's. (Full rule in
+mid-pixel — and per output: convert with the scale of the output the
+window is on (its `output`). (Full rule in
 [Rules an agent needs](./index.md#rules-an-agent-needs).)
 
 ## Pre-LUT: captures show the unmodified frame
 
 `screenshot` reads the framebuffer, which sits *before* the display's
-gamma LUT and color matrix in the pipeline — so a night light (`wlsunset`,
+gamma LUT and color matrix — so a night light (`wlsunset`,
 `gammastep`, or the desktop profile's [night light](../desktop/index.md#night-light))
-never shows in a capture, whether the CRTC warms through its LUT or its
-`CTM` property. The file holds the compositor's own pixels:
-compare two screenshots across a warming boundary and they are
+never shows in a capture. The file holds the compositor's own pixels:
+two screenshots across a warming boundary are
 byte-identical (modulo the pointer, [below](#the-pointer-in-a-screenshot)).
 To observe the ramp itself, read the CRTC color state back on the `--tty`
-session (`drm_info`, `modetest`) instead of capturing it.
+session (`drm_info`, `modetest`).
 
 ## Retry rules
 
@@ -52,8 +49,7 @@ arrives *first*, so match replies by content, not position), one in
 flight per connection, four in flight across every client. On the
 `--tty` GPU scanout tier a capture can also be refused with a retry
 while the screen shows a client's buffer directly — treat both
-refusals as retryable. The full list, with what each costs and what to
-do, is [what the socket refuses](./troubleshooting.md#what-the-socket-refuses).
+refusals as retryable. The full list is [what the socket refuses](./troubleshooting.md#what-the-socket-refuses).
 
 ### The pointer in a screenshot
 
@@ -68,14 +64,14 @@ renderer**, unless the request says not to. On the wire that is an optional
 
 Omitted means drawn in (`SCREENSHOT_CURSOR_DEFAULT` in `scoot-ipc`);
 `false` leaves it out, and `scoot msg screenshot --no-cursor` sends that.
-"The same everywhere" is the point: an agent's script sees the pointer the
+An agent's script sees the pointer the
 same way under `--headless` and `--nested` (whose screens have no drawn
 cursor at all), on `--tty`'s CPU renderer, and on the GPU scanout tier
 (whose cursor rides a hardware plane) — the pointer's own image, hotspot and
 scale, at its position on the captured output and on no other output. A
 fresh session's pointer sits at the centre of the first output, so a
 default screenshot shows it there until something moves it. Leave it out
-to diff two screenshots without the pointer showing up as a difference, or
+to diff two screenshots, or
 to read the pixels it would cover. (Until this field existed, `--headless`
 and `--nested` screenshots never showed the pointer.)
 
