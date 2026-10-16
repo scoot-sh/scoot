@@ -52,7 +52,9 @@ The design this implements against: [live looks](../../../dev/research/live-look
   `scoot look apply NAME` for the bar to spawn and closes the picker;
   `apply N` names the picker's Nth shown row (a row past the snapshot is
   refused), `page N` turns the page. No fd, no timer: placing it costs
-  no wakeups.
+  no wakeups. The active row carries the module's glyph `icon` before
+  its name where one is set, as the power menu's row glyphs do; without
+  one the accent selection alone marks it.
 - One catalog implementation: `crates/scootctl/src/look/catalog.rs` moved
   to `crates/scoot-look/src/catalog.rs`, used by `scoot look list` and
   the picker alike.
@@ -67,7 +69,8 @@ The design this implements against: [live looks](../../../dev/research/live-look
 Evidence: unit tests through the harness (bar text follows the record,
 one page with the active selected, paging past the widget cap, rows
 stage `scoot look apply` for the snapshot's name, rows and pages past
-the snapshot refused); `crates/scootbar/tests/look_picker.rs` against a
+the snapshot refused, the configured glyph marking the active row);
+`crates/scootbar/tests/look_picker.rs` against a
 live headless session (an outside apply moves the bar text; opening the
 picker then `invoke looks "apply 0"` runs a real apply that swaps the
 desktop and moves the bar text); a manual live pick on the dev VM

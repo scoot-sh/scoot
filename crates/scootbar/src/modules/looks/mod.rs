@@ -5,7 +5,9 @@
 //! an agent, shows here. A click opens the picker (`on-click = "popup"`,
 //! and a bare click with no binding, as the network list's): one row per
 //! look in catalog order, the active one selected, a row click running
-//! `scoot look apply` for that look. A long catalog pages past the popup's
+//! `scoot look apply` for that look. The active row also carries the
+//! module's glyph icon before its name where one is set, as the power
+//! menu's row glyphs do. A long catalog pages past the popup's
 //! 16-widget cap ([`crate::popup::MAX_WIDGETS`]): 14 rows with `‹ prev`
 //! and `next ›` rows.
 //!
@@ -69,7 +71,7 @@ const PAGE_ROWS: usize = 14;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Settings {
     /// An icon drawn before the active look's name. None shows the name
-    /// alone.
+    /// alone. A glyph icon also marks the active look's picker row.
     pub icon: Option<Icon>,
 }
 
@@ -123,6 +125,17 @@ impl Looks {
         }
     }
 
+    /// The picker marker: the configured glyph icon, drawn before the
+    /// active row's name. A path or image icon marks nothing: popup rows
+    /// are text the bar's fonts draw, as the power menu's rows are.
+    #[cfg(feature = "popup")]
+    fn marker(&self) -> Option<char> {
+        match &self.icon {
+            Some(Icon::Glyph(glyph)) => Some(*glyph),
+            _ => None,
+        }
+    }
+
     /// Carries out the picker's `N`th row: stages `scoot look apply NAME`
     /// for the loop to spawn. A row past what the picker showed is refused,
     /// never applied by position from a changed catalog.
@@ -155,8 +168,11 @@ impl Looks {
 
     /// Fills the picker from `names` (catalog order) with `active`
     /// selected: the rows of this page, with `‹ prev` and `next ›` rows
-    /// where there is another page. The rows format into the popup's reused
-    /// buffers (the scroll and draw paths allocate nothing); the `shown`
+    /// where there is another page. The active row carries the module's
+    /// glyph icon before its name where one is set, as the power menu's
+    /// row glyphs do; without one the accent selection alone marks it.
+    /// The rows format into the popup's reused buffers (the scroll and
+    /// draw paths allocate nothing); the `shown`
     /// snapshot keeps only this page, and the names list is rebuilt per
     /// fill — a popup fill is rare, never per frame.
     #[cfg(feature = "popup")]
@@ -193,13 +209,23 @@ impl Looks {
             }
         }
         for (index, name) in self.shown.iter().enumerate() {
-            let pushed = content.button(
-                format_args!("{name}"),
-                "apply",
-                Some(index as i32),
-                Some(name.as_str()) == active,
-                true,
-            );
+            let selected = Some(name.as_str()) == active;
+            let pushed = match (selected, self.marker()) {
+                (true, Some(glyph)) => content.button(
+                    format_args!("{glyph} {name}"),
+                    "apply",
+                    Some(index as i32),
+                    true,
+                    true,
+                ),
+                _ => content.button(
+                    format_args!("{name}"),
+                    "apply",
+                    Some(index as i32),
+                    selected,
+                    true,
+                ),
+            };
             if !pushed {
                 break;
             }

@@ -12,6 +12,8 @@ use super::started;
 use crate::action::Action;
 use crate::action::ModuleAction;
 #[cfg(feature = "popup")]
+use crate::icon::Icon;
+#[cfg(feature = "popup")]
 use crate::modules::Update;
 use crate::modules::harness::Harness;
 use crate::modules::{InvokeError, OutputView};
@@ -132,6 +134,23 @@ fn a_short_catalog_is_one_page_with_the_active_selected() {
             ("look-02".to_owned(), "apply", Some(2), true, true),
             ("look-03".to_owned(), "apply", Some(3), false, true),
             ("look-04".to_owned(), "apply", Some(4), false, true),
+        ]
+    );
+}
+
+#[test]
+#[cfg(feature = "popup")]
+fn a_glyph_icon_marks_the_active_row() {
+    let mut looks = started(Some(Icon::Glyph('●')), None);
+    let all = names(3);
+    let (has, content) = filled(&mut looks, &all, Some("look-01"));
+    assert!(has);
+    assert_eq!(
+        labels(&content),
+        vec![
+            ("look-00".to_owned(), "apply", Some(0), false, true),
+            ("● look-01".to_owned(), "apply", Some(1), true, true),
+            ("look-02".to_owned(), "apply", Some(2), false, true),
         ]
     );
 }

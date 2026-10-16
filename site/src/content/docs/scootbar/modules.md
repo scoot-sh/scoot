@@ -858,7 +858,9 @@ on-click = "popup"
   every view, so a swap from anywhere — this picker, `scoot look apply`,
   a keybinding, an agent — shows here.
 - **The picker** is one row per look in catalog order, the active one
-  selected. A catalog past 14 rows pages, with `‹ prev` and `next ›`
+  selected. Where `[looks]` sets a glyph `icon`, the active row carries
+  it before its name, as the power menu's rows do. A catalog past 14
+  rows pages, with `‹ prev` and `next ›`
   rows. A click opens it with no binding at all; `on-click = "popup"`
   opens it as a binding would. Nothing with an empty catalog, which also
   closes an open picker.
