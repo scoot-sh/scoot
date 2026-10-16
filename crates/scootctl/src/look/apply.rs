@@ -43,7 +43,8 @@ use super::catalog::{Catalog, Entry, cache_home, config_home};
 use super::cycle::{Preview, PreviewRead, clear_preview, read_preview, write_preview};
 use super::foot::foot_notes;
 use super::reload::{BarReload, CompositorReload, ReloadError};
-use super::toolkit::{Dconf, apply_toolkit, apply_toolkit_files};
+use super::sync::TargetSkips;
+use super::toolkit::{Dconf, apply_toolkit_files, apply_toolkit_with_claims};
 
 /// How long a second writer waits on `<state>/look.lock` before refusing.
 pub const LOCK_WAIT: Duration = Duration::from_secs(10);
@@ -81,6 +82,10 @@ pub struct ApplyOptions {
     /// revert refuses as superseded rather than undoing a newer choice.
     /// Checked under the lock before anything is touched.
     pub only_if_generation: Option<u64>,
+    /// dconf key paths home-manager owns (the `look-nix-claims` file
+    /// beside the declared default): the toolkit step leaves those alone
+    /// however the live value reads.
+    pub nix_claims: Vec<String>,
 }
 
 /// What one `apply` did.
@@ -98,6 +103,9 @@ pub struct ApplyReport {
     pub skipped: Vec<String>,
     /// Notes: repaired link, warnings, adopted keys.
     pub notes: Vec<String>,
+    /// Whether the swap removed the layer (`sync` to a null default):
+    /// no look is recorded and the link is gone.
+    pub removed: bool,
     /// User-file keys that override a look token.
     pub shadowed: Vec<String>,
     /// User-file keys that failed to parse and fell back to the look.
@@ -806,7 +814,7 @@ fn check_leaf_fragments(
 /// whole module section (the `[workspaces]` table on a minimal bar) for a
 /// build without that module's feature.
 #[derive(Debug, Clone, PartialEq)]
-enum BarDrop {
+pub(crate) enum BarDrop {
     /// A bar without `popup`: re-render with `bar_popup = false`.
     Popup,
     /// A build without the module behind `section`: skip that override
@@ -818,7 +826,7 @@ enum BarDrop {
 impl BarDrop {
     /// Drops this from `inputs`: false when already dropped (the refusal
     /// repeats: a genuine error, not a downgrade).
-    fn apply_to(&self, inputs: &mut RenderInputs) -> bool {
+    pub(crate) fn apply_to(&self, inputs: &mut RenderInputs) -> bool {
         match self {
             BarDrop::Popup => {
                 if !inputs.bar_popup {
@@ -846,7 +854,7 @@ impl BarDrop {
         }
     }
 
-    fn rendered_note(&self) -> String {
+    pub(crate) fn rendered_note(&self) -> String {
         match self {
             BarDrop::Popup => "bar without `popup`: rendered without popup-radius".to_owned(),
             BarDrop::Section { section, field } => {
@@ -936,7 +944,7 @@ fn table_holds(table: &toml::Table, field: &str) -> bool {
 /// bar may lack, and dropping it is what lets a shipped look apply on the
 /// lightest bar. Refusals without a parseable line fall back to the
 /// first-holder search.
-fn bar_downgrade(message: &str, fragment: &str) -> Option<BarDrop> {
+pub(crate) fn bar_downgrade(message: &str, fragment: &str) -> Option<BarDrop> {
     if is_popup_refusal(message) {
         return Some(BarDrop::Popup);
     }
@@ -990,10 +998,10 @@ fn bar_downgrade(message: &str, fragment: &str) -> Option<BarDrop> {
 }
 
 /// One link of an `extends` chain, base first.
-struct ChainEntry {
-    entry: Entry,
+pub(crate) struct ChainEntry {
+    pub(crate) entry: Entry,
     /// The `look.toml` bytes (the winner's, from the catalog).
-    bytes: Vec<u8>,
+    pub(crate) bytes: Vec<u8>,
 }
 
 /// Collects the `extends` chain for `name`, base first, following the same
@@ -1001,7 +1009,7 @@ struct ChainEntry {
 /// bases): the provenance walk the render inputs need (a wallpaper image
 /// resolves against the directory of the look that names it, not the
 /// child that inherits it).
-fn collect_chain(catalog: &Catalog, name: &str) -> Result<Vec<ChainEntry>, String> {
+pub(crate) fn collect_chain(catalog: &Catalog, name: &str) -> Result<Vec<ChainEntry>, String> {
     collect_chain_from(catalog, name, true)
 }
 
@@ -1058,16 +1066,16 @@ fn collect_into(
 
 /// The render inputs for a resolved look: the wallpaper's absolute path
 /// and the bar's UI font file, resolved against the chain.
-struct Inputs {
-    inputs: RenderInputs,
+pub(crate) struct Inputs {
+    pub(crate) inputs: RenderInputs,
     /// Files consulted, for the notes.
-    details: Vec<String>,
+    pub(crate) details: Vec<String>,
 }
 
 /// Resolves the render inputs and runs the effectful checks that need only
 /// the sources (fonts, wallpaper). The bar-fragment check runs later,
 /// against the rendered file.
-fn check_inputs(
+pub(crate) fn check_inputs(
     chain: &[ChainEntry],
     merged: &scoot_look::ResolvedLook,
     checks: &dyn Checks,
@@ -1159,6 +1167,7 @@ fn check_inputs(
             ui_font_file,
             bar_popup: true,
             bar_drop_sections: Vec::new(),
+            omit_cursor: false,
         },
         details,
     })
@@ -1213,7 +1222,7 @@ fn contained_file(dir: &Path, rel: &str) -> Result<PathBuf, String> {
 
 /// A path as a string: non-UTF-8 paths refuse rather than corrupting a
 /// fragment.
-fn path_to_string(path: &Path) -> Result<String, String> {
+pub(crate) fn path_to_string(path: &Path) -> Result<String, String> {
     path.to_str().map(str::to_owned).ok_or_else(|| {
         format!(
             "{} is not valid UTF-8: refusing to render it into a config",
@@ -1287,8 +1296,11 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 /// fragments (`gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`,
 /// `qt/scoot-look.conf`); 6 adds the daemon
 /// leaves (`mako`, `wob.ini`, `fcitx5/theme.conf`, `nightlight`); 7 adds
-/// the launcher and locker leaves (`fuzzel.ini`, `swaylock`).
-pub const RENDER_VERSION: u32 = 7;
+/// the launcher and locker leaves (`fuzzel.ini`, `swaylock`); 8 honors
+/// the cursor/fonts target opt-outs (an opted-out cursor renders no
+/// cursor keys, opted-out fonts no bar `font` key — each keys apart
+/// through the inputs, so the bump only retires pre-opt-out caches).
+pub const RENDER_VERSION: u32 = 8;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
@@ -1313,6 +1325,9 @@ fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs) -> String {
         buffer.push(0);
     }
     buffer.push(if inputs.bar_popup { 1 } else { 0 });
+    // An opted-out cursor renders a different fragment (no cursor keys),
+    // so it keys apart from the full render of the same sources.
+    buffer.push(if inputs.omit_cursor { 1 } else { 0 });
     let mut dropped = inputs.bar_drop_sections.clone();
     dropped.sort();
     for section in &dropped {
@@ -1346,7 +1361,7 @@ fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs) -> String {
 /// racing the render sees the old or the new directory, never a half-written
 /// one. An existing directory with the same key is reused after its
 /// `render.json` names this look and every expected file is present.
-fn render_cached(
+pub(crate) fn render_cached(
     name: &str,
     chain: &[ChainEntry],
     merged: &scoot_look::ResolvedLook,
@@ -1565,7 +1580,7 @@ fn dir_older_than(path: &Path, seconds: u64) -> bool {
 /// best-effort. The cache is global across state dirs, but the keep-set of
 /// one apply is not: without these, churning one session could prune the
 /// render another live session's link names.
-fn live_render_targets() -> Vec<PathBuf> {
+pub(crate) fn live_render_targets() -> Vec<PathBuf> {
     let mut targets = Vec::new();
     let mut state_dirs = Vec::new();
     if let Some(user) = state_dir_from_env(None) {
@@ -1657,6 +1672,452 @@ fn resolve_config_home(config: Option<&Path>) -> Option<PathBuf> {
     }
 }
 
+/// One reload round's completed sets: the peers that may hold the new
+/// layer, so the rollback re-runs them against the restored choice.
+/// `failure` carries the refusal for the caller to roll back; the
+/// completed sets ride beside it (a sent-but-unanswered peer may hold
+/// the new layer, so the rollback re-runs it like a positive receipt).
+pub(crate) struct PeerReload {
+    pub completed_compositor: bool,
+    pub completed_bars: Vec<usize>,
+    pub failure: Option<ApplyFailure>,
+}
+
+/// Reloads, in order: the compositor, then every bar. Each refusal stops
+/// the swap with the failure (the caller rolls back); a skipped app is a
+/// note. A peer joins the completed sets on a positive receipt (it read
+/// the new link and may hold the new layer, so the rollback re-runs it
+/// against the restored choice), on a partial one (a `Reloaded` reply
+/// with a non-empty `refused`: per-field refusals do not hold back the
+/// applied fields), and on a sent-but-unanswered one (a 30 s timeout, a
+/// connection closed after the write: it may have applied before hanging
+/// or dying). Only an explicit error reply, the "predates" wall or a
+/// never-sent request means "never accepted": re-running one of those
+/// would only refuse twice (an old peer answers the rollback with the
+/// same wall), so the rollback skips it. A scoped reload only reads the
+/// link, so re-running one converges on the restored choice.
+pub(crate) fn reload_peers(
+    report: &mut ApplyReport,
+    compositor: &mut dyn CompositorReload,
+    bars: &[&dyn BarReload],
+) -> PeerReload {
+    let mut completed_compositor = false;
+    let mut completed_bars: Vec<usize> = Vec::new();
+    let failed = |message: String| ApplyFailure {
+        message,
+        rolled_back_to: None,
+        rollback_errors: Vec::new(),
+    };
+    match compositor.reload_look() {
+        Ok(reloaded) => {
+            completed_compositor = true;
+            report.reloaded.push("compositor".to_owned());
+            if !reloaded.applied.is_empty() {
+                report.notes.push(format!(
+                    "compositor applied {}",
+                    reloaded.applied.join(", ")
+                ));
+            }
+            report.shadowed.extend(reloaded.shadowed);
+            report.invalid.extend(reloaded.invalid);
+            if !reloaded.refused.is_empty() {
+                return PeerReload {
+                    completed_compositor,
+                    completed_bars,
+                    failure: Some(failed(format!(
+                        "the compositor refused the look reload: {}",
+                        reloaded.refused.join("; ")
+                    ))),
+                };
+            }
+        }
+        Err(ReloadError::NotRunning(note)) => {
+            report.skipped.push(format!("compositor: {note}"));
+        }
+        Err(ReloadError::Refused(message)) => {
+            // Refused (an explicit error reply, an old compositor's
+            // unknown-tag wall, or a never-sent request): the peer never
+            // accepted the new layer, so the rollback skips re-running it
+            // rather than refusing twice.
+            return PeerReload {
+                completed_compositor,
+                completed_bars,
+                failure: Some(failed(message)),
+            };
+        }
+        Err(ReloadError::Unanswered(message)) => {
+            // Sent but unanswered (a timeout, a connection closed after the
+            // write): it may hold the new layer, so the rollback re-runs
+            // it against the restored choice, like a positive receipt.
+            completed_compositor = true;
+            return PeerReload {
+                completed_compositor,
+                completed_bars,
+                failure: Some(failed(message)),
+            };
+        }
+    }
+    for (index, bar) in bars.iter().enumerate() {
+        // A positive receipt completes the bar; an absent listener never
+        // sends, so it is skipped with a note and completes nothing. A
+        // sent-but-unanswered bar (a timeout, a connection closed after the
+        // write: it may hold the new layer) completes like a positive
+        // receipt, so the rollback re-runs it. A refusal (an explicit error
+        // reply, an old bar's unknown-verb wall, a never-sent request, an
+        // unreadable or unexpected reply) never accepted the new layer, so
+        // the rollback skips re-running it rather than refusing twice —
+        // and nothing is ever retried as a plain reload.
+        match bar.reload_look() {
+            Ok(true) => {
+                completed_bars.push(index);
+                report.reloaded.push(format!("bar {}", bar.display()));
+            }
+            Ok(false) => {
+                report
+                    .skipped
+                    .push(format!("bar {}: nothing listens: skipped", bar.display()));
+            }
+            Err(ReloadError::NotRunning(note)) => {
+                report
+                    .skipped
+                    .push(format!("bar {}: {note}", bar.display()));
+            }
+            Err(ReloadError::Unanswered(message)) => {
+                completed_bars.push(index);
+                return PeerReload {
+                    completed_compositor,
+                    completed_bars,
+                    failure: Some(failed(format!("bar {}: {message}", bar.display()))),
+                };
+            }
+            Err(ReloadError::Refused(message)) => {
+                return PeerReload {
+                    completed_compositor,
+                    completed_bars,
+                    failure: Some(failed(format!("bar {}: {message}", bar.display()))),
+                };
+            }
+        }
+    }
+    PeerReload {
+        completed_compositor,
+        completed_bars,
+        failure: None,
+    }
+}
+
+/// What one swap points the link at: a rendered look, or nothing.
+pub(crate) enum SwapTarget {
+    /// Point the link at this rendered directory and reload it in.
+    Point(PathBuf),
+    /// Remove the link and the record: no look layer at all (a null
+    /// declared default).
+    Remove,
+}
+
+/// One record-and-repoint with its reloads, shared by `apply` (a live
+/// choice: point at a fresh render, carry the recorded default) and
+/// `sync` (the declared default: point at the catalog's render, record
+/// the file just read — or remove the layer for a null default).
+pub(crate) struct SwapRequest {
+    /// The look being pointed at, or the look being removed.
+    pub name: String,
+    /// Point or remove.
+    pub target: SwapTarget,
+    /// What recorded the choice (`apply`, `sync`).
+    pub chosen_by: String,
+    /// The declared default to record.
+    pub declared_default: Option<String>,
+    /// Skip every toolkit write (`--no-toolkit`).
+    pub no_toolkit: bool,
+    /// dconf key paths home-manager owns: left alone however they read.
+    pub nix_claims: Vec<String>,
+    /// Theme targets the swap leaves alone (the Nix cursor/fonts
+    /// opt-outs, honored by `sync`; `apply` never skips: a manual
+    /// choice themes everything until the next managed sync).
+    pub target_skips: TargetSkips,
+}
+
+/// Records, repoints and reloads one swap: the design's section 4.5 steps
+/// 2-6. Rolls back on a refusal: the record and the link go back to
+/// `previous` (or vanish, for a first choice), completed reloads re-run.
+/// The lock is held and the link repaired by the caller; the report
+/// carries the caller's validation notes in.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn complete_swap(
+    report: &mut ApplyReport,
+    state_dir: &Path,
+    cache: &Path,
+    previous: Option<&Record>,
+    swap: &SwapRequest,
+    merged: Option<&scoot_look::ResolvedLook>,
+    config: Option<&Path>,
+    compositor: &mut dyn CompositorReload,
+    bars: &[&dyn BarReload],
+    dconf: &dyn Dconf,
+    leaves: &dyn super::leaves::Leaves,
+    live: &[PathBuf],
+) -> Result<(), ApplyFailure> {
+    let refuse = |message: String| ApplyFailure {
+        message,
+        rolled_back_to: None,
+        rollback_errors: Vec::new(),
+    };
+    let generation = previous
+        .as_ref()
+        .map(|record| record.generation + 1)
+        .unwrap_or(1);
+    let failed = Record {
+        name: swap.name.clone(),
+        rendered: match &swap.target {
+            SwapTarget::Point(target) => path_to_string(target).map_err(refuse)?,
+            SwapTarget::Remove => previous
+                .as_ref()
+                .map(|record| record.rendered.clone())
+                .unwrap_or_default(),
+        },
+        generation,
+        chosen_by: Some(swap.chosen_by.clone()),
+        declared_default: swap.declared_default.clone(),
+        toolkit: previous.as_ref().and_then(|record| record.toolkit),
+        dconf_wrote: previous
+            .as_ref()
+            .map(|record| record.dconf_wrote.clone())
+            .unwrap_or_default(),
+        dconf_orig: previous
+            .as_ref()
+            .map(|record| record.dconf_orig.clone())
+            .unwrap_or_default(),
+    };
+    match &swap.target {
+        SwapTarget::Point(_) => {
+            write_record(state_dir, &failed)
+                .map_err(|error| refuse(format!("cannot record the choice: {error}")))?;
+            // `failed.rendered` is absolute by construction; the record
+            // carries what the link points at.
+            point_link(state_dir, &failed.rendered)
+                .map_err(|error| refuse(format!("cannot repoint the look link: {error}")))?;
+        }
+        SwapTarget::Remove => {
+            // The link first, then the record: a crash between them
+            // resurrects the old look at the next repair (record present,
+            // link missing), which the next sync removes again — never a
+            // link no record can repair. A link already gone is fine.
+            match std::fs::remove_file(state_dir.join(LINK_NAME)) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(refuse(format!(
+                        "cannot remove {}: {error}",
+                        state_dir.join(LINK_NAME).display()
+                    )));
+                }
+            }
+        }
+    }
+    let target = PathBuf::from(failed.rendered.clone());
+    let reload = reload_peers(report, compositor, bars);
+    if let Some(failure) = reload.failure {
+        return rollback(
+            state_dir,
+            previous,
+            &failed,
+            reload.completed_compositor,
+            &reload.completed_bars,
+            compositor,
+            bars,
+            failure,
+        )
+        .map(|_| ());
+    }
+    match swap.target {
+        SwapTarget::Point(_) => {
+            // The toolkit step is best-effort: a missing `dconf`, a key
+            // someone else owns, or a foreign config file is a note,
+            // never a refusal. dconf keys first (recorded in
+            // `look.json`), then the owned toolkit files (the `gtk.css`
+            // shims, the inis, qt6ct, fontconfig), all through the state
+            // link so a swap rewrites no file per look.
+            if swap.no_toolkit {
+                report
+                    .notes
+                    .push("toolkit step off for this swap (--no-toolkit)".to_owned());
+            } else if let Some(merged) = merged {
+                let mut record = failed.clone();
+                report.notes.extend(apply_toolkit_with_claims(
+                    state_dir,
+                    &mut record,
+                    merged,
+                    dconf,
+                    &swap.nix_claims,
+                    swap.target_skips,
+                ));
+                if let Err(error) = write_record(state_dir, &record) {
+                    report.notes.push(format!(
+                        "cannot record the toolkit state: {error}: the look applied, the record lags"
+                    ));
+                }
+                let link = state_dir.join(LINK_NAME);
+                report.notes.extend(apply_toolkit_files(
+                    state_dir,
+                    &record,
+                    merged,
+                    resolve_config_home(config).as_deref(),
+                    &link,
+                    swap.target_skips,
+                ));
+            }
+            // The daemon leaves are best-effort too, like the toolkit
+            // step: each app's own reload signal for the swapped look.
+            // A private state runs none of them (they would reach the
+            // user's real session, not the test's).
+            if let Some(merged) = merged {
+                let leaf_report = super::leaves::apply_leaves(state_dir, merged, leaves);
+                report.reloaded.extend(leaf_report.reloaded);
+                report.notes.extend(leaf_report.notes);
+            }
+            // Shadowed keys: the compositor's reply when it reloaded; else
+            // the files, read directly.
+            if let Some(merged) = merged {
+                report.notes.extend(foot_notes(merged, state_dir, config));
+            }
+            if !reload.completed_compositor {
+                let (shadowed, mut file_notes) = shadowed_from_files_in(&target, config);
+                report.shadowed.extend(shadowed);
+                report.notes.append(&mut file_notes);
+                report.notes.push(
+                    "compositor not running: shadowed keys read from the config files, not the live session".to_owned(),
+                );
+            }
+        }
+        SwapTarget::Remove => {
+            // The layer is gone: restore the toolkit key the tool may
+            // have written (best-effort, noted), then drop the record.
+            // A private state never touches the real key at all.
+            if swap.no_toolkit {
+                report
+                    .notes
+                    .push("toolkit writes off for this swap (--no-toolkit)".to_owned());
+            } else {
+                let mut record = failed.clone();
+                report.notes.extend(super::toolkit::toolkit_off_with_claims(
+                    state_dir,
+                    &mut record,
+                    dconf,
+                    &swap.nix_claims,
+                ));
+            }
+            std::fs::remove_file(state_dir.join("look.json")).ok();
+            report.removed = true;
+            report
+                .notes
+                .push("look layer removed: the declared default is null".to_owned());
+        }
+    }
+    report.shadowed.sort();
+    report.shadowed.dedup();
+    report.invalid.sort();
+    report.invalid.dedup();
+    // The previous render survives until the new one is confirmed: prune
+    // only on success, never before a rollback. The keep-set spans every
+    // live session's link (the cache is global, the state dirs are not),
+    // or churning one session could prune another's render. A removed
+    // layer keeps nothing back: its render rejoins the recency set.
+    let mut keep = Vec::new();
+    if matches!(swap.target, SwapTarget::Point(_)) {
+        keep.push(target.clone());
+        if let Some(previous) = &previous {
+            keep.push(PathBuf::from(&previous.rendered));
+        }
+    }
+    keep.extend(live.iter().cloned());
+    prune_cache(cache, &keep, &mut report.notes);
+    report.name = swap.name.clone();
+    report.rendered = match &swap.target {
+        SwapTarget::Point(_) => failed.rendered.clone(),
+        SwapTarget::Remove => String::new(),
+    };
+    report.generation = generation;
+    Ok(())
+}
+
+/// Where one swap renders from: a fresh cache render, or the Nix
+/// catalog's pre-rendered directory (verified by the caller before use).
+pub(crate) enum RenderSource {
+    /// Render into the cache, reusing a matching render.
+    Fresh,
+    /// Use this catalog directory as the render.
+    PreRendered { path: PathBuf },
+}
+
+/// Renders `name` for a swap from `initial` inputs: a verified
+/// pre-rendered catalog directory when given, else the render cache —
+/// then the bar's own parser over the fragment, against the installed
+/// binary's features, re-rendering into the cache without what the
+/// installed bar lacks (see the downgrade note in `apply_with`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_for_swap(
+    name: &str,
+    chain: &[ChainEntry],
+    merged: &scoot_look::ResolvedLook,
+    initial: RenderInputs,
+    source: RenderSource,
+    cache: &Path,
+    checks: &dyn Checks,
+    notes: &mut Vec<String>,
+) -> Result<(PathBuf, RenderInputs), String> {
+    let mut target = match source {
+        RenderSource::PreRendered { path } => path,
+        RenderSource::Fresh => render_cached(name, chain, merged, &initial, cache, notes)?,
+    };
+    let mut render_inputs = initial;
+    // The bar's own parser over the rendered fragment, against the
+    // installed binary's features. A bar built `--no-default-features`
+    // (no `popup`) refuses `popup-radius`, and a minimal bar refuses whole
+    // module tables (`unknown field inactive-color, there are no fields`
+    // for `[workspaces]`): re-render without what the installed bar lacks
+    // rather than refusing every look, and say what was dropped.
+    let mut drops: Vec<BarDrop> = Vec::new();
+    loop {
+        match checks.bar_fragment(&target.join("bar.toml")) {
+            Ok(Availability::Available(())) => {
+                for drop_ in &drops {
+                    notes.push(drop_.rendered_note());
+                }
+                break;
+            }
+            Ok(Availability::Unavailable(note)) => {
+                notes.push(note);
+                break;
+            }
+            Err(message) => {
+                let fragment = match std::fs::read_to_string(target.join("bar.toml")) {
+                    Ok(fragment) => fragment,
+                    Err(_) => return Err(message),
+                };
+                let Some(drop_) = bar_downgrade(&message, &fragment) else {
+                    return Err(message);
+                };
+                if !drop_.apply_to(&mut render_inputs) {
+                    return Err(message);
+                }
+                drops.push(drop_);
+                target = render_cached(name, chain, merged, &render_inputs, cache, notes)?;
+            }
+        }
+    }
+    // Foot's own parser over the rendered fragment, when the look renders
+    // one. A missing foot is a note; a refusal refuses the swap before
+    // anything is recorded, like the bar's genuine errors.
+    if merged.terminal.is_some() {
+        match checks.foot_fragment(&target.join("foot.ini")) {
+            Ok(Availability::Available(())) => {}
+            Ok(Availability::Unavailable(note)) => notes.push(note),
+            Err(message) => return Err(message),
+        }
+    }
+    Ok((target, render_inputs))
+}
 /// Applies `name`: the full transaction. Pure over its `catalog`, `cache`,
 /// `state_dir`, `config` home and peers except the lock, the record, the
 /// link, the cache and the reloads themselves. `config` pins the config
@@ -1824,7 +2285,7 @@ pub fn apply_with_live(
     // The bar's own parser over the rendered fragment, against the
     // installed binary's features. A bar built `--no-default-features`
     // (no `popup`) refuses `popup-radius`, and a minimal bar refuses whole
-    // module tables (`unknown field inactive-color, there are no fields`
+    // module sections (`unknown field inactive-color, there are no fields`
     // for `[workspaces]`): re-render without what the installed bar lacks
     // rather than refusing every look, and say what was dropped.
     let mut drops: Vec<BarDrop> = Vec::new();
@@ -2076,9 +2537,14 @@ pub fn apply_with_live(
             .notes
             .push("toolkit step off for this apply (--no-toolkit)".to_owned());
     } else {
-        report
-            .notes
-            .extend(apply_toolkit(state_dir, &mut record, &merged, dconf));
+        report.notes.extend(apply_toolkit_with_claims(
+            state_dir,
+            &mut record,
+            &merged,
+            dconf,
+            &options.nix_claims,
+            TargetSkips::default(),
+        ));
         if let Err(error) = write_record(state_dir, &record) {
             report.notes.push(format!(
                 "cannot record the toolkit state: {error}: the look applied, the record lags"
@@ -2091,6 +2557,7 @@ pub fn apply_with_live(
             &merged,
             resolve_config_home(config).as_deref(),
             &link,
+            TargetSkips::default(),
         ));
     }
     // The daemon leaves are best-effort too: `makoctl reload`, the fcitx5
@@ -2171,7 +2638,7 @@ pub fn apply_with_live(
 /// refuses leaves the link at the previous look and reports both errors:
 // "rolled back with errors".
 #[allow(clippy::too_many_arguments)]
-fn rollback(
+pub(crate) fn rollback(
     state_dir: &Path,
     previous: Option<&Record>,
     failed: &Record,
@@ -2303,7 +2770,7 @@ fn holders_text(
 }
 
 /// The unknown-look refusal, naming what the catalog holds.
-fn unknown_look(name: &str, catalog: &Catalog) -> String {
+pub(crate) fn unknown_look(name: &str, catalog: &Catalog) -> String {
     let mut names: Vec<&str> = catalog
         .entries
         .iter()

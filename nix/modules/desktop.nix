@@ -183,44 +183,14 @@ in
   options = {
     enable = lib.mkEnableOption "the scoot desktop profile: the session wiring plus bar and wallpaper defaults, themed by `look`";
 
-    # The effective default is ginger-night whenever the profile is on:
-    # `home.nix`/`nixos.nix` set it with `mkDefault` under `desktop.enable`
-    # (kept out of this option's own `default` so a look never lands
-    # without the profile -- the refusal in those files keeps firing
-    # then). The option's own `default` is `null`, which themes nothing;
-    # it is only reachable with the profile on by setting `look = null`
-    # explicitly, the opt-out. Every value is a default the user or
-    # Stylix beats per key. An unknown value is an eval error naming
-    # these five (the `enum` type's own message).
-    look = lib.mkOption {
-      type = lib.types.nullOr (
-        lib.types.enum [
-          "vinyl-sunset"
-          "music-desk"
-          "radial-burst"
-          "moonrise"
-          "ginger-night"
-        ]
-      );
-      default = null;
-      defaultText = lib.literalMD ''
-        `"ginger-night"` when `desktop.enable` is on (the profile sets it),
-        `null` (nothing themed) otherwise
-      '';
-      example = "vinyl-sunset";
-      description = ''
-        One of `docs/examples/*`: applies that example's palette to every
-        piece the flake owns today (the compositor `[appearance]` colors,
-        the bar `colors`, the session wallpaper where one ships in the
-        repository). With the profile on and no choice, the look is
-        `ginger-night` (the cat-peeking look): that is the default. Setting
-        `look = null` explicitly is the opt-out, and themes nothing (a
-        look needs the profile, so `null` is also what you get without
-        `desktop.enable`). Each value is a default a value
-        you set in `settings` beats per key, and Stylix beats where
-        present (Stylix stays the override path); see site/src/content/docs/scoot/theming.md#stylix.
-      '';
-    };
+    # Where the look choice lives now: `programs.scoot.look` (and the
+    # catalog in `programs.scoot.looks`), declared beside the scoot
+    # modules that have `pkgs`, not here — this file stays `lib`-only.
+    # The palettes below are still read by the eval-time leaves (the
+    # theme, the locker, the pickers) until the leaves tickets move each
+    # one onto the rendered look; `look-nix-retire-registry` removes
+    # them. An unknown `look` fails there, against the catalog — the
+    # `enum` below is gone with the option.
 
     # The bar half of `enable`: on, the profile enables and themes the bar
     # (through `programs.scootbar`, when that module is imported -- the
@@ -1311,7 +1281,7 @@ in
         default = false;
         description = ''
           Derive the app theme (fonts, cursor, GTK/Qt settings, the
-          dark-mode signal, the look's app files) from `desktop.look`.
+          dark-mode signal, the look's app files) from the look.
           On with the profile (still individually disable-able);
           without a look it is inert.
         '';

@@ -515,6 +515,18 @@ fi
 # outright (a missing binary, a bad unit) still exits nonzero at once,
 # and a process that dies right after spawning trips the liveness check
 # on the readiness loop's first round instead.
+#
+# The look catalog on a NixOS-module-only machine (no home-manager):
+# `/etc/scoot/look-default` declares the default, the catalog lives
+# under `/run/current-system/sw/share/scoot/`. Sync the live choice to
+# it before the compositor starts, so the first session reads the right
+# look at startup with no reload: no session runs yet, so only the link
+# moves. Unmanaged boxes (no declared default anywhere) answer
+# "nothing to do" and exit 0; a refusal is a note on stderr, never a
+# failed login.
+sync_out=$("$SCOOT_BIN" look sync 2>&1) || {
+    note "scoot look sync refused: $sync_out: the session starts on the recorded choice"
+}
 systemctl --user start "$SERVICE" || die "$SERVICE failed to start (see: journalctl --user -u $SERVICE)"
 
 # Readiness: the IPC socket answers `version` (see `try_version`

@@ -19,8 +19,8 @@ let
   # The desktop profile's shared option subtree and the one helper
   # that reads look-derived values (never hand-mapped here).
   themeLook = import ./theme-look.nix { inherit lib; };
-  look = themeLook.lookFor cfg.desktop;
-  themed = themeLook.themed cfg.desktop "osd";
+  look = themeLook.lookFor cfg;
+  themed = themeLook.themed cfg "osd";
 
   # A `#rrggbb` look token as wob's `RRGGBBAA` (opaque: the OSD never
   # wants translucency -- text over a terminal needs the contrast).

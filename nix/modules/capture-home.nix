@@ -21,8 +21,8 @@ let
   # The desktop profile's shared option subtree and the one helper
   # that reads look-derived values (never hand-mapped here).
   themeLook = import ./theme-look.nix { inherit lib; };
-  look = themeLook.lookFor cfg.desktop;
-  themed = themeLook.themed cfg.desktop "capture";
+  look = themeLook.lookFor cfg;
+  themed = themeLook.themed cfg "capture";
 
   # The chooser's and the region picker's theme: the look's roles the
   # same way the launcher and the history picker carry them (opaque

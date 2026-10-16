@@ -402,6 +402,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Later: opt-in automatic look switching](./core/look-auto-switch.md) (low, later)
 
 ### Core / config / rendering
+- [scoot-look test litter in the system temp dir](./core/scoot-look-test-litter.md) — low, filed 2026-10-16 from the #634 review: `tmp_case` in `crates/scoot-look/src/main.rs` never removes its per-case dirs
 - [A refused managed X window costs the server fds](./core/xwayland-refused-cost-fd-leak.md) (medium, filed 2026-10-15 from the #613 review: `refused_cost` counts 273 fds against a 264 cap, pre-existing)
 - [`scoot --help`/JSON config section list omits `[virtual_input]`](./core/help-config-sections-omit-virtual-input.md) — low, filed 2026-10-14 (docs1 slice review): help text and `config_sections` JSON list eleven sections; the compositor implements twelve.
 - [CPU-tier output swap with empty bindings can strand a headless output reporting live:true](./core/cpu-swap-empty-bindings-strand.md) — found in the #551 seat-reconnect review; the next win heals it

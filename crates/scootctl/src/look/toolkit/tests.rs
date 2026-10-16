@@ -7,9 +7,11 @@ use std::collections::{BTreeMap, HashMap};
 use scoot_look::state::Record;
 use scoot_look::{Origin, ResolvedLook};
 
+use super::super::sync::TargetSkips;
 use super::{
     COLOR_SCHEME_KEY, Dconf, MANAGED_MARK, PREFER_DARK, PREFER_LIGHT, TOOL_KEYS, apply_toolkit,
-    apply_toolkit_files, toolkit_off, toolkit_on, wanted_dconf, wanted_files,
+    apply_toolkit_files, apply_toolkit_with_claims, toolkit_off, toolkit_off_with_claims,
+    toolkit_on, wanted_dconf, wanted_files,
 };
 
 fn look() -> ResolvedLook {
@@ -595,7 +597,8 @@ fn records_round_trip_the_toolkit_half() {
 fn files_cover_gtk_qt_and_fonts() {
     // Six files: the two `@import` shims, the two inis, qt6ct through
     // the link's scheme, and the fontconfig default.
-    let files = wanted_files(&look(), &link(&state_dir("files"))).expect("files");
+    let files =
+        wanted_files(&look(), &link(&state_dir("files")), TargetSkips::default()).expect("files");
     let rels: Vec<&str> = files.iter().map(|file| file.rel).collect();
     assert_eq!(
         rels,
@@ -644,7 +647,8 @@ fn a_backslash_in_the_state_path_refuses_the_files() {
     // that points nowhere.
     let state = state_dir("backslash");
     let link = state.join("we\\ird");
-    let error = wanted_files(&look(), &link).expect_err("a backslash refuses");
+    let error =
+        wanted_files(&look(), &link, TargetSkips::default()).expect_err("a backslash refuses");
     assert!(error.contains("not a plain path"), "{error}");
 }
 
@@ -659,6 +663,7 @@ fn absent_files_are_written_and_identical_ones_kept() {
         &look(),
         Some(home.path()),
         &link(&state),
+        TargetSkips::default(),
     );
     assert_eq!(
         notes
@@ -684,6 +689,7 @@ fn absent_files_are_written_and_identical_ones_kept() {
         &look(),
         Some(home.path()),
         &link(&state),
+        TargetSkips::default(),
     );
     assert!(notes.is_empty(), "{notes:?}");
 }
@@ -712,6 +718,7 @@ fn marked_files_update_and_foreign_files_stay() {
         &look(),
         Some(home.path()),
         &link(&state),
+        TargetSkips::default(),
     );
     assert!(
         notes
@@ -734,16 +741,37 @@ fn files_off_and_private_and_homeless_all_skip() {
     let home = super::super::catalog::tests::scratch("files-gates");
     let state = state_dir("files-gates");
     let off = record(Some(false), &[], &[]);
-    let notes = apply_toolkit_files(&state, &off, &look(), Some(home.path()), &link(&state));
+    let notes = apply_toolkit_files(
+        &state,
+        &off,
+        &look(),
+        Some(home.path()),
+        &link(&state),
+        TargetSkips::default(),
+    );
     assert!(notes.iter().any(|note| note.contains("off")), "{notes:?}");
     let private = std::env::temp_dir().join(format!("scoot-look-gates-{}", std::process::id()));
     let on = record(None, &[], &[]);
-    let notes = apply_toolkit_files(&private, &on, &look(), Some(home.path()), &link(&private));
+    let notes = apply_toolkit_files(
+        &private,
+        &on,
+        &look(),
+        Some(home.path()),
+        &link(&private),
+        TargetSkips::default(),
+    );
     assert!(
         notes.iter().any(|note| note.contains("private look state")),
         "{notes:?}"
     );
-    let notes = apply_toolkit_files(&state, &on, &look(), None, &link(&state));
+    let notes = apply_toolkit_files(
+        &state,
+        &on,
+        &look(),
+        None,
+        &link(&state),
+        TargetSkips::default(),
+    );
     assert!(
         notes.iter().any(|note| note.contains("no home")),
         "{notes:?}"
@@ -753,5 +781,159 @@ fn files_off_and_private_and_homeless_all_skip() {
             .map(|mut entries| entries.next().is_none())
             .unwrap_or(true),
         "a gated run wrote files"
+    );
+}
+
+#[test]
+fn a_claimed_key_is_left_alone_and_records_nothing() {
+    // The Nix claims file owns color-scheme: that key is skipped
+    // however the live value reads, and no ownership is recorded for
+    // it — while the other five keys still write.
+    let dir = state_dir("claims");
+    let claims = vec![COLOR_SCHEME_KEY.to_owned()];
+    for live in [None, Some(PREFER_LIGHT.to_owned())] {
+        let mut live_map = HashMap::new();
+        if let Some(live) = live {
+            live_map.insert(COLOR_SCHEME_KEY.to_owned(), live);
+        }
+        let mut record = record(None, &[], &[]);
+        let dconf = FakeDconf {
+            live: live_map,
+            ..FakeDconf::default()
+        };
+        let notes = apply_toolkit_with_claims(
+            &dir,
+            &mut record,
+            &look(),
+            &dconf,
+            &claims,
+            TargetSkips::default(),
+        );
+        assert!(
+            dconf.wrote_to(COLOR_SCHEME_KEY).is_empty(),
+            "claimed: never written"
+        );
+        assert_eq!(
+            dconf.wrote().len(),
+            TOOL_KEYS.len() - 1,
+            "the rest still write: {notes:?}"
+        );
+        assert!(
+            !record.dconf_wrote.contains_key("color-scheme"),
+            "claimed: never recorded"
+        );
+        assert!(
+            notes
+                .iter()
+                .any(|note| note.contains("owned by the Nix configuration")),
+            "says so: {notes:?}"
+        );
+    }
+}
+
+#[test]
+fn off_leaves_a_claimed_key_alone() {
+    // `toolkit off` on a Nix-owned key restores nothing (home-manager
+    // owns it) but still stops owning it; the unclaimed keys are
+    // untouched here because this record wrote only the claimed one.
+    let dir = state_dir("claims-off");
+    let claims = vec![COLOR_SCHEME_KEY.to_owned()];
+    let mut live = HashMap::new();
+    live.insert(COLOR_SCHEME_KEY.to_owned(), PREFER_DARK.to_owned());
+    let mut record = record(
+        None,
+        &[("color-scheme", PREFER_DARK)],
+        &[("color-scheme", "")],
+    );
+    let dconf = FakeDconf {
+        live,
+        ..FakeDconf::default()
+    };
+    let notes = toolkit_off_with_claims(&dir, &mut record, &dconf, &claims);
+    assert!(dconf.wrote().is_empty(), "claimed: nothing is restored");
+    assert!(
+        record.dconf_wrote.is_empty() && record.dconf_orig.is_empty(),
+        "the record clears"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains("owned by the Nix configuration")),
+        "says so: {notes:?}"
+    );
+}
+
+#[test]
+fn skipped_targets_leave_their_file_traces_out() {
+    // A skipped cursor drops the cursor lines from both inis; skipped
+    // fonts drop the font line and the whole fontconfig file. Nothing
+    // else changes.
+    let link = link(&state_dir("files-skipped"));
+    let files = wanted_files(
+        &look(),
+        &link,
+        TargetSkips {
+            cursor: true,
+            fonts: true,
+        },
+    )
+    .expect("files");
+    let rels: Vec<&str> = files.iter().map(|file| file.rel).collect();
+    assert_eq!(
+        rels,
+        vec![
+            "gtk-3.0/gtk.css",
+            "gtk-4.0/gtk.css",
+            "gtk-3.0/settings.ini",
+            "gtk-4.0/settings.ini",
+            "qt6ct/qt6ct.conf",
+        ]
+    );
+    for file in files
+        .iter()
+        .filter(|file| file.rel.ends_with("settings.ini"))
+    {
+        assert!(
+            !file.contents.contains("gtk-cursor-theme-name")
+                && !file.contents.contains("gtk-cursor-theme-size")
+                && !file.contents.contains("gtk-font-name"),
+            "skipped lines in {}:\n{}",
+            file.rel,
+            file.contents
+        );
+        assert!(
+            file.contents.contains("gtk-theme-name=Adwaita-dark"),
+            "the rest leaves the ini too:\n{}",
+            file.contents
+        );
+    }
+    let cursor_only = wanted_files(
+        &look(),
+        &link,
+        TargetSkips {
+            cursor: true,
+            fonts: false,
+        },
+    )
+    .expect("files");
+    let ini = cursor_only
+        .iter()
+        .find(|file| file.rel == "gtk-3.0/settings.ini")
+        .expect("an ini");
+    assert!(
+        !ini.contents.contains("gtk-cursor-theme-name"),
+        "cursor stays:\n{}",
+        ini.contents
+    );
+    assert!(
+        ini.contents.contains("gtk-font-name="),
+        "font leaves too:\n{}",
+        ini.contents
+    );
+    assert!(
+        cursor_only
+            .iter()
+            .any(|file| file.rel == "fontconfig/conf.d/10-scoot-look.conf"),
+        "only the cursor is skipped"
     );
 }

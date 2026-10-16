@@ -77,14 +77,10 @@ let
   fuzzelTheme = import ./fuzzel-theme.nix { inherit lib; };
   lookFuzzelIni = import ./look-state.nix "fuzzel.ini";
   lookLeafLib = builtins.readFile ./look-leaf.sh;
-  clipboardThemed = themeLook.themed cfg.desktop "clipboard";
-  clipboardThemeFlags = lib.optionalString clipboardThemed (
-    fuzzelTheme (themeLook.lookFor cfg.desktop)
-  );
-  launcherThemed = themeLook.themed cfg.desktop "launcher";
-  launcherThemeFlags = lib.optionalString launcherThemed (
-    fuzzelTheme (themeLook.lookFor cfg.desktop)
-  );
+  clipboardThemed = themeLook.themed cfg "clipboard";
+  clipboardThemeFlags = lib.optionalString clipboardThemed (fuzzelTheme (themeLook.lookFor cfg));
+  launcherThemed = themeLook.themed cfg "launcher";
+  launcherThemeFlags = lib.optionalString launcherThemed (fuzzelTheme (themeLook.lookFor cfg));
 
   # Clipboard picker: `cliphist` history through the launcher menu
   # back into the clipboard -- lines on stdin, selection on stdout (the
@@ -188,10 +184,10 @@ let
       lib.getExe' capture.wlClipboardPackage "wl-copy"
     else
       "wl-copy";
-  captureThemed = themeLook.themed cfg.desktop "capture";
+  captureThemed = themeLook.themed cfg "capture";
   slurpRegionFlags =
     let
-      look = themeLook.lookFor cfg.desktop;
+      look = themeLook.lookFor cfg;
       # Quoted: a bare `#rrggbb` would start a shell comment inside
       # the `"$(...)"` below and eat the closing paren.
       hashA = color: "'#${lib.removePrefix "#" color}ff'";

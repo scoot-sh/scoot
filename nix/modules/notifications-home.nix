@@ -19,7 +19,7 @@ let
   # and its target is on): the colors then come from the look fragment,
   # never from this evaluation.
   themeLook = import ./theme-look.nix { inherit lib; };
-  themed = themeLook.themed cfg.desktop "notifications";
+  themed = themeLook.themed cfg "notifications";
 
   # The bar's build, when its module is imported beside this one (the
   # `or {}` keeps this evaluating without it, the way `scootbar.nix`

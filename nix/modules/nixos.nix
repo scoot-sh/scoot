@@ -14,7 +14,22 @@ let
   # plus the one helper that reads look-derived values.
   desktop = import ./desktop.nix { inherit lib; };
   themeLook = import ./theme-look.nix { inherit lib; };
-  lookNix = themeLook.lookFor cfg.desktop;
+  lookNix = themeLook.lookFor cfg;
+
+  # The system side of the look catalog (design section 6.2): the same
+  # builder the home-manager side uses, over the same `looks`. Null
+  # `lookPackage` keeps the whole catalog side off (see the option).
+  lookCatalogLib = import ../look-catalog.nix {
+    inherit lib pkgs;
+    scootLook = cfg.lookPackage;
+    fallbackUiPackage = config.programs.scoot.desktop.theme.fonts.uiPackage or null;
+    fallbackFont =
+      if pkgs.stdenv.hostPlatform.isLinux then
+        "${pkgs.dejavu_fonts.minimal}/share/fonts/truetype/DejaVuSans.ttf"
+      else
+        null;
+  };
+  lookCatalog = lookCatalogLib.mkCatalog cfg.looks;
 
   # The login-screen entry. Built as a package exposing
   # `share/wayland-sessions/scoot.desktop` with `providedSessions`,
@@ -811,7 +826,7 @@ in
           default =
             if pkgs.stdenv.hostPlatform.isLinux then
               (
-                if cfg.desktop.look == "radial-burst" then
+                if cfg.look == "radial-burst" then
                   (if pkgs ? dejavu_fonts then pkgs.dejavu_fonts else null)
                 else
                   (pkgs.nerd-fonts.fira-code or null)
@@ -865,6 +880,67 @@ in
       description = ''
         The scoot package to install system-wide and to launch from
         the login-screen session entry.
+      '';
+    };
+
+    # The look catalog for the NixOS-module-only path (no home-manager):
+    # names of shipped looks or paths to source look directories, each
+    # rendered at build time and installed as
+    # `/run/current-system/sw/share/scoot/looks/<name>` (sources) and
+    # `/run/current-system/sw/share/scoot/rendered/<name>` (renders), in
+    # list order — first wins. The declared default lands in
+    # `/etc/scoot/look-default`, and `scoot look sync` runs at login
+    # (see `resources/scoot-session`). Read only with `desktop.enable`.
+    looks = lib.mkOption {
+      type = lib.types.listOf (lib.types.either lib.types.str lib.types.path);
+      default = builtins.attrNames (import ./desktop.nix { inherit lib; }).looks;
+      defaultText = lib.literalExpression "every shipped look";
+      example = [
+        "ginger-night"
+        "moonrise"
+      ];
+      description = ''
+        The looks the system installs: shipped look names or paths to
+        source look directories. Default: every shipped look. A look
+        with `extends` resolves its base through this same list, so list
+        the base too.
+      '';
+    };
+
+    # The declared default: what a fresh state starts on. Null removes
+    # the look layer. `scoot look sync` at login starts on this when
+    # nothing is recorded, switches to it when it changed, falls back to
+    # it when the live choice left the catalog, and otherwise keeps the
+    # live choice. With the profile on and no choice, the look is
+    # `ginger-night` (the profile sets it below). An unknown name fails
+    # the evaluation naming the catalog. Moved here from
+    # `programs.scoot.desktop.look` (breaking): update the path.
+    look = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      defaultText = lib.literalMD ''
+        `"ginger-night"` when `desktop.enable` is on (the profile sets it),
+        `null` (nothing themed) otherwise
+      '';
+      example = "moonrise";
+      description = ''
+        One name from `looks`: the declared default look. Setting
+        `look = null` explicitly is the opt-out, and themes nothing.
+      '';
+    };
+
+    # The `scoot-look` binary that renders the catalog at build time:
+    # `pkgs.scoot-look` with the flake's overlay, else null. Null keeps
+    # the system catalog off (no `/etc/scoot/look-default`, no login
+    # sync).
+    lookPackage = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = pkgs.scoot-look or null;
+      defaultText = lib.literalExpression "pkgs.scoot-look or null";
+      example = lib.literalExpression "inputs.scoot.packages.\${pkgs.stdenv.hostPlatform.system}.scoot-look";
+      description = ''
+        The scoot-look package that renders `looks` at build time. Null
+        installs no catalog.
       '';
     };
 
@@ -2233,25 +2309,77 @@ in
     })
     # The default look, with the profile only: ginger-night when enabled
     # without a choice (a value the user sets wins over this default,
-    # including an explicit null to theme nothing). It lives here and on
-    # the home-manager side rather than as the option default, so a look
-    # never lands without the profile (the refusal below keeps firing
-    # then).
+    # including an explicit null to theme nothing). One rung above the
+    # Stylix source's `mkDefault` (1000) and below the option's own
+    # `default = null` (1500). It lives here and on the home-manager
+    # side rather than as the option default, so a look never lands
+    # without the profile (the refusal below keeps firing then).
     (lib.mkIf cfg.desktop.enable {
-      programs.scoot.desktop.look = lib.mkDefault "ginger-night";
+      programs.scoot.look = lib.mkOverride 1200 "ginger-night";
     })
     # A look without the profile is a silent no-op; refuse it loudly
     # instead (kept outside `desktop.enable` so it still fires then).
-    (lib.mkIf (cfg.desktop.look != null) {
+    # An unknown look fails here too, against the catalog — never a
+    # half-applied switch.
+    (lib.mkIf (cfg.look != null) {
       assertions = [
         {
           assertion = cfg.desktop.enable;
           message = ''
-            programs.scoot.desktop.look needs programs.scoot.desktop.enable:
+            programs.scoot.look needs programs.scoot.desktop.enable:
             the look is applied by the profile, so the profile must be on.
           '';
         }
+        {
+          assertion = builtins.elem cfg.look lookCatalog.names;
+          message = ''
+            programs.scoot.look is `${cfg.look}`, which is not in programs.scoot.looks (${lib.concatStringsSep ", " lookCatalog.names}).
+          '';
+        }
       ];
+    })
+    # The system catalog for the NixOS-module-only path (no
+    # home-manager): one package carrying the sources and the renders
+    # under `share/scoot/`, so they land at
+    # `/run/current-system/sw/share/scoot/looks/<name>` and
+    # `.../rendered/<name>` (through `pathsToLink` below). The declared default lands in
+    # `/etc/scoot/look-default` (empty for null), beside an empty
+    # claims file (no `dconf.settings` merge is visible from this
+    # side — the home-manager side writes the real claims, and with no
+    # home-manager there is nothing to claim). Only with the profile
+    # and a render binary.
+    (lib.mkIf (cfg.desktop.enable && lookCatalog.sources != null) {
+      environment.systemPackages = [
+        (pkgs.runCommand "scoot-looks-catalog" { } ''
+          mkdir -p $out/share/scoot/looks $out/share/scoot/rendered
+          ${lib.concatMapStringsSep "\n" (
+            entry: "ln -s ${entry.src} $out/share/scoot/looks/${lib.escapeShellArg entry.name}"
+          ) lookCatalog.entries}
+          ${lib.concatMapStringsSep "\n" (
+            name: "ln -s ${lookCatalog.rendered.${name}} $out/share/scoot/rendered/${lib.escapeShellArg name}"
+          ) lookCatalog.names}
+        '')
+      ];
+      # The catalog above ships under `share/scoot`, but the system
+      # environment only links the `pathsToLink` subpaths of each
+      # package into `/run/current-system/sw` (nixpkgs' own list names
+      # `/share/emacs`, `/share/themes` and the like, never all of
+      # `/share`): without this line the package installs yet the
+      # runtime's `/run/current-system/sw/share/scoot/{looks,rendered}`
+      # stays empty and the login-time `scoot look sync` finds no
+      # catalog entry. Pinned in `nix/tests.nix` (eval plus a build of
+      # the catalog derivation itself).
+      environment.pathsToLink = [ "/share/scoot" ];
+      environment.etc."scoot/look-default".text = if cfg.look == null then "" else cfg.look;
+      environment.etc."scoot/look-nix-claims".text = "";
+      # The theme targets opted out, one name per line (see the
+      # home-manager side's `look-nix-targets` for what each line
+      # skips): the login-time `scoot look sync` reads this beside the
+      # declared default. Empty with every target on.
+      environment.etc."scoot/look-nix-targets".text = lib.concatStringsSep "\n" (
+        lib.optional (!cfg.desktop.theme.targets.cursor.enable) "cursor"
+        ++ lib.optional (!cfg.desktop.theme.targets.fonts.enable) "fonts"
+      );
     })
     # The bar half lives in the bar module (`nix/modules/scootbar.nix`
     # reads this profile): a set of `programs.scootbar` here would need
@@ -2435,7 +2563,7 @@ in
           {
             assertion = cfg.desktop.theme.fonts.sansPackage != null;
             message = ''
-              programs.scoot.desktop.look needs a greeter font but
+              programs.scoot.look needs a greeter font but
               programs.scoot.desktop.theme.fonts.sansPackage is null: set
               it explicitly (apply the overlay, or point at the look's
               UI sans).

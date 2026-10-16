@@ -8,12 +8,19 @@
 //! ```sh
 //! scoot-look validate looks/moonrise [--origin shipped]
 //! scoot-look build looks/moonrise --out /tmp/moonrise --wallpaper-abs /tmp/moonrise/wallpaper.png
+//! scoot-look build my-green --out /tmp/my-green --catalog ./catalog --name my-green
 //! scoot-look import-base16 scheme.yaml [--name NAME] [--extends LOOK] [--out user-looks/NAME]
 //! ```
 //!
 //! `validate` and `build` take `--name NAME` to check the look's `name`
 //! against that instead of the directory (a Nix store path carries a
 //! hash prefix the check strips; anything else unusual goes here).
+//! `build` takes `--catalog DIR` to resolve `extends` through every
+//! source look in that directory (one child directory per look): without
+//! it only an extends-free look builds. The Nix catalog derivation lays
+//! every declared source down in one directory and builds each look
+//! against it, so a declared look with `extends` renders at build time
+//! like any other.
 //! `import-base16` takes `--name` to name the look instead of the
 //! scheme's slug, `--extends` to emit a child of that look, and `--out`
 //! to write `<dir>/look.toml` (without it the `look.toml` goes to
@@ -35,7 +42,7 @@ fn usage() -> ! {
         "  scoot-look validate <dir> [--origin shipped|declared|user|installed] [--name NAME]"
     );
     eprintln!(
-        "  scoot-look build <dir> --out <dir> [--wallpaper-abs PATH] [--ui-font-file PATH] [--no-popup] [--origin shipped|declared|user|installed] [--name NAME]"
+        "  scoot-look build <dir> --out <dir> [--wallpaper-abs PATH] [--ui-font-file PATH] [--no-popup] [--origin shipped|declared|user|installed] [--name NAME] [--catalog DIR]"
     );
     eprintln!(
         "  scoot-look import-base16 <file> [--name NAME] [--extends LOOK] [--out <dir>] [--origin shipped|declared|user|installed]"
@@ -168,6 +175,7 @@ fn main() {
             };
             let mut origin = Origin::User;
             let mut name: Option<String> = None;
+            let mut catalog: Option<String> = None;
             while let Some(flag) = args.next() {
                 match flag.as_str() {
                     "--out" => out = Some(args.next().unwrap_or_else(|| usage())),
@@ -180,6 +188,7 @@ fn main() {
                     "--no-popup" => inputs.bar_popup = false,
                     "--origin" => origin = parse_origin(&args.next().unwrap_or_else(|| usage())),
                     "--name" => name = Some(args.next().unwrap_or_else(|| usage())),
+                    "--catalog" => catalog = Some(args.next().unwrap_or_else(|| usage())),
                     _ => usage(),
                 }
             }
@@ -190,6 +199,7 @@ fn main() {
                 &inputs,
                 origin,
                 name.as_deref(),
+                catalog.as_deref().map(Path::new),
             );
         }
         "import-base16" => {
@@ -294,18 +304,118 @@ fn validate_dir(dir: &Path, origin: Origin, explicit_name: Option<&str>) {
     println!("valid: {}", dir.display());
 }
 
+/// Reads every source look in a catalog directory: one child directory
+/// per look, each with a `look.toml` whose `name` matches the directory.
+/// A child that is not a directory, or a directory without a readable
+/// manifest, is skipped (the derivation lays down only look dirs, and a
+/// stray file must not fail every look's build); anything the manifest
+/// says wrong — unparsable, misnamed, forbidden for the origin — fails
+/// with the look named. Sorted, so the map is deterministic whatever the
+/// filesystem returns. Pure over the directory (I/O, no exit), so the
+/// refusal paths stay testable; the caller exits on `Err`.
+fn read_catalog_sources(
+    dir: &Path,
+    origin: Origin,
+) -> Result<BTreeMap<String, (scoot_look::RawLook, Origin)>, String> {
+    let entries =
+        std::fs::read_dir(dir).map_err(|e| format!("cannot list {}: {e}", dir.display()))?;
+    let mut names: Vec<_> = entries.collect();
+    names.sort_by_key(|entry| entry.as_ref().map(|e| e.file_name()).unwrap_or_default());
+    let mut sources = BTreeMap::new();
+    for entry in names {
+        let entry = entry.map_err(|e| format!("cannot list {}: {e}", dir.display()))?;
+        let meta = std::fs::symlink_metadata(entry.path())
+            .map_err(|e| format!("cannot stat {}: {e}", entry.path().display()))?;
+        if !(meta.is_dir() || meta.is_symlink()) {
+            continue;
+        }
+        let manifest = entry.path().join("look.toml");
+        let bytes = match read_regular_file(&manifest) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        let raw = match scoot_look::parse_look_toml(&bytes) {
+            Ok(raw) => raw,
+            Err(errors) => {
+                let detail = errors
+                    .iter()
+                    .map(|error| error.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(format!(
+                    "catalog {}: invalid look.toml: {detail}",
+                    entry.path().display()
+                ));
+            }
+        };
+        let dir_name = entry.file_name().to_str().unwrap_or_default().to_owned();
+        let dir_name = look_dir_name(&dir_name, None)
+            .map_err(|e| format!("catalog {}: {e}", entry.path().display()))?;
+        if let Some(e) = scoot_look::check_name_matches_dir(&raw, &dir_name) {
+            return Err(format!("catalog {}: {e}", entry.path().display()));
+        }
+        let mut invalid = Vec::new();
+        for e in scoot_look::validate_for_origin(&raw, origin)
+            .into_iter()
+            .chain(scoot_look::validate_apps_allowlist(&raw.apps))
+        {
+            invalid.push(e.to_string());
+        }
+        if let Some(first) = invalid.into_iter().next() {
+            return Err(format!(
+                "catalog {}: invalid for origin {}: {first}",
+                entry.path().display(),
+                origin_name(origin)
+            ));
+        }
+        sources.insert(raw.name.clone(), (raw, origin));
+    }
+    Ok(sources)
+}
+
+/// The origin's name, as errors show it.
+fn origin_name(origin: Origin) -> &'static str {
+    match origin {
+        Origin::Shipped => "shipped",
+        Origin::Declared => "declared",
+        Origin::User => "user",
+        Origin::Installed => "installed",
+    }
+}
+
 fn build_dir(
     dir: &Path,
     out: &Path,
     inputs: &RenderInputs,
     origin: Origin,
     explicit_name: Option<&str>,
+    catalog: Option<&Path>,
 ) {
     let (raw, bytes) = load_raw(dir, explicit_name);
-    if raw.extends.is_some() {
-        eprintln!("error: build takes a single source without extends; resolve the catalog first");
-        std::process::exit(1);
-    }
+    let map = match catalog {
+        Some(catalog) => match read_catalog_sources(catalog, origin) {
+            Ok(mut sources) => {
+                // The directory's own entry wins over a same-named
+                // catalog entry (a tweaked copy never silently builds
+                // the catalog's look).
+                sources.insert(raw.name.clone(), (raw.clone(), origin));
+                sources
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
+        },
+        None => {
+            if raw.extends.is_some() {
+                eprintln!(
+                    "error: build takes a single source without extends; pass --catalog DIR to resolve it"
+                );
+                std::process::exit(1);
+            }
+            BTreeMap::from([(raw.name.clone(), (raw.clone(), origin))])
+        }
+    };
     let mut failed = false;
     for e in validate_for_origin(&raw, origin)
         .into_iter()
@@ -317,8 +427,7 @@ fn build_dir(
     if failed {
         std::process::exit(1);
     }
-    let map = BTreeMap::from([(raw.name.clone(), (raw, origin))]);
-    let name = map.keys().next().unwrap().clone();
+    let name = raw.name.clone();
     let look = match resolve(&map, &name) {
         Ok(look) => look,
         Err(e) => {
@@ -620,5 +729,100 @@ mod tests {
             look_dir_name("abc-moonrise", None).expect("short prefix"),
             "abc-moonrise"
         );
+    }
+
+    fn catalog_toml(name: &str, extra: &str) -> String {
+        format!(
+            r##"
+schema = 1
+name = "{name}"
+title = "Test {name}"
+description = "A test look."
+polarity = "dark"
+license = "MIT"
+{extra}
+[palette]
+background = "#2B3648"
+foreground = "#F6EEDC"
+dim = "#9C8B95"
+accent = "#FFA45C"
+urgent = "#E87F6A"
+
+[fonts]
+ui = "DejaVu Sans"
+sans = "DejaVu Sans"
+mono = "DejaVu Sans Mono"
+size = 10
+
+[shape]
+radius = 14
+ring-width = 2
+
+[cursor]
+theme = "Mocu"
+size = 24
+
+[wallpaper]
+color = "#2B3648"
+mode = "fill"
+"##
+        )
+    }
+
+    fn write_catalog_look(catalog: &std::path::Path, name: &str, extra: &str) {
+        let dir = catalog.join(name);
+        std::fs::create_dir_all(&dir).expect("look dir");
+        std::fs::write(dir.join("look.toml"), catalog_toml(name, extra)).expect("look.toml");
+    }
+
+    #[test]
+    fn catalog_sources_resolve_extends() {
+        // The Nix derivation's shape: every declared source in one
+        // directory, a child resolving its base through it.
+        let root = tmp_case("catalog-ok");
+        write_catalog_look(&root, "base-a", "");
+        write_catalog_look(&root, "child-b", "extends = \"base-a\"\n");
+        let sources = read_catalog_sources(&root, Origin::Declared).expect("sources");
+        assert_eq!(sources.len(), 2);
+        let resolved = resolve(&sources, "child-b").expect("child resolves");
+        assert_eq!(resolved.name, "child-b");
+        assert_eq!(resolved.palette.accent, "#FFA45C");
+    }
+
+    #[test]
+    fn catalog_sources_skip_strays() {
+        // Stray files and dirs without a manifest are skipped: a README
+        // beside the looks must not fail every look's build.
+        let root = tmp_case("catalog-strays");
+        std::fs::write(root.join("README.md"), b"notes").expect("readme");
+        std::fs::create_dir_all(root.join("empty")).expect("empty dir");
+        write_catalog_look(&root, "base-a", "");
+        let sources = read_catalog_sources(&root, Origin::Declared).expect("sources");
+        assert_eq!(sources.len(), 1);
+    }
+
+    #[test]
+    fn catalog_sources_refuse_invalid_manifest() {
+        // A broken manifest fails the build with the look named, before
+        // anything renders.
+        let root = tmp_case("catalog-bad");
+        write_catalog_look(&root, "base-a", "");
+        let dir = root.join("broken-b");
+        std::fs::create_dir_all(&dir).expect("look dir");
+        std::fs::write(dir.join("look.toml"), b"schema = 1\nname = 42\n").expect("bad toml");
+        let error = read_catalog_sources(&root, Origin::Declared).expect_err("refuses");
+        assert!(error.contains("broken-b"), "names the look: {error}");
+    }
+
+    #[test]
+    fn catalog_sources_refuse_misnamed_look() {
+        // The manifest name must match its directory, as in the live
+        // catalog scan.
+        let root = tmp_case("catalog-misnamed");
+        let dir = root.join("dir-name");
+        std::fs::create_dir_all(&dir).expect("look dir");
+        std::fs::write(dir.join("look.toml"), catalog_toml("other-name", "")).expect("look.toml");
+        let error = read_catalog_sources(&root, Origin::Declared).expect_err("refuses");
+        assert!(error.contains("dir-name"), "names the directory: {error}");
     }
 }

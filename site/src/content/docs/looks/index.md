@@ -20,6 +20,7 @@ scoot look apply moonrise --for 20    # preview 20 seconds, then revert
 scoot look current                    # the active look and shadowed keys
 scoot look validate ./my-look         # check a directory without touching anything
 scoot look build ./my-look --out /tmp/my-look   # render without applying
+scoot look sync                       # follow the Nix declared default (below)
 ```
 
 ## Cycle and preview
@@ -217,10 +218,11 @@ new palette; running ones keep theirs.
 - `scoot look toolkit off` persists the skip in `look.json`. When the tool
   wrote what is still live, `off` restores each key from before the
   tool's first write and stops owning it; a key the tool never wrote,
-  one someone else changed since, or one that cannot be read is
-  left alone. Either way the record clears, so turning back `on` adopts
-  fresh on the next apply. `off` leaves the written files in place; only
-  the keys are restored. `scoot look toolkit` shows the state.
+  one someone else changed since, one home-manager owns (see below),
+  or one that cannot be read is left alone. Either way the record
+  clears, so turning back `on` adopts fresh on the next apply.
+  `off` leaves the written files in place; only the keys are restored.
+  `scoot look toolkit` shows the state.
 - A private look state (a headless or `--private-look` session) never
   runs the step: its swaps must not move the real desktop.
 
@@ -246,23 +248,62 @@ foot start, so a swap sends no signal. `validate` and `build` check
 the fragment against foot's own parser; `build --out` writes
 `foot.ini` beside the other fragments.
 
-## Dogfooding on a home-manager machine
+## The Nix catalog
 
-Until the Nix catalog lands, the eval-time merges write look and Stylix
-values into your own `config.toml` and `bar.toml`, and those shadow every
-look. For the duration, set:
+`programs.scoot.looks` lists the catalog (default: every shipped
+look — add paths to your own source look directories beside the
+names); each look renders at build time and installs as
+`~/.local/share/scoot/looks/<name>` (sources) beside
+`~/.local/share/scoot/rendered/<name>` (renders).
+`programs.scoot.look` is the declared default (`ginger-night` with the
+profile on, `null` for no layer), written to
+`~/.config/scoot/look-default`. Each activation runs `scoot look sync`
+after the links and dconf land: with no state it starts on the
+declared default; when the default changed the declaration wins; when
+the live choice left the catalog it falls back and says so; otherwise
+it keeps the live choice and re-resolves it, reloading only when the
+render changed. A null default removes the layer, rolling back like
+any other swap. With no session running, only the link moves.
 
-```nix title="home.nix"
-programs.scoot.desktop.look = null;
-programs.scoot.stylix.enable = false;
-programs.scootbar.stylix.enable = false;
-```
+The toolkit step above runs on `sync` too, from the active
+look. Keys home-manager owns stay home-manager's: the catalog records
+the `org.gnome.desktop.interface` names the merged `dconf.settings`
+still carry in `look-nix-claims` beside the declared default, and
+`sync` (and `apply`) leave those alone however the live value reads.
+On a NixOS-module-only machine the catalog installs system-wide, the
+default lands in `/etc/scoot/look-default`, and the session launcher
+runs `scoot look sync` at login.
 
-`scoot look current` lists anything still shadowing. Cost: with
-`desktop.look = null` the profile's theme slot is inert too, so GTK, Qt
-and fontconfig lose their theming while dogfooding (foot still follows
-the look through the include above); it returns with
-the Nix catalog.
+### `scoot look sync`
+
+`scoot look sync [--no-toolkit] [--json]` is the managed end of the
+rule above: each home-manager activation runs it after the links and
+dconf land, and the session launcher runs it at login on a
+NixOS-module-only machine. It reads the declared default
+(`~/.config/scoot/look-default`, else `/etc/scoot/look-default`) and
+applies the four rules; a missing file is unmanaged and sync exits 0
+leaving the live choice alone. The first managed sync after a choice
+`apply` recorded wins for the declaration: a record from before any
+sync carries no declared default, which counts as changed, so the
+declaration takes over. A refused sync fails the home-manager switch:
+the links and dconf already landed, so the failure is loud rather
+than a quietly stale look. The session launcher instead logs the
+refusal and starts on the recorded choice, so a bad declaration never
+strands a login.
+
+`--no-toolkit` skips the dconf keys and toolkit files for that run;
+`--json` prints the reply as JSON (notes on stderr). Exit status is 0
+synced (including "nothing to do"), 1 the sync refused, 2 the
+invocation was wrong.
+
+`look-nix-targets` beside the default names the opted-out theme
+targets (`cursor`, `fonts`, one per line, written from the Nix
+`desktop.theme.targets` switches): the synced render leaves those
+pieces out — no cursor keys in the compositor layer, no bar font in
+the bar layer, no matching toolkit keys or files — so an explicit
+opt-out holds through the managed sync. A hand-written targets file
+works with no Nix involved; a manual `apply` still themes everything
+until the next sync re-resolves it.
 
 ## Authoring
 

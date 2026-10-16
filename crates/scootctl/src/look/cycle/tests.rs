@@ -59,6 +59,7 @@ fn options() -> ApplyOptions {
         from_compositor: false,
         preview: false,
         only_if_generation: None,
+        nix_claims: Vec::new(),
     }
 }
 

@@ -3,7 +3,7 @@ title: "Stylix becomes a synthesized stylix look instead of a layer above the lo
 status: "open"
 area: "packaging"
 priority: "high"
-blocked: "look-nix-catalog"
+blocked: null
 ---
 
 # Stylix becomes a synthesized stylix look instead of a layer above the look

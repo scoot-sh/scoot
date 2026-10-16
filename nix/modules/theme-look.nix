@@ -1,31 +1,39 @@
 # The one helper every desktop slot reads look-derived values through:
-# the look behind `desktop.look` (null without one; the `enum` type
-# guarantees the name, so the lookup cannot fail), whether a theme
-# target applies, and the two hex spellings configs need. Later
-# children read through here, never hand-mapping per-target colors
-# out of `looks` the way `home.nix`/`scootbar.nix` used to.
+# the registry look behind `programs.scoot.look` (null without one, or
+# without a registry entry for the name — a custom catalog look leaves
+# the eval-time leaves inert until the leaves tickets move each one onto
+# the rendered look), whether a theme target applies, and the two hex
+# spellings configs need. Later children read through here, never
+# hand-mapping per-target colors out of `looks` the way
+# `home.nix`/`scootbar.nix` used to.
 #
 # Takes only `lib`, like `desktop.nix` itself. Each function takes the
-# `desktop` subtree (whatever module reads it: `config.programs.scoot`
-# owns it on both scoot sides, the bar module reads it across the
-# boundary with `or {}` defaults), never the whole config.
+# `programs.scoot` subtree (whatever module reads it: `config` owns it
+# on both scoot sides, the bar module reads it across the boundary with
+# `or {}` defaults), never the whole config.
 { lib }:
 
 let
   desktop = import ./desktop.nix { inherit lib; };
+  # The registry look behind `scootCfg.look`, or null without one (or
+  # without a registry entry: a custom `looks` path has no palette
+  # here, so the eval-time leaves stay out of its way).
+  lookFor =
+    scootCfg:
+    let
+      name = scootCfg.look or null;
+    in
+    if name == null then null else desktop.looks.${name} or null;
 in
 {
-  # The look behind `desktop.look`, or null without one.
-  lookFor =
-    desktopCfg: if (desktopCfg.look or null) == null then null else desktop.looks.${desktopCfg.look};
+  inherit lookFor;
 
-  # Whether a theme target applies: a look is set, and its
+  # Whether a theme target applies: a registry look is set, and its
   # `theme.targets.<name>.enable` is on. The `or true` keeps this
   # reading with an older `desktop` subtree that predates the target.
   themed =
-    desktopCfg: name:
-    (if (desktopCfg.look or null) == null then null else desktop.looks.${desktopCfg.look}) != null
-    && ((desktopCfg.theme.targets.${name}.enable or true));
+    scootCfg: name:
+    (lookFor scootCfg) != null && ((scootCfg.desktop.theme.targets.${name}.enable or true));
 
   # A `#rrggbb` look token without its `#` (swaylock, foot).
   noHash = color: lib.removePrefix "#" color;

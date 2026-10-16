@@ -9,13 +9,24 @@ let
   cfg = config.programs.scoot;
   tomlFormat = pkgs.formats.toml { };
 
-  # The desktop profile's shared option subtree and the one helper
-  # that reads look-derived values (never hand-mapped here).
+  # The desktop profile's shared option subtree.
   desktop = import ./desktop.nix { inherit lib; };
-  themeLook = import ./theme-look.nix { inherit lib; };
-  # Null without a look; the `enum` type guarantees the name is one of
-  # these, so the lookup cannot fail.
-  look = themeLook.lookFor cfg.desktop;
+
+  # The Nix side of the look catalog (sources, build-time renders): names
+  # of shipped looks or paths to source look directories, read with
+  # `builtins.fromTOML` (no derivations, no import-from-derivation). Null
+  # `lookPackage` keeps the whole catalog side off (see the option).
+  lookCatalogLib = import ../look-catalog.nix {
+    inherit lib pkgs;
+    scootLook = cfg.lookPackage;
+    fallbackUiPackage = config.programs.scoot.desktop.theme.fonts.uiPackage or null;
+    fallbackFont =
+      if pkgs.stdenv.hostPlatform.isLinux then
+        "${pkgs.dejavu_fonts.minimal}/share/fonts/truetype/DejaVuSans.ttf"
+      else
+        null;
+  };
+  lookCatalog = lookCatalogLib.mkCatalog cfg.looks;
 
   # Stylix is not an input of this flake: its presence is
   # `config.lib.stylix` (defined by its palette module whether or not it is
@@ -185,6 +196,75 @@ in
     # `[wallpaper]`), the portal config and the `[xwayland]` knob.
     desktop = desktop.options;
 
+    # The look catalog: names of shipped looks (`ginger-night`,
+    # `moonrise`, `music-desk`, `radial-burst`, `vinyl-sunset`) or paths
+    # to source look directories. Each entry renders at build time
+    # through the `scoot-look` binary and links as
+    # `~/.local/share/scoot/looks/<name>` (sources) and
+    # `~/.local/share/scoot/rendered/<name>` (renders), in list order —
+    # first wins, so a path named like a shipped look shadows it. A
+    # shipped name outside the five, a directory without a readable
+    # `look.toml`, or a manifest whose `name` is not a look name fails
+    # the evaluation naming it. Read only with `desktop.enable`.
+    looks = lib.mkOption {
+      type = lib.types.listOf (lib.types.either lib.types.str lib.types.path);
+      default = builtins.attrNames (import ./desktop.nix { inherit lib; }).looks;
+      defaultText = lib.literalExpression "every shipped look";
+      example = [
+        "ginger-night"
+        "moonrise"
+        ./my-looks/moonrise-green
+      ];
+      description = ''
+        The looks home-manager installs: shipped look names or paths to
+        source look directories. Default: every shipped look (plus
+        `stylix` when Stylix synthesis lands). A look with `extends`
+        resolves its base through this same list, so list the base too.
+      '';
+    };
+
+    # The declared default: what a fresh state starts on. Null removes
+    # the look layer. The live choice is state home-manager does not
+    # own: each activation runs `scoot look sync`, which starts on this
+    # when nothing is recorded, switches to it when it changed, falls
+    # back to it when the live choice left the catalog, and otherwise
+    # keeps the live choice. With the profile on and no choice, the
+    # look is `ginger-night` (the profile sets it below). An unknown
+    # name fails the evaluation naming the catalog.
+    look = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      defaultText = lib.literalMD ''
+        `"ginger-night"` when `desktop.enable` is on (the profile sets it),
+        `null` (nothing themed) otherwise
+      '';
+      example = "moonrise";
+      description = ''
+        One name from `looks`: the declared default look. Moved here
+        from `programs.scoot.desktop.look` (breaking): update the path.
+        Setting `look = null` explicitly is the opt-out, and themes
+        nothing. Each value is a default a value you set in `settings`
+        beats per key; the live choice in `<state>/look.json` beats this
+        until it changes (see `scoot look sync`).
+      '';
+    };
+
+    # The `scoot-look` binary that renders the catalog at build time:
+    # `pkgs.scoot-look` with the flake's overlay, else null. Null keeps
+    # the whole catalog side off (no sources, no renders, no declared
+    # default, no activation step): a files-only setup manages no looks.
+    lookPackage = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = pkgs.scoot-look or null;
+      defaultText = lib.literalExpression "pkgs.scoot-look or null";
+      example = lib.literalExpression "inputs.scoot.packages.\${pkgs.stdenv.hostPlatform.system}.scoot-look";
+      description = ''
+        The scoot-look package that renders `looks` at build time. Null
+        installs no catalog: `look sync` then has no declared default
+        and leaves the live choice alone.
+      '';
+    };
+
     # `pkgs.scoot` when the flake's overlay (`overlays.default`) is
     # applied, else null: nothing is guessed, since a `scoot` from anywhere
     # else would silently install someone else's build. The flake wrapper
@@ -340,18 +420,25 @@ in
     # as in the NixOS module (`programs.scoot.wallpaper.*`), so either side
     # reads like the other.
     wallpaper = {
-      # Follows the settings: a `[wallpaper]` table is what asks for the
-      # binary, and nothing else here needs it.
+      # Follows the settings and the catalog: a `[wallpaper]` table is
+      # what asks for the binary, and a catalog look with an image
+      # needs it for the same reason — the look layer carries the
+      # image, and the compositor runs it through scootbg. The catalog
+      # half only counts with the profile (without it no catalog
+      # installs). Nothing else here needs it.
       enable = lib.mkOption {
         type = lib.types.bool;
-        default = hasWallpaper;
-        defaultText = lib.literalExpression "config.programs.scoot.settings ? wallpaper";
+        default = hasWallpaper || ((cfg.desktop.enable or false) && lookCatalog.hasWallpaper);
+        defaultText = lib.literalExpression ''
+          config.programs.scoot.settings ? wallpaper || a catalog look ships an image wallpaper
+        '';
         description = ''
           Install `wallpaper.package` and point `settings.wallpaper.command`
           at it (unless you set `command` yourself). On whenever `settings`
-          has a `wallpaper` table. Set it to `false` to leave both alone:
-          `[wallpaper]` then runs `scootbg` from PATH (a system package,
-          say: the NixOS module's `programs.scoot.wallpaper`).
+          has a `wallpaper` table or a catalog look ships an image. Set it
+          to `false` to leave both alone: `[wallpaper]` then runs `scootbg`
+          from PATH (a system package, say: the NixOS module's
+          `programs.scoot.wallpaper`).
         '';
       };
 
@@ -497,47 +584,39 @@ in
 
     # The default look, with the profile only: ginger-night when enabled
     # without a choice (a value the user sets wins over this default,
-    # including an explicit null to theme nothing). It lives here and on
-    # the NixOS side rather than as the option default, so a look never
-    # lands without the profile (the refusal below keeps firing then).
+    # including an explicit null to theme nothing). One rung above the
+    # Stylix source's `mkDefault` (1000) and below the option's own
+    # `default = null` (1500): Stylix, when its synthesis lands, beats
+    # the profile, and the profile beats nothing chosen. It lives here
+    # and on the NixOS side rather than as the option default, so a look
+    # never lands without the profile (the refusal below keeps firing
+    # then).
     (lib.mkIf cfg.desktop.enable {
-      programs.scoot.desktop.look = lib.mkDefault "ginger-night";
+      programs.scoot.look = lib.mkOverride 1200 "ginger-night";
     })
 
     # A look without the profile is a silent no-op; refuse it loudly
     # instead (kept outside `desktop.enable` so it still fires then, the
-    # way the greeter's assertions sit outside `enable`).
-    (lib.mkIf (cfg.desktop.look != null) {
+    # way the greeter's assertions sit outside `enable`). The catalog
+    # below only installs with the profile for the same reason.
+    (lib.mkIf (cfg.look != null) {
       assertions = [
         {
           assertion = cfg.desktop.enable;
           message = ''
-            programs.scoot.desktop.look needs programs.scoot.desktop.enable:
+            programs.scoot.look needs programs.scoot.desktop.enable:
             the look is applied by the profile, so the profile must be on.
           '';
         }
+        {
+          # Unknown here, not at the next activation: a typo fails the
+          # evaluation naming the catalog, never a half-applied switch.
+          assertion = builtins.elem cfg.look lookCatalog.names;
+          message = ''
+            programs.scoot.look is `${cfg.look}`, which is not in programs.scoot.looks (${lib.concatStringsSep ", " lookCatalog.names}).
+          '';
+        }
       ];
-    })
-
-    # The look's compositor colors plus, where the look ships an in-repo
-    # wallpaper (or a `{ url, hash }` link, fetched at build time), its
-    # image and mode (which is what turns `wallpaper.enable`
-    # on and installs scootbg for it). A look without one (`vinyl-sunset`,
-    # whose illustration cannot be committed or auto-fetched under its
-    # license) sets no `[wallpaper]` keys:
-    # the session shows the flat `background_color` below, and a
-    # `wallpaper` table the user sets themselves pairs with it untouched.
-    # `toString` renders the mode as is and the resolved image as its
-    # store path.
-    (lib.mkIf (cfg.desktop.enable && cfg.desktop.look != null) {
-      programs.scoot.settings = {
-        appearance = lib.mapAttrs (name: value: lib.mkOptionDefault value) look.appearance;
-      }
-      // lib.optionalAttrs (look.wallpaper != null) {
-        wallpaper = lib.mapAttrs (
-          name: value: lib.mkOptionDefault (toString (resolveWallpaperImage value))
-        ) look.wallpaper;
-      };
     })
 
     # The bar half lives in the bar module (`nix/modules/scootbar.nix`
@@ -545,6 +624,84 @@ in
     # that module imported, and a conditional set of an undeclared option
     # fails eval whatever the condition is, so the profile never sets
     # across the module boundary.
+
+    # The look catalog: each declared source linked as
+    # `~/.local/share/scoot/looks/<name>`, each build-time render as
+    # `~/.local/share/scoot/rendered/<name>`. The link targets the
+    # catalog's rendered entry, never a raw store path, so the next
+    # generation re-resolves it. Only with the profile and a render
+    # binary: without either, no declaration can win, so nothing is
+    # installed and `scoot look sync` stays unmanaged.
+    (lib.mkIf (cfg.desktop.enable && lookCatalog.sources != null) {
+      xdg.dataFile = lib.listToAttrs (
+        map (entry: {
+          name = "scoot/looks/${entry.name}";
+          value = {
+            source = entry.src;
+          };
+        }) lookCatalog.entries
+        ++ map (name: {
+          name = "scoot/rendered/${name}";
+          value = {
+            source = lookCatalog.rendered.${name};
+          };
+        }) lookCatalog.names
+      );
+
+      # The declared default: the name, or an empty file for null (no
+      # look layer). `sync` reads this after `linkGeneration`, so it
+      # always sees the new generation's declaration.
+      xdg.configFile."scoot/look-default".text = if cfg.look == null then "" else cfg.look;
+
+      # The `org/gnome/desktop/interface` key names the merged
+      # `dconf.settings` still carry — set by the user or another
+      # module, since scoot defines none — so `sync` leaves those to
+      # home-manager however the live value reads.
+      xdg.configFile."scoot/look-nix-claims".text =
+        let
+          claimed = builtins.attrNames (config.dconf.settings."org/gnome/desktop/interface" or { });
+        in
+        lib.concatStringsSep "\n" (map (leaf: "/org/gnome/desktop/interface/${leaf}") claimed);
+
+      # The theme targets opted out, one name per line, so the managed
+      # `sync` honors them the way the eval-time theme already does: a
+      # `cursor` line renders no cursor keys into the scoot fragment
+      # and writes no cursor dconf keys or settings.ini cursor lines;
+      # a `fonts` line resolves no font, renders no bar `font` key and
+      # writes no `font-name` key, settings.ini font line or
+      # fontconfig file. Empty with every target on. `sync` reads this
+      # beside the declared default (see `scoot look sync`); a
+      # hand-written file works the same with no Nix involved.
+      xdg.configFile."scoot/look-nix-targets".text = lib.concatStringsSep "\n" (
+        lib.optional (!cfg.desktop.theme.targets.cursor.enable) "cursor"
+        ++ lib.optional (!cfg.desktop.theme.targets.fonts.enable) "fonts"
+      );
+
+      # The rule of section 6.3, after the links and the dconf database
+      # land: home-manager's own `dconfSettings` step writes first, so
+      # the toolkit step never fights it over a claimed key. Without a
+      # binary on hand (a files-only setup whose `scoot` comes from
+      # elsewhere), the links above still install and the sync runs
+      # whenever a `scoot` is on PATH instead of failing the switch.
+      home.activation.scootLookSync = {
+        before = [ ];
+        after = [
+          "linkGeneration"
+          "dconfSettings"
+        ];
+        data =
+          if cfg.package != null then
+            "${cfg.package}/bin/scoot look sync"
+          else
+            ''
+              if command -v scoot >/dev/null 2>&1; then
+                scoot look sync
+              else
+                echo "scoot-look-sync: no scoot binary on PATH: catalog installed, live choice untouched"
+              fi
+            '';
+      };
+    })
 
     # Stylix defaults, each at its own leaf (`settings.appearance.X`, not
     # `settings.appearance`), which is what lets the user's one value
@@ -606,25 +763,5 @@ in
         };
       };
     })
-    # The look's cursor, one priority below Stylix's (a value you set
-    # in `settings` wins, Stylix wins where present, the look
-    # otherwise): the theme's one cursor, named here so the
-    # compositor and the apps agree. The package beside it (and the
-    # `XCURSOR_*` half for X11 apps) is `theme-home.nix`'s; read with
-    # the profile and a look, and only while its target is on.
-    (lib.mkIf (cfg.desktop.enable && look != null && (cfg.desktop.theme.targets.cursor.enable or true))
-      {
-        programs.scoot.settings = {
-          appearance = {
-            # The theme's package needs no installing here: the theme
-            # target installs it, and its `share/icons` lands on the
-            # lookup path beside it, the way Stylix's own cursor target
-            # does. This only names the theme and the size.
-            cursor_theme = lib.mkOptionDefault themeLook.cursor.name;
-            cursor_size = lib.mkOptionDefault themeLook.cursor.size;
-          };
-        };
-      }
-    )
   ];
 }
