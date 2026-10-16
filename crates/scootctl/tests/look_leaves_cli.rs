@@ -321,20 +321,59 @@ fn editor_signals_are_really_delivered() {
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a stub dir");
-    // A `sleep` by another name: macOS and Linux both ship one.
-    let sleep = if std::path::Path::new("/bin/sleep").exists() {
-        "/bin/sleep"
-    } else {
-        "/usr/bin/sleep"
+    // A `sleep` by another name: a copy (never a symlink, which some
+    // platforms resolve for `comm`) run under the leaf's process name.
+    // Multicall platforms (NixOS coreutils dispatches on `argv[0]`)
+    // cannot host one: the probe below skips there instead of failing.
+    let sleep = ["/bin/sleep", "/usr/bin/sleep"]
+        .into_iter()
+        .map(std::path::PathBuf::from)
+        .find(|path| path.is_file())
+        .or_else(|| {
+            Command::new("sh")
+                .args(["-c", "command -v sleep"])
+                .output()
+                .ok()
+                .and_then(|out| {
+                    String::from_utf8_lossy(&out.stdout)
+                        .lines()
+                        .next()
+                        .map(|line| std::path::PathBuf::from(line.trim()))
+                })
+                .filter(|path| path.is_file())
+        });
+    let Some(sleep) = sleep else {
+        eprintln!("skipped -- no sleep to host a named sleeper");
+        return;
     };
+    // The capability probe: a copy under a probe name must report that
+    // name as its comm, or no renamed sleeper can prove delivery here.
+    let probe = dir.join("scoot-probe-sleeper");
+    std::fs::copy(&sleep, &probe).expect("a probe copy");
+    let mut probe_child = Command::new(&probe)
+        .arg("30")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("a probe sleeper");
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let seen = Command::new("ps")
+        .args(["-o", "comm=", "-p", &probe_child.id().to_string()])
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .unwrap_or_default();
+    probe_child.kill().ok();
+    let _ = probe_child.wait();
+    if seen.rsplit('/').next().unwrap_or_default() != "scoot-probe-sleeper" {
+        eprintln!("skipped -- renamed copies do not keep their comm here ({seen:?})");
+        return;
+    }
     let mut children = Vec::new();
     for name in ["hx", "btop"] {
-        let link = dir.join(name);
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(sleep, &link).expect("a named sleeper");
-        // Through the symlink the process's comm is the link's name.
-        // (A hard link would do as well; a copy wastes the bytes.)
-        let child = Command::new(&link)
+        let dest = dir.join(name);
+        std::fs::copy(&sleep, &dest).expect("a named sleeper");
+        let child = Command::new(&dest)
             .arg("30")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
