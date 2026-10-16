@@ -2,8 +2,10 @@
 # Installer gate: runs public/install.sh against a fake release tree
 # (file:// URLs, stub binaries, stub session files), so the script's
 # paths, checksum refusal, no-tag failure, up-to-date rerun, --check,
-# --force, look handling, uninstall and missing-library/font report are
-# proved without the network. shellcheck runs first when it is on PATH
+# --force, look handling (a refused apply migrates nothing, symlinks are
+# skipped, the swap is atomic, pre-looks releases degrade with one
+# note), uninstall and missing-library/font report are proved without
+# the network. shellcheck runs first when it is on PATH
 # (CI provides it). `pnpm test-install`; CI's docs-site job.
 set -eu
 
@@ -32,18 +34,45 @@ esac
 # --- a fake release tree ------------------------------------------------------
 f=$work/fake
 stub() { printf '#!/bin/sh\necho "%s"\n' "$1" >"$2" && chmod +x "$2"; }
-mkdir -p "$f/dl/scoot-v0.1.0" "$f/dl/scootbar-v0.2.0" "$f/dl/v0.3.0"
-stub "scoot 0.1.0" "$f/dl/scoot-v0.1.0/scoot-0.1.0-$arch"
+# The fake scoot answers --version and emulates `look apply`: it logs
+# every call under the test HOME and applies (or refuses, when
+# SCOOT_STUB_APPLY_FAIL names the reason), so the gate proves the
+# installer's catalog, migration and apply flow without real binaries.
+scoot_stub() {
+    cat >"$1" <<EOF
+#!/bin/sh
+echo "scoot-stub \$*" >>"\$HOME/stub-scoot-calls"
+if [ "\${1:-}" = look ] && [ "\${2:-}" = apply ]; then
+    if [ -n "\${SCOOT_STUB_APPLY_FAIL:-}" ]; then
+        echo "refused: \$SCOOT_STUB_APPLY_FAIL" >&2
+        exit 1
+    fi
+    echo "applied: \$3"
+    echo "shadowed keys: \${SCOOT_STUB_SHADOWED:-none}"
+    exit 0
+fi
+echo "$2"
+EOF
+    chmod +x "$1"
+}
+mkdir -p "$f/dl/scoot-v0.1.0" "$f/dl/scootbar-v0.2.0" "$f/dl/v0.3.0" "$f/dl/v0.2.1"
+scoot_stub "$f/dl/scoot-v0.1.0/scoot-0.1.0-$arch" "scoot 0.1.0"
 stub "scootbg 0.1.0" "$f/dl/scoot-v0.1.0/scootbg-0.1.0-$arch"
 stub "scootbar 0.2.0" "$f/dl/scootbar-v0.2.0/scootbar-0.2.0-$arch"
-stub "scoot 0.3.0" "$f/dl/v0.3.0/scoot-0.3.0-$arch"
+scoot_stub "$f/dl/v0.3.0/scoot-0.3.0-$arch" "scoot 0.3.0"
 stub "scootbg 0.3.0" "$f/dl/v0.3.0/scootbg-0.3.0-$arch"
 stub "scootbar 0.3.0" "$f/dl/v0.3.0/scootbar-0.3.0-$arch"
+# v0.2.1 ships no looks and its scoot knows no `look apply`: plain stubs,
+# so any apply attempt would show up as a missing stub-scoot-calls file
+# check below rather than a refusal.
+stub "scoot 0.2.1" "$f/dl/v0.2.1/scoot-0.2.1-$arch"
+stub "scootbg 0.2.1" "$f/dl/v0.2.1/scootbg-0.2.1-$arch"
+stub "scootbar 0.2.1" "$f/dl/v0.2.1/scootbar-0.2.1-$arch"
 for d in "$f"/dl/*; do (cd "$d" && sha256sum -- * >SHA256SUMS); done
 
 for ref in scoot-v0.1.0 v0.3.0; do
     r=$f/raw/$ref
-    mkdir -p "$r/resources/systemd/user" "$r/packaging/deb" "$r/docs/examples/ginger-night" "$r/docs/assets/wallpapers" "$r/docs/examples/moonrise"
+    mkdir -p "$r/resources/systemd/user" "$r/packaging/deb" "$r/docs/assets/wallpapers"
     printf '#!/bin/sh\n' >"$r/resources/scoot-session"
     printf '[preferred]\n' >"$r/resources/scoot-portals.conf"
     printf '[Service]\nExecStart=@SCOOT_BIN@ --tty\n' >"$r/resources/systemd/user/scoot.service"
@@ -51,19 +80,86 @@ for ref in scoot-v0.1.0 v0.3.0; do
     printf '[Unit]\n' >"$r/resources/systemd/user/scoot-shutdown.target"
     printf '[Desktop Entry]\nExec=/usr/bin/scoot-session\n' >"$r/packaging/deb/scoot.desktop"
     printf '[Unit]\nPartOf=graphical-session.target\nAfter=graphical-session.target\n[Service]\nExecStart=/usr/bin/scootbar daemon\n[Install]\nWantedBy=graphical-session.target\n' >"$r/packaging/deb/scootbar.service"
-    printf '[wallpaper]\nimage = "wallpaper.png"\n' >"$r/docs/examples/ginger-night/scoot.toml"
-    printf 'command = ["cpu.sh"]\n' >"$r/docs/examples/ginger-night/bar.toml"
-    printf 'png\n' >"$r/docs/examples/ginger-night/wallpaper.png"
+    for look in ginger-night moonrise music-desk radial-burst vinyl-sunset; do
+        mkdir -p "$r/looks/$look" "$r/docs/examples/$look"
+        # The catalog source: a small but shaped look.toml, with an
+        # image for every look but vinyl-sunset (a flat color) and
+        # per-app overrides for the migration to strip.
+        {
+            printf 'schema = 1\nname = "%s"\ntitle = "%s"\n' "$look" "$look"
+            printf 'description = "Fake look for the installer gate."\n'
+            printf 'polarity = "dark"\nlicense = "MIT"\n'
+            printf '\n[palette]\nbackground = "#0E0E0E"\nforeground = "#F5EAD6"\n'
+            printf 'dim = "#8F7A63"\naccent = "#E57F29"\nurgent = "#E05A4E"\n'
+            if [ "$look" = vinyl-sunset ]; then
+                printf '\n[wallpaper]\ncolor = "#271A1F"\n'
+            else
+                printf '\n[wallpaper]\nimage = "wallpaper.png"\nmode = "fill"\n'
+                printf '%s wallpaper\n' "$look" >"$r/looks/$look/wallpaper.png"
+            fi
+            printf '\n[apps.scootbar]\n"bar.padding" = 10\n'
+            if [ "$look" = radial-burst ]; then
+                printf '"bar.spacing" = 14\n'
+            else
+                printf '"bar.separator" = 1\n"bar.spacing" = 8\n'
+                printf '"workspaces.inactive-color" = "#8F7A63"\n'
+            fi
+        } >"$r/looks/$look/look.toml"
+        # The old installer's template: whole example configs with one
+        # look's values. The image line varies per look (a relative
+        # file, a store-style path, a home path), and radial-burst's
+        # bar names no helper scripts.
+        case "$look" in
+        ginger-night) image='image = "wallpaper.png"' ;;
+        moonrise) image='image = "../../assets/wallpapers/moonrise.png"' ;;
+        music-desk) image='image = "../../assets/wallpapers/music-desk.png"' ;;
+        radial-burst) image='image = "../../assets/wallpapers/radial-burst.png"' ;;
+        vinyl-sunset) image='image = "~/Pictures/wallpapers/vinyl-sunset.png"' ;;
+        esac
+        {
+            printf '[layout]\ngap = 20\n'
+            printf '\n[appearance]\nbackground_color = "#0E0E0E"\ncorner_radius = 14\n'
+            printf 'focus_ring_width = 2\nfocus_ring_inactive_width = 2\n'
+            printf 'focus_ring_active_color = "#FF9A30"\nfocus_ring_inactive_color = "#4E2913"\n'
+            printf '\n[wallpaper]\n%s\nmode = "fill"\n' "$image"
+        } >"$r/docs/examples/$look/scoot.toml"
+        {
+            printf 'left = ["workspaces"]\ncenter = ["clock"]\nright = ["cpu"]\n'
+            printf '\n[bar]\nheight = 38\nmargin = "10,14"\nradius = 14\nopacity = 0.82\n'
+            printf 'font-size = 13\npadding = 10\nspacing = 8\n'
+            if [ "$look" != radial-burst ]; then printf 'separator = 1\n'; fi
+            printf '\n[colors]\nbackground = "#0E0E0E"\nforeground = "#F5EAD6"\n'
+            printf 'accent = "#E57F29"\nhover = "#FFB14B"\ndim = "#8F7A63"\nurgent = "#E05A4E"\n'
+            printf '\n[workspaces]\npill-shape = "circle"\n'
+            if [ "$look" != radial-burst ]; then printf 'inactive-color = "#8F7A63"\n'; fi
+            printf '\n[exec.cpu]\n'
+            if [ "$look" = radial-burst ]; then
+                printf 'command = ["top"]\n'
+            else
+                printf 'command = ["cpu.sh"]\n'
+            fi
+        } >"$r/docs/examples/$look/bar.toml"
+    done
     printf '#!/bin/sh\n' >"$r/docs/examples/ginger-night/cpu.sh"
     printf '#!/bin/sh\n' >"$r/docs/examples/ginger-night/load.sh"
-    printf '[wallpaper]\nimage = "../../assets/wallpapers/moonrise.png"\n' >"$r/docs/examples/moonrise/scoot.toml"
-    printf 'left = []\n' >"$r/docs/examples/moonrise/bar.toml"
     printf 'moon\n' >"$r/docs/assets/wallpapers/moonrise.png"
 done
+# v0.2.1 has no looks/ tree and no docs/examples: the session files only,
+# like the real release before looks shipped in v0.3.0.
+r=$f/raw/v0.2.1
+mkdir -p "$r/resources/systemd/user" "$r/packaging/deb"
+printf '#!/bin/sh\n' >"$r/resources/scoot-session"
+printf '[preferred]\n' >"$r/resources/scoot-portals.conf"
+printf '[Service]\nExecStart=@SCOOT_BIN@ --tty\n' >"$r/resources/systemd/user/scoot.service"
+printf '[Unit]\n' >"$r/resources/systemd/user/scoot-session.target"
+printf '[Unit]\n' >"$r/resources/systemd/user/scoot-shutdown.target"
+printf '[Desktop Entry]\nExec=/usr/bin/scoot-session\n' >"$r/packaging/deb/scoot.desktop"
+printf '[Unit]\nPartOf=graphical-session.target\nAfter=graphical-session.target\n[Service]\nExecStart=/usr/bin/scootbar daemon\n[Install]\nWantedBy=graphical-session.target\n' >"$r/packaging/deb/scootbar.service"
 printf '[{"tag_name": "scootbar-v0.2.0"}, {"tag_name": "scoot-v0.1.0", "body": "compare scoot-v9.9.9 and scootbar-v9.9.9"}]' >"$f/tags.json"
 printf '[{"tag_name": "v0.3.0"}, {"tag_name": "scootbar-v0.2.0"}, {"tag_name": "scoot-v0.1.0"}]' >"$f/tags-unified.json"
 printf '[{"tag_name": "scoot-v0.1.1"}, {"tag_name": "scootbar-v0.2.0"}, {"tag_name": "scoot-v0.1.0"}]' >"$f/tags-new.json"
 printf '[]' >"$f/none.json"
+printf '[{"tag_name": "v0.2.1"}]' >"$f/tags-old.json"
 
 export SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl" SCOOT_INSTALL_RAW_URL="file://$f/raw"
 unset XDG_CONFIG_HOME XDG_DATA_HOME
@@ -114,10 +210,17 @@ grep -q "ExecStart=$h/.local/bin/scootbar daemon" "$h/.config/systemd/user/scoot
 grep -q "WantedBy=scoot-session.target" "$h/.config/systemd/user/scootbar.service" || fail "bar not bound to scoot's own session"
 ! grep -q "graphical-session" "$h/.config/systemd/user/scootbar.service" || fail "bar would start in other desktops"
 [ -f "$h/.config/xdg-desktop-portal/scoot-portals.conf" ] || fail "portal config"
-[ -f "$h/.config/scoot/wallpaper.png" ] && [ -x "$h/.config/scoot/cpu.sh" ] || fail "look files"
-grep -q "command = \[\"$h/.config/scoot/cpu.sh\"\]" "$h/.config/scoot/bar.toml" || fail "bar script not by full path"
-[ ! -e "$h/.local/bin/cpu.sh" ] || fail "look script dropped into the bin directory"
-grep -q 'image = "wallpaper.png"' "$h/.config/scoot/config.toml" || fail "look config"
+# --look installs the shipped catalog (recorded, so --uninstall removes
+# it), writes no whole configs, and applies the look.
+for l in ginger-night moonrise music-desk radial-burst vinyl-sunset; do
+    [ -f "$h/.local/share/scoot/looks/$l/look.toml" ] || fail "no catalog $l"
+done
+[ -f "$h/.local/share/scoot/looks/moonrise/wallpaper.png" ] || fail "no catalog wallpaper"
+[ ! -e "$h/.local/share/scoot/looks/vinyl-sunset/wallpaper.png" ] || fail "the color look fetched a wallpaper"
+[ ! -e "$h/.config/scoot/config.toml" ] && [ ! -e "$h/.config/scoot/bar.toml" ] || fail "whole configs written"
+grep -q "look apply ginger-night" "$h/stub-scoot-calls" || fail "apply not invoked"
+grep -q "applied: ginger-night" "$work/out" || fail "no apply reply"
+grep -Fq "$h/.local/share/scoot/looks/ginger-night/look.toml" "$h/.local/share/scoot/install-manifest" || fail "catalog not in manifest"
 grep -q "systemctl --user enable scootbar.service" "$work/systemctl.log" || fail "bar unit not enabled"
 grep -q "systemctl --user daemon-reload" "$work/systemctl.log" || fail "no daemon-reload after install"
 rec=$h/.local/share/scoot/install-version
@@ -157,14 +260,16 @@ grep -q "Installing scoot" "$work/out" || fail "deleted binaries still claimed u
 ok "missing binaries reinstall instead of claiming up to date"
 
 # 1b4. An up-to-date re-run with --look still applies the look (and
-#      downloads no binaries to do it).
+#      downloads no binaries to do it): the catalog is already recorded,
+#      so no look file downloads either.
 h=$work/h-look
 run_in "$h" || { cat "$work/out"; fail "look-gate install"; }
 [ ! -e "$h/.config/scoot/config.toml" ] || fail "look-gate pre-state has config"
 SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl-gone" run_in "$h" --look moonrise || { cat "$work/out"; fail "up-to-date --look"; }
 export SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl"
 grep -q "already up to date (0.1.0)" "$work/out" || fail "up-to-date --look says no up-to-date"
-[ -f "$h/.config/scoot/config.toml" ] || fail "up-to-date --look wrote no config"
+grep -q "look apply moonrise" "$h/stub-scoot-calls" || fail "up-to-date --look applied nothing"
+[ ! -e "$h/.config/scoot/config.toml" ] || fail "up-to-date --look wrote a whole config"
 h=$work/h1
 ok "up-to-date re-run still applies --look"
 
@@ -187,12 +292,141 @@ grep -q "Installing scoot scoot-v0.1.0" "$work/out" || fail "--force did not rei
 [ "$("$h/.local/bin/scoot")" = "scoot 0.1.0" ] || fail "--force broke the install"
 ok "--force reinstalls"
 
+# 1e. A refused apply fails the run but not the install: the binaries,
+#     the catalog and the version record are all in place, and the error
+#     says to fix the cause and re-run with --look.
+h=$work/h-fail
+export SCOOT_STUB_APPLY_FAIL="font Fake is not installed"
+if run_in "$h" --look ginger-night; then fail "a refused apply exited 0"; fi
+unset SCOOT_STUB_APPLY_FAIL
+grep -q "was not applied" "$work/out" || fail "no refused-apply error"
+grep -q "re-run with --look" "$work/out" || fail "no re-run pointer"
+[ -x "$h/.local/bin/scoot" ] || fail "refused apply lost the binaries"
+[ -f "$h/.local/share/scoot/looks/ginger-night/look.toml" ] || fail "refused apply lost the catalog"
+grep -q "^tag=scoot-v0.1.0$" "$h/.local/share/scoot/install-version" || fail "refused apply lost the version record"
+h=$work/h1
+ok "a refused apply fails last, after the install"
+
+# 1e2. A refused apply migrates nothing: configs still byte-identical to
+#      an earlier --look run's output are left alone, with no migration
+#      note, and the error still points at a re-run with --look.
+h=$work/h-fail-mig
+mkdir -p "$h/.config/scoot"
+sed "s|^image *= *\"[^\"]*\"|image = \"wallpaper.png\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/scoot.toml" >"$h/.config/scoot/config.toml"
+sed "s|\"cpu.sh\"|\"$h/.config/scoot/cpu.sh\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/bar.toml" >"$h/.config/scoot/bar.toml"
+cp "$h/.config/scoot/config.toml" "$work/fail-mig-config.before"
+cp "$h/.config/scoot/bar.toml" "$work/fail-mig-bar.before"
+export SCOOT_STUB_APPLY_FAIL="font Fake is not installed"
+if run_in "$h" --look moonrise; then fail "a refused apply with migratable configs exited 0"; fi
+unset SCOOT_STUB_APPLY_FAIL
+grep -q "was not applied" "$work/out" || fail "no refused-apply error with migratable configs"
+grep -q "re-run with --look" "$work/out" || fail "no re-run pointer with migratable configs"
+if grep -Fq "migrated $h/.config/scoot/config.toml" "$work/out"; then fail "refused apply migrated config.toml"; fi
+if grep -Fq "migrated $h/.config/scoot/bar.toml" "$work/out"; then fail "refused apply migrated bar.toml"; fi
+cmp -s "$h/.config/scoot/config.toml" "$work/fail-mig-config.before" || fail "refused apply touched config.toml"
+cmp -s "$h/.config/scoot/bar.toml" "$work/fail-mig-bar.before" || fail "refused apply touched bar.toml"
+h=$work/h1
+ok "a refused apply leaves migratable configs byte-identical"
+
 # 2. A second look never overwrites the first, and a re-run updates
 #    its own files.
+mkdir -p "$h/.config/scoot"
 echo mine >"$h/.config/scoot/config.toml"
 run_in "$h" --look moonrise --force || fail "second look run"
 [ "$(cat "$h/.config/scoot/config.toml")" = mine ] || fail "user config was overwritten"
+grep -q "look apply moonrise" "$h/stub-scoot-calls" || fail "apply not invoked on an existing install"
 ok "existing config kept"
+
+# 2d. A config still byte-identical to an earlier --look run's output has
+#     its look keys removed (layout kept), so the layer shows through.
+#     Moonrise exercises both rewrites (a relative wallpaper, helper
+#     scripts by full path); radial-burst exercises neither (a store
+#     path, no script references).
+h=$work/h-mig
+mkdir -p "$h/.config/scoot"
+sed "s|^image *= *\"[^\"]*\"|image = \"wallpaper.png\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/scoot.toml" >"$h/.config/scoot/config.toml"
+sed "s|\"cpu.sh\"|\"$h/.config/scoot/cpu.sh\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/bar.toml" >"$h/.config/scoot/bar.toml"
+run_in "$h" --look moonrise || { cat "$work/out"; fail "migration run"; }
+grep -q "migrated $h/.config/scoot/config.toml" "$work/out" || fail "no config migration note"
+grep -q "migrated $h/.config/scoot/bar.toml" "$work/out" || fail "no bar migration note"
+c=$h/.config/scoot/config.toml
+if grep -q "^\[appearance\]" "$c" || grep -q "^\[wallpaper\]" "$c"; then fail "look sections left in $c"; fi
+grep -q "^gap = 20$" "$c" || fail "layout lost from $c"
+b=$h/.config/scoot/bar.toml
+if grep -q "^\[colors\]" "$b"; then fail "colors left in $b"; fi
+if grep -q "inactive-color" "$b" || grep -q "^opacity" "$b" || grep -q "^padding" "$b" || grep -q "^separator" "$b" || grep -q "^spacing" "$b"; then
+    fail "look keys left in $b"
+fi
+grep -q "^height = 38$" "$b" || fail "geometry lost from $b"
+grep -q "^pill-shape" "$b" || fail "module style lost from $b"
+grep -q "command = \[\"$h/.config/scoot/cpu.sh\"\]" "$b" || fail "exec command lost from $b"
+# Radial-burst exercises the other rewrites (a store-style image still
+# rewritten, a bar with no helper scripts passed through untouched).
+h=$work/h-mig2
+mkdir -p "$h/.config/scoot"
+sed "s|^image *= *\"[^\"]*\"|image = \"wallpaper.png\"|" "$f/raw/scoot-v0.1.0/docs/examples/radial-burst/scoot.toml" >"$h/.config/scoot/config.toml"
+cp "$f/raw/scoot-v0.1.0/docs/examples/radial-burst/bar.toml" "$h/.config/scoot/bar.toml"
+run_in "$h" --look radial-burst || { cat "$work/out"; fail "migration run without rewrites"; }
+if grep -q "^\[appearance\]" "$h/.config/scoot/config.toml"; then fail "look sections left without rewrites"; fi
+if grep -q "^\[colors\]" "$h/.config/scoot/bar.toml" || grep -q "^spacing" "$h/.config/scoot/bar.toml"; then
+    fail "look keys left without rewrites"
+fi
+grep -q 'command = \["top"\]' "$h/.config/scoot/bar.toml" || fail "plain command lost without rewrites"
+h=$work/h1
+ok "byte-identical configs migrate their look keys away"
+
+# 2d2. A migratable config that is a symlink is left alone, never written
+#      through: the link still points where it did, its target keeps its
+#      bytes, and the output says so. The regular migratable file beside
+#      it still migrates.
+h=$work/h-symlink
+mkdir -p "$h/.config/scoot" "$work/sym-target"
+sed "s|^image *= *\"[^\"]*\"|image = \"wallpaper.png\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/scoot.toml" >"$work/sym-target/real-config.toml"
+cp "$work/sym-target/real-config.toml" "$work/sym-target-config.before"
+ln -s "$work/sym-target/real-config.toml" "$h/.config/scoot/config.toml"
+sed "s|\"cpu.sh\"|\"$h/.config/scoot/cpu.sh\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/bar.toml" >"$h/.config/scoot/bar.toml"
+run_in "$h" --look moonrise || { cat "$work/out"; fail "symlink run"; }
+[ -L "$h/.config/scoot/config.toml" ] || fail "symlink was replaced"
+[ "$(readlink "$h/.config/scoot/config.toml")" = "$work/sym-target/real-config.toml" ] || fail "symlink retargeted"
+cmp -s "$work/sym-target/real-config.toml" "$work/sym-target-config.before" || fail "symlink target was written through"
+grep -Fq "left $h/.config/scoot/config.toml alone" "$work/out" || fail "no symlink note"
+if grep -q "^\[colors\]" "$h/.config/scoot/bar.toml"; then fail "regular file beside a symlink did not migrate"; fi
+h=$work/h1
+ok "a symlinked config is left alone, never written through"
+
+# 2d3. Migration swaps the stripped config in atomically: the migrated
+#      file is a new directory entry (a truncating rewrite would keep the
+#      inode), keeps its permission bits, and leaves no temp files.
+h=$work/h-atomic
+mkdir -p "$h/.config/scoot"
+sed "s|^image *= *\"[^\"]*\"|image = \"wallpaper.png\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/scoot.toml" >"$h/.config/scoot/config.toml"
+sed "s|\"cpu.sh\"|\"$h/.config/scoot/cpu.sh\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/bar.toml" >"$h/.config/scoot/bar.toml"
+chmod 600 "$h/.config/scoot/config.toml"
+ino_before=$(stat -c %i "$h/.config/scoot/config.toml" 2>/dev/null || stat -f %i "$h/.config/scoot/config.toml")
+run_in "$h" --look moonrise || { cat "$work/out"; fail "atomic run"; }
+ino_after=$(stat -c %i "$h/.config/scoot/config.toml" 2>/dev/null || stat -f %i "$h/.config/scoot/config.toml")
+[ "$ino_before" != "$ino_after" ] || fail "migration rewrote in place instead of swapping"
+mode_after=$(stat -c %a "$h/.config/scoot/config.toml" 2>/dev/null || stat -f %Lp "$h/.config/scoot/config.toml" 2>/dev/null)
+[ "$mode_after" = 600 ] || fail "migration changed mode 600 to $mode_after"
+if ls "$h/.config/scoot"/.scoot-migrate.* >/dev/null 2>&1; then fail "migration left temp files"; fi
+if grep -q "^\[appearance\]" "$h/.config/scoot/config.toml"; then fail "atomic run left look sections"; fi
+h=$work/h1
+ok "migration swaps atomically, keeping mode and leaving no temp files"
+
+# 2e. An edited file (one byte off the old output) is left alone, and
+#     the apply reply names the keys shadowing the look.
+h=$work/h-edit
+mkdir -p "$h/.config/scoot"
+sed "s|^image *= *\"[^\"]*\"|image = \"wallpaper.png\"|" "$f/raw/scoot-v0.1.0/docs/examples/moonrise/scoot.toml" >"$h/.config/scoot/config.toml"
+printf '\n# my own note\n' >>"$h/.config/scoot/config.toml"
+before=$(cat "$h/.config/scoot/config.toml")
+export SCOOT_STUB_SHADOWED="appearance.background_color"
+run_in "$h" --look moonrise || { cat "$work/out"; fail "edited-file run"; }
+unset SCOOT_STUB_SHADOWED
+[ "$(cat "$h/.config/scoot/config.toml")" = "$before" ] || fail "edited file was touched"
+grep -q "shadowed keys: appearance.background_color" "$work/out" || fail "shadowing keys not named"
+h=$work/h1
+ok "edited files are left alone with their shadowing keys named"
 
 # 2b. A file the script did not install is never replaced.
 h=$work/h5
@@ -225,6 +459,20 @@ run_in "$h" --uninstall || fail "uninstall"
 [ -f "$h/.config/scoot/config.toml" ] || fail "uninstall removed the config"
 grep -q "systemctl --user disable scootbar.service" "$work/systemctl.log" || fail "bar unit not disabled on uninstall"
 ok "uninstall"
+
+# 3c. Uninstall removes the look catalog too: no look files, and no
+#     emptied look directories. A foreign file in the tree keeps its
+#     directory (rmdir removes solely empty ones).
+h=$work/h-look
+mkdir -p "$h/.local/share/scoot/looks/foreign"
+echo foreign >"$h/.local/share/scoot/looks/foreign/kept"
+run_in "$h" --uninstall || { cat "$work/out"; fail "uninstall with looks"; }
+[ ! -e "$h/.local/share/scoot/looks/ginger-night" ] && [ ! -e "$h/.local/share/scoot/looks/moonrise" ] || fail "uninstall left look files"
+[ ! -e "$h/.local/share/scoot/looks/music-desk" ] && [ ! -e "$h/.local/share/scoot/looks/radial-burst" ] || fail "uninstall left look files"
+[ ! -e "$h/.local/share/scoot/looks/vinyl-sunset" ] || fail "uninstall left look files"
+[ "$(cat "$h/.local/share/scoot/looks/foreign/kept")" = foreign ] || fail "uninstall removed a foreign file"
+h=$work/h1
+ok "uninstall removes the look catalog"
 
 # 3b. A run that fails halfway still records what it placed.
 h=$work/h6
@@ -266,6 +514,24 @@ if releases=file://$f/tags-unified.json run_in "$h" --bar-version 0.3.0; then fa
 unset releases
 grep -q "retired" "$work/out" || fail "unified --bar-version names no retirement"
 ok "unified tag"
+
+# 4d. A release from before looks (v0.2.1: unified tag, no looks/ tree,
+#     a scoot with no `look apply`) degrades: --look installs the
+#     binaries with one plain note and exits 0, attempting no catalog and
+#     no apply.
+h=$work/h-old
+releases=file://$f/tags-old.json run_in "$h" --look ginger-night || { cat "$work/out"; fail "pre-looks install"; }
+unset releases
+[ "$("$h/.local/bin/scoot")" = "scoot 0.2.1" ] || fail "pre-looks scoot is not 0.2.1"
+[ "$("$h/.local/bin/scootbar")" = "scootbar 0.2.1" ] || fail "pre-looks bar is not 0.2.1"
+grep -q "has no looks" "$work/out" || fail "pre-looks run names no missing looks"
+grep -q "v0.3 or later" "$work/out" || fail "pre-looks run names no newer release"
+if grep -q "could not download the look catalog" "$work/out"; then fail "pre-looks run failed on the catalog"; fi
+[ ! -e "$h/.local/share/scoot/looks" ] || fail "pre-looks run fetched a catalog"
+[ ! -e "$h/stub-scoot-calls" ] || fail "pre-looks run invoked the look-less scoot"
+grep -q "^tag=v0.2.1$" "$h/.local/share/scoot/install-version" || fail "pre-looks record has no tag"
+h=$work/h1
+ok "a pre-looks release installs binaries with one note"
 
 # 5. A file that fails its checksum installs nothing.
 echo tampered >>"$f/dl/scoot-v0.1.0/scootbg-0.1.0-$arch"
@@ -398,5 +664,19 @@ if mkdir -p /usr/local/share/scoot 2>/dev/null && printf '%s\n' "$work/nowhere" 
 else
     ok "system uninstall message skipped (no /usr/local/share/scoot write)"
 fi
+
+# 9b. Under sudo the look applies as the invoking user: the dry run
+#     prints the apply with their name in it (the command itself never
+#     executes here, so no privilege is needed).
+h=$work/h-sudo-look
+export SUDO_USER=scoot-probe-user
+# The unified tree: test 5 tampered with the tagged scootbg above.
+releases=file://$f/tags-unified.json run_in "$h" --system --prefix "$work/syspre" --dry-run --look moonrise || { cat "$work/out"; fail "sudo dry run with --look"; }
+unset releases SUDO_USER
+grep -q "look apply moonrise" "$work/out" || fail "sudo dry run names no apply"
+grep -q "scoot-probe-user" "$work/out" || fail "sudo dry run names no invoking user"
+[ ! -e "$h/.local" ] || fail "sudo dry run wrote files"
+h=$work/h1
+ok "sudo applies the look as the invoking user"
 
 printf 'test-install: all passed\n'
