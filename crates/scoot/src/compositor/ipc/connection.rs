@@ -702,6 +702,44 @@ impl Connection {
             ));
         }
 
+        // A look swap runs in a child and is answered when the child
+        // exits, so like `WaitIdle` the connection leaves this source and
+        // lives on in the parked swap. A clone failure closes the
+        // connection; a synchronous refusal (a bad name, a swap already
+        // running, no state dir, no previous look for a preview) answers
+        // on the spot with nothing spawned.
+        if let Request::LookApply { name, for_ms } = request {
+            let Ok(stream) = self.lines.socket().try_clone() else {
+                return Step::Close;
+            };
+            match state.start_look_apply(
+                name,
+                for_ms,
+                stream,
+                std::mem::take(&mut self.outbound),
+                self.slot.take(),
+            ) {
+                // Taken, not left behind -- like the `WaitIdle` arm above,
+                // the queue moves with the socket, so the parked reply
+                // cannot land in the middle of a half-written response,
+                // and `Step::Close` below is an immediate close rather
+                // than a drain.
+                Ok(()) => {
+                    state.ensure_ticking();
+                    return Step::Close;
+                }
+                // A synchronous refusal puts the queue and the slot back
+                // before answering: they were taken up front for the park,
+                // and dropping them here would lose replies already queued
+                // and leak connection-table capacity.
+                Err(refused) => {
+                    self.outbound = refused.outbound;
+                    self.slot = refused.slot;
+                    return self.answer(&refused.response);
+                }
+            }
+        }
+
         // Waiting is answered later, from the render loop, so the connection
         // leaves this source and lives on in `pending_idle`.
         if let Request::WaitIdle {

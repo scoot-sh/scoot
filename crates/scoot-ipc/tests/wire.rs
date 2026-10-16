@@ -2,7 +2,7 @@
 //! `PROTOCOL_VERSION` bump.
 
 use scoot_ipc::{
-    Action, BindRow, EventKind, Horizontal, KeyboardLayout, OutputAdded, OutputChanged,
+    Action, BindRow, EventKind, Horizontal, KeyboardLayout, LookEntry, OutputAdded, OutputChanged,
     OutputRemoved, OutputRestored, OutputSnapshot, OutputTarget, PROTOCOL_VERSION, PointerButton,
     Rect, ReloadScope, Request, Response, SCREENSHOT_CURSOR_DEFAULT, Screenshot, SkippedBind,
     WindowSnapshot, WorkspaceSnapshot, decode, encode,
@@ -488,8 +488,8 @@ fn a_reload_report_round_trips_with_both_lists() {
 #[test]
 fn reworded_reload_refusals_are_payload_not_wire_format() {
     assert_eq!(
-        PROTOCOL_VERSION, 11,
-        "the look-layer event moved the protocol to 11"
+        PROTOCOL_VERSION, 12,
+        "the look IPC moved the protocol 11 → 12"
     );
     let response = Response::Reloaded {
         applied: vec!["autostart.commands".into()],
@@ -1222,8 +1222,8 @@ fn an_output_changed_event_round_trips_with_the_new_mode() {
 #[test]
 fn an_output_added_event_round_trips_and_moved_the_protocol() {
     assert_eq!(
-        PROTOCOL_VERSION, 11,
-        "the output-added event moved the protocol 9 → 10 (and the look-layer event 10 → 11)"
+        PROTOCOL_VERSION, 12,
+        "the output-added event moved the protocol 9 → 10 (and the look-layer event 10 → 11, the look IPC 11 → 12)"
     );
     let response = Response::OutputAdded(OutputAdded {
         output: 3,
@@ -1361,8 +1361,8 @@ fn a_locked_query_round_trips_with_the_live_state() {
 #[test]
 fn a_binds_query_round_trips_rows_and_skipped() {
     assert_eq!(
-        PROTOCOL_VERSION, 11,
-        "the binds reply moved the protocol 8 → 9 (and the output-added event 9 → 10, the look-layer event 10 → 11)"
+        PROTOCOL_VERSION, 12,
+        "the binds reply moved the protocol 8 → 9 (and the output-added event 9 → 10, the look-layer event 10 → 11, the look IPC 11 → 12)"
     );
     let request = Request::Binds;
     assert_eq!(json_of(&request), json!({ "type": "binds" }));
@@ -1495,8 +1495,8 @@ fn a_lock_changed_event_round_trips_for_both_transitions() {
 #[test]
 fn a_look_changed_event_round_trips_and_moved_the_protocol() {
     assert_eq!(
-        PROTOCOL_VERSION, 11,
-        "the look-layer event moved the protocol 10 → 11"
+        PROTOCOL_VERSION, 12,
+        "the look-layer event moved the protocol 10 → 11 (and the look IPC 11 → 12)"
     );
     let request = Request::Subscribe {
         events: vec![EventKind::Look],
@@ -1528,6 +1528,151 @@ fn a_look_changed_event_round_trips_and_moved_the_protocol() {
         source_hash: String::new(),
     };
     assert_eq!(decode::<Response>(&encode(&gone).unwrap()).unwrap(), gone);
+}
+
+/// The look swap over IPC: `look_apply` carries the look name and an
+/// optional preview hold, answered with what the swap applied once the
+/// child exits. New tags, so they moved the protocol 11 → 12: an older
+/// client handed one fails its decode, and an older server meets the new
+/// request with an ordinary unknown-tag error (proved below), never a
+/// misapplied swap.
+#[test]
+fn a_look_apply_round_trips_and_moved_the_protocol() {
+    assert_eq!(
+        PROTOCOL_VERSION, 12,
+        "the look IPC moved the protocol 11 → 12"
+    );
+    let request = Request::LookApply {
+        name: "moonrise".into(),
+        for_ms: None,
+    };
+    assert_eq!(
+        json_of(&request),
+        json!({ "type": "look_apply", "name": "moonrise" })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+    // A request that omits `for_ms` is a stay, not a preview.
+    assert_eq!(
+        decode::<Request>(r#"{"type":"look_apply","name":"moonrise"}"#).unwrap(),
+        request
+    );
+    let preview = Request::LookApply {
+        name: "moonrise".into(),
+        for_ms: Some(20_000),
+    };
+    assert_eq!(
+        json_of(&preview),
+        json!({ "type": "look_apply", "name": "moonrise", "for_ms": 20_000 })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&preview).unwrap()).unwrap(),
+        preview
+    );
+
+    let response = Response::LookApplied {
+        name: "moonrise".into(),
+        applied: vec!["compositor".into(), "bar wayland-1".into()],
+        refused: Vec::new(),
+        shadowed: vec!["appearance.focus_ring_active_color".into()],
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "look_applied",
+            "name": "moonrise",
+            "applied": ["compositor", "bar wayland-1"],
+            "refused": [],
+            "shadowed": ["appearance.focus_ring_active_color"],
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+}
+
+/// The look catalog over IPC: the catalog in search order, the active
+/// look's name, and the session's state directory. New tags under the
+/// same 11 → 12 move as `look_apply` above.
+#[test]
+fn a_looks_query_round_trips_catalog_active_and_state_dir() {
+    assert_eq!(
+        PROTOCOL_VERSION, 12,
+        "the look IPC moved the protocol 11 → 12"
+    );
+    let request = Request::Looks;
+    assert_eq!(json_of(&request), json!({ "type": "looks" }));
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+
+    let response = Response::Looks {
+        looks: vec![LookEntry {
+            name: "moonrise".into(),
+            title: "Moonrise".into(),
+            polarity: "dark".into(),
+            origin: "shipped".into(),
+            source: "/prefix/share/scoot/looks/moonrise".into(),
+        }],
+        active: Some("moonrise".into()),
+        state_dir: "/run/user/1000/scoot-look-wayland-1".into(),
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "looks",
+            "looks": [{
+                "name": "moonrise",
+                "title": "Moonrise",
+                "polarity": "dark",
+                "origin": "shipped",
+                "source": "/prefix/share/scoot/looks/moonrise",
+            }],
+            "active": "moonrise",
+            "state_dir": "/run/user/1000/scoot-look-wayland-1",
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+
+    let empty = Response::Looks {
+        looks: Vec::new(),
+        active: None,
+        state_dir: "/home/user/.local/state/scoot".into(),
+    };
+    assert_eq!(decode::<Response>(&encode(&empty).unwrap()).unwrap(), empty);
+}
+
+/// The look tags' wire shapes: exact spellings, and refusals for a
+/// missing name or a mistyped hold. The spellings matter beyond style: an
+/// older server refuses any `type` it does not know with an ordinary
+/// `Error`, so these exact strings are what an older compositor meets and
+/// refuses (never a silent plain reload, never a misapplied swap).
+#[test]
+fn the_look_tags_decode_from_their_exact_wire_spellings() {
+    assert_eq!(
+        decode::<Request>(r#"{"type":"look_apply","name":"moonrise"}"#).unwrap(),
+        Request::LookApply {
+            name: "moonrise".into(),
+            for_ms: None,
+        }
+    );
+    assert_eq!(
+        decode::<Request>(r#"{"type":"looks"}"#).unwrap(),
+        Request::Looks
+    );
+    // A missing name is a refusal, never a defaulted swap of nothing.
+    assert!(decode::<Request>(r#"{"type":"look_apply"}"#).is_err());
+    // A mistyped hold is a refusal, never a silently ignored preview.
+    assert!(
+        decode::<Request>(r#"{"type":"look_apply","name":"moonrise","for_ms":"soon"}"#).is_err()
+    );
 }
 
 /// The reload reply's look lists: shadowed user keys and invalid user values

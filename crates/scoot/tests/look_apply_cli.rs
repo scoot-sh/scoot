@@ -544,3 +544,124 @@ fn a_swap_never_applies_a_pending_user_edit() {
         "the plain reload did not apply the pending bind:\n{after}",
     );
 }
+
+#[test]
+fn a_swap_renders_the_terminal_fragment_for_new_foot() {
+    // End to end through the real session and the real CLI: a look with
+    // a `[terminal]` table applies, the rendered `foot.ini` carries the
+    // look's hues in foot's order, and the reply walks the user through
+    // the one-time `include` setup until it exists. Where foot is
+    // installed (the dev VM carries foot 1.28.0) its own
+    // `--check-config` parses the fragment; a box without one notes and
+    // keeps the fragment.
+    let scratch = Scratch::new("foot");
+    let session = Session::start(&scratch);
+    let dir = session.shipped.join("look-t");
+    std::fs::create_dir_all(&dir).expect("a look dir");
+    let mut toml = look_toml("look-t", 2);
+    toml.push_str(
+        "[terminal]\ncolors = [\"#1a2230\", \"#c96a63\", \"#8fa382\", \"#e8a34c\", \"#7c8fb0\", \"#9a7b94\", \"#7e9bb0\", \"#c9bfae\", \"#5e6b7f\", \"#e87f6a\", \"#a9bd9b\", \"#ffd54a\", \"#93a8c8\", \"#b595ad\", \"#a8c4d8\", \"#f6eedc\"]\n",
+    );
+    std::fs::write(dir.join("look.toml"), toml).expect("a look.toml");
+    let link_path = session.private_dir().join("look/foot.ini");
+    // No foot.ini yet: the reply carries the one-time setup hint.
+    let out = session.look(&["apply", "look-t"]);
+    assert!(
+        out.status.success(),
+        "apply failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8(out.stderr).expect("UTF-8 stderr");
+    assert!(
+        stderr.contains(&*link_path.to_string_lossy()),
+        "no setup hint names the link path:\n{stderr}"
+    );
+    // The rendered fragment holds the look's hues in foot's order, in
+    // both themes with the look's polarity selected: a light look (and a
+    // user's own opposite `initial-color-theme`) can no longer leave a new
+    // terminal on the wrong palette.
+    let rendered = std::fs::read_link(session.private_dir().join("look")).expect("a link");
+    let foot_ini = rendered.join("foot.ini");
+    let foot = std::fs::read_to_string(&foot_ini).expect("a foot.ini");
+    assert!(foot.contains("[colors-dark]"), "wrong section:\n{foot}");
+    assert!(foot.contains("[colors-light]"), "missing mirror:\n{foot}");
+    assert!(
+        foot.contains("initial-color-theme=dark"),
+        "wrong theme:\n{foot}"
+    );
+    assert!(foot.contains("regular0=1a2230"), "ansi order lost:\n{foot}");
+    assert!(foot.contains("bright7=f6eedc"), "bright hues lost:\n{foot}");
+    match Command::new("foot")
+        .arg("--check-config")
+        .arg("--config")
+        .arg(&foot_ini)
+        .output()
+    {
+        Ok(check) => assert!(
+            check.status.success(),
+            "foot refuses its own fragment:\n{}",
+            String::from_utf8_lossy(&check.stderr)
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("cannot run foot: {error}"),
+    }
+    // A user `[main]` holding the opposite theme with the fragment
+    // included still parses: both themes carry the look's hues, so foot
+    // shows them whichever theme is in effect. Where foot is installed
+    // (the dev VM carries foot 1.28.0) its own parser is the judge; a box
+    // without one skips this half and keeps the fragment.
+    for user_first in [true, false] {
+        let user = "[main]\ninitial-color-theme=light\n".to_owned();
+        let include = format!("[main]\ninclude={}\n", link_path.display());
+        let (head, tail) = if user_first {
+            (user, include)
+        } else {
+            (include, user)
+        };
+        let adversarial = session.config.join(format!(
+            "adversarial-{}.ini",
+            if user_first { "first" } else { "last" }
+        ));
+        std::fs::write(&adversarial, format!("{head}{tail}")).expect("an adversarial ini");
+        match Command::new("foot")
+            .arg("--check-config")
+            .arg("--config")
+            .arg(&adversarial)
+            .output()
+        {
+            Ok(check) => assert!(
+                check.status.success(),
+                "foot refuses the opposite-theme include (user first: {user_first}):\n{}",
+                String::from_utf8_lossy(&check.stderr)
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => panic!("cannot run foot: {error}"),
+        }
+    }
+    // With the include in place, the reply says new terminals follow the
+    // look instead of repeating the setup hint.
+    let foot_home = session.config.join("foot");
+    std::fs::create_dir_all(&foot_home).expect("a foot dir");
+    std::fs::write(
+        foot_home.join("foot.ini"),
+        format!("[main]\ninclude={}\n", link_path.display()),
+    )
+    .expect("a foot.ini");
+    let out = session.look(&["apply", "look-t"]);
+    assert!(
+        out.status.success(),
+        "re-apply failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8(out.stderr).expect("UTF-8 stderr");
+    assert!(
+        stderr.contains("new terminals read the look's colors"),
+        "no follow note:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("once foot.ini includes"),
+        "a setup hint survives the include:\n{stderr}"
+    );
+}

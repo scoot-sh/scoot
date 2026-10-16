@@ -37,10 +37,11 @@
 //!    [`render_gtk4_css`](render::render_gtk4_css),
 //!    [`render_qt_scheme`](render::render_qt_scheme),
 //!    [`render_qt6ct_conf`](render::render_qt6ct_conf),
-//!    [`render_gtk_ini`](render::render_gtk_ini) and
+//!    [`render_gtk_ini`](render::render_gtk_ini),
+//!    [`render_foot`](render::render_foot) and
 //!    [`render_fontconfig`](render::render_fontconfig) emit the
-//!    first-party and toolkit fragments from the resolved look plus
-//!    [`RenderInputs`](render::RenderInputs).
+//!    first-party, toolkit and foot fragments from the resolved look
+//!    plus [`RenderInputs`](render::RenderInputs).
 //!
 //! [`import_base16`](import::import_base16) maps a base16 or base24 scheme
 //! to a source look's `look.toml` (design section 5.3): the plain-install
@@ -76,8 +77,8 @@ pub use grammar::GrammarError;
 pub use import::{ImportOptions, import_base16};
 pub use render::{
     BAR_RADIUS_LIMIT, RenderInputs, font_desc, gtk_theme_name, qt_argb, qt_argb_soft,
-    qt_style_name, render_bar, render_fontconfig, render_gtk_ini, render_gtk3_css, render_gtk4_css,
-    render_json, render_qt_scheme, render_qt6ct_conf, render_scoot, source_hash,
+    qt_style_name, render_bar, render_fontconfig, render_foot, render_gtk_ini, render_gtk3_css,
+    render_gtk4_css, render_json, render_qt_scheme, render_qt6ct_conf, render_scoot, source_hash,
 };
 pub use resolve::resolve;
 pub use resolved::ResolvedLook;

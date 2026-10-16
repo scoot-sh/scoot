@@ -532,3 +532,206 @@ fn theme_and_style_names_follow_polarity() {
     assert_eq!(font_desc("DejaVu Sans", 12.0), "DejaVu Sans 12");
     assert_eq!(font_desc("DejaVu Sans", 10.5), "DejaVu Sans 10.5");
 }
+
+/// Moonrise's 16 ANSI hues, the base16 terminal order foot reads as
+/// `regular0-7` then `bright0-7` (`looks/moonrise/look.toml`).
+const TERMINAL_COLORS: [&str; 16] = [
+    "#1a2230", "#c96a63", "#8fa382", "#e8a34c", "#7c8fb0", "#9a7b94", "#7e9bb0", "#c9bfae",
+    "#5e6b7f", "#e87f6a", "#a9bd9b", "#ffd54a", "#93a8c8", "#b595ad", "#a8c4d8", "#f6eedc",
+];
+
+fn terminal_toml() -> String {
+    let colors = TERMINAL_COLORS
+        .iter()
+        .map(|c| format!("\"{c}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    crate::schema::tests::minimal_toml().replacen(
+        "[fonts]",
+        &format!("[terminal]\ncolors = [{colors}]\n[fonts]"),
+        1,
+    )
+}
+
+fn terminal_look() -> ResolvedLook {
+    let raw = parse_look_toml(terminal_toml().as_bytes()).expect("terminal look parses");
+    let map = BTreeMap::from([("moonrise".to_string(), (raw, Origin::Shipped))]);
+    resolve(&map, "moonrise").expect("terminal look resolves")
+}
+
+#[test]
+fn foot_dark_section_holds_the_terminal_hues_in_ansi_order() {
+    let frag = render_foot(&terminal_look())
+        .expect("renders")
+        .expect("a terminal table renders a fragment");
+    assert!(frag.contains("[main]"), "no [main]:\n{frag}");
+    assert!(
+        frag.contains("initial-color-theme=dark"),
+        "wrong theme:\n{frag}"
+    );
+    // Both palettes carry the same hues: whatever theme is in effect when
+    // a new terminal starts, the look's hues show.
+    for section in ["[colors-dark]", "[colors-light]"] {
+        assert!(frag.contains(section), "missing {section}:\n{frag}");
+    }
+    assert!(!frag.contains("[colors]\n"), "bare colors section:\n{frag}");
+    // ANSI 0-7 then 8-15, foot's hex without `#`, twice (once per theme).
+    for (i, color) in TERMINAL_COLORS.iter().enumerate() {
+        let (key, _) = if i < 8 {
+            (format!("regular{i}"), i)
+        } else {
+            (format!("bright{}", i - 8), i)
+        };
+        let line = format!("{key}={}", color.trim_start_matches('#'));
+        assert_eq!(
+            frag.lines().filter(|l| *l == line).count(),
+            2,
+            "missing a copy of {line}:\n{frag}"
+        );
+    }
+    assert!(
+        frag.lines()
+            .filter(|l| !l.starts_with('#'))
+            .all(|l| !l.contains('#')),
+        "a `#` escapes into foot.ini:\n{frag}"
+    );
+}
+
+#[test]
+fn foot_initial_theme_follows_polarity() {
+    // The effective theme selection, both polarities: a dark look starts
+    // new terminals on `colors-dark`, a light look on `colors-light`.
+    // (Either theme still carries the look's hues, so a user's own
+    // `initial-color-theme` after the include cannot un-theme a terminal.)
+    let dark = render_foot(&terminal_look())
+        .expect("renders")
+        .expect("a terminal table renders a fragment");
+    assert_eq!(
+        dark.lines()
+            .filter(|l| *l == "initial-color-theme=dark")
+            .count(),
+        1,
+        "dark look selects no single theme:\n{dark}"
+    );
+    assert!(
+        !dark.contains("initial-color-theme=light"),
+        "dark look selects light:\n{dark}"
+    );
+    let text = terminal_toml().replacen("polarity = \"dark\"", "polarity = \"light\"", 1);
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("moonrise".to_string(), (raw, Origin::Shipped))]);
+    let look = resolve(&map, "moonrise").expect("resolves");
+    let light = render_foot(&look)
+        .expect("renders")
+        .expect("a terminal table renders a fragment");
+    assert_eq!(
+        light
+            .lines()
+            .filter(|l| *l == "initial-color-theme=light")
+            .count(),
+        1,
+        "light look selects no single theme:\n{light}"
+    );
+    assert!(
+        !light.contains("initial-color-theme=dark"),
+        "light look selects dark:\n{light}"
+    );
+    for frag in [&dark, &light] {
+        for section in ["[colors-dark]", "[colors-light]"] {
+            assert!(frag.contains(section), "missing {section}:\n{frag}");
+        }
+    }
+}
+
+#[test]
+fn foot_light_look_uses_colors_light() {
+    let text = terminal_toml().replacen("polarity = \"dark\"", "polarity = \"light\"", 1);
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("moonrise".to_string(), (raw, Origin::Shipped))]);
+    let look = resolve(&map, "moonrise").expect("resolves");
+    let frag = render_foot(&look)
+        .expect("renders")
+        .expect("a terminal table renders a fragment");
+    assert!(frag.contains("[colors-light]"), "wrong section:\n{frag}");
+    assert!(frag.contains("[colors-dark]"), "missing mirror:\n{frag}");
+    assert!(
+        frag.contains("initial-color-theme=light"),
+        "wrong theme:\n{frag}"
+    );
+}
+
+#[test]
+fn foot_alpha_comes_from_opacity_terminal() {
+    // The shipped example writes `alpha=0.80` beside the colors; the
+    // default opacity renders full.
+    let text = terminal_toml().replacen("[shape]", "[opacity]\nterminal = 0.8\n[shape]", 1);
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("moonrise".to_string(), (raw, Origin::Shipped))]);
+    let look = resolve(&map, "moonrise").expect("resolves");
+    let frag = render_foot(&look)
+        .expect("renders")
+        .expect("a terminal table renders a fragment");
+    assert!(
+        frag.lines().any(|l| l == "alpha=0.80"),
+        "alpha missing:\n{frag}"
+    );
+    assert_eq!(
+        frag.lines().filter(|l| *l == "alpha=0.80").count(),
+        2,
+        "alpha not in both themes:\n{frag}"
+    );
+    let frag = render_foot(&terminal_look())
+        .expect("renders")
+        .expect("a terminal table renders a fragment");
+    assert!(
+        frag.lines().any(|l| l == "alpha=1.00"),
+        "default alpha missing:\n{frag}"
+    );
+    assert_eq!(
+        frag.lines().filter(|l| *l == "alpha=1.00").count(),
+        2,
+        "default alpha not in both themes:\n{frag}"
+    );
+}
+
+#[test]
+fn foot_absent_without_a_terminal_table() {
+    // No `[terminal]` table means no foot fragment, never a palette
+    // synthesized into one (design section 3.3).
+    assert!(render_foot(&moonrise()).expect("renders").is_none());
+}
+
+#[test]
+fn foot_refuses_a_hand_built_bad_palette() {
+    // The parse gate refuses these, but a library caller can hand-build
+    // a `ResolvedLook` past it, so the renderer checks too: a newline
+    // in a hue must never open a new foot section.
+    let mut look = terminal_look();
+    look.terminal = Some(vec![
+        "x\n[main]\nfont = pwned".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+        "x".to_string(),
+    ]);
+    let err = render_foot(&look).expect_err("injected hue renders");
+    assert_eq!(err.field, "terminal.colors[0]");
+    look.terminal = Some(vec!["#000000".to_string(); 15]);
+    let err = render_foot(&look).expect_err("fifteen hues render");
+    assert_eq!(err.field, "terminal.colors");
+    look.opacity.terminal = f64::NAN;
+    look.terminal = Some(TERMINAL_COLORS.iter().map(|s| s.to_string()).collect());
+    let err = render_foot(&look).expect_err("NaN alpha renders");
+    assert_eq!(err.field, "opacity.terminal");
+}

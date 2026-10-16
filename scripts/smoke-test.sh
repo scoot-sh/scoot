@@ -1224,6 +1224,25 @@ EOF
         return 1
     fi
     echo "ok: two looks applied, each background pixel checked"
+
+    echo "--- msg look-apply swaps through IPC and answers when it lands ---"
+    if ! "$SCOOT" msg look-apply vinyl-sunset >"$dir/msg-apply.out" 2>&1; then
+        echo "BUG: msg look-apply failed:"
+        cat "$dir/msg-apply.out"
+        tail -30 "$log"
+        return 1
+    fi
+    if ! grep -q '"name": "vinyl-sunset"' "$dir/msg-apply.out"; then
+        echo "BUG: msg look-apply answered without the applied look:"
+        cat "$dir/msg-apply.out"
+        return 1
+    fi
+    wait_wallpaper_pixel "271A1F" "vinyl-sunset over IPC" || return 1
+    if ! "$SCOOT" msg looks | grep -q "vinyl-sunset"; then
+        echo "BUG: msg looks does not name the applied look"
+        return 1
+    fi
+    echo "ok: the IPC swap landed, pixel-checked, and looks names it"
 }
 if [ -n "$SCOOTBG" ]; then
     ( run_looks_test ) || exit 1

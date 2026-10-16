@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use scoot_look::{
-    ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar,
+    ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar, render_foot,
     render_gtk3_css, render_gtk4_css, render_json, render_qt_scheme, render_scoot, resolve,
     source_hash, validate_apps_allowlist, validate_for_origin,
 };
@@ -348,6 +348,10 @@ fn build_dir(
     let gtk3_css = render_gtk3_css(&look);
     let gtk4_css = render_gtk4_css(&look);
     let qt_scheme = render_qt_scheme(&look);
+    let foot = render_foot(&look).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
     std::fs::create_dir_all(out).unwrap_or_else(|e| {
         eprintln!("cannot create {}: {e}", out.display());
         std::process::exit(1);
@@ -358,7 +362,7 @@ fn build_dir(
             std::process::exit(1);
         });
     }
-    for (file, contents) in [
+    let mut files: Vec<(&str, String)> = vec![
         ("scoot.toml", scoot),
         ("bar.toml", bar),
         (
@@ -368,7 +372,13 @@ fn build_dir(
         ("gtk/gtk-3.0.css", gtk3_css),
         ("gtk/gtk-4.0.css", gtk4_css),
         ("qt/scoot-look.conf", qt_scheme),
-    ] {
+    ];
+    // No `[terminal]` table means no foot fragment, never a synthesized
+    // palette: the file is simply absent.
+    if let Some(foot) = foot {
+        files.push(("foot.ini", foot));
+    }
+    for (file, contents) in &files {
         std::fs::write(out.join(file), contents).unwrap_or_else(|e| {
             eprintln!("cannot write {}: {e}", out.join(file).display());
             std::process::exit(1);

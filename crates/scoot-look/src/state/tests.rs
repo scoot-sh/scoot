@@ -7,7 +7,6 @@
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
-use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::time::Duration;

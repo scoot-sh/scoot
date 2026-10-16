@@ -29,7 +29,16 @@ fn verbs_parse_bare() {
         command(&["apply", "moonrise", "--no-toolkit"]),
         Ok(Command::Apply {
             name: "moonrise".to_owned(),
-            no_toolkit: true
+            no_toolkit: true,
+            from_compositor: false,
+        })
+    );
+    assert_eq!(
+        command(&["apply", "moonrise", "--from-compositor"]),
+        Ok(Command::Apply {
+            name: "moonrise".to_owned(),
+            no_toolkit: false,
+            from_compositor: true,
         })
     );
     assert_eq!(command(&["toolkit"]), Ok(Command::Toolkit { action: None }));
@@ -96,7 +105,8 @@ fn json_state_and_socket_ride_anywhere() {
         look.command,
         Command::Apply {
             name: "moonrise".to_owned(),
-            no_toolkit: false
+            no_toolkit: false,
+            from_compositor: false,
         }
     );
 }

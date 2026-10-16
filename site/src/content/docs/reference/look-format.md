@@ -19,8 +19,9 @@ ls ~/.local/share/scoot/user-looks/moonrise/
 ```
 
 A rendered look is the output of a build: `scoot.toml`, `bar.toml`,
-`gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`, `qt/scoot-look.conf`
-and `render.json`. It is never edited and never a source for
+`gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`, `qt/scoot-look.conf`,
+`foot.ini` (only when the look has `[terminal]`) and `render.json`. It
+is never edited and never a source for
 anything. The two never share a path.
 
 The catalog is the union of the source directories, in fixed order:
@@ -202,7 +203,14 @@ once, with the override winning, so every fragment reparses.
 `@define-color` has no effect on it). `gtk/gtk-4.0.css` carries the look's accent and surfaces as the named
 colors libadwaita paints with, plus the matching `:root` vars (plain
 GTK 4 widgets keep the stock accent). `qt/scoot-look.conf` carries the
-Qt color scheme. `render.json` names the source, its hash and the resolved inputs
+Qt color scheme.
+`foot.ini` carries `[main]` with `initial-color-theme` from the look's
+polarity, and the 16 `[terminal]` hues as `regular0-7` then
+`bright0-7` in both `[colors-dark]` and `[colors-light]` (foot 1.28
+has no `[colors]`), each with `alpha` from `opacity.terminal`. Both
+themes hold the same hues, so new terminals match whatever theme is
+in effect.
+`render.json` names the source, its hash and the resolved inputs
 (font files, wallpaper path). The inputs come from the
 environment: the tool resolves font files and the wallpaper's
 absolute path, and the Nix build passes the font packages. The

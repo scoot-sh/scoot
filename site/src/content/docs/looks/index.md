@@ -135,6 +135,28 @@ new palette; running ones keep theirs.
 - A private look state (a headless or `--private-look` session) never
   runs the step: its swaps must not move the real desktop.
 
+## Terminal (foot)
+
+`apply` renders the look's `[terminal]` hues into the rendered look's
+`foot.ini`: `[main]` selects the look's polarity as foot's initial
+theme, and both `[colors-dark]` and `[colors-light]` carry the same
+hues, with `alpha` from `opacity.terminal`. A look without
+`[terminal]` renders no fragment. New terminals follow the look once
+your `foot.ini` includes the fragment (one-time setup):
+
+```ini title="foot.ini"
+include=~/.local/state/scoot/look/foot.ini
+```
+
+Both palettes hold the look's hues, so new terminals match whatever
+theme is in effect, even with a user's own opposite
+`initial-color-theme`. Running terminals keep their palette until
+they restart: foot never re-reads its config, and its
+`SIGUSR1`/`SIGUSR2` switch only toggles the two palettes loaded at
+foot start, so a swap sends no signal. `validate` and `build` check
+the fragment against foot's own parser; `build --out` writes
+`foot.ini` beside the other fragments.
+
 ## Dogfooding on a home-manager machine
 
 Until the Nix catalog lands, the eval-time merges write look and Stylix
@@ -148,8 +170,9 @@ programs.scootbar.stylix.enable = false;
 ```
 
 `scoot look current` lists anything still shadowing. Cost: with
-`desktop.look = null` the profile's theme slot is inert too, so GTK, Qt,
-fontconfig and foot lose their theming while dogfooding; it returns with
+`desktop.look = null` the profile's theme slot is inert too, so GTK, Qt
+and fontconfig lose their theming while dogfooding (foot still follows
+the look through the include above); it returns with
 the Nix catalog.
 
 ## Authoring
