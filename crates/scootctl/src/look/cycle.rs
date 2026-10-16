@@ -246,6 +246,7 @@ pub fn revert_if_current(
     bars: &[&dyn BarReload],
     checks: &dyn super::apply::Checks,
     dconf: &dyn super::toolkit::Dconf,
+    leaves: &dyn super::leaves::Leaves,
     lock_wait: Duration,
 ) -> Result<RevertOutcome, String> {
     // Like an apply: the state dir must exist before the lock is taken.
@@ -322,6 +323,7 @@ pub fn revert_if_current(
             };
             match apply_with(
                 name, &options, catalog, cache, state_dir, config, compositor, bars, checks, dconf,
+                leaves,
             ) {
                 Ok(_) => RevertOutcome::Reverted {
                     name: Some(name.clone()),
@@ -376,6 +378,7 @@ pub fn revert_with_retry(
     bars: &[&dyn BarReload],
     checks: &dyn super::apply::Checks,
     dconf: &dyn super::toolkit::Dconf,
+    leaves: &dyn super::leaves::Leaves,
     lock_wait: Duration,
     retries: u32,
     retry_delay: Duration,
@@ -392,6 +395,7 @@ pub fn revert_with_retry(
             bars,
             checks,
             dconf,
+            leaves,
             lock_wait,
         ) {
             Err(message) if is_lock_contention(&message) && waits < retries => {

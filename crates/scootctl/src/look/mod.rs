@@ -1151,6 +1151,7 @@ fn run_preview_revert(look: &Look, from: u64, after: u64) -> Result<(), String> 
         .collect();
     let checks = apply::ProdChecks::new();
     let dconf = CliDconf::new();
+    let leaves = CliLeaves::new();
     match cycle::revert_with_retry(
         from,
         &catalog,
@@ -1161,6 +1162,7 @@ fn run_preview_revert(look: &Look, from: u64, after: u64) -> Result<(), String> 
         &bar_refs,
         &checks,
         &dconf,
+        &leaves,
         apply::LOCK_WAIT,
         cycle::REVERT_RETRIES,
         cycle::REVERT_RETRY_DELAY,

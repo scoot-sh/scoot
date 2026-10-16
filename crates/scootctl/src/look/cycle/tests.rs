@@ -12,6 +12,7 @@ use scoot_look::Origin;
 use super::super::apply::{ApplyOptions, Availability, Checks, PREVIEW_SUPERSEDED, apply_with};
 use super::super::catalog::discover_ordered;
 use super::super::catalog::tests::{look_toml, scratch, write_look};
+use super::super::leaves::ScriptedLeaves;
 use super::super::reload::{BarReload, CompositorReload, ReloadError, Reloaded};
 use super::super::toolkit::Dconf;
 use super::{
@@ -203,6 +204,7 @@ fn apply(fixture: &Fixture, name: &str, preview: bool) {
         &bars,
         &FakeChecks,
         &FakeDconf,
+        &ScriptedLeaves::ok(),
     )
     .unwrap_or_else(|failure| panic!("{name} applies: {failure}"));
 }
@@ -370,6 +372,7 @@ fn a_preview_reverts_through_the_transaction() {
         &bars,
         &FakeChecks,
         &FakeDconf,
+        &ScriptedLeaves::ok(),
         Duration::from_millis(500),
     )
     .expect("a revert");
@@ -405,6 +408,7 @@ fn a_preview_never_undoes_a_newer_apply() {
         &bars,
         &FakeChecks,
         &FakeDconf,
+        &ScriptedLeaves::ok(),
         Duration::from_millis(500),
     )
     .expect("a late revert");
@@ -440,6 +444,7 @@ fn a_moved_generation_supersedes_a_live_preview_file() {
         &bars,
         &FakeChecks,
         &FakeDconf,
+        &ScriptedLeaves::ok(),
         Duration::from_millis(500),
     )
     .expect("a superseded revert");
@@ -476,6 +481,7 @@ fn a_newer_preview_owns_its_file() {
         &bars,
         &FakeChecks,
         &FakeDconf,
+        &ScriptedLeaves::ok(),
         Duration::from_millis(500),
     )
     .expect("a replaced revert");
@@ -552,6 +558,7 @@ fn the_generation_guard_refuses_atomically() {
         &bars,
         &FakeChecks,
         &FakeDconf,
+        &ScriptedLeaves::ok(),
     )
     .expect_err("a stale revert refuses");
     assert!(
@@ -669,6 +676,7 @@ fn compositor_calls_count_through_a_revert() {
         &bars,
         &FakeChecks,
         &FakeDconf,
+        &ScriptedLeaves::ok(),
         Duration::from_millis(500),
     )
     .expect("a revert with nothing running");
@@ -721,6 +729,7 @@ fn a_revert_waits_out_a_held_lock() {
         &bars,
         &FakeChecks,
         &FakeDconf,
+        &ScriptedLeaves::ok(),
         Duration::from_millis(1),
         200,
         Duration::from_millis(10),
@@ -757,6 +766,7 @@ fn a_revert_gives_up_when_the_lock_never_frees() {
         &bars,
         &FakeChecks,
         &FakeDconf,
+        &ScriptedLeaves::ok(),
         Duration::from_millis(1),
         3,
         Duration::from_millis(1),
@@ -793,6 +803,7 @@ fn a_revert_does_not_retry_a_refusal() {
         &bars,
         &FakeChecks,
         &FakeDconf,
+        &ScriptedLeaves::ok(),
         Duration::from_millis(1),
         3,
         Duration::from_millis(500),
@@ -868,6 +879,7 @@ fn unapply_restores_the_preview_written_toolkit_keys() {
         &bars,
         &FakeChecks,
         &dconf,
+        &ScriptedLeaves::ok(),
     )
     .unwrap_or_else(|failure| panic!("look-a applies: {failure}"));
     assert!(
@@ -1039,6 +1051,7 @@ fn guard_child_reverts_inside_a_sandboxed_home() {
         &bars,
         &FakeChecks,
         &FakeDconf,
+        &ScriptedLeaves::ok(),
         Duration::from_millis(500),
     )
     .expect("a revert with no home in the environment");
