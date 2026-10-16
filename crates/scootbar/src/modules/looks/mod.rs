@@ -47,6 +47,13 @@ pub const ID: &str = "looks";
 /// it.
 pub const DEFAULT_MARKER: char = '●';
 
+/// The pad an inactive row carries where the active row has its marker and
+/// gap: the bar's font is proportional (DejaVu Sans), where `●` runs about
+/// three spaces wide, so marker-plus-gap reads four. Exact for the default
+/// marker at any size (both scale together); a configured glyph icon is
+/// near one em itself, so the same four holds within a few pixels.
+const INACTIVE_PAD: &str = "    "; // Four spaces: the marker's width.
+
 /// The actions a binding or an agent may name: `apply N` runs
 /// `scoot look apply` for the picker's Nth row (what a row click does),
 /// refused past the picker's rows or with no `scoot` on PATH; `page N`
@@ -207,7 +214,8 @@ impl Looks {
     /// Fills the picker from `names` (catalog order) with `active`
     /// selected: the rows of this page, with `‹ prev` and `next ›` rows
     /// where there is another page. The active row carries the marker
-    /// before its name, as the power menu's row glyphs do. The rows
+    /// before its name, as the power menu's row glyphs do; every other row
+    /// keeps the marker's width in spaces, so the names align. The rows
     /// format into the popup's reused buffers (the scroll and
     /// draw paths allocate nothing); the `shown`
     /// snapshot keeps only this page, and the names list is rebuilt per
@@ -258,7 +266,7 @@ impl Looks {
                 )
             } else {
                 content.button(
-                    format_args!("{name}"),
+                    format_args!("{INACTIVE_PAD}{name}"),
                     "apply",
                     Some(index as i32),
                     false,

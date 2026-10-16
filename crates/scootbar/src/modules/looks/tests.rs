@@ -132,11 +132,11 @@ fn a_short_catalog_is_one_page_with_the_active_selected() {
     assert_eq!(
         labels(&content),
         vec![
-            ("look-00".to_owned(), "apply", Some(0), false, true),
-            ("look-01".to_owned(), "apply", Some(1), false, true),
+            ("    look-00".to_owned(), "apply", Some(0), false, true),
+            ("    look-01".to_owned(), "apply", Some(1), false, true),
             ("● look-02".to_owned(), "apply", Some(2), true, true),
-            ("look-03".to_owned(), "apply", Some(3), false, true),
-            ("look-04".to_owned(), "apply", Some(4), false, true),
+            ("    look-03".to_owned(), "apply", Some(3), false, true),
+            ("    look-04".to_owned(), "apply", Some(4), false, true),
         ]
     );
 }
@@ -152,9 +152,9 @@ fn a_glyph_icon_overrides_the_default_marker() {
     assert_eq!(
         labels(&content),
         vec![
-            ("look-00".to_owned(), "apply", Some(0), false, true),
+            ("    look-00".to_owned(), "apply", Some(0), false, true),
             ("★ look-01".to_owned(), "apply", Some(1), true, true),
-            ("look-02".to_owned(), "apply", Some(2), false, true),
+            ("    look-02".to_owned(), "apply", Some(2), false, true),
         ]
     );
 }
@@ -177,7 +177,7 @@ fn a_long_catalog_pages_past_the_widget_cap() {
     // 14 rows plus the next row: inside the 16-widget cap.
     assert_eq!(content.widgets().len(), PAGE_ROWS + 1);
     let rows = labels(&content);
-    assert_eq!(rows[0].0, "look-00");
+    assert_eq!(rows[0].0, "    look-00");
     assert!(!rows[0].3, "the first page selects nothing here");
     assert_eq!(
         rows[PAGE_ROWS],
@@ -195,7 +195,7 @@ fn a_long_catalog_pages_past_the_widget_cap() {
         rows[0],
         ("‹ prev".to_owned(), "page", Some(1), false, false)
     );
-    assert_eq!(rows[1].0, "look-28");
+    assert_eq!(rows[1].0, "    look-28");
     assert_eq!(
         rows[2],
         ("● look-29".to_owned(), "apply", Some(1), true, true)

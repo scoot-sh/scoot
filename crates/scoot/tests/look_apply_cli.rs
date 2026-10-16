@@ -441,6 +441,18 @@ impl Session {
             .expect("scoot msg runs")
     }
 
+    /// A live Wayland display for the pick tests: binds `name` under the
+    /// session's runtime dir (where `look_with` points `XDG_RUNTIME_DIR`)
+    /// and returns the held listener with the `WAYLAND_DISPLAY` value to
+    /// pass. The caller holds the listener while `scoot look` runs: the
+    /// probe dials this socket, never a compositor. Dropping it first is
+    /// itself a dead display.
+    fn display(&self, name: &str) -> (std::os::unix::net::UnixListener, String) {
+        use std::os::unix::net::UnixListener;
+        let held = UnixListener::bind(self.runtime.join(name)).expect("a live display socket");
+        (held, name.to_owned())
+    }
+
     fn check_look(&self, args: &[&str]) -> String {
         let out = self.look(args);
         assert!(
@@ -796,12 +808,13 @@ fn pick_applies_the_menu_choice() {
     let scratch = Scratch::new("pick-apply");
     let session = Session::start(&scratch);
     session.check_look(&["apply", "look-a"]);
-    // Fuzzel is Wayland-only, so `pick` needs the variable set; the stub
-    // menu never dials it.
+    // Fuzzel is Wayland-only, so `pick` probes the display socket before
+    // spawning; the stub menu never dials it.
+    let (_live, display) = session.display("wayland-live");
     let out = session.look_with(
         &["pick"],
         &[
-            ("WAYLAND_DISPLAY", "stub"),
+            ("WAYLAND_DISPLAY", display.as_str()),
             ("STUB_FUZZEL", "choose:look-b"),
         ],
     );
@@ -814,12 +827,37 @@ fn pick_cancel_applies_nothing_and_succeeds() {
     let scratch = Scratch::new("pick-cancel");
     let session = Session::start(&scratch);
     session.check_look(&["apply", "look-a"]);
+    let (_live, display) = session.display("wayland-live");
     let out = session.look_with(
         &["pick"],
-        &[("WAYLAND_DISPLAY", "stub"), ("STUB_FUZZEL", "cancel")],
+        &[
+            ("WAYLAND_DISPLAY", display.as_str()),
+            ("STUB_FUZZEL", "cancel"),
+        ],
     );
     assert!(out.status.success(), "a cancel succeeds: {out:?}");
     assert!(out.stdout.is_empty(), "a cancel prints nothing: {out:?}");
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+}
+
+#[test]
+fn pick_cancel_json_reports_a_null_apply() {
+    let scratch = Scratch::new("pick-cancel-json");
+    let session = Session::start(&scratch);
+    session.check_look(&["apply", "look-a"]);
+    let (_live, display) = session.display("wayland-live");
+    let out = session.look_with(
+        &["pick", "--json"],
+        &[
+            ("WAYLAND_DISPLAY", display.as_str()),
+            ("STUB_FUZZEL", "cancel"),
+        ],
+    );
+    assert!(out.status.success(), "a cancel succeeds: {out:?}");
+    let doc: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("a JSON cancel document");
+    assert_eq!(doc["applied"], serde_json::Value::Null);
+    assert_eq!(doc["cancelled"], serde_json::Value::Bool(true));
     assert_eq!(active_name(&session), Some("look-a".to_owned()));
 }
 
@@ -828,9 +866,13 @@ fn pick_failure_is_loud_and_applies_nothing() {
     let scratch = Scratch::new("pick-fail");
     let session = Session::start(&scratch);
     session.check_look(&["apply", "look-a"]);
+    let (_live, display) = session.display("wayland-live");
     let out = session.look_with(
         &["pick"],
-        &[("WAYLAND_DISPLAY", "stub"), ("STUB_FUZZEL", "fail")],
+        &[
+            ("WAYLAND_DISPLAY", display.as_str()),
+            ("STUB_FUZZEL", "fail"),
+        ],
     );
     assert_eq!(out.status.code(), Some(1), "a broken menu fails: {out:?}");
     let stderr = String::from_utf8(out.stderr).expect("UTF-8 stderr");
@@ -857,16 +899,96 @@ fn pick_without_a_display_names_it_loudly() {
 }
 
 #[test]
+fn pick_with_a_dead_display_names_it_loudly() {
+    let scratch = Scratch::new("pick-dead-display");
+    let session = Session::start(&scratch);
+    session.check_look(&["apply", "look-a"]);
+    // A stale WAYLAND_DISPLAY (an ssh session, a restarted compositor):
+    // no socket under the runtime dir. The stub would choose look-b, so
+    // look-a staying active proves the probe refused before spawning it.
+    let out = session.look_with(
+        &["pick"],
+        &[
+            ("WAYLAND_DISPLAY", "wayland-nonexistent"),
+            ("STUB_FUZZEL", "choose:look-b"),
+        ],
+    );
+    assert_eq!(out.status.code(), Some(1), "a dead display fails: {out:?}");
+    let stderr = String::from_utf8(out.stderr).expect("UTF-8 stderr");
+    assert!(
+        stderr.contains("Wayland display"),
+        "the failure names the display: {stderr}"
+    );
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+}
+
+#[test]
+fn pick_with_a_file_for_a_display_names_it_loudly() {
+    let scratch = Scratch::new("pick-file-display");
+    let session = Session::start(&scratch);
+    session.check_look(&["apply", "look-a"]);
+    // A plain file where the socket was is not connectable either.
+    std::fs::write(session.runtime.join("wayland-file"), "not a socket").expect("a plain file");
+    let out = session.look_with(
+        &["pick"],
+        &[
+            ("WAYLAND_DISPLAY", "wayland-file"),
+            ("STUB_FUZZEL", "choose:look-b"),
+        ],
+    );
+    assert_eq!(out.status.code(), Some(1), "a file display fails: {out:?}");
+    let stderr = String::from_utf8(out.stderr).expect("UTF-8 stderr");
+    assert!(
+        stderr.contains("Wayland display"),
+        "the failure names the display: {stderr}"
+    );
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+}
+
+#[test]
+fn pick_with_an_absolute_dead_display_names_it_loudly() {
+    let scratch = Scratch::new("pick-absent-display");
+    let session = Session::start(&scratch);
+    session.check_look(&["apply", "look-a"]);
+    // An absolute WAYLAND_DISPLAY names the socket itself, not one under
+    // the runtime dir.
+    let absent = session.runtime.join("wayland-absent");
+    let out = session.look_with(
+        &["pick"],
+        &[
+            ("WAYLAND_DISPLAY", absent.to_str().expect("UTF-8")),
+            ("STUB_FUZZEL", "choose:look-b"),
+        ],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "an absolute dead display fails: {out:?}"
+    );
+    let stderr = String::from_utf8(out.stderr).expect("UTF-8 stderr");
+    assert!(
+        stderr.contains("Wayland display"),
+        "the failure names the display: {stderr}"
+    );
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+}
+
+#[test]
 fn pick_without_fuzzel_names_it_loudly() {
     let scratch = Scratch::new("pick-no-fuzzel");
     let session = Session::start(&scratch);
     // A PATH with no menu at all: the failure names `fuzzel`, and nothing
-    // applies.
+    // applies. The display is live, so the probe passes and the spawn is
+    // what fails.
     let empty = scratch.sub("empty-path");
     let path = empty.to_string_lossy().into_owned();
+    let (_live, display) = session.display("wayland-live");
     let out = session.look_with(
         &["pick"],
-        &[("WAYLAND_DISPLAY", "stub"), ("PATH", path.as_str())],
+        &[
+            ("WAYLAND_DISPLAY", display.as_str()),
+            ("PATH", path.as_str()),
+        ],
     );
     assert_eq!(out.status.code(), Some(1), "no menu fails: {out:?}");
     let stderr = String::from_utf8(out.stderr).expect("UTF-8 stderr");

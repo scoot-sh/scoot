@@ -8,6 +8,8 @@
 //! and no Nix anywhere on this path, only `scoot` and `fuzzel` on PATH.
 
 use std::io::{Read as _, Write as _};
+use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 /// The menu on PATH, and its dmenu contract: lines on stdin, the pick on
@@ -19,6 +21,37 @@ const FUZZEL_ARGS: &[&str] = &["--dmenu", "--prompt=Look: "];
 /// anything past this is not a look name (names are short validated
 /// tokens) and is dropped before it can grow.
 const MENU_OUTPUT_MAX: u64 = 64 * 1024;
+
+/// The Wayland socket `pick` needs fuzzel to dial: an absolute
+/// `$WAYLAND_DISPLAY` is the socket itself, anything else hangs off
+/// `$XDG_RUNTIME_DIR`. `None` when the display is unset or empty, or a
+/// relative display has no runtime dir to hang off.
+pub fn wayland_socket() -> Option<PathBuf> {
+    let display = std::env::var_os("WAYLAND_DISPLAY")?;
+    if display.is_empty() {
+        return None;
+    }
+    let display = Path::new(&display);
+    if display.is_absolute() {
+        return Some(display.to_owned());
+    }
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")?;
+    if runtime.is_empty() {
+        return None;
+    }
+    Some(Path::new(&runtime).join(display))
+}
+
+/// Whether `path` takes a Wayland client right now: a connect succeeds.
+/// A stale `$WAYLAND_DISPLAY` (an ssh session, a restarted compositor)
+/// leaves no socket, or a plain file where the socket was; either way
+/// fuzzel's empty failure would look exactly like a cancel, so the caller
+/// refuses before spawning it. The probe's own connection comes and goes
+/// before fuzzel starts: the compositor sees one extra client that never
+/// sends anything.
+pub fn socket_live(path: &Path) -> bool {
+    UnixStream::connect(path).is_ok()
+}
 
 /// Runs the menu over `names`: the chosen name, or `None` on a cancel.
 /// Errors name fuzzel, never the catalog: a missing fuzzel, one that
@@ -97,7 +130,15 @@ fn menu_outcome(success: bool, output: &str) -> Result<Option<String>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::menu_outcome;
+    use super::{menu_outcome, socket_live};
+
+    /// A scratch dir, removed on drop.
+    fn scratch(tag: &str) -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix(&format!("scootctl-pick-{tag}-{}-", std::process::id()))
+            .tempdir()
+            .expect("a scratch dir")
+    }
 
     #[test]
     fn a_choice_is_the_first_line() {
@@ -116,5 +157,31 @@ mod tests {
     #[test]
     fn output_with_a_failure_is_loud_never_a_pick() {
         assert!(menu_outcome(false, "look-b\n").is_err());
+    }
+
+    #[test]
+    fn a_missing_socket_is_not_live() {
+        let scratch = scratch("missing");
+        assert!(!socket_live(&scratch.path().join("wayland-dead")));
+    }
+
+    #[test]
+    fn a_plain_file_is_not_a_live_socket() {
+        // A stale display can leave a regular file where the socket was;
+        // connecting refuses instead of dialing it.
+        let scratch = scratch("file");
+        let path = scratch.path().join("wayland-file");
+        std::fs::write(&path, "not a socket").expect("a plain file");
+        assert!(!socket_live(&path));
+    }
+
+    #[test]
+    fn a_bound_socket_is_live() {
+        use std::os::unix::net::UnixListener;
+        let scratch = scratch("bound");
+        let path = scratch.path().join("wayland-live");
+        let held = UnixListener::bind(&path).expect("a bound socket");
+        assert!(socket_live(&path));
+        drop(held);
     }
 }

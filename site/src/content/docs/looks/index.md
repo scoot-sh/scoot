@@ -73,10 +73,13 @@ scoot look pick                 # choose a look in fuzzel, apply it
 scoot look list --names         # names in catalog order, for scripting
 ```
 
-`pick` needs a Wayland display plus `scoot` and `fuzzel` on PATH;
+`pick` needs a live Wayland display plus `scoot` and `fuzzel` on PATH;
 `list` needs only `scoot`. No Nix, no running session either way. A
-cancel applies nothing; a missing display, a missing or broken fuzzel
-fails loudly instead of applying.
+cancel applies nothing and prints nothing (`{"applied": null,
+"cancelled": true}` under `--json`); a missing or stale display (an
+ssh session, a restarted compositor: no socket, or a plain file where
+the socket was), a missing or broken fuzzel fails loudly instead of
+applying.
 
 A swap reports three lists: what reloaded, what was skipped, and every
 shadowed key — a key in your own files that overrides a look token. A

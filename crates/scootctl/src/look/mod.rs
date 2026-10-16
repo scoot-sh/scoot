@@ -321,8 +321,9 @@ COMMANDS:
     prev        the previous catalog look before the active one, wrapping
     random      a random catalog look other than the active one
     pick        choose a look through fuzzel's dmenu and apply it (until
-                scootlaunch lands): needs a Wayland display and `fuzzel`
-                on PATH; a cancel applies nothing
+                scootlaunch lands): needs a live Wayland display and
+                `fuzzel` on PATH (a stale display with no socket refuses
+                like none at all); a cancel applies nothing
     sync        the home-manager rule: start on the declared default with
                 no state, switch when it changed, fall back when the live
                 choice left the catalog, else keep the live choice and
@@ -1175,14 +1176,20 @@ fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
 }
 
 /// Picks a look through fuzzel's dmenu and applies it: the keyboard
-/// picker until scootlaunch lands. A cancel applies nothing and succeeds;
-/// an empty catalog, no Wayland display, a missing or broken fuzzel, and
-/// the apply's own refusal all fail loudly.
+/// picker until scootlaunch lands. A cancel applies nothing and succeeds,
+/// printing nothing (a JSON `{"applied": null, "cancelled": true}` under
+/// `--json`); an empty catalog, no Wayland display, a stale one with no
+/// live socket, a missing or broken fuzzel, and the apply's own refusal
+/// all fail loudly.
 fn run_pick(look: &Look) -> Result<(), String> {
-    // Fuzzel is Wayland-only: without a display it cannot choose, and its
-    // empty failure looks exactly like a cancel — refuse loudly instead of
-    // exiting success having applied nothing.
-    if std::env::var_os("WAYLAND_DISPLAY").is_none_or(|display| display.is_empty()) {
+    // Fuzzel is Wayland-only: without a live display it cannot choose, and
+    // its empty failure looks exactly like a cancel — refuse loudly instead
+    // of exiting success having applied nothing. The probe dials the socket
+    // fuzzel would: a stale WAYLAND_DISPLAY (an ssh session, a restarted
+    // compositor) refuses like an unset one, so the only empty-output exit
+    // left is a real Esc.
+    let live = pick::wayland_socket().is_some_and(|path| pick::socket_live(&path));
+    if !live {
         return Err("needs a Wayland display for fuzzel to choose a look".to_owned());
     }
     let catalog = discover();
@@ -1195,6 +1202,16 @@ fn run_pick(look: &Look) -> Result<(), String> {
         .map(|entry| entry.name.clone())
         .collect();
     let Some(choice) = pick::menu_choice(&names)? else {
+        if look.json {
+            output::print_line(
+                &serde_json::to_string_pretty(&serde_json::json!({
+                    "applied": serde_json::Value::Null,
+                    "cancelled": true,
+                }))
+                .unwrap_or_default(),
+            )
+            .map_err(|error| error.to_string())?;
+        }
         return Ok(());
     };
     let options = ApplyOptions {
