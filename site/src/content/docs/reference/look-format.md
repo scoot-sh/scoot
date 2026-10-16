@@ -24,7 +24,6 @@ A rendered look is the output of a build: `scoot.toml`, `bar.toml`,
 daemon leaves (`mako`, `wob.ini`, `fcitx5/theme.conf`, `nightlight` when
 the look names a temperature). It is never edited and never a source for
 anything. The two never share a path.
-anything. The two never share a path.
 
 The catalog is the union of the source directories, in fixed order:
 user looks, installed looks, home-manager, system, shipped. Origin
@@ -248,11 +247,10 @@ and refuses one with it; resolve the catalog first. `build`
 writes `scoot.toml`, `bar.toml`, `gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`,
 `qt/scoot-look.conf`, `foot.ini` (only when the look has
 `[terminal]`), `render.json` and the daemon leaves into the output dir
-(never
-through a symlink, and never beside files it did not write). Both read `look.toml`
-only through a regular file opened without blocking: symlinks,
-directories, devices, FIFOs and
-sockets refuse. On Nix the same binary
+(never through a symlink, and never beside files it did not write). Both
+read `look.toml` only through a regular file opened without blocking:
+symlinks, directories, devices, FIFOs and sockets refuse. On Nix the same
+binary
 runs inside the render derivation with the look's font packages
 as build inputs. Exit nonzero names the field and the reason.
 

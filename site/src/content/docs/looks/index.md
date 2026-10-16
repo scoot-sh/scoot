@@ -31,9 +31,8 @@ shadowed.
 the state link, reloads each running app's look layer in order (the
 compositor first, then every bar of the session), and signals the
 third-party daemons (mako, fcitx5, the OSD and night-light units).
-Apps that are not running
-are skipped, never an error. With nothing running, only the link moves,
-and the next session starts on the new look. A shipped look needs its
+Apps that are not running are skipped, never an error. With nothing
+running, only the link moves, and the next session starts on the new look. A shipped look needs its
 Nerd Fonts installed; without them `apply` refuses and changes nothing.
 
 A swap reports three lists: what reloaded, what was skipped, and every
