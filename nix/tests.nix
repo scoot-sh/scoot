@@ -512,6 +512,14 @@ let
       type = lib.types.listOf lib.types.package;
       default = [ ];
     };
+    # The system environment's link list
+    # (`/run/current-system/sw`): the look catalog adds `share/scoot`
+    # beside nixpkgs' own subpaths (a plain string list, empty here
+    # like the real `system-path.nix` default).
+    options.environment.pathsToLink = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+    };
     options.services.displayManager.sessionPackages = lib.mkOption {
       type = lib.types.listOf lib.types.package;
       default = [ ];
@@ -1274,6 +1282,15 @@ let
     look = "moonrise";
   };
   osRealNoProfile = evalRealNixos { enable = true; };
+  # The system look catalog derivation from that same real evaluation
+  # (found by name, like `withoutCatalog` below): the shell check
+  # builds it and asserts the sources and renders land under
+  # `share/scoot/`, which `pathsToLink` (pinned at eval above) links
+  # into `/run/current-system/sw`.
+  osRealLookCatalog =
+    lib.findFirst (p: (p.name or "") == "scoot-looks-catalog")
+      (throw "no scoot-looks-catalog in the real NixOS system packages")
+      osRealDconf.config.environment.systemPackages;
   hmFlake = evalHomeWith flake.homeModule pkgs {
     enable = true;
     settings.wallpaper.color = "#1e1e2e";
@@ -1720,6 +1737,18 @@ let
     wallpaper.package = fakeBg;
     look = "moonrise";
   };
+  # ...with both runtime-relevant theme targets off: the opt-outs are
+  # recorded for the managed sync beside the declared default (in
+  # list order, one name per line).
+  hmLookTargetsOff = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    look = "moonrise";
+    desktop.theme.targets.cursor.enable = false;
+    desktop.theme.targets.fonts.enable = false;
+  };
   # The NixOS-module-only catalog: the same entries as a system
   # package, the declared default in `/etc/scoot/look-default`.
   osLookCatalog = evalNixos {
@@ -1727,6 +1756,16 @@ let
     package = fakePkg;
     desktop.enable = true;
     look = "moonrise";
+  };
+  # ...with both runtime-relevant theme targets off: the opt-outs are
+  # recorded for the login-time sync beside the declared default.
+  osLookTargetsOff = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    look = "moonrise";
+    desktop.theme.targets.cursor.enable = false;
+    desktop.theme.targets.fonts.enable = false;
   };
   # Explicitly unthemed: `look = null` opts out of the default look
   # (no appearance, no wallpaper, every themed slot inert).
@@ -5946,6 +5985,28 @@ let
         assert lib.any (p: (p.pname or "") == "dconf") osRealDconf.config.services.dbus.packages;
         assert !osRealDconfOff.config.programs.dconf.enable;
         assert !osRealNoProfile.config.programs.dconf.enable;
+        true
+      )
+      # The system look catalog reaches the runtime against real
+      # nixpkgs modules too (not just the stubs above): the profile
+      # with a look links `share/scoot` into `/run/current-system/sw`
+      # (nixpkgs' own default links only its own subpaths, never this
+      # one), and the declared default and its sidecar files land in
+      # `/etc/scoot`.
+      (
+        assert builtins.elem "/share/scoot" osRealDconf.config.environment.pathsToLink;
+        true
+      )
+      (
+        assert osRealDconf.config.environment.etc."scoot/look-default".text == "moonrise";
+        true
+      )
+      (
+        assert osRealDconf.config.environment.etc."scoot/look-nix-claims".text == "";
+        true
+      )
+      (
+        assert osRealDconf.config.environment.etc."scoot/look-nix-targets".text == "";
         true
       )
       # The documented install configs (desktop/index.md) evaluate with
@@ -11423,12 +11484,21 @@ let
       assert !(hmThemeQtOff.config.systemd.user.sessionVariables ? QT_QPA_PLATFORMTHEME);
       true
     )
+    # ...and each cursor/fonts opt-out is recorded for the managed
+    # sync beside the declared default (the compositor and bar configs
+    # carry no look values at all anymore, so "no `cursor_theme` in
+    # `settings`" holds with the target on too and pins nothing about
+    # the switch itself: the targets file below is the real pin)...
     (
-      assert !((hmThemeCursorOff.config.programs.scoot.settings.appearance or { }) ? cursor_theme);
+      assert hmThemeCursorOff.config.xdg.configFile."scoot/look-nix-targets".text == "cursor";
       true
     )
     (
       assert !(hmThemeCursorOff.config.systemd.user.sessionVariables ? XCURSOR_THEME);
+      true
+    )
+    (
+      assert hmThemeFontsOff.config.xdg.configFile."scoot/look-nix-targets".text == "fonts";
       true
     )
     (
@@ -11897,6 +11967,25 @@ let
       assert hmLookDefault.config.xdg.configFile."scoot/look-default".text == "ginger-night";
       true
     )
+    # ...the targets file rides beside the declared default: empty
+    # with every target on, absent with no catalog at all, and one
+    # opted-out name per line otherwise...
+    (
+      assert hmLookDefault.config.xdg.configFile."scoot/look-nix-targets".text == "";
+      true
+    )
+    (
+      assert !(hmLookNoPackage.config.xdg.configFile ? "scoot/look-nix-targets");
+      true
+    )
+    (
+      assert allAssertionsHold hmLookTargetsOff.config;
+      true
+    )
+    (
+      assert hmLookTargetsOff.config.xdg.configFile."scoot/look-nix-targets".text == "cursor\nfonts";
+      true
+    )
     # ...a custom look beside shipped ones: the manifest name is the
     # catalog name, each source and render installs, and the declared
     # default names it...
@@ -12011,6 +12100,28 @@ let
     )
     (
       assert osLookCatalog.config.environment.etc."scoot/look-nix-claims".text == "";
+      true
+    )
+    # ...the system environment links the catalog into
+    # `/run/current-system/sw`: only `pathsToLink` subpaths land
+    # there, so without the entry the package installs yet the
+    # runtime's `sw/share/scoot/{looks,rendered}` stays empty. The
+    # derivation itself carrying that tree is proven by the build
+    # below (10f).
+    (
+      assert builtins.elem "/share/scoot" osLookCatalog.config.environment.pathsToLink;
+      true
+    )
+    (
+      assert osLookCatalog.config.environment.etc."scoot/look-nix-targets".text == "";
+      true
+    )
+    (
+      assert allAssertionsHold osLookTargetsOff.config;
+      true
+    )
+    (
+      assert osLookTargetsOff.config.environment.etc."scoot/look-nix-targets".text == "cursor\nfonts";
       true
     )
     (
@@ -15102,6 +15213,23 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   assert "colors" not in got, got
   ' ${hmDeskBarGingerToml}
   echo "ok: desktop look leaves ginger-night out of the bar config"
+
+  # 10f. NixOS-module-only catalog, built: the derivation carries every
+  # look's sources and renders under `share/scoot/` (what `pathsToLink`
+  # links into `/run/current-system/sw`, pinned at eval above) — the
+  # full render, targets on: cursor keys in the scoot fragment, the
+  # bar font in the bar fragment.
+  ${lib.optionalString isLinux ''
+    for look in ginger-night moonrise music-desk radial-burst vinyl-sunset; do
+      test -e ${osRealLookCatalog}/share/scoot/looks/"$look"/look.toml
+      test -f ${osRealLookCatalog}/share/scoot/rendered/"$look"/scoot.toml
+      test -f ${osRealLookCatalog}/share/scoot/rendered/"$look"/bar.toml
+      test -f ${osRealLookCatalog}/share/scoot/rendered/"$look"/render.json
+    done
+    grep -q '^cursor_theme = ' ${osRealLookCatalog}/share/scoot/rendered/moonrise/scoot.toml
+    grep -q '^font = "' ${osRealLookCatalog}/share/scoot/rendered/moonrise/bar.toml
+    echo "ok: the system look catalog builds with sources and renders under share/scoot"
+  ''}
 
   # 11-12c. Idle policy and locker content (Linux only: every line
   # below names a Linux-only tool's store path, and the files

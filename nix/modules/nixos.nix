@@ -2342,7 +2342,7 @@ in
     # home-manager): one package carrying the sources and the renders
     # under `share/scoot/`, so they land at
     # `/run/current-system/sw/share/scoot/looks/<name>` and
-    # `.../rendered/<name>`. The declared default lands in
+    # `.../rendered/<name>` (through `pathsToLink` below). The declared default lands in
     # `/etc/scoot/look-default` (empty for null), beside an empty
     # claims file (no `dconf.settings` merge is visible from this
     # side — the home-manager side writes the real claims, and with no
@@ -2360,8 +2360,26 @@ in
           ) lookCatalog.names}
         '')
       ];
+      # The catalog above ships under `share/scoot`, but the system
+      # environment only links the `pathsToLink` subpaths of each
+      # package into `/run/current-system/sw` (nixpkgs' own list names
+      # `/share/emacs`, `/share/themes` and the like, never all of
+      # `/share`): without this line the package installs yet the
+      # runtime's `/run/current-system/sw/share/scoot/{looks,rendered}`
+      # stays empty and the login-time `scoot look sync` finds no
+      # catalog entry. Pinned in `nix/tests.nix` (eval plus a build of
+      # the catalog derivation itself).
+      environment.pathsToLink = [ "/share/scoot" ];
       environment.etc."scoot/look-default".text = if cfg.look == null then "" else cfg.look;
       environment.etc."scoot/look-nix-claims".text = "";
+      # The theme targets opted out, one name per line (see the
+      # home-manager side's `look-nix-targets` for what each line
+      # skips): the login-time `scoot look sync` reads this beside the
+      # declared default. Empty with every target on.
+      environment.etc."scoot/look-nix-targets".text = lib.concatStringsSep "\n" (
+        lib.optional (!cfg.desktop.theme.targets.cursor.enable) "cursor"
+        ++ lib.optional (!cfg.desktop.theme.targets.fonts.enable) "fonts"
+      );
     })
     # The bar half lives in the bar module (`nix/modules/scootbar.nix`
     # reads this profile): a set of `programs.scootbar` here would need
