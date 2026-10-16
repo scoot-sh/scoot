@@ -383,7 +383,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Per-session look state for headless and `--private-look` sessions](./resolved/look-session-state-done.md) (medium, computer use)
 - [`scoot look apply`: the atomic swap, scoped reloads, rollback](./resolved/look-apply-cli-done.md) (high) — RESOLVED 2026-10-15
 - [`scoot look next`/`prev`/`random` and timed previews](./core/look-cycle-preview.md) (medium)
-- [IPC: look-apply and looks requests, a look event](./ipc/look-ipc.md) (medium, computer use)
+- [IPC: look-apply and looks requests, a look event](./resolved/look-ipc-done.md) (medium, computer use) — RESOLVED 2026-10-15
 - [Golden screenshots per shipped look](./testing/look-golden-screenshots.md) (medium, computer use)
 - [Nix: the `programs.scoot.looks` catalog and the switch rule](./packaging/look-nix-catalog.md) (high, breaking)
 - [`scoot look import-base16`: the one base16-to-token mapping](./core/look-import-base16.md) (medium)

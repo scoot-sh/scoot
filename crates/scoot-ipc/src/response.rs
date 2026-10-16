@@ -246,6 +246,24 @@ pub struct Screenshot {
     pub png: Vec<u8>,
 }
 
+/// One source look in the catalog, as [`Response::Looks`] reports it: the
+/// same four columns `scoot look list` prints (name, title, polarity,
+/// origin) plus the source directory the winning entry was read from.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LookEntry {
+    /// The look's name (its `name`, matching its directory).
+    pub name: String,
+    /// Display text, if the manifest carries one.
+    pub title: String,
+    /// `dark` or `light`.
+    pub polarity: String,
+    /// Which catalog rung won it: `user`, `installed`, `declared` or
+    /// `shipped`.
+    pub origin: String,
+    /// The source directory the winning entry was read from.
+    pub source: String,
+}
+
 /// One row of the live keymap: what one combo does, in the canonical
 /// spelling the config file's `[binds]` would use for it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -505,6 +523,47 @@ pub enum Response {
     Binds {
         bindings: Vec<BindRow>,
         skipped: Vec<SkippedBind>,
+    },
+    /// The answer to [`Request::LookApply`](crate::Request::LookApply): the
+    /// swap ran to completion in the child and the reply below is what it
+    /// reported -- answered when the child exits, off the loop like
+    /// `WaitIdle`, never before the swap lands.
+    ///
+    /// `name` is the look now active; `applied` the apps reloaded, in
+    /// order (`compositor`, `bar <display>`, ...); `refused` is empty on
+    /// this reply (a refusal fails the swap and answers `Error` instead,
+    /// naming the rollback); `shadowed` every user-file key that
+    /// overrides a look token. A swap refused before anything ran (an
+    /// unknown look, a bad name, a second swap while one runs) answers
+    /// `Error` with nothing touched.
+    ///
+    /// A new variant, so this moves `PROTOCOL_VERSION` 11 → 12 (see that
+    /// constant's doc): an older client handed one would fail its decode,
+    /// which can only happen to a client new enough to have asked. An
+    /// older server meets the new request tag with an ordinary `Error`,
+    /// like any unknown request tag -- so a `look-apply` against one
+    /// fails open (no swap, no silent partial), never misread.
+    LookApplied {
+        name: String,
+        applied: Vec<String>,
+        refused: Vec<String>,
+        shadowed: Vec<String>,
+    },
+    /// The answer to [`Request::Looks`](crate::Request::Looks): the
+    /// catalog in search order, the active look's name (`None` with no
+    /// recorded choice), and the session's state directory -- what
+    /// `scoot look list` and `scoot look current` read from local files,
+    /// for a client that has no files.
+    ///
+    /// A new variant, sharing the 11 → 12 `PROTOCOL_VERSION` move with
+    /// `LookApplied` above: an older client handed one would fail its
+    /// decode, which can only happen to a client new enough to have
+    /// asked. An older server meets the new request tag with an ordinary
+    /// `Error`, like any unknown request tag.
+    Looks {
+        looks: Vec<LookEntry>,
+        active: Option<String>,
+        state_dir: String,
     },
     Error {
         message: String,

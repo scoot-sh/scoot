@@ -29,6 +29,7 @@ mod connection;
 mod events;
 mod line;
 mod listener;
+pub(super) mod look_apply;
 mod outbound;
 mod slots;
 #[cfg(test)]
@@ -726,6 +727,26 @@ impl State {
             // failure, not a request that quietly appears to work while
             // answering wrong.
             Request::WaitIdle { .. } => unreachable!("WaitIdle is answered by Connection::step"),
+            // Connection::step() intercepts and parks this variant itself
+            // (see above) before handle_request is ever called: the reply
+            // waits on the apply child's exit, off the loop like
+            // `WaitIdle`. If this ever fires, that interception was
+            // bypassed -- answer an error rather than running a second,
+            // synchronous swap path beside the parked one (two paths
+            // would be the `Tty::active` class of bug `CLAUDE.md` warns
+            // about: one name meaning two things at two sites), and fail
+            // loudly in debug builds so a test catches the bypass.
+            Request::LookApply { .. } => {
+                debug_assert!(
+                    false,
+                    "LookApply reached handle_request; Connection::serve must intercept it"
+                );
+                Response::error("could not swap the look: internal routing error")
+            }
+            // Session-level like `outputs`: the catalog the tool reads
+            // from local files, for a client that has no files -- answered
+            // synchronously, never refused while locked.
+            Request::Looks => self.request_looks(),
         }
     }
 

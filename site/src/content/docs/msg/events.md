@@ -197,4 +197,7 @@ is protocol 11: the `look_changed` tag on the new `look` kind. A client that
 never sends `subscribe` (or `keyboard`, or `locked`) never receives any of them. An unknown event kind
 in a `subscribe` is answered with an ordinary `error` like any unknown
 request tag, so an older server meets a newer subscriber with an error,
-not a kill.
+not a kill. The look swap itself is protocol 12: the `look_apply` and
+`looks` request tags with their `look_applied` and `looks` replies --
+an older server answers either request with an ordinary `error`, never a
+misapplied swap.
