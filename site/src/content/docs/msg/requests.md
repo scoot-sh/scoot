@@ -276,7 +276,9 @@ answers off the loop when the child exits, so one swap at a time (a
 second is refused).
 A timed preview (`{"type":"look_apply","name":"moonrise","for_ms":20000}`
 on the raw socket; `scoot msg` sends a stay) swaps back when the hold
-expires, unless a newer choice moved meanwhile. Zero holds nothing (a
+expires, unless a newer choice moved meanwhile. A swap still running when
+the hold expires holds the revert until it finishes, then re-checks, so
+the preview never sticks with no timer left. Zero holds nothing (a
 stay, like omitting it). A restart drops a pending revert -- the swap
 stays. The reply lands when the
 swap's reloads complete: ring, background and cursor are on screen with

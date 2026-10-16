@@ -248,7 +248,7 @@ scale = 1.0
 "super+n" = "focus-column right"
 "super+shift+n" = "move-column right"
 "super+t" = "spawn foot"
-"super+shift+t" = "spawn foot -e htop"
+"super+y" = "spawn foot -e htop"
 "ctrl+alt+space" = "spawn fuzzel"
 
 [autostart]

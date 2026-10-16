@@ -193,6 +193,7 @@ fn parked_swap() -> PendingLookApply {
         finished: false,
         last_progress: now,
         client: None,
+        revert_guard: None,
     }
 }
 
@@ -286,4 +287,154 @@ fn a_preview_with_no_recorded_choice_refuses() {
         "names the missing revert"
     );
     assert!(state.pending_look.is_none(), "nothing spawned");
+}
+
+/// A state dir holding a recorded choice at `generation`.
+fn recorded_state(generation: u64) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("a state dir");
+    scoot_look::state::write_record(
+        dir.path(),
+        &scoot_look::state::Record {
+            name: "look-b".to_owned(),
+            rendered: "/cache/look-b".to_owned(),
+            generation,
+            chosen_by: Some("apply".to_owned()),
+            declared_default: None,
+            toolkit: None,
+            dconf_wrote: Default::default(),
+            dconf_orig: Default::default(),
+        },
+    )
+    .expect("a record");
+    dir
+}
+
+#[test]
+fn lock_contention_is_a_wait_not_a_refusal() {
+    assert!(is_lock_contention(
+        "cannot lock /s/look.lock: another writer holds it (os error 11)"
+    ));
+    assert!(!is_lock_contention(
+        "preview superseded: the choice moved past generation 7 (now 8): not reverting"
+    ));
+    assert!(!is_lock_contention("refused: unknown look `nope`"));
+}
+
+#[test]
+fn a_revert_waits_stashed_while_a_swap_runs() {
+    let mut state = gate_state();
+    let dir = recorded_state(7);
+    state.private_look_dir = Some(dir.path().to_owned());
+    // A swap still running when the timer fires: the revert stashes
+    // instead of dropping, and the running swap is untouched (nothing
+    // spawns, nothing is answered early).
+    state.pending_look = Some(parked_swap());
+    state.revert_look_preview("look-a".into(), 7, dir.path().to_owned(), 3);
+    let deferred = state.deferred_look_revert.as_ref().expect("stashed");
+    assert_eq!(deferred.previous, "look-a");
+    assert_eq!(deferred.generation, 7);
+    assert_eq!(deferred.retries, 3);
+    assert_eq!(
+        state.pending_look.as_ref().expect("still parked").name,
+        "look-a"
+    );
+}
+
+#[test]
+fn a_revert_stands_down_without_stashing_when_the_choice_moved() {
+    let mut state = gate_state();
+    let dir = recorded_state(8);
+    state.private_look_dir = Some(dir.path().to_owned());
+    state.pending_look = Some(parked_swap());
+    // A newer choice: no stash, no spawn -- standing down is the answer.
+    state.revert_look_preview("look-a".into(), 7, dir.path().to_owned(), 3);
+    assert!(
+        state.deferred_look_revert.is_none(),
+        "a moved generation stashes nothing"
+    );
+    assert_eq!(
+        state.pending_look.as_ref().expect("still parked").name,
+        "look-a"
+    );
+}
+
+#[test]
+fn a_deferred_revert_stands_down_once_the_choice_moved() {
+    let mut state = gate_state();
+    let dir = recorded_state(8);
+    state.private_look_dir = Some(dir.path().to_owned());
+    // Stashed during a swap that then landed a newer choice: running it
+    // consumes the stash and spawns nothing.
+    state.deferred_look_revert = Some(DeferredLookRevert {
+        previous: "look-a".into(),
+        generation: 7,
+        state_dir: dir.path().to_owned(),
+        retries: 3,
+    });
+    state.run_deferred_look_revert();
+    assert!(
+        state.deferred_look_revert.is_none(),
+        "the stash is consumed"
+    );
+    assert!(
+        state.pending_look.is_none(),
+        "a moved generation spawns no revert"
+    );
+}
+
+#[test]
+fn a_draining_reply_holds_the_revert_until_it_clears() {
+    let mut state = gate_state();
+    let dir = recorded_state(7);
+    state.private_look_dir = Some(dir.path().to_owned());
+    // A finished entry only drains its reply, but spawning over it would
+    // still drop the queued tail: the revert stashes all the same, and
+    // `settle_look` runs it once the drain clears.
+    let mut draining = parked_swap();
+    draining.finished = true;
+    state.pending_look = Some(draining);
+    state.revert_look_preview("look-a".into(), 7, dir.path().to_owned(), 3);
+    assert!(
+        state.deferred_look_revert.is_some(),
+        "a draining entry stashes like a running one"
+    );
+    assert!(
+        state.pending_look.is_some(),
+        "the draining entry is untouched"
+    );
+}
+
+#[test]
+fn a_finished_swap_runs_and_consumes_its_deferred_revert() {
+    let mut state = gate_state();
+    let dir = recorded_state(8);
+    state.private_look_dir = Some(dir.path().to_owned());
+    let now = Instant::now();
+    state.pending_look = Some(PendingLookApply {
+        pid: None,
+        stdout: None,
+        name: "look-b".into(),
+        for_ms: None,
+        previous: None,
+        started: now,
+        finished: true,
+        last_progress: now,
+        client: None,
+        revert_guard: None,
+    });
+    state.deferred_look_revert = Some(DeferredLookRevert {
+        previous: "look-a".into(),
+        generation: 7,
+        state_dir: dir.path().to_owned(),
+        retries: 3,
+    });
+    state.finish_look_apply(ChildEnd::Unknown);
+    assert!(
+        state.deferred_look_revert.is_none(),
+        "the stash is consumed"
+    );
+    assert!(
+        state.pending_look.is_none(),
+        "a moved generation spawns no revert"
+    );
 }

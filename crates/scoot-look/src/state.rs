@@ -53,6 +53,11 @@ pub const RECORD_FILE: &str = "look.json";
 pub const LINK_NAME: &str = "look";
 /// The lock filename inside a state dir, taken by every writer.
 pub const LOCK_FILE: &str = "look.lock";
+/// The timed-preview file inside a state dir: what a `--for` preview
+/// reverts to, and the generation it reverts from. The reverter does
+/// nothing when the file is gone (`--keep`) or the generation moved (a
+/// later apply). Machine-written JSON, read capped like the record.
+pub const PREVIEW_FILE: &str = "look-preview.json";
 /// The private dir's prefix under `$XDG_RUNTIME_DIR`: `scoot-look-<display>`.
 pub const PRIVATE_PREFIX: &str = "scoot-look-";
 
@@ -816,6 +821,11 @@ pub struct StateLock {
 /// FIFO or any other non-regular file at its path refuses rather than
 /// locking something else. The parent dir must exist (startup and the tool
 /// create the state dir before locking it).
+///
+/// A wait that runs out reports [`LOCK_CONTENDED`]: callers that retry on
+/// contention (the detached preview reverter) match on it rather than on
+/// the whole message.
+pub const LOCK_CONTENDED: &str = "another writer holds it";
 pub fn acquire_lock(dir: &Path, wait: Duration) -> Result<StateLock, String> {
     let path = dir.join(LOCK_FILE);
     let fd = rustix::fs::open(
@@ -847,7 +857,7 @@ pub fn acquire_lock(dir: &Path, wait: Duration) -> Result<StateLock, String> {
             }
             Err(errno) => {
                 return Err(format!(
-                    "cannot lock {}: another writer holds it ({errno})",
+                    "cannot lock {}: {LOCK_CONTENDED} ({errno})",
                     path.display()
                 ));
             }

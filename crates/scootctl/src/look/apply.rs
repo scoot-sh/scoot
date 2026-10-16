@@ -40,12 +40,18 @@ use scoot_look::{
 };
 
 use super::catalog::{Catalog, Entry, cache_home, config_home};
+use super::cycle::{Preview, PreviewRead, clear_preview, read_preview, write_preview};
 use super::foot::foot_notes;
 use super::reload::{BarReload, CompositorReload, ReloadError};
 use super::toolkit::{Dconf, apply_toolkit, apply_toolkit_files};
 
 /// How long a second writer waits on `<state>/look.lock` before refusing.
 pub const LOCK_WAIT: Duration = Duration::from_secs(10);
+
+/// The refusal prefix when a guarded revert finds the choice moved: the
+/// reverter maps this back to "superseded, do nothing" rather than a
+/// failure. Intra-crate, matched with `starts_with`.
+pub const PREVIEW_SUPERSEDED: &str = "preview superseded:";
 
 /// The largest wallpaper image accepted without `scootbg`: the same 32 MiB
 /// as scootbg's own download cap (`crates/scootbg/src/fetch.rs`
@@ -66,6 +72,15 @@ pub struct ApplyOptions {
     /// else: the child still renders, records, repoints and drives every
     /// scoped reload itself.
     pub from_compositor: bool,
+    /// Arm a timed preview (`apply --for`): on success the preview file
+    /// records this swap's generation and the previous choice, so the
+    /// detached reverter can restore it.
+    pub preview: bool,
+    /// Revert only while the live generation still equals this (the
+    /// detached reverter's guard): a later apply moved the choice, so the
+    /// revert refuses as superseded rather than undoing a newer choice.
+    /// Checked under the lock before anything is touched.
+    pub only_if_generation: Option<u64>,
 }
 
 /// What one `apply` did.
@@ -87,6 +102,9 @@ pub struct ApplyReport {
     pub shadowed: Vec<String>,
     /// User-file keys that failed to parse and fell back to the look.
     pub invalid: Vec<String>,
+    /// The pending preview this swap armed (`apply --for`), if any: what
+    /// the detached reverter restores, and the generation it reverts from.
+    pub preview: Option<Preview>,
 }
 
 /// Why an `apply` did not swap: the refusal, and what the rollback did.
@@ -1736,6 +1754,19 @@ pub fn apply_with_live(
             )));
         }
     };
+    // A guarded revert (the detached `--for` child) lands here holding no
+    // lock of its own; the check runs under this swap's lock, atomically
+    // with the swap itself, so a concurrent newer apply can never slip
+    // between the check and the repoint.
+    if let Some(want) = options.only_if_generation {
+        let have = previous.as_ref().map(|record| record.generation);
+        if have != Some(want) {
+            return Err(refuse(format!(
+                "{PREVIEW_SUPERSEDED} the choice moved past generation {want} (now {}): not reverting",
+                have.map_or("nothing".to_owned(), |generation| generation.to_string()),
+            )));
+        }
+    }
     let entry = catalog
         .find(name)
         .ok_or_else(|| refuse(unknown_look(name, catalog)))?;
@@ -2095,6 +2126,39 @@ pub fn apply_with_live(
     }
     keep.extend(live.iter().cloned());
     prune_cache(cache, &keep, &mut report.notes);
+    if options.preview {
+        let planned = Preview {
+            revert_to: previous.as_ref().map(|prior| prior.name.clone()),
+            from_generation: generation,
+        };
+        if let Err(error) = write_preview(state_dir, &planned) {
+            // The swap applied but its timer never armed: without the
+            // file the look would stick past the delay, so roll back to
+            // the previous choice loudly rather than keep a preview that
+            // can never revert.
+            let failure = ApplyFailure {
+                message: format!("cannot arm the preview: {error}"),
+                rolled_back_to: None,
+                rollback_errors: Vec::new(),
+            };
+            return rollback(
+                state_dir,
+                previous.as_ref(),
+                &record,
+                completed_compositor,
+                &completed_bars,
+                compositor,
+                bars,
+                failure,
+            );
+        }
+        report.preview = Some(planned);
+    } else if matches!(read_preview(state_dir), PreviewRead::Present(_)) {
+        // A plain apply supersedes any pending preview (its generation
+        // moved by construction): forget the dead file so `--keep` and a
+        // late reverter never trip over it.
+        clear_preview(state_dir);
+    }
     report.name = name.to_owned();
     report.rendered = record.rendered.clone();
     report.generation = generation;

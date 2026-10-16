@@ -28,6 +28,7 @@ The whole map on one card:
 | <kbd>Super</kbd>+<kbd>Space</kbd> / +<kbd>Shift</kbd>+<kbd>Space</kbd> | focus floating vs strip / float or un-float |
 | <kbd>Super</kbd>+<kbd>Return</kbd> / <kbd>q</kbd> / <kbd>Shift</kbd>+<kbd>e</kbd> | terminal / close window / quit |
 | <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> | show the live keymap (this page, in a terminal) |
+| <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>t</kbd> | next look (wraps; nothing while locked) |
 
 ## Move around
 
@@ -73,6 +74,17 @@ is only valid against the list it was read from.)
 | <kbd>Super</kbd>+<kbd>q</kbd> | Close the focused window | `close` |
 | <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>e</kbd> | Quit scoot | `quit` |
 | <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>/</kbd> | Show the live keymap in a terminal pager | `show-keymap` |
+
+## Looks
+
+| Keys | Does | Action |
+|---|---|---|
+| <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>t</kbd> | Next look (wraps through the catalog) | `spawn scoot look next` |
+
+The bind does nothing while the session is locked. The desktop visibly
+changes on each step; `scoot look current` names the active look. See
+[Looks](../looks/index.md#cycle-and-preview) for `prev`, `random` and
+timed previews.
 
 Quit is <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>e</kbd> rather than
 <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>q</kbd>: one slipped Shift away from

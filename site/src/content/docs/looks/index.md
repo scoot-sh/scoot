@@ -15,10 +15,35 @@ and authors looks with these commands alone.
 scoot look list                       # the catalog, in search order
 scoot look show moonrise              # tokens, wallpaper, fonts, contrast
 scoot look apply moonrise             # render, validate, swap, reload
+scoot look next                       # step through the catalog (wraps)
+scoot look apply moonrise --for 20    # preview 20 seconds, then revert
 scoot look current                    # the active look and shadowed keys
 scoot look validate ./my-look         # check a directory without touching anything
 scoot look build ./my-look --out /tmp/my-look   # render without applying
 ```
+
+## Cycle and preview
+
+`next` and `prev` step through the catalog in `list` order, wrapping at
+either end. `random` picks a random look other than the active one, and
+stays when the catalog holds one look. `Super+Shift+T` steps to the next
+look; it does nothing while the session is locked. Each step applies
+through the same transaction as `apply`, with the same reloads and
+rollback. Two quick presses can land on the same look: each press picks
+its target before the swap takes its lock.
+
+`apply NAME --for SECONDS` previews a look and reverts after the delay.
+The revert records the generation it reverts from: a newer `apply` before
+the timer fires cancels the revert, so a preview never undoes a newer
+choice. A preview over a pending preview chains the reverts: each timer
+restores the choice it replaced, and an older timer stands down once a
+newer choice lands. The timer is a detached child of the applying CLI, so
+closing the terminal never strands it, and a compositor restart does not
+drop it either (only the IPC `for_ms` timer is dropped by a restart). A
+swap running when the delay ends waits the reverter out (bounded retries
+with the guard re-checked), instead of dropping the revert. `scoot look
+apply --keep` keeps the preview (and cancels the timer); `apply NAME
+--keep` applies for good and cancels any pending preview.
 
 ## Pick and apply
 

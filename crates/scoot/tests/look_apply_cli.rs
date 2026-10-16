@@ -676,3 +676,127 @@ fn a_swap_renders_the_terminal_fragment_for_new_foot() {
         "a setup hint survives the include:\n{stderr}"
     );
 }
+/// The active look's name from `current --json` (None when nothing applied).
+fn active_name(session: &Session) -> Option<String> {
+    let out = session.look(&["current", "--json"]);
+    assert!(out.status.success(), "current answers");
+    let doc: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).expect("UTF-8")).expect("JSON");
+    doc.get("active")
+        .and_then(|active| active.get("name"))
+        .and_then(|name| name.as_str())
+        .map(str::to_owned)
+}
+
+/// The active generation from `current --json`.
+fn active_generation(session: &Session) -> Option<u64> {
+    let out = session.look(&["current", "--json"]);
+    assert!(out.status.success(), "current answers");
+    let doc: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).expect("UTF-8")).expect("JSON");
+    doc.get("active")
+        .and_then(|active| active.get("generation"))
+        .and_then(|generation| generation.as_u64())
+}
+
+#[test]
+fn cycle_next_prev_and_random_walk_the_catalog() {
+    let scratch = Scratch::new("cycle");
+    let session = Session::start(&scratch);
+    session.check_look(&["apply", "look-a"]);
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+    session.check_look(&["next"]);
+    assert_eq!(active_name(&session), Some("look-b".to_owned()));
+    // Wraps past the end.
+    session.check_look(&["next"]);
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+    // Wraps past the start.
+    session.check_look(&["prev"]);
+    assert_eq!(active_name(&session), Some("look-b".to_owned()));
+    session.check_look(&["prev"]);
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+    // `random` never repeats the active look: with two looks it flips.
+    session.check_look(&["random"]);
+    assert_eq!(active_name(&session), Some("look-b".to_owned()));
+    session.check_look(&["random"]);
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+}
+
+#[test]
+fn a_timed_preview_reverts_through_the_live_reload() {
+    let scratch = Scratch::new("preview-revert");
+    let session = Session::start(&scratch);
+    session.check_look(&["apply", "look-a"]);
+    // The CLI returns at once (the timer is detached); the revert lands
+    // after the delay through the same scoped reloads an apply uses.
+    session.check_look(&["apply", "look-b", "--for", "2"]);
+    assert_eq!(active_name(&session), Some("look-b".to_owned()));
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        if active_name(&session).as_deref() == Some("look-a") {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the preview never reverted to look-a"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+#[test]
+fn keep_holds_a_preview_past_its_delay() {
+    let scratch = Scratch::new("preview-keep");
+    let session = Session::start(&scratch);
+    session.check_look(&["apply", "look-a"]);
+    session.check_look(&["apply", "look-b", "--for", "3"]);
+    session.check_look(&["apply", "--keep"]);
+    assert_eq!(active_name(&session), Some("look-b".to_owned()));
+    // Past the delay: the kept look stays, and the timer is gone.
+    std::thread::sleep(Duration::from_secs(5));
+    assert_eq!(active_name(&session), Some("look-b".to_owned()));
+    let out = session.look(&["apply", "--keep"]);
+    assert!(
+        !out.status.success(),
+        "a second keep refuses: nothing is pending"
+    );
+}
+
+#[test]
+fn a_preview_never_undoes_a_newer_apply_live() {
+    let scratch = Scratch::new("preview-newer");
+    let session = Session::start(&scratch);
+    session.check_look(&["apply", "look-a"]);
+    session.check_look(&["apply", "look-b", "--for", "2"]);
+    let previewed = active_generation(&session).expect("a generation");
+    session.check_look(&["apply", "look-a"]);
+    let newer = active_generation(&session).expect("a generation");
+    assert!(newer > previewed, "the newer apply moved the generation");
+    // Past the first preview's delay: the newer choice stands.
+    std::thread::sleep(Duration::from_secs(4));
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+    assert_eq!(active_generation(&session), Some(newer));
+}
+
+#[test]
+fn a_first_choice_preview_clears_the_layer_live() {
+    // No apply yet: the preview is the first choice, so the revert
+    // clears the layer (restoring the toolkit keys the preview wrote)
+    // instead of restoring a look.
+    let scratch = Scratch::new("preview-first");
+    let session = Session::start(&scratch);
+    assert_eq!(active_name(&session), None, "nothing applied yet");
+    session.check_look(&["apply", "look-a", "--for", "2"]);
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        if active_name(&session).is_none() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the first-choice preview never cleared"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}

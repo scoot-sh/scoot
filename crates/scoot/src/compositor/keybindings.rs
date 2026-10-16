@@ -234,6 +234,21 @@ impl Default for Keybindings {
                 Keysym::slash,
                 Bound::Action(Action::ShowKeymap),
             ),
+            // Cycle the desktop look: the next catalog look, wrapping.
+            // Fires once and never while locked (the default flags): a swap
+            // repaints pixels the lock screen owns, so it waits for unlock.
+            // The desktop visibly changes and the compositor emits its look
+            // event; a bar look-name module or a toast (with the picker and
+            // notify work) names the new look.
+            (
+                SUPER_SHIFT,
+                Keysym::t,
+                Bound::Action(Action::Spawn(vec![
+                    "scoot".into(),
+                    "look".into(),
+                    "next".into(),
+                ])),
+            ),
             // Deliberately not Super+Shift+q: that's one slipped Shift away
             // from Super+q (close-focused), and a slip shouldn't be able to
             // end the whole session.
@@ -784,6 +799,26 @@ mod tests {
         assert_eq!(
             matched(&table, Keysym::slash, SUPER_SHIFT),
             Some(Bound::Action(Action::ShowKeymap))
+        );
+    }
+
+    #[test]
+    fn super_shift_t_cycles_the_look_and_stays_locked_out() {
+        // The look-cycle bind (D8): `scoot look next`, wrapping through
+        // the catalog. Default flags, so a `spawn` without
+        // `allow_when_locked` never fires while locked (see `shell.rs`):
+        // a swap repaints pixels the lock screen owns.
+        let table = Keybindings::default();
+        assert_eq!(
+            table.match_key(Keysym::t, SUPER_SHIFT),
+            Some((
+                Bound::Action(Action::Spawn(vec![
+                    "scoot".into(),
+                    "look".into(),
+                    "next".into()
+                ])),
+                BindFlags::default(),
+            ))
         );
     }
 
