@@ -33,6 +33,7 @@ fn verbs_parse_bare() {
             from_compositor: false,
             for_secs: None,
             keep: false,
+            only_if_generation: None,
         })
     );
     assert_eq!(
@@ -43,6 +44,7 @@ fn verbs_parse_bare() {
             from_compositor: true,
             for_secs: None,
             keep: false,
+            only_if_generation: None,
         })
     );
     assert_eq!(command(&["toolkit"]), Ok(Command::Toolkit { action: None }));
@@ -113,6 +115,7 @@ fn json_state_and_socket_ride_anywhere() {
             from_compositor: false,
             for_secs: None,
             keep: false,
+            only_if_generation: None,
         }
     );
 }
@@ -154,6 +157,7 @@ fn apply_for_and_keep_parse() {
             from_compositor: false,
             for_secs: Some(20),
             keep: false,
+            only_if_generation: None,
         })
     );
     assert_eq!(
@@ -164,6 +168,7 @@ fn apply_for_and_keep_parse() {
             from_compositor: false,
             for_secs: Some(20),
             keep: false,
+            only_if_generation: None,
         })
     );
     assert_eq!(
@@ -174,6 +179,7 @@ fn apply_for_and_keep_parse() {
             from_compositor: false,
             for_secs: None,
             keep: true,
+            only_if_generation: None,
         })
     );
     assert_eq!(
@@ -184,6 +190,7 @@ fn apply_for_and_keep_parse() {
             from_compositor: false,
             for_secs: None,
             keep: true,
+            only_if_generation: None,
         })
     );
     // A preview that is kept needs no timer.
@@ -206,6 +213,45 @@ fn apply_for_and_keep_parse() {
     assert_eq!(
         command(&["apply", "--for", "20"]),
         Err(Error::Missing("a look name"))
+    );
+}
+
+#[test]
+fn apply_only_if_generation_parses() {
+    // The compositor's timed-preview revert passes the generation its
+    // preview wrote; a newer choice refuses as superseded, never undone.
+    assert_eq!(
+        command(&["apply", "moonrise", "--only-if-generation", "7"]),
+        Ok(Command::Apply {
+            name: Some("moonrise".to_owned()),
+            no_toolkit: false,
+            from_compositor: false,
+            for_secs: None,
+            keep: false,
+            only_if_generation: Some(7),
+        })
+    );
+    assert_eq!(
+        command(&["apply", "moonrise", "--only-if-generation=7"]),
+        Ok(Command::Apply {
+            name: Some("moonrise".to_owned()),
+            no_toolkit: false,
+            from_compositor: false,
+            for_secs: None,
+            keep: false,
+            only_if_generation: Some(7),
+        })
+    );
+    assert_eq!(
+        command(&["apply", "moonrise", "--only-if-generation"]),
+        Err(Error::Missing("a generation after --only-if-generation"))
+    );
+    assert_eq!(
+        command(&["apply", "moonrise", "--only-if-generation", "soon"]),
+        Err(Error::Invalid {
+            what: "--only-if-generation",
+            value: "soon".to_owned(),
+        })
     );
 }
 

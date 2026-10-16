@@ -78,6 +78,7 @@ pub enum Command {
         from_compositor: bool,
         for_secs: Option<u64>,
         keep: bool,
+        only_if_generation: Option<u64>,
     },
     /// The next, previous or a random catalog look, in search order.
     Cycle { step: CycleStep },
@@ -110,7 +111,7 @@ pub const LOOK_USAGE: &str = "\
     look show NAME [--json]
     look validate DIR|NAME [--origin shipped|declared|user|installed] [--json]
     look build DIR|NAME --out DIR [--origin shipped|declared|user|installed] [--json]
-    look apply [NAME] [--for SECONDS] [--keep] [--no-toolkit] [--from-compositor] [--json]
+    look apply [NAME] [--for SECONDS] [--keep] [--no-toolkit] [--from-compositor] [--only-if-generation N] [--json]
     look next|prev|random [--json]
     look toolkit [on|off] [--json]
 
@@ -288,7 +289,11 @@ COMMANDS:
                 --for SECONDS previews the look and reverts after the
                 delay (a detached child, so closing the terminal never
                 strands it); --keep with a name applies for good and
-                cancels any pending preview, bare keeps the current look
+                cancels any pending preview, bare keeps the current look;
+                --only-if-generation N applies only while the recorded
+                generation still equals N (the compositor's timed-preview
+                revert passes the generation its preview wrote, so the
+                revert stands down instead of undoing a newer choice)
     next        the next catalog look after the active one, wrapping
     prev        the previous catalog look before the active one, wrapping
     random      a random catalog look
@@ -441,6 +446,7 @@ fn parse_apply(positionals: &[String]) -> Result<Command, Error> {
     let mut from_compositor = false;
     let mut for_secs: Option<u64> = None;
     let mut keep = false;
+    let mut only_if_generation: Option<u64> = None;
     let mut words = positionals.iter().peekable();
     while let Some(word) = words.next() {
         if word == "--no-toolkit" {
@@ -449,6 +455,22 @@ fn parse_apply(positionals: &[String]) -> Result<Command, Error> {
             from_compositor = true;
         } else if word == "--keep" {
             keep = true;
+        } else if word == "--only-if-generation" {
+            let value = words
+                .next()
+                .ok_or(Error::Missing("a generation after --only-if-generation"))?;
+            only_if_generation = Some(value.parse::<u64>().map_err(|_| Error::Invalid {
+                what: "--only-if-generation",
+                value: value.clone(),
+            })?);
+        } else if let Some(value) = word.strip_prefix("--only-if-generation=") {
+            if value.is_empty() {
+                return Err(Error::Missing("a generation after --only-if-generation"));
+            }
+            only_if_generation = Some(value.parse::<u64>().map_err(|_| Error::Invalid {
+                what: "--only-if-generation",
+                value: value.to_owned(),
+            })?);
         } else if word == "--for" {
             let value = words.next().ok_or(Error::Missing("seconds after --for"))?;
             for_secs = Some(parse_seconds(value)?);
@@ -477,6 +499,7 @@ fn parse_apply(positionals: &[String]) -> Result<Command, Error> {
                 from_compositor,
                 for_secs: None,
                 keep: true,
+                only_if_generation,
             });
         }
         return Err(Error::Missing("a look name"));
@@ -488,6 +511,7 @@ fn parse_apply(positionals: &[String]) -> Result<Command, Error> {
         from_compositor,
         for_secs,
         keep,
+        only_if_generation,
     })
 }
 
@@ -571,6 +595,7 @@ pub fn run(look: &Look) -> Result<(), String> {
             from_compositor,
             for_secs,
             keep,
+            only_if_generation,
         } => run_apply(
             look,
             name.as_deref(),
@@ -578,6 +603,7 @@ pub fn run(look: &Look) -> Result<(), String> {
             *from_compositor,
             *for_secs,
             *keep,
+            *only_if_generation,
         ),
         Command::Cycle { step } => run_cycle(look, *step),
         Command::PreviewRevert { from, after } => run_preview_revert(look, *from, *after),
@@ -1020,6 +1046,7 @@ fn run_apply(
     from_compositor: bool,
     for_secs: Option<u64>,
     keep: bool,
+    only_if_generation: Option<u64>,
 ) -> Result<(), String> {
     let Some(name) = name else {
         return run_keep(look);
@@ -1034,7 +1061,7 @@ fn run_apply(
         no_toolkit,
         from_compositor,
         preview: for_secs.is_some(),
-        only_if_generation: None,
+        only_if_generation,
     };
     let armed = apply_and_print(look, name, &options, for_secs)?;
     if keep && had_preview {
@@ -1102,6 +1129,8 @@ fn run_keep(look: &Look) -> Result<(), String> {
 /// The detached reverter (hidden `_preview-revert`): sleeps out the delay,
 /// then reverts only while the generation still matches. Never holds a
 /// lock across the sleep: the previewing apply released its own long ago.
+/// A swap running when the delay ends waits the reverter out (bounded
+/// retries, guards re-checked each round), never drops the revert.
 fn run_preview_revert(look: &Look, from: u64, after: u64) -> Result<(), String> {
     if after > 0 {
         std::thread::sleep(std::time::Duration::from_secs(after));
@@ -1120,7 +1149,7 @@ fn run_preview_revert(look: &Look, from: u64, after: u64) -> Result<(), String> 
         .collect();
     let checks = apply::ProdChecks::new();
     let dconf = CliDconf::new();
-    match cycle::revert_if_current(
+    match cycle::revert_with_retry(
         from,
         &catalog,
         &cache,
@@ -1131,6 +1160,8 @@ fn run_preview_revert(look: &Look, from: u64, after: u64) -> Result<(), String> 
         &checks,
         &dconf,
         apply::LOCK_WAIT,
+        cycle::REVERT_RETRIES,
+        cycle::REVERT_RETRY_DELAY,
     ) {
         Ok(cycle::RevertOutcome::Reverted { name }) => {
             let line = match &name {

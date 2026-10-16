@@ -135,6 +135,11 @@ impl Checks for FakeChecks {
         assert!(fragment.is_file(), "the bar fragment renders");
         Ok(Availability::Available(()))
     }
+
+    fn foot_fragment(&self, fragment: &Path) -> Result<Availability<()>, String> {
+        assert!(fragment.is_file(), "the foot fragment renders");
+        Ok(Availability::Available(()))
+    }
 }
 
 #[derive(Default)]
@@ -633,4 +638,130 @@ fn compositor_calls_count_through_a_revert() {
     );
     assert_eq!(calls.get(), 1);
     assert_eq!(record_name(&fixture.state), Some("look-a".to_owned()));
+}
+
+#[test]
+fn lock_contention_is_recognized() {
+    assert!(super::is_lock_contention(
+        "cannot lock /s/look.lock: another writer holds it (os error 11)"
+    ));
+    assert!(!super::is_lock_contention(
+        "the recorded choice is corrupt (boom)"
+    ));
+    assert!(!super::is_lock_contention(
+        "preview superseded: the choice moved past generation 2 (now 3): not reverting"
+    ));
+}
+
+#[test]
+fn a_revert_waits_out_a_held_lock() {
+    let fixture = fixture("cycle-retry-lock");
+    apply(&fixture, "look-a", false);
+    apply(&fixture, "look-b", true);
+    // A swap holding the lock past the attempt's own short wait: the
+    // retry sleeps it out and reverts, instead of failing loudly while
+    // the preview sticks.
+    let lock = scoot_look::state::acquire_lock(&fixture.state, Duration::from_secs(5))
+        .expect("the test holds the lock");
+    let holder = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(100));
+        drop(lock);
+    });
+    let mut compositor = FakeCompositor::ok();
+    let bars: Vec<&dyn BarReload> = Vec::new();
+    let outcome = super::revert_with_retry(
+        2,
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        None,
+        &mut compositor,
+        &bars,
+        &FakeChecks,
+        &FakeDconf,
+        Duration::from_millis(1),
+        200,
+        Duration::from_millis(10),
+    )
+    .expect("the retry waits the holder out");
+    holder.join().expect("the holder thread");
+    assert_eq!(
+        outcome,
+        super::RevertOutcome::Reverted {
+            name: Some("look-a".to_owned())
+        }
+    );
+    assert_eq!(record_name(&fixture.state), Some("look-a".to_owned()));
+}
+
+#[test]
+fn a_revert_gives_up_when_the_lock_never_frees() {
+    let fixture = fixture("cycle-retry-giveup");
+    apply(&fixture, "look-a", false);
+    apply(&fixture, "look-b", true);
+    // Held for the whole call: every attempt contends, and the error
+    // names the lock, loudly rather than silently.
+    let _lock = scoot_look::state::acquire_lock(&fixture.state, Duration::from_secs(5))
+        .expect("the test holds the lock");
+    let mut compositor = FakeCompositor::ok();
+    let bars: Vec<&dyn BarReload> = Vec::new();
+    let failure = super::revert_with_retry(
+        2,
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        None,
+        &mut compositor,
+        &bars,
+        &FakeChecks,
+        &FakeDconf,
+        Duration::from_millis(1),
+        3,
+        Duration::from_millis(1),
+    )
+    .expect_err("no attempt can take the lock");
+    assert!(
+        super::is_lock_contention(&failure),
+        "the give-up names the lock: {failure}"
+    );
+}
+
+#[test]
+fn a_revert_does_not_retry_a_refusal() {
+    let fixture = fixture("cycle-retry-no-repeat");
+    apply(&fixture, "look-a", false);
+    apply(&fixture, "look-b", true);
+    // A corrupt record (not contention): the first attempt fails and no
+    // retry follows — a retry could only repeat it.
+    std::fs::write(
+        fixture.state.join(scoot_look::state::RECORD_FILE),
+        b"not json",
+    )
+    .expect("a corrupt record");
+    let mut compositor = FakeCompositor::ok();
+    let bars: Vec<&dyn BarReload> = Vec::new();
+    let started = std::time::Instant::now();
+    let failure = super::revert_with_retry(
+        2,
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        None,
+        &mut compositor,
+        &bars,
+        &FakeChecks,
+        &FakeDconf,
+        Duration::from_millis(1),
+        3,
+        Duration::from_millis(500),
+    )
+    .expect_err("a corrupt record refuses");
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "a refusal returns at once, never sleeps out retries"
+    );
+    assert!(
+        failure.contains("corrupt"),
+        "the refusal names the record: {failure}"
+    );
 }

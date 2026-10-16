@@ -21,6 +21,15 @@ use super::apply::{ApplyOptions, PREVIEW_SUPERSEDED, apply_with};
 use super::catalog::Catalog;
 use super::reload::{BarReload, CompositorReload};
 
+/// How many times the detached reverter waits out a concurrent swap's
+/// lock past each attempt's own wait before giving up loudly: twelve
+/// five-second waits ride out a swap whose apps hang their bounded
+/// reloads, while anything else (a refusal, a corrupt record) returns at
+/// once. Nothing is held between attempts.
+pub const REVERT_RETRIES: u32 = 12;
+/// The wait between a reverter's lock-contention retries.
+pub const REVERT_RETRY_DELAY: Duration = Duration::from_secs(5);
+
 /// Which way `cycle_target` steps through the catalog.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Step {
@@ -325,6 +334,58 @@ pub fn revert_if_current(
     };
     forget_if_same(state_dir, &preview, lock_wait);
     Ok(outcome)
+}
+
+/// Whether a revert failure is a busy state-dir lock (a swap running
+/// now): worth retrying, unlike a refusal or a corrupt record, which a
+/// retry would only repeat. Matches [`scoot_look::state::LOCK_CONTENDED`].
+pub fn is_lock_contention(message: &str) -> bool {
+    message.contains(scoot_look::state::LOCK_CONTENDED)
+}
+
+/// Reverts a timed preview, retrying while a concurrent swap holds the
+/// state-dir lock: each attempt re-runs [`revert_if_current`]'s guards, so
+/// a newer choice that lands mid-wait stands the revert down instead of
+/// being undone. Only lock contention retries (up to `retries` waits of
+/// `retry_delay` past each attempt's own `lock_wait`); anything else —
+/// a refusal, a corrupt record, a failed revert — returns at once, since a
+/// retry could only repeat it (or, after a rolled-back revert, re-apply).
+#[allow(clippy::too_many_arguments)]
+pub fn revert_with_retry(
+    from_generation: u64,
+    catalog: &Catalog,
+    cache: &Path,
+    state_dir: &Path,
+    config: Option<&Path>,
+    compositor: &mut dyn CompositorReload,
+    bars: &[&dyn BarReload],
+    checks: &dyn super::apply::Checks,
+    dconf: &dyn super::toolkit::Dconf,
+    lock_wait: Duration,
+    retries: u32,
+    retry_delay: Duration,
+) -> Result<RevertOutcome, String> {
+    let mut waits = 0;
+    loop {
+        match revert_if_current(
+            from_generation,
+            catalog,
+            cache,
+            state_dir,
+            config,
+            compositor,
+            bars,
+            checks,
+            dconf,
+            lock_wait,
+        ) {
+            Err(message) if is_lock_contention(&message) && waits < retries => {
+                waits += 1;
+                std::thread::sleep(retry_delay);
+            }
+            outcome => return outcome,
+        }
+    }
 }
 
 /// Forgets the preview file, but only when it still carries this preview:

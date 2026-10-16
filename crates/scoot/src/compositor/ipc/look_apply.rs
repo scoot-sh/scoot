@@ -25,9 +25,11 @@
 //!
 //! A timed preview (`for_ms`) arms a calloop timer at a successful swap:
 //! when it fires, the recorded choice is read back, and only if its
-//! generation still holds (no newer choice) and no swap is running does
-//! the previous look swap back -- the same generation rule `apply --for`
-//! keeps client-side.
+//! generation still holds (no newer choice) does the previous look swap
+//! back -- the same generation rule `apply --for` keeps client-side. A
+//! swap still running when the timer fires does not drop the revert: it
+//! waits stashed until the swap finishes (or times out), then re-checks,
+//! so the preview never sticks past its delay with no timer left.
 
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -93,7 +95,43 @@ pub(crate) struct PendingLookApply {
     /// reply, and its connection-table slot. `None` for a timer revert,
     /// which answers nobody.
     client: Option<ParkedClient>,
+    /// The generation guard a timer revert's child carries, with its
+    /// remaining lock-contention retries. `Some` only for timer reverts
+    /// (`client` is `None` there too): the child refuses as superseded
+    /// rather than undoing a newer choice that landed after the guard was
+    /// read, and a child that fails on a still-held lock re-arms through
+    /// [`DeferredLookRevert`] instead of dropping the revert.
+    revert_guard: Option<RevertGuard>,
 }
+
+/// The generation a timer revert restores only while the choice still
+/// holds, and how many of its lock-contention retries remain.
+#[derive(Clone, Copy)]
+pub(crate) struct RevertGuard {
+    generation: u64,
+    retries: u8,
+}
+
+/// A timed preview's revert that fired while a swap was running: it waits
+/// for the running swap to finish (or time out) instead of being dropped,
+/// then re-reads the generation and reverts only if the choice has not
+/// moved. A newer preview's timer overwrites an older one's: the older
+/// generation can no longer hold once a newer preview's swap completed,
+/// so its revert would stand down anyway.
+#[derive(Clone)]
+pub(crate) struct DeferredLookRevert {
+    previous: String,
+    generation: u64,
+    state_dir: PathBuf,
+    retries: u8,
+}
+
+/// How many lock-contention rounds a deferred revert waits out before
+/// giving up loudly: each round is one spawned child waiting out the
+/// holder, so eight rounds ride out a swap whose apps hang their bounded
+/// reloads. Every round re-checks the generation, so a newer choice still
+/// stands the revert down instead of being undone.
+const DEFERRED_REVERT_RETRIES: u8 = 8;
 
 struct ParkedClient {
     stream: UnixStream,
@@ -180,6 +218,14 @@ pub(super) fn valid_look_apply_name(name: &str) -> Result<(), String> {
 /// choice.
 pub(super) fn should_revert(current_generation: Option<u64>, wanted: u64) -> bool {
     current_generation == Some(wanted)
+}
+
+/// Whether a revert child's failure is a busy state-dir lock (a swap
+/// still running): worth waiting out, unlike a refusal, which a retry
+/// would only repeat. Matches [`scoot_look::state::LOCK_CONTENDED`], the
+/// same marker the CLI reverter matches on.
+fn is_lock_contention(message: &str) -> bool {
+    message.contains(scoot_look::state::LOCK_CONTENDED)
 }
 
 /// Reads the swapped generation out of a successful child's first JSON
@@ -435,6 +481,7 @@ impl State {
                         outbound,
                         _slot: slot,
                     }),
+                    revert_guard: None,
                 });
                 Ok(())
             }
@@ -492,7 +539,7 @@ impl State {
             None
         };
         let (pid, stdout) = self
-            .spawn_apply_child(&name)
+            .spawn_apply_child(&name, &[])
             .map_err(|error| format!("could not start `scoot look apply {name}`: {error}"))?;
         tracing::info!(%name, pid, "started `scoot look apply` for an IPC swap");
         Ok(SpawnedLookApply {
@@ -504,14 +551,19 @@ impl State {
         })
     }
 
-    /// Spawns `scoot look apply NAME --from-compositor --json` with the
-    /// session environment: the binary this compositor runs as (so a
-    /// renamed or relocated install still finds its own tool), the live
-    /// socket and display, and this session's look state. Stdout piped
-    /// (the reply's source); stderr inherited (the child's notes land in
-    /// this log); stdin null. Dropping the `Child` neither waits nor
-    /// kills: the SIGCHLD reaper collects the exit.
-    fn spawn_apply_child(&self, name: &str) -> std::io::Result<(u32, std::process::ChildStdout)> {
+    /// Spawns `scoot look apply NAME --from-compositor --json` (plus
+    /// `extra` args) with the session environment: the binary this
+    /// compositor runs as (so a renamed or relocated install still finds
+    /// its own tool), the live socket and display, and this session's
+    /// look state. Stdout piped (the reply's source); stderr inherited
+    /// (the child's notes land in this log); stdin null. Dropping the
+    /// `Child` neither waits nor kills: the SIGCHLD reaper collects the
+    /// exit.
+    fn spawn_apply_child(
+        &self,
+        name: &str,
+        extra: &[&str],
+    ) -> std::io::Result<(u32, std::process::ChildStdout)> {
         let program = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("scoot"));
         let mut child = self.session_command(program.as_os_str());
         child
@@ -519,6 +571,7 @@ impl State {
             .arg("apply")
             .arg(name)
             .arg("--from-compositor")
+            .args(extra)
             .arg("--json");
         child.stdin(std::process::Stdio::null());
         child.stdout(std::process::Stdio::piped());
@@ -549,7 +602,10 @@ impl State {
     }
 
     /// Turns the reaped child's exit into the parked reply (or a log, for
-    /// a timer revert), and arms the preview timer on a timed success.
+    /// a timer revert), and arms the preview timer on a timed success. A
+    /// revert stashed while this swap ran goes next: the generation guard
+    /// is re-read, so a swap that landed (or a newer choice) stands it
+    /// down, while a swap that rolled back to the preview still reverts.
     fn finish_look_apply(&mut self, end: ChildEnd) {
         let mut pending = match self.pending_look.take() {
             Some(pending) => pending,
@@ -580,7 +636,52 @@ impl State {
                 _ => {}
             }
         }
+        // A timer revert's child that failed on a still-held lock waits
+        // out the holder like a deferred revert, bounded: `settle_look`
+        // re-runs the stash below, and each round re-checks the
+        // generation. Anything else (a success, a superseded stand-down,
+        // a genuine refusal) is already answered in the log below.
+        let revert_lockout = match (&pending.revert_guard, &response) {
+            (Some(guard), Response::Error { message }) if is_lock_contention(message) => {
+                Some(*guard)
+            }
+            _ => None,
+        };
+        match revert_lockout {
+            Some(guard) if guard.retries > 0 => {
+                let Some(dir) = self.look_state_dir() else {
+                    tracing::warn!(
+                        "a timed look preview's revert is locked out with no state dir; giving up loudly"
+                    );
+                    self.answer_look_apply(pending, response);
+                    self.run_deferred_look_revert();
+                    return;
+                };
+                self.deferred_look_revert = Some(DeferredLookRevert {
+                    previous: pending.name.clone(),
+                    generation: guard.generation,
+                    state_dir: dir,
+                    retries: guard.retries - 1,
+                });
+                tracing::info!(
+                    "a timed look preview's revert is locked out; it waits out the holder"
+                );
+                self.answer_look_apply(pending, response);
+                self.run_deferred_look_revert();
+                return;
+            }
+            Some(_) => {
+                if let Response::Error { message } = &response {
+                    tracing::warn!(
+                        %message,
+                        "a timed look preview's revert is still locked out; giving up loudly"
+                    );
+                }
+            }
+            None => {}
+        }
         self.answer_look_apply(pending, response);
+        self.run_deferred_look_revert();
     }
 
     /// Queues the parked reply behind the connection's inherited tail, and
@@ -608,9 +709,16 @@ impl State {
             }
             None => {
                 // A timer revert answers nobody: its outcome is a log line.
+                // A superseded stand-down is expected (a newer choice
+                // landed after the guard was read), not a failure.
                 match response {
                     Response::LookApplied { name, .. } => {
                         tracing::info!(%name, "a timed look preview reverted");
+                    }
+                    Response::Error { message }
+                        if message.starts_with(scootctl::look::apply::PREVIEW_SUPERSEDED) =>
+                    {
+                        tracing::info!(%message, "a timed look preview stood down");
                     }
                     Response::Error { message } => {
                         tracing::warn!(%message, "a timed look revert refused");
@@ -631,13 +739,25 @@ impl State {
                 return;
             }
         };
+        let deferred = DeferredLookRevert {
+            previous,
+            generation,
+            state_dir,
+            retries: DEFERRED_REVERT_RETRIES,
+        };
         match self.loop_handle.insert_source(
             Timer::from_duration(Duration::from_millis(for_ms)),
             // `FnMut`, not `FnOnce`: calloop may poll the source more
             // than once, so the owned captures clone per fire (it drops
             // itself after the first, so this runs once).
             move |_, _, state: &mut State| {
-                state.revert_look_preview(previous.clone(), generation, state_dir.clone());
+                let DeferredLookRevert {
+                    previous,
+                    generation,
+                    state_dir,
+                    retries,
+                } = deferred.clone();
+                state.revert_look_preview(previous, generation, state_dir, retries);
                 TimeoutAction::Drop
             },
         ) {
@@ -649,8 +769,35 @@ impl State {
         }
     }
 
-    /// Runs a timed preview's revert, if the choice has not moved since.
-    fn revert_look_preview(&mut self, previous: String, generation: u64, state_dir: PathBuf) {
+    /// Runs the stashed deferred revert, if any: the generation guard is
+    /// re-read, so whatever finished (or timed out) since the timer fired
+    /// decides. A newer choice stands the revert down; a swap that rolled
+    /// back to the preview still reverts.
+    fn run_deferred_look_revert(&mut self) {
+        let Some(deferred) = self.deferred_look_revert.take() else {
+            return;
+        };
+        self.revert_look_preview(
+            deferred.previous,
+            deferred.generation,
+            deferred.state_dir,
+            deferred.retries,
+        );
+    }
+
+    /// Runs a timed preview's revert, if the choice has not moved since. A
+    /// swap still running does not drop the revert: it is stashed until
+    /// the swap finishes (or times out), then re-checked. Anything parked
+    /// -- a running child, or a reply still draining to a slow client --
+    /// holds the revert: spawning over a draining entry would drop its
+    /// queued tail, so the drain completes first (see `settle_look`).
+    fn revert_look_preview(
+        &mut self,
+        previous: String,
+        generation: u64,
+        state_dir: PathBuf,
+        retries: u8,
+    ) {
         let current = match scoot_look::state::read_record(&state_dir) {
             scoot_look::state::RecordRead::Present(record) => Some(record.generation),
             scoot_look::state::RecordRead::Missing | scoot_look::state::RecordRead::Corrupt(_) => {
@@ -664,11 +811,23 @@ impl State {
             return;
         }
         if self.pending_look.is_some() {
-            tracing::info!("a look swap is running; dropping the timed preview's revert");
+            tracing::info!(
+                "a look swap is still parked; a timed look preview's revert waits for it"
+            );
+            self.deferred_look_revert = Some(DeferredLookRevert {
+                previous,
+                generation,
+                state_dir,
+                retries,
+            });
             return;
         }
+        // The guard travels with the child: a choice that lands between
+        // this read and the child's own swap refuses as superseded
+        // inside the child's lock, instead of being undone.
+        let guard = format!("--only-if-generation={generation}");
         let name = previous.clone();
-        match self.spawn_apply_child(&previous) {
+        match self.spawn_apply_child(&previous, &[guard.as_str()]) {
             Ok((pid, stdout)) => {
                 tracing::info!(%name, pid, "reverting a timed look preview");
                 let now = Instant::now();
@@ -682,6 +841,10 @@ impl State {
                     finished: false,
                     last_progress: now,
                     client: None,
+                    revert_guard: Some(RevertGuard {
+                        generation,
+                        retries,
+                    }),
                 });
                 self.ensure_ticking();
             }
@@ -720,6 +883,9 @@ impl State {
                     .to_owned(),
             ),
         );
+        // A revert stashed while this swap ran stays stashed: the child
+        // keeps running past its bound, and `settle_look` runs the stash
+        // below once nothing is parked, re-checking the generation then.
     }
 
     /// Moves the parked swap along by one frame tick: times out a hung
@@ -770,6 +936,12 @@ impl State {
         }
         if clear {
             self.pending_look = None;
+        }
+        // A reply that just finished draining may release a stashed
+        // revert: spawning over the draining entry would have dropped its
+        // queued tail, so the stash waited for exactly this.
+        if self.pending_look.is_none() {
+            self.run_deferred_look_revert();
         }
         self.pending_look.is_some()
     }

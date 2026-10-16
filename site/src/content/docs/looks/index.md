@@ -33,7 +33,9 @@ the session is locked. Each step applies through the same transaction as
 The revert records the generation it reverts from: a newer `apply` before
 the timer fires cancels the revert, so a preview never undoes a newer
 choice. The timer is a detached child of the applying CLI, so closing the
-terminal never strands it. `scoot look apply --keep` keeps the preview
+terminal never strands it. A swap running when the delay ends waits the
+reverter out (bounded retries with the guard re-checked), instead of
+dropping the revert. `scoot look apply --keep` keeps the preview
 (and cancels the timer); `apply NAME --keep` applies for good and cancels
 any pending preview.
 

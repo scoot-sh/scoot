@@ -821,6 +821,11 @@ pub struct StateLock {
 /// FIFO or any other non-regular file at its path refuses rather than
 /// locking something else. The parent dir must exist (startup and the tool
 /// create the state dir before locking it).
+///
+/// A wait that runs out reports [`LOCK_CONTENDED`]: callers that retry on
+/// contention (the detached preview reverter) match on it rather than on
+/// the whole message.
+pub const LOCK_CONTENDED: &str = "another writer holds it";
 pub fn acquire_lock(dir: &Path, wait: Duration) -> Result<StateLock, String> {
     let path = dir.join(LOCK_FILE);
     let fd = rustix::fs::open(
@@ -852,7 +857,7 @@ pub fn acquire_lock(dir: &Path, wait: Duration) -> Result<StateLock, String> {
             }
             Err(errno) => {
                 return Err(format!(
-                    "cannot lock {}: another writer holds it ({errno})",
+                    "cannot lock {}: {LOCK_CONTENDED} ({errno})",
                     path.display()
                 ));
             }

@@ -62,6 +62,7 @@ use super::gamma_control::GammaControlState;
 use super::idle;
 use super::input;
 use super::ipc::PendingIdle;
+use super::ipc::look_apply::DeferredLookRevert;
 use super::ipc::look_apply::PendingLookApply;
 use super::keybindings::Keybindings;
 use super::layer_shell;
@@ -1207,6 +1208,11 @@ pub struct State {
     /// connection the reply goes to (see `ipc::look_apply`). One at a
     /// time -- a second swap while this holds one is refused.
     pub(crate) pending_look: Option<PendingLookApply>,
+    /// A timed preview's revert that fired while a swap was running: it
+    /// waits for the running swap (see `ipc::look_apply`) instead of
+    /// being dropped, so the preview never sticks past its delay with no
+    /// timer left to revert it.
+    pub(crate) deferred_look_revert: Option<DeferredLookRevert>,
     /// The cursor rebuild worker's completion channel. Created once,
     /// alongside its event source, on the first cursor-changing reload --
     /// a session that never changes its cursor pays for no thread and no
@@ -1527,6 +1533,7 @@ impl State {
             last_commit: Instant::now(),
             pending_idle: Vec::new(),
             pending_look: None,
+            deferred_look_revert: None,
             cursor_sink: None,
             cursor_generation: 0,
             screenshot_encoder: None,

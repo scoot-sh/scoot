@@ -60,3 +60,22 @@ order wrapping both ends, bind in the default table + docs), each first
 as a failing shape then green: 13 cycle unit tests, 4 real-daemon
 integration tests (8/8 suite), smoke next/--for checks with pixel proofs.
 Full matrices on the dev VM in the report.
+
+## Rebase onto main with the look IPC (2026-10-16, PR #636)
+
+The branch predated the look IPC (#635: `LookApply`/`Looks`, protocol
+12, one parked swap), the foot leaf (#633, `RENDER_VERSION` 4) and the
+installer (#629). The two cycle commits were transplanted onto main;
+`Apply`/`ApplyOptions` carry both sides' fields (`from_compositor` plus
+`preview`/`only_if_generation`, and the new `--only-if-generation`
+guard flag, which the compositor's revert child passes so a choice that
+lands after the guard is read refuses as superseded instead of being
+undone). Protocol stays 12, render version stays 4.
+
+The #635 review note (a preview revert silently dropped when a swap runs
+at timer fire, sticking the preview) is fixed in the revert path this
+ticket owns, on both halves: the compositor stashes the revert and runs
+it when the running swap finishes or times out (re-checking the
+generation; a revert child locked out past its retries re-arms, bounded,
+then gives up loudly), and the detached CLI reverter retries a held lock
+(bounded, guards re-checked; anything else returns at once).
