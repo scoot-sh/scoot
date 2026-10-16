@@ -32,9 +32,10 @@
 //! 3. [`resolve`] follows `extends` over source looks only.
 //! 4. [`check`](contrast::check) measures contrast, refusing or warning by
 //!    origin.
-//! 5. [`render_scoot`](render::render_scoot) and
-//!    [`render_bar`](render::render_bar) emit the first-party fragments from
-//!    the resolved look plus [`RenderInputs`](render::RenderInputs).
+//! 5. [`render_scoot`](render::render_scoot),
+//!    [`render_bar`](render::render_bar) and [`render_foot`](render::render_foot)
+//!    emit the first-party fragments and foot's `foot.ini` from the
+//!    resolved look plus [`RenderInputs`](render::RenderInputs).
 //!
 //! [`import_base16`](import::import_base16) maps a base16 or base24 scheme
 //! to a source look's `look.toml` (design section 5.3): the plain-install
@@ -69,7 +70,7 @@ pub use contrast::{ContrastPair, ContrastReport, check as check_contrast};
 pub use grammar::GrammarError;
 pub use import::{ImportOptions, import_base16};
 pub use render::{
-    BAR_RADIUS_LIMIT, RenderInputs, render_bar, render_json, render_scoot, source_hash,
+    BAR_RADIUS_LIMIT, RenderInputs, render_bar, render_foot, render_json, render_scoot, source_hash,
 };
 pub use resolve::resolve;
 pub use resolved::ResolvedLook;

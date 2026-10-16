@@ -140,6 +140,7 @@ struct FakeChecks {
     font_dir: Option<PathBuf>,
     font_refuse: Option<String>,
     bar_refuse: Option<String>,
+    foot_refuse: Option<String>,
     /// Models a bar built `--no-default-features`: refuses only fragments
     /// carrying `popup-radius`, recording every fragment seen.
     popup_only: bool,
@@ -148,6 +149,7 @@ struct FakeChecks {
     /// the whole-stderr shapes a real minimal binary answers with.
     minimal_bar: bool,
     bar_seen: RefCell<Vec<String>>,
+    foot_seen: RefCell<Vec<String>>,
 }
 
 impl FakeChecks {
@@ -159,9 +161,11 @@ impl FakeChecks {
             font_dir: Some(dir.to_owned()),
             font_refuse: None,
             bar_refuse: None,
+            foot_refuse: None,
             popup_only: false,
             minimal_bar: false,
             bar_seen: RefCell::new(Vec::new()),
+            foot_seen: RefCell::new(Vec::new()),
         }
     }
 }
@@ -238,6 +242,16 @@ impl Checks for FakeChecks {
             return Err(refusal.clone());
         }
         assert!(fragment.is_file(), "the bar fragment renders");
+        Ok(Availability::Available(()))
+    }
+
+    fn foot_fragment(&self, fragment: &Path) -> Result<Availability<()>, String> {
+        let text = std::fs::read_to_string(fragment).unwrap_or_default();
+        self.foot_seen.borrow_mut().push(text);
+        if let Some(refusal) = &self.foot_refuse {
+            return Err(refusal.clone());
+        }
+        assert!(fragment.is_file(), "the foot fragment renders");
         Ok(Availability::Available(()))
     }
 }
@@ -1713,9 +1727,11 @@ fn a_font_refusal_refuses_before_anything_is_touched() {
         font_dir: None,
         font_refuse: Some("font `DejaVu Sans` resolves to nothing".to_owned()),
         bar_refuse: None,
+        foot_refuse: None,
         popup_only: false,
         minimal_bar: false,
         bar_seen: RefCell::new(Vec::new()),
+        foot_seen: RefCell::new(Vec::new()),
     };
     let mut compositor = FakeCompositor::not_running();
     let failure = apply_with(
@@ -1798,9 +1814,11 @@ fn effectful_refusals_are_structured_not_bare_errors() {
         font_dir: None,
         font_refuse: Some("font `DejaVu Sans` resolves to nothing".to_owned()),
         bar_refuse: None,
+        foot_refuse: None,
         popup_only: false,
         minimal_bar: false,
         bar_seen: RefCell::new(Vec::new()),
+        foot_seen: RefCell::new(Vec::new()),
     };
     let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
     assert_eq!(validation.errors.len(), 3, "{:?}", validation.errors);
@@ -1912,6 +1930,8 @@ fn validate_and_apply_agree_on_the_bar_fragment() {
         popup_only: false,
         minimal_bar: false,
         bar_seen: RefCell::new(Vec::new()),
+        foot_refuse: None,
+        foot_seen: RefCell::new(Vec::new()),
     };
     let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
     assert!(
@@ -1962,6 +1982,8 @@ fn validate_retries_a_popup_refusal_without_popup_keys() {
         popup_only: true,
         minimal_bar: false,
         bar_seen: RefCell::new(Vec::new()),
+        foot_refuse: None,
+        foot_seen: RefCell::new(Vec::new()),
     };
     let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
@@ -2023,6 +2045,8 @@ fn a_minimal_bar_drops_module_tokens_with_a_note() {
         popup_only: false,
         minimal_bar: true,
         bar_seen: RefCell::new(Vec::new()),
+        foot_refuse: None,
+        foot_seen: RefCell::new(Vec::new()),
     };
     // Validate drops both and says so.
     let checks = new_checks();
@@ -2335,4 +2359,313 @@ fn assert_no_build_litter(root: &Path) {
         }
     }
     assert!(litter.is_empty(), "stage litter survives: {litter:?}");
+}
+
+/// Moonrise's 16 ANSI hues, the order foot reads as `regular0-7` then
+/// `bright0-7`.
+const TERMINAL_EXTRA: &str = r##"
+[terminal]
+colors = ["#1a2230", "#c96a63", "#8fa382", "#e8a34c", "#7c8fb0", "#9a7b94", "#7e9bb0", "#c9bfae", "#5e6b7f", "#e87f6a", "#a9bd9b", "#ffd54a", "#93a8c8", "#b595ad", "#a8c4d8", "#f6eedc"]
+"##;
+
+/// One look with a `[terminal]` table, a cache, a state dir and a config
+/// home, all scratch.
+fn terminal_fixture(tag: &str) -> Fixture {
+    let scratch = scratch(tag);
+    let root: PathBuf = scratch.path().to_owned();
+    let sources = root.join("looks");
+    write_look(&sources, "look-t", TERMINAL_EXTRA);
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    assert_eq!(catalog.entries.len(), 1, "notes: {:?}", catalog.notes);
+    let cache = root.join("cache");
+    let state = root.join("state");
+    let config = root.join("config");
+    Fixture {
+        catalog,
+        cache,
+        state,
+        config,
+        _scratch: scratch,
+        _root: root,
+    }
+}
+
+#[test]
+fn build_writes_foot_ini_for_a_terminal_look() {
+    let fixture = terminal_fixture("build-foot");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let out = fixture._root.join("out");
+    build_to_out(
+        &BuildTarget::Name("look-t".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+    )
+    .expect("a terminal look builds");
+    let foot = std::fs::read_to_string(out.join("foot.ini")).expect("a foot.ini");
+    assert!(foot.contains("[colors-dark]"), "wrong section:\n{foot}");
+    assert!(foot.contains("[colors-light]"), "missing mirror:\n{foot}");
+    assert!(
+        foot.contains("initial-color-theme=dark"),
+        "wrong theme:\n{foot}"
+    );
+    assert!(foot.contains("regular0=1a2230"), "ansi order lost:\n{foot}");
+    assert!(foot.contains("bright7=f6eedc"), "bright hues lost:\n{foot}");
+    assert!(foot.contains("alpha=1.00"), "alpha lost:\n{foot}");
+}
+
+#[test]
+fn build_removes_a_stale_foot_ini_when_the_look_has_none() {
+    let fixture = terminal_fixture("build-foot-stale");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let out = fixture._root.join("out");
+    build_to_out(
+        &BuildTarget::Name("look-t".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+    )
+    .expect("a terminal look builds");
+    assert!(out.join("foot.ini").is_file(), "no foot.ini to go stale");
+    // `look-p` has no `[terminal]` table: rebuilding over the same dir
+    // must not leave the other look's colors behind.
+    let sources = fixture._root.join("plain");
+    write_look(&sources, "look-p", "");
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    build_to_out(
+        &BuildTarget::Name("look-p".to_owned()),
+        &out,
+        &catalog,
+        &checks,
+    )
+    .expect("a plain look builds over the dir");
+    assert!(
+        !out.join("foot.ini").exists(),
+        "a stale foot.ini survives the rebuild"
+    );
+}
+
+#[test]
+fn apply_renders_foot_ini_into_the_cached_render() {
+    let fixture = terminal_fixture("apply-foot");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with(
+        "look-t",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("an offline apply succeeds");
+    assert_eq!(report.name, "look-t");
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    let foot = std::fs::read_to_string(rendered.join("foot.ini")).expect("a foot.ini");
+    assert!(foot.contains("regular0=1a2230"), "ansi order lost:\n{foot}");
+}
+
+#[test]
+fn a_foot_check_refusal_refuses_before_anything_is_touched() {
+    let fixture = terminal_fixture("apply-foot-refused");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let mut checks = FakeChecks::with_fonts(&fonts);
+    checks.foot_refuse = Some("foot says no".to_owned());
+    let mut compositor = FakeCompositor::not_running();
+    let failure = apply_with(
+        "look-t",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect_err("a refused foot fragment applies");
+    assert!(
+        failure.message.contains("foot says no"),
+        "{}",
+        failure.message
+    );
+    assert_eq!(compositor.calls.get(), 0, "a reload ran before the refusal");
+    assert!(
+        !fixture.state.join("look.json").exists(),
+        "a record was written before the refusal"
+    );
+}
+
+#[test]
+fn validate_reports_a_foot_refusal() {
+    let fixture = terminal_fixture("validate-foot");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let mut checks = FakeChecks::with_fonts(&fonts);
+    checks.foot_refuse = Some("foot says no".to_owned());
+    let validation = validate_entry(&fixture.catalog, "look-t", &checks).expect("a validation");
+    assert!(
+        validation.errors.iter().any(|e| e.contains("foot says no")),
+        "errors: {:?}",
+        validation.errors
+    );
+}
+
+#[test]
+fn apply_notes_name_the_foot_include_setup_until_it_exists() {
+    let fixture = terminal_fixture("apply-foot-notes");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    // No foot.ini at all: the reply carries the one-time setup.
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with(
+        "look-t",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("an offline apply succeeds");
+    let link_path = fixture.state.join("look/foot.ini");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|n| n.contains(&*link_path.to_string_lossy())),
+        "no setup hint names the link path: {:?}",
+        report.notes
+    );
+    // A commented-out include is still absent.
+    let foot_home = fixture.config.join("foot");
+    std::fs::create_dir_all(&foot_home).expect("a foot dir");
+    std::fs::write(
+        foot_home.join("foot.ini"),
+        format!("#include={}\n", link_path.display()),
+    )
+    .expect("a foot.ini");
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with(
+        "look-t",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("an offline apply succeeds");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|n| n.contains(&*link_path.to_string_lossy())),
+        "a commented include counts: {:?}",
+        report.notes
+    );
+    // A live include: the reply says new terminals follow the look and
+    // running ones keep their palette, with no setup hint.
+    std::fs::write(
+        foot_home.join("foot.ini"),
+        format!("[main]\ninclude={}\n", link_path.display()),
+    )
+    .expect("a foot.ini");
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with(
+        "look-t",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("an offline apply succeeds");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|n| n.contains("new terminals") && n.contains("running")),
+        "no follow note: {:?}",
+        report.notes
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .all(|n| !n.contains("once foot.ini includes")),
+        "a setup hint survives the include: {:?}",
+        report.notes
+    );
+}
+
+#[test]
+fn a_second_apply_reuses_the_cached_foot_ini() {
+    let fixture = terminal_fixture("apply-foot-reuse");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::not_running();
+    apply_with(
+        "look-t",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("the first apply succeeds");
+    let first = PathBuf::from(&record_of(&fixture.state).rendered);
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with(
+        "look-t",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("the second apply succeeds");
+    let second = PathBuf::from(&record_of(&fixture.state).rendered);
+    assert_eq!(first, second, "the same look re-renders instead of reusing");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|n| n.contains("reusing cached render")),
+        "no reuse note: {:?}",
+        report.notes
+    );
+    assert!(second.join("foot.ini").is_file(), "reuse loses foot.ini");
 }

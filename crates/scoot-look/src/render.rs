@@ -13,8 +13,9 @@
 use std::collections::BTreeMap;
 
 use crate::allowlist::check_app_value;
-use crate::grammar::GrammarError;
+use crate::grammar::{GrammarError, is_hex_color};
 use crate::resolved::{ResolvedLook, pt_to_px};
+use crate::schema::Polarity;
 
 /// The largest `bar.radius` the renderer emits: half scootbar's default
 /// height (`DEFAULT_HEIGHT = 28` in `crates/scootbar/src/bar.rs:28-30`;
@@ -304,6 +305,73 @@ pub fn render_bar(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, 
         }
     }
     Ok(out)
+}
+
+/// Render the foot fragment (`foot.ini`): `[main]` selects the look's
+/// polarity as foot's initial theme (`initial-color-theme`: foot starts on
+/// `colors-dark` unless it is set to `light`), and both `[colors-dark]`
+/// and `[colors-light]` carry the look's 16 ANSI hues as `regular0-7`
+/// then `bright0-7`, each with `alpha` from `opacity.terminal` (foot 1.28
+/// has no `[colors]`). Both palettes hold the same hues on purpose:
+/// whatever theme is in effect when a new terminal starts — the
+/// fragment's own `initial-color-theme`, or the user's own `foot.ini`
+/// setting when it comes after the include — the look's hues show.
+/// `None` when the look has no `[terminal]` table: no fragment is ever
+/// synthesized from the palette.
+///
+/// Every hue is re-checked here, not only at parse: a library caller can
+/// hand-build a `ResolvedLook` past the gate, and a newline in a hue would
+/// otherwise open a new foot section (foot's `shell` key runs commands, so
+/// a section break is a code-execution shape, not a color typo).
+pub fn render_foot(look: &ResolvedLook) -> Result<Option<String>, GrammarError> {
+    let Some(colors) = &look.terminal else {
+        return Ok(None);
+    };
+    if colors.len() != 16 {
+        return Err(GrammarError::new(
+            "terminal.colors",
+            format!("must hold exactly 16 colors, found {}", colors.len()),
+        ));
+    }
+    for (i, color) in colors.iter().enumerate() {
+        if !is_hex_color(color) {
+            return Err(GrammarError::new(
+                format!("terminal.colors[{i}]"),
+                "must be exactly #rrggbb",
+            ));
+        }
+    }
+    if !look.opacity.terminal.is_finite() || !(0.0..=1.0).contains(&look.opacity.terminal) {
+        return Err(GrammarError::new("opacity.terminal", "must be 0.0 to 1.0"));
+    }
+    let theme = if look.polarity == Polarity::Dark {
+        "dark"
+    } else {
+        "light"
+    };
+    // A hand-built `ResolvedLook` skips the name grammar, so the comment
+    // quotes rather than interpolates: a newline in the name stays one line.
+    let mut out = format!(
+        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n# Both themes carry the look's hues, so new terminals match whatever theme is in effect.\n",
+        toml_str(&look.name)
+    );
+    out.push_str(&format!("\n[main]\ninitial-color-theme={theme}\n"));
+    for section in ["colors-dark", "colors-light"] {
+        out.push_str(&format!(
+            "\n[{section}]\nalpha={:.2}\n",
+            look.opacity.terminal
+        ));
+        for (i, color) in colors.iter().enumerate() {
+            // Foot's hex carries no `#`; the check above makes the slice safe.
+            let key = if i < 8 {
+                format!("regular{i}")
+            } else {
+                format!("bright{}", i - 8)
+            };
+            out.push_str(&format!("{key}={}\n", &color[1..]));
+        }
+    }
+    Ok(Some(out))
 }
 
 /// A cache identity for `render.json`, not security: FNV-1a over the source
