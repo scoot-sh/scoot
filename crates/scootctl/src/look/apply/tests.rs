@@ -68,6 +68,8 @@ fn options() -> ApplyOptions {
         lock_wait: Duration::from_millis(500),
         no_toolkit: false,
         from_compositor: false,
+        preview: false,
+        only_if_generation: None,
     }
 }
 

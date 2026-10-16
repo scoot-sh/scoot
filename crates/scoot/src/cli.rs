@@ -1961,6 +1961,12 @@ mod tests {
             &["build", "looks/moonrise", "--out", "/tmp/out"],
             &["apply", "moonrise"],
             &["apply", "moonrise", "--no-toolkit", "--json"],
+            &["apply", "moonrise", "--for", "20"],
+            &["apply", "--keep"],
+            &["apply", "moonrise", "--keep"],
+            &["next"],
+            &["prev"],
+            &["random"],
             &["toolkit"],
             &["toolkit", "off"],
             &["apply", "moonrise", "--state", "/s", "--socket", "/sock"],
@@ -2009,7 +2015,7 @@ mod tests {
             "--help hides the look subcommand"
         );
         assert!(
-            HelpPage::Look.text().contains("look apply NAME"),
+            HelpPage::Look.text().contains("look apply [NAME]"),
             "look help hides apply"
         );
         let document: serde_json::Value = serde_json::from_str(&json()).unwrap();

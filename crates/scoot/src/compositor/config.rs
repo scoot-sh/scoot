@@ -5210,9 +5210,9 @@ mod tests {
             );
             binds += 1;
         }
-        // "All 45 of them" (see site/src/content/docs/scoot/keybindings.md): a dropped default
+        // "All 46 of them" (see site/src/content/docs/scoot/keybindings.md): a dropped default
         // bind must fail loudly here, not just shrink the file.
-        assert_eq!(binds, 45, "a default bind was added or lost");
+        assert_eq!(binds, 46, "a default bind was added or lost");
     }
 
     /// Commented scalar values are pinned to their live defaults, not just

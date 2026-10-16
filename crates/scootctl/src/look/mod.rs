@@ -20,6 +20,7 @@
 pub mod apply;
 pub mod build_dir;
 pub mod catalog;
+pub mod cycle;
 pub mod foot;
 pub mod leaves;
 pub mod reload;
@@ -72,17 +73,34 @@ pub enum Command {
     },
     /// Render, record, repoint, reload in order, roll back on refusal.
     Apply {
-        name: String,
+        name: Option<String>,
         no_toolkit: bool,
         from_compositor: bool,
+        for_secs: Option<u64>,
+        keep: bool,
     },
+    /// The next, previous or a random catalog look, in search order.
+    Cycle { step: CycleStep },
+    /// The detached `--for` reverter (hidden: spawned by `apply --for`,
+    /// never typed). Sleeps out the delay, then reverts only while the
+    /// generation still matches.
+    PreviewRevert { from: u64, after: u64 },
     /// Show or persist the toolkit writes (`on` or `off`).
     Toolkit { action: Option<bool> },
 }
 
+/// Which catalog step a `Cycle` command takes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CycleStep {
+    Next,
+    Prev,
+    Random,
+}
+
 /// Every look command, for the JSON document and `did you mean` guesses.
+/// `_preview-revert` stays out: it is spawned, never typed.
 pub const COMMANDS: &[&str] = &[
-    "list", "current", "show", "validate", "build", "apply", "toolkit",
+    "list", "current", "show", "validate", "build", "apply", "next", "prev", "random", "toolkit",
 ];
 
 /// The usage line, shared by `scoot look --help` and the top-level help.
@@ -92,7 +110,8 @@ pub const LOOK_USAGE: &str = "\
     look show NAME [--json]
     look validate DIR|NAME [--origin shipped|declared|user|installed] [--json]
     look build DIR|NAME --out DIR [--origin shipped|declared|user|installed] [--json]
-    look apply NAME [--no-toolkit] [--from-compositor] [--json]
+    look apply [NAME] [--for SECONDS] [--keep] [--no-toolkit] [--from-compositor] [--json]
+    look next|prev|random [--json]
     look toolkit [on|off] [--json]
 
     --state DIR takes the look state (default: $SCOOT_LOOK_STATE, then
@@ -184,29 +203,26 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
                 origin,
             }
         }
-        "apply" => {
-            let mut name: Option<String> = None;
-            let mut no_toolkit = false;
-            let mut from_compositor = false;
-            for word in positionals {
-                if word == "--no-toolkit" {
-                    no_toolkit = true;
-                } else if word == "--from-compositor" {
-                    from_compositor = true;
-                } else if name.is_none() {
-                    name = Some(word);
-                } else {
-                    return Err(Error::Unknown(word));
-                }
-            }
-            let name = name.ok_or(Error::Missing("a look name"))?;
-            check_name(&name)?;
-            Command::Apply {
-                name,
-                no_toolkit,
-                from_compositor,
+        "apply" => parse_apply(&positionals)?,
+        "next" => {
+            refuse_trailing(&positionals)?;
+            Command::Cycle {
+                step: CycleStep::Next,
             }
         }
+        "prev" => {
+            refuse_trailing(&positionals)?;
+            Command::Cycle {
+                step: CycleStep::Prev,
+            }
+        }
+        "random" => {
+            refuse_trailing(&positionals)?;
+            Command::Cycle {
+                step: CycleStep::Random,
+            }
+        }
+        "_preview-revert" => parse_preview_revert(&positionals)?,
         "toolkit" => {
             let action = match positionals.as_slice() {
                 [] => None,
@@ -227,7 +243,8 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
                 "look command",
                 other.to_owned(),
                 &[
-                    "list", "current", "show", "validate", "build", "apply", "toolkit",
+                    "list", "current", "show", "validate", "build", "apply", "next", "prev",
+                    "random", "toolkit",
                 ],
                 "scoot look --help",
             ));
@@ -267,7 +284,14 @@ COMMANDS:
                 with no record adopts each key whatever it holds);
                 --from-compositor marks the choice as compositor-driven
                 (what the compositor's own IPC child passes; `current`
-                shows it)
+                shows it);
+                --for SECONDS previews the look and reverts after the
+                delay (a detached child, so closing the terminal never
+                strands it); --keep with a name applies for good and
+                cancels any pending preview, bare keeps the current look
+    next        the next catalog look after the active one, wrapping
+    prev        the previous catalog look before the active one, wrapping
+    random      a random catalog look
     toolkit     show whether the toolkit step is on, or persist
                 `toolkit on|off` in look.json
 
@@ -411,6 +435,110 @@ fn build_args(positionals: &[String]) -> Result<(String, Origin, PathBuf), Error
     Ok((target, origin, out))
 }
 
+fn parse_apply(positionals: &[String]) -> Result<Command, Error> {
+    let mut name: Option<String> = None;
+    let mut no_toolkit = false;
+    let mut from_compositor = false;
+    let mut for_secs: Option<u64> = None;
+    let mut keep = false;
+    let mut words = positionals.iter().peekable();
+    while let Some(word) = words.next() {
+        if word == "--no-toolkit" {
+            no_toolkit = true;
+        } else if word == "--from-compositor" {
+            from_compositor = true;
+        } else if word == "--keep" {
+            keep = true;
+        } else if word == "--for" {
+            let value = words.next().ok_or(Error::Missing("seconds after --for"))?;
+            for_secs = Some(parse_seconds(value)?);
+        } else if let Some(value) = word.strip_prefix("--for=") {
+            if value.is_empty() {
+                return Err(Error::Missing("seconds after --for"));
+            }
+            for_secs = Some(parse_seconds(value)?);
+        } else if name.is_none() {
+            name = Some(word.clone());
+        } else {
+            return Err(Error::Unknown(word.clone()));
+        }
+    }
+    if for_secs.is_some() && keep {
+        return Err(Error::Invalid {
+            what: "--for with --keep",
+            value: "a preview that is kept needs no timer".to_owned(),
+        });
+    }
+    let Some(name) = name else {
+        if keep {
+            return Ok(Command::Apply {
+                name: None,
+                no_toolkit,
+                from_compositor,
+                for_secs: None,
+                keep: true,
+            });
+        }
+        return Err(Error::Missing("a look name"));
+    };
+    check_name(&name)?;
+    Ok(Command::Apply {
+        name: Some(name),
+        no_toolkit,
+        from_compositor,
+        for_secs,
+        keep,
+    })
+}
+
+/// Seconds for `apply --for`: a positive integer. Zero would revert before
+/// the swap's own reloads land; the reverter sleeps this long detached, so
+/// there is no upper bound worth enforcing beyond the integer itself.
+fn parse_seconds(value: &str) -> Result<u64, Error> {
+    match value.parse::<u64>() {
+        Ok(secs) if secs >= 1 => Ok(secs),
+        _ => Err(Error::Invalid {
+            what: "--for",
+            value: value.to_owned(),
+        }),
+    }
+}
+
+/// The detached reverter's argv (hidden: spawned by `apply --for`, never
+/// typed): `_preview-revert --from GENERATION --after SECONDS`.
+fn parse_preview_revert(positionals: &[String]) -> Result<Command, Error> {
+    let mut from: Option<u64> = None;
+    let mut after: Option<u64> = None;
+    let mut words = positionals.iter().peekable();
+    while let Some(word) = words.next() {
+        if word == "--from" {
+            let value = words
+                .next()
+                .ok_or(Error::Missing("a generation after --from"))?;
+            from = Some(value.parse::<u64>().map_err(|_| Error::Invalid {
+                what: "--from",
+                value: value.clone(),
+            })?);
+        } else if word == "--after" {
+            let value = words
+                .next()
+                .ok_or(Error::Missing("seconds after --after"))?;
+            after = Some(value.parse::<u64>().map_err(|_| Error::Invalid {
+                what: "--after",
+                value: value.clone(),
+            })?);
+        } else {
+            return Err(Error::Unknown(word.clone()));
+        }
+    }
+    match (from, after) {
+        (Some(from), Some(after)) => Ok(Command::PreviewRevert { from, after }),
+        _ => Err(Error::Missing(
+            "a generation after --from and seconds after --after",
+        )),
+    }
+}
+
 fn hinted(kind: &'static str, what: String, candidates: &[&str], topic: &'static str) -> Error {
     match scoot_ipc::suggest(&what, candidates.iter().copied()) {
         Some(suggestion) => Error::Hinted {
@@ -441,7 +569,18 @@ pub fn run(look: &Look) -> Result<(), String> {
             name,
             no_toolkit,
             from_compositor,
-        } => run_apply(look, name, *no_toolkit, *from_compositor),
+            for_secs,
+            keep,
+        } => run_apply(
+            look,
+            name.as_deref(),
+            *no_toolkit,
+            *from_compositor,
+            *for_secs,
+            *keep,
+        ),
+        Command::Cycle { step } => run_cycle(look, *step),
+        Command::PreviewRevert { from, after } => run_preview_revert(look, *from, *after),
         Command::Toolkit { action } => run_toolkit(look, *action),
     }
 }
@@ -876,18 +1015,204 @@ fn run_build(look: &Look, target: &str, out: &Path, origin: Origin) -> Result<()
 
 fn run_apply(
     look: &Look,
-    name: &str,
+    name: Option<&str>,
     no_toolkit: bool,
     from_compositor: bool,
+    for_secs: Option<u64>,
+    keep: bool,
 ) -> Result<(), String> {
-    let catalog = discover();
-    let cache = apply::render_cache_dir()?;
-    let state_dir = resolve_state_dir(look.state.as_deref())?;
+    let Some(name) = name else {
+        return run_keep(look);
+    };
+    // Word the `--keep` note honestly: peek at the preview file before
+    // the swap moves the generation out from under it.
+    let had_preview = resolve_state_dir(look.state.as_deref())
+        .map(|dir| matches!(cycle::read_preview(&dir), cycle::PreviewRead::Present(_)))
+        .unwrap_or(false);
     let options = ApplyOptions {
         lock_wait: apply::LOCK_WAIT,
         no_toolkit,
         from_compositor,
+        preview: for_secs.is_some(),
+        only_if_generation: None,
     };
+    let armed = apply_and_print(look, name, &options, for_secs)?;
+    if keep && had_preview {
+        output::warn(format_args!(
+            "note: kept {name}: the pending preview is cancelled"
+        ));
+    }
+    if let (Some(preview), Some(secs)) = (armed, for_secs) {
+        arm_preview_timer(look, preview.from_generation, secs)?;
+    }
+    Ok(())
+}
+
+/// Runs one cycling step: resolves the neighbor in catalog order and
+/// applies it through the same transaction a named apply uses.
+fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
+    let catalog = discover();
+    let state_dir = resolve_state_dir(look.state.as_deref())?;
+    let current = match scoot_look::state::read_record(&state_dir) {
+        scoot_look::state::RecordRead::Present(record) => Some(record.name),
+        scoot_look::state::RecordRead::Missing => None,
+        scoot_look::state::RecordRead::Corrupt(reason) => {
+            return Err(format!("the recorded choice is corrupt: {reason}"));
+        }
+    };
+    let target = match step {
+        CycleStep::Next => cycle::cycle_target(&catalog, current.as_deref(), cycle::Step::Next),
+        CycleStep::Prev => cycle::cycle_target(&catalog, current.as_deref(), cycle::Step::Prev),
+        CycleStep::Random => cycle::random_target(&catalog),
+    };
+    let Some(target) = target else {
+        return Err("the catalog is empty".to_owned());
+    };
+    let options = ApplyOptions {
+        lock_wait: apply::LOCK_WAIT,
+        no_toolkit: false,
+        from_compositor: false,
+        preview: false,
+        only_if_generation: None,
+    };
+    apply_and_print(look, &target, &options, None).map(|_| ())
+}
+
+/// Keeps a timed preview: forgets the pending revert, staying on the
+/// current look.
+fn run_keep(look: &Look) -> Result<(), String> {
+    let state_dir = resolve_state_dir(look.state.as_deref())?;
+    match cycle::keep_preview(&state_dir, apply::LOCK_WAIT) {
+        Ok(name) => {
+            if look.json {
+                output::print_line(
+                    &serde_json::to_string_pretty(&serde_json::json!({"kept": name}))
+                        .unwrap_or_default(),
+                )
+                .map_err(|error| error.to_string())?;
+            } else {
+                output::print_line(&format!("kept: {name}")).map_err(|error| error.to_string())?;
+            }
+            Ok(())
+        }
+        Err(message) => Err(message),
+    }
+}
+
+/// The detached reverter (hidden `_preview-revert`): sleeps out the delay,
+/// then reverts only while the generation still matches. Never holds a
+/// lock across the sleep: the previewing apply released its own long ago.
+fn run_preview_revert(look: &Look, from: u64, after: u64) -> Result<(), String> {
+    if after > 0 {
+        std::thread::sleep(std::time::Duration::from_secs(after));
+    }
+    let catalog = discover();
+    let cache = apply::render_cache_dir()?;
+    let state_dir = resolve_state_dir(look.state.as_deref())?;
+    let mut compositor: Box<dyn CompositorReload> = match &look.socket {
+        Some(path) => Box::new(IpcCompositor::explicit(path.clone())),
+        None => Box::new(IpcCompositor::default_socket()),
+    };
+    let (bars, _) = bar_targets();
+    let bar_refs: Vec<&dyn reload::BarReload> = bars
+        .iter()
+        .map(|bar| bar as &dyn reload::BarReload)
+        .collect();
+    let checks = apply::ProdChecks::new();
+    let dconf = CliDconf::new();
+    match cycle::revert_if_current(
+        from,
+        &catalog,
+        &cache,
+        &state_dir,
+        None,
+        compositor.as_mut(),
+        &bar_refs,
+        &checks,
+        &dconf,
+        apply::LOCK_WAIT,
+    ) {
+        Ok(cycle::RevertOutcome::Reverted { name }) => {
+            let line = match &name {
+                Some(name) => format!("reverted to {name}"),
+                None => "reverted: no look active".to_owned(),
+            };
+            if look.json {
+                output::print_line(
+                    &serde_json::to_string_pretty(&serde_json::json!({
+                        "reverted_to": name,
+                        "from_generation": from,
+                    }))
+                    .unwrap_or_default(),
+                )
+                .map_err(|error| error.to_string())?;
+            } else {
+                output::print_line(&line).map_err(|error| error.to_string())?;
+            }
+            Ok(())
+        }
+        Ok(cycle::RevertOutcome::Superseded) | Ok(cycle::RevertOutcome::NothingPending) => {
+            if look.json {
+                output::print_line(
+                    &serde_json::to_string_pretty(&serde_json::json!({
+                        "reverted_to": serde_json::Value::Null,
+                        "from_generation": from,
+                        "superseded": true,
+                    }))
+                    .unwrap_or_default(),
+                )
+                .map_err(|error| error.to_string())?;
+            }
+            Ok(())
+        }
+        Err(message) => Err(message),
+    }
+}
+
+/// Spawns the detached reverter after a `--for` apply armed its preview.
+/// The child outlives this CLI (its own session, stdio to null). The
+/// generation comes from the completed swap itself, not a re-read, so a
+/// concurrent newer apply between the swap and the spawn cannot retarget
+/// the timer: the reverter simply finds its generation moved and stands
+/// down. When the spawn itself fails the preview would stick past its
+/// delay, so the file is forgotten loudly and the look stays applied,
+/// plainly said.
+fn arm_preview_timer(look: &Look, from_generation: u64, secs: u64) -> Result<(), String> {
+    let state_dir = resolve_state_dir(look.state.as_deref())?;
+    let state_dir = apply::absolutize(&state_dir).map_err(|error| error.to_string())?;
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let (_, args) = cycle::reverter_argv(
+        &exe,
+        &state_dir,
+        look.socket.as_deref(),
+        from_generation,
+        secs,
+    );
+    match cycle::spawn_reverter(&exe, &args) {
+        Ok(()) => {
+            output::warn(format_args!(
+                "note: preview: reverts in {secs}s (`scoot look apply --keep` keeps it)"
+            ));
+            Ok(())
+        }
+        Err(error) => {
+            cycle::clear_preview(&state_dir);
+            Err(format!(
+                "applied, but {error}: the preview timer never started, so the look stays until changed"
+            ))
+        }
+    }
+}
+
+fn apply_and_print(
+    look: &Look,
+    name: &str,
+    options: &ApplyOptions,
+    for_secs: Option<u64>,
+) -> Result<Option<cycle::Preview>, String> {
+    let catalog = discover();
+    let cache = apply::render_cache_dir()?;
+    let state_dir = resolve_state_dir(look.state.as_deref())?;
     let mut compositor: Box<dyn CompositorReload> = match &look.socket {
         Some(path) => Box::new(IpcCompositor::explicit(path.clone())),
         None => Box::new(IpcCompositor::default_socket()),
@@ -902,7 +1227,7 @@ fn run_apply(
     let leaves = CliLeaves::new();
     match apply_with(
         name,
-        &options,
+        options,
         &catalog,
         &cache,
         &state_dir,
@@ -916,6 +1241,12 @@ fn run_apply(
         Ok(report) => {
             let mut all_notes = notes;
             all_notes.extend(report.notes.iter().cloned());
+            let preview_json = report.preview.as_ref().map(|preview| {
+                serde_json::json!({
+                    "revert_to": preview.revert_to,
+                    "from_generation": preview.from_generation,
+                })
+            });
             if look.json {
                 output::print_line(
                     &serde_json::to_string_pretty(&serde_json::json!({
@@ -926,6 +1257,7 @@ fn run_apply(
                         "skipped": report.skipped,
                         "shadowed": report.shadowed,
                         "invalid": report.invalid,
+                        "preview": preview_json,
                         "notes": all_notes,
                     }))
                     .unwrap_or_default(),
@@ -934,6 +1266,13 @@ fn run_apply(
             } else {
                 output::print_line(&format!("applied: {}", report.name))
                     .map_err(|error| error.to_string())?;
+                if let (Some(preview), Some(secs)) = (&report.preview, for_secs) {
+                    let back = preview.revert_to.as_deref().unwrap_or("(no look)");
+                    output::print_line(&format!(
+                        "preview: reverts to {back} in {secs}s (`scoot look apply --keep` keeps it)"
+                    ))
+                    .map_err(|error| error.to_string())?;
+                }
                 if !report.reloaded.is_empty() {
                     output::print_line(&format!("reloaded: {}", report.reloaded.join(", ")))
                         .map_err(|error| error.to_string())?;
@@ -960,7 +1299,7 @@ fn run_apply(
                     output::warn(format_args!("note: {note}"));
                 }
             }
-            Ok(())
+            Ok(report.preview.clone())
         }
         Err(failure) => {
             // `--json` still prints a document on stdout (like `validate`

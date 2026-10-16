@@ -1,9 +1,10 @@
 ---
 title: "scoot look next, prev, random and timed previews"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-15"
 ---
 
 # scoot look next, prev, random and timed previews

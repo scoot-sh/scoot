@@ -60,7 +60,7 @@ stated rule.
 | [`look-layer-scootbar`](../../scootbar/backlog/resolved/look-layer-scootbar-done.md) | high | daily-drive | `look-format` |
 | [`scootbar-style-reload`](../../scootbar/backlog/resolved/scootbar-style-reload-done.md) | medium | daily-drive | |
 | [`look-apply-cli`](../resolved/look-apply-cli-done.md) | high | both | `look-shipped`, `look-scoped-reload` |
-| [`look-cycle-preview`](look-cycle-preview.md) | medium | daily-drive | `look-apply-cli` |
+| [`look-cycle-preview`](../resolved/look-cycle-preview-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-ipc`](../resolved/look-ipc-done.md) | medium | computer use | `look-apply-cli` |
 | [`look-golden-screenshots`](../testing/look-golden-screenshots.md) | medium | computer use | `look-ipc` |
 | [`look-nix-catalog`](../packaging/look-nix-catalog.md) | high | daily-drive | `look-apply-cli` |

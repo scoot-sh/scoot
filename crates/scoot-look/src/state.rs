@@ -53,6 +53,11 @@ pub const RECORD_FILE: &str = "look.json";
 pub const LINK_NAME: &str = "look";
 /// The lock filename inside a state dir, taken by every writer.
 pub const LOCK_FILE: &str = "look.lock";
+/// The timed-preview file inside a state dir: what a `--for` preview
+/// reverts to, and the generation it reverts from. The reverter does
+/// nothing when the file is gone (`--keep`) or the generation moved (a
+/// later apply). Machine-written JSON, read capped like the record.
+pub const PREVIEW_FILE: &str = "look-preview.json";
 /// The private dir's prefix under `$XDG_RUNTIME_DIR`: `scoot-look-<display>`.
 pub const PRIVATE_PREFIX: &str = "scoot-look-";
 

@@ -1243,6 +1243,41 @@ EOF
         return 1
     fi
     echo "ok: the IPC swap landed, pixel-checked, and looks names it"
+    echo "--- next steps the catalog, --for previews and reverts ---"
+    if ! "$SCOOT" look next --state "$state" --socket "$socket" >"$dir/apply.out" 2>&1; then
+        echo "BUG: look next failed:"
+        cat "$dir/apply.out"
+        return 1
+    fi
+    stepped="$("$SCOOT" look current --state "$state" --socket "$socket" | head -1)"
+    stepped_name="${stepped%% *}"
+    case "$stepped_name" in
+        ginger-night)
+            echo "BUG: look next stayed on ginger-night"
+            return 1
+            ;;
+    esac
+    if ! "$SCOOT" look list | grep -q "^$stepped_name"; then
+        echo "BUG: look next landed outside the catalog: $stepped"
+        return 1
+    fi
+    echo "ok: next stepped to $stepped"
+    if ! "$SCOOT" look apply vinyl-sunset --for 2 --state "$state" --socket "$socket" >"$dir/apply.out" 2>&1; then
+        echo "BUG: preview apply failed:"
+        cat "$dir/apply.out"
+        return 1
+    fi
+    if ! "$SCOOT" look current --state "$state" | grep -q "vinyl-sunset"; then
+        echo "BUG: current does not name the preview"
+        return 1
+    fi
+    sleep 5
+    if ! "$SCOOT" look current --state "$state" | grep -q "^$stepped_name"; then
+        echo "BUG: the preview did not revert to $stepped_name:"
+        "$SCOOT" look current --state "$state" || true
+        return 1
+    fi
+    echo "ok: the preview reverted after its delay"
 }
 if [ -n "$SCOOTBG" ]; then
     ( run_looks_test ) || exit 1

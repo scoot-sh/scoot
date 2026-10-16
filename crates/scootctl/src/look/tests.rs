@@ -28,17 +28,21 @@ fn verbs_parse_bare() {
     assert_eq!(
         command(&["apply", "moonrise", "--no-toolkit"]),
         Ok(Command::Apply {
-            name: "moonrise".to_owned(),
+            name: Some("moonrise".to_owned()),
             no_toolkit: true,
             from_compositor: false,
+            for_secs: None,
+            keep: false,
         })
     );
     assert_eq!(
         command(&["apply", "moonrise", "--from-compositor"]),
         Ok(Command::Apply {
-            name: "moonrise".to_owned(),
+            name: Some("moonrise".to_owned()),
             no_toolkit: false,
             from_compositor: true,
+            for_secs: None,
+            keep: false,
         })
     );
     assert_eq!(command(&["toolkit"]), Ok(Command::Toolkit { action: None }));
@@ -104,10 +108,104 @@ fn json_state_and_socket_ride_anywhere() {
     assert_eq!(
         look.command,
         Command::Apply {
-            name: "moonrise".to_owned(),
+            name: Some("moonrise".to_owned()),
             no_toolkit: false,
             from_compositor: false,
+            for_secs: None,
+            keep: false,
         }
+    );
+}
+
+#[test]
+fn cycle_verbs_parse_bare() {
+    use super::CycleStep;
+    assert_eq!(
+        command(&["next"]),
+        Ok(Command::Cycle {
+            step: CycleStep::Next
+        })
+    );
+    assert_eq!(
+        command(&["prev"]),
+        Ok(Command::Cycle {
+            step: CycleStep::Prev
+        })
+    );
+    assert_eq!(
+        command(&["random"]),
+        Ok(Command::Cycle {
+            step: CycleStep::Random
+        })
+    );
+    assert_eq!(
+        command(&["next", "extra"]),
+        Err(Error::Unknown("extra".to_owned()))
+    );
+}
+
+#[test]
+fn apply_for_and_keep_parse() {
+    assert_eq!(
+        command(&["apply", "moonrise", "--for", "20"]),
+        Ok(Command::Apply {
+            name: Some("moonrise".to_owned()),
+            no_toolkit: false,
+            from_compositor: false,
+            for_secs: Some(20),
+            keep: false,
+        })
+    );
+    assert_eq!(
+        command(&["apply", "moonrise", "--for=20"]),
+        Ok(Command::Apply {
+            name: Some("moonrise".to_owned()),
+            no_toolkit: false,
+            from_compositor: false,
+            for_secs: Some(20),
+            keep: false,
+        })
+    );
+    assert_eq!(
+        command(&["apply", "--keep"]),
+        Ok(Command::Apply {
+            name: None,
+            no_toolkit: false,
+            from_compositor: false,
+            for_secs: None,
+            keep: true,
+        })
+    );
+    assert_eq!(
+        command(&["apply", "moonrise", "--keep"]),
+        Ok(Command::Apply {
+            name: Some("moonrise".to_owned()),
+            no_toolkit: false,
+            from_compositor: false,
+            for_secs: None,
+            keep: true,
+        })
+    );
+    // A preview that is kept needs no timer.
+    assert!(command(&["apply", "moonrise", "--for", "20", "--keep"]).is_err());
+    // Zero seconds would revert before the swap lands.
+    assert_eq!(
+        command(&["apply", "moonrise", "--for", "0"]),
+        Err(Error::Invalid {
+            what: "--for",
+            value: "0".to_owned(),
+        })
+    );
+    assert_eq!(
+        command(&["apply", "moonrise", "--for", "soon"]),
+        Err(Error::Invalid {
+            what: "--for",
+            value: "soon".to_owned(),
+        })
+    );
+    assert_eq!(
+        command(&["apply", "--for", "20"]),
+        Err(Error::Missing("a look name"))
     );
 }
 
@@ -186,6 +284,8 @@ fn the_usage_names_every_verb() {
         "--state",
         "--socket",
         "--no-toolkit",
+        "--for",
+        "--keep",
         "--out",
         "--origin",
     ] {
