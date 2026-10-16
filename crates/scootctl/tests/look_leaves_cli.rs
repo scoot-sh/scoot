@@ -201,14 +201,10 @@ fn stub_ps_table(bin: &std::path::Path, uid: u32, other: u32) {
 }
 
 fn own_uid() -> u32 {
-    let out = std::process::Command::new("id")
-        .arg("-u")
-        .output()
-        .expect("id -u runs");
-    String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse()
-        .expect("a numeric uid")
+    // No subprocess: `id -u` resolves on `PATH`, which a concurrent
+    // exact-PATH test rewrites mid-flight (`NotFound`). `getuid` cannot
+    // race it, and matches the production uid filter in `leaves.rs`.
+    rustix::process::getuid().as_raw()
 }
 
 #[test]
@@ -226,9 +222,11 @@ fn editor_signals_reach_only_the_users_own_processes() {
     // The stub ps beside (not inside) the fake bin dir: reuse the
     // fake's PATH plumbing by pointing PATH at both.
     let _ = &fake;
-    let old = std::env::var_os("PATH");
     {
         let _guard = PATH_LOCK.lock().expect("the PATH lock");
+        // Read inside the lock (as `with_path` does): outside, another
+        // test's body PATH could be observed and restored as ours.
+        let old = std::env::var_os("PATH");
         let mut path = dir.display().to_string();
         if let Some(real) = &old {
             path.push(':');
@@ -273,9 +271,11 @@ fn no_running_editor_is_a_count_of_zero() {
         std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
             .expect("an executable stub");
     }
-    let old = std::env::var_os("PATH");
     {
         let _guard = PATH_LOCK.lock().expect("the PATH lock");
+        // Read inside the lock (as `with_path` does): outside, another
+        // test's body PATH could be observed and restored as ours.
+        let old = std::env::var_os("PATH");
         let mut path = dir.display().to_string();
         if let Some(real) = &old {
             path.push(':');
@@ -314,6 +314,11 @@ fn missing_ps_is_a_named_error() {
 #[test]
 fn editor_signals_are_really_delivered() {
     use std::process::{Command, Stdio};
+    // The whole test holds the PATH lock: the sleep lookup shells `sh`
+    // and the comm probe shells `ps` (both PATH-resolved), so they must
+    // not run while a concurrent exact-PATH test rewrites PATH — the
+    // same class as `own_uid`'s old `id -u` race.
+    let _path_guard = PATH_LOCK.lock().expect("the PATH lock");
     let uid = own_uid();
     let dir = std::env::temp_dir().join(format!(
         "scoot-leaves-ps-{}-{}",
@@ -402,7 +407,8 @@ fn editor_signals_are_really_delivered() {
     }
     let old = std::env::var_os("PATH");
     let (hx_count, btop_count) = {
-        let _guard = PATH_LOCK.lock().expect("the PATH lock");
+        // No second lock: `_path_guard` above already holds PATH_LOCK
+        // (`Mutex` is not reentrant, so this block only sets PATH).
         let mut path = dir.display().to_string();
         if let Some(real) = &old {
             path.push(':');
@@ -470,9 +476,11 @@ fn a_table_past_the_pipe_buffer_still_reads() {
         std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
             .expect("an executable stub");
     }
-    let old = std::env::var_os("PATH");
     let count = {
         let _guard = PATH_LOCK.lock().expect("the PATH lock");
+        // Read inside the lock: outside, another test's body PATH could
+        // be observed and restored as ours.
+        let old = std::env::var_os("PATH");
         let mut path = dir.display().to_string();
         if let Some(real) = &old {
             path.push(':');
