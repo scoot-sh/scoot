@@ -2563,7 +2563,7 @@ in
           {
             assertion = cfg.desktop.theme.fonts.sansPackage != null;
             message = ''
-              programs.scoot.desktop.look needs a greeter font but
+              programs.scoot.look needs a greeter font but
               programs.scoot.desktop.theme.fonts.sansPackage is null: set
               it explicitly (apply the overlay, or point at the look's
               UI sans).

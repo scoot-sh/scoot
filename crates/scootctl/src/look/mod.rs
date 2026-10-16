@@ -1410,6 +1410,8 @@ fn run_sync(look: &Look, no_toolkit: bool) -> Result<(), String> {
         .collect();
     let checks = apply::ProdChecks::new();
     let dconf = CliDconf::new();
+    let leaves = CliLeaves::new();
+    let live = apply::live_render_targets();
     let target = declared
         .clone()
         .flatten()
@@ -1428,6 +1430,8 @@ fn run_sync(look: &Look, no_toolkit: bool) -> Result<(), String> {
         &bar_refs,
         &checks,
         &dconf,
+        &leaves,
+        &live,
     ) {
         Ok(report) => print_swap_report(look, &target, &report, &notes),
         Err(failure) => print_swap_failure(look, &target, &failure),

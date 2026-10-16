@@ -1296,8 +1296,11 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 /// fragments (`gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`,
 /// `qt/scoot-look.conf`); 6 adds the daemon
 /// leaves (`mako`, `wob.ini`, `fcitx5/theme.conf`, `nightlight`); 7 adds
-/// the launcher and locker leaves (`fuzzel.ini`, `swaylock`).
-pub const RENDER_VERSION: u32 = 7;
+/// the launcher and locker leaves (`fuzzel.ini`, `swaylock`); 8 honors
+/// the cursor/fonts target opt-outs (an opted-out cursor renders no
+/// cursor keys, opted-out fonts no bar `font` key — each keys apart
+/// through the inputs, so the bump only retires pre-opt-out caches).
+pub const RENDER_VERSION: u32 = 8;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
@@ -1577,7 +1580,7 @@ fn dir_older_than(path: &Path, seconds: u64) -> bool {
 /// best-effort. The cache is global across state dirs, but the keep-set of
 /// one apply is not: without these, churning one session could prune the
 /// render another live session's link names.
-fn live_render_targets() -> Vec<PathBuf> {
+pub(crate) fn live_render_targets() -> Vec<PathBuf> {
     let mut targets = Vec::new();
     let mut state_dirs = Vec::new();
     if let Some(user) = state_dir_from_env(None) {
@@ -1852,6 +1855,8 @@ pub(crate) fn complete_swap(
     compositor: &mut dyn CompositorReload,
     bars: &[&dyn BarReload],
     dconf: &dyn Dconf,
+    leaves: &dyn super::leaves::Leaves,
+    live: &[PathBuf],
 ) -> Result<(), ApplyFailure> {
     let refuse = |message: String| ApplyFailure {
         message,
@@ -1962,6 +1967,15 @@ pub(crate) fn complete_swap(
                     swap.target_skips,
                 ));
             }
+            // The daemon leaves are best-effort too, like the toolkit
+            // step: each app's own reload signal for the swapped look.
+            // A private state runs none of them (they would reach the
+            // user's real session, not the test's).
+            if let Some(merged) = merged {
+                let leaf_report = super::leaves::apply_leaves(state_dir, merged, leaves);
+                report.reloaded.extend(leaf_report.reloaded);
+                report.notes.extend(leaf_report.notes);
+            }
             // Shadowed keys: the compositor's reply when it reloaded; else
             // the files, read directly.
             if let Some(merged) = merged {
@@ -2016,7 +2030,7 @@ pub(crate) fn complete_swap(
             keep.push(PathBuf::from(&previous.rendered));
         }
     }
-    keep.extend(live_render_targets());
+    keep.extend(live.iter().cloned());
     prune_cache(cache, &keep, &mut report.notes);
     report.name = swap.name.clone();
     report.rendered = match &swap.target {
@@ -2256,20 +2270,71 @@ pub fn apply_with_live(
         }
     };
     report.notes.extend(validation.notes);
-    let render_inputs = inputs.inputs;
+    let mut render_inputs = inputs.inputs;
     let details = inputs.details;
     report.notes.extend(details);
-    let (mut target, _) = render_for_swap(
+    let mut target = render_cached(
         name,
         &chain,
         &merged,
-        render_inputs,
-        RenderSource::Fresh,
+        &render_inputs,
         cache,
-        checks,
         &mut report.notes,
     )
     .map_err(refuse)?;
+    // The bar's own parser over the rendered fragment, against the
+    // installed binary's features. A bar built `--no-default-features`
+    // (no `popup`) refuses `popup-radius`, and a minimal bar refuses whole
+    // module sections (`unknown field inactive-color, there are no fields`
+    // for `[workspaces]`): re-render without what the installed bar lacks
+    // rather than refusing every look, and say what was dropped.
+    let mut drops: Vec<BarDrop> = Vec::new();
+    loop {
+        match checks.bar_fragment(&target.join("bar.toml")) {
+            Ok(Availability::Available(())) => {
+                for drop_ in &drops {
+                    report.notes.push(drop_.rendered_note());
+                }
+                break;
+            }
+            Ok(Availability::Unavailable(note)) => {
+                report.notes.push(note);
+                break;
+            }
+            Err(message) => {
+                let fragment = match std::fs::read_to_string(target.join("bar.toml")) {
+                    Ok(fragment) => fragment,
+                    Err(_) => return Err(refuse(message)),
+                };
+                let Some(drop_) = bar_downgrade(&message, &fragment) else {
+                    return Err(refuse(message));
+                };
+                if !drop_.apply_to(&mut render_inputs) {
+                    return Err(refuse(message));
+                }
+                drops.push(drop_);
+                target = render_cached(
+                    name,
+                    &chain,
+                    &merged,
+                    &render_inputs,
+                    cache,
+                    &mut report.notes,
+                )
+                .map_err(refuse)?;
+            }
+        }
+    }
+    // Foot's own parser over the rendered fragment, when the look renders
+    // one. A missing foot is a note; a refusal refuses the swap before
+    // anything is recorded, like the bar's genuine errors.
+    if merged.terminal.is_some() {
+        match checks.foot_fragment(&target.join("foot.ini")) {
+            Ok(Availability::Available(())) => {}
+            Ok(Availability::Unavailable(note)) => report.notes.push(note),
+            Err(message) => return Err(refuse(message)),
+        }
+    }
     let generation = previous
         .as_ref()
         .map(|record| record.generation + 1)

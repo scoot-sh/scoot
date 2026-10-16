@@ -25,7 +25,9 @@
 
 let
   cfg = config.programs.scoot;
-  look = cfg.desktop.look or null;
+  # The declared default look (moved from `desktop.look` by
+  # `look-nix-catalog`: read the new path).
+  look = cfg.look or null;
   # `or null`: a standalone leaf import without the profile entry leaves
   # `package` undefined, and a files-only setup sets it to null; neither
   # seeds anything.

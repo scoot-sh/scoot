@@ -245,7 +245,7 @@ fn seed(fixture: &Fixture, name: &str, checks: &dyn Checks) -> PathBuf {
         &[],
         checks,
         &FakeDconf::absent(),
-        &ScriptedLeaves::ok(),
+        &ScriptedLeaves::failing(),
     )
     .expect("seeding apply succeeds");
     PathBuf::from(report.rendered)
@@ -268,6 +268,8 @@ fn run_sync(
     bars: &[&dyn BarReload],
     checks: &dyn Checks,
     dconf: &dyn Dconf,
+    leaves: &dyn super::super::leaves::Leaves,
+    live: &[PathBuf],
 ) -> Result<super::super::apply::ApplyReport, super::super::apply::ApplyFailure> {
     sync_with(
         declared,
@@ -283,6 +285,8 @@ fn run_sync(
         bars,
         checks,
         dconf,
+        leaves,
+        live,
     )
 }
 
@@ -302,6 +306,8 @@ fn rule_one_starts_on_the_declared_default() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("rule one syncs");
     assert_eq!(report.name, "look-b");
@@ -335,6 +341,8 @@ fn rule_one_null_with_no_state_does_nothing() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("null with no state succeeds");
     assert!(!report.removed);
@@ -359,6 +367,8 @@ fn unmanaged_leaves_the_choice_alone() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("unmanaged sync succeeds");
     assert_eq!(report.name, "look-a");
@@ -385,6 +395,8 @@ fn rule_two_follows_a_changed_default() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("rule two syncs");
     assert_eq!(report.name, "look-b");
@@ -419,6 +431,8 @@ fn rule_two_null_removes_the_layer() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("null removes the layer");
     assert!(report.removed);
@@ -453,6 +467,8 @@ fn removal_rolls_back_on_a_refused_reload() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("a refused removal fails");
     assert_eq!(failure.rolled_back_to.as_deref(), Some("look-a"));
@@ -481,6 +497,8 @@ fn rule_three_falls_back_when_the_live_choice_left() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("first sync");
     let mut compositor = FakeCompositor::not_running();
@@ -495,7 +513,7 @@ fn rule_three_falls_back_when_the_live_choice_left() {
         &[],
         &checks,
         &FakeDconf::absent(),
-        &ScriptedLeaves::ok(),
+        &ScriptedLeaves::failing(),
     )
     .expect("a manual apply carries the recorded default");
     let record = record_of(&fixture.state);
@@ -524,6 +542,8 @@ fn rule_three_falls_back_when_the_live_choice_left() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("rule three syncs");
     assert_eq!(report.name, "look-b");
@@ -551,6 +571,8 @@ fn rule_three_unknown_declared_refuses() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("an unknown declared default refuses");
     assert!(
@@ -583,6 +605,8 @@ fn rule_four_keeps_an_unchanged_choice_quiet() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("first sync");
     let mut compositor = FakeCompositor::ok();
@@ -595,6 +619,8 @@ fn rule_four_keeps_an_unchanged_choice_quiet() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("second sync");
     assert_eq!(report.name, "look-a");
@@ -632,6 +658,8 @@ fn a_catalog_render_is_adopted_then_kept() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("first sync renders fresh");
     assert!(
@@ -655,6 +683,8 @@ fn a_catalog_render_is_adopted_then_kept() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("second sync adopts the catalog render");
     assert_eq!(second.rendered, published.display().to_string());
@@ -678,6 +708,8 @@ fn a_catalog_render_is_adopted_then_kept() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("third sync keeps");
     assert_eq!(third.generation, second.generation, "no new generation");
@@ -712,6 +744,8 @@ fn a_stale_catalog_render_falls_back_to_cache() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("sync falls back");
     assert!(
@@ -748,6 +782,8 @@ fn a_claimed_key_is_left_alone() {
         &[],
         &checks,
         &dconf,
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("sync applies around the claim");
     assert_eq!(report.name, "look-a");
@@ -802,6 +838,8 @@ fn a_failed_switch_rolls_back_to_the_live_choice() {
         &bars,
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("a refused switch fails");
     assert_eq!(failure.rolled_back_to.as_deref(), Some("look-a"));
@@ -831,6 +869,8 @@ fn a_corrupt_record_refuses_before_anything_moves() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("a corrupt record refuses");
     assert!(
@@ -934,6 +974,7 @@ impl Checks for FontRefusingChecks {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sync_with_skips(
     declared: Option<Option<String>>,
     skips: TargetSkips,
@@ -942,6 +983,7 @@ fn sync_with_skips(
     compositor: &mut dyn CompositorReload,
     checks: &dyn Checks,
     dconf: &dyn Dconf,
+    leaves: &dyn super::super::leaves::Leaves,
 ) -> Result<super::super::apply::ApplyReport, super::super::apply::ApplyFailure> {
     sync_with(
         declared,
@@ -957,6 +999,8 @@ fn sync_with_skips(
         &[],
         checks,
         dconf,
+        leaves,
+        &[],
     )
 }
 
@@ -979,6 +1023,8 @@ fn cursor_skip_renders_fresh_without_cursor_keys() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("first sync renders fresh");
     let published = fixture.roots.join("look-a");
@@ -1005,6 +1051,7 @@ fn cursor_skip_renders_fresh_without_cursor_keys() {
         &mut compositor,
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::ok(),
     )
     .expect("cursor-skipped sync succeeds");
     assert!(
@@ -1045,6 +1092,11 @@ fn cursor_skip_renders_fresh_without_cursor_keys() {
         report.notes
     );
     assert_eq!(compositor.calls.get(), 1, "the filtered layer reloads in");
+    assert!(
+        report.reloaded.iter().any(|name| name == "mako"),
+        "the managed sync runs the daemon leaves: {:?}",
+        report.reloaded
+    );
 }
 
 #[test]
@@ -1067,6 +1119,7 @@ fn fonts_skip_never_resolves_a_face_and_renders_no_bar_font() {
         &mut compositor,
         &checks,
         &dconf,
+        &ScriptedLeaves::failing(),
     )
     .expect("fonts-skipped sync succeeds despite refusing fonts");
     let bar =
@@ -1136,6 +1189,7 @@ fn cursor_skip_leaves_the_cursor_dconf_keys_and_ini_lines_alone() {
         &mut compositor,
         &checks,
         &dconf,
+        &ScriptedLeaves::failing(),
     )
     .expect("cursor-skipped sync succeeds");
     let writes = dconf.writes.borrow();

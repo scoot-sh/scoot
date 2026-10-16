@@ -364,6 +364,8 @@ pub fn sync_with(
     bars: &[&dyn BarReload],
     checks: &dyn Checks,
     dconf: &dyn Dconf,
+    leaves: &dyn super::leaves::Leaves,
+    live: &[PathBuf],
 ) -> Result<ApplyReport, ApplyFailure> {
     let refuse = |message: String| ApplyFailure {
         message,
@@ -529,6 +531,8 @@ pub fn sync_with(
                     compositor,
                     bars,
                     dconf,
+                    leaves,
+                    live,
                 )?;
                 return Ok(report);
             }
@@ -690,6 +694,8 @@ pub fn sync_with(
         compositor,
         bars,
         dconf,
+        leaves,
+        live,
     )?;
     Ok(report)
 }

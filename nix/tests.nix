@@ -344,10 +344,6 @@ let
     };
     # Activation scripts, as home-manager orders them: plain data the
     # pins read for presence. Activation itself never runs in an eval.
-    options.home.activation = lib.mkOption {
-      type = lib.types.attrsOf lib.types.raw;
-      default = { };
-    };
     options.xdg.configFile = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
@@ -3385,13 +3381,13 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   hmSeedNoLook = evalHome {
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # Refusals: the slot with no engine to run (pinned by message in
   # `_inputMethodPins`)...

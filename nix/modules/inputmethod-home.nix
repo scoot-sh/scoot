@@ -19,7 +19,7 @@ let
   # and its target is on): the theme then comes from the look fragment,
   # never from this evaluation.
   themeLook = import ./theme-look.nix { inherit lib; };
-  themed = themeLook.themed cfg.desktop "inputMethod";
+  themed = themeLook.themed cfg "inputMethod";
 
   isLinux = pkgs.stdenv.hostPlatform.isLinux;
 
