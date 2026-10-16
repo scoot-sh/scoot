@@ -34,7 +34,7 @@ store (`theme-home.nix:657-678`).
 A swap observed in a running Helix and btop and a new foot; the trust drop
 tested.
 
-## Resolution (2026-10-16, PR TBD)
+## Resolution (2026-10-16, PR #639)
 
 foot shipped in #633. This ticket landed Helix, btop and starship:
 
