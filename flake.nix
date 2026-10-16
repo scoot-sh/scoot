@@ -291,6 +291,17 @@
             scope = scootArgs [ ];
             withEglLink = true;
           };
+          # The look tool's own set: `-p scoot-look`, whose closure is
+          # serde, toml and rustix only (no Smithay, no EGL flags) — a
+          # separate artifact from the base set above, not a scope tweak
+          # of it, for the same fingerprint reason. Builds everywhere
+          # the crate does (Linux and Darwin alike: nothing
+          # platform-specific links in).
+          depsLook = mkDeps {
+            pname = "scoot-look";
+            inherit version;
+            scope = "--locked -p scoot-look";
+          };
 
           # Arguments shared by every package build below: sources plus the
           # lock the vendor step needs, with tests off for the reasons
@@ -486,6 +497,36 @@
             }
           );
 
+          # The look format tool, its own package (the `scoot` package
+          # stays `scoot` only): `-p scoot-look` puts just the one binary
+          # in `$out/bin`. Pure Rust with no Smithay in its closure, so
+          # this is what the look catalog derivations run at build time
+          # — never the whole compositor. Builds on every system (the
+          # crate builds on macOS beside `scoot-core`, per the design's
+          # section 3.3), so unlike `scootbg` this is no Linux-only
+          # package.
+          scoot-look = craneLib.buildPackage (
+            cranePackage
+            // {
+              pname = "scoot-look";
+              inherit version;
+              cargoArtifacts = depsLook;
+              cargoExtraArgs = "--locked -p scoot-look";
+              passthru.cargoBuildFeatures = [ ];
+              # Same strip backstop and no other inputs as the packages
+              # above: nothing to probe or link beyond what std links.
+              stripAllList = [ "bin" ];
+              meta = {
+                description =
+                  (builtins.fromTOML (builtins.readFile ./crates/scoot-look/Cargo.toml)).package.description;
+                homepage = "https://github.com/scoot-sh/scoot";
+                license = pkgs.lib.licenses.mit;
+                mainProgram = "scoot-look";
+                platforms = pkgs.lib.platforms.linux ++ pkgs.lib.platforms.darwin;
+              };
+            }
+          );
+
           # The status bar, the same shape as scootbg (Linux only, one
           # binary, nothing linked beyond what std links, no font in its
           # closure), in its own file so that its Cargo features are
@@ -518,7 +559,7 @@
           # `scoot` everywhere: on Linux the compositor, on Darwin the
           # client-only build (`scoot msg` drives a compositor elsewhere).
           default = scoot;
-          inherit scoot;
+          inherit scoot scoot-look;
           # The docs site (site/, nix/docs-site.nix): Astro Starlight over
           # pnpm, built offline with hash-pinned dependencies. On every
           # system Node runs on (Linux and Darwin alike): it is a static
@@ -662,6 +703,7 @@
         in
         nixpkgs.lib.getAttrs (builtins.filter (name: built ? ${name}) [
           "scoot"
+          "scoot-look"
           "scootbg"
           "mocu-cursor-theme"
           # Not `scootbar-demo`: a demo to run, not a package to build on
@@ -697,6 +739,9 @@
               # files-only setup also serves -- but the default now installs
               # the client rather than nothing.
               programs.scoot.package = nixpkgs.lib.mkDefault (built.default or null);
+              # The look catalog's render binary: the flake's own
+              # `scoot-look` build, beside `package` above.
+              programs.scoot.lookPackage = nixpkgs.lib.mkDefault (built.scoot-look or null);
               # scootbg is Linux-only: null elsewhere (and on Darwin a
               # `[wallpaper]` renders as written, for the Linux box).
               programs.scoot.wallpaper.package = nixpkgs.lib.mkDefault (built.scootbg or null);
@@ -733,6 +778,9 @@
             {
               imports = [ ./nix/modules/nixos.nix ];
               programs.scoot.package = nixpkgs.lib.mkDefault (built.default or null);
+              # The look catalog's render binary: the flake's own
+              # `scoot-look` build, beside `package` above.
+              programs.scoot.lookPackage = nixpkgs.lib.mkDefault (built.scoot-look or null);
               programs.scoot.wallpaper.package = nixpkgs.lib.mkDefault (built.scootbg or null);
             };
         in

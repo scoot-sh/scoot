@@ -10,15 +10,22 @@ and monitor configs — from one `look` choice. Set it in [the desktop
 profile](../desktop/index.md#pick-a-look):
 
 ```nix title="configuration.nix and home.nix"
-programs.scoot.desktop = {
-  enable = true;
+programs.scoot = {
+  desktop.enable = true;
   look = "music-desk";   # "ginger-night" (default) | "vinyl-sunset" | "radial-burst" | "moonrise" | null (no theming)
 };
 ```
 
 The default is `ginger-night` (the cat-peeking look): an empty
 `desktop` config themes. Set `look = null` explicitly to theme
-nothing.
+nothing. `programs.scoot.looks` lists the catalog (default: every
+shipped look, plus paths to your own source look directories). Each
+look renders at build time; each activation runs `scoot look sync`,
+which starts a fresh state on the declared default, switches when it
+changed, falls back when the live choice left the catalog, and
+otherwise keeps the live choice. A swap (`scoot look apply`, the
+`Mod+Shift+T` cycle, the IPC request) takes effect at once; the
+declaration only wins when it changes.
 
 | Look | Ring / background | Wallpaper | |
 |---|---|---|---|
@@ -28,7 +35,7 @@ nothing.
 | [`moonrise`](https://github.com/scoot-sh/scoot/tree/main/looks/moonrise) | amber `#FF9A49` on slate navy `#2B3648` | ships | ![moonrise](../../../assets/moonrise-preview.png) |
 | [`vinyl-sunset`](https://github.com/scoot-sh/scoot/tree/main/looks/vinyl-sunset) | orange `#E59560` on espresso `#271A1F` | flat color (the illustration is yours to download) | ![vinyl-sunset](../../../assets/vinyl-sunset-preview.png) |
 
-Each look's tokens live in `looks/<name>/look.toml`, in the [look format](../reference/look-format.md): the same manifest on a Nix install and a plain binary install, with no Nix-only step anywhere in it. A check validates and renders every look there and fails on a missing role. The examples below keep their own copies of those values until the look layer lands, so they still apply as before.
+Each look's tokens live in `looks/<name>/look.toml`, in the [look format](../reference/look-format.md): the same manifest on a Nix install and a plain binary install, with no Nix-only step anywhere in it. A check validates and renders every look there and fails on a missing role.
 
 A headless session (`scoot --headless`, the agent and CI path) starts on
 a private copy of your look choice: swaps inside it never touch your
@@ -43,26 +50,18 @@ you download, never a committed file.)
 
 ## What one look sets
 
-Every row is a default a value you set wins over per key, and Stylix
-wins over where present (your explicit value > Stylix > the look).
-An upstream home-manager module owns the paths it actually writes:
-`gtk.enable` owns both `settings.ini` files (its `extraCss`/theme
-the `gtk.css` files, its `colorScheme` the dconf leaf) and
-`qt.enable` with `qt6ctSettings` owns `qt6ct.conf` — the look's file
-stays out of each owned path while the rest stays themed.
-Each example is one directory with the same shape — `scoot.toml` (the
-compositor: layout, appearance, binds), `bar.toml` (the bar),
-`regreet.css` (the login screen), plus terminal and tool configs that
-follow the palette:
-
-- [ginger-night](https://github.com/scoot-sh/scoot/tree/main/docs/examples/ginger-night)
-- [vinyl-sunset](https://github.com/scoot-sh/scoot/tree/main/docs/examples/vinyl-sunset)
-- [music-desk](https://github.com/scoot-sh/scoot/tree/main/docs/examples/music-desk)
-- [radial-burst](https://github.com/scoot-sh/scoot/tree/main/docs/examples/radial-burst)
-- [moonrise](https://github.com/scoot-sh/scoot/tree/main/docs/examples/moonrise)
+The compositor and the bar read the active look as a runtime layer
+under your own files: per key, your file wins, then the look, then
+the app default (`[wallpaper]` is one unit — a key of yours there
+keeps your whole section). A swap never rewrites your files. What
+Stylix sets in your files (where present) sits above the layer, so a
+live swap cannot change those keys; a value you set beats everything.
+GTK, Qt and the rest below still read files, so a look change reaches
+newly started apps, running ones where their toolkit watches:
 
 | File the profile writes | From the look | Takes effect |
 |---|---|---|
+| the look layer (`~/.local/share/scoot/rendered/<name>`, pointed at by the state link) | ring colors and widths, background, corners, cursor, bar colors and style, the wallpaper | live, on apply or sync |
 | `~/.config/gtk-3.0/settings.ini`, `~/.config/gtk-4.0/settings.ini` | Adwaita (Adwaita-dark for a dark look), Adwaita icons, the look's proportional sans and cursor, the dark preference | Next launch; running apps do not re-read it (the keys that also live in dconf follow live, next row) |
 | `~/.config/gtk-3.0/gtk.css`, `~/.config/gtk-4.0/gtk.css` | the look's text selection (GTK 3) and accent and surfaces (libadwaita) | Next launch: GTK 3 selection plus libadwaita follow; plain GTK 4 keeps its stock accent; running apps keep their palette (`gtk.css` is never re-read) |
 | dconf `org.gnome.desktop.interface` (`color-scheme`, `gtk-theme`, `icon-theme`, `cursor-theme`, `cursor-size`, `font-name`), written by `scoot look apply` | `prefer-dark` for a dark look, `prefer-light` for the light one, the Adwaita theme in the look's polarity, Adwaita icons, the Mocu cursor at 24, the proportional sans | Live: GTK 4 and libadwaita follow through the portal; GTK 3 follows the theme, icons, cursor and font through GSettings directly (`color-scheme` means nothing to GTK 3) |
@@ -76,6 +75,20 @@ follow the palette:
 | `~/.local/share/fcitx5/themes/scoot-look/theme.conf` (needs `inputMethod.enable`) | a classic-UI theme generated from the look's palette (accent selection, background surfaces) | fcitx5 on restart (the unit restarts into a new theme) |
 | `~/.config/fcitx5/conf/classicui.conf` (needs `inputMethod.enable`) | `Theme=scoot-look` (plus `DarkTheme=scoot-look` for the portal dark path) | fcitx5 on restart |
 | ReGreet (NixOS, needs `greeter.enable`) | the session wallpaper behind the login card, the dark setting, the look's CSS and proportional sans | next login |
+
+An upstream home-manager module owns the paths it actually writes:
+`gtk.enable` owns both `settings.ini` files (its `extraCss`/theme
+the `gtk.css` files) and `qt.enable` with `qt6ctSettings` owns
+`qt6ct.conf` — the look's file stays out of each owned path while the
+rest stays themed. A key you or another module sets under
+`org.gnome.desktop.interface` stays home-manager's too: the catalog
+records it beside the declared default, and `sync` leaves it alone.
+
+Visible change with this setup: the shipped looks now carry their
+shape — rounded windows, ring widths, bar padding and spacing — where
+the Nix path used to apply only colors, fonts and the wallpaper (the
+bar stays opaque: its opacity holds at 1.0). To keep square windows,
+set `settings.appearance.corner_radius = 0`: your file wins per key.
 
 `radial-burst` ships no shell, editor or monitor files, so those
 three targets are inert for it; `music-desk` ships a btop config with
@@ -155,7 +168,8 @@ only.
 
 Each look declares dark or light (`music-desk` light, the other
 four dark): that drives `gtk-application-prefer-dark-theme`, the
-Adwaita variant on both toolkits, and the greeter's dark setting.
+Adwaita variant on both toolkits, the toolkit keys `apply` and `sync`
+write, and the greeter's dark setting.
 X11 apps through XWayland read the same `settings.ini` and
 `qt6ct.conf` — no settings daemon runs for them, and the theme sets
 no `Xft.dpi`: the compositor publishes the output scale and XWayland
@@ -198,30 +212,14 @@ at it, or leave the section to find `scootbg` on `PATH`).
 
 ## Make a look
 
-A look is data, so new ones are cheap: one directory with the same
-shape as the five above — palette, `scoot.toml`, `bar.toml`,
-`regreet.css`, the terminal/shell/editor/monitor files where the look
-has its own (the registry holds `null` where it has none, and that
-target goes inert for it), and a wallpaper (an image, or a palette
-color for a license-clean look like vinyl-sunset's flat espresso;
-edge art like ginger-night's right-edge cat wants `mode = "fit"` with
-`fill` set to the look's background color — `fill` crops it on
-narrower outputs). Wire it into the flake's look registry
-(`nix/modules/desktop.nix`): the name in the `look` enum plus its
-`appearance` (3 colors), `barColors` (6 roles), `isDark` polarity,
-`fonts` (bar, proportional sans, terminal mono), `nightTemp`,
-`appFiles` and `wallpaper`. Then mirror the per-look pins in
-`nix/tests.nix` (appearance, wallpaper mode/fill, bar colors,
-launcher flags, GTK/Qt, greeter, night temperature), the rows in the
-tables on this page and the [desktop page](../desktop/index.md#pick-a-look),
-and a reproducible IPC screenshot below — a check renders every look
-into every target and fails on a missing role.
-
-Where looks are headed (the standing direction, not all of it
-shipped): the look list reads from a registry rather than a
-hand-written enum, so adding a look means adding its directory;
-`look = "auto"` matches your own wallpaper (through Stylix's palette
-with Stylix present, else derived from the image at build time); and
-a user-passed look (a path or attrset with the same shape) works the
-same way. `look` only ever gains values — existing configs keep
-working.
+A look is data, so new ones are cheap: one directory with a `look.toml`
+(see the [format](../reference/look-format.md)) — palette, fonts,
+opacity, shape, cursor, wallpaper — plus a wallpaper image and,
+where the look has its own, terminal/shell/editor/monitor files and a
+preview. Validate it with `scoot look validate DIR`, render it with
+`scoot look build DIR --out OUT`, and list it in
+`programs.scoot.looks` to install it through the catalog (a look with
+`extends` resolves its base through the same list, so list the base
+too). Your own looks live in `~/.local/share/scoot/user-looks/` with
+no Nix involved; a look with `extends` names a shipped, declared or
+user-authored look, never an installed one.

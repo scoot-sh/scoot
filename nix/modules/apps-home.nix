@@ -67,10 +67,7 @@ let
   # without a look (or opted out): fuzzel's own style stands.
   fuzzelTheme = import ./fuzzel-theme.nix { inherit lib; };
   themeFor =
-    target:
-    lib.optionalString (themeLook.themed cfg.desktop target) (
-      fuzzelTheme (themeLook.lookFor cfg.desktop)
-    );
+    target: lib.optionalString (themeLook.themed cfg target) (fuzzelTheme (themeLook.lookFor cfg));
 
   # What both pickers share: awk for the parsing, coreutils' `timeout`
   # bounding every bluetoothctl, keyring and notification call, and

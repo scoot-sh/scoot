@@ -11,7 +11,7 @@ one per side:
 programs.scoot = {
   enable = true;
   desktop.enable = true;
-  desktop.look = "ginger-night";  # the login screen and system fonts follow it
+  look = "ginger-night";  # the login screen and system fonts follow it
 };
 ```
 
@@ -19,7 +19,7 @@ programs.scoot = {
 programs.scoot = {
   enable = true;
   desktop.enable = true;
-  desktop.look = "ginger-night";  # or music-desk, radial-burst, moonrise, vinyl-sunset
+  look = "ginger-night";  # or music-desk, radial-burst, moonrise, vinyl-sunset
 };
 ```
 
@@ -178,16 +178,21 @@ there (the default; X11 is a runtime knob, not a package) and the whole desktop 
 Two loud refusals instead of silent no-ops: `desktop.enable` without
 `programs.scoot.enable`, and a `look` without `desktop.enable`, each fail
 evaluation naming the missing switch; an unknown `look` fails naming the
-five valid ones.
+catalog.
 
 ## Pick a look
 
-`look` applies that example's palette to every piece the flake owns:
-the compositor `[appearance]` colors, the bar `colors`, the session
-wallpaper where one ships in the repository, and — through the
-[app theme](#app-theme) — fonts, cursor, GTK/Qt settings, the
-dark-mode preference, the login screen, and the look's terminal,
-prompt, editor and monitor configs. The default is `ginger-night`
+`look` names the declared default: one entry of `programs.scoot.looks`
+(default: every shipped look, plus paths to your own source look
+directories). Each look renders at build time into the catalog
+(`~/.local/share/scoot/looks` sources beside
+`~/.local/share/scoot/rendered` renders); each activation runs
+`scoot look sync`, which starts a fresh state on the declared
+default, switches when it changed, falls back when the live choice
+left the catalog, and otherwise keeps the live choice. A swap
+(`scoot look apply`, the look-cycle key, the IPC request) repoints
+the state link and reloads each running app's look layer at once; the
+declaration only wins when it changes. The default is `ginger-night`
 (the cat-peeking look): a profile with no `look` choice renders it.
 
 | Look | Compositor ring / background | Bar | Wallpaper |
@@ -200,19 +205,26 @@ prompt, editor and monitor configs. The default is `ginger-night`
 
 With the profile on and no `look` set, the look is `ginger-night`: that is the
 default. `null` themes nothing and is only reached by setting `look = null`
-explicitly (the opt-out), or by not enabling the profile at all. What the look does not theme
-stays yours: layout details (gaps, corner radius, column widths — copy
-them from the example's `scoot.toml` if you want the whole look).
+explicitly (the opt-out), or by not enabling the profile at all. A look
+is presentation only (colors, fonts, opacity, shape, cursor, the
+wallpaper): layout stays yours — gaps, column widths, module lists,
+binds. The shipped looks carry their shape (rounded windows, ring
+widths, bar padding and spacing; the bar stays opaque), where the Nix
+path used to apply only colors, fonts and the wallpaper. To keep
+square windows, set `settings.appearance.corner_radius = 0`: your
+file wins per key.
 
 **Precedence**, highest first, per key: a value you set in `settings`,
-then Stylix's (Stylix stays the override path where present), then the
-look's. So `settings.appearance.background_color = "#123456"` beside
+then the active look's layer, then the app default. So
+`settings.appearance.background_color = "#123456"` beside
 `look = "music-desk"` replaces that one color and keeps the rest of the
-look. One combination is invalid the same way the Stylix one is: a
-`wallpaper.color` you set yourself beside a look's shipped `image` (the
-two together are refused by scoot, fail-safe — the session carries on
-with `background_color`). Set your own `image` instead (it wins per key),
-or drop to `look = null`.
+look. What Stylix sets in `settings` (where present) sits above the
+layer, so a live swap cannot change those keys. One combination is
+invalid the same way the Stylix one is: a `wallpaper.color` you set
+yourself beside a look's shipped `image` (the two together are refused
+by scoot, fail-safe — the session carries on with `background_color`).
+Set your own `image` instead (it wins per key: a `[wallpaper]` key of
+yours keeps your whole section), or drop to `look = null`.
 
 For `vinyl-sunset`, the illustration is yours to download: point the
 wallpaper at your copy and the flat color steps aside:
@@ -245,10 +257,10 @@ variables only, no daemon, so the theme costs no wakeups.
 
 | Piece | Option | Type | Default | Notes |
 |---|---|---|---|---|
-| GTK apps | `desktop.theme.targets.gtk.enable` | bool | `true` | `settings.ini` (GTK 3 + 4): Adwaita, or Adwaita-dark for a dark look, with the look's proportional sans, cursor and dark preference — plus `gtk.css` carrying the look's accent and surfaces (named colors and the `:root` vars libadwaita paints with), and dconf `color-scheme` carrying the dark-mode signal libadwaita follows (no `GTK_THEME` force: it would make libadwaita skip its own providers) |
+| GTK apps | `desktop.theme.targets.gtk.enable` | bool | `true` | `settings.ini` (GTK 3 + 4): Adwaita, or Adwaita-dark for a dark look, with the look's proportional sans, cursor and dark preference — plus `gtk.css` carrying the look's accent and surfaces (named colors and the `:root` vars libadwaita paints with); the dark-mode signal is `color-scheme`, written by `scoot look sync` from the active look (no `GTK_THEME` force: it would make libadwaita skip its own providers) |
 | Qt apps | `desktop.theme.targets.qt.enable` | bool | `true` | `qt6ct.conf` through `QT_QPA_PLATFORMTHEME=qt6ct` (plus `QT_PLUGIN_PATH` for its platformtheme and style): the Adwaita Qt style in the look's polarity, Adwaita icons, and a generated color scheme from the look's palette — dark looks get a dark palette, the light look a light one |
-| Cursor | `desktop.theme.targets.cursor.enable` | bool | `true` | Mocu at its native 24 px: the compositor cursor plus `XCURSOR_THEME`/`XCURSOR_SIZE` for X11 apps — the same art as the built-in fallback, as real theme files |
-| Fonts | `desktop.theme.targets.fonts.enable` | bool | `true` | DejaVu Sans for sans-serif (proportional UI text in GTK/Qt apps and the greeter), FiraCode Nerd Font for monospace (DejaVu Sans Mono for `radial-burst`), through fontconfig — and the bar keeps its own DroidSansM Nerd Font Propo file, whose glyphs carry the module icons |
+| Cursor | `desktop.theme.targets.cursor.enable` | bool | `true` | Mocu at its native 24 px: the look layer names it for the compositor plus `XCURSOR_THEME`/`XCURSOR_SIZE` for X11 apps — the same art as the built-in fallback, as real theme files |
+| Fonts | `desktop.theme.targets.fonts.enable` | bool | `true` | DejaVu Sans for sans-serif (proportional UI text in GTK/Qt apps and the greeter), FiraCode Nerd Font for monospace (DejaVu Sans Mono for `radial-burst`), through fontconfig — and the look layer carries the bar's DroidSansM Nerd Font Propo file, whose glyphs carry the module icons |
 | Login screen | `desktop.theme.targets.greeter.enable` | bool | `true` | the session wallpaper behind the login card (nothing for `vinyl-sunset`: its illustration is license-barred), the dark setting, the look's ReGreet CSS and font — needs `greeter.enable` too |
 | Terminal | `desktop.theme.targets.terminal.enable` | bool | `true` | the look's `foot.ini` from the flake |
 | Prompt | `desktop.theme.targets.shell.enable` | bool | `true` | the look's `starship.toml` (`radial-burst` ships none: inert there) |
@@ -258,10 +270,11 @@ variables only, no daemon, so the theme costs no wakeups.
 | Extra GTK keys | `desktop.theme.settings` | attrs of str | `{ }` | merged over the generated `settings.ini`: a value here wins per key |
 
 On NixOS the profile also turns on `programs.dconf.enable` (as a
-default, so your own `false` wins): home-manager writes the dark-mode
-signal into dconf, and its activation needs the system's dconf service
-to do that. With the profile on only in your home config, set
-`programs.dconf.enable = true;` in the system config yourself.
+default, so your own `false` wins): `scoot look sync` writes the
+dark-mode signal into dconf after the links land, and its activation
+needs the system's dconf service to do that. With the profile on only
+in your home config, set `programs.dconf.enable = true;` in the
+system config yourself.
 
 Set any target to `false` to keep that piece's own style while the
 rest follows the look — for example, to leave alone an app you
@@ -274,16 +287,16 @@ programs.scoot.desktop.theme.targets.gtk.enable = false;  # my GTK is hand-tuned
 The cursor is [Mocu](https://github.com/sevmeyer/mocu-xcursor): the profile
 installs it as real XCursor files (`Mocu`, white at its native 24 px, with
 `Mocu-Black` beside it in the same package — see
-`nix/mocu-cursor-theme.nix`), names it in the compositor config, and exports
-it for X11/XWayland apps through `XCURSOR_THEME`/`XCURSOR_SIZE`. It is the
+`nix/mocu-cursor-theme.nix`), the look layer names it for the compositor,
+and the theme exports it for X11/XWayland apps through
+`XCURSOR_THEME`/`XCURSOR_SIZE`. It is the
 same art scoot draws as its built-in fallback cursors (see
 [Appearance](../scoot/appearance.md#the-built-in-cursors)), so the fallback
 rarely shows, and when it does it is the same family. The busy cursors are
 static first frames in both: Mocu's animation frames are not vendored. To use
 another theme, point `desktop.theme.cursor.package` at it and name it in
-`settings.appearance.cursor_theme` (a value there wins per key, and Stylix
-where present wins over the look); set `targets.cursor.enable = false` to
-leave the cursor alone entirely.
+`settings.appearance.cursor_theme` (a value there wins per key); set
+`targets.cursor.enable = false` to leave the cursor alone entirely.
 
 If you theme an app through its own home-manager module instead
 (`programs.foot`, `programs.starship`, `programs.helix`,
@@ -299,9 +312,10 @@ the upstream module beside the profile evaluates cleanly with your
 file winning.
 
 **Precedence**, highest first, per key: a value you set (in
-`settings`, in `theme.settings`, or in the app's own module), then
-Stylix's (Stylix stays the override path where present), then the
-look's, then the toolkit default. So `theme.settings.gtk-theme-name
+`settings`, in `theme.settings`, or in the app's own module), then the
+active look's layer, then the toolkit default. What Stylix sets in
+`settings` (where present) sits above the layer, so a live swap cannot
+change those keys. So `theme.settings.gtk-theme-name
 = "HighContrast"` beside `look = "music-desk"` replaces that one key
 and keeps the rest of the look.
 

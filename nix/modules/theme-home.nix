@@ -1,10 +1,11 @@
 # `programs.scoot.desktop.theme` for home-manager: fonts, cursor,
-# GTK/Qt settings, the dark-mode signal and the look's app files, all
-# derived from `desktop.look` (with and without Stylix). The option
-# shapes live in `./desktop.nix` (shared with the NixOS side); the
-# `package` defaults live here because only this side has `pkgs`. See
-# site/src/content/docs/desktop/index.md#app-theme ("App theme") and
-# site/src/content/docs/scoot/theming.md.
+# GTK/Qt settings and the look's app files, all derived from the
+# registry look behind `programs.scoot.look` (with and without Stylix).
+# The dark-mode signal is `scoot look sync`'s, not this module's. The
+# option shapes live in `./desktop.nix` (shared with the NixOS side);
+# the `package` defaults live here because only this side has `pkgs`.
+# See site/src/content/docs/desktop/index.md#app-theme ("App theme")
+# and site/src/content/docs/scoot/theming.md.
 #
 # Precedence per key, highest first: what the user wrote (a value in
 # `settings`/`theme.settings`, or an upstream module they enabled),
@@ -28,14 +29,14 @@ let
   # here): the look, whether a target applies, the one cursor and icon
   # theme, and the hex spellings.
   themeLook = import ./theme-look.nix { inherit lib; };
-  look = themeLook.lookFor cfg.desktop;
+  look = themeLook.lookFor cfg;
 
   # The whole theme renders while the slot is on with a look behind
   # it. Without a look there is nothing to derive from, so the slot
   # is inert (GTK/Qt/cursor stay unmanaged: the user's own configs
   # rule, the way every other standalone slot runs unthemed).
   themeOn = theme.enable && look != null;
-  themed = name: themeOn && themeLook.themed cfg.desktop name;
+  themed = name: themeOn && themeLook.themed cfg name;
 
   gtkThemed = themed "gtk";
   qtThemed = themed "qt";
@@ -85,7 +86,6 @@ let
     && (
       ((gtk3Cfg.extraCss or "") != "") || ((gtk4Cfg.extraCss or "") != "") || (gtk4ThemePackage != null)
     );
-  gtkColorSchemeOwned = gtkOwned && ((gtk3Cfg.colorScheme or null) != null);
   qtCfg = config.qt or { };
   qtConfOwned = (qtCfg.enable or false) && ((qtCfg.qt6ctSettings or null) != null);
 
@@ -433,7 +433,7 @@ in
       default =
         if isLinux then
           (
-            if cfg.desktop.look == "radial-burst" then
+            if cfg.look == "radial-burst" then
               (if pkgs ? dejavu_fonts then pkgs.dejavu_fonts else null)
             else
               (pkgs.nerd-fonts.fira-code or null)
@@ -615,22 +615,16 @@ in
       xdg.configFile."gtk-4.0/gtk.css".source = gtkCss;
     })
 
-    # The dark-mode signal libadwaita actually follows: GSettings
-    # `org.gnome.desktop.interface color-scheme` (`prefer-dark` for a
-    # dark look, `prefer-light` for the light one), written to the
-    # user's dconf database at activation. No daemon: the dconf client
-    # library reads the database file directly, and a settings portal
-    # (where one runs) reports this same key -- so one write covers
-    # the portal-less session, the portal-backed session, and anything
-    # in between. Without it a dark look's libadwaita apps render
-    # light (proven live: `prefer-dark-theme` alone only warns). It
-    # stays out only when the upstream module writes the same leaf
-    # (see `gtkColorSchemeOwned`); its other dconf leaves merge beside
-    # this one.
-    (lib.mkIf (themeOn && gtkThemed && toolsReady && !gtkColorSchemeOwned) {
-      dconf.settings."org/gnome/desktop/interface".color-scheme =
-        if look.isDark then "prefer-dark" else "prefer-light";
-    })
+    # The dark-mode signal libadwaita follows is no longer written here:
+    # `scoot look sync` writes `org.gnome.desktop.interface
+    # color-scheme` from the active look's polarity after
+    # `dconfSettings` (and `scoot look apply` does the same one-key
+    # write), so a dark look never loses GTK's dark-mode signal. The
+    # catalog's claims file beside the declared default carries the
+    # interface key names the merged `dconf.settings` still hold — set
+    # by the user, another module, or the upstream gtk module's
+    # `gtk3.colorScheme` leaf — and `sync` leaves those to
+    # home-manager.
 
     # Qt reads `qt6ct.conf` at startup through
     # `QT_QPA_PLATFORMTHEME=qt6ct` above (no daemon either). The

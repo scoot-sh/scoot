@@ -1,0 +1,13 @@
+# A custom declared look for the module checks (`nix/tests.nix`): a
+# child of ginger-night, so the catalog's `--catalog` render resolves
+# `extends` through the declared set at build time.
+schema = 1
+name = "my-green"
+title = "My Green"
+description = "A test look extending ginger-night."
+polarity = "dark"
+extends = "ginger-night"
+license = "MIT"
+
+[palette]
+accent = "#7FA36B"

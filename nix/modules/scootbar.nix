@@ -9,23 +9,23 @@
 #   1. what the user wrote (priority 100, the module system's default);
 #   2. Stylix, when `config.lib.stylix` exists and `stylix.enable` is on
 #      (`lib.mkDefault`, 1000);
-#   3. the desktop profile's look, when `programs.scoot.desktop` enables
-#      it (`lib.mkOptionDefault`, 1500);
-#   4. this module's plain default (priority 1600): a font, and only a
+#   3. this module's plain default (priority 1600): a font, and only a
 #      font, since the bar refuses to start without one.
 #
-# (4) sits one rung below (3) on purpose: the look themes `bar.font`
-# too (the UI face as a file), so sharing `mkOptionDefault` would
-# merge-conflict on that key. Everything else the look themes
-# (`colors.*`) has no plain default, so those merge instead.
+# The look is not a rung here at all: it arrives as a runtime layer
+# under the user's own file (see `scoot look sync`), merged per key
+# below every `settings` value above — so the plain default font below
+# still loses to the look's own face at runtime, the way sharing
+# `mkOptionDefault` with the old eval-time look values would have
+# merge-conflicted here.
 #
 # Everything else the bar reads has its own default in the binary, so an
-# absent key is that default. Each Stylix and look value is defined at its
+# absent key is that default. Each Stylix value is defined at its
 # own leaf (`settings.colors.accent`, not `settings.colors`), which is what
 # lets the user's `settings.colors.background` replace one token and keep
-# the other four from Stylix or the look: a priority applies to the whole
-# value it wraps, so wrapping a table would make the user's one key
-# discard it all.
+# the other four from Stylix: a priority applies to the whole value it
+# wraps, so wrapping a table would make the user's one key discard it
+# all.
 {
   config,
   lib,
@@ -116,25 +116,12 @@ let
   # checks): nothing here requires it. The profile never sets across the
   # boundary in the other direction either (a conditional set of an
   # undeclared option fails eval whatever the condition is), so this read
-  # is the whole bar half of the profile. Look-derived values come
-  # through the one theme helper, never hand-mapped here -- except the
-  # bar face's *package*, which lives in the theme's options (Linux-only
-  # defaults there), so it is read across the boundary with the same
-  # `or` fallback as everything else.
-  themeLook = import ./theme-look.nix { inherit lib; };
+  # is the whole bar half of the profile.
   desktopProfile = ((config.programs.scoot or { }).desktop or { });
-  desktopThemeFonts = ((desktopProfile.theme or { }).fonts or { });
-  # Null with the scoot module absent, or where the theme leaves it
-  # null: the derivation below then falls back to the same face the
-  # theme defaults to, so the bar never renders without its icons.
-  barFacePackage = desktopThemeFonts.uiPackage or null;
   profileOn = desktopProfile.enable or false;
   # `bar.enable = false` leaves the bar entirely to the user: neither
   # enabled nor themed by the profile.
   profileManagesBar = desktopProfile.bar.enable or true;
-  # Null without a look; the scoot side's `enum` type guarantees the name
-  # is one of these, so the lookup cannot fail.
-  profileLook = themeLook.lookFor desktopProfile;
 
   # The notification daemon (`programs.scoot.desktop.notifications`
   # in the scoot modules), when those are imported beside this one.
@@ -356,68 +343,33 @@ in
 
       # A font only when something draws text; the bar refuses to start
       # for a font it cannot use and needs none for a bar with no modules.
-      # Priority 1600, one rung below the look's own font (see the
-      # precedence note up top): the look wins where themed, Stylix and
-      # the user above it.
+      # Priority 1600: below Stylix and the user, above the binary's own
+      # default — and the runtime look layer sits below all of these, so
+      # a themed bar still draws the look's face unless `settings` or
+      # Stylix names another (see the precedence note up top).
       programs.scootbar.settings = lib.mkIf (cfg.features != [ ]) {
         bar.font = lib.mkOverride 1600 fallbackFont;
       };
     })
 
     # The desktop profile's bar half: the profile turns this bar on (at
-    # `mkDefault`, so an explicit value still wins), and the look themes
-    # its colors, each leaf a priority below Stylix's. `cfg.enable` in the
-    # second gate keeps a bar the user turned off unthemed too.
+    # `mkDefault`, so an explicit value still wins). The look reaches
+    # the bar as a runtime layer under the user's own file (see
+    # `scoot look sync`), never as eval-time values here.
     (lib.mkIf (profileOn && profileManagesBar) {
       programs.scootbar.enable = lib.mkDefault true;
     })
-    (lib.mkIf (profileOn && profileManagesBar && profileLook != null && cfg.enable) {
-      programs.scootbar.settings.colors = lib.mapAttrs (
-        name: value: lib.mkOptionDefault value
-      ) profileLook.barColors;
-    })
-
-    # The look's bar face as a file (there is no fontconfig), one
-    # priority below Stylix's (user > Stylix > look): the Propo
-    # carries the module icons itself, so a themed bar never falls
-    # back to the icon-less DejaVu default above. The bar keeps this
-    # mono face while GTK/Qt apps and the greeter use the look's
-    # proportional `sans` (see `theme-home.nix`). The package is the
-    # theme's `fonts.uiPackage` -- the same face the theme installs,
-    # so a user override (or a future look with another face) reaches
-    # the bar's file; without it the theme's own default stands.
-    # Like the look's colors, a bar the user turned off stays
-    # unthemed too.
-    (lib.mkIf
-      (
-        profileOn
-        && profileManagesBar
-        && profileLook != null
-        && (desktopProfile.theme.targets.fonts.enable or true)
-        && cfg.enable
-      )
-      {
-        programs.scootbar.settings = lib.mkIf (cfg.features != [ ]) {
-          bar.font = lib.mkOptionDefault "${
-            fontFile {
-              name = profileLook.fonts.ui;
-              package = if barFacePackage != null then barFacePackage else pkgs.nerd-fonts.droid-sans-mono;
-            }
-          }/font";
-        };
-      }
-    )
 
     # The notification daemon's bar half: the `push` module its feed
     # writes (DND state and the unread count -- see
     # `nix/modules/notifications-home.nix`), with a click toggling
     # do-not-disturb through the daemon's own command, by absolute
     # path, so it works whatever is on PATH. Each leaf a priority
-    # below the user's and Stylix's, the way the look's colors are: a
-    # value set in `settings` wins per key. Placement stays yours (the
+    # below the user's and Stylix's: a value set in `settings` wins
+    # per key. Placement stays yours (the
     # module is defined, not placed -- add `"notifications"` to a list
-    # to show it; see site/src/content/docs/scootbar/theming.md). Like the look's colors, a bar the
-    # user turned off stays unthemed too. The idle icon stands while
+    # to show it; see site/src/content/docs/scootbar/theming.md). Like the
+    # other profile halves, a bar the user turned off stays unthemed too. The idle icon stands while
     # the text is empty (a quiet desktop keeps a clickable indicator,
     # not a hole); it is in DejaVu Sans, the bar's own default font,
     # and empty (`bar.icons.idle = ""`) sets no static icon at all, so
@@ -438,9 +390,9 @@ in
     })
 
     # The apps pickers' bar half (see `pickerWired` above): each
-    # command a priority below the user's and Stylix's, the way the
-    # look's colors are, so a command set in `settings` wins per key.
-    # Like the look's colors, a bar the user turned off stays unwired.
+    # command a priority below the user's and Stylix's, so a command
+    # set in `settings` wins per key. Like the other profile halves, a
+    # bar the user turned off stays unwired.
     (lib.mkIf (pickerWired "network" "network" && cfg.enable) {
       programs.scootbar.settings.network = {
         menu-command = lib.mkOptionDefault [

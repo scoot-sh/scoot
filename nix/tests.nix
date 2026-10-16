@@ -86,10 +86,14 @@
 #   plus the wallpaper default on the NixOS side (staying additive: no
 #   default session) and the portal config on the home-manager side, and
 #   through `programs.scootbar` (when imported -- never required) the bar
-#   with its unit; `look` renders the example palette into the compositor
-#   and bar configs (each leaf yielding to a user value, and to Stylix
-#   where present); a look without an in-repo wallpaper (`vinyl-sunset`)
-#   sets no `[wallpaper]` table; the `[xwayland]` knob defaults on; the
+#   with its unit; `look` (one name from `looks`, ginger-night with the
+#   profile alone) installs the catalog beside the configs (sources and
+#   build-time renders), writes the declared default, and runs
+#   `scoot look sync` after the links and dconf land — the compositor
+#   and bar configs carry no look values themselves (a value the user
+#   sets still renders there); a look without an in-repo wallpaper
+#   (`vinyl-sunset`) renders no image, only its color; the `[xwayland]`
+#   knob defaults on; the
 #   idle policy (`desktop-idle-lock` child) runs with the profile -- dim
 #   2 min to 10%, lock at 4, screens off at 5, lock-before-sleep, audio
 #   hold -- each timeout overridable and each of the three switches
@@ -207,18 +211,18 @@
 #   service (no NetworkManager takeover, no Bluetooth hardware
 #   switch -- pinned off);
 #   the theme (`desktop-theme-look` child) runs with the profile --
-#   the look's cursor in the compositor config (Mocu, one priority
-#   below Stylix's) and its theme files on disk (both `Mocu` and
-#   `Mocu-Black` carry every canonical and legacy cursor name, each
-#   file loading through libXcursor), GTK settings, the qt6ct config plus
-#   `QT_QPA_PLATFORMTHEME`, the dark-mode preference from the look's
-#   polarity, the fontconfig default (UI face for sans-serif,
-#   terminal face for monospace), the look's UI face as the bar's
-#   font file, and the look's own app files from the flake (foot,
-#   starship, Helix config beside its theme, btop config beside its
-#   theme where the example ships them -- `radial-burst` ships no
-#   shell, editor or monitor files, so those targets are inert for
-#   it); each per-target opt-out drops just its piece, an upstream
+#   the theme files on disk (both `Mocu` and `Mocu-Black` carry every
+#   canonical and legacy cursor name, each file loading through
+#   libXcursor), GTK settings, the qt6ct config plus
+#   `QT_QPA_PLATFORMTHEME`, the fontconfig default (UI face for
+#   sans-serif, terminal face for monospace), and the look's own app
+#   files from the flake (foot, starship, Helix config beside its
+#   theme, btop config beside its theme where the example ships them --
+#   `radial-burst` ships no shell, editor or monitor files, so those
+#   targets are inert for it); the compositor cursor keys and the
+#   dark-mode signal left this module for `scoot look sync` (the theme
+#   target still installs the cursor package and names it for GTK/X11);
+#   each per-target opt-out drops just its piece, an upstream
 #   home-manager module owning the same path wins, and each null
 #   tool fails eval; the greeter wears the look too (backdrop
 #   pairing, dark setting, the look's CSS and font -- `vinyl-sunset`
@@ -428,6 +432,33 @@ let
     };
     options.home.sessionSearchVariables = lib.mkOption {
       type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+      default = { };
+    };
+    # The activation scripts (`home.activation` in
+    # `modules/home-environment.nix`): one `{ data, before, after }`
+    # entry per script, the shape `lib.hm.dag.entryAfter` builds (seen
+    # at nix-community/home-manager efa3ccb4, the rev
+    # `scripts/scootbar-stylix-test.sh` pins). Plain data the sync-step
+    # pins read; the real home-manager orders and runs them.
+    options.home.activation = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            data = lib.mkOption {
+              type = lib.types.lines;
+              default = "";
+            };
+            before = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+            };
+            after = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+            };
+          };
+        }
+      );
       default = { };
     };
     # The apps slot's user dirs and file associations
@@ -751,7 +782,16 @@ let
         ./modules/home.nix
         baseStubs
         homeStubs
-        ({ config, ... }: { programs.scoot = cfg; })
+        ({ config, ... }: {
+          # The catalog's render binary in every evaluation (a fake: the
+          # renders are derivations as values here, never built). An eval
+          # that sets `lookPackage` itself still wins (`//` keeps the
+          # right side), so the null-catalog path stays testable.
+          programs.scoot = {
+            lookPackage = lib.mkDefault fakeLook;
+          }
+          // cfg;
+        })
       ]
       ++ extra;
       specialArgs = { inherit pkgs; };
@@ -842,7 +882,12 @@ let
         baseStubs
         homeStubs
         (stylixStub stub)
-        ({ config, ... }: { programs.scoot = cfg; })
+        ({ config, ... }: {
+          programs.scoot = {
+            lookPackage = lib.mkDefault fakeLook;
+          }
+          // cfg;
+        })
       ];
       specialArgs = { inherit pkgs; };
     };
@@ -852,6 +897,23 @@ let
   # (`evalNixos`), so that `wallpaper.enable` (on by default) cannot make
   # an unrelated pin's assertions fail -- or, worse, make a pin that
   # expects a failure pass for the wrong reason.
+  # Like `evalNixosWith` below without the catalog fake: for evaluations
+  # through the flake wrapper or overlay, whose own `lookPackage`
+  # default (the real build) must stand, unshadowed by the fake.
+  evalNixosWithRealLook =
+    modules: pkgs': cfg:
+    lib.evalModules {
+      modules = modules ++ [
+        baseStubs
+        nixosStubs
+        regreetStubs
+        ({ config, ... }: { programs.scoot = cfg; })
+      ];
+      specialArgs = {
+        pkgs = pkgs';
+        modulesPath = "${pkgs'.path}/nixos/modules";
+      };
+    };
   evalNixosWith =
     modules: pkgs': cfg:
     lib.evalModules {
@@ -863,7 +925,14 @@ let
         # ride along in every NixOS evaluation, greeter or not, the
         # same way `nixosStubs` rides along for NixOS-owned options.
         regreetStubs
-        ({ config, ... }: { programs.scoot = cfg; })
+        ({ config, ... }: {
+          # As in `evalHomeModules` above: the catalog's render binary
+          # in every evaluation, still overridable per eval.
+          programs.scoot = {
+            lookPackage = lib.mkDefault fakeLook;
+          }
+          // cfg;
+        })
       ];
       specialArgs = {
         pkgs = pkgs';
@@ -880,6 +949,15 @@ let
     mkdir -p $out/bin
     echo '#!/bin/sh' > $out/bin/scoot
     chmod +x $out/bin/scoot
+  '';
+  # A stand-in `scoot-look` binary for the catalog renders: the renders
+  # are derivations as values in these evaluations, never built, so the
+  # binary never runs here — the real build-time rendering is proven by
+  # the render derivation shape below and live on the dev VM.
+  fakeLook = pkgs.runCommand "fake-scoot-look" { } ''
+    mkdir -p $out/bin
+    echo '#!/bin/sh' > $out/bin/scoot-look
+    chmod +x $out/bin/scoot-look
   '';
   fakeBg = pkgs.runCommand "fake-scootbg" { } ''
     mkdir -p $out/bin
@@ -1099,7 +1177,7 @@ let
       };
     };
   # A flake consumer: `enable` and a `[wallpaper]` table, nothing else.
-  osFlake = evalNixosWith [ flake.nixosModule ] pkgs { enable = true; };
+  osFlake = evalNixosWithRealLook [ flake.nixosModule ] pkgs { enable = true; };
   # The flake's NixOS module inside a real NixOS evaluation (nixpkgs' own
   # `eval-config.nix`: the full module list, `pkgs` from `_module.args`
   # as every NixOS system gets it). The stub evaluations above hand
@@ -1188,12 +1266,12 @@ let
   osRealDconf = evalRealNixos {
     enable = true;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
   };
   osRealDconfOff = evalRealNixosWith [ { programs.dconf.enable = false; } ] {
     enable = true;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
   };
   osRealNoProfile = evalRealNixos { enable = true; };
   hmFlake = evalHomeWith flake.homeModule pkgs {
@@ -1210,19 +1288,19 @@ let
   # --- the documented install configs (site/src/content/docs/start/install.mdx
   # and the top of desktop/index.md — keep in step with those pages). The minimal NixOS desktop, exactly the page's snippet, through
   # the flake wrapper a consumer imports.
-  osDocsDesktop = evalNixosWith [ flake.nixosModule ] pkgs {
+  osDocsDesktop = evalNixosWithRealLook [ flake.nixosModule ] pkgs {
     enable = true;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
   };
   # ...plus the page's commented greeter option switched on: the opt-in
   # greeter (with the login user a real configuration provides, like the
   # sibling greeter pins). No XWayland package choice anymore: the single
   # `scoot` carries XWayland compiled in with the binary on `PATH`.
-  osDocsDesktopFull = evalNixosWith [ flake.nixosModule greeterUser ] pkgs {
+  osDocsDesktopFull = evalNixosWithRealLook [ flake.nixosModule greeterUser ] pkgs {
     enable = true;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
     package = built.scoot;
     greeter.enable = true;
   };
@@ -1235,7 +1313,7 @@ let
   hmDocsDesktop = evalHomeWith flake.homeModules.scoot pkgs {
     enable = true;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
   };
   # The same documented options through the pure module (stub packages,
   # like the sibling look pins): what the rendered-file check below reads.
@@ -1246,11 +1324,11 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
   };
   # The overlay, and the pure module defaulting to what it provides.
   overlaid = pkgs.appendOverlays [ flake.overlays.default ];
-  osOverlaid = evalNixosWith [ ./modules/nixos.nix ] overlaid { enable = true; };
+  osOverlaid = evalNixosWithRealLook [ ./modules/nixos.nix ] overlaid { enable = true; };
   darwinOverlaid = darwinPkgs.appendOverlays [ flake.overlays.default ];
   # `lib.hasInfix` over strings that name store paths: the check is of
   # text, so their context (the derivations they refer to) is dropped, which
@@ -1267,6 +1345,12 @@ let
     buildFeatures = [ "clock" ];
   };
   sorted = packages: lib.sort lib.lessThan (drvs packages);
+  # The system look catalog beside the pinned tools: profile-on NixOS
+  # evaluations carry the anonymous `scoot-looks-catalog` derivation
+  # (the same entries as lists, pinned by name in `_lookCatalogPins`),
+  # found here by name so the exact-list pins stay exact about
+  # everything else.
+  withoutCatalog = packages: lib.filter (p: (p.name or "") != "scoot-looks-catalog") packages;
   # A keymap slot script's `bin/` path, found in an evaluation's
   # installed packages by derivation name (the store hash is not
   # knowable in the pin, the name is).
@@ -1531,28 +1615,28 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   hmDeskLookVinyl = evalHome {
     enable = true;
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "vinyl-sunset";
+    look = "vinyl-sunset";
   };
   hmDeskLookBurst = evalHome {
     enable = true;
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "radial-burst";
+    look = "radial-burst";
   };
   hmDeskLookMoon = evalHome {
     enable = true;
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
   };
   # Ginger-night, the default look: the cat-peeking palette plus its
   # shipped wallpaper (`fit` on the look's black, so the cat at the
@@ -1562,7 +1646,87 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "ginger-night";
+    look = "ginger-night";
+  };
+  # --- the look catalog (`programs.scoot.looks`, `programs.scoot.look`) ---
+  #
+  # A custom look beside shipped ones: the manifest name (not the store
+  # basename) is the catalog name, and first wins — so a path entry for
+  # moonrise beside the shipped `"moonrise"` keeps the shipped one.
+  hmLookCustom = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    looks = [
+      "ginger-night"
+      ./test-looks/my-green
+      ../looks/moonrise
+      "moonrise"
+    ];
+    look = "my-green";
+  };
+  # ...an explicit look beats the profile default (priority 100 over
+  # the profile's 1200)...
+  hmLookExplicit = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    look = "moonrise";
+  };
+  # ...and the profile alone resolves to ginger-night (1200 over the
+  # option's own null at 1500).
+  hmLookDefault = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+  };
+  # ...while no render binary means no catalog at all (files-only
+  # setups manage no looks): no sources, no renders, no declared
+  # default, no activation step.
+  hmLookNoPackage = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    lookPackage = null;
+    look = "moonrise";
+  };
+  # ...and no scoot binary means the activation degrades to a PATH
+  # lookup (a files-only setup whose `scoot` comes from elsewhere):
+  # the catalog still installs, and the switch never fails over a
+  # binary home-manager does not manage.
+  hmLookFilesOnly = evalHome {
+    enable = true;
+    package = null;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    look = "moonrise";
+  };
+  # ...an unknown declared default fails, naming the catalog...
+  hmLookUnknown = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    look = "nosuchlook";
+  };
+  # ...and a look without the profile is refused.
+  hmLookNoEnable = evalHome {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    look = "moonrise";
+  };
+  # The NixOS-module-only catalog: the same entries as a system
+  # package, the declared default in `/etc/scoot/look-default`.
+  osLookCatalog = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    look = "moonrise";
   };
   # Explicitly unthemed: `look = null` opts out of the default look
   # (no appearance, no wallpaper, every themed slot inert).
@@ -1571,7 +1735,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # A user value beside a look wins per key; the rest stays the look's.
   hmDeskUserWins = evalHome {
@@ -1579,7 +1743,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     settings.appearance.background_color = "#123456";
     settings.wallpaper.image = "/user/wall.png";
     settings.wallpaper.mode = "center";
@@ -1591,7 +1755,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   # The `[xwayland]` knob: on means on, off means absent.
   hmDeskXwayland = evalHome {
@@ -1621,7 +1785,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...every future slot on: all twenty-three binds render, the slot
   # scripts beside them.
@@ -1669,7 +1833,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
     desktop.keys.enable = false;
   };
   # ...keys only (policy and locker off): an empty lock action still
@@ -1692,13 +1856,13 @@ let
   hmIdle = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   # ...without a look: the policy runs unthemed (swaylock's own colors).
   hmIdleNoLook = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...the policy off (each of the three switches back off: the
   # profile turns the set on, and the lock and inhibitor refuse to run
@@ -1772,7 +1936,7 @@ let
   hmLockSettings = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.idle.lock.settings = {
       ring-color = "#123456";
       show-failed-attempts = "";
@@ -1783,7 +1947,7 @@ let
   hmThemeTargetOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.lock.enable = false;
     desktop.idle.lock.settings = {
       ring-color = "#123456";
@@ -1829,14 +1993,14 @@ let
   hmNotif = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   # ...without a look: the daemon runs unthemed (mako's own colors,
   # the DND behavior still on -- pinned by content below).
   hmNotifNoLook = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...the daemon off (the profile turns it on, like the idle policy;
   # each switch back off disables just its half).
@@ -1855,7 +2019,7 @@ let
   hmNotifSettings = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.notifications.settings = {
       anchor = "bottom-right";
       layer = "top";
@@ -1867,7 +2031,7 @@ let
   hmNotifTargetOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.notifications.enable = false;
     desktop.notifications.settings = {
       border-color = "#123456";
@@ -1961,14 +2125,14 @@ let
   hmClip = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   # ...without a look: the slot runs unthemed (fuzzel's own colors --
   # pinned by content below).
   hmClipNoLook = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...the slot off (the profile turns it on, like the idle policy;
   # each switch back off disables just its half).
@@ -1998,7 +2162,7 @@ let
   hmClipBounds = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.clipboard.maxItems = 250;
     desktop.clipboard.dbPath = "/home/scoot-test/.cache/cliphist-test/db";
   };
@@ -2006,7 +2170,7 @@ let
   hmClipTargetOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.clipboard.enable = false;
   };
   # ...in radial-burst (whose bar palette has no `hover`: the match
@@ -2014,7 +2178,7 @@ let
   hmClipLookBurst = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "radial-burst";
+    look = "radial-burst";
   };
   # Refusals: the slot with each tool missing (pinned by message in
   # `_clipPins`)...
@@ -2105,14 +2269,14 @@ let
   hmApps = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   # ...without a look: the slots run unthemed (fuzzel's own colors --
   # pinned by content below).
   hmAppsNoLook = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...the file manager on: its package on PATH and the directory
   # association answering through it.
@@ -2157,7 +2321,7 @@ let
   hmAppsTargetOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.network.enable = false;
     desktop.theme.targets.bluetooth.enable = false;
   };
@@ -2544,7 +2708,7 @@ let
     enable = true;
     package = clipStubs;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.clipboard.enable = true;
     desktop.clipboard.managerPackage = clipStubs;
     desktop.clipboard.wlClipboardPackage = clipStubs;
@@ -2565,7 +2729,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   osClipOff = evalNixos {
     enable = true;
@@ -2602,7 +2766,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   osAppsFiles = evalNixos {
     enable = true;
@@ -2684,14 +2848,14 @@ let
   hmLaunch = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   # ...without a look: the slot runs unthemed (fuzzel's own colors --
   # pinned by content below).
   hmLaunchNoLook = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...the slot off (the profile turns it on, like the idle policy;
   # the switch back off disables just its half).
@@ -2710,7 +2874,7 @@ let
   hmLaunchTargetOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.launcher.enable = false;
   };
   # ...one per remaining look: the themed flags pinned by content
@@ -2718,22 +2882,22 @@ let
   hmLaunchLookVinyl = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "vinyl-sunset";
+    look = "vinyl-sunset";
   };
   hmLaunchLookBurst = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "radial-burst";
+    look = "radial-burst";
   };
   hmLaunchLookMoon = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
   };
   hmLaunchLookGinger = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "ginger-night";
+    look = "ginger-night";
   };
   # Refusals: the slot with no launcher to run it (pinned by message
   # in `_launchPins`)...
@@ -2758,7 +2922,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   osLaunchOff = evalNixos {
     enable = true;
@@ -2780,14 +2944,14 @@ let
   hmCapture = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   # ...without a look: the slot runs unthemed (fuzzel's and slurp's
   # own colors -- pinned by content below).
   hmCaptureNoLook = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...the slot off (the profile turns it on; the switch back off
   # disables just its half: no tools, no chooser file, no binds).
@@ -2807,7 +2971,7 @@ let
   hmCaptureSlurp = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.capture.chooser = "slurp";
   };
   # ...no picker at all, on a named output...
@@ -2828,7 +2992,7 @@ let
   hmCaptureTargetOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.capture.enable = false;
   };
   # Refusals: a null beside `enable` (each pinned by message in
@@ -2890,7 +3054,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   osCaptureOff = evalNixos {
     enable = true;
@@ -2965,13 +3129,13 @@ let
   hmNight = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   # ...without a look: the slot runs on the plain default (3500 K).
   hmNightNoLook = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...the slot off (the profile turns it on, like the idle policy;
   # the switch back off disables just its half: no tool, no unit).
@@ -2991,7 +3155,7 @@ let
   hmNightTargetOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.nightlight.enable = false;
   };
   # ...a user night temperature beside a look (winning per key over
@@ -2999,7 +3163,7 @@ let
   hmNightUserWins = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.nightlight.nightTemp = 3000;
   };
   # ...location mode (the sun computes the boundaries: the manual pair
@@ -3007,7 +3171,7 @@ let
   hmNightLocated = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
     desktop.nightlight.latitude = 37.33;
     desktop.nightlight.longitude = -121.89;
   };
@@ -3015,7 +3179,7 @@ let
   hmNightGamma = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
     desktop.nightlight.daemon = "gammastep";
     desktop.nightlight.latitude = 37.33;
     desktop.nightlight.longitude = -121.89;
@@ -3110,7 +3274,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   osNightOff = evalNixos {
     enable = true;
@@ -3151,7 +3315,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
     desktop.inputMethod.enable = true;
   };
   # ...opted out of candidate theming (fcitx5's own theme stands
@@ -3161,7 +3325,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
     desktop.inputMethod.enable = true;
     desktop.theme.targets.inputMethod.enable = false;
   };
@@ -3219,7 +3383,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   osInputMethodStandalone = evalNixos {
     enable = true;
@@ -3230,7 +3394,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
     desktop.inputMethod.enable = true;
     desktop.inputMethod.package = null;
   };
@@ -3244,7 +3408,7 @@ let
   hmAuth = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...one per remaining agent (the default rides on `hmAuth`)...
   hmAuthLxqt = evalHome {
@@ -3304,7 +3468,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   osAuthOff = evalNixos {
     enable = true;
@@ -3360,7 +3524,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
     desktop.power.enable = true;
   };
   # ...standalone (no profile): the switch and the CLI run unthemed.
@@ -3463,7 +3627,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
     desktop.power.enable = true;
   };
   # ...standalone (no profile): the policy without the session entry.
@@ -3929,14 +4093,14 @@ let
   hmAudio = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   # ...without a look: the slot runs unthemed (wob's own colors --
   # pinned by content below).
   hmAudioNoLook = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...the slot off (the profile turns it on; the switch back off
   # disables just its half: no OSD, no scripts, the binds run silent).
@@ -3955,7 +4119,7 @@ let
   hmAudioTimeout = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.audio.osd.timeoutMs = 2500;
   };
   # ...opted out of OSD theming (the look leaves wob alone, the muted
@@ -3963,7 +4127,7 @@ let
   hmAudioTargetOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.osd.enable = false;
   };
   # Refusals: the slot with no OSD to run (pinned by message in
@@ -4007,44 +4171,44 @@ let
   hmTheme = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   # ...a dark look (Adwaita-dark, prefer-dark).
   hmThemeDark = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "vinyl-sunset";
+    look = "vinyl-sunset";
   };
   # ...radial-burst (DejaVu mono, no shell/editor/monitor files).
   hmThemeBurst = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "radial-burst";
+    look = "radial-burst";
   };
   # ...moonrise (amber accent, dark): the accent/polarity pins read it.
   hmThemeMoon = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
   };
   # ...ginger-night (ginger accent, dark): the default look's pins.
   hmThemeGinger = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "ginger-night";
+    look = "ginger-night";
   };
   # ...without a look: the slot is inert (no theme files, no theme
   # packages, no cursor keys in the compositor config).
   hmThemeNoLook = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...the slot off beside a look: inert the same way.
   hmThemeOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.enable = false;
   };
   # ...Stylix beside a look: Stylix wins per key (cursor, appearance),
@@ -4053,14 +4217,14 @@ let
   hmThemeStylix = evalHomeStylix { } {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
   # ...Stylix, a look, and user values: the user wins per key over
   # both (compositor cursor, one GTK key).
   hmThemeStylixUser = evalHomeStylix { } {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     settings.appearance.cursor_theme = "Adwaita";
     desktop.theme.settings.gtk-xft-hintstyle = "hintslight";
   };
@@ -4069,7 +4233,7 @@ let
   hmThemeSettings = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.settings = {
       gtk-theme-name = "HighContrast";
       gtk-xft-hintstyle = "hintslight";
@@ -4080,31 +4244,31 @@ let
   hmThemeGtkOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.gtk.enable = false;
   };
   hmThemeQtOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.qt.enable = false;
   };
   hmThemeCursorOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.cursor.enable = false;
   };
   hmThemeFontsOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.fonts.enable = false;
   };
   hmThemeTerminalOff = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.terminal.enable = false;
   };
   # ...an upstream home-manager module owning the same path wins (its
@@ -4168,7 +4332,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   } { package = fakeBar; };
   hmThemeUpstreamOn =
     evalHomeDesktopWith
@@ -4186,7 +4350,7 @@ let
         package = fakePkg;
         wallpaper.package = fakeBg;
         desktop.enable = true;
-        desktop.look = "music-desk";
+        look = "music-desk";
       }
       { package = fakeBar; };
   # ...an upstream GTK module owning `settings.ini` (its text stands,
@@ -4207,7 +4371,7 @@ let
       {
         enable = true;
         desktop.enable = true;
-        desktop.look = "music-desk";
+        look = "music-desk";
       };
   # ...the same module also owning its css (both versions' files stay
   # out together)...
@@ -4226,7 +4390,7 @@ let
       {
         enable = true;
         desktop.enable = true;
-        desktop.look = "music-desk";
+        look = "music-desk";
       };
   # ...and owning the dconf `color-scheme` leaf (its value wins, ours
   # stays out)...
@@ -4245,7 +4409,7 @@ let
       {
         enable = true;
         desktop.enable = true;
-        desktop.look = "music-desk";
+        look = "music-desk";
       };
   # ...an upstream Qt module owning `qt6ct.conf` (its source stands,
   # ours stays out, while the scheme beside it stays theme-owned)...
@@ -4265,7 +4429,7 @@ let
       {
         enable = true;
         desktop.enable = true;
-        desktop.look = "music-desk";
+        look = "music-desk";
       };
   # ...Qt enabled without settings (nothing owned: our config stays)...
   hmThemeQtBare =
@@ -4277,7 +4441,7 @@ let
       {
         enable = true;
         desktop.enable = true;
-        desktop.look = "music-desk";
+        look = "music-desk";
       };
   # ...a user's own `QT_PLUGIN_PATH` beside the theme (shells compose
   # it with the theme's dirs; the manager default stands)...
@@ -4289,7 +4453,7 @@ let
       {
         enable = true;
         desktop.enable = true;
-        desktop.look = "music-desk";
+        look = "music-desk";
       };
   # ...and a user's own manager-level value (it wins there, the way
   # home-manager's single-string join works; the shell search list
@@ -4302,50 +4466,50 @@ let
       {
         enable = true;
         desktop.enable = true;
-        desktop.look = "music-desk";
+        look = "music-desk";
       };
   # Refusals: each null tool beside its target (pinned by message in
   # `_themePins`).
   hmThemeNoCursorPkg = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.cursor.package = null;
   };
   hmThemeNoIconPkg = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.icon.package = null;
   };
   hmThemeNoUiPkg = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.fonts.uiPackage = null;
   };
   hmThemeNoSansPkg = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.fonts.sansPackage = null;
   };
   hmThemeNoMonoPkg = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.fonts.monoPackage = null;
   };
   hmThemeNoQtPkg = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.qt.package = null;
   };
   hmThemeNoQtStylePkg = evalHome {
     enable = true;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.qt.stylePackage = null;
   };
   # ...beside the bar module: the look's UI face as a file (never the
@@ -4355,14 +4519,14 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   } { package = fakeBar; };
   hmThemeBarFontsOff = evalHomeDesktopWith [ ] {
     enable = true;
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.targets.fonts.enable = false;
   } { package = fakeBar; };
   # A stand-in UI-face package carrying a file named for the look's
@@ -4380,7 +4544,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.theme.fonts.uiPackage = fakeUiPkg;
   } { package = fakeBar; };
 
@@ -4392,14 +4556,14 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
     greeter.enable = true;
   } greeterUser;
   osThemeGreeterGinger = evalNixosRegreet {
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = "ginger-night";
+    look = "ginger-night";
     greeter.enable = true;
   } greeterUser;
   # ...vinyl-sunset: no shippable backdrop (license-barred), so the
@@ -4408,7 +4572,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = "vinyl-sunset";
+    look = "vinyl-sunset";
     greeter.enable = true;
   } greeterUser;
   # ...opted out of greeter theming: ReGreet stands unthemed.
@@ -4416,7 +4580,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
     desktop.theme.targets.greeter.enable = false;
     greeter.enable = true;
   } greeterUser;
@@ -4425,7 +4589,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
     greeter.enable = true;
   } greeterUser;
 
@@ -4530,17 +4694,15 @@ let
   hmDeskNoEnable = evalHome { desktop.enable = true; };
   hmDeskLookNoEnable = evalHome {
     enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   };
-  # ...and an unknown look, which is an option type error (the `enum`'s own
-  # message names the valid values), caught here by `tryEval`.
-  hmDeskUnknownLook =
-    builtins.tryEval
-      (evalHome {
-        enable = true;
-        desktop.enable = true;
-        desktop.look = "bogus-look";
-      }).config.programs.scoot.desktop.look;
+  # ...and an unknown look, which fails the catalog assertion (naming
+  # the catalog), caught here through the collected assertions.
+  hmDeskUnknownLook = evalHome {
+    enable = true;
+    desktop.enable = true;
+    look = "bogus-look";
+  };
 
   osDesk = evalNixos {
     enable = true;
@@ -4565,7 +4727,7 @@ let
   osDeskLookNoEnable = evalNixos {
     enable = true;
     package = fakePkg;
-    desktop.look = "radial-burst";
+    look = "radial-burst";
   };
   # TTY autologin (gh-462): the console logs in as "alice". Without
   # `linger` her user manager never starts, so the profile warns,
@@ -4666,7 +4828,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...the policy off: the rule untouched, no PAM, the profile's own
   # packages only.
@@ -4724,7 +4886,7 @@ let
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = null;
+    look = null;
   };
   # ...the daemon off: the profile's own packages only.
   osNotifOff = evalNixos {
@@ -4781,7 +4943,10 @@ let
         baseStubs
         homeStubs
         ({ config, ... }: {
-          programs.scoot = scootCfg;
+          programs.scoot = {
+            lookPackage = lib.mkDefault fakeLook;
+          }
+          // scootCfg;
           programs.scootbar = barCfg;
         })
       ]
@@ -4800,7 +4965,10 @@ let
         regreetStubs
         { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
         ({ config, ... }: {
-          programs.scoot = scootCfg;
+          programs.scoot = {
+            lookPackage = lib.mkDefault fakeLook;
+          }
+          // scootCfg;
           programs.scootbar = barCfg;
         })
       ]
@@ -4816,7 +4984,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   } { package = fakeBar; };
   hmDeskBarUserWins =
     evalHomeDesktop
@@ -4825,7 +4993,7 @@ let
         package = fakePkg;
         wallpaper.package = fakeBg;
         desktop.enable = true;
-        desktop.look = "music-desk";
+        look = "music-desk";
       }
       {
         package = fakeBar;
@@ -4836,13 +5004,13 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   } { package = fakeBar; };
   hmDeskBarOff = evalHomeDesktop {
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.bar.enable = false;
   } { package = fakeBar; };
   hmDeskBarMoon = evalHomeDesktop {
@@ -4850,26 +5018,26 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "moonrise";
+    look = "moonrise";
   } { package = fakeBar; };
   hmDeskBarGinger = evalHomeDesktop {
     enable = true;
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "ginger-night";
+    look = "ginger-night";
   } { package = fakeBar; };
   osDeskBar = evalNixosDesktop {
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = "radial-burst";
+    look = "radial-burst";
   } { package = fakeBar; };
   osDeskBarOff = evalNixosDesktop {
     enable = true;
     package = fakePkg;
     desktop.enable = true;
-    desktop.look = "radial-burst";
+    look = "radial-burst";
     desktop.bar.enable = false;
   } { package = fakeBar; };
   # A standalone bar (no profile at all): the unit stays a generic
@@ -4903,7 +5071,7 @@ let
         enable = true;
         package = fakePkg;
         desktop.enable = true;
-        desktop.look = "music-desk";
+        look = "music-desk";
         desktop.bar.enable = false;
       }
       {
@@ -4916,7 +5084,7 @@ let
         enable = true;
         package = fakePkg;
         desktop.enable = true;
-        desktop.look = "radial-burst";
+        look = "radial-burst";
         desktop.bar.enable = false;
       }
       {
@@ -4930,7 +5098,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
   } { package = fakeBar; };
   # ...with the daemon off: no feed module (the bar is entirely the
   # user's, the push table absent).
@@ -4939,7 +5107,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.notifications.enable = false;
   } { package = fakeBar; };
   # The apps pickers' bar half: with the pickers off, the bar keeps
@@ -4949,7 +5117,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.apps.network.enable = false;
     desktop.apps.bluetooth.enable = false;
   } { package = fakeBar; };
@@ -4963,7 +5131,7 @@ let
         package = fakePkg;
         wallpaper.package = fakeBg;
         desktop.enable = true;
-        desktop.look = "music-desk";
+        look = "music-desk";
       }
       {
         package = fakeBar // {
@@ -4997,7 +5165,7 @@ let
     package = fakePkg;
     wallpaper.package = fakeBg;
     desktop.enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.notifications.bar.icons = {
       idle = "✉";
       unread = "!";
@@ -5016,7 +5184,7 @@ let
         package = fakePkg;
         wallpaper.package = fakeBg;
         desktop.enable = true;
-        desktop.look = "music-desk";
+        look = "music-desk";
       }
       {
         package = fakeBar // {
@@ -5787,7 +5955,7 @@ let
       # it breaks here first.
       (
         assert allAssertionsHold osDocsDesktop.config;
-        assert osDocsDesktop.config.programs.scoot.desktop.look == "moonrise";
+        assert osDocsDesktop.config.programs.scoot.look == "moonrise";
         assert osDocsDesktop.config.programs.scoot.session.enable;
         true
       )
@@ -5799,7 +5967,7 @@ let
       )
       (
         assert allAssertionsHold hmDocsDesktop.config;
-        assert hmDocsDesktop.config.programs.scoot.desktop.look == "moonrise";
+        assert hmDocsDesktop.config.programs.scoot.look == "moonrise";
         # The old `homeManagerModules` output is gone: no alias, no shim.
         # (Accessing it is an eval error on the flake itself; here the
         # wiring pins its absence — `flake.nix` no longer passes it in.)
@@ -5824,6 +5992,17 @@ let
             built.default
             built.scootbg
           ];
+        true
+      )
+      # ...and the flake's own look renderer as the catalog default, on
+      # both sides (the wrapper injects the same build the overlay
+      # carries).
+      (
+        assert osFlake.config.programs.scoot.lookPackage.drvPath == built.scoot-look.drvPath;
+        true
+      )
+      (
+        assert hmFlake.config.programs.scoot.lookPackage.drvPath == built.scoot-look.drvPath;
         true
       )
       # The overlay is the flake's own builds...
@@ -5967,6 +6146,12 @@ let
         assert !(darwinOverlaid ? scootctl);
         true
       )
+      # ...and the look renderer beside it (pure, so it builds
+      # everywhere the client does).
+      (
+        assert darwinOverlaid.scoot-look.drvPath == flake.packages.aarch64-darwin.scoot-look.drvPath;
+        true
+      )
     ];
 
   # Renders (build succeeds); the live loader proof boots it and shows
@@ -6082,10 +6267,6 @@ let
   themeHelixConf = hmTheme.config.xdg.configFile."helix/config.toml".source;
   themeHelixTheme = hmTheme.config.xdg.configFile."helix/themes/scoot-light.toml".source;
   themeBtopConf = hmTheme.config.xdg.configFile."btop/btop.conf".source;
-  # The bar font with a user `uiPackage` override: the setting is
-  # `${derivation}/font`, so the content check resolves the symlink
-  # and proves it lands inside the override package.
-  themeBarUiPkgFont = hmThemeBarUiPkg.config.programs.scootbar.settings.bar.font;
   notifNoLookConf = hmNotifNoLook.config.xdg.configFile."mako/config".source;
   notifSettingsConf = hmNotifSettings.config.xdg.configFile."mako/config".source;
   notifTargetOffConf = hmNotifTargetOff.config.xdg.configFile."mako/config".source;
@@ -6411,42 +6592,70 @@ let
       true
     )
     (
-      assert hmDesk.config.programs.scoot.desktop.look == "ginger-night";
+      assert hmDesk.config.programs.scoot.look == "ginger-night";
       true
     )
     # ...and without the profile the look stays null (the default is
     # profile-gated, so non-desktop configs keep evaluating unthemed)...
     (
-      assert hmEmpty.config.programs.scoot.desktop.look == null;
+      assert hmEmpty.config.programs.scoot.look == null;
+      true
+    )
+    # ...while the profile alone carries no look values in the user
+    # config: the default look arrives as a runtime layer, never as
+    # eval-time merges...
+    (
+      assert !(hmDesk.config.programs.scoot.settings ? appearance);
+      true
+    )
+    (
+      assert !(hmDesk.config.programs.scoot.settings ? wallpaper);
+      true
+    )
+    # ...and the catalog installs beside it: the default look's source
+    # and build-time render, the declared default, no Nix-owned dconf
+    # keys, and the sync step after the links and dconf land...
+    (
+      assert lib.hasSuffix "looks/ginger-night" (
+        toString hmDesk.config.xdg.dataFile."scoot/looks/ginger-night".source
+      );
       true
     )
     (
       assert
-        hmDesk.config.programs.scoot.settings.appearance == {
-          background_color = "#0E0E0E";
-          focus_ring_active_color = "#FF9A30";
-          focus_ring_inactive_color = "#4E2913";
-          cursor_theme = "Mocu";
-          cursor_size = 24;
-        };
+        hmDesk.config.xdg.dataFile."scoot/rendered/ginger-night".source.name
+        == "scoot-look-ginger-night-rendered";
       true
     )
     (
-      assert hmDesk.config.programs.scoot.settings.wallpaper.mode == "fit";
+      assert hmDesk.config.xdg.configFile."scoot/look-default".text == "ginger-night";
       true
     )
     (
-      assert hmDesk.config.programs.scoot.settings.wallpaper.fill == "#0E0E0E";
+      assert hmDesk.config.xdg.configFile."scoot/look-nix-claims".text == "";
+      true
+    )
+    (
+      assert
+        hmDesk.config.home.activation.scootLookSync.after == [
+          "linkGeneration"
+          "dconfSettings"
+        ];
+      true
+    )
+    (
+      assert lib.hasInfix "scoot look sync" hmDesk.config.home.activation.scootLookSync.data;
       true
     )
     # ...while an explicit `look = null` themes nothing (no appearance,
-    # no wallpaper, every themed slot inert)...
+    # no wallpaper, every themed slot inert — but the catalog still
+    # installs, so a manual apply finds every look)...
     (
       assert allAssertionsHold hmDeskLookNull.config;
       true
     )
     (
-      assert hmDeskLookNull.config.programs.scoot.desktop.look == null;
+      assert hmDeskLookNull.config.programs.scoot.look == null;
       true
     )
     (
@@ -6458,7 +6667,11 @@ let
       true
     )
     (
-      assert !hmDeskLookNull.config.programs.scoot.wallpaper.enable;
+      assert hmDeskLookNull.config.xdg.configFile."scoot/look-default".text == "";
+      true
+    )
+    (
+      assert hmDeskLookNull.config.programs.scoot.wallpaper.enable;
       true
     )
     # ...and the idle policy on with the profile (the
@@ -6720,30 +6933,35 @@ let
       assert !hmDesk.config.programs.scoot.desktop.inputMethod.enable;
       true
     )
-    # music-desk: the example palette in the compositor config (plus
-    # the theme's cursor, one priority below Stylix's)...
+    # music-desk: nothing in the compositor config (the palette arrives
+    # as a runtime layer) — but the declared default names it, and the
+    # catalog installs its source and build-time render...
     (
       assert allAssertionsHold hmDeskLookMusic.config;
       true
     )
     (
+      assert !(hmDeskLookMusic.config.programs.scoot.settings ? appearance);
+      true
+    )
+    (
+      assert !(hmDeskLookMusic.config.programs.scoot.settings ? wallpaper);
+      true
+    )
+    (
+      assert hmDeskLookMusic.config.xdg.configFile."scoot/look-default".text == "music-desk";
+      true
+    )
+    (
+      assert lib.hasSuffix "looks/music-desk" (
+        toString hmDeskLookMusic.config.xdg.dataFile."scoot/looks/music-desk".source
+      );
+      true
+    )
+    (
       assert
-        hmDeskLookMusic.config.programs.scoot.settings.appearance == {
-          background_color = "#FCFBFB";
-          focus_ring_active_color = "#3D579A";
-          focus_ring_inactive_color = "#D5D7DD";
-          cursor_theme = "Mocu";
-          cursor_size = 24;
-        };
-      true
-    )
-    (
-      assert hmDeskLookMusic.config.programs.scoot.settings.wallpaper.mode == "fill";
-      true
-    )
-    (
-      assert lib.hasSuffix "music-desk.png"
-        hmDeskLookMusic.config.programs.scoot.settings.wallpaper.image;
+        hmDeskLookMusic.config.xdg.dataFile."scoot/rendered/music-desk".source.name
+        == "scoot-look-music-desk-rendered";
       true
     )
     # ...which is what installs scootbg for it (beside the idle
@@ -6824,17 +7042,13 @@ let
         ];
       true
     )
-    # vinyl-sunset: colors but no wallpaper table (the illustration cannot
-    # be committed), so no scootbg for it -- the flat background_color shows.
+    # vinyl-sunset: no eval-time values at all (the illustration cannot
+    # be committed, and colors arrive as a runtime layer) — but the
+    # catalog installs its source and render, and the declared default
+    # names it. scootbg still installs: other catalog looks ship
+    # images, and a manual apply needs it.
     (
-      assert
-        hmDeskLookVinyl.config.programs.scoot.settings.appearance == {
-          background_color = "#271A1F";
-          focus_ring_active_color = "#E59560";
-          focus_ring_inactive_color = "#423F51";
-          cursor_theme = "Mocu";
-          cursor_size = 24;
-        };
+      assert !(hmDeskLookVinyl.config.programs.scoot.settings ? appearance);
       true
     )
     (
@@ -6842,79 +7056,76 @@ let
       true
     )
     (
-      assert !hmDeskLookVinyl.config.programs.scoot.wallpaper.enable;
-      true
-    )
-    # radial-burst: colors plus its shipped image.
-    (
-      assert
-        hmDeskLookBurst.config.programs.scoot.settings.appearance == {
-          background_color = "#241721";
-          focus_ring_active_color = "#31a9e5";
-          focus_ring_inactive_color = "#e36e38";
-          cursor_theme = "Mocu";
-          cursor_size = 24;
-        };
+      assert hmDeskLookVinyl.config.programs.scoot.wallpaper.enable;
       true
     )
     (
-      assert lib.hasSuffix "radial-burst.png"
-        hmDeskLookBurst.config.programs.scoot.settings.wallpaper.image;
+      assert hmDeskLookVinyl.config.xdg.configFile."scoot/look-default".text == "vinyl-sunset";
       true
     )
-    # moonrise: colors plus its shipped image.
     (
-      assert
-        hmDeskLookMoon.config.programs.scoot.settings.appearance == {
-          background_color = "#2B3648";
-          focus_ring_active_color = "#FF9A49";
-          focus_ring_inactive_color = "#5E4B5B";
-          cursor_theme = "Mocu";
-          cursor_size = 24;
-        };
+      assert lib.hasSuffix "looks/vinyl-sunset" (
+        toString hmDeskLookVinyl.config.xdg.dataFile."scoot/looks/vinyl-sunset".source
+      );
       true
     )
     (
-      assert hmDeskLookMoon.config.programs.scoot.settings.wallpaper.mode == "fill";
+      assert
+        hmDeskLookVinyl.config.xdg.dataFile."scoot/rendered/vinyl-sunset".source.name
+        == "scoot-look-vinyl-sunset-rendered";
+      true
+    )
+    # radial-burst: the same shape, declared moonrise beside it below.
+    (
+      assert !(hmDeskLookBurst.config.programs.scoot.settings ? appearance);
       true
     )
     (
-      assert lib.hasSuffix "moonrise.png" hmDeskLookMoon.config.programs.scoot.settings.wallpaper.image;
+      assert !(hmDeskLookBurst.config.programs.scoot.settings ? wallpaper);
       true
     )
-    # ...which is what installs scootbg for it.
+    (
+      assert hmDeskLookBurst.config.xdg.configFile."scoot/look-default".text == "radial-burst";
+      true
+    )
+    # moonrise: the declared default names it; its shipped image now
+    # renders at build time (the render derivation's wallpaper), not
+    # into the user config.
+    (
+      assert !(hmDeskLookMoon.config.programs.scoot.settings ? appearance);
+      true
+    )
+    (
+      assert !(hmDeskLookMoon.config.programs.scoot.settings ? wallpaper);
+      true
+    )
+    (
+      assert hmDeskLookMoon.config.xdg.configFile."scoot/look-default".text == "moonrise";
+      true
+    )
+    # ...which is what installs scootbg for it (the catalog ships
+    # images, so the binary installs even with no user table).
     (
       assert hmDeskLookMoon.config.programs.scoot.wallpaper.enable;
       true
     )
-    # ginger-night (the default): the cat-peeking palette, `fit` on the
-    # look's black so the right-edge cat is never cropped...
+    # ginger-night (the default): no eval-time values either — the
+    # cat-peeking palette, `fit` on the look's black, and the image all
+    # render at build time now...
     (
       assert allAssertionsHold hmDeskLookGinger.config;
       true
     )
     (
-      assert
-        hmDeskLookGinger.config.programs.scoot.settings.appearance == {
-          background_color = "#0E0E0E";
-          focus_ring_active_color = "#FF9A30";
-          focus_ring_inactive_color = "#4E2913";
-          cursor_theme = "Mocu";
-          cursor_size = 24;
-        };
+      assert !(hmDeskLookGinger.config.programs.scoot.settings ? appearance);
       true
     )
     (
-      assert hmDeskLookGinger.config.programs.scoot.settings.wallpaper.mode == "fit";
+      assert !(hmDeskLookGinger.config.programs.scoot.settings ? wallpaper);
       true
     )
     (
-      assert hmDeskLookGinger.config.programs.scoot.settings.wallpaper.fill == "#0E0E0E";
-      true
-    )
-    (
-      assert lib.hasSuffix "wallpaper.png"
-        hmDeskLookGinger.config.programs.scoot.settings.wallpaper.image;
+      assert hmDeskLookGinger.config.xdg.configFile."scoot/look-default".text == "ginger-night";
       true
     )
     # ...which is what installs scootbg for it.
@@ -6924,17 +7135,18 @@ let
     )
     # ...and an explicit older look still resolves to itself.
     (
-      assert hmDeskLookMusic.config.programs.scoot.desktop.look == "music-desk";
+      assert hmDeskLookMusic.config.programs.scoot.look == "music-desk";
       true
     )
-    # A user value beside a look wins per key; the rest stays the look's.
+    # A user value beside a look wins per key; the look's own keys are
+    # gone from the file (they arrive as a runtime layer), so only the
+    # user's table renders here.
     (
       assert hmDeskUserWins.config.programs.scoot.settings.appearance.background_color == "#123456";
       true
     )
     (
-      assert
-        hmDeskUserWins.config.programs.scoot.settings.appearance.focus_ring_active_color == "#3D579A";
+      assert !(hmDeskUserWins.config.programs.scoot.settings.appearance ? focus_ring_active_color);
       true
     )
     (
@@ -6982,13 +7194,17 @@ let
       true
     )
     (
-      assert lib.hasInfix "desktop.look needs" (builtins.head (failing hmDeskLookNoEnable.config));
+      assert lib.hasInfix "programs.scoot.look needs" (builtins.head (failing hmDeskLookNoEnable.config));
       true
     )
-    # ...and an unknown look, an enum type error (verified by hand to name
-    # the five valid values).
+    # ...and an unknown look, a catalog assertion failure (naming the
+    # catalog).
     (
-      assert !hmDeskUnknownLook.success;
+      assert builtins.length (failing hmDeskUnknownLook.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "bogus-look" (builtins.head (failing hmDeskUnknownLook.config));
       true
     )
     # NixOS: the profile turns on the session entry and its units, the
@@ -7198,7 +7414,7 @@ let
       true
     )
     (
-      assert lib.any (m: lib.hasInfix "desktop.look needs" m) (failing osDeskLookNoEnable.config);
+      assert lib.any (m: lib.hasInfix "programs.scoot.look needs" m) (failing osDeskLookNoEnable.config);
       true
     )
     # `desktop.greeter` is the greeter: through it the profile lists a
@@ -7229,51 +7445,31 @@ let
       assert hmDeskBar.config.systemd.user.services ? scootbar;
       true
     )
+    # ...and no look colors reach its file either: the look arrives as
+    # a runtime layer under the user's file, never as eval-time values
+    # (the bar equivalent of the compositor pins above)...
     (
-      assert
-        hmDeskBar.config.programs.scootbar.settings.colors == {
-          background = "#FCFBFB";
-          foreground = "#1A2032";
-          accent = "#3D579A";
-          hover = "#5D7AB0";
-          dim = "#C9CBD0";
-          urgent = "#EE6F5E";
-        };
+      assert (hmDeskBar.config.programs.scootbar.settings.colors or { }) == { };
       true
     )
-    # ...and the moonrise look themes the bar the same way.
+    # ...and the moonrise look leaves it alone the same way.
     (
-      assert
-        hmDeskBarMoon.config.programs.scootbar.settings.colors == {
-          background = "#2B3648";
-          foreground = "#F6EEDC";
-          accent = "#FFA45C";
-          hover = "#FFD54A";
-          dim = "#9C8B95";
-          urgent = "#E87F6A";
-        };
+      assert (hmDeskBarMoon.config.programs.scootbar.settings.colors or { }) == { };
       true
     )
-    # ...and ginger-night themes it from the cat-peeking palette.
+    # ...and ginger-night themes nothing in the file either (its palette
+    # renders at build time into the catalog beside this file).
     (
-      assert
-        hmDeskBarGinger.config.programs.scootbar.settings.colors == {
-          background = "#0E0E0E";
-          foreground = "#F5EAD6";
-          accent = "#E57F29";
-          hover = "#FFB14B";
-          dim = "#8F7A63";
-          urgent = "#E05A4E";
-        };
+      assert (hmDeskBarGinger.config.programs.scootbar.settings.colors or { }) == { };
       true
     )
-    # ...a user color wins per key there too...
+    # ...a user color still renders (the runtime layer sits below it)...
     (
       assert hmDeskBarUserWins.config.programs.scootbar.settings.colors.accent == "#123456";
       true
     )
     (
-      assert hmDeskBarUserWins.config.programs.scootbar.settings.colors.background == "#FCFBFB";
+      assert (hmDeskBarUserWins.config.programs.scootbar.settings.colors.background or null) == null;
       true
     )
     # ...Stylix wins every bar leaf as well...
@@ -7325,7 +7521,8 @@ let
       true
     )
     # NixOS with the bar module: the unit and the /etc file beside the
-    # session entry, in the look's colors...
+    # session entry; the look stays out of the file (runtime layer),
+    # while the system catalog installs beside it (pinned below).
     (
       assert allAssertionsHold osDeskBar.config;
       true
@@ -7343,14 +7540,7 @@ let
       true
     )
     (
-      assert
-        osDeskBar.config.programs.scootbar.settings.colors == {
-          background = "#241721";
-          foreground = "#fdef1d";
-          accent = "#31a9e5";
-          dim = "#99911d";
-          urgent = "#bf128d";
-        };
+      assert (osDeskBar.config.programs.scootbar.settings.colors or { }) == { };
       true
     )
     (
@@ -8102,7 +8292,7 @@ let
     )
     (
       assert
-        sorted osIdle.config.environment.systemPackages == sorted [
+        sorted (withoutCatalog osIdle.config.environment.systemPackages) == sorted [
           fakePkg
           fakeBg
           pkgs.swayidle
@@ -8170,7 +8360,7 @@ let
     )
     (
       assert
-        sorted osIdleOff.config.environment.systemPackages == sorted [
+        sorted (withoutCatalog osIdleOff.config.environment.systemPackages) == sorted [
           fakePkg
           fakeBg
           leanMako
@@ -8215,7 +8405,7 @@ let
     )
     (
       assert
-        sorted osLockOff.config.environment.systemPackages == sorted [
+        sorted (withoutCatalog osLockOff.config.environment.systemPackages) == sorted [
           fakePkg
           fakeBg
           pkgs.swayidle
@@ -8564,7 +8754,7 @@ let
             package = fakePkg;
             wallpaper.package = fakeBg;
             desktop.enable = true;
-            desktop.look = "music-desk";
+            look = "music-desk";
           }
           {
             package = fakeBar;
@@ -8628,7 +8818,7 @@ let
             package = fakePkg;
             wallpaper.package = fakeBg;
             desktop.enable = true;
-            desktop.look = "music-desk";
+            look = "music-desk";
             desktop.notifications.bar.icons.idle = "";
           } { package = fakeBar; }).config.programs.scootbar.settings.push.notifications ? icon
         );
@@ -9727,7 +9917,7 @@ let
                 package = fakePkg;
                 wallpaper.package = fakeBg;
                 desktop.enable = true;
-                desktop.look = "music-desk";
+                look = "music-desk";
               }
               {
                 package = fakeBar;
@@ -9752,7 +9942,7 @@ let
                 package = fakePkg;
                 wallpaper.package = fakeBg;
                 desktop.enable = true;
-                desktop.look = "music-desk";
+                look = "music-desk";
               }
               {
                 package = fakeBar;
@@ -10981,20 +11171,30 @@ let
       assert allAssertionsHold hmThemeGinger.config;
       true
     )
-    # ...the dark-mode signal libadwaita follows (`prefer-dark` for a
-    # dark look, `prefer-light` for the light one)...
+    # ...the dark-mode signal libadwaita follows is no longer written
+    # here at all: `scoot look sync` writes it from the active look's
+    # polarity after `dconfSettings`, so no `color-scheme` of ours
+    # reaches the merged set — and the claims file beside the declared
+    # default is empty where nothing else claims an interface key...
     (
-      assert hmTheme.config.dconf.settings."org/gnome/desktop/interface".color-scheme == "prefer-light";
+      assert
+        ((hmTheme.config.dconf.settings."org/gnome/desktop/interface" or { }).color-scheme or null) == null;
       true
     )
     (
       assert
-        hmThemeDark.config.dconf.settings."org/gnome/desktop/interface".color-scheme == "prefer-dark";
+        ((hmThemeDark.config.dconf.settings."org/gnome/desktop/interface" or { }).color-scheme or null)
+        == null;
       true
     )
     (
       assert
-        hmThemeMoon.config.dconf.settings."org/gnome/desktop/interface".color-scheme == "prefer-dark";
+        ((hmThemeMoon.config.dconf.settings."org/gnome/desktop/interface" or { }).color-scheme or null)
+        == null;
+      true
+    )
+    (
+      assert hmTheme.config.xdg.configFile."scoot/look-nix-claims".text == "";
       true
     )
     # ...opted out of GTK, and without a look, no signal is written...
@@ -11070,12 +11270,15 @@ let
       assert hmTheme.config.systemd.user.sessionVariables.XCURSOR_SIZE == "24";
       true
     )
+    # ...while the compositor config carries no cursor keys either: the
+    # look's cursor arrives as a runtime layer (the theme target still
+    # installs the package and names it for GTK/X11 beside this)...
     (
-      assert hmTheme.config.programs.scoot.settings.appearance.cursor_theme == "Mocu";
+      assert !((hmTheme.config.programs.scoot.settings.appearance or { }) ? cursor_theme);
       true
     )
     (
-      assert hmTheme.config.programs.scoot.settings.appearance.cursor_size == 24;
+      assert !((hmTheme.config.programs.scoot.settings.appearance or { }) ? cursor_size);
       true
     )
     # ...a dark look sets the dark Qt style (the GTK side needs no
@@ -11221,7 +11424,7 @@ let
       true
     )
     (
-      assert !(hmThemeCursorOff.config.programs.scoot.settings.appearance ? cursor_theme);
+      assert !((hmThemeCursorOff.config.programs.scoot.settings.appearance or { }) ? cursor_theme);
       true
     )
     (
@@ -11301,8 +11504,15 @@ let
       assert
         hmThemeGtk.config.dconf.settings."org/gnome/desktop/interface" == {
           gtk-theme = "UserTheme";
-          color-scheme = "prefer-light";
         };
+      true
+    )
+    # ...and the claims file carries that owned leaf, so `sync` leaves
+    # it to home-manager...
+    (
+      assert
+        hmThemeGtk.config.xdg.configFile."scoot/look-nix-claims".text
+        == "/org/gnome/desktop/interface/gtk-theme";
       true
     )
     # ...its css owned too (both versions' files stay out together)...
@@ -11332,6 +11542,15 @@ let
         hmThemeGtkScheme.config.dconf.settings."org/gnome/desktop/interface" == {
           color-scheme = "prefer-dark";
         };
+      true
+    )
+    # ...and the claims file beside the declared default carries that
+    # owned leaf (full dconf path), so `sync` leaves it to
+    # home-manager however the live value reads...
+    (
+      assert
+        hmThemeGtkScheme.config.xdg.configFile."scoot/look-nix-claims".text
+        == "/org/gnome/desktop/interface/color-scheme";
       true
     )
     # ...an upstream Qt module owns `qt6ct.conf` (its source stands,
@@ -11417,35 +11636,31 @@ let
       assert builtins.length hmTheme.config.home.sessionSearchVariables.QT_PLUGIN_PATH == 2;
       true
     )
-    # ...beside the bar module the look's UI face reaches the bar as
-    # a file (never the icon-less DejaVu default)...
+    # ...beside the bar module the bar font is the plain default (the
+    # look's own face arrives as a runtime layer now, never as an
+    # eval-time `bar.font`)...
     (
       assert allAssertionsHold hmThemeBar.config;
       true
     )
     (
-      assert lib.hasPrefix builtins.storeDir hmThemeBar.config.programs.scootbar.settings.bar.font;
+      assert
+        hmThemeBar.config.programs.scootbar.settings.bar.font
+        == "${pkgs.dejavu_fonts.minimal}/share/fonts/truetype/DejaVuSans.ttf";
       true
     )
-    (
-      assert lib.hasInfix "scootbar-font" hmThemeBar.config.programs.scootbar.settings.bar.font;
-      true
-    )
-    # ...and a user `uiPackage` override reaches the bar's font file
-    # (a different derivation than the default-package one; the shell
-    # half proves it resolves into the override package)...
+    # ...a user `uiPackage` override reaches the catalog render instead:
+    # the override changes the render derivation's closure (a different
+    # font input), pinned by output path — computable at evaluation,
+    # without building...
     (
       assert allAssertionsHold hmThemeBarUiPkg.config;
       true
     )
     (
-      assert lib.hasInfix "scootbar-font" hmThemeBarUiPkg.config.programs.scootbar.settings.bar.font;
-      true
-    )
-    (
       assert
-        hmThemeBarUiPkg.config.programs.scootbar.settings.bar.font
-        != hmThemeBar.config.programs.scootbar.settings.bar.font;
+        hmThemeBarUiPkg.config.xdg.dataFile."scoot/rendered/music-desk".source.outPath
+        != hmThemeBar.config.xdg.dataFile."scoot/rendered/music-desk".source.outPath;
       true
     )
     # ...opted out of fonts, the DejaVu default stands...
@@ -11646,6 +11861,165 @@ let
   # the style tokens against the example files. Pure evaluation, so it
   # runs on every platform, not only where the desktop profile can run.
   _lookShippedPins = import ./looks-shipped-check.nix { inherit lib; };
+
+  # --- the look catalog (`programs.scoot.looks`, `programs.scoot.look`) ---
+  # The declared default, the catalog links, the claims file and the
+  # sync step; the priority table (explicit beats profile beats the
+  # null option default); custom paths, first-wins and the refusals.
+  # The section 6.3 rule corners themselves run in `scootctl`'s sync
+  # suite (same names, scripted peers); the rollback corner runs live
+  # on the dev VM (a generation switch with a live choice).
+  _lookCatalogPins = lib.optionals isLinux [
+    # An explicit look beats the profile default; the declared default
+    # names it...
+    (
+      assert allAssertionsHold hmLookExplicit.config;
+      true
+    )
+    (
+      assert hmLookExplicit.config.programs.scoot.look == "moonrise";
+      true
+    )
+    (
+      assert hmLookExplicit.config.xdg.configFile."scoot/look-default".text == "moonrise";
+      true
+    )
+    # ...the profile alone resolves to ginger-night...
+    (
+      assert allAssertionsHold hmLookDefault.config;
+      true
+    )
+    (
+      assert hmLookDefault.config.programs.scoot.look == "ginger-night";
+      true
+    )
+    (
+      assert hmLookDefault.config.xdg.configFile."scoot/look-default".text == "ginger-night";
+      true
+    )
+    # ...a custom look beside shipped ones: the manifest name is the
+    # catalog name, each source and render installs, and the declared
+    # default names it...
+    (
+      assert allAssertionsHold hmLookCustom.config;
+      true
+    )
+    (
+      assert hmLookCustom.config.programs.scoot.look == "my-green";
+      true
+    )
+    (
+      assert hmLookCustom.config.xdg.configFile."scoot/look-default".text == "my-green";
+      true
+    )
+    (
+      assert lib.hasSuffix "test-looks/my-green" (
+        toString hmLookCustom.config.xdg.dataFile."scoot/looks/my-green".source
+      );
+      true
+    )
+    (
+      assert
+        hmLookCustom.config.xdg.dataFile."scoot/rendered/my-green".source.name
+        == "scoot-look-my-green-rendered";
+      true
+    )
+    # ...first wins: the path entry for moonrise beside the shipped
+    # `"moonrise"` keeps the shipped source (registry order, not store
+    # basename)...
+    (
+      assert lib.hasSuffix "looks/moonrise" (
+        toString hmLookCustom.config.xdg.dataFile."scoot/looks/moonrise".source
+      );
+      true
+    )
+    (
+      assert
+        !(lib.hasInfix "test-looks" (
+          toString hmLookCustom.config.xdg.dataFile."scoot/looks/moonrise".source
+        ));
+      true
+    )
+    # ...no render binary means no catalog at all (still asserting
+    # clean: files-only setups manage no looks)...
+    (
+      assert allAssertionsHold hmLookNoPackage.config;
+      true
+    )
+    (
+      assert !(hmLookNoPackage.config.xdg.dataFile ? "scoot/looks/moonrise");
+      true
+    )
+    (
+      assert !(hmLookNoPackage.config.xdg.dataFile ? "scoot/rendered/moonrise");
+      true
+    )
+    (
+      assert !(hmLookNoPackage.config.xdg.configFile ? "scoot/look-default");
+      true
+    )
+    (
+      assert !(hmLookNoPackage.config.home.activation ? scootLookSync);
+      true
+    )
+    # ...no scoot binary still installs the catalog, with a PATH
+    # lookup for the sync instead of a failed switch...
+    (
+      assert allAssertionsHold hmLookFilesOnly.config;
+      true
+    )
+    (
+      assert hmLookFilesOnly.config.xdg.configFile."scoot/look-default".text == "moonrise";
+      true
+    )
+    (
+      assert lib.hasInfix "command -v scoot" hmLookFilesOnly.config.home.activation.scootLookSync.data;
+      true
+    )
+    # ...an unknown declared default fails, naming the catalog...
+    (
+      assert builtins.length (failing hmLookUnknown.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "nosuchlook" (builtins.head (failing hmLookUnknown.config));
+      true
+    )
+    # ...and a look without the profile is refused.
+    (
+      assert builtins.length (failing hmLookNoEnable.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "programs.scoot.look needs" (builtins.head (failing hmLookNoEnable.config));
+      true
+    )
+    # The NixOS-module-only catalog: the same entries as a system
+    # package pair, the declared default in `/etc`, and no claims
+    # (nothing merges `dconf.settings` from this side)...
+    (
+      assert allAssertionsHold osLookCatalog.config;
+      true
+    )
+    (
+      assert osLookCatalog.config.programs.scoot.look == "moonrise";
+      true
+    )
+    (
+      assert osLookCatalog.config.environment.etc."scoot/look-default".text == "moonrise";
+      true
+    )
+    (
+      assert osLookCatalog.config.environment.etc."scoot/look-nix-claims".text == "";
+      true
+    )
+    (
+      assert lib.any (
+        p: (p.name or "") == "scoot-looks-catalog"
+      ) osLookCatalog.config.environment.systemPackages;
+      true
+    )
+  ];
 
   _darwinAudioPins = lib.optionals (!isLinux) [
     # Home-manager: every tool null, nothing installed for the slot...
@@ -12164,7 +12538,7 @@ let
         (evalHome {
           enable = true;
           desktop.enable = true;
-          desktop.look = "vinyl-sunset";
+          look = "vinyl-sunset";
         }).config.programs.scoot.desktop.nightlight.nightTemp == 3200;
       true
     )
@@ -12173,7 +12547,7 @@ let
         (evalHome {
           enable = true;
           desktop.enable = true;
-          desktop.look = "moonrise";
+          look = "moonrise";
         }).config.programs.scoot.desktop.nightlight.nightTemp == 3400;
       true
     )
@@ -12182,7 +12556,7 @@ let
         (evalHome {
           enable = true;
           desktop.enable = true;
-          desktop.look = "ginger-night";
+          look = "ginger-night";
         }).config.programs.scoot.desktop.nightlight.nightTemp == 3300;
       true
     )
@@ -12191,7 +12565,7 @@ let
         (evalHome {
           enable = true;
           desktop.enable = true;
-          desktop.look = "radial-burst";
+          look = "radial-burst";
         }).config.programs.scoot.desktop.nightlight.nightTemp == 3500;
       true
     )
@@ -12906,6 +13280,10 @@ let
       assert
         sorted hmKeys.config.home.packages == sorted [
           fakePkg
+          # scootbg installs for the catalog's wallpapers even with
+          # `look = null` (a manual apply needs it; the layer is gone,
+          # the images are not).
+          fakeBg
           pkgs.swayidle
           pkgs.brightnessctl
           pkgs.wlopm
@@ -13146,6 +13524,9 @@ let
       assert
         sorted hmKeysOff.config.home.packages == sorted [
           fakePkg
+          # scootbg installs for the catalog's wallpapers even with
+          # `look = null` (a manual apply needs it).
+          fakeBg
           pkgs.swayidle
           pkgs.brightnessctl
           pkgs.wlopm
@@ -13193,7 +13574,7 @@ let
     )
     (
       assert
-        sorted osKeysOff.config.environment.systemPackages == sorted [
+        sorted (withoutCatalog osKeysOff.config.environment.systemPackages) == sorted [
           fakePkg
           fakeBg
           pkgs.swayidle
@@ -13339,7 +13720,14 @@ let
       true
     )
     (
-      assert hmKeys.config.home.packages == [ fakePkg ];
+      assert
+        hmKeys.config.home.packages == [
+          fakePkg
+          # scootbg installs for the catalog's wallpapers even with
+          # `look = null` (a manual apply needs it; the layer is gone,
+          # the images are not).
+          fakeBg
+        ];
       true
     )
     # ...the keymap still on with the profile, its binds in bare
@@ -13969,8 +14357,8 @@ let
     # profile's own system packages (exactly those two added)...
     (
       assert
-        sorted osPower.config.environment.systemPackages == sorted (
-          osDesk.config.environment.systemPackages
+        sorted (withoutCatalog osPower.config.environment.systemPackages) == sorted (
+          withoutCatalog osDesk.config.environment.systemPackages
           ++ [
             pkgs.power-profiles-daemon
             (import ./modules/power-charge.nix {
@@ -14399,6 +14787,7 @@ assert lib.all (x: x) _seedPins;
 assert lib.all (x: x) _authPins;
 assert lib.all (x: x) _themePins;
 assert lib.all (x: x) _lookShippedPins;
+assert lib.all (x: x) _lookCatalogPins;
 assert lib.all (x: x) _keysPins;
 assert lib.all (x: x) _powerPins;
 assert lib.all (x: x) _displaysPins;
@@ -14648,86 +15037,71 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   ' ${hmStylixColorToml} '${fakeBg}/bin/scootbg'
   echo "ok: stylix.wallpaper.enable = false leaves a user color alone"
 
-  # 10. Desktop profile, music-desk: the example palette in the compositor
-  #     config (appearance plus the theme cursor and the shipped wallpaper
-  #     beside the injected scootbg command), and the same palette in the
-  #     bar file.
+  # 10. Desktop profile, music-desk: the compositor config carries no
+  #     look values (the palette arrives as a runtime layer), and neither
+  #     does the bar file.
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["appearance"] == {"background_color": "#FCFBFB", "focus_ring_active_color": "#3D579A", "focus_ring_inactive_color": "#D5D7DD", "cursor_theme": "Mocu", "cursor_size": 24}, got["appearance"]
-  assert got["wallpaper"]["mode"] == "fill", got["wallpaper"]
-  assert got["wallpaper"]["image"].endswith("music-desk.png"), got["wallpaper"]
-  assert got["wallpaper"]["command"].endswith("/bin/scootbg"), got["wallpaper"]
+  assert "appearance" not in got, got
+  assert "wallpaper" not in got, got
   ' ${hmDeskMusicToml}
-  echo "ok: desktop look renders the example palette plus its wallpaper"
+  echo "ok: desktop look leaves the compositor config alone"
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["colors"] == {"background": "#FCFBFB", "foreground": "#1A2032", "accent": "#3D579A", "hover": "#5D7AB0", "dim": "#C9CBD0", "urgent": "#EE6F5E"}, got["colors"]
+  assert "colors" not in got, got
   ' ${hmDeskBarToml}
-  echo "ok: desktop look renders the example palette into the bar config"
+  echo "ok: desktop look leaves the bar config alone"
 
-  # 10b. Desktop profile, vinyl-sunset: colors but no wallpaper table (the
-  #      illustration cannot be committed -- the flat background_color is
-  #      the session's flat color).
+  # 10b. Desktop profile, vinyl-sunset: no wallpaper table (the
+  #      illustration cannot be committed) — and no appearance either.
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["appearance"]["background_color"] == "#271A1F", got["appearance"]
+  assert "appearance" not in got, got
   assert "wallpaper" not in got, got
   ' ${hmDeskVinylToml}
   echo "ok: a look without an in-repo wallpaper sets no wallpaper table"
 
-  # 10c. Desktop profile, radial-burst on the NixOS side: the bar file
-  #      carries that look's colors (five tokens: no hover there).
+  # 10c. Desktop profile, radial-burst on the NixOS side: no colors in
+  #      the bar file either.
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["colors"] == {"background": "#241721", "foreground": "#fdef1d", "accent": "#31a9e5", "dim": "#99911d", "urgent": "#bf128d"}, got["colors"]
+  assert "colors" not in got, got
   ' ${osDeskBarToml}
-  echo "ok: desktop look renders into the NixOS-side bar config"
+  echo "ok: desktop look leaves the NixOS-side bar config alone"
 
-  # 10d. Desktop profile, moonrise: the example palette in the compositor
-  #      config (appearance plus the theme cursor and the shipped wallpaper
-  #      beside the injected scootbg command), and the same palette in the
-  #      bar file.
+  # 10d. Desktop profile, moonrise: nothing in either file.
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["appearance"] == {"background_color": "#2B3648", "focus_ring_active_color": "#FF9A49", "focus_ring_inactive_color": "#5E4B5B", "cursor_theme": "Mocu", "cursor_size": 24}, got["appearance"]
-  assert got["wallpaper"]["mode"] == "fill", got["wallpaper"]
-  assert got["wallpaper"]["image"].endswith("moonrise.png"), got["wallpaper"]
-  assert got["wallpaper"]["command"].endswith("/bin/scootbg"), got["wallpaper"]
+  assert "appearance" not in got, got
+  assert "wallpaper" not in got, got
   ' ${hmDeskMoonToml}
-  echo "ok: desktop look renders moonrise plus its wallpaper"
+  echo "ok: desktop look leaves moonrise out of the compositor config"
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["colors"] == {"background": "#2B3648", "foreground": "#F6EEDC", "accent": "#FFA45C", "hover": "#FFD54A", "dim": "#9C8B95", "urgent": "#E87F6A"}, got["colors"]
+  assert "colors" not in got, got
   ' ${hmDeskBarMoonToml}
-  echo "ok: desktop look renders moonrise into the bar config"
+  echo "ok: desktop look leaves moonrise out of the bar config"
 
-  # 10e. Desktop profile, ginger-night: the cat-peeking palette in the
-  #      compositor config (`fit` on the look's black, so the right-edge
-  #      cat is never cropped) beside the injected scootbg command, and
-  #      the same palette in the bar file.
+  # 10e. Desktop profile, ginger-night: nothing in either file.
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["appearance"] == {"background_color": "#0E0E0E", "focus_ring_active_color": "#FF9A30", "focus_ring_inactive_color": "#4E2913", "cursor_theme": "Mocu", "cursor_size": 24}, got["appearance"]
-  assert got["wallpaper"]["mode"] == "fit", got["wallpaper"]
-  assert got["wallpaper"]["fill"] == "#0E0E0E", got["wallpaper"]
-  assert got["wallpaper"]["image"].endswith("wallpaper.png"), got["wallpaper"]
-  assert got["wallpaper"]["command"].endswith("/bin/scootbg"), got["wallpaper"]
+  assert "appearance" not in got, got
+  assert "wallpaper" not in got, got
   ' ${hmDeskGingerToml}
-  echo "ok: desktop look renders ginger-night plus its wallpaper"
+  echo "ok: desktop look leaves ginger-night out of the compositor config"
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  assert got["colors"] == {"background": "#0E0E0E", "foreground": "#F5EAD6", "accent": "#E57F29", "hover": "#FFB14B", "dim": "#8F7A63", "urgent": "#E05A4E"}, got["colors"]
+  assert "colors" not in got, got
   ' ${hmDeskBarGingerToml}
-  echo "ok: desktop look renders ginger-night into the bar config"
+  echo "ok: desktop look leaves ginger-night out of the bar config"
 
   # 11-12c. Idle policy and locker content (Linux only: every line
   # below names a Linux-only tool's store path, and the files
@@ -15157,14 +15531,6 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q 'color_theme = "ginger-night"' ${themeBtopGingerConf}
     echo "ok: the look's app files apply from the flake"
 
-    # 13n. The bar font follows `theme.fonts.uiPackage`: with the
-    #      override, the font file resolves inside the override
-    #      package (whose file is named for the look's bar face), not
-    #      the theme default.
-    themeBarUiTarget=$(readlink ${themeBarUiPkgFont})
-    echo "$themeBarUiTarget" | grep -F -q "fake-ui-font" || { echo "bar font missed the uiPackage override: $themeBarUiTarget" >&2; exit 1; }
-    echo "ok: bar font resolves into the uiPackage override"
-
     # 14. The bar feed, against stub tools (the REAL bridge script from
     #     the module, scenario files below -- `mode`/`list` are what
     #     `makoctl` prints, `bus` what `busctl monitor` prints,
@@ -15556,15 +15922,16 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     echo "ok: a locked pick is refused"
 
     # 18. The documented standalone desktop (site/desktop/index.md's
-    #     home.nix snippet) renders the moonrise look end to end
-    #     (appearance plus the theme cursor).
+    #     home.nix snippet) carries no look values in its compositor
+    #     file (the declared default renders at build time into the
+    #     catalog, pinned at evaluation above).
     python3 -c '
     import sys,tomllib
     got = tomllib.load(open(sys.argv[1],"rb"))
-    assert got["appearance"] == {"background_color": "#2B3648", "focus_ring_active_color": "#FF9A49", "focus_ring_inactive_color": "#5E4B5B", "cursor_theme": "Mocu", "cursor_size": 24}, got["appearance"]
-    assert got["wallpaper"]["image"].endswith("moonrise.png"), got["wallpaper"]
+    assert "appearance" not in got, got
+    assert "wallpaper" not in got, got
     ' ${hmDocsDesktopToml}
-    echo "ok: documented home-manager desktop renders moonrise"
+    echo "ok: documented home-manager desktop leaves the compositor config alone"
 
     # 19. Launcher slot content: the wrapper script runs this
     #     profile's fuzzel by absolute store path (the one fuzzel the
@@ -17069,3 +17436,4 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   touch $out
   echo "scoot-modules: all file-content checks passed"
 ''
+# MARKER-W4-001
