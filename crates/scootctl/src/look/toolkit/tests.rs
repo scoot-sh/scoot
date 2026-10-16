@@ -3,6 +3,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use scoot_look::state::Record;
 use scoot_look::{Origin, ResolvedLook};
@@ -14,8 +15,65 @@ use super::{
     toolkit_on, wanted_dconf, wanted_files,
 };
 
+static TOOLKIT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A scratch dir unique to this test process and call, removed on drop:
+/// the same fixture `apply/tests.rs` keeps locally, since the catalog's
+/// own helpers are not visible outside `scoot-look`.
+fn scratch(tag: &str) -> tempfile::TempDir {
+    let id = TOOLKIT_COUNTER.fetch_add(1, Ordering::SeqCst);
+    tempfile::Builder::new()
+        .prefix(&format!(
+            "scoot-look-toolkit-{tag}-{}-{id}-",
+            std::process::id()
+        ))
+        .tempdir()
+        .expect("a scratch dir")
+}
+
+/// A minimal valid look: the moonrise palette (which clears the contrast
+/// bars), a color wallpaper (no image binary needed), and a license (so it
+/// validates under every origin).
+fn look_toml(name: &str) -> String {
+    format!(
+        r##"
+schema = 1
+name = "{name}"
+title = "Test {name}"
+description = "A test look."
+polarity = "dark"
+license = "MIT"
+
+[palette]
+background = "#2B3648"
+foreground = "#F6EEDC"
+dim = "#9C8B95"
+accent = "#FFA45C"
+urgent = "#E87F6A"
+
+[fonts]
+ui = "DejaVu Sans"
+sans = "DejaVu Sans"
+mono = "DejaVu Sans Mono"
+size = 10
+
+[shape]
+radius = 14
+ring-width = 2
+
+[cursor]
+theme = "Mocu"
+size = 24
+
+[wallpaper]
+color = "#2B3648"
+mode = "fill"
+"##
+    )
+}
+
 fn look() -> ResolvedLook {
-    let text = super::super::catalog::tests::look_toml("moonrise");
+    let text = look_toml("moonrise");
     let raw = scoot_look::parse_look_toml(text.as_bytes()).expect("test look parses");
     let map = BTreeMap::from([("moonrise".to_string(), (raw, Origin::Shipped))]);
     scoot_look::resolve(&map, "moonrise").expect("test look resolves")
@@ -654,7 +712,7 @@ fn a_backslash_in_the_state_path_refuses_the_files() {
 
 #[test]
 fn absent_files_are_written_and_identical_ones_kept() {
-    let home = super::super::catalog::tests::scratch("files-write");
+    let home = scratch("files-write");
     let state = state_dir("files-write");
     let state_record = record(None, &[], &[]);
     let notes = apply_toolkit_files(
@@ -696,7 +754,7 @@ fn absent_files_are_written_and_identical_ones_kept() {
 
 #[test]
 fn marked_files_update_and_foreign_files_stay() {
-    let home = super::super::catalog::tests::scratch("files-mixed");
+    let home = scratch("files-mixed");
     let state = state_dir("files-mixed");
     let state_record = record(None, &[], &[]);
     // A stale managed file updates; a hand-written one stays.
@@ -738,7 +796,7 @@ fn marked_files_update_and_foreign_files_stay() {
 
 #[test]
 fn files_off_and_private_and_homeless_all_skip() {
-    let home = super::super::catalog::tests::scratch("files-gates");
+    let home = scratch("files-gates");
     let state = state_dir("files-gates");
     let off = record(Some(false), &[], &[]);
     let notes = apply_toolkit_files(
