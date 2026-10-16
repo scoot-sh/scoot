@@ -47,8 +47,14 @@ AWK=@AWK@
 TIMEOUT=@TIMEOUT@
 SETSID=@SETSID@
 # The look's menu colors as fuzzel flags (empty without a look): split
-# on purpose below, each flag one word.
+# on purpose below, each flag one word. The fallback: once a swap
+# renders the live look's `fuzzel.ini`, `menu` below reads the same
+# seven colors out of it at runtime instead (next launch).
 THEME=@THEME@
+# The live look's launcher config at runtime (never evaluation).
+LOOK_INI=@LOOK_INI@
+# The shared look-leaf helpers (one function behind every fuzzel call).
+@LOOK_LEAF_LIB@
 
 # `_join keyring`'s status for a keyring key refused for its secrets:
 # the caller prompts (see `do_connect`). Apart from every other status
@@ -60,6 +66,22 @@ fail() {
     say "$*"
     "$TIMEOUT" 5 "$NOTIFY" --app-name=scoot WiFi "$*" >/dev/null 2>&1 || true
     exit 1
+}
+
+# The menu behind every pick below: the live look's colors as CLI
+# flags when a swap rendered them, else the eval-time flags in $THEME.
+# Fuzzel reads the user's own config either way (no `--config`: that
+# flag replaces it); the flags layer only the seven colors over it. One
+# function, so the choice is made at pick time and every call site reads
+# the same.
+menu() {
+    live_colors=$(scoot_fuzzel_look_flags "$LOOK_INI") || live_colors=""
+    # shellcheck disable=SC2086
+    if [ -n "$live_colors" ]; then
+        "$MENU" "$@" $live_colors
+    else
+        "$MENU" "$@" $THEME
+    fi
 }
 
 # nmcli's terse output escapes `:` and `\` with a backslash: fields
@@ -154,8 +176,7 @@ nm_act() {
 # The masked key prompt (`$2` is the prompt's text); an empty or
 # cancelled one exits 0, joining nothing.
 ask_key() {
-    # shellcheck disable=SC2086
-    key=$("$MENU" --dmenu --password --prompt-only="$2" $THEME </dev/null) || exit 0
+    key=$(menu --dmenu --password --prompt-only="$2" </dev/null) || exit 0
     [ -n "$key" ] || exit 0
     printf '%s\n' "$key"
 }
@@ -279,8 +300,7 @@ do_join() {
 # `connect`. A cancel (Escape, or an empty feed with
 # `--no-run-if-empty`) joins nothing and exits 0.
 menu_pick() {
-    # shellcheck disable=SC2086
-    sel=$("$MENU" --dmenu --prompt='wifi: ' --no-run-if-empty --only-match $THEME) || exit 0
+    sel=$(menu --dmenu --prompt='wifi: ' --no-run-if-empty --only-match) || exit 0
     [ -n "$sel" ] || exit 0
     do_connect "$sel"
 }

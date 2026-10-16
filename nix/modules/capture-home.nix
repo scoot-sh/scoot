@@ -30,6 +30,8 @@ let
   # the same roles, so the three menus read as one). Nothing without
   # a look (or opted out): their own styles stand.
   fuzzelTheme = import ./fuzzel-theme.nix { inherit lib; };
+  lookFuzzelIni = import ./look-state.nix "fuzzel.ini";
+  lookLeafLib = builtins.readFile ./look-leaf.sh;
   hexA = themeLook.withAlpha;
   # Quoted: a bare `#rrggbb` would start a shell comment wherever
   # xdpw runs the chooser through a shell and eat the rest of the
@@ -65,9 +67,20 @@ let
   # fully-flagged `chooser_cmd` mid-flag (seen live: fuzzel refused a
   # truncated `--selection-color` with no value and the cast died).
   # The script keeps the config line a bare store path; the theme
-  # travels inside it, where no line limit applies.
+  # travels inside it, where no line limit applies: the live look's
+  # colors read out of its `fuzzel.ini` once a swap renders one, the
+  # eval-time flags before that (no `--config`: that flag replaces the
+  # user's own config, while flags layer only the colors over it).
   chooserScript = pkgs.writeShellScriptBin "scoot-screencast-chooser" ''
-    exec ${menuBin} --dmenu --prompt='Share: '${fuzzelThemeFlags}
+    ${lookLeafLib}
+    look_ini=${lookFuzzelIni}
+    live_colors=$(scoot_fuzzel_look_flags "$look_ini") || live_colors=""
+    # shellcheck disable=SC2086
+    if [ -n "$live_colors" ]; then
+      exec ${menuBin} --dmenu --prompt='Share: ' $live_colors
+    else
+      exec ${menuBin} --dmenu --prompt='Share: '${fuzzelThemeFlags}
+    fi
   '';
   chooserCmd =
     if cap.chooser == "fuzzel" then

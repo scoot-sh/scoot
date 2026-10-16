@@ -95,16 +95,11 @@ fn real_font_file() -> PathBuf {
             }
         }
     }
-    let mut roots = vec![
+    let roots = vec![
         PathBuf::from("/usr/share/fonts"),
         PathBuf::from("/run/current-system/sw/share/fonts"),
         PathBuf::from("/run/current-system/sw/share/X11/fonts"),
     ];
-    if let Some(home) = std::env::var_os("HOME") {
-        let home = PathBuf::from(home);
-        roots.push(home.join(".local/share/fonts"));
-        roots.push(home.join(".fonts"));
-    }
     let mut tried = Vec::new();
     for root in &roots {
         tried.push(root.display().to_string());
@@ -429,7 +424,13 @@ fn offline_commands_list_show_validate_and_build() {
     session.check_look(&["validate", &dir.to_string_lossy()]);
     let out = scratch.dir.join("built");
     session.check_look(&["build", "look-a", "--out", &out.to_string_lossy()]);
-    for file in ["scoot.toml", "bar.toml", "render.json"] {
+    for file in [
+        "scoot.toml",
+        "bar.toml",
+        "fuzzel.ini",
+        "swaylock",
+        "render.json",
+    ] {
         assert!(out.join(file).is_file(), "build writes {file}");
     }
     let current = session.check_look(&["current", "--json"]);
@@ -504,7 +505,17 @@ fn a_swap_applies_two_looks_through_the_scoped_reload() {
         "the link points at a render: {}",
         link.display()
     );
-    assert!(link.join("scoot.toml").is_file());
+    // The swap renders the next-launch leaves too: the launcher and the
+    // locker read them at their next start.
+    for file in [
+        "scoot.toml",
+        "bar.toml",
+        "fuzzel.ini",
+        "swaylock",
+        "render.json",
+    ] {
+        assert!(link.join(file).is_file(), "a swap renders {file}");
+    }
     let second = session.check_look(&["apply", "look-b", "--json"]);
     let second: serde_json::Value = serde_json::from_str(&second).expect("JSON from apply");
     assert_eq!(second["applied"], "look-b");

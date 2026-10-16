@@ -34,9 +34,9 @@ use scoot_look::state::{
     read_record, state_dir_from_env, write_record,
 };
 use scoot_look::{
-    Origin, RawLook, RenderInputs, check_contrast, render_bar, render_foot, render_gtk3_css,
-    render_gtk4_css, render_json, render_leaf_files, render_qt_scheme, render_scoot, resolve,
-    source_hash,
+    Origin, RawLook, RenderInputs, check_contrast, parse_kv_config, render_bar, render_foot,
+    render_fuzzel, render_gtk3_css, render_gtk4_css, render_json, render_leaf_files,
+    render_qt_scheme, render_scoot, render_swaylock, resolve, source_hash,
 };
 
 use super::catalog::{Catalog, Entry, cache_home, config_home};
@@ -194,6 +194,8 @@ pub fn validate_entry(
         check_bar_fragment(name, &merged, &inputs.inputs, checks, &mut validation);
         // Foot's own parser over its fragment, as `apply` runs it.
         check_foot_fragment(name, &merged, checks, &mut validation);
+        // The launcher and locker leaves, as `apply` writes them.
+        check_leaf_fragments(name, &merged, &mut validation);
     }
     Ok(validation)
 }
@@ -305,6 +307,7 @@ pub fn validate_dir(
             &mut validation,
         );
         check_foot_fragment(&merged.name, &merged, checks, &mut validation);
+        check_leaf_fragments(&merged.name, &merged, &mut validation);
         return Ok(validation);
     }
     Ok(validation)
@@ -745,6 +748,38 @@ fn check_foot_fragment(
         Ok(Availability::Available(())) => {}
         Ok(Availability::Unavailable(note)) => validation.notes.push(note),
         Err(message) => validation.errors.push(message),
+    }
+}
+
+/// Renders the launcher and locker leaves and reparses each — the same
+/// fragments `apply` and `build` write, so `validate` and `apply` agree
+/// on them. The reparse is the check: neither format has a check the
+/// tool can always run, so a fragment that does not read back as the
+/// pairs it wrote names a renderer bug. Refusals land in `errors`.
+fn check_leaf_fragments(
+    name: &str,
+    merged: &scoot_look::ResolvedLook,
+    validation: &mut Validation,
+) {
+    for (file, fragment) in [
+        ("fuzzel.ini", render_fuzzel(merged)),
+        ("swaylock", render_swaylock(merged)),
+    ] {
+        let fragment = match fragment {
+            Ok(fragment) => fragment,
+            Err(error) => {
+                validation
+                    .errors
+                    .push(format!("cannot render {name}: {error}"));
+                return;
+            }
+        };
+        if let Err(error) = parse_kv_config(&fragment) {
+            validation
+                .errors
+                .push(format!("rendered {file} does not parse: {error}"));
+            return;
+        }
     }
 }
 
@@ -1233,8 +1268,9 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 /// hues in both `colors-dark` and `colors-light`; 5 adds the toolkit
 /// fragments (`gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`,
 /// `qt/scoot-look.conf`); 6 adds the daemon
-/// leaves (`mako`, `wob.ini`, `fcitx5/theme.conf`, `nightlight`).
-pub const RENDER_VERSION: u32 = 6;
+/// leaves (`mako`, `wob.ini`, `fcitx5/theme.conf`, `nightlight`); 7 adds
+/// the launcher and locker leaves (`fuzzel.ini`, `swaylock`).
+pub const RENDER_VERSION: u32 = 7;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
@@ -1284,7 +1320,8 @@ fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs) -> String {
 /// Renders the look into the cache: `<cache>/<name>-<hash>/` with
 /// `scoot.toml`, `bar.toml`, the toolkit fragments
 /// (`gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`, `qt/scoot-look.conf`),
-/// `foot.ini` (only when the look has a `[terminal]` table),
+/// `foot.ini` (only when the look has a `[terminal]` table), the launcher
+/// and locker leaves (`fuzzel.ini`, `swaylock`),
 /// `render.json` and the daemon leaves (`mako`,
 /// `wob.ini`, `fcitx5/theme.conf`, `nightlight` when the look names a
 /// temperature), written into a fresh directory and renamed, so a reader
@@ -1315,6 +1352,8 @@ fn render_cached(
             && target.join("gtk/gtk-4.0.css").is_file()
             && target.join("qt/scoot-look.conf").is_file()
             && (merged.terminal.is_none() || target.join("foot.ini").is_file())
+            && target.join("fuzzel.ini").is_file()
+            && target.join("swaylock").is_file()
             && leaves.iter().all(|(file, _)| target.join(file).is_file())
         {
             notes.push(format!("reusing cached render {}", target.display()));
@@ -1331,6 +1370,9 @@ fn render_cached(
     let gtk4_css = render_gtk4_css(merged);
     let qt_scheme = render_qt_scheme(merged);
     let foot = render_foot(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let fuzzel = render_fuzzel(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let swaylock =
+        render_swaylock(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     // The fragments must parse as TOML: the renderers quote, and this is
     // where a quoting failure shows itself, before any app reads them.
     // (`gtk.css` and the Qt scheme have no strict parser handy; their
@@ -1338,6 +1380,10 @@ fn render_cached(
     // tests instead.)
     for (file, text) in [("scoot.toml", &scoot), ("bar.toml", &bar)] {
         text.parse::<toml::Table>()
+            .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
+    }
+    for (file, text) in [("fuzzel.ini", &fuzzel), ("swaylock", &swaylock)] {
+        parse_kv_config(text)
             .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
     }
     let target_bytes = chain
@@ -1352,6 +1398,8 @@ fn render_cached(
         ("gtk/gtk-3.0.css", gtk3_css.as_str()),
         ("gtk/gtk-4.0.css", gtk4_css.as_str()),
         ("qt/scoot-look.conf", qt_scheme.as_str()),
+        ("fuzzel.ini", fuzzel.as_str()),
+        ("swaylock", swaylock.as_str()),
     ];
     if let Some(foot) = &foot {
         files.push(("foot.ini", foot.as_str()));
@@ -1411,6 +1459,8 @@ fn render_cached(
             && target.join("gtk/gtk-4.0.css").is_file()
             && target.join("qt/scoot-look.conf").is_file()
             && (merged.terminal.is_none() || target.join("foot.ini").is_file())
+            && target.join("fuzzel.ini").is_file()
+            && target.join("swaylock").is_file()
             && leaves.iter().all(|(file, _)| target.join(file).is_file())
         {
             notes.push(format!("reusing cached render {}", target.display()));
@@ -2379,12 +2429,15 @@ pub fn build_to_out(
     let mut render_inputs = inputs.inputs;
     let render_details = inputs.details;
     /// One full render: the two first-party fragments, foot's `foot.ini`
-    /// (only when the look has a `[terminal]` table), the record, and the
+    /// (only when the look has a `[terminal]` table), the launcher and
+    /// locker leaves (`fuzzel.ini`, `swaylock`), the record, and the
     /// daemon leaves (`fcitx5/theme.conf` under its directory).
     type FullRender = (
         String,
         String,
         Option<String>,
+        String,
+        String,
         String,
         Vec<(String, String)>,
     );
@@ -2395,8 +2448,16 @@ pub fn build_to_out(
             .map_err(|error| format!("cannot render {name}: {error}"))?;
         let foot =
             render_foot(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+        let fuzzel =
+            render_fuzzel(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+        let swaylock =
+            render_swaylock(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
         for (file, text) in [("scoot.toml", &scoot), ("bar.toml", &bar)] {
             text.parse::<toml::Table>()
+                .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
+        }
+        for (file, text) in [("fuzzel.ini", &fuzzel), ("swaylock", &swaylock)] {
+            parse_kv_config(text)
                 .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
         }
         let leaves =
@@ -2406,7 +2467,7 @@ pub fn build_to_out(
             .map(|link| link.bytes.as_slice())
             .unwrap_or_default();
         let rendered_json = render_json(&name, &source_hash(target_bytes), render_inputs);
-        Ok((scoot, bar, foot, rendered_json, leaves))
+        Ok((scoot, bar, foot, fuzzel, swaylock, rendered_json, leaves))
     };
     // One staged list per render, so the bar downgrade loop below rebuilds
     // the same files it checks. The toolkit triple renders from tokens
@@ -2417,6 +2478,8 @@ pub fn build_to_out(
     let stage_of = |scoot: &str,
                     bar: &str,
                     foot: &Option<String>,
+                    fuzzel: &str,
+                    swaylock: &str,
                     gtk3: &str,
                     gtk4: &str,
                     qt: &str,
@@ -2429,6 +2492,8 @@ pub fn build_to_out(
             ("gtk/gtk-3.0.css".to_owned(), gtk3.to_owned()),
             ("gtk/gtk-4.0.css".to_owned(), gtk4.to_owned()),
             ("qt/scoot-look.conf".to_owned(), qt.to_owned()),
+            ("fuzzel.ini".to_owned(), fuzzel.to_owned()),
+            ("swaylock".to_owned(), swaylock.to_owned()),
         ];
         if let Some(foot) = foot {
             staged.push(("foot.ini".to_owned(), foot.clone()));
@@ -2436,7 +2501,7 @@ pub fn build_to_out(
         staged.extend(leaves.iter().cloned());
         staged
     };
-    let (mut scoot, mut bar, mut foot, mut rendered_json, mut leaf_files) =
+    let (mut scoot, mut bar, mut foot, mut fuzzel, mut swaylock, mut rendered_json, mut leaf_files) =
         render_once(&render_inputs)?;
     // The bar's own parser runs before anything lands in `--out`: a
     // refused fragment leaves no complete-looking output behind. The
@@ -2455,12 +2520,15 @@ pub fn build_to_out(
     let stage: &Path = scratch.path();
     // The staged files mirror the cache render exactly (first-party
     // fragments, the toolkit triple, foot's `foot.ini` when the look has a
-    // `[terminal]` table, plus every leaf file, `fcitx5/theme.conf` under
-    // its directory): validate renders what apply renders.
+    // `[terminal]` table, the launcher and locker leaves, plus every leaf
+    // file, `fcitx5/theme.conf` under its directory): validate renders
+    // what apply renders.
     let mut staged: Vec<(String, String)> = stage_of(
         &scoot,
         &bar,
         &foot,
+        &fuzzel,
+        &swaylock,
         &gtk3_css,
         &gtk4_css,
         &qt_scheme,
@@ -2510,11 +2578,21 @@ pub fn build_to_out(
                     return Err(message);
                 }
                 drops.push(drop_);
-                (scoot, bar, foot, rendered_json, leaf_files) = render_once(&render_inputs)?;
+                (
+                    scoot,
+                    bar,
+                    foot,
+                    fuzzel,
+                    swaylock,
+                    rendered_json,
+                    leaf_files,
+                ) = render_once(&render_inputs)?;
                 staged = stage_of(
                     &scoot,
                     &bar,
                     &foot,
+                    &fuzzel,
+                    &swaylock,
                     &gtk3_css,
                     &gtk4_css,
                     &qt_scheme,

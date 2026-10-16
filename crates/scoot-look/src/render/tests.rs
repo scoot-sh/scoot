@@ -735,3 +735,105 @@ fn foot_refuses_a_hand_built_bad_palette() {
     let err = render_foot(&look).expect_err("NaN alpha renders");
     assert_eq!(err.field, "opacity.terminal");
 }
+
+#[test]
+fn fuzzel_fragment() {
+    // The launcher's leaves (design section 3.3, `fuzzel-theme.nix`):
+    // the same seven roles the inlined CLI flags carry, as a `fuzzel.ini`
+    // `[colors]` table in fuzzel's `rrggbbaa` spelling. No `[main]`
+    // section: the font, lines and every other knob stay the user's,
+    // exactly what the flags leave alone today.
+    let frag = render_fuzzel(&moonrise()).expect("renders");
+    for line in [
+        "[colors]",
+        "background=2B3648ff",
+        "text=F6EEDCff",
+        "prompt=F6EEDCff",
+        "match=FFA45Cff",
+        "selection=FFA45Cff",
+        "selection-text=2B3648ff",
+        "border=FFA45Cff",
+    ] {
+        assert!(frag.contains(line), "missing {line}:\n{frag}");
+    }
+    assert!(!frag.contains("[main]"), "font section emitted:\n{frag}");
+    assert!(
+        !frag.contains("launch-prefix"),
+        "command key emitted:\n{frag}"
+    );
+    assert!(!frag.contains("terminal"), "command key emitted:\n{frag}");
+    // The fragment reparses to the same pairs: no line in it opens a
+    // new section or key.
+    let parsed = parse_kv_config(&frag).expect("fragment parses");
+    let colors = parsed.get("colors").expect("a colors section");
+    assert_eq!(colors.len(), 7, "seven leaves, no more: {colors:?}");
+    assert_eq!(
+        colors.get("selection").map(String::as_str),
+        Some("FFA45Cff")
+    );
+}
+
+#[test]
+fn swaylock_fragment() {
+    // The locker's leaves (`idle-home.nix` `lockTheme`): the same
+    // fourteen `key=value` lines the store config carries, in swaylock's
+    // `rrggbb` spelling without the `#`.
+    let frag = render_swaylock(&moonrise()).expect("renders");
+    for line in [
+        "color=2B3648",
+        "inside-color=2B3648",
+        "ring-color=FFA45C",
+        "ring-ver-color=FFA45C",
+        "ring-clear-color=FFA45C",
+        "ring-wrong-color=E87F6A",
+        "inside-ver-color=FFA45C",
+        "inside-clear-color=FFA45C",
+        "inside-wrong-color=E87F6A",
+        "key-hl-color=FFA45C",
+        "bs-hl-color=FFA45C",
+        "text-color=F6EEDC",
+        "line-color=9C8B95",
+        "separator-color=9C8B95",
+    ] {
+        assert!(frag.contains(line), "missing {line}:\n{frag}");
+    }
+    let parsed = parse_kv_config(&frag).expect("fragment parses");
+    let global = parsed.get("").expect("section-less pairs");
+    assert_eq!(global.len(), 14, "fourteen leaves, no more: {global:?}");
+}
+
+#[test]
+fn leaf_values_never_span_lines() {
+    // Design section 3.5: every renderer quotes for its own format on
+    // top of the grammar. These formats have no string quoting, so the
+    // writer refuses a value that would open a new line; `=`, `[` and a
+    // quote pass through literally and reparse to themselves.
+    for hostile in ["a\nb", "a\rb", "a\0b"] {
+        assert!(
+            kv_line("key", hostile).is_err(),
+            "{hostile:?} renders: {:?}",
+            kv_line("key", hostile).ok()
+        );
+    }
+    for probe in ["a=b", "a[b", "a\"b", "a'b", "a#b"] {
+        let line = kv_line("key", probe).expect("probe renders");
+        let parsed = parse_kv_config(&format!("[s]\n{line}\n")).expect("reparses");
+        assert_eq!(
+            parsed
+                .get("s")
+                .and_then(|s| s.get("key"))
+                .map(String::as_str),
+            Some(probe),
+            "{probe:?} does not round-trip"
+        );
+    }
+    // A hand-built look carrying a non-hex color refuses at render, so a
+    // broken config never reaches the app. (The roles render resolved,
+    // so the hostile value goes on the role each renderer reads.)
+    let mut look = moonrise();
+    look.palette.selection = "accent\nselection-text=000000ff".to_string();
+    assert!(render_fuzzel(&look).is_err());
+    let mut look = moonrise();
+    look.palette.border = "border".to_string();
+    assert!(render_swaylock(&look).is_err());
+}

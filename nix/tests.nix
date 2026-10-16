@@ -2411,6 +2411,7 @@ let
         cat "$d/psk"; exit "$(cat "$d/psk-code")" ;;
     esac
     cat > "$d/menu-input"
+    printf '%s\n' "$*" >> "$d/menu-argv"
     if [ -s "$d/picks" ]; then
       head -n 1 "$d/picks"; sed -i 1d "$d/picks"; exit 0
     fi
@@ -2442,8 +2443,20 @@ let
     desktop.apps.bluetooth.cliPackage = appsStubs;
     desktop.apps.bluetooth.menuPackage = appsStubs;
   };
+  # ...the network slot on, running the stubs, themed by the look: the
+  # eval-time flags land beside the stub tools, so a live look proves
+  # its own precedence over them at launch.
+  hmAppsNetStubThemed = evalHome {
+    enable = true;
+    desktop.look = "music-desk";
+    desktop.apps.network.enable = true;
+    desktop.apps.network.cliPackage = appsStubs;
+    desktop.apps.network.menuPackage = appsStubs;
+    desktop.secrets.clientPackage = appsStubs;
+  };
   appsNetPick = slotScriptBin hmAppsNetTest "scoot-network-pick";
   appsBluePick = slotScriptBin hmAppsBlueTest "scoot-bluetooth-pick";
+  appsNetPickStubThemed = slotScriptBin hmAppsNetStubThemed "scoot-network-pick";
   # The automounter's command line, for udiskie's own device matcher in
   # the content checks below (`nix/apps-udiskie-rules.py`).
   appsUdiskieExec = hmApps.config.systemd.user.services.scoot-automount.Service.ExecStart;
@@ -6030,6 +6043,8 @@ let
   idleSettingsConf = hmLockSettings.config.xdg.configFile."swaylock/config".source;
   idleTargetOffConf = hmThemeTargetOff.config.xdg.configFile."swaylock/config".source;
   idleNoLookConf = hmIdleNoLook.config.xdg.configFile."swaylock/config".source;
+  idleLocker = slotScriptBin hmIdle "scoot-locker";
+  idleLockerSettings = slotScriptBin hmLockSettings "scoot-locker";
   # The notification daemon's generated files: the mako config
   # (overlay layer, DND section, themed leaves, critical ring), plus
   # the lookless, recolored and opt-out variants the content checks
@@ -6082,6 +6097,7 @@ let
   # profile with music-desk), lookless, opt-out, rebound and relocated
   # variants the content checks read.
   idleClipOffConf = hmClipOff.config.xdg.configFile."swayidle/config".source;
+  idleClipOffLocker = slotScriptBin hmClipOff "scoot-locker";
   idleClipBoundsConf = hmClipBounds.config.xdg.configFile."swayidle/config".source;
   clipEntry = clipEntryOf hmClip "scoot-clipboard-store";
   clipBoundsEntry = clipEntryOf hmClipBounds "scoot-clipboard-store";
@@ -6761,6 +6777,7 @@ let
           pkgs.brightnessctl
           pkgs.wlopm
           pkgs.swaylock
+          (slotScriptDrv hmDeskLookMusic "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           leanMako
           leanClip
@@ -7763,7 +7780,7 @@ let
     # it appears twice, and `fuzzel` five (the clipboard picker, the
     # launcher, the capture chooser and both pickers' menus).
     (
-      assert builtins.length hmIdle.config.home.packages == 47;
+      assert builtins.length hmIdle.config.home.packages == 48;
       true
     )
     (
@@ -7773,6 +7790,7 @@ let
           pkgs.brightnessctl
           pkgs.wlopm
           pkgs.swaylock
+          (slotScriptDrv hmIdle "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           leanMako
           leanClip
@@ -7962,9 +7980,10 @@ let
       assert !(hmInhibitOff.config.systemd.user.services ? scoot-audio-inhibit);
       true
     )
-    # 39 slot packages plus the default look's theme seven.
+    # 39 slot packages plus the default look's theme seven, and the
+    # locker script beside the locker.
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 46;
+      assert builtins.length hmInhibitOff.config.home.packages == 47;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -12891,6 +12910,7 @@ let
           pkgs.brightnessctl
           pkgs.wlopm
           pkgs.swaylock
+          (slotScriptDrv hmKeys "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           leanMako
           leanClip
@@ -13130,6 +13150,7 @@ let
           pkgs.brightnessctl
           pkgs.wlopm
           pkgs.swaylock
+          (slotScriptDrv hmKeysOff "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           leanMako
           pkgs.fuzzel
@@ -14717,8 +14738,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     #     timeouts -- dim at 2 min with save/restore, lock at 4 min
     #     through loginctl, screens off at 5 min with the output wildcard
     #     quoted intact -- plus the sleep lock and the lock event, each
-    #     wiping the clipboard history before `swaylock -f` with its
-    #     config (the profile has the clipboard slot on). (Fixed-string
+    #     wiping the clipboard history before the locker script (the
+    #     profile has the clipboard slot on). (Fixed-string
     #     matches throughout: the quoting is the assertion.)
     grep -F "timeout 120 '${pkgs.brightnessctl}/bin/brightnessctl -s set 10%' resume '${pkgs.brightnessctl}/bin/brightnessctl -r'" ${idleConf}
     grep -F "timeout 240 '${pkgs.systemd}/bin/loginctl lock-session'" ${idleConf}
@@ -14729,8 +14750,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F "timeout 300 '${pkgs.wlopm}/bin/wlopm --off \"*\"' resume '${pkgs.wlopm}/bin/wlopm --on \"*\"; ${hmIdle.config.programs.scoot.desktop.displays.watcher}/bin/scoot-displays apply'" ${idleConf}
     grep -F "resume '${pkgs.wlopm}/bin/wlopm --on \"*\"'" ${idleStandaloneConf}
     if grep -F -q "scoot-displays" ${idleStandaloneConf}; then echo "the idle resume calls the watcher with display profiles off" >&2; exit 1; fi
-    grep -F "before-sleep '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
-    grep -F "lock '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock -f -C /nix/store/" ${idleConf}
+    grep -F "before-sleep '${leanClip}/bin/cliphist wipe; ${idleLocker}'" ${idleConf}
+    grep -F "lock '${leanClip}/bin/cliphist wipe; ${idleLocker}'" ${idleConf}
     echo "ok: swayidle config carries the idle timeouts, the sleep lock and the lock event"
 
     # 11b. The lock off: dim and screens-off stay, and no line locks
@@ -14783,6 +14804,64 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -x "ring-color=#123456" ${idleTargetOffConf}
     if grep -q "color=" ${idleNoLookConf}; then echo "themed leaf present with no look" >&2; exit 1; fi
     echo "ok: opting out (or no look) leaves the locker unthemed"
+
+    # 12d. The locker merges the live look's colors with the user's own
+    #      settings (next lock) and falls back to the generated store
+    #      config: a session that never applied a look locks exactly as
+    #      before. The merge reads the look first and the settings after
+    #      (swaylock takes duplicate keys last-wins), into one private
+    #      runtime file; a merge that cannot be written still locks with
+    #      the store config. The bare look file never reaches `-C`: that
+    #      flag replaces the user's config instead of layering over it.
+    grep -F -q 'if [ -f "$look_conf" ]' ${idleLocker}
+    grep -F -q 'scoot_swaylock_merged "$look_conf"' ${idleLocker}
+    grep -F -q -- '-f -C "$merged"' ${idleLocker}
+    grep -F -q -- '-f -C /nix/store/' ${idleLocker}
+    grep -F -q 'look/swaylock' ${idleLocker}
+    if grep -F -q -- '-C "$look_conf"' ${idleLocker}; then echo "the locker points -C at the bare look file" >&2; exit 1; fi
+    echo "ok: the locker merges the live look under the user's settings when applied"
+
+    ${lib.optionalString isLinux ''
+      # 12d2. The merge, live: the look's colors land first, the user's
+      #      own settings after (what swaylock reads last wins), and the
+      #      merged file parses in the real swaylock. `env -i`
+      #      throughout: without a display swaylock parses but never
+      #      locks (the display connect fails before any fork).
+      export SWL_T="$PWD/swl-test"
+      rm -rf "$SWL_T"
+      mkdir -p "$SWL_T/rt" "$SWL_T/home" "$SWL_T/state/scoot/look"
+      printf '%s\n' "color=AAAAAA" "inside-color=BBBBBB" "ring-color=CCCCCC" "text-color=DDDDDD" > "$SWL_T/state/scoot/look/swaylock"
+      export SCOOT_LOOK_STATE="$SWL_T/state/scoot" XDG_RUNTIME_DIR="$SWL_T/rt" HOME="$SWL_T/home" XDG_CONFIG_HOME="$SWL_T/home/.config"
+      if env -i PATH=${pkgs.coreutils}/bin SCOOT_LOOK_STATE="$SCOOT_LOOK_STATE" XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" HOME="$HOME" ${idleLockerSettings} 2>"$SWL_T/stderr"; then echo "the locker locked without a display (12d2)" >&2; exit 1; fi
+      grep -q "Unable to connect to the compositor" "$SWL_T/stderr" || { echo "real swaylock said '$(cat "$SWL_T/stderr")' (12d2)" >&2; exit 1; }
+      merged="$XDG_RUNTIME_DIR/scoot-swaylock-config"
+      [ -f "$merged" ] || { echo "no merged file (12d2)" >&2; exit 1; }
+      # The look fills the colors; the user's ring-color, read last,
+      # wins; the bare flag survives.
+      grep -F -x -q "color=AAAAAA" "$merged"
+      grep -F -x -q "show-failed-attempts" "$merged"
+      [ "$(grep -c -F "ring-color=" "$merged")" = 2 ] || { echo "want the look and the user ring-color (12d2)"; cat "$merged"; exit 1; }
+      [ "$(grep -F "ring-color=" "$merged" | tail -n 1)" = "ring-color=#123456" ] || { echo "the user ring-color is not last (12d2)"; cat "$merged"; exit 1; }
+      # The real parser takes the merged file: it reaches the display
+      # error with no complaint about any line (getopt names an
+      # unrecognized one on stderr, so its absence proves every line
+      # parsed), while a sectioned file is refused at parse (the
+      # renderer stays section-less for a reason).
+      if env -i ${pkgs.swaylock}/bin/swaylock --config "$merged" 2>"$SWL_T/parse"; then echo "swaylock parsed nothing (12d2)" >&2; exit 1; fi
+      grep -q "Unable to connect to the compositor" "$SWL_T/parse" || { echo "merged file does not parse (12d2): '$(cat "$SWL_T/parse")'" >&2; exit 1; }
+      if grep -q "unrecognized option" "$SWL_T/parse"; then echo "a merged line refused (12d2): '$(cat "$SWL_T/parse")'" >&2; exit 1; fi
+      printf '%s\n' "[colors]" "color=AAAAAA" > "$SWL_T/bad"
+      if env -i ${pkgs.swaylock}/bin/swaylock --config "$SWL_T/bad" 2>"$SWL_T/baderr"; then echo "swaylock took a sectioned file (12d2)" >&2; exit 1; fi
+      grep -q "unrecognized option" "$SWL_T/baderr" || { echo "sectioned file not refused at parse (12d2): '$(cat "$SWL_T/baderr")'" >&2; exit 1; }
+      # With no live look nothing merges: the store config locks as
+      # before, and no runtime file appears.
+      rm -rf "$SWL_T/rt2" "$SWL_T/empty"
+      mkdir -p "$SWL_T/rt2" "$SWL_T/empty"
+      if env -i PATH=${pkgs.coreutils}/bin SCOOT_LOOK_STATE="$SWL_T/empty" XDG_RUNTIME_DIR="$SWL_T/rt2" HOME="$HOME" ${idleLockerSettings} 2>"$SWL_T/stderr2"; then echo "the fallback locked without a display (12d2)" >&2; exit 1; fi
+      grep -q "Unable to connect to the compositor" "$SWL_T/stderr2" || { echo "fallback swaylock said '$(cat "$SWL_T/stderr2")' (12d2)" >&2; exit 1; }
+      [ ! -e "$SWL_T/rt2/scoot-swaylock-config" ] || { echo "a merge appeared with no live look (12d2)" >&2; exit 1; }
+      echo "ok: the live merge layers the look under the user's settings, and the store config still locks alone"
+    ''}
 
     # 13. Notification daemon, music-desk: the overlay layer (popups
     #     above fullscreen -- mako's own default is `top`, which the
@@ -15291,11 +15370,11 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     #     CLI colors, opaque), unthemed without a look or opted out;
     #     the store entry bounds the history and guards the lock; the
     #     lean manager carries no picker fat.
-    grep -F "lock '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock" ${idleConf}
-    grep -F "before-sleep '${leanClip}/bin/cliphist wipe; ${pkgs.swaylock}/bin/swaylock" ${idleConf}
+    grep -F "lock '${leanClip}/bin/cliphist wipe; ${idleLocker}'" ${idleConf}
+    grep -F "before-sleep '${leanClip}/bin/cliphist wipe; ${idleLocker}'" ${idleConf}
     echo "ok: the lock lines wipe the history before the locker"
     if grep -F "lock '" ${idleClipOffConf} | grep -q cliphist; then echo "wipe present with the slot off" >&2; exit 1; fi
-    grep -F "lock '${pkgs.swaylock}/bin/swaylock" ${idleClipOffConf}
+    grep -F "lock '${idleClipOffLocker}'" ${idleClipOffConf}
     echo "ok: with the slot off the lock lines stay wipe-free"
 
     # 16b. The picker, music-desk: the look's roles as fuzzel colors
@@ -15310,6 +15389,10 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "--match-color=5D7AB0ff" ${clipPickerThemed}
     grep -F -q -- "--prompt-color=1A2032ff" ${clipPickerThemed}
     grep -F -q -- "--dmenu --prompt='clipboard: ' --no-run-if-empty --only-match" ${clipPickerThemed}
+    grep -F -q 'look/fuzzel.ini' ${clipPickerThemed}
+    grep -q '^scoot_fuzzel_look_flags()' ${clipPickerThemed}
+    grep -F -q 'scoot_fuzzel_look_flags "$look_ini"' ${clipPickerThemed}
+    if grep -F -q -- '--config "$look_ini"' ${clipPickerThemed}; then echo "--config in the picker (the user's config would be replaced)" >&2; exit 1; fi
     grep -F -q "clipboard_unlocked" ${clipPickerThemed}
     grep -F -q "msg locked" ${clipPickerThemed}
     grep -F -q 'wl-copy <"$tmp"' ${clipPickerThemed}
@@ -15501,6 +15584,10 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "--match-color=5D7AB0ff" ${launchThemed}
     grep -F -q -- "--prompt-color=1A2032ff" ${launchThemed}
     grep -F -q -- '"$@"' ${launchThemed}
+    grep -F -q 'look/fuzzel.ini' ${launchThemed}
+    grep -q '^scoot_fuzzel_look_flags()' ${launchThemed}
+    grep -F -q 'scoot_fuzzel_look_flags "$look_ini"' ${launchThemed}
+    if grep -F -q -- '--config "$look_ini"' ${launchThemed}; then echo "--config in the launcher (the user's config would be replaced)" >&2; exit 1; fi
     if grep -q -- "--dmenu" ${launchThemed}; then echo "dmenu flag in the launcher script" >&2; exit 1; fi
     if grep -q "clipboard_unlocked" ${launchThemed}; then echo "lock probe in the launcher script" >&2; exit 1; fi
     echo "ok: the launcher runs fuzzel on overlay, themed, passing args through"
@@ -15528,6 +15615,41 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "${pkgs.fuzzel}/bin/fuzzel --layer=overlay" ${launchTargetOff}
     echo "ok: opting out (or no look) leaves fuzzel unthemed but layered"
 
+    ${lib.optionalString isLinux ''
+      # 19d. The user's own fuzzel config survives a swap: with a live
+      #      look applied no call site passes a config-file flag (that
+      #      flag replaces the user's config -- pinned above per script),
+      #      and the live colors travel as CLI flags read out of the look
+      #      file at launch. The one shared helper, extracted here from
+      #      the launcher itself, over a fixture user config the real
+      #      fuzzel validates: the file fuzzel will read at launch, since
+      #      nothing redirects it elsewhere.
+      export FZ_T="$PWD/fuzz-test"
+      rm -rf "$FZ_T"
+      mkdir -p "$FZ_T/home/.config/fuzzel" "$FZ_T/state/scoot/look"
+      printf '%s\n' "[main]" "font=DejaVu Sans:size=11" "lines=20" "width=45" "launch-prefix=footclient --" "terminal=footclient" "" "[colors]" "background=111111ff" > "$FZ_T/home/.config/fuzzel/fuzzel.ini"
+      printf '%s\n' "[colors]" "background=2B3648ff" "text=F6EEDCff" "prompt=F6EEDCff" "match=FFA45Cff" "selection=FFA45Cff" "selection-text=2B3648ff" "border=FFA45Cff" > "$FZ_T/state/scoot/look/fuzzel.ini"
+      sed -n '/^scoot_fuzzel_look_flags()/,/^}/p' ${launchThemed} > "$FZ_T/flags.sh"
+      . "$FZ_T/flags.sh"
+      flags=$(scoot_fuzzel_look_flags "$FZ_T/state/scoot/look/fuzzel.ini")
+      want=" --background-color=2B3648ff --text-color=F6EEDCff --prompt-color=F6EEDCff --match-color=FFA45Cff --selection-color=FFA45Cff --selection-text-color=2B3648ff --border-color=FFA45Cff"
+      [ "$flags" = "$want" ] || { echo "helper gave '$flags', want '$want' (19d)" >&2; exit 1; }
+      # Nothing usable without a look file: the eval-time flags stand.
+      [ -z "$(scoot_fuzzel_look_flags "$FZ_T/state/scoot/look/missing")" ] || { echo "flags without a look file (19d)" >&2; exit 1; }
+      printf '%s\n' "[colors]" "background=ZZZZZZZZ" > "$FZ_T/state/scoot/look/broken.ini"
+      [ -z "$(scoot_fuzzel_look_flags "$FZ_T/state/scoot/look/broken.ini")" ] || { echo "flags from a broken look file (19d)" >&2; exit 1; }
+      export HOME="$FZ_T/home" XDG_CONFIG_HOME="$FZ_T/home/.config"
+      ${pkgs.fuzzel}/bin/fuzzel --check-config --config "$HOME/.config/fuzzel/fuzzel.ini" || { echo "the user config does not validate (19d)" >&2; exit 1; }
+      # Without any flag fuzzel finds the same file by search: the
+      # user's [main] is what a launch reads.
+      ${pkgs.fuzzel}/bin/fuzzel --check-config || { echo "the user config is not what fuzzel finds (19d)" >&2; exit 1; }
+      # ...and a broken user file fails the same check: the file is
+      # really consulted, not bypassed.
+      printf '%s\n' "[main]" "font=DejaVu Sans:size=11" "" "[colors]" "background=ZZZZZZZZ" > "$HOME/.config/fuzzel/fuzzel.ini"
+      if ${pkgs.fuzzel}/bin/fuzzel --check-config 2>/dev/null; then echo "a broken user config validates (19d)" >&2; exit 1; fi
+      echo "ok: the user's [main] survives a swap, the live colors arrive as flags"
+    ''}
+
     # 20. Capture slot content: the per-desktop chooser file xdpw
     #     reads first -- a dmenu ask through a wrapper script (a bare
     #     store path: xdpw's inih config reader cuts 200+ character
@@ -15547,6 +15669,10 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "--background-color=FCFBFBff" "''${chooserScript}"
     grep -F -q -- "--text-color=1A2032ff" "''${chooserScript}"
     grep -F -q -- "--selection-color=3D579Aff" "''${chooserScript}"
+    grep -F -q 'look/fuzzel.ini' "''${chooserScript}"
+    grep -q '^scoot_fuzzel_look_flags()' "''${chooserScript}"
+    grep -F -q 'scoot_fuzzel_look_flags "$look_ini"' "''${chooserScript}"
+    if grep -F -q -- '--config "$look_ini"' "''${chooserScript}"; then echo "--config in the chooser (the user's config would be replaced)" >&2; exit 1; fi
     echo "ok: the chooser is a themed dmenu list at 30 fps"
 
     # 20b. Lookless (or opted out): the menu and the behavior stay,
@@ -16329,6 +16455,13 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       grep -F -q -- "--background-color=FCFBFBff" ${appsBluePickThemed}
       grep -F -q -- "--dmenu --prompt='wifi: ' --no-run-if-empty --only-match" ${appsNetPickThemed}
       grep -F -q -- "--dmenu --prompt='bluetooth: ' --no-run-if-empty --only-match" ${appsBluePickThemed}
+      grep -F -q 'look/fuzzel.ini' ${appsNetPickThemed}
+      grep -F -q 'look/fuzzel.ini' ${appsBluePickThemed}
+      grep -q '^scoot_fuzzel_look_flags()' ${appsNetPickThemed}
+      grep -q '^scoot_fuzzel_look_flags()' ${appsBluePickThemed}
+      grep -F -q 'scoot_fuzzel_look_flags "$LOOK_INI"' ${appsNetPickThemed}
+      grep -F -q 'scoot_fuzzel_look_flags "$LOOK_INI"' ${appsBluePickThemed}
+      if grep -F -q -- '--config "$LOOK_INI"' ${appsNetPickThemed} ${appsBluePickThemed}; then echo "--config in a picker (the user's config would be replaced)" >&2; exit 1; fi
       grep -F -q "lookup scoot-wifi" ${appsNetPickThemed}
       grep -x -q "AUDIO=1" ${appsBluePickThemed}
       grep -F -q "scoot-audio-sink" ${appsBluePickThemed}
@@ -16591,6 +16724,31 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       printf ''' | ${appsNetPick} menu
       [ ! -s "$A/calls" ] || { echo "empty feed called nmcli (23i2)" >&2; exit 1; }
       echo "ok: the bar-fed menu joins fed rows, empty stays quiet"
+
+      # 23i3. The theme at launch: without a live look the menu
+      #      carries the eval-time flags, with one it carries the live
+      #      look's colors as flags (the user's own config is read by
+      #      default: no config-file flag anywhere), and the pick still
+      #      joins either way. The live values differ from the eval-time
+      #      theme on purpose, so the flags prove which file was read.
+      net_setup
+      rm -f "$A/menu-argv"
+      printf 'HomeNet' > "$A/pick"
+      printf 'HomeNet\nOpenNet\n' | ${appsNetPickStubThemed} menu
+      grep -F -x -q "nmcli connection up uuid abc-uuid" "$A/calls"
+      grep -F -q -- "--background-color=FCFBFBff" "$A/menu-argv" || { echo "eval-time theme missing from the menu argv (23i3): '$(cat "$A/menu-argv")'" >&2; exit 1; }
+      net_setup
+      rm -f "$A/menu-argv"
+      mkdir -p "$A/look-live/look"
+      printf '%s\n' "[colors]" "background=2B3648ff" "selection=FFA45Cff" > "$A/look-live/look/fuzzel.ini"
+      printf 'HomeNet' > "$A/pick"
+      printf 'HomeNet\nOpenNet\n' | SCOOT_LOOK_STATE="$A/look-live" ${appsNetPickStubThemed} menu
+      grep -F -x -q "nmcli connection up uuid abc-uuid" "$A/calls"
+      grep -F -q -- "--background-color=2B3648ff" "$A/menu-argv" || { echo "live background missing from the menu argv (23i3): '$(cat "$A/menu-argv")'" >&2; exit 1; }
+      grep -F -q -- "--selection-color=FFA45Cff" "$A/menu-argv" || { echo "live selection missing from the menu argv (23i3)" >&2; exit 1; }
+      if grep -F -q -- "--background-color=FCFBFBff" "$A/menu-argv"; then echo "stale eval-time theme beside the live look (23i3)" >&2; exit 1; fi
+      if grep -F -q -- "--config" "$A/menu-argv"; then echo "a config-file flag reached the menu (23i3)" >&2; exit 1; fi
+      echo "ok: the menu carries the eval-time theme, or the live look's colors as flags"
 
       # 23v. The bar reopening its menu (or replacing a connect) ends the
       #      old one's whole process group, SIGKILL 100 ms after SIGTERM

@@ -356,6 +356,8 @@ fn an_offline_apply_records_repoints_and_renders() {
         "mako",
         "wob.ini",
         "fcitx5/theme.conf",
+        "fuzzel.ini",
+        "swaylock",
     ] {
         let text = std::fs::read_to_string(rendered.join(file)).expect("a rendered file");
         assert!(!text.is_empty(), "{file} renders");
@@ -364,6 +366,18 @@ fn an_offline_apply_records_repoints_and_renders() {
     assert!(
         !rendered.join("nightlight").exists(),
         "a nightlight file renders without a temperature"
+    );
+    // The launcher and locker leaves carry the look's roles: fuzzel's
+    // border is the focus ring, the locker's ring the same.
+    let fuzzel = std::fs::read_to_string(rendered.join("fuzzel.ini")).expect("fuzzel.ini");
+    assert!(
+        fuzzel.contains("border=FFA45Cff"),
+        "fuzzel border is the focus ring:\n{fuzzel}"
+    );
+    let swaylock = std::fs::read_to_string(rendered.join("swaylock")).expect("swaylock");
+    assert!(
+        swaylock.contains("ring-color=FFA45C"),
+        "swaylock ring is the focus ring:\n{swaylock}"
     );
     let cache_name = rendered.file_name().expect("a dir name").to_string_lossy();
     assert!(
@@ -1611,18 +1625,15 @@ fn readers_racing_a_swap_see_old_or_new_never_half() {
                 if let RecordRead::Present(record) = read_record(&state) {
                     let rendered = PathBuf::from(&record.rendered);
                     // A recorded choice always names a complete render.
-                    assert!(
-                        rendered.join("scoot.toml").is_file(),
-                        "half a swap: {record:?}"
-                    );
-                    assert!(
-                        rendered.join("bar.toml").is_file(),
-                        "half a swap: {record:?}"
-                    );
-                    assert!(
-                        rendered.join("render.json").is_file(),
-                        "half a swap: {record:?}"
-                    );
+                    for file in [
+                        "scoot.toml",
+                        "bar.toml",
+                        "fuzzel.ini",
+                        "swaylock",
+                        "render.json",
+                    ] {
+                        assert!(rendered.join(file).is_file(), "half a swap: {record:?}");
+                    }
                 }
                 if let Ok(target) = std::fs::read_link(state.join(LINK_NAME)) {
                     // A link always names a complete render too.
@@ -1800,7 +1811,7 @@ fn build_into_an_out_holding_only_our_files_overwrites() {
         &checks,
     )
     .expect("the first build succeeds");
-    // A second build into the same dir (only our three files) succeeds.
+    // A second build into the same dir (only our five files) succeeds.
     build_to_out(
         &BuildTarget::Name("look-b".to_owned()),
         &out,
@@ -1978,7 +1989,13 @@ fn validate_and_build_cover_a_directory_and_a_name() {
     )
     .expect("buildable");
     assert_eq!(report.name, "look-a");
-    for file in ["scoot.toml", "bar.toml", "render.json"] {
+    for file in [
+        "scoot.toml",
+        "bar.toml",
+        "fuzzel.ini",
+        "swaylock",
+        "render.json",
+    ] {
         assert!(out.join(file).is_file(), "{file} builds");
     }
     // Nothing was recorded or linked by validating or building.
@@ -2532,7 +2549,7 @@ fn symlinked_user_configs_still_report_shadowed_keys() {
 }
 
 #[test]
-fn build_into_an_empty_out_writes_three_files_and_leaves_no_litter() {
+fn build_into_an_empty_out_writes_five_files_and_leaves_no_litter() {
     // The old stage lived in `out`'s parent, so `--out .` refused citing
     // the tool's own stage file; the stage now lives in a tool-owned temp
     // dir, gone on every exit path. An empty dir (what `--out .` is from
@@ -2551,7 +2568,13 @@ fn build_into_an_empty_out_writes_three_files_and_leaves_no_litter() {
     )
     .expect("an empty out builds");
     assert_eq!(report.name, "look-a");
-    for file in ["scoot.toml", "bar.toml", "render.json"] {
+    for file in [
+        "scoot.toml",
+        "bar.toml",
+        "fuzzel.ini",
+        "swaylock",
+        "render.json",
+    ] {
         assert!(out.join(file).is_file(), "{file} renders");
     }
     assert_no_build_litter(&fixture._root);
