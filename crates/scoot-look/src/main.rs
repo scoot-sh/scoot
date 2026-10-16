@@ -36,8 +36,8 @@ use std::path::Path;
 use scoot_look::{
     ImportOptions, Origin, RenderInputs, STATIC_LEAVES, check_contrast, check_static_leaf,
     import_base16, render_bar, render_foot, render_fuzzel, render_greet, render_gtk3_css,
-    render_gtk4_css, render_json, render_leaf_files, render_qt_scheme, render_scoot, render_swaylock,
-    resolve, source_hash, validate_apps_allowlist, validate_for_origin,
+    render_gtk4_css, render_json, render_leaf_files, render_qt_scheme, render_scoot,
+    render_swaylock, resolve, source_hash, validate_apps_allowlist, validate_for_origin,
 };
 
 fn usage() -> ! {

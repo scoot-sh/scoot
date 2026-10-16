@@ -187,7 +187,10 @@ fn leaf_comm_shapes() {
     // NixOS runs as `.hx-wrapped`, verified live).
     assert!(super::leaf_comm("hx", ".hx-wrapped"));
     assert!(super::leaf_comm("btop", ".btop-wrapped"));
-    assert!(super::leaf_comm("hx", "/run/current-system/sw/bin/.hx-wrapped"));
+    assert!(super::leaf_comm(
+        "hx",
+        "/run/current-system/sw/bin/.hx-wrapped"
+    ));
     // Near misses never match: a longer name, a wrapper for another
     // app, a bare `-wrapped` without the leading dot.
     assert!(!super::leaf_comm("hx", "hx-something"));

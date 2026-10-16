@@ -3859,7 +3859,10 @@ fn build_dir_target_honors_origin_and_trust() {
     )
     .expect("a trusted build succeeds");
     assert!(
-        report.notes.iter().any(|note| note.contains("trusted static leaf")),
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("trusted static leaf")),
         "{report:?}"
     );
     assert!(out.join("apps/helix.toml").is_file(), "the leaf builds");
