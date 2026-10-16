@@ -734,6 +734,9 @@ fn foot_refuses_a_hand_built_bad_palette() {
     look.terminal = Some(TERMINAL_COLORS.iter().map(|s| s.to_string()).collect());
     let err = render_foot(&look).expect_err("NaN alpha renders");
     assert_eq!(err.field, "opacity.terminal");
+}
+
+#[test]
 fn fuzzel_fragment() {
     // The launcher's leaves (design section 3.3, `fuzzel-theme.nix`):
     // the same seven roles the inlined CLI flags carry, as a `fuzzel.ini`

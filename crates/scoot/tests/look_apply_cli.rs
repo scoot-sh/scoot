@@ -95,16 +95,11 @@ fn real_font_file() -> PathBuf {
             }
         }
     }
-    let mut roots = vec![
+    let roots = vec![
         PathBuf::from("/usr/share/fonts"),
         PathBuf::from("/run/current-system/sw/share/fonts"),
         PathBuf::from("/run/current-system/sw/share/X11/fonts"),
     ];
-    if let Some(home) = std::env::var_os("HOME") {
-        let home = PathBuf::from(home);
-        roots.push(home.join(".local/share/fonts"));
-        roots.push(home.join(".fonts"));
-    }
     let mut tried = Vec::new();
     for root in &roots {
         tried.push(root.display().to_string());

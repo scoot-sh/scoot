@@ -83,12 +83,14 @@ let
     "@NOTIFY@" = binOr "notify-send" (linuxPkg "libnotify");
   };
   # A picker script from its shell file, every `@NAME@` replaced by a
-  # shell-quoted value (a tool path, the theme flags, a switch).
-  # `@LOOK_INI@` is the one raw substitution, never quoted: the live
-  # look's launcher config at RUNTIME, so the session's own
+  # shell-quoted value (a tool path, the theme flags, a switch), except
+  # `@LOOK_INI@` and `@LOOK_LEAF_LIB@`, which are raw: the live look's
+  # launcher config at RUNTIME, so the session's own
   # `$SCOOT_LOOK_STATE` (a private look) or `$XDG_STATE_HOME` resolves
-  # when the picker runs.
+  # when the picker runs, and the shared look-leaf helpers every fuzzel
+  # call site reads through one function.
   lookIni = import ./look-state.nix "fuzzel.ini";
+  lookLeafLib = builtins.readFile ./look-leaf.sh;
   pickerScript =
     name: file: values:
     let
@@ -96,9 +98,11 @@ let
     in
     pkgs.writeShellScriptBin name (
       builtins.replaceStrings [ "@LOOK_INI@" ] [ lookIni ] (
-        builtins.replaceStrings (builtins.attrNames all) (map lib.escapeShellArg (
-          builtins.attrValues all
-        )) (builtins.readFile file)
+        builtins.replaceStrings [ "@LOOK_LEAF_LIB@" ] [ lookLeafLib ] (
+          builtins.replaceStrings (builtins.attrNames all) (map lib.escapeShellArg (
+            builtins.attrValues all
+          )) (builtins.readFile file)
+        )
       )
     );
 

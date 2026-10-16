@@ -2372,7 +2372,6 @@ fn flatten_keys(table: &toml::Table, prefix: String) -> Vec<String> {
     keys
 }
 
-
 /// Renders a source (a directory, or a catalog name) into `out` without
 /// touching state, the cache, or any app: `build` without `apply`. The
 /// output file list and directory guard live in [`super::build_dir`].
@@ -2451,8 +2450,8 @@ pub fn build_to_out(
             render_foot(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
         let fuzzel =
             render_fuzzel(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
-        let swaylock = render_swaylock(&merged)
-            .map_err(|error| format!("cannot render {name}: {error}"))?;
+        let swaylock =
+            render_swaylock(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
         for (file, text) in [("scoot.toml", &scoot), ("bar.toml", &bar)] {
             text.parse::<toml::Table>()
                 .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
@@ -2579,8 +2578,15 @@ pub fn build_to_out(
                     return Err(message);
                 }
                 drops.push(drop_);
-                (scoot, bar, foot, fuzzel, swaylock, rendered_json, leaf_files) =
-                    render_once(&render_inputs)?;
+                (
+                    scoot,
+                    bar,
+                    foot,
+                    fuzzel,
+                    swaylock,
+                    rendered_json,
+                    leaf_files,
+                ) = render_once(&render_inputs)?;
                 staged = stage_of(
                     &scoot,
                     &bar,

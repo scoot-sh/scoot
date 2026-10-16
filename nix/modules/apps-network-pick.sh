@@ -48,11 +48,13 @@ TIMEOUT=@TIMEOUT@
 SETSID=@SETSID@
 # The look's menu colors as fuzzel flags (empty without a look): split
 # on purpose below, each flag one word. The fallback: once a swap
-# renders the live look's `fuzzel.ini`, `menu` below takes `--config`
-# at it instead (next launch).
+# renders the live look's `fuzzel.ini`, `menu` below reads the same
+# seven colors out of it at runtime instead (next launch).
 THEME=@THEME@
 # The live look's launcher config at runtime (never evaluation).
 LOOK_INI=@LOOK_INI@
+# The shared look-leaf helpers (one function behind every fuzzel call).
+@LOOK_LEAF_LIB@
 
 # `_join keyring`'s status for a keyring key refused for its secrets:
 # the caller prompts (see `do_connect`). Apart from every other status
@@ -66,13 +68,17 @@ fail() {
     exit 1
 }
 
-# The menu behind every pick below: the live look's config when a swap
-# rendered one, else the eval-time flags in $THEME. One function, so the
-# choice is made at pick time and every call site reads the same.
+# The menu behind every pick below: the live look's colors as CLI
+# flags when a swap rendered them, else the eval-time flags in $THEME.
+# Fuzzel reads the user's own config either way (no `--config`: that
+# flag replaces it); the flags layer only the seven colors over it. One
+# function, so the choice is made at pick time and every call site reads
+# the same.
 menu() {
+    live_colors=$(scoot_fuzzel_look_flags "$LOOK_INI") || live_colors=""
     # shellcheck disable=SC2086
-    if [ -f "$LOOK_INI" ]; then
-        "$MENU" "$@" --config "$LOOK_INI"
+    if [ -n "$live_colors" ]; then
+        "$MENU" "$@" $live_colors
     else
         "$MENU" "$@" $THEME
     fi

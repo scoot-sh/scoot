@@ -213,11 +213,16 @@ has no `[colors]`), each with `alpha` from `opacity.terminal`. Both
 themes hold the same hues, so new terminals match whatever theme is
 in effect.
 `fuzzel.ini` carries the seven launcher colors as a `[colors]`
-table in fuzzel's `rrggbbaa` spelling; it sets no font, so the launcher keeps the user's
-own. `swaylock` carries the fourteen locker colors as
+table in fuzzel's `rrggbbaa` spelling; it sets no font, so the launcher
+keeps the user's own. `swaylock` carries the fourteen locker colors as
 `key=value` lines in swaylock's `rrggbb` spelling. Both are
 next-launch: fuzzel reads its config on every start, swaylock on
-every lock. `render.json` names the source, its hash and the resolved inputs
+every lock. Neither file is a whole config: each app replaces the
+user's file when pointed at another (`--config`, `-C`), so the apps
+layer these leaves over the user's own instead -- fuzzel as CLI flags
+read out of the file at launch, swaylock as the file's lines first
+with the user's lines after (later lines win). The user's own keys
+always survive a swap; the look only fills the colors. `render.json` names the source, its hash and the resolved inputs
 (font files, wallpaper path). The inputs come from the
 environment: the tool resolves font files and the wallpaper's
 absolute path, and the Nix build passes the font packages. The

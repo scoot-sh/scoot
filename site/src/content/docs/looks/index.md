@@ -122,20 +122,33 @@ The choice is per-session state: `<state>/look.json` (the record) plus a
 in the cache (`$XDG_CACHE_HOME/scoot/rendered/<name>-<hash>/`), pruned to
 the active, the previous and the four most recent. An unwritable state dir
 refuses loudly. The rendered look holds `fuzzel.ini` and `swaylock`
-beside the first-party fragments: point the apps at the link and the
-next launch picks the look up, no Nix involved.
+beside the first-party fragments: layer them over your own configs and
+the next launch picks the look up, no Nix involved.
+
+Your own configs stay the base. Neither file is ever passed to its app
+as the whole config: fuzzel's `--config` and swaylock's `-C` each read
+that file instead of your own, so your font, terminal, lock image and
+other settings would be lost while the look is active. The look's
+colors layer over your files instead. Fuzzel takes them as CLI flags
+(flags win over the file, so only the seven colors change). Swaylock
+reads the look's lines first and yours after in one merged file (later
+lines win, so your keys win per key and the look fills the colors).
+A Nix install wires this for the launcher, the pickers, the chooser and
+the lock screen, falling back to the eval-time theme while no look is
+applied. Without Nix, wire the same two mergers yourself:
 
 ```sh
-fuzzel --config ~/.local/state/scoot/look/fuzzel.ini
-swaylock -C ~/.local/state/scoot/look/swaylock
+# Fuzzel: your config stays; the look's seven colors arrive as flags.
+flags=$(awk '/^\[colors\]/{s=1;next} /^\[/{s=0} s&&/=/ {k=$0;sub(/=.*/,"",k);v=$0;sub(/[^=]*=/,"",v); if((k=="background"||k=="text"||k=="prompt"||k=="match"||k=="selection"||k=="selection-text"||k=="border") && v~/^[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]$/) printf " --"k"-color="v}' ~/.local/state/scoot/look/fuzzel.ini)
+fuzzel $flags
+
+# Swaylock: the look's lines first, your config after, as one file.
+cat ~/.local/state/scoot/look/swaylock ~/.config/swaylock/config > "$XDG_RUNTIME_DIR/scoot-swaylock-config"
+swaylock -C "$XDG_RUNTIME_DIR/scoot-swaylock-config"
 ```
 
 (`~/.local/state/scoot` is the default state dir; `--state` and
-`$SCOOT_LOOK_STATE` move it, as above.) With `--config` fuzzel reads that file instead of its own config, so
-the look's seven colors replace the whole file while it is active;
-the font and remaining keys fall back to fuzzel's defaults. A Nix
-install wires this for the launcher, the pickers and the lock screen,
-falling back to the eval-time theme while no look is applied.
+`$SCOOT_LOOK_STATE` move it, as above.)
 
 - `--state DIR` takes the state (default: `$SCOOT_LOOK_STATE`, then
   `$XDG_STATE_HOME/scoot`, then `~/.local/state/scoot`).
