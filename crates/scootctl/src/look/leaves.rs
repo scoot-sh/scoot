@@ -244,8 +244,11 @@ impl CliLeaves {
                 continue;
             };
             match rustix::process::kill_process(target, signal) {
+                // Delivered. (A pid that exits between the listing and
+                // the kill reads as `ESRCH` below: it existed when
+                // listed, so the attempt counts all the same.)
                 Ok(()) => signaled += 1,
-                Err(rustix::io::Errno::SRCH) => {}
+                Err(rustix::io::Errno::SRCH) => signaled += 1,
                 Err(error) => failures.push(format!("pid {pid}: {error}")),
             }
         }

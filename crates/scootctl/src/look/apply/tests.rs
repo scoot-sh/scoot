@@ -3451,3 +3451,308 @@ fn a_second_apply_reuses_the_cached_foot_ini() {
     );
     assert!(second.join("foot.ini").is_file(), "reuse loses foot.ini");
 }
+
+/// Static terminal leaves through the transaction: rendering, the trust
+/// drop, inheritance, opt-outs, and refusal before anything is touched.
+
+const HELIX_LEAF: &str =
+    "\"ui.background\" = {}\n\"ui.text\" = \"#FF0000\"\n\"ui.selection\" = \"#FF0000\"\n";
+const BTOP_LEAF: &str = "# a theme\ntheme[main_fg]=\"#FF0000\"\n";
+const STARSHIP_LEAF: &str = "add_newline = false\nformat = \"$directory$character\"\n";
+
+/// Writes `apps/` static leaves into the source look `sources/<name>`.
+fn write_static(sources: &Path, name: &str, leaves: &[(&str, &str)]) {
+    for (file, contents) in leaves {
+        let path = sources.join(name).join(file);
+        std::fs::create_dir_all(path.parent().expect("a parent")).expect("apps parents");
+        std::fs::write(&path, contents).expect("a static leaf");
+    }
+}
+
+const ALL_LEAVES: &[(&str, &str)] = &[
+    ("apps/helix.toml", HELIX_LEAF),
+    ("apps/btop.theme", BTOP_LEAF),
+    ("apps/starship.toml", STARSHIP_LEAF),
+];
+
+/// A fixture whose `look-a` carries static leaves, scanned as `origin`.
+fn static_fixture(tag: &str, origin: Origin, leaves: &[(&str, &str)]) -> Fixture {
+    let scratch = scratch(tag);
+    let root: PathBuf = scratch.path().to_owned();
+    let sources = root.join("looks");
+    write_look(&sources, "look-a", "");
+    write_static(&sources, "look-a", leaves);
+    let catalog = discover_ordered(&[(sources, origin)]);
+    assert_eq!(catalog.entries.len(), 1, "notes: {:?}", catalog.notes);
+    let cache = root.join("cache");
+    let state = root.join("state");
+    let config = root.join("config");
+    Fixture {
+        catalog,
+        cache,
+        state,
+        config,
+        _scratch: scratch,
+        _root: root,
+    }
+}
+
+fn trust_options() -> ApplyOptions {
+    ApplyOptions {
+        trust: true,
+        ..options()
+    }
+}
+
+fn opt_out_options() -> ApplyOptions {
+    ApplyOptions {
+        no_helix: true,
+        no_btop: true,
+        ..options()
+    }
+}
+
+fn offline_apply(
+    fixture: &Fixture,
+    name: &str,
+    options: &ApplyOptions,
+    leaves: &ScriptedLeaves,
+) -> ApplyReport {
+    let mut compositor = FakeCompositor::not_running();
+    apply_with_live(
+        name,
+        options,
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &FakeChecks::default(),
+        &FakeDconf::absent(),
+        leaves,
+        &[],
+    )
+    .expect("an offline apply succeeds")
+}
+
+#[test]
+fn static_leaves_render_verbatim_and_signal() {
+    let fixture = static_fixture("static-render", Origin::User, ALL_LEAVES);
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &options(), &leaves);
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    for (file, contents) in ALL_LEAVES {
+        let read = std::fs::read(rendered.join(file)).expect("a rendered static leaf");
+        assert_eq!(read, contents.as_bytes(), "{file} copies verbatim");
+    }
+    assert_eq!(leaves.signaled(), vec!["helix".to_owned(), "btop".to_owned()]);
+    assert!(report.reloaded.contains(&"helix".to_owned()), "{report:?}");
+    assert!(report.reloaded.contains(&"btop".to_owned()), "{report:?}");
+    // The one-time wiring for each leaf, and starship's next prompt.
+    assert!(
+        report.notes.iter().any(|note| note.contains("scoot-look.toml")),
+        "{report:?}"
+    );
+    assert!(
+        report.notes.iter().any(|note| note.contains("scoot-look.theme")),
+        "{report:?}"
+    );
+    assert!(
+        report.notes.iter().any(|note| note.contains("STARSHIP_CONFIG")),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn installed_look_drops_static_leaves_without_trust() {
+    let fixture = static_fixture("static-drop", Origin::Installed, ALL_LEAVES);
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &options(), &leaves);
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    assert!(
+        !rendered.join("apps").exists(),
+        "no static leaf renders untrusted"
+    );
+    assert!(leaves.signaled().is_empty(), "no signal attempted");
+    assert!(
+        !report.reloaded.contains(&"helix".to_owned()),
+        "{report:?}"
+    );
+    assert!(
+        report.notes.iter().any(|note| note.contains("dropping apps/btop.theme")
+            && note.contains("apps/helix.toml")
+            && note.contains("apps/starship.toml")
+            && note.contains("--trust")),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn trusted_installed_look_keeps_and_prints_static_leaves() {
+    let fixture = static_fixture("static-trust", Origin::Installed, ALL_LEAVES);
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &trust_options(), &leaves);
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    for (file, contents) in ALL_LEAVES {
+        let read = std::fs::read(rendered.join(file)).expect("a rendered static leaf");
+        assert_eq!(read, contents.as_bytes(), "{file} copies verbatim");
+    }
+    // `--trust` prints each kept leaf first: the contents ride the reply.
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("trusted static leaf apps/helix.toml")
+                && note.contains("\"ui.text\"")),
+        "{report:?}"
+    );
+    assert_eq!(leaves.signaled(), vec!["helix".to_owned(), "btop".to_owned()]);
+}
+
+#[test]
+fn trusted_non_installed_look_prints_no_trust_notes() {
+    // `--trust` on a look that needs no trusting changes nothing and
+    // prints nothing: the leaves render like any trusted look's.
+    let fixture = static_fixture("static-notrust", Origin::User, ALL_LEAVES);
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &trust_options(), &leaves);
+    assert!(
+        report.notes.iter().all(|note| !note.contains("trusted static leaf")),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn static_leaves_inherit_unless_the_child_names_its_own() {
+    let scratch = scratch("static-inherit");
+    let root: PathBuf = scratch.path().to_owned();
+    let sources = root.join("looks");
+    write_look(&sources, "base-a", "");
+    write_static(&sources, "base-a", &[("apps/helix.toml", HELIX_LEAF)]);
+    // `extends` is a top-level key: appended text would land inside
+    // `[wallpaper]`, so the child's manifest is edited in place.
+    let child = look_toml("child-b").replacen(
+        "name = \"child-b\"",
+        "name = \"child-b\"\nextends = \"base-a\"",
+        1,
+    );
+    let child_dir = sources.join("child-b");
+    std::fs::create_dir_all(&child_dir).expect("a look dir");
+    std::fs::write(child_dir.join("look.toml"), child).expect("a look.toml");
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    let cache = root.join("cache");
+    let state = root.join("state");
+    let config = root.join("config");
+    let fixture = Fixture {
+        catalog,
+        cache,
+        state,
+        config,
+        _scratch: scratch,
+        _root: root,
+    };
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "child-b", &options(), &leaves);
+    let _ = report;
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    let read = std::fs::read_to_string(rendered.join("apps/helix.toml")).expect("inherited leaf");
+    assert_eq!(read, HELIX_LEAF, "the base's leaf renders under the child");
+    // The child names its own: the file changes, the render follows (the
+    // cache keys the leaf bytes, so no stale directory is reused).
+    let own = "\"ui.background\" = {}\n\"ui.text\" = \"#00FF00\"\n\"ui.selection\" = \"#00FF00\"\n";
+    write_static(&fixture._root.join("looks"), "child-b", &[("apps/helix.toml", own)]);
+    let first = rendered.clone();
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "child-b", &options(), &leaves);
+    let _ = report;
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    assert_ne!(rendered, first, "an edited leaf re-renders elsewhere");
+    let read = std::fs::read_to_string(rendered.join("apps/helix.toml")).expect("own leaf");
+    assert_eq!(read, own, "the child's own leaf wins");
+}
+
+#[test]
+fn broken_static_leaf_refuses_before_anything() {
+    let fixture = static_fixture(
+        "static-broken",
+        Origin::User,
+        &[("apps/helix.toml", "\"ui.text\" = ")],
+    );
+    let mut compositor = FakeCompositor::not_running();
+    let failure = apply_with_live(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &FakeChecks::default(),
+        &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
+    )
+    .expect_err("a broken static leaf refuses");
+    assert!(
+        failure.message.contains("apps/helix.toml"),
+        "the refusal names the leaf: {}",
+        failure.message
+    );
+    assert!(
+        !fixture.state.join("look.json").exists(),
+        "nothing is recorded"
+    );
+}
+
+#[test]
+fn opt_outs_skip_signals_but_keep_leaves_and_notes() {
+    let fixture = static_fixture("static-optout", Origin::User, ALL_LEAVES);
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &opt_out_options(), &leaves);
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    for (file, _) in ALL_LEAVES {
+        assert!(rendered.join(file).is_file(), "{file} still renders");
+    }
+    assert!(leaves.signaled().is_empty(), "no signal attempted");
+    assert!(
+        !report.reloaded.contains(&"helix".to_owned())
+            && !report.reloaded.contains(&"btop".to_owned()),
+        "{report:?}"
+    );
+    assert!(
+        report.notes.iter().any(|note| note.contains("--no-helix")),
+        "{report:?}"
+    );
+    assert!(
+        report.notes.iter().any(|note| note.contains("--no-btop")),
+        "{report:?}"
+    );
+    assert!(
+        report.notes.iter().any(|note| note.contains("scoot-look.toml")),
+        "the setup hint still prints: {report:?}"
+    );
+}
+
+#[test]
+fn look_without_static_leaves_signals_nothing() {
+    // A look with no `apps/` files runs no editor step at all: no
+    // signal, no note, no silence broken.
+    let fixture = fixture("static-absent");
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &options(), &leaves);
+    assert!(leaves.signaled().is_empty(), "no signal attempted");
+    assert!(
+        !report.reloaded.contains(&"helix".to_owned())
+            && !report.reloaded.contains(&"btop".to_owned()),
+        "{report:?}"
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .all(|note| !note.contains("helix") && !note.contains("btop")),
+        "{report:?}"
+    );
+}

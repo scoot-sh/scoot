@@ -329,3 +329,61 @@ fn shipped_contrast_warnings_are_the_known_dim_and_urgent_pairs() {
         ]
     );
 }
+
+#[test]
+fn shipped_static_leaves_read_and_shape_check() {
+    // The terminal static leaves each shipped look carries: read from
+    // `apps/` and shape-checked the way `apply` checks them before
+    // writing them into the render. Locked per look, so a leaf added,
+    // removed or corrupted shows up as a test change. music-desk ships
+    // no btop theme (its tuned theme path is not portable, so its
+    // `color_theme` stays commented out) and radial-burst ships no
+    // terminal leaves at all.
+    let expected: &[(&str, &[&str])] = &[
+        (
+            "ginger-night",
+            &["apps/helix.toml", "apps/btop.theme", "apps/starship.toml"],
+        ),
+        (
+            "moonrise",
+            &["apps/helix.toml", "apps/btop.theme", "apps/starship.toml"],
+        ),
+        ("music-desk", &["apps/helix.toml", "apps/starship.toml"]),
+        ("radial-burst", &[]),
+        (
+            "vinyl-sunset",
+            &["apps/helix.toml", "apps/btop.theme", "apps/starship.toml"],
+        ),
+    ];
+    for (name, leaves) in expected {
+        let dir = looks_dir().join(name);
+        for leaf in scoot_look::STATIC_LEAVES {
+            let path = dir.join(leaf.path);
+            if leaves.contains(&leaf.path) {
+                let bytes = std::fs::read(&path).unwrap_or_else(|e| {
+                    panic!("{name}: cannot read {}: {e}", path.display())
+                });
+                scoot_look::check_static_leaf(leaf.path, &bytes).unwrap_or_else(|e| {
+                    panic!("{name}: {} does not shape-check: {e}", path.display())
+                });
+                // A Helix theme that loads: the leaf must at least name
+                // the selection (an invalid theme falls back to the
+                // default with only a log line, proven live against
+                // 25.07.1).
+                if leaf.path == "apps/helix.toml" {
+                    let text = String::from_utf8_lossy(&bytes);
+                    assert!(
+                        text.contains("ui.selection"),
+                        "{name}: helix leaf names no ui.selection"
+                    );
+                }
+            } else {
+                assert!(
+                    !path.exists(),
+                    "{name}: unexpected {}",
+                    path.display()
+                );
+            }
+        }
+    }
+}

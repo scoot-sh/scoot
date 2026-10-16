@@ -1431,7 +1431,12 @@ pub const RENDER_VERSION: u32 = 10;
 /// feature and dropped module sections), hashed like `source_hash`. A font
 /// package update or an edited source re-renders instead of reusing a stale
 /// directory.
-fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs, trust: bool) -> String {
+fn cache_key(
+    chain: &[ChainEntry],
+    inputs: &RenderInputs,
+    trust: bool,
+    static_files: &[(String, Vec<u8>)],
+) -> String {
     let mut buffer = Vec::new();
     buffer.extend_from_slice(&RENDER_VERSION.to_le_bytes());
     buffer.push(0);
@@ -1439,6 +1444,15 @@ fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs, trust: bool) -> String
         buffer.extend_from_slice(link.entry.name.as_bytes());
         buffer.push(0);
         buffer.extend_from_slice(&link.bytes);
+        buffer.push(0);
+    }
+    // The static leaves ride the key by bytes: an edited `apps/` file
+    // re-renders instead of reusing the stale directory (look.toml alone
+    // cannot tell them apart).
+    for (file, bytes) in static_files {
+        buffer.extend_from_slice(file.as_bytes());
+        buffer.push(0);
+        buffer.extend_from_slice(bytes);
         buffer.push(0);
     }
     for value in [
@@ -1509,12 +1523,15 @@ pub(crate) fn render_cached(
     notes: &mut Vec<String>,
     trust: bool,
 ) -> Result<PathBuf, String> {
-    let target = cache.join(format!("{name}-{}", cache_key(chain, inputs, trust)));
-    let leaves =
-        render_leaf_files(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     let mut static_notes = Vec::new();
     let static_files = static_leaf_files(chain, trust, &mut static_notes)
         .map_err(|error| format!("cannot render {name}: {error}"))?;
+    let target = cache.join(format!(
+        "{name}-{}",
+        cache_key(chain, inputs, trust, &static_files)
+    ));
+    let leaves =
+        render_leaf_files(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     if target.is_dir() {
         let render = target.join("render.json");
         let identity: serde_json::Value = read_capped(&render)

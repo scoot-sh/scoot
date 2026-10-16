@@ -175,3 +175,227 @@ fn failing_daemons_are_named_errors() {
         assert!(error.contains("scoot-osd"), "names the unit: {error}");
     });
 }
+
+/// The process table the signal tests read: our own uid's `hx` twice
+/// (one under our own pid, which must never be signaled) and `btop`
+/// once, another uid's `hx` and `btop` (never touched), plus a header
+/// and a garbage line (both skipped). Pids sit where no real process
+/// can be (above any pid_max), so the kills land on `ESRCH` and stay
+/// silent: the counts prove the selection, never a side effect.
+fn stub_ps_table(bin: &std::path::Path, uid: u32, other: u32) {
+    let own = std::process::id();
+    let stub = bin.join("ps");
+    std::fs::write(
+        &stub,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \\\n  '    PID   UID COMMAND' \\\n  'not a process line' \\\n  \"2000000001 {uid} hx\" \\\n  \"2000000002 {uid} hx\" \\\n  \"{own} {uid} hx\" \\\n  \"2000000003 {uid} btop\" \\\n  \"2000000004 {uid} foot\" \\\n  \"2000000005 {other} hx\" \\\n  \"2000000006 {other} btop\"\n"
+        ),
+    )
+    .expect("a stub ps");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .expect("an executable stub");
+    }
+}
+
+fn own_uid() -> u32 {
+    let out = std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .expect("id -u runs");
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse()
+        .expect("a numeric uid")
+}
+
+#[test]
+fn editor_signals_reach_only_the_users_own_processes() {
+    let uid = own_uid();
+    let dir = std::env::temp_dir().join(format!(
+        "scoot-leaves-ps-{}-{}",
+        std::process::id(),
+        "signals"
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a stub dir");
+    stub_ps_table(&dir, uid, uid + 1);
+    let fake = FakeBin::new("signals-ps", &[]);
+    // The stub ps beside (not inside) the fake bin dir: reuse the
+    // fake's PATH plumbing by pointing PATH at both.
+    let _ = &fake;
+    let old = std::env::var_os("PATH");
+    {
+        let _guard = PATH_LOCK.lock().expect("the PATH lock");
+        let mut path = dir.display().to_string();
+        if let Some(real) = &old {
+            path.push(':');
+            path.push_str(&real.to_string_lossy());
+        }
+        unsafe { std::env::set_var("PATH", &path) };
+        let leaves = CliLeaves::new();
+        // Two own `hx` (our own pid excluded), one own `btop`: the
+        // other uid's pair and `foot` are never counted. The kills hit
+        // pids no process holds (`ESRCH`), so nothing is side-effected.
+        assert_eq!(leaves.helix_signal().expect("hx signaled"), 2);
+        assert_eq!(leaves.btop_signal().expect("btop signaled"), 1);
+        if let Some(path) = old.clone() {
+            unsafe { std::env::set_var("PATH", path) };
+        }
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn no_running_editor_is_a_count_of_zero() {
+    let uid = own_uid();
+    let dir = std::env::temp_dir().join(format!(
+        "scoot-leaves-ps-{}-{}",
+        std::process::id(),
+        "empty"
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a stub dir");
+    let stub = dir.join("ps");
+    std::fs::write(
+        &stub,
+        format!("#!/bin/sh\nprintf '%s\\n' '    PID   UID COMMAND' '2000000007 {uid} foot'\n"),
+    )
+    .expect("a stub ps");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .expect("an executable stub");
+    }
+    let old = std::env::var_os("PATH");
+    {
+        let _guard = PATH_LOCK.lock().expect("the PATH lock");
+        let mut path = dir.display().to_string();
+        if let Some(real) = &old {
+            path.push(':');
+            path.push_str(&real.to_string_lossy());
+        }
+        unsafe { std::env::set_var("PATH", &path) };
+        let leaves = CliLeaves::new();
+        assert_eq!(leaves.helix_signal().expect("hx counted"), 0);
+        assert_eq!(leaves.btop_signal().expect("btop counted"), 0);
+        if let Some(path) = old.clone() {
+            unsafe { std::env::set_var("PATH", path) };
+        }
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn missing_ps_is_a_named_error() {
+    // An exact PATH with no `ps`: the step reports, never refuses the
+    // swap (the caller turns this into a note).
+    let fake = FakeBin::new("signals-nops", &[]);
+    with_exact_path(&fake, || {
+        let leaves = CliLeaves::new();
+        let error = leaves.helix_signal().expect_err("no ps surfaces");
+        assert!(error.contains("`ps`"), "names the tool: {error}");
+        let error = leaves.btop_signal().expect_err("no ps surfaces");
+        assert!(error.contains("`ps`"), "names the tool: {error}");
+    });
+}
+
+/// Real delivery, hermetically: copies of `sleep` named `hx` and `btop`
+/// run as our own children, and a stub `ps` lists only their pids — so
+/// the real `ps` output parse, the uid match and the real `kill` run
+/// with nothing else in reach. Both sleepers must die by their signal
+/// (`SIGUSR1` for Helix, `SIGUSR2` for btop), proving the signal lands.
+#[test]
+fn editor_signals_are_really_delivered() {
+    use std::process::{Command, Stdio};
+    let uid = own_uid();
+    let dir = std::env::temp_dir().join(format!(
+        "scoot-leaves-ps-{}-{}",
+        std::process::id(),
+        "deliver"
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a stub dir");
+    // A `sleep` by another name: macOS and Linux both ship one.
+    let sleep = if std::path::Path::new("/bin/sleep").exists() {
+        "/bin/sleep"
+    } else {
+        "/usr/bin/sleep"
+    };
+    let mut children = Vec::new();
+    for name in ["hx", "btop"] {
+        let link = dir.join(name);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(sleep, &link).expect("a named sleeper");
+        // Through the symlink the process's comm is the link's name.
+        // (A hard link would do as well; a copy wastes the bytes.)
+        let child = Command::new(&link)
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("a sleeper");
+        children.push((name, child));
+    }
+    // The stub lists only the two sleepers (plus a header and garbage,
+    // both skipped): no ambient process is in reach.
+    let table = format!(
+        "#!/bin/sh\nprintf '%s\\n' 'PID UID COMMAND' 'junk' '{} {} hx' '{} {} btop'\n",
+        children[0].1.id(),
+        uid,
+        children[1].1.id(),
+        uid,
+    );
+    let stub = dir.join("ps");
+    std::fs::write(&stub, table).expect("a stub ps");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .expect("an executable stub");
+    }
+    let old = std::env::var_os("PATH");
+    let (hx_count, btop_count) = {
+        let _guard = PATH_LOCK.lock().expect("the PATH lock");
+        let mut path = dir.display().to_string();
+        if let Some(real) = &old {
+            path.push(':');
+            path.push_str(&real.to_string_lossy());
+        }
+        unsafe { std::env::set_var("PATH", &path) };
+        let leaves = CliLeaves::new();
+        let counts = (
+            leaves.helix_signal().expect("hx signaled"),
+            leaves.btop_signal().expect("btop signaled"),
+        );
+        if let Some(path) = old.clone() {
+            unsafe { std::env::set_var("PATH", path) };
+        }
+        counts
+    };
+    assert_eq!((hx_count, btop_count), (1, 1));
+    // Both sleepers died by their signal (never an exit code): the
+    // delivery is real, through the real `kill`.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt as _;
+        // SIGUSR1/SIGUSR2: 30/31 on macOS, 10/12 on Linux.
+        #[cfg(target_os = "macos")]
+        let want = [30, 31];
+        #[cfg(not(target_os = "macos"))]
+        let want = [10, 12];
+        for ((name, mut child), want) in children.into_iter().zip(want) {
+            let status = child.wait().expect("a reaped sleeper");
+            assert_eq!(
+                status.signal(),
+                Some(want),
+                "{name} died by its signal"
+            );
+        }
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
