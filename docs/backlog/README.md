@@ -392,7 +392,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Qt palette under the Adwaita style ignores the look (measured)](./packaging/qt-adwaita-palette.md) (low)
 - [Look leaves for mako, wob, fcitx5 and the night light](./resolved/look-leaves-daemons-done.md) (medium) — RESOLVED 2026-10-15
 - [Look leaves for swaylock, fuzzel and the pickers](./resolved/look-leaves-launchers-done.md) (medium) — RESOLVED 2026-10-15
-- [Look leaves for foot, Helix, btop and starship](./packaging/look-leaves-terminal.md) (medium)
+- [Look leaves for foot, Helix, btop and starship](./resolved/look-leaves-terminal-done.md) (medium) — RESOLVED 2026-10-16
 - [The greeter's look](./resolved/look-greeter-done.md) (low) — RESOLVED 2026-10-16
 - [Retire the Nix look registry](./packaging/look-nix-retire-registry.md) (medium, last)
 - [Authoring: look new, watch and preview capture](./core/look-authoring.md) (medium)
