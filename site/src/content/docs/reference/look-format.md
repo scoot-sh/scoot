@@ -222,7 +222,9 @@ user's file when pointed at another (`--config`, `-C`), so the apps
 layer these leaves over the user's own instead -- fuzzel as CLI flags
 read out of the file at launch, swaylock as the file's lines first
 with the user's lines after (later lines win). The user's own keys
-always survive a swap; the look only fills the colors. `render.json` names the source, its hash and the resolved inputs
+always survive a swap; the look only fills the colors.
+
+`render.json` names the source, its hash and the resolved inputs
 (font files, wallpaper path). The inputs come from the
 environment: the tool resolves font files and the wallpaper's
 absolute path, and the Nix build passes the font packages. The

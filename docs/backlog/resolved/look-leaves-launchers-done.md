@@ -21,6 +21,9 @@ capture chooser (`capture-home.nix:41-42,69-76`).
 
 ## What to do
 
+Original plan, superseded: the Resolution below explains why neither app is
+pointed at the look file.
+
 - swaylock: `-C <state>/look/swaylock` (next lock).
 - fuzzel: `--config <state>/look/fuzzel.ini` instead of inlined flags (next
   launch), the launcher, pickers and capture chooser alike.
@@ -43,7 +46,7 @@ PR #631: `scoot-look` renders `fuzzel.ini` (the seven CLI roles as a
 `[colors]` table in `rrggbbaa`) and `swaylock` (the fourteen
 `lockTheme` leaves as `key=value` in `rrggbb`) from the resolved look;
 `apply`, `build` and `validate` render and check all five files
-(`RENDER_VERSION` 3), and the standalone `scoot-look build` renders
+(`RENDER_VERSION` 7), and the standalone `scoot-look build` renders
 them for the Nix path. No `[apps.fuzzel]` / `[apps.swaylock]`
 overrides in v1: there is no layer loader for these apps, so an
 override would have nothing to agree with. Nix takes the state link
