@@ -61,6 +61,21 @@ Apps that are not running are skipped, never an error. With nothing
 running, only the link moves, and the next session starts on the new look. A shipped look needs its
 Nerd Fonts installed; without them `apply` refuses and changes nothing.
 
+Two pickers drive the same command. The bar's `looks` module shows the
+active look's name and opens the catalog as a popup — one row per look,
+the active one selected, a long catalog paged — where a row click runs
+`apply` for that look ([modules](../scootbar/modules.md#looks)). From the
+keyboard, `scoot-look-pick` lists the catalog through fuzzel until
+scootlaunch lands:
+
+```sh
+scoot-look-pick pick            # choose a look in fuzzel, apply it
+scoot-look-pick list            # names in catalog order, for scripting
+```
+
+Both need only `scoot` on PATH: no Nix, no running session. A cancel
+applies nothing.
+
 A swap reports three lists: what reloaded, what was skipped, and every
 shadowed key — a key in your own files that overrides a look token. A
 swap that changes nothing it was asked to still answers applied; check

@@ -184,7 +184,7 @@ Shared foundation ([epic](extract-scootui.md)):
 The bar's half of the [live-looks epic](../../backlog/core/live-looks.md) ([design](../../../dev/research/live-looks-design.md)):
 - [scootbar reads a look layer under bar.toml, with a look-scoped reload](resolved/look-layer-scootbar-done.md) (high) — RESOLVED 2026-10-15
 - [A style-only reload keeps every module running and repaints](resolved/scootbar-style-reload-done.md) (medium) — RESOLVED 2026-10-15 in #609: a reload differing only in style keeps every module running, restyles an open popup or tooltip in place (remade or closed where it cannot be), and repaints every output
-- [A looks picker: a bar popup module, a default keybinding, a launcher list](look-picker.md) (medium)
+- [A looks picker: a bar popup module and a launcher list](resolved/look-picker-done.md) (medium) — RESOLVED 2026-10-15
 
 ### Unscheduled (until someone asks)
 - [Gate integration tests on module features, tidy the unit-test script](resolved/scootbar-test-gating-and-script-hygiene-done.md) (low) — RESOLVED 2026-10-08 in #527

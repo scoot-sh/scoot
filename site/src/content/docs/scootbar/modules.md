@@ -841,8 +841,48 @@ on-click = "popup"
   an answer other than `yes`/`challenge`/`no`/`na` never hides a row;
   the error text kept is cut to 256 bytes.
 
+## Looks
 
+The active look's name, and the catalog as a popup to pick from. A Cargo
+feature (`looks`), on by default.
 
+```toml
+[looks]
+on-click = "popup"
+```
+
+- **What it shows** is the recorded look's name (`no look` with nothing
+  applied yet), with an optional icon before it (`icon`, plus
+  `icon-path`, `icon-viewbox` and `icon-image`, at most one, as the
+  clock's). The tooltip names the active look. The text is read fresh on
+  every view, so a swap from anywhere — this picker, `scoot look apply`,
+  a keybinding, an agent — shows here.
+- **The picker** is one row per look in catalog order, the active one
+  selected. A catalog past 14 rows pages, with `‹ prev` and `next ›`
+  rows. A click opens it with no binding at all; `on-click = "popup"`
+  opens it as a binding would. Nothing with an empty catalog, which also
+  closes an open picker.
+- **A row click runs `scoot look apply`** for that look and closes the
+  picker, so the swap's reload finds no popup open. It is the same
+  machinery as the CLI: the look is rendered, validated, recorded and
+  repointed, then every app's look layer is reloaded in order, rolling
+  back on a refusal. A swap from elsewhere restyles an open picker to
+  the new style, and its next refill marks the new active look.
+- **An agent's `invoke` names rows by position** (`scootbar msg invoke
+  looks "apply 0"` applies the picker's first row; `page 1` turns to
+  page 1). A row past what the picker showed is refused, never applied
+  by position from a changed catalog.
+- **`query`** reports the active look, the picker's page, and the names
+  the picker last showed on it: `{"active": "moonrise", "page": 0,
+  "pages": 1, "looks": ["ginger-night", "moonrise"]}`.
+- **Options.** `[looks]` takes `icon` (plus `icon-path`,
+  `icon-viewbox` and `icon-image`, at most one, as the clock's),
+  `margin` and the five [interaction
+  keys](./modules.md#pointer-input).
+- **Idle cost: nothing.** The module holds no fd and no timer, and reads
+  the state only for its view and its popup (cold paths, never per
+  frame): the record for the name, the catalog for the rows, each read
+  capped, nonblocking and regular files only.
 
 ## Pointer input
 
