@@ -390,7 +390,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Stylix becomes a synthesized `stylix` look instead of a layer above the look](./packaging/look-stylix-source.md) (high, breaking)
 - [GTK, libadwaita, Qt, cursor and fonts follow a swap through dconf and the portal](./resolved/look-toolkit-live-done.md) (medium) — RESOLVED 2026-10-15
 - [Qt palette under the Adwaita style ignores the look (measured)](./packaging/qt-adwaita-palette.md) (low)
-- [Look leaves for mako, wob, fcitx5 and the night light](./packaging/look-leaves-daemons.md) (medium)
+- [Look leaves for mako, wob, fcitx5 and the night light](./resolved/look-leaves-daemons-done.md) (medium) — RESOLVED 2026-10-15
 - [Look leaves for swaylock, fuzzel and the pickers](./packaging/look-leaves-launchers.md) (medium)
 - [Look leaves for foot, Helix, btop and starship](./packaging/look-leaves-terminal.md) (medium)
 - [The greeter's look](./packaging/look-greeter.md) (low)

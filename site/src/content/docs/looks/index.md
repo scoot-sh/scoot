@@ -28,10 +28,11 @@ that exists twice resolves to the earliest; `list` marks the later one
 shadowed.
 
 `apply NAME` renders the look, validates it, records the choice, repoints
-the state link, and reloads each running app's look layer in order: the
-compositor first, then every bar of the session. Apps that are not running
-are skipped, never an error. With nothing running, only the link moves,
-and the next session starts on the new look. A shipped look needs its
+the state link, reloads each running app's look layer in order (the
+compositor first, then every bar of the session), and signals the
+third-party daemons (mako, fcitx5, the OSD and night-light units).
+Apps that are not running are skipped, never an error. With nothing
+running, only the link moves, and the next session starts on the new look. A shipped look needs its
 Nerd Fonts installed; without them `apply` refuses and changes nothing.
 
 A swap reports three lists: what reloaded, what was skipped, and every
@@ -69,6 +70,10 @@ wrong.
 | Dark mode, GTK theme, icons, cursor, app font (`color-scheme`, `gtk-theme`, `icon-theme`, `cursor-theme`, `cursor-size`, `font-name`) | Live, on apply (see below) |
 | GTK `gtk.css` colors | Next launch: GTK 3 text selection plus libadwaita accent and surfaces follow; plain GTK 4 keeps its stock accent; running apps keep their palette |
 | Qt style variant and palette | Next launch of each app; under the Adwaita style QWidget apps keep Adwaita's fixed palette (see below) |
+| Notification colors (mako) | Live, on apply (D-Bus reload; `makoctl` fallback) |
+| OSD colors (wob) | Live, on apply (the unit restarts) |
+| Input-method candidate theme (fcitx5) | Live, on apply (D-Bus reload) |
+| Night-light temperature | Live, on apply (the unit restarts) |
 | Launcher and notification configs | Next launch of each app |
 | Running terminals | Keep their palette; new terminals use the look's |
 | Cursor size in already-running apps | Next launch |
@@ -77,6 +82,38 @@ A swap never applies pending edits to your own files: the reloads are
 scoped to the look layer, under a snapshot of your files from their last
 successful load. Half-written files wait for your own `scoot msg reload`
 (or `scootbar msg reload`).
+
+## Third-party daemons
+
+Each swap also renders the third-party daemon configs from the look's
+tokens (`mako`, `wob.ini`, `fcitx5/theme.conf`, `nightlight` beside
+`scoot.toml` in the rendered look) and signals each daemon. A daemon
+that is not installed or not running is a note, never an error; a
+private look state (headless or `--private-look`) signals none of them.
+
+- mako reads the fragment through an `include=` of the link's file
+  (ahead of your own keys, which win) and a D-Bus `Reload` restyles
+  on-screen notifications without starting a stopped mako
+  (`makoctl reload` only where no `busctl` exists). On Nix the generated config carries the
+  include; without Nix add
+  `include=~/.local/state/scoot/look/mako` yourself.
+- wob reads a complete `wob.ini` from `-c` and the unit restarts (it
+  starts in milliseconds and holds no state). Without Nix run
+  `wob -c ~/.local/state/scoot/look/wob.ini`.
+- fcitx5 reads the `scoot-look` classic UI theme and reloads it over
+  D-Bus (`ReloadAddonConfig "classicui"`). Without Nix link
+  `~/.local/share/fcitx5/themes/scoot-look/theme.conf` at the
+  fragment and keep `Theme=scoot-look` in `classicui.conf`.
+- The night-light unit reads the temperature from the fragment at
+  start (only while the look's own warmth is in effect; an explicit
+  temperature or a disabled target uses your value instead) and restarts
+  on swap. Without Nix read
+  `<state>/look/nightlight` (`temperature=` in Kelvin) in your own
+  warmer's startup.
+
+Your own settings win over the look, and a theme target turned off keeps the look away from that app entirely: mako and fcitx5 keys you set override the fragment by file order, an explicit night temperature beats the look's, and the OSD hide timeout and the day temperature stay yours. The first apply on a Nix machine
+seeds the declared default look, so a fresh install's daemons never
+start against a missing fragment.
 
 ## Files and flags
 

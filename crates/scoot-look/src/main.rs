@@ -24,8 +24,8 @@ use std::path::Path;
 
 use scoot_look::{
     ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar, render_foot,
-    render_gtk3_css, render_gtk4_css, render_json, render_qt_scheme, render_scoot, resolve,
-    source_hash, validate_apps_allowlist, validate_for_origin,
+    render_gtk3_css, render_gtk4_css, render_json, render_leaf_files, render_qt_scheme,
+    render_scoot, resolve, source_hash, validate_apps_allowlist, validate_for_origin,
 };
 
 fn usage() -> ! {
@@ -352,6 +352,10 @@ fn build_dir(
         eprintln!("error: {e}");
         std::process::exit(1);
     });
+    let leaves = render_leaf_files(&look).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
     std::fs::create_dir_all(out).unwrap_or_else(|e| {
         eprintln!("cannot create {}: {e}", out.display());
         std::process::exit(1);
@@ -381,6 +385,19 @@ fn build_dir(
     for (file, contents) in &files {
         std::fs::write(out.join(file), contents).unwrap_or_else(|e| {
             eprintln!("cannot write {}: {e}", out.join(file).display());
+            std::process::exit(1);
+        });
+    }
+    for (file, contents) in &leaves {
+        let path = out.join(file);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap_or_else(|e| {
+                eprintln!("cannot create {}: {e}", parent.display());
+                std::process::exit(1);
+            });
+        }
+        std::fs::write(&path, contents).unwrap_or_else(|e| {
+            eprintln!("cannot write {}: {e}", path.display());
             std::process::exit(1);
         });
     }
