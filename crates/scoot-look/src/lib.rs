@@ -49,6 +49,10 @@
 //! to a source look's `look.toml` (design section 5.3): the plain-install
 //! source of palettes, pure like the rest here.
 //!
+//! [`catalog`] discovers the source looks on any box, in the search order
+//! above: the same discovery behind `scoot look list` and the bar's looks
+//! picker, so the two can never disagree about what the catalog holds.
+//!
 //! [`state`] is the per-session state (`<state>/look.json` plus the `look`
 //! link): the state-dir rule scoot and scootbar share (scootbg takes no
 //! look state), the record (with the toolkit half: `toolkit` and the last
@@ -61,6 +65,7 @@
 //! apps' own strict parsers.
 
 pub mod allowlist;
+pub mod catalog;
 pub mod contrast;
 pub mod grammar;
 pub mod import;

@@ -9,7 +9,7 @@
 //! per state — per row for power — through [`network`], [`bluetooth`],
 //! [`media`] and [`power`].
 
-#[cfg(any(feature = "clock", feature = "icon-image"))]
+#[cfg(any(feature = "clock", feature = "looks", feature = "icon-image"))]
 use std::path::Path;
 use std::sync::Arc;
 
@@ -21,7 +21,11 @@ use crate::modules::brightness::BrightnessIcon;
 use crate::modules::network::WifiIcon;
 
 #[cfg(feature = "clock")]
-use super::{ClockFile, Error};
+use super::ClockFile;
+#[cfg(any(feature = "clock", feature = "looks"))]
+use super::Error;
+#[cfg(feature = "looks")]
+use super::LooksFile;
 use crate::icon::path::{Vector, ViewBox};
 use crate::icon::{Art, Icon};
 
@@ -45,6 +49,31 @@ pub(super) fn clock(path: &Path, file: &ClockFile) -> Result<Option<Icon>, Error
     read(
         "clock",
         "a clock",
+        &Keys {
+            icon: file.icon.as_deref(),
+            icon_path: file.icon_path.as_deref(),
+            icon_viewbox: file.icon_viewbox.as_deref(),
+            icon_image: image,
+        },
+    )
+    .map_err(|(key, message)| Error::Named {
+        path: path.to_owned(),
+        key,
+        message,
+    })
+}
+
+/// The looks module's icon, if its section gives one: drawn before the
+/// active look's name.
+#[cfg(feature = "looks")]
+pub(super) fn looks(path: &Path, file: &LooksFile) -> Result<Option<Icon>, Error> {
+    #[cfg(feature = "icon-image")]
+    let image = file.icon_image.as_deref();
+    #[cfg(not(feature = "icon-image"))]
+    let image = file.icon_image.as_ref().map(|_| "");
+    read(
+        "looks",
+        "a looks module",
         &Keys {
             icon: file.icon.as_deref(),
             icon_path: file.icon_path.as_deref(),

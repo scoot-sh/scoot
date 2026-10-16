@@ -34,7 +34,7 @@ order wrapping; the bind added to the default keymap table and the docs.
 
 ## Not in this ticket
 
-The picker popup (`look-picker`).
+The picker popup ([`look-picker`](../../scootbar/backlog/resolved/look-picker-done.md)).
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
 

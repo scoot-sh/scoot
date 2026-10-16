@@ -184,9 +184,10 @@ Shared foundation ([epic](extract-scootui.md)):
 The bar's half of the [live-looks epic](../../backlog/core/live-looks.md) ([design](../../../dev/research/live-looks-design.md)):
 - [scootbar reads a look layer under bar.toml, with a look-scoped reload](resolved/look-layer-scootbar-done.md) (high) — RESOLVED 2026-10-15
 - [A style-only reload keeps every module running and repaints](resolved/scootbar-style-reload-done.md) (medium) — RESOLVED 2026-10-15 in #609: a reload differing only in style keeps every module running, restyles an open popup or tooltip in place (remade or closed where it cannot be), and repaints every output
-- [A looks picker: a bar popup module, a default keybinding, a launcher list](look-picker.md) (medium)
+- [A looks picker: a bar popup module and a launcher list](resolved/look-picker-done.md) (medium) — RESOLVED 2026-10-15 in #637
 
 ### Unscheduled (until someone asks)
+- [Hung spawned children block every other exec binding until the bar restarts](hung-spawn-blocks-binds.md) (low): the spawner's 8-slot table has no timeout, kill or queue; hung `scoot look apply` children wedge every other exec binding
 - [Gate integration tests on module features, tidy the unit-test script](resolved/scootbar-test-gating-and-script-hygiene-done.md) (low) — RESOLVED 2026-10-08 in #527
 - [Documented exec recipes for CPU/memory/pressure readouts](resolved/exec-stats-recipes-done.md) (low) — RESOLVED 2026-10-08 in #519: CPU, memory and PSI-stall exec recipes beside the exec module, each with cost and reload behavior
 - [drive_placed pidfile-vs-pipe race flakes the exec keep tests](resolved/exec-keep-pidfile-race-done.md) (low) — RESOLVED 2026-10-03 in #402: waits on shown text, pidfile as identity check only

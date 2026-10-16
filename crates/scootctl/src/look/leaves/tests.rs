@@ -3,9 +3,53 @@
 
 use super::*;
 
+use std::collections::BTreeMap;
+
+/// A minimal valid look: the moonrise palette (which clears the contrast
+/// bars), a color wallpaper (no image binary needed), and a license (so it
+/// validates under every origin). A local copy, as in `apply/tests.rs`
+/// and `toolkit/tests.rs`: the catalog's own helpers are not visible
+/// outside `scoot-look`.
+fn look_toml(name: &str) -> String {
+    format!(
+        r##"
+schema = 1
+name = "{name}"
+title = "Test {name}"
+description = "A test look."
+polarity = "dark"
+license = "MIT"
+
+[palette]
+background = "#2B3648"
+foreground = "#F6EEDC"
+dim = "#9C8B95"
+accent = "#FFA45C"
+urgent = "#E87F6A"
+
+[fonts]
+ui = "DejaVu Sans"
+sans = "DejaVu Sans"
+mono = "DejaVu Sans Mono"
+size = 10
+
+[shape]
+radius = 14
+ring-width = 2
+
+[cursor]
+theme = "Mocu"
+size = 24
+
+[wallpaper]
+color = "#2B3648"
+mode = "fill"
+"##
+    )
+}
+
 fn look_named(name: &str, night: Option<i64>) -> scoot_look::ResolvedLook {
-    use std::collections::BTreeMap;
-    let text = super::super::catalog::tests::look_toml(name);
+    let text = look_toml(name);
     let raw = scoot_look::parse_look_toml(text.as_bytes()).expect("parses");
     let map = BTreeMap::from([(name.to_string(), (raw, scoot_look::Origin::User))]);
     let mut look = scoot_look::resolve(&map, name).expect("resolves");

@@ -48,9 +48,9 @@ use super::apply::{
     Validation, absolutize, check_inputs, collect_chain, complete_swap, render_for_swap,
     unknown_look,
 };
-use super::catalog::{Catalog, config_home, data_home};
 use super::reload::{BarReload, CompositorReload};
 use super::toolkit::Dconf;
+use scoot_look::catalog::{Catalog, config_home, data_home};
 
 /// Options for one `sync`, from flags.
 pub struct SyncOptions {

@@ -48,7 +48,8 @@ mod custom_tests;
     feature = "bluetooth",
     feature = "media",
     feature = "window-title",
-    feature = "power"
+    feature = "power",
+    feature = "looks"
 ))]
 mod icon;
 #[cfg(all(test, feature = "clock"))]
@@ -401,6 +402,9 @@ struct File {
     /// The power module's options. Without the `power` feature there are
     /// none, and any key is a loud error naming it.
     power: PowerFile,
+    /// The looks module's options. Without the `looks` feature there are
+    /// none, and any key is a loud error naming it.
+    looks: LooksFile,
     /// `[button.NAME]`, `[push.NAME]` and `[exec.NAME]`: modules the file
     /// defines, placed by their names (`custom`).
     #[cfg(feature = "button")]
@@ -1322,6 +1326,13 @@ impl File {
                 margins.push((crate::modules::power::ID, margin));
             }
         }
+        #[cfg(feature = "looks")]
+        if let Some(margin) = self.looks.margin {
+            let margin = gap(path, "looks.margin", Some(margin), 0)?;
+            if margin > 0 {
+                margins.push((crate::modules::looks::ID, margin));
+            }
+        }
         let layout = self.layout(
             path,
             Gaps {
@@ -1657,6 +1668,10 @@ impl File {
         #[cfg(feature = "power")]
         {
             apply_power(path, &self.power, &mut modules.power, &mut modules.bindings)?;
+        }
+        #[cfg(feature = "looks")]
+        {
+            apply_looks(path, &self.looks, &mut modules.looks, &mut modules.bindings)?;
         }
         Ok(Config {
             bar: Bar {
@@ -2612,6 +2627,101 @@ struct PowerFile {
     #[serde(rename = "on-scroll-up")]
     on_scroll_up: Option<toml::Value>,
     #[cfg(feature = "power")]
+    #[serde(rename = "on-scroll-down")]
+    on_scroll_down: Option<toml::Value>,
+}
+
+#[cfg(feature = "looks")]
+const LOOKS_KEYS: [&str; 5] = [
+    "looks.on-click",
+    "looks.on-right-click",
+    "looks.on-middle-click",
+    "looks.on-scroll-up",
+    "looks.on-scroll-down",
+];
+
+/// The `[looks]` table: the icon keys and the interaction keys, into the
+/// module's settings.
+#[cfg(feature = "looks")]
+fn apply_looks(
+    path: &Path,
+    table: &LooksFile,
+    settings: &mut crate::modules::looks::Settings,
+    bindings: &mut Vec<(&'static str, crate::action::Bindings)>,
+) -> Result<(), Error> {
+    if let Some(icon) = icon::looks(path, table)? {
+        settings.icon = Some(icon);
+    }
+    let read = bindings::read(
+        crate::modules::looks::ID,
+        [
+            table.on_click.as_ref(),
+            table.on_right_click.as_ref(),
+            table.on_middle_click.as_ref(),
+            table.on_scroll_up.as_ref(),
+            table.on_scroll_down.as_ref(),
+        ],
+    )
+    .map_err(|(trigger, message)| {
+        value(
+            path,
+            LOOKS_KEYS[trigger as usize],
+            format_args!("{message}"),
+        )
+    })?;
+    // A click opens the picker only when bound (`on-click = "popup"`): the
+    // module also opens it on a bare click, but like every other module, no
+    // keys means no bindings entry at all.
+    if !read.is_empty() {
+        bindings.push((crate::modules::looks::ID, read));
+    }
+    Ok(())
+}
+
+/// The looks module's options. Without the `looks` feature there are
+/// none, and any key is a loud error naming it.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct LooksFile {
+    /// Extra logical pixels on each side of the module.
+    #[cfg(feature = "looks")]
+    margin: Option<u32>,
+    /// One glyph, drawn before the active look's name.
+    #[cfg(feature = "looks")]
+    icon: Option<String>,
+    /// SVG path data, drawn before the name (instead of `icon`).
+    #[cfg(feature = "looks")]
+    #[serde(rename = "icon-path")]
+    icon_path: Option<String>,
+    /// The path's viewbox, `min-x min-y width height`; 24 by 24 if absent.
+    #[cfg(feature = "looks")]
+    #[serde(rename = "icon-viewbox")]
+    icon_viewbox: Option<String>,
+    /// A PNG file, drawn before the name (instead of `icon`). Only in a
+    /// build with the `icon-image` feature: without it the key is unknown.
+    #[cfg(all(feature = "looks", feature = "icon-image"))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<String>,
+    /// Without the feature the key is still taken (its value ignored), so
+    /// that the refusal can say what is missing, not "unknown field".
+    #[cfg(all(feature = "looks", not(feature = "icon-image")))]
+    #[serde(rename = "icon-image")]
+    icon_image: Option<serde::de::IgnoredAny>,
+    /// The interaction keys (`bindings`): a module action, `{ exec = [...] }`
+    /// or `{ scoot = "..." }`.
+    #[cfg(feature = "looks")]
+    #[serde(rename = "on-click")]
+    on_click: Option<toml::Value>,
+    #[cfg(feature = "looks")]
+    #[serde(rename = "on-right-click")]
+    on_right_click: Option<toml::Value>,
+    #[cfg(feature = "looks")]
+    #[serde(rename = "on-middle-click")]
+    on_middle_click: Option<toml::Value>,
+    #[cfg(feature = "looks")]
+    #[serde(rename = "on-scroll-up")]
+    on_scroll_up: Option<toml::Value>,
+    #[cfg(feature = "looks")]
     #[serde(rename = "on-scroll-down")]
     on_scroll_down: Option<toml::Value>,
 }

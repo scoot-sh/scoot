@@ -15,8 +15,8 @@ use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use scoot_look::state::read_capped_follow;
-use scoot_look::{
+use crate::state::read_capped_follow;
+use crate::{
     Origin, RawLook, check_name_matches_dir, parse_look_toml, validate_apps_allowlist,
     validate_for_origin,
 };
@@ -250,10 +250,10 @@ fn scan_dir(dir: &Path, origin: Origin, catalog: &mut Catalog) {
                 continue;
             }
         };
-        if bytes.len() as u64 > scoot_look::state::MAX_FILE {
+        if bytes.len() as u64 > crate::state::MAX_FILE {
             catalog.notes.push(format!(
                 "skipping {dir_name}: look.toml is larger than {} bytes",
-                scoot_look::state::MAX_FILE
+                crate::state::MAX_FILE
             ));
             continue;
         }

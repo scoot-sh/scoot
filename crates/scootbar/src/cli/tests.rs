@@ -465,6 +465,7 @@ fn the_help_matches_the_build() {
     let has_brightness = crate::modules::find("brightness").is_some();
     let has_bluetooth = crate::modules::find("bluetooth").is_some();
     let has_power = crate::modules::find("power").is_some();
+    let has_looks = crate::modules::find("looks").is_some();
     assert_eq!(daemon_help().contains("--clock-format"), has_clock);
     // Battery sorts first, then bluetooth, then brightness, so with the
     // clock the list opens with whichever of them this build has.
@@ -535,9 +536,14 @@ fn the_help_matches_the_build() {
     assert_eq!(daemon_help().contains("the media module"), has_media);
     assert_eq!(daemon_help().contains("MPRIS"), has_media);
     assert_eq!(daemon_help().contains("media.player"), has_media);
-    // Media sorts after the clock, so with both the list names it there.
+    // Media sorts after the clock, so with both the list names it there
+    // (after `looks`, when the looks module is in the build).
     if has_clock && has_media {
-        assert!(daemon_help().contains("clock, media"));
+        if has_looks {
+            assert!(daemon_help().contains("clock, looks, media"));
+        } else {
+            assert!(daemon_help().contains("clock, media"));
+        }
     }
     let has_bluetooth = crate::modules::find("bluetooth").is_some();
     assert_eq!(
@@ -565,6 +571,7 @@ fn the_help_matches_the_build() {
     if has_power && has_tray {
         assert!(daemon_help().contains("power, tray"));
     }
+    assert_eq!(daemon_help().contains("the looks module"), has_looks);
     for flag in super::FLAGS {
         assert!(daemon_help().contains(flag), "{flag} is not documented");
     }

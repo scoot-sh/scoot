@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use super::catalog::config_home;
+use scoot_look::catalog::config_home;
 use scoot_look::state::read_capped_follow;
 
 /// The foot leaf after a swap: new terminals read the rendered `foot.ini`

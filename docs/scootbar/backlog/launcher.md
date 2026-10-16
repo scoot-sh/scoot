@@ -56,4 +56,4 @@ Same standards: lowest resource use of its class, a resource ratchet against
 Theming contract (added 2026-10-12): read the look layer at launch, never
 Stylix or a palette of its own; see the [live looks design](../../../dev/research/live-looks-design.md),
 section 9. A `Look:` list through the dmenu mode is an optional hook
-([`look-picker`](look-picker.md)).
+([`look-picker`](resolved/look-picker-done.md)).

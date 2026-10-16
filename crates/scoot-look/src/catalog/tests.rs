@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use scoot_look::Origin;
+use crate::Origin;
 
 use super::{Catalog, cache_home, config_home, data_home, discover_ordered, origin_name};
 

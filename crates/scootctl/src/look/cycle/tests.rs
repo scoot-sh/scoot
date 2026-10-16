@@ -5,13 +5,12 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use scoot_look::Origin;
 
 use super::super::apply::{ApplyOptions, Availability, Checks, PREVIEW_SUPERSEDED, apply_with};
-use super::super::catalog::discover_ordered;
-use super::super::catalog::tests::{look_toml, scratch, write_look};
 use super::super::leaves::ScriptedLeaves;
 use super::super::reload::{BarReload, CompositorReload, ReloadError, Reloaded};
 use super::super::toolkit::Dconf;
@@ -19,7 +18,72 @@ use super::{
     Preview, PreviewRead, Step, clear_preview, cycle_target, keep_preview, random_target,
     read_preview, revert_if_current, reverter_argv, unapply, write_preview,
 };
-use crate::look::catalog::Catalog;
+use scoot_look::catalog::{Catalog, discover_ordered};
+
+static FIXTURE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A scratch dir unique to this test process and call, removed on drop.
+fn scratch(tag: &str) -> tempfile::TempDir {
+    let id = FIXTURE_COUNTER.fetch_add(1, Ordering::SeqCst);
+    tempfile::Builder::new()
+        .prefix(&format!(
+            "scoot-look-cycle-{tag}-{}-{id}-",
+            std::process::id()
+        ))
+        .tempdir()
+        .expect("a scratch dir")
+}
+
+/// A minimal valid look: the moonrise palette (which clears the contrast
+/// bars), a color wallpaper (no image binary needed), and a license (so it
+/// validates under every origin).
+fn look_toml(name: &str) -> String {
+    format!(
+        r##"
+schema = 1
+name = "{name}"
+title = "Test {name}"
+description = "A test look."
+polarity = "dark"
+license = "MIT"
+
+[palette]
+background = "#2B3648"
+foreground = "#F6EEDC"
+dim = "#9C8B95"
+accent = "#FFA45C"
+urgent = "#E87F6A"
+
+[fonts]
+ui = "DejaVu Sans"
+sans = "DejaVu Sans"
+mono = "DejaVu Sans Mono"
+size = 10
+
+[shape]
+radius = 14
+ring-width = 2
+
+[cursor]
+theme = "Mocu"
+size = 24
+
+[wallpaper]
+color = "#2B3648"
+mode = "fill"
+"##
+    )
+}
+
+/// Writes a source look `dir/<name>/look.toml`, with `extra` appended.
+fn write_look(dir: &Path, name: &str, extra: &str) -> PathBuf {
+    let look = dir.join(name);
+    std::fs::create_dir_all(&look).expect("a look dir");
+    let mut text = look_toml(name);
+    text.push_str(extra);
+    std::fs::write(look.join("look.toml"), text).expect("a look.toml");
+    look
+}
 
 struct Fixture {
     catalog: Catalog,

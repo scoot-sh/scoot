@@ -19,7 +19,7 @@ license.workspace = true
 # module draws a plain bar and needs no font. `icon-image` is the one
 # feature that is not a module: it is an optional decoder (below).
 [features]
-default = ["clock", "workspaces", "window-title", "volume", "microphone", "network", "brightness", "battery", "tray", "media", "bluetooth", "button", "push", "exec", "popup", "power"]
+default = ["clock", "workspaces", "window-title", "volume", "microphone", "network", "brightness", "battery", "tray", "media", "bluetooth", "button", "push", "exec", "popup", "power", "looks"]
 clock = []
 workspaces = []
 window-title = []
@@ -62,6 +62,10 @@ bluetooth = []
 # confirm step, over logind on the system bus where it applies
 # (docs/scootbar/backlog/power-menu.md).
 power = []
+# The active look's name, with a popup listing the catalog and applying
+# one on click through `scoot look apply`
+# (docs/scootbar/backlog/look-picker.md).
+looks = []
 # The three modules the config defines by name (`[button.NAME]`,
 # `[push.NAME]`, `[exec.NAME]`): extend the bar without Rust. `push` and
 # `exec` share the update payload (`src/modules/payload.rs`).
@@ -126,3 +130,6 @@ rustix = { version = "1", default-features = false, features = ["std", "process"
 base64.workspace = true
 png = "0.18"
 serde_json.workspace = true
+# Scratch dirs as `TempDir` guards in the looks module's tests: the same
+# version the look crates carry (same lock entry, MIT OR Apache-2.0).
+tempfile = "3"

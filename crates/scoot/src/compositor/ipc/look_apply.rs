@@ -402,14 +402,14 @@ impl State {
                 "no look state directory: neither XDG_STATE_HOME nor HOME is set".to_owned(),
             );
         };
-        self.look_snapshot(&scootctl::look::catalog::discover(), &state_dir)
+        self.look_snapshot(&scoot_look::catalog::discover(), &state_dir)
     }
 
     /// Shapes `Response::Looks` over an explicit catalog, so tests pin the
     /// shaping without touching the process environment.
     pub(super) fn look_snapshot(
         &self,
-        catalog: &scootctl::look::catalog::Catalog,
+        catalog: &scoot_look::catalog::Catalog,
         state_dir: &Path,
     ) -> Response {
         let _ = self;
@@ -424,7 +424,7 @@ impl State {
                     .polarity
                     .map(|polarity| polarity.as_str().to_owned())
                     .unwrap_or_else(|| "dark".to_owned()),
-                origin: scootctl::look::catalog::origin_name(entry.origin).to_owned(),
+                origin: scoot_look::catalog::origin_name(entry.origin).to_owned(),
                 source: entry.dir.display().to_string(),
             })
             .collect();
