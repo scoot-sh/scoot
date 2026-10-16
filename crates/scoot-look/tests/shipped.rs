@@ -1,5 +1,5 @@
 //! The five shipped looks under `looks/`: each validates as a shipped look
-//! and renders both first-party fragments.
+//! and renders the first-party fragments plus the greeter's.
 //!
 //! The gate behind the theming page's "a check renders every look into
 //! every target and fails on a missing role": CI runs this on every change
@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use scoot_look::{
-    Origin, RenderInputs, check_contrast, parse_kv_config, render_bar, render_fuzzel, render_scoot,
-    render_swaylock, resolve,
+    Origin, RenderInputs, check_contrast, parse_kv_config, render_bar, render_fuzzel, render_greet,
+    render_scoot, render_swaylock, resolve,
 };
 
 /// Every directory under `looks/` with a `look.toml`.
@@ -268,6 +268,32 @@ fn every_shipped_look_validates_and_renders() {
                 .is_some_and(|ring| ring.eq_ignore_ascii_case(&focus)),
             "{name}: swaylock ring is the focus ring: {:?}",
             global.get("ring-color")
+        );
+        // The greeter fragment renders for every shipped look too: all
+        // thirteen shell-app roles, the UI sans, opaque, with the look's
+        // radius. scootgreet reads it at system build time, never live.
+        let greet = render_greet(&look)
+            .unwrap_or_else(|e| panic!("{name}: greet.toml does not render: {e}"));
+        let greet: toml::Value =
+            toml::from_str(&greet).unwrap_or_else(|e| panic!("{name}: greet.toml reparse: {e}"));
+        let colors = greet
+            .get("colors")
+            .and_then(|colors| colors.as_table())
+            .unwrap_or_else(|| panic!("{name}: greet.toml has no [colors]"));
+        assert_eq!(
+            colors.len(),
+            13,
+            "{name}: greet.toml carries the thirteen shell-app roles"
+        );
+        assert_eq!(
+            greet.get("opacity").and_then(|opacity| opacity.as_float()),
+            Some(1.0),
+            "{name}: the login screen stays opaque"
+        );
+        assert_eq!(
+            greet.get("font").and_then(|font| font.as_str()),
+            Some(look.fonts.sans.as_str()),
+            "{name}: the greeter reads the UI sans"
         );
     }
 }

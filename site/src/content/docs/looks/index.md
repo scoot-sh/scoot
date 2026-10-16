@@ -123,6 +123,7 @@ wrong.
 | Launcher, picker and lock colors (`fuzzel.ini`, `swaylock`) | Next launch of each app |
 | Running terminals | Keep their palette; new terminals use the look's |
 | Cursor size in already-running apps | Next launch |
+| Login screen (`greet.toml`, ReGreet CSS) | System build time, never live |
 
 A swap never applies pending edits to your own files: the reloads are
 scoped to the look layer, under a snapshot of your files from their last
@@ -169,7 +170,9 @@ in the cache (`$XDG_CACHE_HOME/scoot/rendered/<name>-<hash>/`), pruned to
 the active, the previous and the four most recent. An unwritable state dir
 refuses loudly. The rendered look holds `fuzzel.ini` and `swaylock`
 beside the first-party fragments: layer them over your own configs and
-the next launch picks the look up, no Nix involved.
+the next launch picks the look up, no Nix involved. It also holds
+`greet.toml` for the login screen, read at system build time only: a
+swap never touches it.
 
 Your own configs stay the base. Neither file is ever passed to its app
 as the whole config: fuzzel's `--config` and swaylock's `-C` each read

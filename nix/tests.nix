@@ -4627,6 +4627,50 @@ let
     look = null;
     greeter.enable = true;
   } greeterUser;
+  # ...pinned to another look than the session default: the login
+  # screen follows `greeter.look`, never `look`.
+  osThemeGreeterExplicit = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    look = "moonrise";
+    greeter.enable = true;
+    greeter.look = "ginger-night";
+  } greeterUser;
+  # ...a custom catalog look outside the registry: polarity, sans,
+  # backdrop and CSS all read from its manifest down the `extends`
+  # chain (light through no local table, DejaVu Sans through
+  # ginger-night, no backdrop from a color wallpaper, its own CSS
+  # leaf).
+  osThemeGreeterCustom = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    looks = [
+      "moonrise"
+      "ginger-night"
+      ./test-looks/greeter-oak
+    ];
+    look = "moonrise";
+    greeter.enable = true;
+    greeter.look = "greeter-oak";
+  } greeterUser;
+  # ...an unknown greeter look: refused, naming the catalog.
+  osThemeGreeterBadLook = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    look = "moonrise";
+    greeter.enable = true;
+    greeter.look = "nosuchlook";
+  } greeterUser;
+  # ...a greeter look without the profile: refused.
+  osThemeGreeterNoEnable = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    greeter.enable = true;
+    greeter.look = "moonrise";
+  } greeterUser;
 
   # --- audio system evaluations ---
   osAudio = evalNixos {
@@ -11918,6 +11962,123 @@ let
     )
     (
       assert osThemeGreeterNoLook.config.programs.scoot.greeter.background == null;
+      true
+    )
+    # ...the greeter's look defaults to the declared look...
+    (
+      assert osThemeGreeterMoon.config.programs.scoot.greeter.look == "moonrise";
+      true
+    )
+    # ...an explicit greeter look pins the login screen while the
+    # session default stays elsewhere: ginger's sheet and backdrop, not
+    # moonrise's (read the sheet: ginger's near-black, never moonrise's
+    # slate)...
+    (
+      assert allAssertionsHold osThemeGreeterExplicit.config;
+      true
+    )
+    (
+      assert osThemeGreeterExplicit.config.programs.scoot.greeter.look == "ginger-night";
+      true
+    )
+    (
+      assert lib.hasInfix "#0E0E0E" (
+        builtins.readFile osThemeGreeterExplicit.config.services.displayManager.regreet.extraCss
+      );
+      true
+    )
+    (
+      assert
+        !(lib.hasInfix "#2B3648" (
+          builtins.readFile osThemeGreeterExplicit.config.services.displayManager.regreet.extraCss
+        ));
+      true
+    )
+    (
+      assert lib.hasSuffix "wallpaper.png" (
+        toString osThemeGreeterExplicit.config.programs.scoot.greeter.background
+      );
+      true
+    )
+    (
+      assert
+        !(lib.hasSuffix "moonrise.png" (
+          toString osThemeGreeterExplicit.config.programs.scoot.greeter.background
+        ));
+      true
+    )
+    # ...and the session default never leaks into it: the explicit
+    # login screen equals the ginger-default one, file for file. A live
+    # swap repoints only the session's own state, so this equality is
+    # what keeps it from ever reaching the greeter.
+    (
+      assert
+        osThemeGreeterExplicit.config.services.displayManager.regreet.extraCss
+        == osThemeGreeterGinger.config.services.displayManager.regreet.extraCss;
+      true
+    )
+    (
+      assert
+        osThemeGreeterExplicit.config.programs.scoot.greeter.background
+        == osThemeGreeterGinger.config.programs.scoot.greeter.background;
+      true
+    )
+    # ...a custom catalog look themes from its manifest: light, its own
+    # CSS leaf, no backdrop (a color wallpaper pairs nothing)...
+    (
+      assert allAssertionsHold osThemeGreeterCustom.config;
+      true
+    )
+    (
+      assert osThemeGreeterCustom.config.programs.scoot.greeter.look == "greeter-oak";
+      true
+    )
+    (
+      assert
+        osThemeGreeterCustom.config.services.displayManager.regreet.settings.GTK.application_prefer_dark_theme
+        == false;
+      true
+    )
+    (
+      assert osThemeGreeterCustom.config.services.displayManager.regreet.font.name == "DejaVu Sans";
+      true
+    )
+    (
+      assert osThemeGreeterCustom.config.programs.scoot.greeter.background == null;
+      true
+    )
+    (
+      assert lib.hasSuffix "apps/regreet.css" (
+        toString osThemeGreeterCustom.config.services.displayManager.regreet.extraCss
+      );
+      true
+    )
+    (
+      assert lib.hasInfix "#B0722A" (
+        builtins.readFile osThemeGreeterCustom.config.services.displayManager.regreet.extraCss
+      );
+      true
+    )
+    # ...an unknown greeter look fails, naming the catalog...
+    (
+      assert builtins.length (failing osThemeGreeterBadLook.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "programs.scoot.greeter.look is" (
+        builtins.head (failing osThemeGreeterBadLook.config)
+      );
+      true
+    )
+    # ...and a greeter look without the profile fails too.
+    (
+      assert builtins.length (failing osThemeGreeterNoEnable.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "programs.scoot.greeter.look needs" (
+        builtins.head (failing osThemeGreeterNoEnable.config)
+      );
       true
     )
   ];

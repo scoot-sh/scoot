@@ -2233,6 +2233,14 @@ the greeter stays an explicit opt-in on top of the profile. Logging in
 through it starts the same session [First session](../start/first-session.md)
 describes.
 
+**The login screen follows its own look.**
+`programs.scoot.greeter.look` names the login screen's look: one entry
+of `programs.scoot.looks`, defaulting to the declared `look`. Set it to
+pin the login screen while the session starts elsewhere. It resolves at
+system build time into the `greet.toml` fragment and ReGreet's CSS — a
+live swap repoints only the session's own state and never reaches the
+login screen.
+
 Writing your own ReGreet CSS instead of using a look's? Scope card
 rules to `frame.background`, never bare `frame` — see
 [Theming](../scoot/theming.md#what-stays-a-static-file-and-why).
