@@ -64,5 +64,14 @@ The design this implements against: [live looks](../../../dev/research/live-look
   `site/src/content/docs/looks/index.md` (picker paragraph),
   `scootbar daemon --help` (`Looks` section, gated on the feature).
 
-Evidence: [to be filled: unit/integration counts, live pick, idle cost].
-PR: [to be filled].
+Evidence: unit tests through the harness (bar text follows the record,
+one page with the active selected, paging past the widget cap, rows
+stage `scoot look apply` for the snapshot's name, rows and pages past
+the snapshot refused); `crates/scootbar/tests/look_picker.rs` against a
+live headless session (an outside apply moves the bar text; opening the
+picker then `invoke looks "apply 0"` runs a real apply that swaps the
+desktop and moves the bar text); a manual live pick on the dev VM
+(center background pixel #2B3648 to #3B4A5C, bar text `no look` to
+`pick-b`, `scoot look current` agreeing); idle 0 wakeups in 15 s with
+and without the module placed, 7 fds both.
+PR: #637.
