@@ -849,42 +849,47 @@ feature (`looks`), on by default.
 ```toml
 [looks]
 on-click = "popup"
+icon = "★"
 ```
 
 - **What it shows** is the recorded look's name (`no look` with nothing
-  applied yet), with an optional icon before it (`icon`, plus
-  `icon-path`, `icon-viewbox` and `icon-image`, at most one, as the
-  clock's). The tooltip names the active look. The text is read fresh on
-  every view, so a swap from anywhere — this picker, `scoot look apply`,
-  a keybinding, an agent — shows here.
+  applied yet), with an optional icon before it. The tooltip names the
+  active look. The text is read fresh on every view, so a swap from
+  anywhere — this picker, `scoot look apply`, a keybinding, an agent —
+  shows here.
 - **The picker** is one row per look in catalog order, the active one
-  selected. Where `[looks]` sets a glyph `icon`, the active row carries
-  it before its name, as the power menu's rows do. A catalog past 14
-  rows pages, with `‹ prev` and `next ›`
-  rows. A click opens it with no binding at all; `on-click = "popup"`
-  opens it as a binding would. Nothing with an empty catalog, which also
-  closes an open picker.
+  marked with `●` before its name (or the configured glyph `icon`, as
+  the power menu's rows do). A catalog past 14 rows pages, with `‹ prev`
+  and `next ›` rows. A click opens it with no binding at all;
+  `on-click = "popup"` opens it as a binding would. Nothing with an
+  empty catalog, which also closes an open picker.
 - **A row click runs `scoot look apply`** for that look and closes the
-  picker, so the swap's reload finds no popup open. It is the same
-  machinery as the CLI: the look is rendered, validated, recorded and
-  repointed, then every app's look layer is reloaded in order, rolling
-  back on a refusal. A swap from elsewhere restyles an open picker to
-  the new style, and its next refill marks the new active look.
+  picker, so the swap's reload finds no popup open. A swap from elsewhere
+  restyles an open picker to the new style, and its next refill marks the
+  new active look.
 - **An agent's `invoke` names rows by position** (`scootbar msg invoke
   looks "apply 0"` applies the picker's first row; `page 1` turns to
   page 1). A row past what the picker showed is refused, never applied
-  by position from a changed catalog.
+  by position from a changed catalog. With no `scoot` on PATH the apply
+  is refused too: start the bar with `scoot` beside it.
 - **`query`** reports the active look, the picker's page, and the names
   the picker last showed on it: `{"active": "moonrise", "page": 0,
   "pages": 1, "looks": ["ginger-night", "moonrise"]}`.
-- **Options.** `[looks]` takes `icon` (plus `icon-path`,
-  `icon-viewbox` and `icon-image`, at most one, as the clock's),
-  `margin` and the five [interaction
-  keys](./modules.md#pointer-input).
-- **Idle cost: nothing.** The module holds no fd and no timer, and reads
-  the state only for its view and its popup (cold paths, never per
-  frame): the record for the name, the catalog for the rows, each read
-  capped, nonblocking and regular files only.
+
+> **Symptom:** the picker opens with no looks, or every `apply` is
+> refused. The catalog is empty: no `looks/` directory where the bar
+> looks (`SCOOT_LOOKS_DIR` first, then the installed, home-manager,
+> system and shipped catalogs). An `apply` refused naming `scoot` means
+> the bar started without `scoot` on PATH: fix PATH and restart it.
+
+| Key | Takes | Default | Reload |
+| --- | --- | --- | --- |
+| `icon` | exactly one character: a glyph from a symbol font in the [font chain](./configure.md#fallback-fonts-and-icons) | the bar text shows no icon; the picker's active row shows `●` | full: restarts the module |
+| `icon-path` | SVG path data, as [Icons](./modules.md#icons) | none | full: restarts the module |
+| `icon-viewbox` | `"min-x min-y width height"`, only with `icon-path` | `"0 0 24 24"` | full: restarts the module |
+| `icon-image` | an absolute path to a PNG file (a build with `--features icon-image`) | none | full: restarts the module |
+| `margin` | whole logical pixels on each side, 0 to 1024 | 0 | style: repaints without restarting the module |
+| `on-click`, `on-right-click`, `on-middle-click`, `on-scroll-up`, `on-scroll-down` | one action each, as [pointer input](./modules.md#pointer-input) | a bare click opens the picker; the rest do nothing | full: restarts the module |
 
 ## Pointer input
 

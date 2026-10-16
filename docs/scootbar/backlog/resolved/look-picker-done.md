@@ -47,21 +47,23 @@ The design this implements against: [live looks](../../../dev/research/live-look
   feature `looks`, on by default): the bar text is the recorded look's
   name read fresh on every view (`no look` with nothing applied yet), a
   click opens the picker, and the picker lists the catalog in search
-  order with the active look selected, paged at 14 rows with `‹ prev`
+  order with the active look marked, paged at 14 rows with `‹ prev`
   and `next ›` rows inside the 16-widget cap. A row stages
   `scoot look apply NAME` for the bar to spawn and closes the picker;
   `apply N` names the picker's Nth shown row (a row past the snapshot is
-  refused), `page N` turns the page. No fd, no timer: placing it costs
-  no wakeups. The active row carries the module's glyph `icon` before
-  its name where one is set, as the power menu's row glyphs do; without
-  one the accent selection alone marks it.
+  refused, as is an apply with no `scoot` on PATH), `page N` turns the
+  page. No fd, no timer: placing it costs
+  no wakeups. The active row carries `●` before
+  its name, or the module's glyph `icon` where one is set, as the power
+  menu's row glyphs do.
 - One catalog implementation: `crates/scootctl/src/look/catalog.rs` moved
   to `crates/scoot-look/src/catalog.rs`, used by `scoot look list` and
   the picker alike.
-- Launcher list: `resources/scoot-look-pick` (`list` names in catalog
-  order, `menu` stdin through `fuzzel --dmenu`, `pick` applies the
-  choice; a cancel applies nothing), documented on the looks page for
-  Nix and non-Nix use.
+- Keyboard pick: `scoot look pick` chooses through `fuzzel --dmenu` and
+  applies through the same transaction a named apply uses (a cancel
+  applies nothing; a missing or broken fuzzel fails loudly);
+  `scoot look list --names` prints one name per line, for scripting.
+  Both documented on the looks page for Nix and non-Nix use.
 - Docs: `site/src/content/docs/scootbar/modules.md` (`## Looks`),
   `site/src/content/docs/looks/index.md` (picker paragraph),
   `scootbar daemon --help` (`Looks` section, gated on the feature).

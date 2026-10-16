@@ -51,7 +51,7 @@ apply --keep` keeps the preview (and cancels the timer); `apply NAME
 `list` shows the catalog in search order: your own looks, installed
 looks, home-manager looks, system looks, then the shipped ones. A name
 that exists twice resolves to the earliest; `list` marks the later one
-shadowed.
+shadowed. `list --names` prints one name per line, for scripting.
 
 `apply NAME` renders the look, validates it, records the choice, repoints
 the state link, reloads each running app's look layer in order (the
@@ -63,18 +63,20 @@ Nerd Fonts installed; without them `apply` refuses and changes nothing.
 
 Two pickers drive the same command. The bar's `looks` module shows the
 active look's name and opens the catalog as a popup — one row per look,
-the active one selected, a long catalog paged — where a row click runs
-`apply` for that look ([modules](../scootbar/modules.md#looks)). From the
-keyboard, `scoot-look-pick` lists the catalog through fuzzel until
-scootlaunch lands:
+the active one marked with `●`, a long catalog paged — where a row click
+runs `apply` for that look ([modules](../scootbar/modules.md#looks)). From the
+keyboard, `scoot look pick` chooses a look through fuzzel and applies it,
+until scootlaunch lands:
 
 ```sh
-scoot-look-pick pick            # choose a look in fuzzel, apply it
-scoot-look-pick list            # names in catalog order, for scripting
+scoot look pick                 # choose a look in fuzzel, apply it
+scoot look list --names         # names in catalog order, for scripting
 ```
 
-Both need only `scoot` on PATH: no Nix, no running session. A cancel
-applies nothing.
+`pick` needs a Wayland display plus `scoot` and `fuzzel` on PATH;
+`list` needs only `scoot`. No Nix, no running session either way. A
+cancel applies nothing; a missing display, a missing or broken fuzzel
+fails loudly instead of applying.
 
 A swap reports three lists: what reloaded, what was skipped, and every
 shadowed key — a key in your own files that overrides a look token. A
