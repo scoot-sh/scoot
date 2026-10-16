@@ -160,7 +160,7 @@ impl Rig {
         fs::write(&file, bar_toml()).unwrap();
         let mut path = stub_dir.into_os_string();
         path.push(":");
-        path.push(&bin_dir.into_os_string());
+        path.push(bin_dir.into_os_string());
         path.push(":");
         path.push(std::env::var_os("PATH").unwrap_or_default());
         let path = path.into_string().unwrap();
