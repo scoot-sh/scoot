@@ -119,6 +119,12 @@ else
     for f in "$ROOT"/docs/examples/*/regreet.css; do
         check_one "$f" "css"
     done
+    # Test-look ReGreet leaves: a fixture that themes the login screen in
+    # the Nix checks must obey the same scoping.
+    for f in "$ROOT"/nix/test-looks/*/apps/regreet.css; do
+        [ -e "$f" ] || continue
+        check_one "$f" "css"
+    done
     # Every docs page, nested sections included: a page this never scans
     # is a page whose CSS example can rot into the blank-card bug.
     # shellcheck disable=SC2044
