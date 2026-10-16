@@ -10,11 +10,8 @@ let
   cfg = config.programs.scoot;
 
   # The desktop profile's shared option subtree (the look palettes stay
-  # where they are applied: the home-manager side and the bar module),
-  # plus the one helper that reads look-derived values.
+  # where they are applied: the home-manager side and the bar module).
   desktop = import ./desktop.nix { inherit lib; };
-  themeLook = import ./theme-look.nix { inherit lib; };
-  lookNix = themeLook.lookFor cfg;
 
   # The system side of the look catalog (design section 6.2): the same
   # builder the home-manager side uses, over the same `looks`. Null
@@ -30,6 +27,109 @@ let
         null;
   };
   lookCatalog = lookCatalogLib.mkCatalog cfg.looks;
+
+  # The greeter's look (ticket `look-greeter`): `greeter.look`,
+  # defaulting to the declared `look` (set beside the options below)
+  # and resolved at system build time only — a live swap never touches
+  # it. The registry entry when the name is a shipped look, else the
+  # catalog entry: a custom catalog look themes the login screen from
+  # its manifest (polarity, sans, wallpaper, `apps/regreet.css`), so the
+  # eval-time leaves stay out of no look's way.
+  greeterRegistry =
+    if cfg.greeter.look == null then null else desktop.looks.${cfg.greeter.look} or null;
+  greeterEntry = lib.findFirst (entry: entry.name == cfg.greeter.look) null lookCatalog.entries;
+
+  # The first catalog entry down the `extends` chain whose `get` of
+  # the entry reads non-null (the child wins, mirroring `resolve`):
+  # null without an entry, past an unknown base, a cycle, or depth 8.
+  # The build (`scoot-look build --catalog`) refuses those loudly, so
+  # this never silently themes the wrong login screen.
+  greeterChainEntry =
+    get:
+    let
+      walk =
+        current: depth:
+        let
+          entry = lib.findFirst (e: e.name == current) null lookCatalog.entries;
+          value = if entry == null then null else get entry;
+        in
+        if value != null then
+          entry
+        else if entry == null || depth >= 8 then
+          null
+        else
+          let
+            base = entry.manifest.extends or null;
+          in
+          if base == null then null else walk base (depth + 1);
+    in
+    if cfg.greeter.look == null then null else walk cfg.greeter.look 0;
+
+  # Whether the greeter themes at all: a shipped look, or a catalog
+  # entry (whose manifest carries what the registry would have).
+  greeterThemed = greeterRegistry != null || greeterEntry != null;
+
+  # The greeter backdrop pairs the session wallpaper behind the login
+  # card: the registry image for a shipped look (the same file the
+  # session themes from — a license-barred look pairs nothing), else the
+  # catalog entry's image file. Null for a color-only, URL, or missing
+  # image: ReGreet then keeps its own background. The greeter never
+  # fetches: a URL wallpaper resolves at the first session swap, which
+  # the login screen cannot run.
+  greeterBackdrop =
+    if greeterRegistry != null then
+      (if greeterRegistry.wallpaper == null then null else greeterRegistry.wallpaper.image)
+    else
+      let
+        hit = greeterChainEntry (entry: entry.manifest.wallpaper or null);
+        image = if hit == null then null else hit.manifest.wallpaper.image or null;
+      in
+      if image == null || lib.hasPrefix "https://" image then
+        null
+      else
+        let
+          file = hit.src + "/${image}";
+        in
+        if builtins.pathExists file then file else null;
+
+  # The dark/light half of the greeter's look (what the session's GTK
+  # apps follow through `settings.ini`). Polarity is required after
+  # `extends` resolution (an unresolvable look fails its build), so the
+  # dark fallback below never fires for a look that builds.
+  greeterIsDark =
+    if greeterRegistry != null then
+      greeterRegistry.isDark
+    else
+      let
+        hit = greeterChainEntry (entry: entry.manifest.polarity or null);
+      in
+      if hit == null then true else hit.manifest.polarity == "dark";
+
+  # The greeter's proportional sans: the registry face for a shipped
+  # look, else the manifest's down the chain (DejaVu Sans when no entry
+  # names one — the face the profile already ships, so zero closure).
+  greeterSans =
+    if greeterRegistry != null then
+      greeterRegistry.fonts.sans
+    else
+      let
+        hit = greeterChainEntry (entry: (entry.manifest.fonts or { }).sans or null);
+      in
+      if hit == null then "DejaVu Sans" else hit.manifest.fonts.sans;
+
+  # The look's ReGreet CSS: the shipped sheet for a shipped look, else
+  # the first `apps/regreet.css` leaf down the `extends` chain (the
+  # child wins, like the backdrop, the dark setting and the sans
+  # above). Null leaves ReGreet's own CSS alone.
+  greeterCss =
+    if greeterRegistry != null then
+      greeterRegistry.appFiles.regreetCss
+    else
+      let
+        leafOf = entry: entry.src + "/apps/regreet.css";
+        hit = greeterChainEntry (entry: if builtins.pathExists (leafOf entry) then leafOf entry else null);
+      in
+      if hit == null then null else leafOf hit;
 
   # The login-screen entry. Built as a package exposing
   # `share/wayland-sessions/scoot.desktop` with `providedSessions`,
@@ -1106,6 +1206,33 @@ in
           (`background.path` in its config). Null leaves it alone (and
           is required under Stylix with its regreet target, which sets
           the background from `stylix.image` itself).
+        '';
+      };
+
+      # The login screen's look: null (the default) follows the declared
+      # `programs.scoot.look`, so the greeter wears the session default;
+      # an explicit null themes nothing (an unthemed login screen). Set
+      # it to pin the login screen to another catalog look while the
+      # session starts elsewhere. Resolved at system build time into
+      # ReGreet's CSS, backdrop, dark setting and sans (a custom catalog
+      # look themes from its manifest down the `extends` chain): a live
+      # swap never touches it (it only repoints the session's own
+      # state). The look also renders a `greet.toml` fragment, which
+      # nothing reads yet (for the future scootgreet). Later, not here:
+      # a non-Nix `sudo scoot look apply --greeter`.
+      look = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        defaultText = lib.literalMD ''
+          the declared `programs.scoot.look`
+        '';
+        example = "moonrise";
+        description = ''
+          One name from `programs.scoot.looks`: the login screen's look.
+          Null follows the declared default look (an explicit null
+          themes nothing). An unknown name fails evaluation. Takes
+          effect on rebuild: a live swap never reaches the login
+          screen.
         '';
       };
     };
@@ -2338,6 +2465,33 @@ in
         }
       ];
     })
+    # The greeter's look defaults to the declared look (a value the user
+    # sets wins over this default, including an explicit null for an
+    # unthemed login screen). Unconditional, so the default reads the
+    # same with the greeter on or off.
+    {
+      programs.scoot.greeter.look = lib.mkDefault cfg.look;
+    }
+    # A greeter look without the profile is a silent no-op; refuse it
+    # loudly instead. An unknown greeter look fails here too, against
+    # the catalog — never a half-themed login screen.
+    (lib.mkIf (cfg.greeter.look != null) {
+      assertions = [
+        {
+          assertion = cfg.desktop.enable;
+          message = ''
+            programs.scoot.greeter.look needs programs.scoot.desktop.enable:
+            the login screen's look is applied by the profile, so the profile must be on.
+          '';
+        }
+        {
+          assertion = builtins.elem cfg.greeter.look lookCatalog.names;
+          message = ''
+            programs.scoot.greeter.look is `${cfg.greeter.look}`, which is not in programs.scoot.looks (${lib.concatStringsSep ", " lookCatalog.names}).
+          '';
+        }
+      ];
+    })
     # The system catalog for the NixOS-module-only path (no
     # home-manager): one package carrying the sources and the renders
     # under `share/scoot/`, so they land at
@@ -2544,18 +2698,21 @@ in
     # The look on the login screen (the `desktop-theme-look` child):
     # backdrop pairing, the dark/light GTK setting, the look's CSS
     # and font, each at plain `mkDefault` so an explicit value still
-    # wins. Off with no look behind the profile, or while
+    # wins. Off with no look behind the greeter, or while
     # `theme.targets.greeter` opts out. A look without a shippable
     # backdrop (`vinyl-sunset`, license-barred from being committed)
-    # leaves the backdrop alone. No extra daemons: ReGreet reads its
-    # config and CSS at startup, and the packages below put the
-    # font, icons and cursor on the system lookup paths its session
-    # reads.
+    # leaves the backdrop alone; a custom catalog look without its own
+    # `apps/regreet.css` leaf leaves ReGreet's own CSS alone. No extra
+    # daemons: ReGreet reads its config and CSS at startup, and the
+    # packages below put the font, icons and cursor on the system
+    # lookup paths its session reads. Every input is a build-time path:
+    # a live swap repoints only the session's own state, so it can never
+    # reach the login screen.
     (lib.mkIf
       (
         cfg.greeter.enable
         && cfg.desktop.enable
-        && lookNix != null
+        && greeterThemed
         && (cfg.desktop.theme.targets.greeter.enable or true)
       )
       {
@@ -2563,7 +2720,7 @@ in
           {
             assertion = cfg.desktop.theme.fonts.sansPackage != null;
             message = ''
-              programs.scoot.look needs a greeter font but
+              programs.scoot.greeter.look needs a greeter font but
               programs.scoot.desktop.theme.fonts.sansPackage is null: set
               it explicitly (apply the overlay, or point at the look's
               UI sans).
@@ -2575,20 +2732,21 @@ in
         # card (null keeps ReGreet's own background, which is also
         # what a license-barred look does). An explicit `background`
         # wins over this default.
-        programs.scoot.greeter.background = lib.mkIf (lookNix.wallpaper != null) (
-          lib.mkDefault lookNix.wallpaper.image
+        programs.scoot.greeter.background = lib.mkIf (greeterBackdrop != null) (
+          lib.mkDefault greeterBackdrop
         );
 
         services.displayManager.regreet = {
           # The dark/light half of the look (what the session's GTK
           # apps follow through `settings.ini`).
-          settings.GTK.application_prefer_dark_theme = lib.mkDefault lookNix.isDark;
+          settings.GTK.application_prefer_dark_theme = lib.mkDefault greeterIsDark;
           # The look's CSS and proportional sans (12 pt, the measured
-          # greeter size). An explicit `extraCss`/`font` wins over these.
-          extraCss = lib.mkDefault lookNix.appFiles.regreetCss;
+          # greeter size). An explicit `extraCss`/`font` wins over these;
+          # no sheet means ReGreet stands on its own CSS.
+          extraCss = lib.mkIf (greeterCss != null) (lib.mkDefault greeterCss);
           font = lib.mkDefault {
             package = cfg.desktop.theme.fonts.sansPackage;
-            name = lookNix.fonts.sans;
+            name = greeterSans;
             size = 12;
           };
         };

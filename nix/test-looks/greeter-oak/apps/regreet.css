@@ -1,0 +1,27 @@
+/* The "greeter-oak" test look for ReGreet: oak paper and bark.
+ * A custom look's own `apps/regreet.css` leaf, read at system build
+ * time when the greeter's look is a catalog look outside the shipped
+ * registry. Card rules scope to `frame.background`, not bare `frame`:
+ * ReGreet's empty notification bar carries no `background` class, and a
+ * bare `frame` rule would ink it into a blank card (GTK CSS has no
+ * `:empty`). See `scripts/check-regreet-css-scope.sh`.
+ */
+window {
+  font-family: "DejaVu Sans";
+}
+frame.background {
+  background-color: alpha(#F2EAD8, 0.9);
+  border-radius: 12px;
+  padding: 20px 26px;
+  color: #2A2118;
+}
+frame.background > border {
+  border: none;
+}
+button.suggested-action {
+  background: #B0722A;
+  border: none;
+}
+button.suggested-action label {
+  color: #F2EAD8;
+}

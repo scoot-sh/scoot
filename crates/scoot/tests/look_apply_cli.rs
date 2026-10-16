@@ -494,6 +494,7 @@ fn offline_commands_list_show_validate_and_build() {
         "bar.toml",
         "fuzzel.ini",
         "swaylock",
+        "greet.toml",
         "render.json",
     ] {
         assert!(out.join(file).is_file(), "build writes {file}");
@@ -571,12 +572,14 @@ fn a_swap_applies_two_looks_through_the_scoped_reload() {
         link.display()
     );
     // The swap renders the next-launch leaves too: the launcher and the
-    // locker read them at their next start.
+    // locker read them at their next start, and the login screen reads
+    // its fragment at system build time.
     for file in [
         "scoot.toml",
         "bar.toml",
         "fuzzel.ini",
         "swaylock",
+        "greet.toml",
         "render.json",
     ] {
         assert!(link.join(file).is_file(), "a swap renders {file}");

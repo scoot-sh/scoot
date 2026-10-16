@@ -41,7 +41,9 @@
 //!    [`render_foot`](render::render_foot) and
 //!    [`render_fontconfig`](render::render_fontconfig) emit the
 //!    first-party, toolkit and foot fragments from the resolved look
-//!    plus [`RenderInputs`](render::RenderInputs), and
+//!    plus [`RenderInputs`](render::RenderInputs), [`render_greet`](render::render_greet)
+//!    emits the login-screen fragment scootgreet reads at system build
+//!    time (never live), and
 //!    [`leaves`] renders the third-party daemon leaves (mako, wob, the
 //!    fcitx5 classic UI theme, the night light).
 //!
@@ -89,7 +91,7 @@ pub use leaves::{
 pub use render::{
     BAR_RADIUS_LIMIT, RenderInputs, font_desc, gtk_theme_name, parse_kv_config, qt_argb,
     qt_argb_soft, qt_style_name, render_bar, render_fontconfig, render_foot, render_fuzzel,
-    render_gtk_ini, render_gtk3_css, render_gtk4_css, render_json, render_qt_scheme,
+    render_greet, render_gtk_ini, render_gtk3_css, render_gtk4_css, render_json, render_qt_scheme,
     render_qt6ct_conf, render_scoot, render_swaylock, source_hash,
 };
 pub use resolve::resolve;

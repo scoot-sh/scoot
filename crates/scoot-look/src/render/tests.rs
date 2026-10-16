@@ -859,3 +859,95 @@ fn leaf_values_never_span_lines() {
     look.palette.border = "border".to_string();
     assert!(render_swaylock(&look).is_err());
 }
+
+#[test]
+fn greet_fragment_carries_the_shell_contract() {
+    // Design section 9: the login-screen fragment holds all thirteen
+    // color roles, the UI sans at its app size, opaque, with the look's
+    // radius. The minimal look's defaults resolve surface to the
+    // background, hover/focus/selection to the accent, border to dim,
+    // and accent-fg/selection-text to the background.
+    let frag = render_greet(&moonrise()).expect("renders");
+    for line in [
+        "background = \"#2B3648\"",
+        "foreground = \"#F6EEDC\"",
+        "dim = \"#9C8B95\"",
+        "accent = \"#FFA45C\"",
+        "urgent = \"#E87F6A\"",
+        "surface = \"#2B3648\"",
+        "hover = \"#FFA45C\"",
+        "focus = \"#FFA45C\"",
+        "border = \"#9C8B95\"",
+        "accent-fg = \"#2B3648\"",
+        "selection = \"#FFA45C\"",
+        "selection-text = \"#2B3648\"",
+        "match = \"#FFA45C\"",
+        "font = \"DejaVu Sans\"",
+        "font-size = 16",
+        "opacity = 1.0",
+        "radius = 14",
+    ] {
+        assert!(frag.contains(line), "missing {line}:\n{frag}");
+    }
+    // One `[colors]`, and the scalar keys stay top-level (before it):
+    // keys after a table would land in that table.
+    assert_eq!(frag.matches("[colors]").count(), 1, "colors table:\n{frag}");
+    let colors_at = frag.find("[colors]").expect("a colors table");
+    for key in ["font =", "font-size =", "opacity =", "radius ="] {
+        let at = frag.find(key).expect("a scalar key");
+        assert!(at < colors_at, "{key} lands under [colors]:\n{frag}");
+    }
+    let parsed: toml::Table = toml::from_str(&frag).expect("greet fragment reparses");
+    assert_eq!(parsed["colors"].as_table().expect("colors").len(), 13);
+    assert_eq!(parsed["font"].as_str(), Some("DejaVu Sans"));
+}
+
+#[test]
+fn greet_fragment_stays_opaque() {
+    // Design section 9: `opacity.popups` reaches scootnotify and
+    // scootlaunch, never the greeter. A look translucent elsewhere
+    // still renders an opaque login screen.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[shape]",
+        "[opacity]\nbar = 0.5\npopups = 0.5\nterminal = 0.5\n[shape]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let frag = render_greet(&look).expect("renders");
+    assert!(
+        frag.contains("opacity = 1.0"),
+        "greeter follows popups opacity:\n{frag}"
+    );
+}
+
+#[test]
+fn greet_overrides_merge() {
+    // `[apps.scootgreet]` roles replace the derived ones and dotless
+    // keys replace the top-level values, each emitted once.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[apps.scootgreet]\n\"colors.accent\" = \"#000000\"\n\"radius\" = 3\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let frag = render_greet(&look).expect("renders");
+    assert_eq!(
+        frag.matches("[colors]").count(),
+        1,
+        "duplicate table:\n{frag}"
+    );
+    let parsed: toml::Table = toml::from_str(&frag).expect("greet fragment reparses");
+    assert_eq!(parsed["colors"]["accent"].as_str(), Some("#000000"));
+    assert_eq!(parsed["radius"].as_integer(), Some(3));
+    // A scoot key through the greeter renderer is refused, not misplaced.
+    let mut look = moonrise();
+    look.apps = BTreeMap::from([(
+        "scootgreet".to_string(),
+        BTreeMap::from([("binds.foo".to_string(), toml::Value::String("x".into()))]),
+    )]);
+    assert!(render_greet(&look).is_err());
+}

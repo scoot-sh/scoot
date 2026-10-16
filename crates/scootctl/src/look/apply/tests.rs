@@ -425,6 +425,7 @@ fn an_offline_apply_records_repoints_and_renders() {
         "fcitx5/theme.conf",
         "fuzzel.ini",
         "swaylock",
+        "greet.toml",
     ] {
         let text = std::fs::read_to_string(rendered.join(file)).expect("a rendered file");
         assert!(!text.is_empty(), "{file} renders");
@@ -450,6 +451,133 @@ fn an_offline_apply_records_repoints_and_renders() {
     assert!(
         cache_name.starts_with("look-a-") && cache_name.len() == "look-a-".len() + 16,
         "the cache dir carries the key: {cache_name}"
+    );
+}
+
+#[test]
+fn the_render_carries_the_greeter_fragment() {
+    // Ticket `look-greeter`: every render carries the login-screen
+    // fragment scootgreet will read at system build time (never live).
+    // The fixture look's defaults resolve surface to the background and
+    // hover/focus/selection to the accent; the app size defaults to 12
+    // pt (16 px by the bar's rule).
+    let fixture = fixture("greeter-fragment");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::not_running();
+    apply_with_live(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
+    )
+    .expect("an offline apply succeeds");
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    let greet = std::fs::read_to_string(rendered.join("greet.toml")).expect("greet.toml");
+    for line in [
+        "background = \"#2B3648\"",
+        "foreground = \"#F6EEDC\"",
+        "accent = \"#FFA45C\"",
+        "surface = \"#2B3648\"",
+        "focus = \"#FFA45C\"",
+        "font = \"DejaVu Sans\"",
+        "font-size = 16",
+        "opacity = 1.0",
+        "radius = 14",
+    ] {
+        assert!(greet.contains(line), "missing {line}:\n{greet}");
+    }
+    let parsed: toml::Table = toml::from_str(&greet).expect("greet.toml parses");
+    assert_eq!(parsed["colors"].as_table().expect("colors").len(), 13);
+}
+
+#[test]
+fn a_live_swap_never_reaches_the_greeter() {
+    // Ticket `look-greeter`: the login screen reads the greeter's look
+    // at system build time only. A swap runs entirely inside the
+    // session's own roots (state, cache, config home): the catalog
+    // sources below — the manifests and the `apps/regreet.css` leaf
+    // the greeter's build-time resolution reads — are byte-identical
+    // across two swaps, and no swap writes anything outside the roots
+    // at all. The other half of the pin is Nix-side: `nix/tests.nix`
+    // asserts the explicit-greeter evaluation equals the
+    // session-default one file for file, so with build-time inputs
+    // fixed the login screen cannot move under a live swap.
+    let fixture = fixture("greeter-isolation");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    // A ReGreet CSS leaf in one source look, shaped like the greeter's
+    // build-time CSS input (planted after discovery: the pin hashes the
+    // files on disk, which is what the build-time resolution reads).
+    let apps = fixture._root.join("looks/look-a/apps");
+    std::fs::create_dir_all(&apps).expect("an apps dir");
+    std::fs::write(
+        apps.join("regreet.css"),
+        "frame.background { color: #FFA45C; }\n",
+    )
+    .expect("a greeter CSS leaf");
+    let before_tree = tree_snapshot(&fixture._root);
+    let before_sources = dir_file_contents(&fixture._root.join("looks"));
+    let mut compositor = FakeCompositor::with_script(vec![
+        Err(ReloadError::NotRunning("no compositor answers".to_owned())),
+        Err(ReloadError::NotRunning("no compositor answers".to_owned())),
+    ]);
+    for name in ["look-a", "look-b"] {
+        apply_with_live(
+            name,
+            &options(),
+            &fixture.catalog,
+            &fixture.cache,
+            &fixture.state,
+            Some(&fixture.config),
+            &mut compositor,
+            &[],
+            &checks,
+            &FakeDconf::absent(),
+            &ScriptedLeaves::failing(),
+            &[],
+        )
+        .expect("a swap succeeds");
+    }
+    assert_eq!(record_of(&fixture.state).name, "look-b");
+    // The greeter's build-time inputs survive two swaps byte for byte.
+    assert_eq!(
+        dir_file_contents(&fixture._root.join("looks")),
+        before_sources,
+        "a live swap rewrote the greeter's build-time inputs"
+    );
+    // Nothing outside the session's own roots: the only new entries
+    // are under the cache, the state dir, the config home and the
+    // fonts stub. In particular the catalog sources (`looks/`, the
+    // build-time inputs the greeter also reads) gain nothing: a live
+    // swap writes no build-time location.
+    let after = tree_snapshot(&fixture._root);
+    let fresh: Vec<&String> = after
+        .iter()
+        .filter(|rel| !before_tree.contains(rel))
+        .collect();
+    let stray: Vec<&&String> = fresh
+        .iter()
+        .filter(|rel| {
+            !rel.starts_with("cache/")
+                && !rel.starts_with("state/")
+                && !rel.starts_with("config/")
+                && !rel.starts_with("fonts/")
+        })
+        .collect();
+    assert!(
+        stray.is_empty(),
+        "a live swap wrote outside its roots: {stray:?}"
     );
 }
 
@@ -1697,6 +1825,7 @@ fn readers_racing_a_swap_see_old_or_new_never_half() {
                         "bar.toml",
                         "fuzzel.ini",
                         "swaylock",
+                        "greet.toml",
                         "render.json",
                     ] {
                         assert!(rendered.join(file).is_file(), "half a swap: {record:?}");
@@ -2061,6 +2190,7 @@ fn validate_and_build_cover_a_directory_and_a_name() {
         "bar.toml",
         "fuzzel.ini",
         "swaylock",
+        "greet.toml",
         "render.json",
     ] {
         assert!(out.join(file).is_file(), "{file} builds");
@@ -2640,6 +2770,7 @@ fn build_into_an_empty_out_writes_five_files_and_leaves_no_litter() {
         "bar.toml",
         "fuzzel.ini",
         "swaylock",
+        "greet.toml",
         "render.json",
     ] {
         assert!(out.join(file).is_file(), "{file} renders");
@@ -2751,6 +2882,32 @@ fn tree_snapshot(root: &Path) -> Vec<String> {
     let mut out = Vec::new();
     walk(root, root, &mut out);
     out.sort();
+    out
+}
+
+/// Every file under `dir` as `(relative path, bytes)`, sorted: a
+/// byte-for-byte comparison of a build-time input tree across swaps.
+fn dir_file_contents(dir: &Path) -> Vec<(String, Vec<u8>)> {
+    fn walk(base: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) {
+        let mut entries: Vec<_> = std::fs::read_dir(dir)
+            .expect("a readable dir")
+            .filter_map(|entry| entry.ok())
+            .collect();
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            let path = entry.path();
+            if path.is_dir() && !path.is_symlink() {
+                walk(base, &path, out);
+            } else if let Ok(rel) = path.strip_prefix(base) {
+                out.push((
+                    rel.to_string_lossy().replace('\\', "/"),
+                    std::fs::read(&path).unwrap_or_default(),
+                ));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
     out
 }
 

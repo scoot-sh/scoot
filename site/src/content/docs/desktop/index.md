@@ -2233,6 +2233,33 @@ the greeter stays an explicit opt-in on top of the profile. Logging in
 through it starts the same session [First session](../start/first-session.md)
 describes.
 
+**The login screen follows its own look.**
+`programs.scoot.greeter.look` names the login screen's look: one entry
+of `programs.scoot.looks`. It resolves at system build time into
+ReGreet's CSS, backdrop, dark setting and sans — a live swap repoints
+only the session's own state and never reaches the login screen. The
+look also renders a `greet.toml` fragment, which nothing reads yet (it
+is for the future scootgreet).
+
+| Option | Type | Default | Reload | Meaning |
+|---|---|---|---|---|
+| `programs.scoot.greeter.look` | null or string | `null` (follow `programs.scoot.look`) | system rebuild | the login screen's look (e.g. `"moonrise"`); an explicit `null` themes nothing |
+
+Set it to pin the login screen while the session starts elsewhere:
+
+```nix title="configuration.nix"
+programs.scoot.desktop.enable = true;
+programs.scoot.greeter.enable = true;
+programs.scoot.look = "moonrise";
+programs.scoot.greeter.look = "ginger-night";  # or null for an unthemed login screen
+```
+
+The theming applies only with `greeter.enable` and `desktop.enable`
+both on. An unknown name fails the evaluation, naming the catalog. A
+custom catalog look themes from its manifest down the `extends` chain.
+`desktop.theme.targets.greeter.enable = false` opts the login screen
+out while the rest follows the look.
+
 Writing your own ReGreet CSS instead of using a look's? Scope card
 rules to `frame.background`, never bare `frame` — see
 [Theming](../scoot/theming.md#what-stays-a-static-file-and-why).

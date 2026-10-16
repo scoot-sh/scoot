@@ -1,9 +1,10 @@
 ---
 title: "The greeter's look: greeter.look rendered at NixOS build time"
-status: "open"
-area: "packaging"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-16"
 ---
 
 # The greeter's look: greeter.look rendered at NixOS build time
@@ -29,6 +30,19 @@ reach it.
 ## Evidence to record
 
 A greeter screenshot per shipped look on the dev VM.
+
+## Resolution (2026-10-16, PR #638)
+
+`programs.scoot.greeter.look` (null follows the declared `look`) resolves
+at system build time into ReGreet's CSS, backdrop, dark setting and sans;
+a custom catalog look themes from its manifest down the `extends` chain.
+Every render carries the `greet.toml` fragment for scootgreet (thirteen
+roles, UI sans, opaque), and a canary plus write-inventory test proves a
+live swap never reaches the login screen. The `frame.background`
+card-scope rule and the Stylix regreet assertion are kept. Screenshots
+are still owed: the dev VM was down through the session, so no greeter
+screenshot ran; the Nix-side gates (module suite, all-systems eval, both
+Linux drvPaths) are green.
 
 ## Not in this ticket
 

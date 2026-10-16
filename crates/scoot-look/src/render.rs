@@ -321,6 +321,82 @@ pub fn render_bar(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, 
     Ok(out)
 }
 
+/// Render the greeter fragment (`greet.toml`): the thirteen color roles
+/// of the shell-app contract (design section 9), the look's UI sans at
+/// its app size, opaque, with the look's radius. scootgreet reads this at
+/// system build time only, never live; ReGreet's CSS beside it stays a
+/// static leaf. Like [`render_scoot`], overrides merge into the base
+/// tables: an `[apps.scootgreet]` `colors.*` key replaces the derived
+/// role, and a dotless key (`font`, `font-size`, `opacity`, `radius`)
+/// replaces the top-level value, so each is emitted once.
+pub fn render_greet(look: &ResolvedLook) -> Result<String, GrammarError> {
+    let p = &look.palette;
+    // A hand-built `ResolvedLook` skips the name grammar, so the comment
+    // quotes rather than interpolates: a newline in the name stays one line.
+    let mut out = format!(
+        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n",
+        toml_str(&look.name)
+    );
+    let mut top: BTreeMap<String, String> = BTreeMap::new();
+    top.insert("font".to_string(), toml_str(&look.fonts.sans));
+    top.insert(
+        "font-size".to_string(),
+        pt_to_px(look.fonts.app_size).to_string(),
+    );
+    // The greeter is opaque: no translucency token reaches it (design
+    // section 9). The allowlist still holds `opacity`, so an override
+    // may set it — but the derived value is always 1.0.
+    top.insert("opacity".to_string(), "1.0".to_string());
+    top.insert("radius".to_string(), look.shape.radius.to_string());
+    let mut colors: BTreeMap<String, String> = BTreeMap::new();
+    for (key, color) in [
+        ("background", &p.background),
+        ("foreground", &p.foreground),
+        ("dim", &p.dim),
+        ("accent", &p.accent),
+        ("urgent", &p.urgent),
+        ("surface", &p.surface),
+        ("hover", &p.hover),
+        ("focus", &p.focus),
+        ("border", &p.border),
+        ("accent-fg", &p.accent_fg),
+        ("selection", &p.selection),
+        ("selection-text", &p.selection_text),
+        ("match", &p.r#match),
+    ] {
+        colors.insert(key.to_string(), toml_str(color));
+    }
+    let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    for (section, keys) in override_sections("scootgreet", &look.apps)? {
+        if section.is_empty() {
+            top.extend(keys);
+        } else if section == "colors" {
+            colors.extend(keys);
+        } else {
+            // Unreachable today: the allowlist holds only `colors.*` and
+            // the four dotless keys. Emit rather than drop, so a future
+            // key is visible instead of silently lost.
+            sections.entry(section).or_default().extend(keys);
+        }
+    }
+    // Top-level keys first: TOML reads keys before the first table as
+    // the root table, so these must precede `[colors]`.
+    for (key, value) in &top {
+        out.push_str(&format!("{} = {value}\n", toml_key(key)));
+    }
+    out.push_str("\n[colors]\n");
+    for (key, value) in &colors {
+        out.push_str(&format!("{} = {value}\n", toml_dotted(key)));
+    }
+    for (section, keys) in &sections {
+        out.push_str(&format!("\n[{}]\n", toml_key(section)));
+        for (key, value) in keys {
+            out.push_str(&format!("{} = {value}\n", toml_dotted(key)));
+        }
+    }
+    Ok(out)
+}
+
 /// The GTK theme name from the look's polarity (Adwaita ships inside
 /// GTK itself: no extra theme package, nothing invented). Matches the
 /// home-manager profile's `gtkTheme` (`nix/modules/theme-home.nix`), so a

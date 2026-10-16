@@ -1,0 +1,24 @@
+# A custom declared look for the greeter checks (`nix/tests.nix`): a
+# child of ginger-night, so the greeter's manifest walk resolves
+# `extends` through the declared set at evaluation time. Light
+# polarity with a color-only wallpaper (no greeter backdrop), and its
+# own ReGreet CSS leaf (card rules scoped to `frame.background`, never
+# bare `frame` — see `scripts/check-regreet-css-scope.sh`).
+schema = 1
+name = "greeter-oak"
+title = "Greeter Oak"
+description = "A light test look for the greeter checks."
+polarity = "light"
+extends = "ginger-night"
+license = "MIT"
+
+[palette]
+background = "#F2EAD8"
+foreground = "#2A2118"
+dim = "#8A7A63"
+accent = "#B0722A"
+urgent = "#C0392B"
+
+[wallpaper]
+color = "#F2EAD8"
+mode = "fill"
