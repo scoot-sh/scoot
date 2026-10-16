@@ -54,7 +54,7 @@ The design this implements against: [live looks](../../../dev/research/live-look
 ## Resolution (2026-10-15)
 
 Landed as `feat(scoot,scoot-ipc,scootctl): compositor IPC for looks
-(look-apply and looks)` (PR TBD): `Request::LookApply { name, for_ms }`
+(look-apply and looks)` (PR #635): `Request::LookApply { name, for_ms }`
 → `Response::LookApplied { name, applied, refused, shadowed }` and
 `Request::Looks` → `Response::Looks { looks, active, state_dir }`, with
 `PROTOCOL_VERSION` 11 → 12 for the two new reply variants (the request
