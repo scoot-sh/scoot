@@ -1220,6 +1220,7 @@ fn run_pick(look: &Look) -> Result<(), String> {
         from_compositor: false,
         preview: false,
         only_if_generation: None,
+        nix_claims: sync::read_nix_claims(),
     };
     apply_and_print(look, &choice, &options, None).map(|_| ())
 }
