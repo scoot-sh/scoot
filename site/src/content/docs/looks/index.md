@@ -303,7 +303,9 @@ wiring on every swap that carries the leaves.
   are never generated, so a hostile file could carry anything
   (starship custom commands run a shell). `apply`, `build` and
   `validate` take `--trust` to keep them, printing each kept leaf
-  first so the reply shows what was trusted.
+  first so the reply shows what was trusted. Trust lasts one apply:
+  a managed sync, cycle or revert re-renders untrusted, so the leaves
+  vanish on the next sync.
 - `build --out` writes `apps/` beside the other fragments; a rebuild
   for a look that no longer carries a leaf removes the stale file.
 
