@@ -393,3 +393,60 @@ fn the_usage_names_every_verb() {
         assert!(text.contains(flag), "--help hides `{flag}`");
     }
 }
+
+#[test]
+fn apply_trust_and_editor_opt_outs_parse() {
+    assert_eq!(
+        command(&["apply", "moonrise", "--trust"]),
+        Ok(Command::Apply {
+            name: Some("moonrise".to_owned()),
+            no_toolkit: false,
+            trust: true,
+            no_helix: false,
+            no_btop: false,
+            from_compositor: false,
+            for_secs: None,
+            keep: false,
+            only_if_generation: None,
+        })
+    );
+    assert_eq!(
+        command(&["apply", "moonrise", "--no-helix", "--no-btop"]),
+        Ok(Command::Apply {
+            name: Some("moonrise".to_owned()),
+            no_toolkit: false,
+            trust: false,
+            no_helix: true,
+            no_btop: true,
+            from_compositor: false,
+            for_secs: None,
+            keep: false,
+            only_if_generation: None,
+        })
+    );
+    assert_eq!(
+        command(&["validate", "looks/moonrise", "--trust"]),
+        Ok(Command::Validate {
+            target: "looks/moonrise".to_owned(),
+            origin: Origin::User,
+            trust: true,
+        })
+    );
+    assert_eq!(
+        command(&[
+            "build",
+            "looks/moonrise",
+            "--out",
+            "/tmp/out",
+            "--origin",
+            "installed",
+            "--trust"
+        ]),
+        Ok(Command::Build {
+            target: "looks/moonrise".to_owned(),
+            out: PathBuf::from("/tmp/out"),
+            origin: Origin::Installed,
+            trust: true,
+        })
+    );
+}
