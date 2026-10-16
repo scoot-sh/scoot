@@ -1,6 +1,10 @@
 //! Swap tests: the transaction against scripted peers. Hermetic: scratch
-//! catalogs, state dirs and caches, never the environment (except
-//! `shadowed_from_files_in`, which takes its config home explicitly).
+//! catalogs, state dirs, caches and config homes, never the environment.
+//! `apply_with` takes the config home explicitly (pinned to a tempdir in
+//! every test); the `None` fallback resolves it from the live environment
+//! for production only, and `toolkit_files_follow_the_injected_config_home`
+//! re-runs an apply in a child process under a sandboxed HOME and
+//! XDG_CONFIG_HOME to prove nothing lands outside it.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -10,7 +14,7 @@ use std::time::Duration;
 use scoot_look::state::{LINK_NAME, RecordRead, read_record};
 
 use super::{
-    ApplyOptions, Availability, BuildTarget, Checks, apply_with, build_to_out,
+    ApplyOptions, ApplyReport, Availability, BuildTarget, Checks, apply_with, build_to_out,
     shadowed_from_files_in, validate_dir, validate_entry,
 };
 use scoot_look::Origin;
@@ -259,7 +263,7 @@ impl Checks for FakeChecks {
 
 #[derive(Default)]
 struct FakeDconf {
-    live: Option<String>,
+    live: std::collections::HashMap<String, String>,
     writes: RefCell<Vec<(String, String)>>,
     missing: bool,
 }
@@ -267,7 +271,7 @@ struct FakeDconf {
 impl FakeDconf {
     fn absent() -> Self {
         Self {
-            live: None,
+            live: std::collections::HashMap::new(),
             writes: RefCell::new(Vec::new()),
             missing: true,
         }
@@ -279,8 +283,8 @@ impl Dconf for FakeDconf {
         !self.missing
     }
 
-    fn read(&self, _key: &str) -> Result<Option<String>, String> {
-        Ok(self.live.clone())
+    fn read(&self, key: &str) -> Result<Option<String>, String> {
+        Ok(self.live.get(key).cloned())
     }
 
     fn write(&self, key: &str, value: &str) -> Result<(), String> {
@@ -1298,12 +1302,38 @@ fn the_toolkit_write_lands_in_the_record() {
         &dconf,
     )
     .expect("the apply succeeds");
-    assert_eq!(dconf.writes.borrow().len(), 1);
+    assert_eq!(
+        dconf.writes.borrow().len(),
+        super::super::toolkit::TOOL_KEYS.len()
+    );
     let record = record_of(&fixture.state);
-    assert_eq!(record.color_scheme.as_deref(), Some("'prefer-dark'"));
-    // A key someone else changed since is left alone and named.
+    assert_eq!(
+        record.dconf_wrote.get("color-scheme").map(String::as_str),
+        Some("'prefer-dark'")
+    );
+    assert_eq!(
+        record.dconf_wrote.len(),
+        super::super::toolkit::TOOL_KEYS.len()
+    );
+    // A key someone else changed since is left alone and named, while the
+    // keys the tool still owns rewrite: every key reads back what the
+    // first apply wrote, except `color-scheme`, which reads `prefer-light`
+    // against the recorded `prefer-dark`.
+    let mut live = record.dconf_wrote.clone();
+    live.insert("color-scheme".to_owned(), "'prefer-light'".to_owned());
+    let live = live
+        .into_iter()
+        .map(|(short, value)| {
+            let path = super::super::toolkit::TOOL_KEYS
+                .iter()
+                .find(|(name, _)| name == &short)
+                .map(|(_, path)| (*path).to_owned())
+                .expect("a toolkit key");
+            (path, value)
+        })
+        .collect();
     let dconf = FakeDconf {
-        live: Some("'prefer-light'".to_owned()),
+        live,
         ..FakeDconf::default()
     };
     let mut compositor = FakeCompositor::not_running();
@@ -1320,7 +1350,14 @@ fn the_toolkit_write_lands_in_the_record() {
         &dconf,
     )
     .expect("the second apply succeeds");
-    assert!(dconf.writes.borrow().is_empty());
+    let writes = dconf.writes.borrow();
+    assert!(
+        writes
+            .iter()
+            .all(|(key, _)| key != super::super::toolkit::COLOR_SCHEME_KEY),
+        "the foreign key was written: {writes:?}"
+    );
+    assert_eq!(writes.len(), super::super::toolkit::TOOL_KEYS.len() - 1);
     assert!(
         report
             .notes
@@ -1662,6 +1699,9 @@ fn validate_names_a_bad_wallpaper_instead_of_blank() {
         if catalog.find("badlook").is_some() {
             let cache = root.join("cache");
             let state = root.join("state");
+            // Refused before the toolkit step, but still pinned: every
+            // apply test points its config home at a tempdir.
+            let config = root.join("config");
             let mut compositor = FakeCompositor::not_running();
             let failure = apply_with(
                 "badlook",
@@ -1669,7 +1709,7 @@ fn validate_names_a_bad_wallpaper_instead_of_blank() {
                 &catalog,
                 &cache,
                 &state,
-                None,
+                Some(&config),
                 &mut compositor,
                 &[],
                 &checks,
@@ -2388,6 +2428,237 @@ fn assert_no_build_litter(root: &Path) {
         }
     }
     assert!(litter.is_empty(), "stage litter survives: {litter:?}");
+}
+
+/// The six owned toolkit files, relative to the config home.
+const TOOLKIT_RELS: [&str; 6] = [
+    "gtk-3.0/gtk.css",
+    "gtk-4.0/gtk.css",
+    "gtk-3.0/settings.ini",
+    "gtk-4.0/settings.ini",
+    "qt6ct/qt6ct.conf",
+    "fontconfig/conf.d/10-scoot-look.conf",
+];
+
+/// Every file under `root`, as sorted `/`-separated paths relative to it.
+fn tree_snapshot(root: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(_) => return,
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            if path.is_dir() && !path.is_symlink() {
+                walk(root, &path, out);
+            } else if let Ok(rel) = path.strip_prefix(root) {
+                out.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out.sort();
+    out
+}
+
+/// Asserts `dir` holds exactly the six owned toolkit files, each carrying
+/// the managed marker, and that the report says they were written.
+fn assert_toolkit_files(dir: &Path, report: &ApplyReport) {
+    for rel in TOOLKIT_RELS {
+        let text =
+            std::fs::read_to_string(dir.join(rel)).unwrap_or_else(|_| panic!("{rel} written"));
+        assert!(
+            text.contains(super::super::toolkit::MANAGED_MARK),
+            "{rel} carries no marker"
+        );
+    }
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("wrote gtk-3.0/gtk.css")),
+        "no toolkit write notes: {:?}",
+        report.notes
+    );
+    let mut expected: Vec<String> = TOOLKIT_RELS.iter().map(|rel| (*rel).to_owned()).collect();
+    expected.sort();
+    assert_eq!(tree_snapshot(dir), expected, "extra files beside the six");
+}
+
+/// One snapshotted toolkit file: its size plus its mtime (secs, nanos),
+/// or nothing when absent.
+type FileStamp = Option<(u64, u64, u32)>;
+
+/// The developer's real toolkit files, as (rel, stamp), read-only and
+/// never mutated: the parent guard compares these across the sandboxed
+/// child run.
+fn real_toolkit_snapshot() -> Vec<(String, FileStamp)> {
+    let mut out = Vec::new();
+    let home = std::env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
+    for rel in TOOLKIT_RELS {
+        let data = home
+            .as_deref()
+            .map(|home| home.join(".config").join(rel))
+            .and_then(|path| {
+                std::fs::metadata(&path).ok().and_then(|meta| {
+                    meta.modified().ok().and_then(|mtime| {
+                        mtime
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .ok()
+                            .map(|age| (meta.len(), age.as_secs(), age.subsec_nanos()))
+                    })
+                })
+            });
+        out.push((rel.to_owned(), data));
+    }
+    out
+}
+
+#[test]
+fn toolkit_files_follow_the_injected_config_home() {
+    // The regression guard for the real-`~/.config` writes: `apply_with`
+    // must honor its injected config home and never consult the
+    // environment for the toolkit files. The child process below runs one
+    // apply per path under a sandboxed HOME (a nonexistent path, so any
+    // consult of it fails loudly) and XDG_CONFIG_HOME; the parent asserts
+    // the sandbox contains exactly those files and the developer's real
+    // `~/.config` is unchanged across the run. A child process (not
+    // in-process `set_var`, which is `unsafe` under the shared test
+    // process) keeps this hermetic under both test runners.
+    let sandbox = scratch("guard-sandbox");
+    let root = sandbox.path().to_owned();
+    let missing_home = root.join("missing-home");
+    let xdg_config = root.join("config");
+    let before = real_toolkit_snapshot();
+    let exe = std::env::current_exe().expect("the test binary");
+    // The child helper's libtest path (no crate name in harness paths).
+    let child = format!(
+        "{}::guard_child_applies_inside_a_sandboxed_home",
+        module_path!()
+            .split_once("::")
+            .map(|(_, rest)| rest)
+            .unwrap_or(module_path!())
+    );
+    let out = std::process::Command::new(exe)
+        .arg("--exact")
+        .arg(&child)
+        .env("HOME", &missing_home)
+        .env("XDG_CONFIG_HOME", &xdg_config)
+        .env("XDG_CACHE_HOME", root.join("cache-home"))
+        .env("XDG_STATE_HOME", root.join("state-home"))
+        .env("XDG_RUNTIME_DIR", root.join("runtime"))
+        .env("SCOOT_LOOK_GUARD", "1")
+        .env_remove("SCOOT_LOOK_STATE")
+        .env_remove("SCOOT_SOCKET")
+        .env_remove("SCOOT_LOOKS_DIR")
+        .env_remove("WAYLAND_DISPLAY")
+        .output()
+        .expect("the guard child runs");
+    assert!(
+        out.status.success(),
+        "the sandboxed apply failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // The nonexistent HOME was never consulted (it would exist now), and
+    // every file the child wrote sits under the sandboxed config home.
+    assert!(!missing_home.exists(), "the child created $HOME");
+    let stray: Vec<String> = tree_snapshot(&root)
+        .into_iter()
+        .filter(|rel| !rel.starts_with("config/"))
+        .collect();
+    assert!(
+        stray.is_empty(),
+        "files outside the sandboxed config home: {stray:?}"
+    );
+    assert_eq!(
+        real_toolkit_snapshot(),
+        before,
+        "the real ~/.config changed under a sandboxed run"
+    );
+}
+
+#[test]
+fn guard_child_applies_inside_a_sandboxed_home() {
+    // The working half of `toolkit_files_follow_the_injected_config_home`:
+    // runs only in the re-exec child (marker env set by the parent), where
+    // HOME is a nonexistent path and XDG_CONFIG_HOME is a tempdir. A
+    // direct run without the marker returns immediately, so the normal
+    // suite never touches the process environment.
+    if std::env::var_os("SCOOT_LOOK_GUARD").is_none() {
+        return;
+    }
+    let home = PathBuf::from(std::env::var_os("HOME").expect("a sandboxed HOME"));
+    assert!(
+        !home.exists(),
+        "the sandbox HOME must not exist: {}",
+        home.display()
+    );
+    let xdg =
+        PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").expect("a sandboxed XDG_CONFIG_HOME"));
+    // The production path (`config: None`): resolves from the sandboxed
+    // environment and succeeds without ever consulting the missing HOME.
+    let first = fixture("guard-fallback");
+    let fonts = first._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with(
+        "look-a",
+        &options(),
+        &first.catalog,
+        &first.cache,
+        &first.state,
+        None,
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::default(),
+    )
+    .expect("the sandboxed fallback apply succeeds");
+    assert_toolkit_files(&xdg, &report);
+    assert!(
+        !home.exists(),
+        "the fallback consulted $HOME: {}",
+        home.display()
+    );
+    let xdg_before = tree_snapshot(&xdg);
+    // The injected path wins over the environment: with the sandbox still
+    // on XDG_CONFIG_HOME, a pinned config home takes every file and the
+    // sandbox gains nothing.
+    let second = fixture("guard-injected");
+    let fonts = second._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let pinned = second._root.join("config");
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with(
+        "look-b",
+        &options(),
+        &second.catalog,
+        &second.cache,
+        &second.state,
+        Some(&pinned),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::default(),
+    )
+    .expect("the pinned apply succeeds");
+    assert_toolkit_files(&pinned, &report);
+    assert_eq!(
+        tree_snapshot(&xdg),
+        xdg_before,
+        "the pinned apply leaked into XDG_CONFIG_HOME"
+    );
+    assert!(
+        !home.exists(),
+        "the pinned apply consulted $HOME: {}",
+        home.display()
+    );
 }
 
 /// Moonrise's 16 ANSI hues, the order foot reads as `regular0-7` then

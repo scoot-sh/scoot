@@ -66,8 +66,10 @@ wrong.
 | Compositor ring, background, corners, cursor | Live, on apply |
 | Bar colors, radius, opacity, fonts | Live, on apply |
 | Wallpaper image or color | Live, on apply |
-| Dark/light (`color-scheme`) | Live, on apply (see below) |
-| GTK `gtk.css` colors, Qt palette, launcher and notification configs | Next launch of each app |
+| Dark mode, GTK theme, icons, cursor, app font (`color-scheme`, `gtk-theme`, `icon-theme`, `cursor-theme`, `cursor-size`, `font-name`) | Live, on apply (see below) |
+| GTK `gtk.css` colors | Next launch: GTK 3 text selection plus libadwaita accent and surfaces follow; plain GTK 4 keeps its stock accent; running apps keep their palette |
+| Qt style variant and palette | Next launch of each app; under the Adwaita style QWidget apps keep Adwaita's fixed palette (see below) |
+| Launcher and notification configs | Next launch of each app |
 | Running terminals | Keep their palette; new terminals use the look's |
 | Cursor size in already-running apps | Next launch |
 
@@ -92,25 +94,46 @@ refuses loudly.
   never touch the desktop. `--tty` and `--nested` sessions use the shared
   choice, so their swaps survive a restart.
 
-## Dark mode and the toolkit write
+## Dark mode and the toolkit step
 
-`apply` writes `org.gnome.desktop.interface color-scheme` from the
-look's polarity, so a swap across dark/light reaches GTK and libadwaita
-at once. The tool owns that one key with two rules: it writes when the
-key is unset or holds what the tool last wrote, and it leaves the key
-alone (naming it) when something else changed it. The first `apply` with
-no record adopts the key whatever it holds. A box without `dconf` gets a
-note, not a refusal.
+`apply` renders the toolkit files once and writes the dconf keys, so a
+swap reaches GTK and libadwaita at once with no resident daemon. GTK 4
+and libadwaita follow through the portal; GTK 3 follows the theme,
+icons, cursor and font through GSettings directly (`color-scheme` means
+nothing to GTK 3).
 
-- `scoot look apply --no-toolkit` skips the write for one apply.
+The dconf keys, all under `org.gnome.desktop.interface`: `color-scheme`
+(`prefer-dark`/`prefer-light` from the polarity), `gtk-theme`
+(`Adwaita-dark`/`Adwaita`), `icon-theme`, `cursor-theme`, `cursor-size`
+and `font-name`. The owned files, under `~/.config`: the two `gtk.css`
+shims (one `@import` of the state link's per-version `gtk/gtk-3.0.css`
+and `gtk/gtk-4.0.css`, so new GTK apps take the new palette with no
+rewrite per swap), the two `settings.ini`
+files, `qt6ct/qt6ct.conf` (through the link's scheme), and the
+fontconfig default. The tool owns a key or file only while it holds the
+record: it writes when the key is unset or holds what the tool last
+wrote, adopts it on the first apply whatever it holds, and otherwise
+leaves it alone and names it. A file the tool did not write (hand-made,
+or linked into the Nix store by home-manager) is left alone and named.
+A box without `dconf` gets a note, not a refusal.
+
+Qt limits, both measured: under the Adwaita style the look's palette
+never reaches QWidget apps (adwaita-qt replaces it with its fixed one —
+a style honoring `custom_palette` paints the scheme), and an in-place
+scheme change fires no watcher in a running app (qt6ct watches its own
+directory for added and removed files only). New Qt processes read the
+new palette; running ones keep theirs.
+
+- `scoot look apply --no-toolkit` skips the step for one apply.
 - `scoot look toolkit off` persists the skip in `look.json`. When the tool
-  wrote what is still live, `off` restores the `color-scheme` from before
-  the tool's first write and stops owning the key; a key the tool never
-  wrote, one someone else changed since, or one that cannot be read is
+  wrote what is still live, `off` restores each key from before the
+  tool's first write and stops owning it; a key the tool never wrote,
+  one someone else changed since, or one that cannot be read is
   left alone. Either way the record clears, so turning back `on` adopts
-  fresh on the next apply. `scoot look toolkit` shows the state.
+  fresh on the next apply. `off` leaves the written files in place; only
+  the keys are restored. `scoot look toolkit` shows the state.
 - A private look state (a headless or `--private-look` session) never
-  writes `color-scheme`: its swaps must not move the real desktop.
+  runs the step: its swaps must not move the real desktop.
 
 ## Terminal (foot)
 

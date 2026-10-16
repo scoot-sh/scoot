@@ -3,7 +3,7 @@ title: "Retire the Nix look registry once every consumer reads look directories"
 status: "open"
 area: "packaging"
 priority: "medium"
-blocked: "look-nix-catalog, look-stylix-source, look-toolkit-live, look-leaves-daemons, look-leaves-launchers, look-leaves-terminal, look-greeter"
+blocked: "look-nix-catalog, look-stylix-source, look-leaves-daemons, look-leaves-launchers, look-leaves-terminal, look-greeter"
 ---
 
 # Retire the Nix look registry once every consumer reads look directories

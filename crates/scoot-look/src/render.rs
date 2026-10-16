@@ -307,6 +307,287 @@ pub fn render_bar(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, 
     Ok(out)
 }
 
+/// The GTK theme name from the look's polarity (Adwaita ships inside
+/// GTK itself: no extra theme package, nothing invented). Matches the
+/// home-manager profile's `gtkTheme` (`nix/modules/theme-home.nix`), so a
+/// look renders the same theme name with and without Nix.
+pub fn gtk_theme_name(dark: bool) -> &'static str {
+    if dark { "Adwaita-dark" } else { "Adwaita" }
+}
+
+/// The Qt style from the look's polarity (the Adwaita-Qt style in the
+/// look's variant, capitalized exactly as the plugin registers it).
+/// Matches the profile's `qtStyle`.
+pub fn qt_style_name(dark: bool) -> &'static str {
+    if dark { "Adwaita-Dark" } else { "Adwaita" }
+}
+
+/// A `#rrggbb` token as opaque `#AARRGGBB` (what qt6ct color scheme
+/// entries spell, lowercase like its shipped schemes).
+pub fn qt_argb(color: &str) -> String {
+    format!("ff{}", color.trim_start_matches('#').to_lowercase())
+}
+
+/// The same token translucent (placeholder text, the stock-scheme shape:
+/// `#80ffffff` on dark schemes, `#80000000` on light ones).
+pub fn qt_argb_soft(color: &str) -> String {
+    format!("80{}", color.trim_start_matches('#').to_lowercase())
+}
+
+/// A font description for GTK and dconf (`Family 11`): the family plus
+/// the app size, without a trailing `.0`.
+pub fn font_desc(family: &str, size: f64) -> String {
+    if size.fract() == 0.0 {
+        format!("{family} {}", size as i64)
+    } else {
+        format!("{family} {size}")
+    }
+}
+
+/// Render the GTK 3 `gtk.css`: the look's selection as direct rules.
+/// GTK 3's parser dies on a `:root` block (`Theme parsing error:
+/// gtk.css:18:1: Invalid name of pseudo-class`, measured live against
+/// 3.24.52), and user `@define-color theme_*` overrides have no visible
+/// effect on its embedded Adwaita (three stock roles sampled against the
+/// look's tokens), so this file carries neither: just the selection
+/// rules, with literal hexes, proven amber live on `gtk3-widget-factory`.
+/// New GTK 3 apps take the look's selection; running ones keep theirs.
+pub fn render_gtk3_css(look: &ResolvedLook) -> String {
+    let p = &look.palette;
+    let mut out = format!(
+        "/* Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply. */\n",
+        toml_str(&look.name)
+    );
+    out.push_str("entry selection,\n.view selection,\ntextview selection,\nrow:selected {\n");
+    out.push_str(&format!("  background-color: {};\n", p.accent));
+    out.push_str(&format!("  color: {};\n", p.accent_fg));
+    out.push_str("}\n");
+    out
+}
+
+/// Render the GTK 4 `gtk.css`: the look's accent and surfaces as
+/// `@define-color` names plus the `:root` vars libadwaita widgets
+/// actually paint with. The `:root` defaults live in libadwaita's own
+/// stylesheet at THEME priority, so names alone never reach them; the
+/// literal hexes (never `@`-references, which resolve per provider) make
+/// the win unconditional. Measured live: libadwaita paints the look's
+/// accent and surfaces from this file, while plain GTK 4 widgets keep
+/// the stock accent (their theme does not read these names). Semantic
+/// colors (destructive, success, warning, error) stay the toolkit
+/// defaults: the look names no hues for them.
+pub fn render_gtk4_css(look: &ResolvedLook) -> String {
+    let p = &look.palette;
+    let mut out = format!(
+        "/* Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply. */\n",
+        toml_str(&look.name)
+    );
+    for (name, color) in [
+        ("accent_bg_color", &p.accent),
+        ("accent_fg_color", &p.accent_fg),
+        ("accent_color", &p.accent),
+        ("window_bg_color", &p.background),
+        ("window_fg_color", &p.foreground),
+        ("view_bg_color", &p.background),
+        ("view_fg_color", &p.foreground),
+        ("headerbar_bg_color", &p.background),
+        ("headerbar_fg_color", &p.foreground),
+        ("headerbar_border_color", &p.dim),
+        ("popover_bg_color", &p.background),
+        ("popover_fg_color", &p.foreground),
+        ("card_bg_color", &p.background),
+        ("card_fg_color", &p.foreground),
+        ("sidebar_bg_color", &p.background),
+        ("sidebar_fg_color", &p.foreground),
+    ] {
+        out.push_str(&format!("@define-color {name} {color};\n"));
+    }
+    out.push_str(":root {\n");
+    for (name, color) in [
+        ("--accent-bg-color", &p.accent),
+        ("--accent-fg-color", &p.accent_fg),
+        ("--accent-color", &p.accent),
+        ("--window-bg-color", &p.background),
+        ("--window-fg-color", &p.foreground),
+        ("--view-bg-color", &p.background),
+        ("--view-fg-color", &p.foreground),
+        ("--headerbar-bg-color", &p.background),
+        ("--headerbar-fg-color", &p.foreground),
+        ("--headerbar-border-color", &p.dim),
+        ("--headerbar-backdrop-color", &p.background),
+        ("--popover-bg-color", &p.background),
+        ("--popover-fg-color", &p.foreground),
+        ("--card-bg-color", &p.background),
+        ("--card-fg-color", &p.foreground),
+        ("--sidebar-bg-color", &p.background),
+        ("--sidebar-fg-color", &p.foreground),
+        ("--sidebar-backdrop-color", &p.background),
+        ("--dialog-bg-color", &p.background),
+        ("--dialog-fg-color", &p.foreground),
+    ] {
+        out.push_str(&format!("  {name}: {color};\n"));
+    }
+    out.push_str("}\n");
+    out
+}
+
+/// Render the Qt color scheme (`qt/scoot-look.conf`): the look's palette
+/// in qt6ct's own `[ColorScheme]` file shape (pinned qt6ct 0.11
+/// `loadColorScheme`: `active_colors`, `inactive_colors`,
+/// `disabled_colors`, each 21 entries in `QPalette::ColorRole` order).
+/// Moved from the home-manager profile (`nix/modules/theme-home.nix`)
+/// unchanged, so a look renders the same scheme with and without Nix.
+///
+/// Text roles carry the look's foreground, surfaces its background,
+/// Highlight and Link its accent with the background on top (the AA
+/// pairing the contrast checks measure); inactive mirrors active the way
+/// the stock schemes do, and disabled drops the text roles to the look's
+/// dim. No `[Fonts]` group: absent keys fall back to the application
+/// font, which follows fontconfig.
+///
+/// One measured limit, not a rendering gap: under the Adwaita style the
+/// look's palette never reaches QWidget apps (adwaita-qt's `polish`
+/// replaces it with its fixed one, proven live against qtbase 6.11.2,
+/// qt6ct 0.11 and adwaita-qt 1.4.2). The scheme still ships: a style that
+/// honors `custom_palette` (Fusion does) paints it, and new processes read
+/// it either way.
+pub fn render_qt_scheme(look: &ResolvedLook) -> String {
+    let p = &look.palette;
+    let fg = qt_argb(&p.foreground);
+    let bg = qt_argb(&p.background);
+    let accent = qt_argb(&p.accent);
+    let accent_fg = qt_argb(&p.background);
+    let dim = qt_argb(&p.dim);
+    let soft_fg = qt_argb_soft(&p.foreground);
+    let soft_dim = qt_argb_soft(&p.dim);
+    // Role order 0-20: WindowText Button Light Midlight Dark Mid Text
+    // BrightText ButtonText Base Window Shadow Highlight
+    // HighlightedText Link LinkVisited AlternateBase NoRole
+    // ToolTipBase ToolTipText PlaceholderText.
+    let active = [
+        &fg, &bg, &fg, &dim, &bg, &dim, &fg, &accent, &fg, &bg, &bg, &dim, &accent, &accent_fg,
+        &accent, &accent, &bg, &fg, &bg, &fg, &soft_fg,
+    ];
+    let disabled = [
+        &dim, &bg, &fg, &dim, &bg, &dim, &dim, &dim, &dim, &bg, &bg, &dim, &dim, &dim, &accent,
+        &accent, &bg, &fg, &bg, &dim, &soft_dim,
+    ];
+    let row = |colors: &[&String]| {
+        colors
+            .iter()
+            .map(|c| format!("#{c}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let active_row = row(&active);
+    let disabled_row = row(&disabled);
+    format!(
+        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n\
+         [ColorScheme]\n\
+         active_colors={active_row}\n\
+         inactive_colors={active_row}\n\
+         disabled_colors={disabled_row}\n",
+        toml_str(&look.name),
+    )
+}
+
+/// Render the qt6ct config: the Adwaita Qt style in the look's polarity
+/// plus the Adwaita icon theme, with `custom_palette` pointing at the
+/// scheme. `scheme_path` is the absolute path the entry carries (on a
+/// plain install, through the state link, so a swap needs no rewrite).
+/// Moved from the profile's `qtConf`, minus its `~` (qt6ct's own
+/// `resolvePath` expands `~`; an absolute path needs no expansion).
+/// Without both keys the platform theme keeps its default light palette.
+pub fn render_qt6ct_conf(look: &ResolvedLook, scheme_path: &str) -> Result<String, GrammarError> {
+    if scheme_path.is_empty()
+        || scheme_path.len() > 4096
+        || scheme_path.contains('\0')
+        || scheme_path.chars().any(|c| c.is_control() || c == '"')
+    {
+        return Err(GrammarError::new(
+            "color_scheme_path",
+            "the Qt scheme path must be 1 to 4096 bytes with no control characters or quotes",
+        ));
+    }
+    let dark = look.polarity == Polarity::Dark;
+    Ok(format!(
+        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n\
+         [Appearance]\n\
+         style={}\n\
+         icon_theme={}\n\
+         standard_dialogs=default\n\
+         custom_palette=true\n\
+         color_scheme_path={scheme_path}\n",
+        toml_str(&look.name),
+        qt_style_name(dark),
+        look.icons_theme,
+    ))
+}
+
+/// Render the GTK `settings.ini` (both versions, same content): the
+/// theme, the icon theme, the look's sans, cursor and dark preference.
+/// Moved from the profile's `gtkIni`, except the font size: the profile
+/// hardcodes 11 pt, while the renderer uses the look's `fonts.app-size`
+/// token (default 12), so a look controls its app text on both paths.
+/// Newly started apps read it; running GTK 3 apps follow the same values
+/// live through dconf instead.
+pub fn render_gtk_ini(look: &ResolvedLook) -> String {
+    let dark = look.polarity == Polarity::Dark;
+    let mut out = format!(
+        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n\
+         [Settings]\n",
+        toml_str(&look.name)
+    );
+    for (key, value) in [
+        ("gtk-theme-name", gtk_theme_name(dark).to_string()),
+        ("gtk-icon-theme-name", look.icons_theme.clone()),
+        (
+            "gtk-font-name",
+            font_desc(&look.fonts.sans, look.fonts.app_size),
+        ),
+        ("gtk-cursor-theme-name", look.cursor.theme.clone()),
+        ("gtk-cursor-theme-size", look.cursor.size.to_string()),
+        (
+            "gtk-application-prefer-dark-theme",
+            if dark { "true" } else { "false" }.to_string(),
+        ),
+        ("gtk-xft-antialias", "1".to_string()),
+        ("gtk-xft-hinting", "1".to_string()),
+    ] {
+        out.push_str(&format!("{key}={value}\n"));
+    }
+    out
+}
+
+/// Render the fontconfig default (`10-scoot-look.conf`): the proportional
+/// sans for sans-serif (GTK/Qt apps, the greeter) and the terminal face
+/// for monospace. Written as `match` rules with strong bindings, not
+/// `<alias>` blocks. Family names pass the identifier grammar (no
+/// `<>&"'` possible), so no XML escaping is needed on top.
+pub fn render_fontconfig(look: &ResolvedLook) -> String {
+    let mut out = String::from(
+        "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig>\n",
+    );
+    out.push_str(&format!(
+        "  <!-- Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply. -->\n",
+        toml_str(&look.name)
+    ));
+    for (generic, family) in [
+        ("sans-serif", &look.fonts.sans),
+        ("monospace", &look.fonts.mono),
+    ] {
+        out.push_str("  <match target=\"pattern\">\n");
+        out.push_str(&format!(
+            "    <test name=\"family\"><string>{generic}</string></test>\n"
+        ));
+        out.push_str(&format!(
+            "    <edit name=\"family\" mode=\"prepend\" binding=\"strong\"><string>{family}</string></edit>\n"
+        ));
+        out.push_str("  </match>\n");
+    }
+    out.push_str("</fontconfig>\n");
+    out
+}
+
 /// Render the foot fragment (`foot.ini`): `[main]` selects the look's
 /// polarity as foot's initial theme (`initial-color-theme`: foot starts on
 /// `colors-dark` unless it is set to `light`), and both `[colors-dark]`
@@ -373,7 +654,6 @@ pub fn render_foot(look: &ResolvedLook) -> Result<Option<String>, GrammarError> 
     }
     Ok(Some(out))
 }
-
 /// A cache identity for `render.json`, not security: FNV-1a over the source
 /// bytes. No hash crate enters the tree for this.
 pub fn source_hash(bytes: &[u8]) -> String {

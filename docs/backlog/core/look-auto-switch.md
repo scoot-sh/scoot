@@ -3,7 +3,7 @@ title: "Opt-in automatic look switching: a schedule, sunset, or the portal"
 status: "open"
 area: "core"
 priority: "low"
-blocked: "look-toolkit-live"
+blocked: null
 milestone: "later"
 ---
 

@@ -19,6 +19,7 @@ ls ~/.local/share/scoot/user-looks/moonrise/
 ```
 
 A rendered look is the output of a build: `scoot.toml`, `bar.toml`,
+`gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`, `qt/scoot-look.conf`,
 `foot.ini` (only when the look has `[terminal]`) and `render.json`. It
 is never edited and never a source for
 anything. The two never share a path.
@@ -197,6 +198,12 @@ only with `--ui-font-file`: scootbar reads a file path there, and
 without one the bar falls back to its well-known font paths.
 Per-app overrides merge into those tables: each section renders
 once, with the override winning, so every fragment reparses.
+`gtk/gtk-3.0.css` carries the look's selection as direct rules
+(proven amber live; a `:root` block breaks its parser and
+`@define-color` has no effect on it). `gtk/gtk-4.0.css` carries the look's accent and surfaces as the named
+colors libadwaita paints with, plus the matching `:root` vars (plain
+GTK 4 widgets keep the stock accent). `qt/scoot-look.conf` carries the
+Qt color scheme.
 `foot.ini` carries `[main]` with `initial-color-theme` from the look's
 polarity, and the 16 `[terminal]` hues as `regular0-7` then
 `bright0-7` in both `[colors-dark]` and `[colors-light]` (foot 1.28
@@ -230,8 +237,8 @@ source down under another name. `validate` skips contrast for a
 look with `extends`: without the catalog only single-file looks
 resolve here. `build` takes a single source without `extends`
 and refuses one with it; resolve the catalog first. `build`
-writes `scoot.toml`, `bar.toml`
-and `render.json` into the output dir. Both read `look.toml`
+writes `scoot.toml`, `bar.toml`, `gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`,
+`qt/scoot-look.conf` and `render.json` into the output dir. Both read `look.toml`
 only through a regular file opened without blocking: symlinks,
 directories, devices, FIFOs and
 sockets refuse. On Nix the same binary

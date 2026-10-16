@@ -34,13 +34,13 @@ use scoot_look::state::{
     read_record, state_dir_from_env, write_record,
 };
 use scoot_look::{
-    Origin, RawLook, RenderInputs, check_contrast, render_bar, render_foot, render_json,
-    render_scoot, resolve, source_hash,
+    Origin, RawLook, RenderInputs, check_contrast, render_bar, render_foot, render_gtk3_css,
+    render_gtk4_css, render_json, render_qt_scheme, render_scoot, resolve, source_hash,
 };
 
 use super::catalog::{Catalog, Entry, cache_home, config_home};
 use super::reload::{BarReload, CompositorReload, ReloadError};
-use super::toolkit::{Dconf, apply_toolkit};
+use super::toolkit::{Dconf, apply_toolkit, apply_toolkit_files};
 
 /// How long a second writer waits on `<state>/look.lock` before refusing.
 pub const LOCK_WAIT: Duration = Duration::from_secs(10);
@@ -55,7 +55,8 @@ pub const MAX_IMAGE_BYTES: u64 = 32 << 20;
 pub struct ApplyOptions {
     /// How long to wait on the lock.
     pub lock_wait: Duration,
-    /// Skip every dconf write (`--no-toolkit`).
+    /// Skip the toolkit step (`--no-toolkit`): no dconf key and no
+    /// toolkit file is written for this apply.
     pub no_toolkit: bool,
     /// This apply was spawned by the compositor for an IPC `look_apply`
     /// (`--from-compositor`): recorded as the choice's provenance, so
@@ -1227,8 +1228,10 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 /// so an upgrade re-renders an unchanged look instead of reusing a stale
 /// cached directory. Part of the cache key. 3 adds foot's `foot.ini`; 4
 /// selects the look's polarity as foot's initial theme and carries the
-/// hues in both `colors-dark` and `colors-light`.
-pub const RENDER_VERSION: u32 = 4;
+/// hues in both `colors-dark` and `colors-light`; 5 adds the toolkit
+/// fragments (`gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`,
+/// `qt/scoot-look.conf`).
+pub const RENDER_VERSION: u32 = 5;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
@@ -1276,11 +1279,13 @@ fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs) -> String {
 }
 
 /// Renders the look into the cache: `<cache>/<name>-<hash>/` with
-/// `scoot.toml`, `bar.toml`, `foot.ini` (only when the look has a
-/// `[terminal]` table) and `render.json`, written into a fresh
-/// directory and renamed, so a reader racing the render sees the old or
-/// the new directory, never a half-written one. An existing directory with
-/// the same key is reused after its `render.json` names this look.
+/// `scoot.toml`, `bar.toml`, the toolkit fragments
+/// (`gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`, `qt/scoot-look.conf`),
+/// `foot.ini` (only when the look has a `[terminal]` table) and
+/// `render.json`, written into a fresh directory and renamed, so a
+/// reader racing the render sees the old or the new directory, never a
+/// half-written one. An existing directory with the same key is reused
+/// after its `render.json` names this look.
 fn render_cached(
     name: &str,
     chain: &[ChainEntry],
@@ -1299,6 +1304,9 @@ fn render_cached(
         if identity.get("name").and_then(|n| n.as_str()) == Some(name)
             && target.join("scoot.toml").is_file()
             && target.join("bar.toml").is_file()
+            && target.join("gtk/gtk-3.0.css").is_file()
+            && target.join("gtk/gtk-4.0.css").is_file()
+            && target.join("qt/scoot-look.conf").is_file()
             && (merged.terminal.is_none() || target.join("foot.ini").is_file())
         {
             notes.push(format!("reusing cached render {}", target.display()));
@@ -1311,9 +1319,15 @@ fn render_cached(
         render_scoot(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
     let bar =
         render_bar(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let gtk3_css = render_gtk3_css(merged);
+    let gtk4_css = render_gtk4_css(merged);
+    let qt_scheme = render_qt_scheme(merged);
     let foot = render_foot(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     // The fragments must parse as TOML: the renderers quote, and this is
     // where a quoting failure shows itself, before any app reads them.
+    // (`gtk.css` and the Qt scheme have no strict parser handy; their
+    // renderers only interpolate `#rrggbb` tokens and are pinned by unit
+    // tests instead.)
     for (file, text) in [("scoot.toml", &scoot), ("bar.toml", &bar)] {
         text.parse::<toml::Table>()
             .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
@@ -1327,6 +1341,9 @@ fn render_cached(
         ("scoot.toml", scoot.as_str()),
         ("bar.toml", bar.as_str()),
         ("render.json", rendered_json.as_str()),
+        ("gtk/gtk-3.0.css", gtk3_css.as_str()),
+        ("gtk/gtk-4.0.css", gtk4_css.as_str()),
+        ("qt/scoot-look.conf", qt_scheme.as_str()),
     ];
     if let Some(foot) = &foot {
         files.push(("foot.ini", foot.as_str()));
@@ -1354,6 +1371,9 @@ fn render_cached(
     let write = (|| {
         for (file, contents) in &files {
             let path = tmp.join(file);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
             std::fs::write(&path, contents)?;
             std::fs::File::open(&path)?.sync_all()?;
         }
@@ -1367,6 +1387,10 @@ fn render_cached(
         if target.is_dir()
             && target.join("scoot.toml").is_file()
             && target.join("bar.toml").is_file()
+            && target.join("gtk/gtk-3.0.css").is_file()
+            && target.join("gtk/gtk-4.0.css").is_file()
+            && target.join("qt/scoot-look.conf").is_file()
+            && (merged.terminal.is_none() || target.join("foot.ini").is_file())
         {
             notes.push(format!("reusing cached render {}", target.display()));
             return Ok(target);
@@ -1528,9 +1552,27 @@ fn sync_dir(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The config home for this apply: the injected `config` when the caller
+/// pins one (every test does), else the live `$XDG_CONFIG_HOME`/`HOME`
+/// fallback, exactly as before. The toolkit files and the shadowed-keys
+/// read share this one resolution, so a pinned caller never touches the
+/// real `~/.config`.
+fn resolve_config_home(config: Option<&Path>) -> Option<PathBuf> {
+    match config {
+        Some(dir) => Some(dir.to_owned()),
+        None => {
+            let xdg = std::env::var_os("XDG_CONFIG_HOME");
+            let home = std::env::var_os("HOME");
+            config_home(xdg.as_deref(), home.as_deref())
+        }
+    }
+}
+
 /// Applies `name`: the full transaction. Pure over its `catalog`, `cache`,
-/// `state_dir` and peers except the lock, the record, the link, the cache
-/// and the reloads themselves.
+/// `state_dir`, `config` home and peers except the lock, the record, the
+/// link, the cache and the reloads themselves. `config` pins the config
+/// home (the toolkit files land there, the shadowed keys read there);
+/// `None` resolves it from the live environment, for production.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_with(
     name: &str,
@@ -1720,12 +1762,14 @@ pub fn apply_with(
             .as_ref()
             .and_then(|record| record.declared_default.clone()),
         toolkit: previous.as_ref().and_then(|record| record.toolkit),
-        color_scheme: previous
+        dconf_wrote: previous
             .as_ref()
-            .and_then(|record| record.color_scheme.clone()),
-        color_scheme_orig: previous
+            .map(|record| record.dconf_wrote.clone())
+            .unwrap_or_default(),
+        dconf_orig: previous
             .as_ref()
-            .and_then(|record| record.color_scheme_orig.clone()),
+            .map(|record| record.dconf_orig.clone())
+            .unwrap_or_default(),
     };
     write_record(state_dir, &record)
         .map_err(|error| refuse(format!("cannot record the choice: {error}")))?;
@@ -1890,22 +1934,32 @@ pub fn apply_with(
             }
         }
     }
-    // The toolkit step is best-effort: a missing `dconf` or a key someone
-    // else owns is a note, never a refusal.
-    let dark = merged.polarity == scoot_look::schema::Polarity::Dark;
+    // The toolkit step is best-effort: a missing `dconf`, a key someone
+    // else owns, or a foreign config file is a note, never a refusal.
+    // dconf keys first (recorded in `look.json`), then the owned toolkit
+    // files (the `gtk.css` shims, the inis, qt6ct, fontconfig), all
+    // through the state link so a swap rewrites no file per look.
     if options.no_toolkit {
         report
             .notes
-            .push("toolkit writes off for this apply (--no-toolkit)".to_owned());
+            .push("toolkit step off for this apply (--no-toolkit)".to_owned());
     } else {
         report
             .notes
-            .extend(apply_toolkit(state_dir, &mut record, dark, dconf));
+            .extend(apply_toolkit(state_dir, &mut record, &merged, dconf));
         if let Err(error) = write_record(state_dir, &record) {
             report.notes.push(format!(
                 "cannot record the toolkit state: {error}: the look applied, the record lags"
             ));
         }
+        let link = state_dir.join(LINK_NAME);
+        report.notes.extend(apply_toolkit_files(
+            state_dir,
+            &record,
+            &merged,
+            resolve_config_home(config).as_deref(),
+            &link,
+        ));
     }
     // Shadowed keys: the compositor's reply when it reloaded; else the
     // files, read directly.
@@ -1963,8 +2017,8 @@ fn rollback(
                 chosen_by: Some("rollback".to_owned()),
                 declared_default: previous.declared_default.clone(),
                 toolkit: previous.toolkit,
-                color_scheme: previous.color_scheme.clone(),
-                color_scheme_orig: previous.color_scheme_orig.clone(),
+                dconf_wrote: previous.dconf_wrote.clone(),
+                dconf_orig: previous.dconf_orig.clone(),
             };
             if let Err(error) = write_record(state_dir, &restored) {
                 failure
@@ -2176,16 +2230,10 @@ pub(crate) fn shadowed_from_files_in(
 ) -> (Vec<String>, Vec<String>) {
     let mut shadowed = Vec::new();
     let mut notes = Vec::new();
-    let owned;
-    let config = match config {
-        Some(dir) => Some(dir),
-        None => {
-            let xdg = std::env::var_os("XDG_CONFIG_HOME");
-            let home = std::env::var_os("HOME");
-            owned = config_home(xdg.as_deref(), home.as_deref());
-            owned.as_deref()
-        }
-    };
+    let owned = config
+        .map(Path::to_path_buf)
+        .or_else(|| resolve_config_home(None));
+    let config = owned.as_deref();
     let user_scoot = config.map(|base| base.join("scoot/config.toml"));
     let user_bar = config.map(|base| base.join("scoot/bar.toml"));
     let mut read_table = |path: &Path| -> Option<toml::Table> {
@@ -2287,8 +2335,25 @@ fn flatten_keys(table: &toml::Table, prefix: String) -> Vec<String> {
 
 /// Our output files, the only ones `build --out` may write. `foot.ini`
 /// joins them only when the look has a `[terminal]` table; a rebuild
-/// without one clears a stale copy (see `build_to_out`).
-const BUILD_FILES: [&str; 4] = ["scoot.toml", "bar.toml", "foot.ini", "render.json"];
+/// without one clears a stale copy (see `build_to_out`). The toolkit
+/// fragments beside the first-party ones render from tokens alone, so
+/// they are always written: `qt6ct.conf`, `settings.ini` and the
+/// fontconfig file stay apply-rendered (the conf points through the
+/// state link, which `build` does not know).
+const BUILD_FILES: [&str; 7] = [
+    "scoot.toml",
+    "bar.toml",
+    "foot.ini",
+    "render.json",
+    "gtk/gtk-3.0.css",
+    "gtk/gtk-4.0.css",
+    "qt/scoot-look.conf",
+];
+
+/// Top-level directories our nested build outputs live under. The
+/// foreign-dir check reads top-level names, so these need their own
+/// branch: one holding only [`BUILD_FILES`] entries is ours.
+const BUILD_DIRS: [&str; 2] = ["gtk", "qt"];
 
 /// Renders a source (a directory, or a catalog name) into `out` without
 /// touching state, the cache, or any app: `build` without `apply`.
@@ -2365,12 +2430,25 @@ pub fn build_to_out(
             Ok((scoot, bar, foot, rendered_json))
         };
     // One staged list per render, so the bar downgrade loop below rebuilds
-    // the same files it checks.
-    let stage_of = |scoot: &str, bar: &str, foot: &Option<String>, json: &str| {
+    // the same files it checks. The toolkit triple renders from tokens
+    // alone (no resolved inputs), so it renders once, outside the loop.
+    let gtk3_css = render_gtk3_css(&merged);
+    let gtk4_css = render_gtk4_css(&merged);
+    let qt_scheme = render_qt_scheme(&merged);
+    let stage_of = |scoot: &str,
+                    bar: &str,
+                    foot: &Option<String>,
+                    gtk3: &str,
+                    gtk4: &str,
+                    qt: &str,
+                    json: &str| {
         let mut staged = vec![
             ("scoot.toml".to_owned(), scoot.to_owned()),
             ("bar.toml".to_owned(), bar.to_owned()),
             ("render.json".to_owned(), json.to_owned()),
+            ("gtk/gtk-3.0.css".to_owned(), gtk3.to_owned()),
+            ("gtk/gtk-4.0.css".to_owned(), gtk4.to_owned()),
+            ("qt/scoot-look.conf".to_owned(), qt.to_owned()),
         ];
         if let Some(foot) = foot {
             staged.push(("foot.ini".to_owned(), foot.clone()));
@@ -2393,10 +2471,23 @@ pub fn build_to_out(
     // `--out .` from wiping the cwd.
     let scratch = ScratchDir::new("build")?;
     let stage: &Path = scratch.path();
-    let mut staged: Vec<(String, String)> = stage_of(&scoot, &bar, &foot, &rendered_json);
+    let mut staged: Vec<(String, String)> = stage_of(
+        &scoot,
+        &bar,
+        &foot,
+        &gtk3_css,
+        &gtk4_css,
+        &qt_scheme,
+        &rendered_json,
+    );
     for (file, contents) in &staged {
-        std::fs::write(stage.join(file), contents)
-            .map_err(|error| format!("cannot write {}: {error}", stage.join(file).display()))?;
+        let path = stage.join(file);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+        }
+        std::fs::write(&path, contents)
+            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     }
     // Every `return Err` below (and every `?` above) drops `scratch`,
     // removing the stage: no exit path leaks it. A bar built
@@ -2433,11 +2524,23 @@ pub fn build_to_out(
                 }
                 drops.push(drop_);
                 (scoot, bar, foot, rendered_json) = render_once(&render_inputs)?;
-                staged = stage_of(&scoot, &bar, &foot, &rendered_json);
+                staged = stage_of(
+                    &scoot,
+                    &bar,
+                    &foot,
+                    &gtk3_css,
+                    &gtk4_css,
+                    &qt_scheme,
+                    &rendered_json,
+                );
                 for (file, contents) in &staged {
-                    std::fs::write(stage.join(file), contents).map_err(|error| {
-                        format!("cannot write {}: {error}", stage.join(file).display())
-                    })?;
+                    let path = stage.join(file);
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+                    }
+                    std::fs::write(&path, contents)
+                        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
                 }
             }
         }
@@ -2474,12 +2577,11 @@ pub fn build_to_out(
         let mut foreign: Vec<String> = Vec::new();
         for entry in entries.filter_map(|e| e.ok()) {
             let entry_name = entry.file_name().to_string_lossy().into_owned();
-            if !BUILD_FILES.contains(&entry_name.as_str()) {
-                foreign.push(entry_name.clone());
-            }
-            // A symlinked output file would be written through: refuse it.
             let fp = out.join(&entry_name);
-            if BUILD_FILES.contains(&entry_name.as_str())
+            // A symlinked output file or dir would be written through:
+            // refuse it.
+            if (BUILD_FILES.contains(&entry_name.as_str())
+                || BUILD_DIRS.contains(&entry_name.as_str()))
                 && let Ok(meta) = std::fs::symlink_metadata(&fp)
                 && meta.file_type().is_symlink()
             {
@@ -2489,6 +2591,36 @@ pub fn build_to_out(
                     fp.display()
                 ));
             }
+            if BUILD_FILES.contains(&entry_name.as_str()) {
+                continue;
+            }
+            // Our nested outputs read as top-level dirs: one holding only
+            // our files is ours, anything else in it is foreign.
+            if BUILD_DIRS.contains(&entry_name.as_str()) && fp.is_dir() {
+                let subs = std::fs::read_dir(&fp)
+                    .map_err(|error| format!("cannot list {}: {error}", fp.display()))?;
+                for sub in subs.filter_map(|e| e.ok()) {
+                    let sub_name = sub.file_name().to_string_lossy().into_owned();
+                    let rel = format!("{entry_name}/{sub_name}");
+                    let sfp = fp.join(&sub_name);
+                    // A symlinked nested output would be written through.
+                    if BUILD_FILES.contains(&rel.as_str())
+                        && let Ok(meta) = std::fs::symlink_metadata(&sfp)
+                        && meta.file_type().is_symlink()
+                    {
+                        return Err(format!(
+                            "refusing to build into {}: {} is a symlink",
+                            out.display(),
+                            sfp.display()
+                        ));
+                    }
+                    if !BUILD_FILES.contains(&rel.as_str()) {
+                        foreign.push(rel);
+                    }
+                }
+                continue;
+            }
+            foreign.push(entry_name.clone());
         }
         if !foreign.is_empty() {
             foreign.sort();
@@ -2504,6 +2636,10 @@ pub fn build_to_out(
     }
     for (file, contents) in &staged {
         let path = out.join(file);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+        }
         if let Err(error) = write_nofollow(&path, contents.as_bytes()) {
             return Err(format!("cannot write {}: {error}", path.display()));
         }

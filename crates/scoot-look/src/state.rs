@@ -34,6 +34,7 @@
 //! nothing here needs Nix. A plain binary install manages the same plain
 //! files the same way.
 
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::os::unix::ffi::OsStrExt as _;
@@ -153,21 +154,22 @@ pub struct Record {
     /// The declared default in force when the choice was made (`sync`'s
     /// rule 2 compares against it); `None` for no declared default.
     pub declared_default: Option<String>,
-    /// Whether `apply` writes the toolkit keys (today only
-    /// `org.gnome.desktop.interface color-scheme`, from the look's
-    /// polarity). `None` and `Some(true)` both mean on; only an explicit
-    /// `Some(false)` (`scoot look toolkit off`) skips every dconf write.
+    /// Whether `apply` runs the toolkit step (the dconf keys plus the
+    /// owned toolkit files). `None` and `Some(true)` both mean on; only
+    /// an explicit `Some(false)` (`scoot look toolkit off`) skips it.
     pub toolkit: Option<bool>,
-    /// The `color-scheme` value the tool last wrote, if it wrote one:
-    /// before writing again the tool reads the live value, and a value
-    /// that is neither unset nor this one means someone else changed it,
-    /// so the tool leaves it alone (design D11).
-    pub color_scheme: Option<String>,
-    /// The live `color-scheme` before the tool's first write, if it has
-    /// written one: `Some("")` means it was unset. Saved once, never
-    /// overwritten, so `toolkit off` can restore it. Back-compatible:
-    /// absent means "not saved" (an older record).
-    pub color_scheme_orig: Option<String>,
+    /// The toolkit values the tool last wrote, by short key name
+    /// (`color-scheme`, `gtk-theme`, `icon-theme`, `cursor-theme`,
+    /// `cursor-size`, `font-name`): before writing again the tool reads
+    /// the live value, and a value that is neither unset nor this one
+    /// means someone else changed it, so the tool leaves it alone
+    /// (design D11).
+    pub dconf_wrote: BTreeMap<String, String>,
+    /// The live toolkit values before the tool's first write, by short
+    /// key name: `""` means it was unset. Saved once, never overwritten,
+    /// so `toolkit off` can restore them. Back-compatible: absent means
+    /// "not saved" (an older record).
+    pub dconf_orig: BTreeMap<String, String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -184,6 +186,12 @@ struct RawRecord {
     declared_default: Option<String>,
     #[serde(default)]
     toolkit: Option<bool>,
+    #[serde(default)]
+    dconf: Option<BTreeMap<String, String>>,
+    #[serde(default, rename = "dconf-orig")]
+    dconf_orig: Option<BTreeMap<String, String>>,
+    // Legacy single-key fields (before the toolkit step owned six keys):
+    // folded into the maps on read, never written back.
     #[serde(default, rename = "color-scheme")]
     color_scheme: Option<String>,
     #[serde(default, rename = "color-scheme-orig")]
@@ -298,6 +306,35 @@ fn validate_record(raw: RawRecord) -> Result<Record, String> {
             "{RECORD_FILE}: `color-scheme-orig` must be plain text of at most 64 bytes"
         ));
     }
+    let mut dconf_wrote = raw.dconf.unwrap_or_default();
+    let mut dconf_orig = raw.dconf_orig.unwrap_or_default();
+    for (map, what) in [(&dconf_wrote, "dconf"), (&dconf_orig, "dconf-orig")] {
+        for (key, value) in map {
+            if !is_toolkit_key(key) {
+                return Err(format!(
+                    "{RECORD_FILE}: `{what}` names an unknown toolkit key `{key}`"
+                ));
+            }
+            if check_display_text(what, value, 128).is_some() {
+                return Err(format!(
+                    "{RECORD_FILE}: `{what}` value for `{key}` must be plain text of at most 128 bytes"
+                ));
+            }
+        }
+    }
+    // Legacy single-key records (before the six-key toolkit step): fold
+    // the flat fields into the maps, so `toolkit off` on an old record
+    // still restores what it wrote. The maps win when both name a key.
+    if let Some(scheme) = raw.color_scheme
+        && !dconf_wrote.contains_key("color-scheme")
+    {
+        dconf_wrote.insert("color-scheme".to_owned(), scheme);
+    }
+    if let Some(orig) = raw.color_scheme_orig
+        && !dconf_orig.contains_key("color-scheme")
+    {
+        dconf_orig.insert("color-scheme".to_owned(), orig);
+    }
     Ok(Record {
         name,
         rendered,
@@ -305,9 +342,17 @@ fn validate_record(raw: RawRecord) -> Result<Record, String> {
         chosen_by: raw.chosen_by,
         declared_default: raw.declared_default,
         toolkit: raw.toolkit,
-        color_scheme: raw.color_scheme,
-        color_scheme_orig: raw.color_scheme_orig,
+        dconf_wrote,
+        dconf_orig,
     })
+}
+
+/// Whether `key` is one of the toolkit step's short key names.
+pub fn is_toolkit_key(key: &str) -> bool {
+    matches!(
+        key,
+        "color-scheme" | "gtk-theme" | "icon-theme" | "cursor-theme" | "cursor-size" | "font-name"
+    )
 }
 
 /// Serializes a record the way [`write_record`] stores it.
@@ -340,16 +385,28 @@ pub fn record_json(record: &Record) -> String {
     if let Some(toolkit) = record.toolkit {
         out.insert("toolkit".to_owned(), serde_json::Value::Bool(toolkit));
     }
-    if let Some(scheme) = &record.color_scheme {
+    if !record.dconf_wrote.is_empty() {
         out.insert(
-            "color-scheme".to_owned(),
-            serde_json::Value::String(scheme.clone()),
+            "dconf".to_owned(),
+            serde_json::Value::Object(
+                record
+                    .dconf_wrote
+                    .iter()
+                    .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
+                    .collect(),
+            ),
         );
     }
-    if let Some(orig) = &record.color_scheme_orig {
+    if !record.dconf_orig.is_empty() {
         out.insert(
-            "color-scheme-orig".to_owned(),
-            serde_json::Value::String(orig.clone()),
+            "dconf-orig".to_owned(),
+            serde_json::Value::Object(
+                record
+                    .dconf_orig
+                    .iter()
+                    .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
+                    .collect(),
+            ),
         );
     }
     serde_json::Value::Object(out).to_string()

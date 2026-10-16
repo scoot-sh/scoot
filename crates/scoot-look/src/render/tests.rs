@@ -375,6 +375,164 @@ fn render_checks_override_values() {
     assert!(render_scoot(&look, &inputs()).is_err());
 }
 
+#[test]
+fn gtk3_css_carries_the_selection_rules() {
+    // No `:root` block (GTK 3's parser dies on it, measured:
+    // `Theme parsing error: gtk.css:18:1`) and no `@define-color`
+    // (proven without effect on its embedded Adwaita): just the
+    // selection rules, proven amber live on gtk3-widget-factory.
+    let css = render_gtk3_css(&moonrise());
+    for line in [
+        "entry selection,",
+        ".view selection,",
+        "textview selection,",
+        "row:selected {",
+        "background-color: #FFA45C;",
+        "color: #2B3648;",
+    ] {
+        assert!(css.contains(line), "missing {line}:\n{css}");
+    }
+    assert!(!css.contains(":root"), "a :root block breaks GTK 3:\n{css}");
+    assert!(
+        !css.contains("@define-color"),
+        "defines have no effect on GTK 3:\n{css}"
+    );
+}
+
+#[test]
+fn gtk4_css_carries_names_and_root_vars() {
+    // The same names the profile's `gtkCss` writes
+    // (`nix/modules/theme-home.nix`): `@define-color` plus the `:root`
+    // vars libadwaita widgets paint with. Moonrise is dark, so the
+    // surfaces are its slate navy and the accent its amber.
+    let css = render_gtk4_css(&moonrise());
+    for line in [
+        "@define-color accent_bg_color #FFA45C;",
+        "@define-color accent_fg_color #2B3648;",
+        "@define-color window_bg_color #2B3648;",
+        "@define-color window_fg_color #F6EEDC;",
+        "@define-color headerbar_border_color #9C8B95;",
+        "  --accent-bg-color: #FFA45C;",
+        "  --window-bg-color: #2B3648;",
+        "  --headerbar-border-color: #9C8B95;",
+        "  --dialog-fg-color: #F6EEDC;",
+    ] {
+        assert!(css.contains(line), "missing {line}:\n{css}");
+    }
+    assert!(css.contains(":root {"), "no :root block:\n{css}");
+    // The literal hexes, never `@`-references (which resolve per provider).
+    let without_names = css.replace("@define-color", "");
+    assert!(
+        !without_names.contains('@'),
+        "an @-reference leaked:\n{css}"
+    );
+}
+
+#[test]
+fn qt_scheme_is_21_roles_in_qpalette_order() {
+    // The profile's `qtScheme` shape: three rows of 21 `#AARRGGBB`
+    // entries. Spot-check the roles the mapping promises: Window (10)
+    // is the background, Highlight (12) the accent with the background
+    // on top (13), inactive mirrors active, disabled dims the text.
+    let scheme = render_qt_scheme(&moonrise());
+    let active = scheme
+        .lines()
+        .find(|line| line.starts_with("active_colors="))
+        .expect("active row");
+    let roles: Vec<&str> = active["active_colors=".len()..].split(", ").collect();
+    assert_eq!(roles.len(), 21, "not 21 roles:\n{scheme}");
+    assert_eq!(roles[9], "#ff2b3648", "Base is not the background");
+    assert_eq!(roles[10], "#ff2b3648", "Window is not the background");
+    assert_eq!(roles[12], "#ffffa45c", "Highlight is not the accent");
+    assert_eq!(
+        roles[13], "#ff2b3648",
+        "HighlightedText is not background-on-accent"
+    );
+    assert_eq!(roles[0], "#fff6eedc", "WindowText is not the foreground");
+    let inactive = scheme
+        .lines()
+        .find(|line| line.starts_with("inactive_colors="))
+        .expect("inactive row");
+    assert_eq!(
+        inactive["inactive_colors=".len()..],
+        active["active_colors=".len()..],
+        "inactive does not mirror active"
+    );
+    let disabled = scheme
+        .lines()
+        .find(|line| line.starts_with("disabled_colors="))
+        .expect("disabled row");
+    let dimmed: Vec<&str> = disabled["disabled_colors=".len()..].split(", ").collect();
+    assert_eq!(dimmed[0], "#ff9c8b95", "disabled text is not dim");
+}
+
+#[test]
+fn qt6ct_conf_names_style_and_scheme() {
+    let conf = render_qt6ct_conf(&moonrise(), "/state/look/qt/scoot-look.conf").expect("renders");
+    for line in [
+        "style=Adwaita-Dark",
+        "icon_theme=Adwaita",
+        "custom_palette=true",
+        "color_scheme_path=/state/look/qt/scoot-look.conf",
+    ] {
+        assert!(conf.contains(line), "missing {line}:\n{conf}");
+    }
+    // A light look takes the light style variant.
+    let mut light = moonrise();
+    light.polarity = crate::schema::Polarity::Light;
+    let conf = render_qt6ct_conf(&light, "/state/look/qt/scoot-look.conf").expect("renders");
+    assert!(
+        conf.contains("style=Adwaita\n"),
+        "light style wrong:\n{conf}"
+    );
+    // The path lands in an INI value: no quotes, no newlines, no controls.
+    assert!(render_qt6ct_conf(&moonrise(), "/s\ncheme").is_err());
+    assert!(render_qt6ct_conf(&moonrise(), "").is_err());
+}
+
+#[test]
+fn gtk_ini_names_theme_font_cursor() {
+    let ini = render_gtk_ini(&moonrise());
+    for line in [
+        "[Settings]",
+        "gtk-theme-name=Adwaita-dark",
+        "gtk-icon-theme-name=Adwaita",
+        "gtk-font-name=DejaVu Sans 12",
+        "gtk-cursor-theme-name=Mocu",
+        "gtk-cursor-theme-size=24",
+        "gtk-application-prefer-dark-theme=true",
+    ] {
+        assert!(ini.contains(line), "missing {line}:\n{ini}");
+    }
+}
+
+#[test]
+fn fontconfig_prefers_the_look_faces() {
+    let conf = render_fontconfig(&moonrise());
+    assert!(
+        conf.contains("<string>DejaVu Sans</string>"),
+        "sans missing:\n{conf}"
+    );
+    assert!(
+        conf.contains("<string>FiraCode Nerd Font</string>"),
+        "mono missing:\n{conf}"
+    );
+    assert!(
+        conf.contains("mode=\"prepend\""),
+        "not a prepend rule:\n{conf}"
+    );
+}
+
+#[test]
+fn theme_and_style_names_follow_polarity() {
+    assert_eq!(gtk_theme_name(true), "Adwaita-dark");
+    assert_eq!(gtk_theme_name(false), "Adwaita");
+    assert_eq!(qt_style_name(true), "Adwaita-Dark");
+    assert_eq!(qt_style_name(false), "Adwaita");
+    assert_eq!(font_desc("DejaVu Sans", 12.0), "DejaVu Sans 12");
+    assert_eq!(font_desc("DejaVu Sans", 10.5), "DejaVu Sans 10.5");
+}
+
 /// Moonrise's 16 ANSI hues, the base16 terminal order foot reads as
 /// `regular0-7` then `bright0-7` (`looks/moonrise/look.toml`).
 const TERMINAL_COLORS: [&str; 16] = [
