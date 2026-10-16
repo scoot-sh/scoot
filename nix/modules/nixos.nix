@@ -39,11 +39,11 @@ let
     if cfg.greeter.look == null then null else desktop.looks.${cfg.greeter.look} or null;
   greeterEntry = lib.findFirst (entry: entry.name == cfg.greeter.look) null lookCatalog.entries;
 
-  # The first catalog entry down the `extends` chain whose `get` of its
-  # manifest reads non-null (the child wins, mirroring `resolve`): null
-  # without an entry, past an unknown base, a cycle, or depth 8. The
-  # build (`scoot-look build --catalog`) refuses those loudly, so this
-  # never silently themes the wrong login screen.
+  # The first catalog entry down the `extends` chain whose `get` of
+  # the entry reads non-null (the child wins, mirroring `resolve`):
+  # null without an entry, past an unknown base, a cycle, or depth 8.
+  # The build (`scoot-look build --catalog`) refuses those loudly, so
+  # this never silently themes the wrong login screen.
   greeterChainEntry =
     get:
     let
@@ -51,7 +51,7 @@ let
         current: depth:
         let
           entry = lib.findFirst (e: e.name == current) null lookCatalog.entries;
-          value = if entry == null then null else get entry.manifest;
+          value = if entry == null then null else get entry;
         in
         if value != null then
           entry
@@ -81,7 +81,7 @@ let
       (if greeterRegistry.wallpaper == null then null else greeterRegistry.wallpaper.image)
     else
       let
-        hit = greeterChainEntry (manifest: manifest.wallpaper or null);
+        hit = greeterChainEntry (entry: entry.manifest.wallpaper or null);
         image = if hit == null then null else hit.manifest.wallpaper.image or null;
       in
       if image == null || lib.hasPrefix "https://" image then
@@ -101,7 +101,7 @@ let
       greeterRegistry.isDark
     else
       let
-        hit = greeterChainEntry (manifest: manifest.polarity or null);
+        hit = greeterChainEntry (entry: entry.manifest.polarity or null);
       in
       if hit == null then true else hit.manifest.polarity == "dark";
 
@@ -113,23 +113,23 @@ let
       greeterRegistry.fonts.sans
     else
       let
-        hit = greeterChainEntry (manifest: (manifest.fonts or { }).sans or null);
+        hit = greeterChainEntry (entry: (entry.manifest.fonts or { }).sans or null);
       in
       if hit == null then "DejaVu Sans" else hit.manifest.fonts.sans;
 
   # The look's ReGreet CSS: the shipped sheet for a shipped look, else
-  # the custom look's own `apps/regreet.css` leaf when it carries one.
-  # Null leaves ReGreet's own CSS alone.
+  # the first `apps/regreet.css` leaf down the `extends` chain (the
+  # child wins, like the backdrop, the dark setting and the sans
+  # above). Null leaves ReGreet's own CSS alone.
   greeterCss =
     if greeterRegistry != null then
       greeterRegistry.appFiles.regreetCss
-    else if greeterEntry == null then
-      null
     else
       let
-        leaf = greeterEntry.src + "/apps/regreet.css";
+        leafOf = entry: entry.src + "/apps/regreet.css";
+        hit = greeterChainEntry (entry: if builtins.pathExists (leafOf entry) then leafOf entry else null);
       in
-      if builtins.pathExists leaf then leaf else null;
+      if hit == null then null else leafOf hit;
 
   # The login-screen entry. Built as a package exposing
   # `share/wayland-sessions/scoot.desktop` with `providedSessions`,
@@ -1210,12 +1210,16 @@ in
       };
 
       # The login screen's look: null (the default) follows the declared
-      # `programs.scoot.look`, so the greeter wears the session default.
-      # Set it to pin the login screen to another catalog look while the
-      # session starts elsewhere. Resolved at system build time into the
-      # `greet.toml` fragment and ReGreet's CSS: a live swap never
-      # touches it (it only repoints the session's own state). Later,
-      # not here: a non-Nix `sudo scoot look apply --greeter`.
+      # `programs.scoot.look`, so the greeter wears the session default;
+      # an explicit null themes nothing (an unthemed login screen). Set
+      # it to pin the login screen to another catalog look while the
+      # session starts elsewhere. Resolved at system build time into
+      # ReGreet's CSS, backdrop, dark setting and sans (a custom catalog
+      # look themes from its manifest down the `extends` chain): a live
+      # swap never touches it (it only repoints the session's own
+      # state). The look also renders a `greet.toml` fragment, which
+      # nothing reads yet (for the future scootgreet). Later, not here:
+      # a non-Nix `sudo scoot look apply --greeter`.
       look = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
@@ -1225,7 +1229,10 @@ in
         example = "moonrise";
         description = ''
           One name from `programs.scoot.looks`: the login screen's look.
-          Null follows the declared default look.
+          Null follows the declared default look (an explicit null
+          themes nothing). An unknown name fails evaluation. Takes
+          effect on rebuild: a live swap never reaches the login
+          screen.
         '';
       };
     };

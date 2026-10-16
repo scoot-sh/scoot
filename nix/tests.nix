@@ -226,7 +226,12 @@
 #   home-manager module owning the same path wins, and each null
 #   tool fails eval; the greeter wears the look too (backdrop
 #   pairing, dark setting, the look's CSS and font -- `vinyl-sunset`
-#   leaves the backdrop alone, its illustration license-barred);
+#   leaves the backdrop alone, its illustration license-barred); the
+#   login screen follows `greeter.look` (null follows `look`, an
+#   explicit null themes nothing, an unknown name fails eval), a custom
+#   look themes from its manifest with the CSS walking the `extends`
+#   chain, and a live swap never reaches it (pinned by equality, file
+#   for file, with the session-default evaluation);
 #   no daemon runs for any of it (files, packages and session
 #   variables only);
 #   every profile unit (the idle pair, mako, the bar feed, both
@@ -4654,6 +4659,23 @@ let
     look = "moonrise";
     greeter.enable = true;
     greeter.look = "greeter-oak";
+  } greeterUser;
+  # ...a custom look with no CSS leaf of its own: the sheet walks the
+  # `extends` chain to its base's leaf (with polarity, sans and
+  # backdrop walking the same chain).
+  osThemeGreeterChainCss = evalNixosRegreet {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    looks = [
+      "moonrise"
+      "ginger-night"
+      ./test-looks/greeter-oak
+      ./test-looks/greeter-pine
+    ];
+    look = "moonrise";
+    greeter.enable = true;
+    greeter.look = "greeter-pine";
   } greeterUser;
   # ...an unknown greeter look: refused, naming the catalog.
   osThemeGreeterBadLook = evalNixosRegreet {
@@ -12057,6 +12079,51 @@ let
       assert lib.hasInfix "#B0722A" (
         builtins.readFile osThemeGreeterCustom.config.services.displayManager.regreet.extraCss
       );
+      true
+    )
+    # ...a custom look with no CSS leaf of its own inherits its base's
+    # sheet down the `extends` chain: oak's leaf (not pine's), oak's
+    # bark accent in it, the very file the oak evaluation resolves —
+    # with light through oak, DejaVu Sans through ginger-night, and no
+    # backdrop from a color wallpaper...
+    (
+      assert allAssertionsHold osThemeGreeterChainCss.config;
+      true
+    )
+    (
+      assert osThemeGreeterChainCss.config.programs.scoot.greeter.look == "greeter-pine";
+      true
+    )
+    (
+      assert
+        osThemeGreeterChainCss.config.services.displayManager.regreet.settings.GTK.application_prefer_dark_theme
+        == false;
+      true
+    )
+    (
+      assert osThemeGreeterChainCss.config.services.displayManager.regreet.font.name == "DejaVu Sans";
+      true
+    )
+    (
+      assert osThemeGreeterChainCss.config.programs.scoot.greeter.background == null;
+      true
+    )
+    (
+      assert lib.hasSuffix "greeter-oak/apps/regreet.css" (
+        toString osThemeGreeterChainCss.config.services.displayManager.regreet.extraCss
+      );
+      true
+    )
+    (
+      assert lib.hasInfix "#B0722A" (
+        builtins.readFile osThemeGreeterChainCss.config.services.displayManager.regreet.extraCss
+      );
+      true
+    )
+    (
+      assert
+        osThemeGreeterChainCss.config.services.displayManager.regreet.extraCss
+        == osThemeGreeterCustom.config.services.displayManager.regreet.extraCss;
       true
     )
     # ...an unknown greeter look fails, naming the catalog...

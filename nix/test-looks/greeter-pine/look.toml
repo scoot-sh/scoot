@@ -1,0 +1,18 @@
+# A custom declared look for the greeter checks (`nix/tests.nix`): a
+# child of greeter-oak with no `apps/regreet.css` leaf of its own, so
+# the greeter's CSS walk inherits its base's sheet. No polarity, fonts
+# or wallpaper of its own either: light through greeter-oak, DejaVu
+# Sans through ginger-night, no backdrop from a color wallpaper.
+schema = 1
+name = "greeter-pine"
+title = "Greeter Pine"
+description = "A leafless test look for the greeter CSS chain."
+extends = "greeter-oak"
+license = "MIT"
+
+[palette]
+background = "#F2EAD8"
+foreground = "#2A2118"
+dim = "#8A7A63"
+accent = "#B0722A"
+urgent = "#C0392B"
