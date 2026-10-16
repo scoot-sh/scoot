@@ -484,7 +484,7 @@ pub fn run(
                         String::new()
                     };
                     warn(format_args!(
-                        "scootbar: on-low on the {id} module: {failure}{more}"
+                        "scootbar: staged action on the {id} module: {failure}{more}"
                     ));
                 }
             }

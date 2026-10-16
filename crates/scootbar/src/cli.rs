@@ -482,7 +482,7 @@ macro_rules! looks_help {
         "Looks (the looks module):
     the active look's name, with a click opening the picker (bind a click
     to \"popup\" with on-click = \"popup\", or click with no binding): one
-    row per look in catalog order, the active one selected, a long catalog
+    row per look in catalog order, the active one marked, a long catalog
     paged with `prev` and `next` rows. A row click runs `scoot look apply`
     for that look and closes the picker. Its actions are `apply N` (the
     picker's Nth row) and `page N`, each taking a number. Nothing is

@@ -6,7 +6,10 @@
 use std::path::PathBuf;
 
 #[cfg(feature = "popup")]
+use super::DEFAULT_MARKER;
+#[cfg(feature = "popup")]
 use super::PAGE_ROWS;
+use super::resolve_on_path;
 use super::started;
 #[cfg(feature = "popup")]
 use crate::action::Action;
@@ -131,7 +134,7 @@ fn a_short_catalog_is_one_page_with_the_active_selected() {
         vec![
             ("look-00".to_owned(), "apply", Some(0), false, true),
             ("look-01".to_owned(), "apply", Some(1), false, true),
-            ("look-02".to_owned(), "apply", Some(2), true, true),
+            ("● look-02".to_owned(), "apply", Some(2), true, true),
             ("look-03".to_owned(), "apply", Some(3), false, true),
             ("look-04".to_owned(), "apply", Some(4), false, true),
         ]
@@ -140,8 +143,9 @@ fn a_short_catalog_is_one_page_with_the_active_selected() {
 
 #[test]
 #[cfg(feature = "popup")]
-fn a_glyph_icon_marks_the_active_row() {
-    let mut looks = started(Some(Icon::Glyph('●')), None);
+fn a_glyph_icon_overrides_the_default_marker() {
+    assert_eq!(DEFAULT_MARKER, '●');
+    let mut looks = started(Some(Icon::Glyph('★')), None);
     let all = names(3);
     let (has, content) = filled(&mut looks, &all, Some("look-01"));
     assert!(has);
@@ -149,7 +153,7 @@ fn a_glyph_icon_marks_the_active_row() {
         labels(&content),
         vec![
             ("look-00".to_owned(), "apply", Some(0), false, true),
-            ("● look-01".to_owned(), "apply", Some(1), true, true),
+            ("★ look-01".to_owned(), "apply", Some(1), true, true),
             ("look-02".to_owned(), "apply", Some(2), false, true),
         ]
     );
@@ -194,7 +198,7 @@ fn a_long_catalog_pages_past_the_widget_cap() {
     assert_eq!(rows[1].0, "look-28");
     assert_eq!(
         rows[2],
-        ("look-29".to_owned(), "apply", Some(1), true, true)
+        ("● look-29".to_owned(), "apply", Some(1), true, true)
     );
 }
 
@@ -214,6 +218,8 @@ fn a_page_past_the_end_clamps_to_the_last() {
 #[cfg(feature = "popup")]
 fn a_row_stages_scoot_look_apply_for_the_shown_name() {
     let mut looks = started(None, None);
+    // The staged path, never spawned here: hermetic whatever PATH holds.
+    looks.scoot = Some(PathBuf::from("/bin/scoot"));
     let all = names(3);
     let (has, _) = filled(&mut looks, &all, None);
     assert!(has);
@@ -225,7 +231,7 @@ fn a_row_stages_scoot_look_apply_for_the_shown_name() {
     assert_eq!(
         harness.take_action(),
         Some(Action::Exec(vec![
-            "scoot".to_owned(),
+            "/bin/scoot".to_owned(),
             "look".to_owned(),
             "apply".to_owned(),
             "look-01".to_owned(),
@@ -233,6 +239,41 @@ fn a_row_stages_scoot_look_apply_for_the_shown_name() {
     );
     // One shot: nothing staged twice.
     assert_eq!(harness.take_action(), None);
+}
+
+#[test]
+#[cfg(feature = "popup")]
+fn an_apply_with_no_scoot_is_refused() {
+    let mut looks = started(None, None);
+    looks.scoot = None;
+    let all = names(2);
+    let (has, _) = filled(&mut looks, &all, None);
+    assert!(has);
+    let mut harness = Harness::new(Box::new(looks));
+    assert_eq!(
+        harness.invoke(&DP1, &action("apply", Some(0)), 1),
+        Err(InvokeError::Refused("no `scoot` on PATH to apply the look"))
+    );
+    assert_eq!(harness.take_action(), None);
+}
+
+#[test]
+fn resolve_on_path_finds_the_first_executable() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let first = scratch("path-first");
+    let second = scratch("path-second");
+    let stub = second.path().join("scoot");
+    std::fs::write(&stub, "#!/bin/sh\n").expect("a stub scoot");
+    std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+        .expect("an executable stub");
+    // A non-executable namesake earlier on PATH is skipped.
+    std::fs::write(first.path().join("scoot"), "#!/bin/sh\n").expect("a dull scoot");
+    let mut path = first.path().as_os_str().to_owned();
+    path.push(":");
+    path.push(second.path().as_os_str());
+    assert_eq!(resolve_on_path("scoot", Some(&path)), Some(stub));
+    assert_eq!(resolve_on_path("missing", Some(&path)), None);
+    assert_eq!(resolve_on_path("scoot", None), None);
 }
 
 #[test]

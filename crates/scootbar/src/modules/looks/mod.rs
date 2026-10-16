@@ -4,10 +4,10 @@
 //! applied last, through this picker, `scoot look apply`, a keybinding or
 //! an agent, shows here. A click opens the picker (`on-click = "popup"`,
 //! and a bare click with no binding, as the network list's): one row per
-//! look in catalog order, the active one selected, a row click running
-//! `scoot look apply` for that look. The active row also carries the
-//! module's glyph icon before its name where one is set, as the power
-//! menu's row glyphs do. A long catalog pages past the popup's
+//! look in catalog order, the active one selected and marked, a row click
+//! running `scoot look apply` for that look. The active row carries `●`
+//! before its name, or the module's glyph icon where one is set, as the
+//! power menu's row glyphs do. A long catalog pages past the popup's
 //! 16-widget cap ([`crate::popup::MAX_WIDGETS`]): 14 rows with `‹ prev`
 //! and `next ›` rows.
 //!
@@ -26,6 +26,7 @@
 //! reads are).
 
 use std::fmt::Write;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 
 use rustix::event::PollFlags;
@@ -41,9 +42,15 @@ mod tests;
 /// The id `--left`, `--center` and `--right` name it by.
 pub const ID: &str = "looks";
 
+/// The picker's active-row marker with no glyph icon configured: U+25CF,
+/// in DejaVu, so it needs no icon font. A configured glyph icon overrides
+/// it.
+pub const DEFAULT_MARKER: char = '●';
+
 /// The actions a binding or an agent may name: `apply N` runs
 /// `scoot look apply` for the picker's Nth row (what a row click does),
-/// `page N` turns the picker to page N, plus the popup itself
+/// refused past the picker's rows or with no `scoot` on PATH; `page N`
+/// turns the picker to page N, plus the popup itself
 /// (`on-click = "popup"`). Both take a number.
 pub const ACTIONS: &[ActionSpec] = &[
     ActionSpec {
@@ -71,7 +78,8 @@ const PAGE_ROWS: usize = 14;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Settings {
     /// An icon drawn before the active look's name. None shows the name
-    /// alone. A glyph icon also marks the active look's picker row.
+    /// alone. A glyph icon also marks the active look's picker row,
+    /// overriding the default marker.
     pub icon: Option<Icon>,
 }
 
@@ -85,6 +93,7 @@ pub fn init(settings: &super::Settings) -> Init {
 fn started(icon: Option<Icon>, state_dir: Option<PathBuf>) -> Looks {
     Looks {
         icon,
+        scoot: resolve_on_path("scoot", std::env::var_os("PATH").as_deref()),
         state_dir,
         page: 0,
         pages: 0,
@@ -93,9 +102,30 @@ fn started(icon: Option<Icon>, state_dir: Option<PathBuf>) -> Looks {
     }
 }
 
+/// Resolves `program` against `path` (a `PATH` value): the first executable
+/// regular file by that name, as spawning it would run. `None` when
+/// nothing there runs it.
+fn resolve_on_path(program: &str, path: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    let path = path?;
+    for dir in std::env::split_paths(path) {
+        let candidate = dir.join(program);
+        let executable = std::fs::metadata(&candidate)
+            .map(|meta| meta.is_file() && (meta.permissions().mode() & 0o111) != 0)
+            .unwrap_or(false);
+        if executable {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 /// The module.
 struct Looks {
     icon: Option<Icon>,
+    /// The `scoot` binary an apply stages, resolved from PATH once at
+    /// start. `None` refuses the apply with an error, so `invoke` never
+    /// answers success for a spawn that cannot run.
+    scoot: Option<PathBuf>,
     /// Where the active look is recorded: resolved once, read on every view
     /// and popup fill, so the bar always shows the last swap, whoever asked
     /// for it.
@@ -125,27 +155,35 @@ impl Looks {
         }
     }
 
-    /// The picker marker: the configured glyph icon, drawn before the
-    /// active row's name. A path or image icon marks nothing: popup rows
-    /// are text the bar's fonts draw, as the power menu's rows are.
+    /// The picker marker: the configured glyph icon, else the default
+    /// marker. A path or image icon marks nothing (the configured icon
+    /// still draws in the bar text): popup rows are text the bar's fonts
+    /// draw, as the power menu's rows are.
     #[cfg(feature = "popup")]
-    fn marker(&self) -> Option<char> {
+    fn marker(&self) -> char {
         match &self.icon {
-            Some(Icon::Glyph(glyph)) => Some(*glyph),
-            _ => None,
+            Some(Icon::Glyph(glyph)) => *glyph,
+            _ => DEFAULT_MARKER,
         }
     }
 
     /// Carries out the picker's `N`th row: stages `scoot look apply NAME`
-    /// for the loop to spawn. A row past what the picker showed is refused,
-    /// never applied by position from a changed catalog.
+    /// for the loop to spawn, through the `scoot` resolved at start (an
+    /// absolute path, so the spawn runs what the invoke checked). A row
+    /// past what the picker showed is refused, never applied by position
+    /// from a changed catalog; with no `scoot` on PATH the apply is
+    /// refused too, so `invoke` answers an error instead of success for
+    /// a spawn that cannot run.
     fn do_apply(&mut self, at: i32) -> Result<Update, InvokeError> {
         let index = usize::try_from(at).map_err(|_| InvokeError::Refused("no such look row"))?;
         let Some(name) = self.shown.get(index) else {
             return Err(InvokeError::Refused("no such look row"));
         };
+        let Some(scoot) = &self.scoot else {
+            return Err(InvokeError::Refused("no `scoot` on PATH to apply the look"));
+        };
         self.staged = Some(Action::Exec(vec![
-            "scoot".to_owned(),
+            scoot.to_string_lossy().into_owned(),
             "look".to_owned(),
             "apply".to_owned(),
             name.clone(),
@@ -168,10 +206,9 @@ impl Looks {
 
     /// Fills the picker from `names` (catalog order) with `active`
     /// selected: the rows of this page, with `‹ prev` and `next ›` rows
-    /// where there is another page. The active row carries the module's
-    /// glyph icon before its name where one is set, as the power menu's
-    /// row glyphs do; without one the accent selection alone marks it.
-    /// The rows format into the popup's reused buffers (the scroll and
+    /// where there is another page. The active row carries the marker
+    /// before its name, as the power menu's row glyphs do. The rows
+    /// format into the popup's reused buffers (the scroll and
     /// draw paths allocate nothing); the `shown`
     /// snapshot keeps only this page, and the names list is rebuilt per
     /// fill — a popup fill is rare, never per frame.
@@ -210,21 +247,23 @@ impl Looks {
         }
         for (index, name) in self.shown.iter().enumerate() {
             let selected = Some(name.as_str()) == active;
-            let pushed = match (selected, self.marker()) {
-                (true, Some(glyph)) => content.button(
-                    format_args!("{glyph} {name}"),
+            let marker = self.marker();
+            let pushed = if selected {
+                content.button(
+                    format_args!("{marker} {name}"),
                     "apply",
                     Some(index as i32),
                     true,
                     true,
-                ),
-                _ => content.button(
+                )
+            } else {
+                content.button(
                     format_args!("{name}"),
                     "apply",
                     Some(index as i32),
-                    selected,
+                    false,
                     true,
-                ),
+                )
             };
             if !pushed {
                 break;
