@@ -19,10 +19,10 @@ struct FakeBin {
 }
 
 impl FakeBin {
-    /// A bin dir with `makoctl`, `busctl` and `systemctl` fakes: each
-    /// appends its argv (one line) to `$out/argv-<name>` and exits the
-    /// code in `$out/exit-<name>` (0 when the file is missing).
-    fn new(tag: &str) -> Self {
+    /// A bin dir with fakes for `names`: each appends its argv (one line)
+    /// to `$out/argv-<name>` and exits the code in `$out/exit-<name>`
+    /// (0 when the file is missing).
+    fn new(tag: &str, names: &[&str]) -> Self {
         let id = COUNTER.fetch_add(1, Ordering::SeqCst);
         let root = std::env::temp_dir().join(format!(
             "scoot-leaves-cli-{tag}-{}-{id}",
@@ -32,7 +32,7 @@ impl FakeBin {
         let out = root.join("out");
         std::fs::create_dir_all(&dir).expect("a bin dir");
         std::fs::create_dir_all(&out).expect("an out dir");
-        for name in ["makoctl", "busctl", "systemctl"] {
+        for name in names {
             let out_sh = out.display().to_string();
             std::fs::write(
                 dir.join(name),
@@ -63,15 +63,35 @@ impl FakeBin {
     }
 }
 
+/// Prepends the fake bin dir to `PATH` for the body (real tools behind it
+/// still resolve, but the fakes win).
 fn with_fake_path<T>(fake: &FakeBin, f: impl FnOnce() -> T) -> T {
+    with_path(fake, true, f)
+}
+
+/// Sets `PATH` to exactly the fake bin dir for the body, so tools the
+/// fake omits (e.g. `busctl`) resolve to nothing.
+fn with_exact_path<T>(fake: &FakeBin, f: impl FnOnce() -> T) -> T {
+    with_path(fake, false, f)
+}
+
+/// One binary, several threads under `cargo test` (each test its own
+/// process under nextest): `PATH` is process-global, so the three tests
+/// serialize here rather than racing each other's `set_var`. Module-level
+/// (a generic fn would mint one lock per instantiation and serialize
+/// nothing).
+static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn with_path<T>(fake: &FakeBin, keep_real: bool, f: impl FnOnce() -> T) -> T {
+    let _guard = PATH_LOCK.lock().expect("the PATH lock");
+    // Read inside the lock: the suffix must be the pre-body PATH, not
+    // another test's body PATH observed mid-flight.
     let old = std::env::var_os("PATH");
-    let path = format!(
-        "{}{}",
-        fake.dir.display(),
-        old.as_ref()
-            .map(|p| format!(":{}", p.to_string_lossy()))
-            .unwrap_or_default()
-    );
+    let mut path = fake.dir.display().to_string();
+    if keep_real && let Some(real) = &old {
+        path.push(':');
+        path.push_str(&real.to_string_lossy());
+    }
     // `set_var` is `unsafe` (it can race another thread's `getenv`); the
     // body runs alone here and restores the value before returning.
     unsafe { std::env::set_var("PATH", &path) };
@@ -84,7 +104,7 @@ fn with_fake_path<T>(fake: &FakeBin, f: impl FnOnce() -> T) -> T {
 
 #[test]
 fn leaf_commands_reach_the_daemons_with_exact_args() {
-    let fake = FakeBin::new("ok");
+    let fake = FakeBin::new("ok", &["makoctl", "busctl", "systemctl"]);
     with_fake_path(&fake, || {
         let leaves = CliLeaves::new();
         leaves.mako_reload().expect("mako reloads");
@@ -96,10 +116,19 @@ fn leaf_commands_reach_the_daemons_with_exact_args() {
             .unit_try_restart("scoot-nightlight")
             .expect("the night-light unit restarts");
     });
-    assert_eq!(fake.argv("makoctl").trim(), "reload");
+    // mako goes over the bus with auto-start off (a bare `makoctl reload`
+    // would D-Bus-activate a mako nobody started); `makoctl` itself is
+    // never invoked while busctl exists.
+    assert!(fake.argv("makoctl").trim().is_empty());
+    let busctl_argv = fake.argv("busctl");
+    let mut busctl = busctl_argv.lines();
     assert_eq!(
-        fake.argv("busctl").trim(),
-        "--user call org.fcitx.Fcitx5 /controller org.fcitx.Fcitx.Controller1 ReloadAddonConfig s classicui"
+        busctl.next().unwrap_or_default(),
+        "--user --auto-start=no call org.freedesktop.Notifications /fr/emersion/Mako fr.emersion.Mako Reload"
+    );
+    assert_eq!(
+        busctl.next().unwrap_or_default(),
+        "--user --auto-start=no call org.fcitx.Fcitx5 /controller org.fcitx.Fcitx.Controller1 ReloadAddonConfig s classicui"
     );
     let systemctl = fake.argv("systemctl");
     let mut lines = systemctl.lines();
@@ -114,15 +143,30 @@ fn leaf_commands_reach_the_daemons_with_exact_args() {
 }
 
 #[test]
+fn mako_falls_back_to_makoctl_without_busctl() {
+    // No busctl on PATH at all (exact PATH, nothing behind it): the
+    // reload goes through `makoctl reload` as before.
+    let fake = FakeBin::new("mako-fallback", &["makoctl"]);
+    with_exact_path(&fake, || {
+        let leaves = CliLeaves::new();
+        leaves.mako_reload().expect("mako reloads");
+    });
+    assert_eq!(fake.argv("makoctl").trim(), "reload");
+}
+
+#[test]
 fn failing_daemons_are_named_errors() {
-    let fake = FakeBin::new("failing");
+    let fake = FakeBin::new("failing", &["makoctl", "busctl", "systemctl"]);
     fake.fail("makoctl");
     fake.fail("busctl");
     fake.fail("systemctl");
     with_fake_path(&fake, || {
         let leaves = CliLeaves::new();
         let error = leaves.mako_reload().expect_err("mako failure surfaces");
-        assert!(error.contains("makoctl"), "names the command: {error}");
+        assert!(error.contains("Reload"), "names the call: {error}");
+        // The failure never falls through to `makoctl` (which would
+        // D-Bus-activate mako): busctl present means makoctl stays out.
+        assert!(fake.argv("makoctl").trim().is_empty());
         let error = leaves.fcitx5_reload().expect_err("fcitx5 failure surfaces");
         assert!(error.contains("fcitx5"), "names the daemon: {error}");
         let error = leaves

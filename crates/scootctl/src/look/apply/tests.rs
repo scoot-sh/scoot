@@ -14,7 +14,8 @@ use std::time::Duration;
 use scoot_look::state::{LINK_NAME, RecordRead, read_record};
 
 use super::{
-    ApplyOptions, ApplyReport, Availability, BuildTarget, Checks, apply_with, build_to_out,
+    ApplyOptions, ApplyReport, Availability, BuildTarget, Checks, apply_with, apply_with_live,
+    build_to_out,
     shadowed_from_files_in, validate_dir, validate_entry,
 };
 use scoot_look::Origin;
@@ -321,7 +322,7 @@ fn an_offline_apply_records_repoints_and_renders() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::not_running();
-    let report = apply_with(
+    let report = apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -333,6 +334,7 @@ fn an_offline_apply_records_repoints_and_renders() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("an offline apply succeeds");
     assert_eq!(report.name, "look-a");
@@ -380,7 +382,7 @@ fn a_from_compositor_apply_records_its_provenance() {
     let mut compositor = FakeCompositor::not_running();
     let mut flagged = options();
     flagged.from_compositor = true;
-    apply_with(
+    apply_with_live(
         "look-a",
         &flagged,
         &fixture.catalog,
@@ -391,6 +393,8 @@ fn a_from_compositor_apply_records_its_provenance() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("a compositor-driven apply succeeds");
     assert_eq!(
@@ -406,7 +410,7 @@ fn a_second_apply_bumps_the_generation() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::not_running();
-    apply_with(
+    apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -418,10 +422,11 @@ fn a_second_apply_bumps_the_generation() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the first apply succeeds");
     let mut compositor = FakeCompositor::not_running();
-    let report = apply_with(
+    let report = apply_with_live(
         "look-b",
         &options(),
         &fixture.catalog,
@@ -433,6 +438,7 @@ fn a_second_apply_bumps_the_generation() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the second apply succeeds");
     assert_eq!(report.generation, 2);
@@ -457,7 +463,7 @@ fn a_committed_swap_renders_and_runs_the_daemon_leaves() {
     std::fs::write(fixture._root.join("looks/look-a/look.toml"), night)
         .expect("a look.toml with night");
     let catalog = discover_ordered(&[(fixture._root.join("looks"), Origin::User)]);
-    let report = apply_with(
+    let report = apply_with_live(
         "look-a",
         &options(),
         &catalog,
@@ -469,6 +475,7 @@ fn a_committed_swap_renders_and_runs_the_daemon_leaves() {
         &checks,
         &FakeDconf::absent(),
         &leaves,
+        &[],
     )
     .expect("the apply succeeds");
     assert!(report.reloaded.contains(&"mako".to_owned()), "{report:?}");
@@ -524,7 +531,7 @@ fn a_rolled_back_swap_runs_no_leaf_signal() {
     let mut compositor =
         FakeCompositor::with_script(vec![Err(ReloadError::Refused("no".to_owned()))]);
     let leaves = ScriptedLeaves::ok();
-    let _ = apply_with(
+    let _ = apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -536,6 +543,7 @@ fn a_rolled_back_swap_runs_no_leaf_signal() {
         &checks,
         &FakeDconf::absent(),
         &leaves,
+        &[],
     )
     .expect_err("the refused reload fails the swap");
     assert!(
@@ -551,7 +559,7 @@ fn an_unknown_look_refuses_and_touches_nothing() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::not_running();
-    let failure = apply_with(
+    let failure = apply_with_live(
         "nope",
         &options(),
         &fixture.catalog,
@@ -563,6 +571,7 @@ fn an_unknown_look_refuses_and_touches_nothing() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("an unknown look refuses");
     assert!(
@@ -582,7 +591,7 @@ fn an_invalid_name_refuses_before_any_path_join() {
     let checks = FakeChecks::default();
     let mut compositor = FakeCompositor::not_running();
     for bad in ["../evil", "LOUD", "", "a/b"] {
-        let failure = apply_with(
+        let failure = apply_with_live(
             bad,
             &options(),
             &fixture.catalog,
@@ -594,6 +603,7 @@ fn an_invalid_name_refuses_before_any_path_join() {
             &checks,
             &FakeDconf::absent(),
             &ScriptedLeaves::failing(),
+            &[],
         )
         .expect_err("an invalid name refuses");
         assert!(
@@ -613,7 +623,7 @@ fn a_corrupt_record_refuses_and_keeps_the_link() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::not_running();
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -625,6 +635,7 @@ fn a_corrupt_record_refuses_and_keeps_the_link() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("a corrupt record refuses");
     assert!(failure.message.contains("corrupt"), "{}", failure.message);
@@ -638,7 +649,7 @@ fn an_unwritable_state_dir_refuses_loudly() {
     std::fs::write(&fixture.state, b"not a dir").expect("a blocking file");
     let checks = FakeChecks::default();
     let mut compositor = FakeCompositor::not_running();
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -650,6 +661,7 @@ fn an_unwritable_state_dir_refuses_loudly() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("an unwritable state dir refuses");
     assert!(
@@ -666,7 +678,7 @@ fn a_compositor_refusal_rolls_back_to_the_previous_look() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::ok(&["appearance.background_color"], &[]);
-    apply_with(
+    apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -678,6 +690,7 @@ fn a_compositor_refusal_rolls_back_to_the_previous_look() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the first apply succeeds");
     let first_rendered = link_of(&fixture.state);
@@ -691,7 +704,7 @@ fn a_compositor_refusal_rolls_back_to_the_previous_look() {
         }),
         Ok(Reloaded::default()),
     ]);
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-b",
         &options(),
         &fixture.catalog,
@@ -703,6 +716,7 @@ fn a_compositor_refusal_rolls_back_to_the_previous_look() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("a refused swap fails");
     assert!(failure.message.contains("refused"), "{}", failure.message);
@@ -731,7 +745,7 @@ fn an_older_compositor_is_a_refusal_never_a_plain_retry() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::ok(&[], &[]);
-    apply_with(
+    apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -743,12 +757,13 @@ fn an_older_compositor_is_a_refusal_never_a_plain_retry() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the first apply succeeds");
     let mut compositor = FakeCompositor::with_script(vec![Err(ReloadError::Refused(
         "unknown variant `reload_look`, expected `reload`".to_owned(),
     ))]);
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-b",
         &options(),
         &fixture.catalog,
@@ -760,6 +775,7 @@ fn an_older_compositor_is_a_refusal_never_a_plain_retry() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("an older compositor refuses");
     assert_eq!(failure.rolled_back_to.as_deref(), Some("look-a"));
@@ -783,7 +799,7 @@ fn a_rollback_that_also_refuses_reports_both_errors() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::ok(&[], &[]);
-    apply_with(
+    apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -795,6 +811,7 @@ fn a_rollback_that_also_refuses_reports_both_errors() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the first apply succeeds");
     let mut compositor = FakeCompositor::with_script(vec![
@@ -806,7 +823,7 @@ fn a_rollback_that_also_refuses_reports_both_errors() {
         vec![Err(ReloadError::Refused("the new layer is bad".to_owned()))],
     );
     let bars: Vec<&dyn BarReload> = vec![&bar];
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-b",
         &options(),
         &fixture.catalog,
@@ -818,6 +835,7 @@ fn a_rollback_that_also_refuses_reports_both_errors() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("a double refusal fails");
     // The link stays at the previous look; both errors are reported.
@@ -859,7 +877,7 @@ fn a_failed_first_apply_removes_what_it_wrote() {
     // so no split-brain note either.
     let mut compositor =
         FakeCompositor::with_script(vec![Err(ReloadError::Refused("nope".to_owned()))]);
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -871,6 +889,7 @@ fn a_failed_first_apply_removes_what_it_wrote() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("the first apply fails");
     assert!(failure.rolled_back_to.is_none());
@@ -902,7 +921,7 @@ fn a_failed_first_apply_names_only_what_actually_reloaded() {
         vec![Err(ReloadError::Refused("bad layer".to_owned()))],
     );
     let bars: Vec<&dyn BarReload> = vec![&bar];
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -914,6 +933,7 @@ fn a_failed_first_apply_names_only_what_actually_reloaded() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("the first apply fails");
     assert!(failure.rolled_back_to.is_none());
@@ -947,7 +967,7 @@ fn a_partially_applied_compositor_is_re_run_on_rollback() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::ok(&[], &[]);
-    apply_with(
+    apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -959,6 +979,7 @@ fn a_partially_applied_compositor_is_re_run_on_rollback() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the first apply succeeds");
     let mut compositor = FakeCompositor::with_script(vec![
@@ -970,7 +991,7 @@ fn a_partially_applied_compositor_is_re_run_on_rollback() {
         }),
         Ok(Reloaded::default()),
     ]);
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-b",
         &options(),
         &fixture.catalog,
@@ -982,6 +1003,7 @@ fn a_partially_applied_compositor_is_re_run_on_rollback() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("a partial apply refuses the swap");
     assert_eq!(failure.rolled_back_to.as_deref(), Some("look-a"));
@@ -1010,7 +1032,7 @@ fn a_sent_but_unanswered_compositor_is_re_run_on_rollback() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::ok(&[], &[]);
-    apply_with(
+    apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -1022,6 +1044,7 @@ fn a_sent_but_unanswered_compositor_is_re_run_on_rollback() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the first apply succeeds");
     let mut compositor = FakeCompositor::with_script(vec![
@@ -1030,7 +1053,7 @@ fn a_sent_but_unanswered_compositor_is_re_run_on_rollback() {
         )),
         Ok(Reloaded::default()),
     ]);
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-b",
         &options(),
         &fixture.catalog,
@@ -1042,6 +1065,7 @@ fn a_sent_but_unanswered_compositor_is_re_run_on_rollback() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("an unanswered apply refuses the swap");
     assert_eq!(failure.rolled_back_to.as_deref(), Some("look-a"));
@@ -1064,7 +1088,7 @@ fn an_absent_bar_is_skipped_not_rolled_back() {
     // skips it with a note and completes without it.
     let bar = FakeBar::with_script("wayland-9", vec![Ok(false)]);
     let bars: Vec<&dyn BarReload> = vec![&bar];
-    let report = apply_with(
+    let report = apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -1076,6 +1100,7 @@ fn an_absent_bar_is_skipped_not_rolled_back() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("an absent bar skips");
     assert_eq!(report.reloaded, vec!["compositor".to_owned()]);
@@ -1102,7 +1127,7 @@ fn a_bar_refusal_rolls_back_the_compositor_too() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::ok(&[], &[]);
-    apply_with(
+    apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -1114,6 +1139,7 @@ fn a_bar_refusal_rolls_back_the_compositor_too() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the first apply succeeds");
     let mut compositor =
@@ -1127,7 +1153,7 @@ fn a_bar_refusal_rolls_back_the_compositor_too() {
         vec![Err(ReloadError::Refused("bad layer".to_owned()))],
     );
     let bars: Vec<&dyn BarReload> = vec![&bar0, &bar1];
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-b",
         &options(),
         &fixture.catalog,
@@ -1139,6 +1165,7 @@ fn a_bar_refusal_rolls_back_the_compositor_too() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("a bar refusal fails the swap");
     assert!(failure.message.contains("wayland-1"), "{}", failure.message);
@@ -1162,7 +1189,7 @@ fn a_sent_but_unanswered_bar_is_re_run_on_rollback() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::ok(&[], &[]);
-    apply_with(
+    apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -1174,6 +1201,7 @@ fn a_sent_but_unanswered_bar_is_re_run_on_rollback() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the first apply succeeds");
     let mut compositor =
@@ -1188,7 +1216,7 @@ fn a_sent_but_unanswered_bar_is_re_run_on_rollback() {
         ],
     );
     let bars: Vec<&dyn BarReload> = vec![&bar];
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-b",
         &options(),
         &fixture.catalog,
@@ -1200,6 +1228,7 @@ fn a_sent_but_unanswered_bar_is_re_run_on_rollback() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("an unanswered bar fails the swap");
     assert_eq!(failure.rolled_back_to.as_deref(), Some("look-a"));
@@ -1229,7 +1258,7 @@ fn a_failed_first_apply_names_an_unanswered_bar() {
         ))],
     );
     let bars: Vec<&dyn BarReload> = vec![&bar];
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -1241,6 +1270,7 @@ fn a_failed_first_apply_names_an_unanswered_bar() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("the first apply fails");
     assert!(failure.rolled_back_to.is_none());
@@ -1267,7 +1297,7 @@ fn a_held_lock_refuses_the_second_writer() {
     let mut compositor = FakeCompositor::not_running();
     let mut brief = options();
     brief.lock_wait = Duration::from_millis(100);
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-a",
         &brief,
         &fixture.catalog,
@@ -1279,6 +1309,7 @@ fn a_held_lock_refuses_the_second_writer() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("a held lock refuses");
     assert!(
@@ -1296,7 +1327,7 @@ fn a_disagreeing_link_heals_from_the_record() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::not_running();
-    apply_with(
+    apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -1308,6 +1339,7 @@ fn a_disagreeing_link_heals_from_the_record() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the first apply succeeds");
     // A simulated crash between the record and the link: the link dangles
@@ -1316,7 +1348,7 @@ fn a_disagreeing_link_heals_from_the_record() {
     std::os::unix::fs::symlink("/nonexistent-crash-target", fixture.state.join(LINK_NAME))
         .expect("a dangling link");
     let mut compositor = FakeCompositor::not_running();
-    let report = apply_with(
+    let report = apply_with_live(
         "look-b",
         &options(),
         &fixture.catalog,
@@ -1328,6 +1360,7 @@ fn a_disagreeing_link_heals_from_the_record() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the next apply heals first");
     assert!(
@@ -1348,7 +1381,7 @@ fn shadowed_keys_come_from_the_reload_reply() {
         &["appearance.background_color"],
         &["appearance.background_color", "wallpaper"],
     );
-    let report = apply_with(
+    let report = apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -1360,6 +1393,7 @@ fn shadowed_keys_come_from_the_reload_reply() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the apply succeeds");
     assert_eq!(
@@ -1389,7 +1423,7 @@ fn offline_shadowed_keys_come_from_the_files() {
     )
     .expect("a user bar");
     let mut compositor = FakeCompositor::not_running();
-    let report = apply_with(
+    let report = apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -1401,6 +1435,7 @@ fn offline_shadowed_keys_come_from_the_files() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the offline apply succeeds");
     assert!(
@@ -1437,7 +1472,7 @@ fn the_toolkit_write_lands_in_the_record() {
     let checks = FakeChecks::with_fonts(&fonts);
     let dconf = FakeDconf::default();
     let mut compositor = FakeCompositor::not_running();
-    apply_with(
+    apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -1449,6 +1484,7 @@ fn the_toolkit_write_lands_in_the_record() {
         &checks,
         &dconf,
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the apply succeeds");
     assert_eq!(
@@ -1486,7 +1522,7 @@ fn the_toolkit_write_lands_in_the_record() {
         ..FakeDconf::default()
     };
     let mut compositor = FakeCompositor::not_running();
-    let report = apply_with(
+    let report = apply_with_live(
         "look-b",
         &options(),
         &fixture.catalog,
@@ -1498,6 +1534,7 @@ fn the_toolkit_write_lands_in_the_record() {
         &checks,
         &dconf,
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the second apply succeeds");
     let writes = dconf.writes.borrow();
@@ -1527,7 +1564,7 @@ fn no_toolkit_skips_without_persisting() {
     let dconf = FakeDconf::default();
     let mut brief = options();
     brief.no_toolkit = true;
-    let report = apply_with(
+    let report = apply_with_live(
         "look-a",
         &brief,
         &fixture.catalog,
@@ -1539,6 +1576,7 @@ fn no_toolkit_skips_without_persisting() {
         &checks,
         &dconf,
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the apply succeeds");
     assert!(dconf.writes.borrow().is_empty());
@@ -1601,7 +1639,7 @@ fn readers_racing_a_swap_see_old_or_new_never_half() {
     let checks = FakeChecks::with_fonts(&fonts);
     for round in 0..10 {
         let name = if round % 2 == 0 { "look-a" } else { "look-b" };
-        apply_with(
+        apply_with_live(
             name,
             &options(),
             &fixture.catalog,
@@ -1613,6 +1651,7 @@ fn readers_racing_a_swap_see_old_or_new_never_half() {
             &checks,
             &FakeDconf::absent(),
             &ScriptedLeaves::failing(),
+            &[],
         )
         .expect("each swap succeeds");
     }
@@ -1639,7 +1678,7 @@ fn the_cache_keeps_active_previous_and_four_recent() {
         std::thread::sleep(Duration::from_millis(10));
     }
     let mut compositor = FakeCompositor::not_running();
-    apply_with(
+    apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -1651,6 +1690,7 @@ fn the_cache_keeps_active_previous_and_four_recent() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the apply succeeds");
     // Active + four most recent survive; the two oldest are pruned.
@@ -1672,7 +1712,7 @@ fn pruning_never_touches_state_names() {
     std::fs::write(fixture.cache.join("look.json"), "{}").expect("a look.json");
     std::fs::write(fixture.cache.join("look.lock"), "").expect("a look.lock");
     let mut compositor = FakeCompositor::not_running();
-    apply_with(
+    apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -1684,6 +1724,7 @@ fn pruning_never_touches_state_names() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the apply succeeds");
     assert!(fixture.cache.join("look").is_dir());
@@ -1857,7 +1898,7 @@ fn validate_names_a_bad_wallpaper_instead_of_blank() {
             // apply test points its config home at a tempdir.
             let config = root.join("config");
             let mut compositor = FakeCompositor::not_running();
-            let failure = apply_with(
+            let failure = apply_with_live(
                 "badlook",
                 &options(),
                 &catalog,
@@ -1869,6 +1910,7 @@ fn validate_names_a_bad_wallpaper_instead_of_blank() {
                 &checks,
                 &FakeDconf::absent(),
                 &ScriptedLeaves::failing(),
+                &[],
             )
             .expect_err("a bad wallpaper refuses the apply");
             assert!(!failure.message.trim().is_empty(), "blank apply message");
@@ -1958,7 +2000,7 @@ fn a_font_refusal_refuses_before_anything_is_touched() {
         foot_seen: RefCell::new(Vec::new()),
     };
     let mut compositor = FakeCompositor::not_running();
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -1970,6 +2012,7 @@ fn a_font_refusal_refuses_before_anything_is_touched() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("a refused font refuses the swap");
     assert!(
@@ -2168,7 +2211,7 @@ fn validate_and_apply_agree_on_the_bar_fragment() {
         validation.errors
     );
     let mut compositor = FakeCompositor::not_running();
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-a",
         &options(),
         &fixture.catalog,
@@ -2180,6 +2223,7 @@ fn validate_and_apply_agree_on_the_bar_fragment() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("apply refuses too");
     assert!(
@@ -2312,7 +2356,7 @@ fn a_minimal_bar_drops_module_tokens_with_a_note() {
     let state = root.join("state");
     let config = root.join("config");
     let mut compositor = FakeCompositor::not_running();
-    let report = apply_with(
+    let report = apply_with_live(
         "look-ws",
         &options(),
         &catalog,
@@ -2324,6 +2368,7 @@ fn a_minimal_bar_drops_module_tokens_with_a_note() {
         &checks,
         &FakeDconf::absent(),
         &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("a minimal bar applies a shipped-shaped look");
     assert!(
@@ -2775,6 +2820,7 @@ fn guard_child_applies_inside_a_sandboxed_home() {
         &[],
         &checks,
         &FakeDconf::default(),
+        &ScriptedLeaves::failing(),
     )
     .expect("the sandboxed fallback apply succeeds");
     assert_toolkit_files(&xdg, &report);
@@ -2804,6 +2850,7 @@ fn guard_child_applies_inside_a_sandboxed_home() {
         &[],
         &checks,
         &FakeDconf::default(),
+        &ScriptedLeaves::failing(),
     )
     .expect("the pinned apply succeeds");
     assert_toolkit_files(&pinned, &report);
@@ -2914,7 +2961,7 @@ fn apply_renders_foot_ini_into_the_cached_render() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::not_running();
-    let report = apply_with(
+    let report = apply_with_live(
         "look-t",
         &options(),
         &fixture.catalog,
@@ -2925,6 +2972,8 @@ fn apply_renders_foot_ini_into_the_cached_render() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("an offline apply succeeds");
     assert_eq!(report.name, "look-t");
@@ -2941,7 +2990,7 @@ fn a_foot_check_refusal_refuses_before_anything_is_touched() {
     let mut checks = FakeChecks::with_fonts(&fonts);
     checks.foot_refuse = Some("foot says no".to_owned());
     let mut compositor = FakeCompositor::not_running();
-    let failure = apply_with(
+    let failure = apply_with_live(
         "look-t",
         &options(),
         &fixture.catalog,
@@ -2952,6 +3001,8 @@ fn a_foot_check_refusal_refuses_before_anything_is_touched() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect_err("a refused foot fragment applies");
     assert!(
@@ -2989,7 +3040,7 @@ fn apply_notes_name_the_foot_include_setup_until_it_exists() {
     let checks = FakeChecks::with_fonts(&fonts);
     // No foot.ini at all: the reply carries the one-time setup.
     let mut compositor = FakeCompositor::not_running();
-    let report = apply_with(
+    let report = apply_with_live(
         "look-t",
         &options(),
         &fixture.catalog,
@@ -3000,6 +3051,8 @@ fn apply_notes_name_the_foot_include_setup_until_it_exists() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("an offline apply succeeds");
     let link_path = fixture.state.join("look/foot.ini");
@@ -3020,7 +3073,7 @@ fn apply_notes_name_the_foot_include_setup_until_it_exists() {
     )
     .expect("a foot.ini");
     let mut compositor = FakeCompositor::not_running();
-    let report = apply_with(
+    let report = apply_with_live(
         "look-t",
         &options(),
         &fixture.catalog,
@@ -3031,6 +3084,8 @@ fn apply_notes_name_the_foot_include_setup_until_it_exists() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("an offline apply succeeds");
     assert!(
@@ -3049,7 +3104,7 @@ fn apply_notes_name_the_foot_include_setup_until_it_exists() {
     )
     .expect("a foot.ini");
     let mut compositor = FakeCompositor::not_running();
-    let report = apply_with(
+    let report = apply_with_live(
         "look-t",
         &options(),
         &fixture.catalog,
@@ -3060,6 +3115,8 @@ fn apply_notes_name_the_foot_include_setup_until_it_exists() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("an offline apply succeeds");
     assert!(
@@ -3087,7 +3144,7 @@ fn a_second_apply_reuses_the_cached_foot_ini() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let mut compositor = FakeCompositor::not_running();
-    apply_with(
+    apply_with_live(
         "look-t",
         &options(),
         &fixture.catalog,
@@ -3098,11 +3155,13 @@ fn a_second_apply_reuses_the_cached_foot_ini() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the first apply succeeds");
     let first = PathBuf::from(&record_of(&fixture.state).rendered);
     let mut compositor = FakeCompositor::not_running();
-    let report = apply_with(
+    let report = apply_with_live(
         "look-t",
         &options(),
         &fixture.catalog,
@@ -3113,6 +3172,8 @@ fn a_second_apply_reuses_the_cached_foot_ini() {
         &[],
         &checks,
         &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
     )
     .expect("the second apply succeeds");
     let second = PathBuf::from(&record_of(&fixture.state).rendered);

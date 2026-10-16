@@ -79,3 +79,50 @@ fn private_state_runs_nothing() {
     assert!(report.notes[0].contains("private look state"));
     assert!(leaves.restarted().is_empty());
 }
+
+/// A unit that was never installed is skipped silently: no reload, no
+/// note. (On a non-systemd box every swap would otherwise nag about
+/// units that never existed.)
+#[test]
+fn absent_units_are_silent() {
+    struct AbsentUnits;
+    impl super::Leaves for AbsentUnits {
+        fn mako_reload(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn fcitx5_reload(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn unit_try_restart(&self, _unit: &str) -> Result<(), String> {
+            Err(super::UNIT_ABSENT.to_owned())
+        }
+    }
+    let report = apply_leaves(
+        Path::new("/state"),
+        &look_named("moonrise", Some(3400)),
+        &AbsentUnits,
+    );
+    assert_eq!(report.reloaded, vec!["mako", "fcitx5"]);
+    assert!(report.notes.is_empty(), "notes: {:?}", report.notes);
+}
+
+#[test]
+fn unit_absent_patterns() {
+    for output in [
+        "Unit scoot-osd.service not found.",
+        "Failed to get unit: Unit not found.",
+        "Unknown unit: scoot-osd.service",
+        "System has not been booted with systemd as init system.",
+        "No such file or directory",
+        "Could not find unit scoot-osd",
+    ] {
+        assert!(super::is_unit_absent(output), "absent: {output}");
+    }
+    for output in [
+        "Failed to restart unit: Unit entered failed state.",
+        "no `systemctl` on PATH",
+        "Job failed. See \"journalctl --user -xe\" for details.",
+    ] {
+        assert!(!super::is_unit_absent(output), "present: {output}");
+    }
+}

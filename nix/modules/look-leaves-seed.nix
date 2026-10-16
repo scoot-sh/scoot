@@ -33,10 +33,11 @@ let
   # `lib.hm.dag` exists under real home-manager only: the eval stubs in
   # `nix/tests.nix` use plain nixpkgs lib, so fall back to a plain
   # after-entry there (activation never runs in an eval).
-  entryAfter = lib.hm.dag.entryAfter or (deps: text: {
-    data = text;
-    after = deps;
-  });
+  entryAfter =
+    lib.hm.dag.entryAfter or (deps: text: {
+      data = text;
+      after = deps;
+    });
 in
 {
   home.activation.scootLookSeed = lib.mkIf (look != null && package != null) (

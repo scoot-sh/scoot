@@ -33,36 +33,48 @@ let
   # standalone evals collect assertions without enforcing them.
   toolsReady = night.package != null;
 
-  # The night temperature comes from the live look at unit start: the
-  # wrapper reads `<state>/look/nightlight` (one `temperature=` line,
-  # rendered by `scoot look apply`) and falls back to the configured
-  # `nightTemp` when the link is missing, unreadable or out of range.
-  # `scoot look apply` restarts this unit on every swap, so the new
-  # temperature lands then. Every other option stays baked at
-  # evaluation (a unit rewrite still restarts the daemon, as before).
+  # The night temperature comes from the live look at unit start only
+  # when the look's own warmth is in effect: a look is set, its
+  # nightlight target is on, and no explicit `nightTemp` overrides it
+  # (your own setting wins, so the wrapper then uses it directly and
+  # never reads the fragment). Baked at evaluation: the two wrappers
+  # below differ, there is no runtime gate to drift. `scoot look apply`
+  # restarts this unit on every swap, so the new temperature lands then.
+  # Every other option stays baked at evaluation (a unit rewrite still
+  # restarts the daemon, as before).
+  useLive = themed && look != null && night.nightTemp == look.nightTemp;
+
+  # The daemon is fixed at evaluation (a unit rewrite restarts the
+  # daemon on any option change), so only the taken branch renders:
+  # no dead flags, and a negative longitude rides as its own word
+  # (`-L -121.9`: getopt takes the next word verbatim).
+  daemonExec =
+    if night.daemon == "gammastep" then
+      ''exec ${lib.getExe night.package} -m wayland -t "${toString night.dayTemp}:$temp" -l "${toString night.latitude}:${toString night.longitude}" -g "${toString night.gamma}:${toString night.gamma}:${toString night.gamma}"''
+    else if located then
+      ''exec ${lib.getExe night.package} -T ${toString night.dayTemp} -t "$temp" -l ${toString night.latitude} -L ${toString night.longitude} -g ${toString night.gamma}''
+    else
+      ''exec ${lib.getExe night.package} -T ${toString night.dayTemp} -t "$temp" -S ${night.sunrise} -s ${night.sunset} -d ${toString night.duration} -g ${toString night.gamma}'';
   nightlightRun =
-    pkgs.writeShellScriptBin "scoot-nightlight-run" ''
-      look="''${XDG_STATE_HOME:-$HOME/.local/state}/scoot/look/nightlight"
-      temp="$(sed -n 's/^temperature=//p' "$look" 2>/dev/null | head -n 1)"
-      case "$temp" in
-        "" | *[!0-9]*) temp=${toString night.nightTemp} ;;
-      esac
-      if [ "$temp" -lt 1000 ] || [ "$temp" -gt 10000 ]; then
+    if useLive then
+      pkgs.writeShellScriptBin "scoot-nightlight-run" ''
+        look="''${XDG_STATE_HOME:-$HOME/.local/state}/scoot/look/nightlight"
+        temp="$(sed -n 's/^temperature=//p' "$look" 2>/dev/null | head -n 1)"
+        case "$temp" in
+          "" | *[!0-9]* | ??????*) temp=${toString night.nightTemp} ;;
+        esac
+        if [ "$temp" -lt 1000 ] || [ "$temp" -gt 10000 ]; then
+          temp=${toString night.nightTemp}
+        fi
+        ${daemonExec}
+      ''
+    else
+      pkgs.writeShellScriptBin "scoot-nightlight-run" ''
+        # Static: an explicit nightTemp wins, or no look theme applies;
+        # the live fragment stays unread even after `scoot look apply`.
         temp=${toString night.nightTemp}
-      fi
-      # The daemon is fixed at evaluation (a unit rewrite restarts the
-      # daemon on any option change), so only the taken branch renders:
-      # no dead flags, and a negative longitude rides as its own word
-      # (`-L -121.9`: getopt takes the next word verbatim).
-      ${
-        if night.daemon == "gammastep" then
-          ''exec ${lib.getExe night.package} -m wayland -t "${toString night.dayTemp}:$temp" -l "${toString night.latitude}:${toString night.longitude}" -g "${toString night.gamma}:${toString night.gamma}:${toString night.gamma}"''
-        else if located then
-          ''exec ${lib.getExe night.package} -T ${toString night.dayTemp} -t "$temp" -l ${toString night.latitude} -L ${toString night.longitude} -g ${toString night.gamma}''
-        else
-          ''exec ${lib.getExe night.package} -T ${toString night.dayTemp} -t "$temp" -S ${night.sunrise} -s ${night.sunset} -d ${toString night.duration} -g ${toString night.gamma}''
-      }
-    '';
+        ${daemonExec}
+      '';
 
   # `builtins.match` needs the whole value, so each pattern below is a
   # full `HH:MM` (00:00 to 23:59) and nothing else.

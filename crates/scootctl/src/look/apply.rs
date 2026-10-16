@@ -1592,7 +1592,10 @@ fn resolve_config_home(config: Option<&Path>) -> Option<PathBuf> {
 /// `state_dir`, `config` home and peers except the lock, the record, the
 /// link, the cache and the reloads themselves. `config` pins the config
 /// home (the toolkit files land there, the shadowed keys read there);
-/// `None` resolves it from the live environment, for production.
+/// `None` resolves it from the live environment, for production. Other
+/// live sessions' renders are kept via [`live_render_targets`] (read from
+/// the environment here); tests use [`apply_with_live`] with an explicit
+/// keep-set instead, so no test ever reads the real home or runtime dirs.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_with(
     name: &str,
@@ -1606,6 +1609,32 @@ pub fn apply_with(
     checks: &dyn Checks,
     dconf: &dyn Dconf,
     leaves: &dyn super::leaves::Leaves,
+) -> Result<ApplyReport, ApplyFailure> {
+    let live = live_render_targets();
+    apply_with_live(
+        name, options, catalog, cache, state_dir, config, compositor, bars, checks, dconf, leaves,
+        &live,
+    )
+}
+
+/// [`apply_with`] with the other live sessions' renders passed in: the
+/// keep-set is `target`, `previous`, plus `live`. Production passes
+/// [`live_render_targets`]; tests pass `&[]` (their caches are scratch,
+/// so nothing else can name a render in them).
+#[allow(clippy::too_many_arguments)]
+pub fn apply_with_live(
+    name: &str,
+    options: &ApplyOptions,
+    catalog: &Catalog,
+    cache: &Path,
+    state_dir: &Path,
+    config: Option<&Path>,
+    compositor: &mut dyn CompositorReload,
+    bars: &[&dyn BarReload],
+    checks: &dyn Checks,
+    dconf: &dyn Dconf,
+    leaves: &dyn super::leaves::Leaves,
+    live: &[PathBuf],
 ) -> Result<ApplyReport, ApplyFailure> {
     if !is_name(name) {
         return Err(ApplyFailure {
@@ -2013,7 +2042,7 @@ pub fn apply_with(
     if let Some(previous) = &previous {
         keep.push(PathBuf::from(&previous.rendered));
     }
-    keep.extend(live_render_targets());
+    keep.extend(live.iter().cloned());
     prune_cache(cache, &keep, &mut report.notes);
     report.name = name.to_owned();
     report.rendered = record.rendered.clone();
@@ -2362,39 +2391,9 @@ fn flatten_keys(table: &toml::Table, prefix: String) -> Vec<String> {
     keys
 }
 
-/// Our output files, the only ones `build --out` may write. `foot.ini`
-/// joins them only when the look has a `[terminal]` table, and `nightlight`
-/// only when the look names a temperature; a rebuild without one clears the
-/// stale copy (see `build_to_out`). The toolkit
-/// fragments beside the first-party ones render from tokens alone, so
-/// they are always written: `qt6ct.conf`, `settings.ini` and the
-/// fontconfig file stay apply-rendered (the conf points through the
-/// state link, which `build` does not know).
-const BUILD_FILES: [&str; 10] = [
-    "scoot.toml",
-    "bar.toml",
-    "foot.ini",
-    "render.json",
-    "gtk/gtk-3.0.css",
-    "gtk/gtk-4.0.css",
-    "qt/scoot-look.conf",
-    "mako",
-    "wob.ini",
-    "nightlight",
-];
-
-/// Top-level directories our nested build outputs live under, each with
-/// the files it may hold (never followed through a symlink). The
-/// foreign-dir check reads top-level names, so these need their own
-/// branch: one holding only its named files is ours.
-const BUILD_DIRS: [(&str, &[&str]); 3] = [
-    ("fcitx5", &["theme.conf"]),
-    ("gtk", &["gtk-3.0.css", "gtk-4.0.css"]),
-    ("qt", &["scoot-look.conf"]),
-];
-
 /// Renders a source (a directory, or a catalog name) into `out` without
-/// touching state, the cache, or any app: `build` without `apply`.
+/// touching state, the cache, or any app: `build` without `apply`. The
+/// output file list and directory guard live in [`super::build_dir`].
 pub fn build_to_out(
     target: &BuildTarget,
     out: &Path,
@@ -2451,7 +2450,13 @@ pub fn build_to_out(
     /// One full render: the two first-party fragments, foot's `foot.ini`
     /// (only when the look has a `[terminal]` table), the record, and the
     /// daemon leaves (`fcitx5/theme.conf` under its directory).
-    type FullRender = (String, String, Option<String>, String, Vec<(String, String)>);
+    type FullRender = (
+        String,
+        String,
+        Option<String>,
+        String,
+        Vec<(String, String)>,
+    );
     let render_once = |render_inputs: &RenderInputs| -> Result<FullRender, String> {
         let scoot = render_scoot(&merged, render_inputs)
             .map_err(|error| format!("cannot render {name}: {error}"))?;
@@ -2607,79 +2612,9 @@ pub fn build_to_out(
             Err(message) => return Err(message),
         }
     }
-    // Refuse a symlinked `out`: writing through it would land outside the
-    // named directory.
-    if let Ok(meta) = std::fs::symlink_metadata(out)
-        && meta.file_type().is_symlink()
-    {
-        return Err(format!(
-            "refusing to build into {}: it is a symlink",
-            out.display()
-        ));
-    }
-    if out.exists() && !out.is_dir() {
-        return Err(format!(
-            "refusing to build into {}: not a directory",
-            out.display()
-        ));
-    }
-    if out.is_dir() {
-        let entries = std::fs::read_dir(out)
-            .map_err(|error| format!("cannot list {}: {error}", out.display()))?;
-        let mut foreign: Vec<String> = Vec::new();
-        for entry in entries.filter_map(|e| e.ok()) {
-            let entry_name = entry.file_name().to_string_lossy().into_owned();
-            // A symlinked output entry would be written through: refuse
-            // it, whatever it is named.
-            let fp = out.join(&entry_name);
-            if let Ok(meta) = std::fs::symlink_metadata(&fp)
-                && meta.file_type().is_symlink()
-            {
-                return Err(format!(
-                    "refusing to build into {}: {} is a symlink",
-                    out.display(),
-                    fp.display()
-                ));
-            }
-            if BUILD_FILES.contains(&entry_name.as_str()) {
-                continue;
-            }
-            // Our nested outputs read as top-level dirs: one holding only
-            // our files is ours, anything else in it is foreign.
-            match BUILD_DIRS.iter().find(|(dir, _)| *dir == entry_name) {
-                Some((_, allowed)) => {
-                    if !fp.is_dir() {
-                        foreign.push(entry_name.clone());
-                        continue;
-                    }
-                    let inner = std::fs::read_dir(&fp)
-                        .map_err(|error| format!("cannot list {}: {error}", fp.display()))?;
-                    for child in inner.filter_map(|e| e.ok()) {
-                        let child_name = child.file_name().to_string_lossy().into_owned();
-                        let child_path = fp.join(&child_name);
-                        let child_symlink = std::fs::symlink_metadata(&child_path)
-                            .map(|meta| meta.file_type().is_symlink())
-                            .unwrap_or(false);
-                        if !allowed.contains(&child_name.as_str()) || child_symlink {
-                            foreign.push(format!("{entry_name}/{child_name}"));
-                        }
-                    }
-                }
-                None => foreign.push(entry_name.clone()),
-            }
-        }
-        if !foreign.is_empty() {
-            foreign.sort();
-            return Err(format!(
-                "refusing to build into {}: it holds files this build did not write ({})",
-                out.display(),
-                foreign.join(", ")
-            ));
-        }
-    } else {
-        std::fs::create_dir_all(out)
-            .map_err(|error| format!("cannot create {}: {error}", out.display()))?;
-    }
+    // The output dir guard lives in `build_dir` (refuses symlinks and
+    // foreign files, creates an absent dir).
+    super::build_dir::check_out_dir(out)?;
     for (file, contents) in &staged {
         let path = out.join(file);
         if let Some(parent) = path.parent() {

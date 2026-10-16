@@ -6134,17 +6134,21 @@ let
   audioNoLook = hmAudioNoLook.config.xdg.configFile."wob/wob.ini".source;
   audioTargetOff = hmAudioTargetOff.config.xdg.configFile."wob/wob.ini".source;
   audioOsdScript = slotScriptBin hmAudio "scoot-osd";
+  audioNoLookOsd = slotScriptBin hmAudioNoLook "scoot-osd";
+  audioTargetOffOsd = slotScriptBin hmAudioTargetOff "scoot-osd";
   audioVolumeScript = slotScriptBin hmAudio "scoot-volume";
   audioBrightnessScript = slotScriptBin hmAudio "scoot-brightness";
   audioSinkScript = slotScriptBin hmAudio "scoot-audio-sink";
   # The night-light wrappers: the unit's `ExecStart` itself, whose
   # content carries the daemon's flags with the temperature resolved
-  # at unit start.
+  # at unit start (live) or baked in (an explicit nightTemp, an
+  # opted-out target, or no look).
   nightExec = hmNight.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
-  nightLocatedExec =
-    hmNightLocated.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
-  nightGammaExec =
-    hmNightGamma.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
+  nightLocatedExec = hmNightLocated.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
+  nightGammaExec = hmNightGamma.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
+  nightUserExec = hmNightUserWins.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
+  nightTargetOffExec =
+    hmNightTargetOff.config.systemd.user.services.scoot-nightlight.Service.ExecStart;
 
   # --- greeter structural pins (fail `nix flake check` at eval) ---
   #
@@ -16093,19 +16097,24 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q "scoot/look/wob.ini" ${audioOsdScript}
     grep -F -q "printf 'timeout = %s" ${audioOsdScript}
     grep -F -q '"1500"' ${audioOsdScript}
-    grep -F -q 'else cat ' ${audioOsdScript}
+    grep -F -q 'no applied look, using the static config' ${audioOsdScript}
     grep -F -q -- '-c "$assembled"' ${audioOsdScript}
     echo "ok: the OSD follows the live look fragment, timeout prepended"
 
     # 22b. Lookless (or opted out): geometry and the timeout stay, the
     #      look's colors leave (wob's own stand), the muted style still
-    #      defined so mute never names a missing style.
+    #      defined so mute never names a missing style. The daemon never
+    #      reads the live fragment there, even after `scoot look apply`.
     grep -F -x "timeout = 1500" ${audioNoLook}
     if grep -q "FCFBFBff" ${audioNoLook}; then echo "look color present with no look (22b)" >&2; exit 1; fi
     grep -F -q -- "[style.muted]" ${audioNoLook}
     grep -F -x "bar_color = 888888ff" ${audioNoLook}
     if grep -q "FCFBFBff" ${audioTargetOff}; then echo "look color present with theming off (22b)" >&2; exit 1; fi
     grep -F -q -- "[style.muted]" ${audioTargetOff}
+    if grep -q "scoot/look/wob.ini" ${audioNoLookOsd}; then echo "fragment read with no look (22b)" >&2; exit 1; fi
+    if grep -q "scoot/look/wob.ini" ${audioTargetOffOsd}; then echo "fragment read with theming off (22b)" >&2; exit 1; fi
+    grep -F -q "printf 'timeout = %s" ${audioTargetOffOsd}
+    grep -F -q -- '-c "$assembled"' ${audioTargetOffOsd}
     echo "ok: opting out (or no look) leaves wob unthemed but mute-safe"
 
     # 22c. Retimed: the override prepends onto whatever config the
@@ -16871,26 +16880,32 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     echo "ok: candidate window follows the live look, both classic UI paths name it"
 
     # 24b. Night-light wrappers: the temperature resolves at unit start
-    #      from the live look fragment, falling back to the configured
-    #      night temperature (music-desk's 4000, the plain 3500 without
-    #      a look) when the link is missing or out of range. The manual
-    #      schedule, the located mode and the gammastep spelling each
-    #      carry their own baked flags around that one live value.
+    #      from the live look fragment only when the look's own warmth is
+    #      in effect (music-desk's 4000, falling back when the link is
+    #      missing, unreadable, or out of range). An explicit nightTemp, an
+    #      opted-out target, or no look bakes the value in and never reads
+    #      the fragment. The manual schedule, the located mode and the
+    #      gammastep spelling each carry their own baked flags around that.
     grep -F -q "scoot/look/nightlight" ${nightExec}
     grep -F -q -- "-T 6500" ${nightExec}
     grep -F -q -- "-S 07:00 -s 19:00 -d 900" ${nightExec}
     grep -F -q "temp=4000" ${nightExec}
-    grep -F -q "scoot/look/nightlight" ${nightLocatedExec}
+    if grep -q "scoot/look/nightlight" ${nightLocatedExec}; then echo "fragment read without a look (24b)" >&2; exit 1; fi
     grep -F -q -- "-l 37.33" ${nightLocatedExec}
     grep -F -q -- "-L -121.89" ${nightLocatedExec}
     grep -F -q "temp=3500" ${nightLocatedExec}
     if grep -q -- "-S " ${nightLocatedExec}; then echo "manual schedule in located mode (24b)" >&2; exit 1; fi
+    if grep -q "scoot/look/nightlight" ${nightGammaExec}; then echo "fragment read without a look (24b)" >&2; exit 1; fi
     grep -F -q -- "-m wayland" ${nightGammaExec}
-    grep -F -q -- "-t 6500:" ${nightGammaExec}
-    grep -F -q -- "-l 37.33:-121.89" ${nightGammaExec}
-    grep -F -q -- "-g 1.000000:1.000000:1.000000" ${nightGammaExec}
+    grep -F -q -- '-t "6500:' ${nightGammaExec}
+    grep -F -q -- '"37.330000:-121.890000"' ${nightGammaExec}
+    grep -F -q -- '"1.000000:1.000000:1.000000"' ${nightGammaExec}
     grep -F -q "temp=3500" ${nightGammaExec}
-    echo "ok: night-light wrappers read the live temperature, flags baked around it"
+    if grep -q "scoot/look/nightlight" ${nightUserExec}; then echo "fragment read over an explicit nightTemp (24b)" >&2; exit 1; fi
+    grep -F -q "temp=3000" ${nightUserExec}
+    if grep -q "scoot/look/nightlight" ${nightTargetOffExec}; then echo "fragment read with the target off (24b)" >&2; exit 1; fi
+    grep -F -q "temp=3500" ${nightTargetOffExec}
+    echo "ok: night-light wrappers read the live temperature only when the look's warmth is in effect, flags baked around it"
   ''}
 
   touch $out

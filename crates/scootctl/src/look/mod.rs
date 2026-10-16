@@ -18,6 +18,7 @@
 //! the link fresh.
 
 pub mod apply;
+pub mod build_dir;
 pub mod catalog;
 pub mod leaves;
 pub mod reload;

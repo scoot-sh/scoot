@@ -105,13 +105,13 @@ private look state (headless or `--private-look`) signals none of them.
   `~/.local/share/fcitx5/themes/scoot-look/theme.conf` at the
   fragment and keep `Theme=scoot-look` in `classicui.conf`.
 - The night-light unit reads the temperature from the fragment at
-  start and restarts on swap. Without Nix read
+  start (only while the look's own warmth is in effect; an explicit
+  temperature or a disabled target uses your value instead) and restarts
+  on swap. Without Nix read
   `<state>/look/nightlight` (`temperature=` in Kelvin) in your own
   warmer's startup.
 
-Your own settings keep winning per key: mako and fcitx5 keys you set
-yourself override the fragment by file order, and the OSD hide timeout
-and the day temperature stay yours. The first apply on a Nix machine
+Your own settings win over the look, and a theme target turned off keeps the look away from that app entirely: mako and fcitx5 keys you set override the fragment by file order, an explicit night temperature beats the look's, and the OSD hide timeout and the day temperature stay yours. The first apply on a Nix machine
 seeds the declared default look, so a fresh install's daemons never
 start against a missing fragment.
 

@@ -16,14 +16,22 @@
 //!
 //! The commands, verified against the pinned sources:
 //!
-//! - `makoctl reload`: mako 1.11.0 re-parses its config (following the
-//!   `include=` to the new fragment) and restyles the notifications
-//!   already on screen (`dbus/mako.c`, `config.c`).
-//! - `busctl --user call org.fcitx.Fcitx5 /controller
+//! - `makoctl reload`, guarded so it can never start mako: makoctl
+//!   calls `Reload` on `org.freedesktop.Notifications` (mako 1.11.0
+//!   `makoctl.c`), and mako ships D-Bus activation for exactly that
+//!   name (`fr.emersion.mako.service`: `Name=org.freedesktop.Notifications`),
+//!   so a bare reload with mako down would launch it. The swap instead
+//!   calls the same `Reload` method through
+//!   `busctl --user --auto-start=no` (same bus, same method makoctl
+//!   would call), falling back to `makoctl reload` only where no busctl
+//!   exists to probe with.
+//! - `busctl --user --auto-start=no call org.fcitx.Fcitx5 /controller
 //!   org.fcitx.Fcitx.Controller1 ReloadAddonConfig s classicui`: fcitx5
 //!   5.1.21 re-reads the classic UI theme (`dbusmodule.cpp`: the service
-//!   is `org.fcitx.Fcitx5`, the object `/controller`). `fcitx5-remote -r`
-//!   does not restyle it.
+//!   is `org.fcitx.Fcitx5`, the object `/controller`). `--auto-start=no`
+//!   matters: busctl auto-starts the service by default and fcitx5 ships
+//!   a D-Bus activation file, so a swap without it would launch fcitx5
+//!   the user never started. `fcitx5-remote -r` does not restyle it.
 //! - `systemctl --user try-restart scoot-osd` / `scoot-nightlight`:
 //!   `try-restart` restarts a running unit and no-ops when it is not
 //!   running (a swap never starts what the user never started).
@@ -81,6 +89,32 @@ impl Default for CliLeaves {
 
 impl Leaves for CliLeaves {
     fn mako_reload(&self) -> Result<(), String> {
+        // Never D-Bus-activate mako: `makoctl reload` addresses
+        // `org.freedesktop.Notifications`, for which mako ships an
+        // activation file, so a bare call with mako down would launch a
+        // daemon the user never started. `busctl --auto-start=no` calls
+        // the same `Reload` method makoctl would (`fr.emersion.Mako` on
+        // `/fr/emersion/Mako`, mako 1.11.0 `makoctl.c`/`dbus/mako.c`)
+        // without activating anything; only where no busctl exists at
+        // all does `makoctl reload` remain the fallback.
+        if let Some(busctl) = self.busctl.as_ref() {
+            let out = super::apply::run_with_timeout(
+                busctl,
+                &[
+                    "--user",
+                    "--auto-start=no",
+                    "call",
+                    "org.freedesktop.Notifications",
+                    "/fr/emersion/Mako",
+                    "fr.emersion.Mako",
+                    "Reload",
+                ],
+            )?;
+            if out.status.success() {
+                return Ok(());
+            }
+            return Err(mako_bus_error(&out));
+        }
         let program = self
             .makoctl
             .as_ref()
@@ -102,6 +136,7 @@ impl Leaves for CliLeaves {
             program,
             &[
                 "--user",
+                "--auto-start=no",
                 "call",
                 "org.fcitx.Fcitx5",
                 "/controller",
@@ -127,9 +162,78 @@ impl Leaves for CliLeaves {
         if out.status.success() {
             Ok(())
         } else {
-            Err(format!("`systemctl --user try-restart {unit}` failed"))
+            // A unit that was never installed (or no systemd to own it) is
+            // skipped, not reported: an absent daemon is not an error.
+            // Anything else (a real restart failure) stays a note.
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let detail = stderr.lines().next().unwrap_or("").trim();
+            let detail = if detail.chars().count() > 160 {
+                format!("{}…", detail.chars().take(160).collect::<String>())
+            } else {
+                detail.to_owned()
+            };
+            if is_unit_absent(&format!(
+                "{detail} {}",
+                String::from_utf8_lossy(&out.stdout)
+            )) {
+                return Err(UNIT_ABSENT.to_owned());
+            }
+            if detail.is_empty() {
+                Err(format!("`systemctl --user try-restart {unit}` failed"))
+            } else {
+                Err(format!(
+                    "`systemctl --user try-restart {unit}` failed: {detail}"
+                ))
+            }
         }
     }
+}
+
+/// A failed Reload over the bus: mako not running (never activated, so
+/// this is just a note), or the bus itself unreachable. The first stderr
+/// line carries the cause; over-long output is cut.
+fn mako_bus_error(out: &std::process::Output) -> String {
+    let detail = String::from_utf8_lossy(&out.stderr)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_owned();
+    let detail = if detail.chars().count() > 160 {
+        format!("{}…", detail.chars().take(160).collect::<String>())
+    } else {
+        detail
+    };
+    if detail.is_empty() {
+        "`busctl` Reload call failed (mako not running?)".to_owned()
+    } else {
+        format!("`busctl` Reload call failed (mako not running?): {detail}")
+    }
+}
+
+/// Marker for a unit that does not exist (or no systemd owns units):
+/// [`apply_leaves`] swallows it silently, an absent daemon skipped.
+pub(crate) const UNIT_ABSENT: &str = "unit absent: skipped";
+
+/// Whether a failed `try-restart` means the unit is simply absent (never
+/// installed, or systemd not running): skipped silently, never a note.
+fn is_unit_absent(output: &str) -> bool {
+    let lower = output.to_lowercase();
+    [
+        "not found",
+        "no such",
+        "unknown unit",
+        "failed to get unit",
+        "not loaded",
+        "system has not been booted",
+        "not been booted",
+        "unit not found",
+        "could not find",
+        "does not exist",
+        "not exist",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 /// Runs the leaf steps for a swap over the rendered `merged` look.
@@ -157,6 +261,7 @@ pub fn apply_leaves(
     }
     match leaves.unit_try_restart(UNIT_OSD) {
         Ok(()) => report.reloaded.push(format!("{UNIT_OSD} unit")),
+        Err(error) if error == UNIT_ABSENT => {}
         Err(error) => report.notes.push(format!("wob not restarted: {error}")),
     }
     match merged.night_temperature {
@@ -164,6 +269,7 @@ pub fn apply_leaves(
             Ok(()) => report
                 .reloaded
                 .push(format!("{UNIT_NIGHTLIGHT} unit ({temperature}K)")),
+            Err(error) if error == UNIT_ABSENT => {}
             Err(error) => report.notes.push(format!(
                 "nightlight not restarted (look wants {temperature}K): {error}"
             )),

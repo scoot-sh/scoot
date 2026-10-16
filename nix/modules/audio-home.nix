@@ -112,6 +112,42 @@ let
   # lands in the pipe buffer and shows (stale, then hides) when it
   # restarts, instead of wedging a held key's repeat at 25 Hz. A
   # missing fifo (the unit never ran) fails loud, not silent.
+  # The OSD daemon body: the live look fragment first when the look's
+  # OSD target is on (baked at evaluation, so a disabled target never
+  # themes the OSD even after `scoot look apply`), else the static
+  # config alone. The timeout prepends, never appends: past the first
+  # `[style.*]` header a bare key belongs to that style, and wob refuses
+  # unknown style keys. The fragment carries no timeout line (it is
+  # desktop configuration, not a look token); the static file's own
+  # line agrees with this one, so that duplicate is harmless.
+  osdDaemonBody =
+    if themed then
+      ''
+        # The look's colors, when a look is applied: the live fragment
+        # first, the static config before the first apply (activation
+        # seeds the declared default, so the fallback only matters for
+        # a deleted state).
+        frag="''${XDG_STATE_HOME:-$HOME/.local/state}/scoot/look/wob.ini"
+        assembled="''${XDG_RUNTIME_DIR:-/run/user/''${UID}}/scoot-osd-wob.ini"
+        {
+          printf 'timeout = %s\n' "${toString audio.osd.timeoutMs}"
+          if [ -f "$frag" ]; then cat "$frag"; else echo "scoot-osd: no applied look, using the static config" >&2; cat ${osdIni}; fi
+        } > "$assembled"
+        exec ${tailBin} -f "$fifo" | exec ${
+          if audio.osd.package != null then lib.getExe' audio.osd.package "wob" else "wob"
+        } -c "$assembled"''
+    else
+      ''
+        # Unthemed (or opted out): the static config stands; the live
+        # fragment stays unread even after `scoot look apply`.
+        assembled="''${XDG_RUNTIME_DIR:-/run/user/''${UID}}/scoot-osd-wob.ini"
+        {
+          printf 'timeout = %s\n' "${toString audio.osd.timeoutMs}"
+          cat ${osdIni}
+        } > "$assembled"
+        exec ${tailBin} -f "$fifo" | exec ${
+          if audio.osd.package != null then lib.getExe' audio.osd.package "wob" else "wob"
+        } -c "$assembled"'';
   scootOsd = pkgs.writeShellScriptBin "scoot-osd" ''
     fifo="${fifoPath}"
     case "''${1:-}" in
@@ -136,24 +172,7 @@ let
         if [ ! -p "$fifo" ]; then
           ${mkfifoBin} -m 600 "$fifo"
         fi
-        # The look's colors, when a look is applied: the live fragment
-        # first, the static config before the first apply (activation
-        # seeds the declared default, so the fallback only matters for
-        # a deleted state). The timeout prepends, never appends: past
-        # the first `[style.*]` header a bare key belongs to that style,
-        # and wob refuses unknown style keys. The fragment carries no
-        # timeout line (it is desktop configuration, not a look token);
-        # the static file's own line agrees with this one, so that
-        # duplicate is harmless.
-        frag="''${XDG_STATE_HOME:-$HOME/.local/state}/scoot/look/wob.ini"
-        assembled="''${XDG_RUNTIME_DIR:-/run/user/''${UID}}/scoot-osd-wob.ini"
-        {
-          printf 'timeout = %s\n' "${toString audio.osd.timeoutMs}"
-          if [ -f "$frag" ]; then cat "$frag"; else echo "scoot-osd: no applied look, using the static config" >&2; cat ${osdIni}; fi
-        } > "$assembled"
-        exec ${tailBin} -f "$fifo" | exec ${
-          if audio.osd.package != null then lib.getExe' audio.osd.package "wob" else "wob"
-        } -c "$assembled"
+        ${osdDaemonBody}
         ;;
       *)
         echo "usage: scoot-osd {show <percent> [style]|daemon}" >&2
