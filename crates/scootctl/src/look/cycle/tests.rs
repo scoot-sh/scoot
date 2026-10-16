@@ -537,7 +537,8 @@ fn unapply_clears_the_layer_and_honors_its_guard() {
             &mut compositor,
             &bars,
             Duration::from_millis(500),
-            Some(999)
+            Some(999),
+            &FakeDconf,
         ),
         Ok(false)
     );
@@ -548,7 +549,8 @@ fn unapply_clears_the_layer_and_honors_its_guard() {
             &mut compositor,
             &bars,
             Duration::from_millis(500),
-            Some(1)
+            Some(1),
+            &FakeDconf,
         ),
         Ok(true)
     );
@@ -764,4 +766,102 @@ fn a_revert_does_not_retry_a_refusal() {
         failure.contains("corrupt"),
         "the refusal names the record: {failure}"
     );
+}
+
+/// A settings backend that remembers: reads see prior writes, so the
+/// ownership round-trip is observable without touching the real dconf.
+#[derive(Default)]
+struct RecordingDconf {
+    live: RefCell<std::collections::HashMap<String, String>>,
+    writes: RefCell<Vec<(String, String)>>,
+    resets: RefCell<Vec<String>>,
+}
+
+impl Dconf for RecordingDconf {
+    fn available(&self) -> bool {
+        true
+    }
+
+    fn read(&self, key: &str) -> Result<Option<String>, String> {
+        Ok(self.live.borrow().get(key).cloned())
+    }
+
+    fn write(&self, key: &str, value: &str) -> Result<(), String> {
+        self.live
+            .borrow_mut()
+            .insert(key.to_owned(), value.to_owned());
+        self.writes
+            .borrow_mut()
+            .push((key.to_owned(), value.to_owned()));
+        Ok(())
+    }
+
+    fn reset(&self, key: &str) -> Result<(), String> {
+        self.live.borrow_mut().remove(key);
+        self.resets.borrow_mut().push(key.to_owned());
+        Ok(())
+    }
+}
+
+#[test]
+fn unapply_restores_the_preview_written_toolkit_keys() {
+    // A first-choice preview owns toolkit keys (nothing was recorded
+    // before it); clearing the layer restores what was live before,
+    // instead of stranding the preview's values with no record for the
+    // next apply to own.
+    let fixture = fixture("cycle-unapply-toolkit");
+    let dconf = RecordingDconf::default();
+    let mut compositor = FakeCompositor::not_running();
+    let bars: Vec<&dyn BarReload> = Vec::new();
+    let options = ApplyOptions {
+        no_toolkit: false,
+        ..options()
+    };
+    apply_with(
+        "look-a",
+        &options,
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        None,
+        &mut compositor,
+        &bars,
+        &FakeChecks,
+        &dconf,
+    )
+    .unwrap_or_else(|failure| panic!("look-a applies: {failure}"));
+    assert!(
+        !dconf.writes.borrow().is_empty(),
+        "the apply owned toolkit keys"
+    );
+    let mut compositor = FakeCompositor::not_running();
+    assert_eq!(
+        unapply(
+            &fixture.state,
+            &mut compositor,
+            &bars,
+            Duration::from_millis(500),
+            Some(1),
+            &dconf,
+        ),
+        Ok(true)
+    );
+    // Every key the preview wrote was unset before it: each is reset,
+    // none keeps the preview's value.
+    assert!(
+        dconf.live.borrow().is_empty(),
+        "no preview value survives: {:?}",
+        dconf.live.borrow()
+    );
+    let mut resets = dconf.resets.borrow().clone();
+    resets.sort();
+    let mut written: Vec<String> = dconf
+        .writes
+        .borrow()
+        .iter()
+        .map(|(key, _)| key.clone())
+        .collect();
+    written.sort();
+    assert_eq!(resets, written, "each owned key reset");
+    assert_eq!(record_name(&fixture.state), None);
 }

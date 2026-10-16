@@ -327,6 +327,7 @@ pub fn revert_if_current(
             bars,
             lock_wait,
             Some(from_generation),
+            dconf,
         )? {
             true => RevertOutcome::Reverted { name: None },
             false => RevertOutcome::Superseded,
@@ -400,9 +401,14 @@ fn forget_if_same(state_dir: &Path, preview: &Preview, lock_wait: Duration) {
 
 /// Clears the look layer: the record and the link go away and every running
 /// app reloads scoped to the look, landing without a layer. Startup with no
-/// record runs the same way, so this is converge, not invention. Refusals
-/// are best-effort here (there is no newer choice to roll toward): they are
-/// reported, and the choice stays cleared.
+/// record runs the same way, so this is converge, not invention. The
+/// preview's owned toolkit keys are restored first (through
+/// [`toolkit_off`], best-effort like the reloads: with no record left,
+/// the next apply would otherwise adopt the preview's values as the
+/// user's own baseline); toolkit files stay (marked ones converge on the
+/// next apply, unmarked ones were never touched). Refusals are best-effort
+/// here (there is no newer choice to roll toward): they are reported, and
+/// the choice stays cleared.
 ///
 /// `expect_generation` guards the clear the way [`ApplyOptions`]'s guard
 /// does the reverting swap: when the live generation moved past it, the
@@ -414,6 +420,7 @@ pub fn unapply(
     bars: &[&dyn BarReload],
     lock_wait: Duration,
     expect_generation: Option<u64>,
+    dconf: &dyn super::toolkit::Dconf,
 ) -> Result<bool, String> {
     let _lock = state::acquire_lock(state_dir, lock_wait)
         .map_err(|error| format!("cannot lock the state dir: {error}"))?;
@@ -430,6 +437,15 @@ pub fn unapply(
         if live != Some(want) {
             return Ok(false);
         }
+    }
+    // Best-effort, before the record (and its ownership maps) goes away:
+    // without this the preview's keys survive with no record, and the
+    // next apply adopts them as user values. The restore's notes have no
+    // channel on the detached path (stdio is null), so they are dropped;
+    // reload refusals below stay errors because they mean apps visibly
+    // kept the old layer.
+    if let state::RecordRead::Present(mut record) = state::read_record(state_dir) {
+        let _ = super::toolkit::toolkit_off(state_dir, &mut record, dconf);
     }
     std::fs::remove_file(state_dir.join(state::RECORD_FILE)).ok();
     std::fs::remove_file(state_dir.join(state::LINK_NAME)).ok();

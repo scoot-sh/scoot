@@ -767,3 +767,26 @@ fn a_preview_never_undoes_a_newer_apply_live() {
     assert_eq!(active_name(&session), Some("look-a".to_owned()));
     assert_eq!(active_generation(&session), Some(newer));
 }
+
+#[test]
+fn a_first_choice_preview_clears_the_layer_live() {
+    // No apply yet: the preview is the first choice, so the revert
+    // clears the layer (restoring the toolkit keys the preview wrote)
+    // instead of restoring a look.
+    let scratch = Scratch::new("preview-first");
+    let session = Session::start(&scratch);
+    assert_eq!(active_name(&session), None, "nothing applied yet");
+    session.check_look(&["apply", "look-a", "--for", "2"]);
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        if active_name(&session).is_none() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the first-choice preview never cleared"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
