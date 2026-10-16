@@ -62,6 +62,7 @@ use super::gamma_control::GammaControlState;
 use super::idle;
 use super::input;
 use super::ipc::PendingIdle;
+use super::ipc::look_apply::PendingLookApply;
 use super::keybindings::Keybindings;
 use super::layer_shell;
 use super::nested::{Host, HostLoss};
@@ -1202,6 +1203,10 @@ pub struct State {
     /// When a client last committed, which is what `wait-idle` waits on.
     pub last_commit: Instant,
     pub pending_idle: Vec<PendingIdle>,
+    /// The `look_apply` swap in flight, if any: its child, and the parked
+    /// connection the reply goes to (see `ipc::look_apply`). One at a
+    /// time -- a second swap while this holds one is refused.
+    pub(crate) pending_look: Option<PendingLookApply>,
     /// The cursor rebuild worker's completion channel. Created once,
     /// alongside its event source, on the first cursor-changing reload --
     /// a session that never changes its cursor pays for no thread and no
@@ -1521,6 +1526,7 @@ impl State {
             timer_armed: false,
             last_commit: Instant::now(),
             pending_idle: Vec::new(),
+            pending_look: None,
             cursor_sink: None,
             cursor_generation: 0,
             screenshot_encoder: None,

@@ -270,4 +270,47 @@ pub enum Request {
     /// half. (The reply half is a new `Response` variant, which is why the
     /// version still moved -- see `Response::Binds`.)
     Binds,
+    /// Swap the active look: what `scoot look apply` does to local files,
+    /// reachable from a client that has no files -- a Mac driving a VM's
+    /// compositor over the socket.
+    ///
+    /// `name` is a look name (`[a-z0-9-]{1,32}`), never a path: anything
+    /// else is refused before anything is spawned. `for_ms` asks for a
+    /// timed preview instead of a stay: after `for_ms` milliseconds the
+    /// compositor swaps back to the look that was active, unless a newer
+    /// choice moved the generation meanwhile (then the revert does
+    /// nothing); omitted -- or zero -- means stay. A swap that only
+    /// touches local files cannot be reached this way, and
+    /// `Action(Spawn "scoot look apply …")` answers before the swap and
+    /// never says whether it refused -- this answers when the swap lands,
+    /// with [`Response::LookApplied`](crate::Response::LookApplied).
+    ///
+    /// The compositor runs the swap in a child (`scoot look apply NAME
+    /// --from-compositor`, answered off the loop like `WaitIdle`), so one
+    /// swap at a time: a second `LookApply` while one runs is refused with
+    /// an error. Applies under session lock, like `Reload`.
+    ///
+    /// Additive like `Reload`: a client that never sends this tag decodes
+    /// exactly as before, so no `PROTOCOL_VERSION` bump for the request
+    /// half -- and an older server answers it with an ordinary `Error`
+    /// (unknown tag), never a misapplied swap. (The reply half is a new
+    /// `Response` variant, which is why the version still moved -- see
+    /// `Response::LookApplied`.)
+    LookApply {
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        for_ms: Option<u64>,
+    },
+    /// The look catalog, the active look and the session's state directory:
+    /// what `scoot look list` and `scoot look current` read from local
+    /// files, reachable from a client that has no files. Answered with
+    /// [`Response::Looks`](crate::Response::Looks).
+    ///
+    /// Additive like `LookApply`: a client that never sends this tag
+    /// decodes exactly as before, so no `PROTOCOL_VERSION` bump for the
+    /// request half -- and an older server answers it with an ordinary
+    /// `Error`, like any unknown tag. (The reply half is a new `Response`
+    /// variant, which shares the same version move -- see
+    /// `Response::Looks`.)
+    Looks,
 }

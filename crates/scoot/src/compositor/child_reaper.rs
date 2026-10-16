@@ -294,6 +294,7 @@ impl State {
         if !self.wallpaper.is_idle() {
             self.reap_wallpaper();
         }
+        self.reap_look_apply();
     }
 }
 

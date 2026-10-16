@@ -31,7 +31,7 @@ pub use help::{DOCS_URL, docs_tail, suggest};
 pub use key::{KeyCombo, Modifier, ParseKeyComboError};
 pub use request::{OutputTarget, PointerButton, ReloadScope, Request, SCREENSHOT_CURSOR_DEFAULT};
 pub use response::{
-    BindRow, OutputSnapshot, Rect, Response, Screenshot, SkippedBind, WindowSnapshot,
+    BindRow, LookEntry, OutputSnapshot, Rect, Response, Screenshot, SkippedBind, WindowSnapshot,
 };
 pub use socket::{SOCKET_ENV, socket_path};
 
@@ -96,4 +96,13 @@ pub use socket::{SOCKET_ENV, socket_path};
 /// And again 10 → 11 for the look-layer event (2026-10): one new tag,
 /// `Response::LookChanged`, under the same rule -- only a subscriber to the
 /// new `look` kind ever receives one.
-pub const PROTOCOL_VERSION: u32 = 11;
+///
+/// And again 11 → 12 for the look swap over IPC (2026-10): two new request
+/// tags, `Request::LookApply` and `Request::Looks`, with their two new
+/// reply tags, `Response::LookApplied` and `Response::Looks`, under the
+/// same rule -- only a client new enough to ask ever receives one. The
+/// request halves are additive (an older server meets either with an
+/// ordinary `Error`, like any unknown tag); the reply halves are what move
+/// the version. An older server meets a newer `look-apply` client with an
+/// error, never a misapplied swap.
+pub const PROTOCOL_VERSION: u32 = 12;

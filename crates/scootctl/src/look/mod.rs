@@ -66,7 +66,11 @@ pub enum Command {
         origin: Origin,
     },
     /// Render, record, repoint, reload in order, roll back on refusal.
-    Apply { name: String, no_toolkit: bool },
+    Apply {
+        name: String,
+        no_toolkit: bool,
+        from_compositor: bool,
+    },
     /// Show or persist the toolkit writes (`on` or `off`).
     Toolkit { action: Option<bool> },
 }
@@ -83,7 +87,7 @@ pub const LOOK_USAGE: &str = "\
     look show NAME [--json]
     look validate DIR|NAME [--origin shipped|declared|user|installed] [--json]
     look build DIR|NAME --out DIR [--origin shipped|declared|user|installed] [--json]
-    look apply NAME [--no-toolkit] [--json]
+    look apply NAME [--no-toolkit] [--from-compositor] [--json]
     look toolkit [on|off] [--json]
 
     --state DIR takes the look state (default: $SCOOT_LOOK_STATE, then
@@ -178,9 +182,12 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
         "apply" => {
             let mut name: Option<String> = None;
             let mut no_toolkit = false;
+            let mut from_compositor = false;
             for word in positionals {
                 if word == "--no-toolkit" {
                     no_toolkit = true;
+                } else if word == "--from-compositor" {
+                    from_compositor = true;
                 } else if name.is_none() {
                     name = Some(word);
                 } else {
@@ -189,7 +196,11 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
             }
             let name = name.ok_or(Error::Missing("a look name"))?;
             check_name(&name)?;
-            Command::Apply { name, no_toolkit }
+            Command::Apply {
+                name,
+                no_toolkit,
+                from_compositor,
+            }
         }
         "toolkit" => {
             let action = match positionals.as_slice() {
@@ -245,7 +256,10 @@ COMMANDS:
                 look layer in order (the compositor, then every bar),
                 rolling back on a refusal; --no-toolkit skips the
                 color-scheme write for this apply (the first apply with no
-                record adopts the color-scheme key whatever it holds)
+                record adopts the color-scheme key whatever it holds);
+                --from-compositor marks the choice as compositor-driven
+                (what the compositor's own IPC child passes; `current`
+                shows it)
     toolkit     show whether the color-scheme write is on, or persist
                 `toolkit on|off` in look.json
 
@@ -415,7 +429,11 @@ pub fn run(look: &Look) -> Result<(), String> {
             out,
             origin,
         } => run_build(look, target, out, *origin),
-        Command::Apply { name, no_toolkit } => run_apply(look, name, *no_toolkit),
+        Command::Apply {
+            name,
+            no_toolkit,
+            from_compositor,
+        } => run_apply(look, name, *no_toolkit, *from_compositor),
         Command::Toolkit { action } => run_toolkit(look, *action),
     }
 }
@@ -848,13 +866,19 @@ fn run_build(look: &Look, target: &str, out: &Path, origin: Origin) -> Result<()
     Ok(())
 }
 
-fn run_apply(look: &Look, name: &str, no_toolkit: bool) -> Result<(), String> {
+fn run_apply(
+    look: &Look,
+    name: &str,
+    no_toolkit: bool,
+    from_compositor: bool,
+) -> Result<(), String> {
     let catalog = discover();
     let cache = apply::render_cache_dir()?;
     let state_dir = resolve_state_dir(look.state.as_deref())?;
     let options = ApplyOptions {
         lock_wait: apply::LOCK_WAIT,
         no_toolkit,
+        from_compositor,
     };
     let mut compositor: Box<dyn CompositorReload> = match &look.socket {
         Some(path) => Box::new(IpcCompositor::explicit(path.clone())),

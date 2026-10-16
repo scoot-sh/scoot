@@ -58,6 +58,11 @@ pub const REQUESTS_HELP: &str = "\
     wait-idle [--quiet-ms N] [--timeout-ms N]
     subscribe [EVENT...]          stream events until killed (default: output;
                                     known events: output, keyboard, workspace, lock, look)
+    look-apply NAME                   swap the active look and wait for the
+                                    swap to land (answered when the swap's
+                                    child exits: `look_applied`, or `error`)
+    looks                             the catalog, the active look and the
+                                    session's state dir
 ";
 
 /// The action grammar both clients print in their `--help`. Same single-owner
@@ -393,6 +398,44 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
             }
             Request::Subscribe { events }
         }
+        "look-apply" => {
+            let name = args.next().ok_or(Error::Missing("a look name"))?;
+            // Refused at parse (exit 2), like `key`'s combo and
+            // `output-scale`'s range: a path is never a look, so it never
+            // reaches the socket. The compositor re-checks before
+            // spawning, never trusting this side.
+            if !scoot_look::grammar::is_name(&name) {
+                return Err(Error::Invalid {
+                    what: "look name",
+                    value: name,
+                });
+            }
+            for flag in args.by_ref() {
+                match flag.as_str() {
+                    "--json" => json = true,
+                    other => {
+                        return Err(hinted(
+                            "flag",
+                            other.to_owned(),
+                            &["--json"],
+                            "help look-apply",
+                        ));
+                    }
+                }
+            }
+            Request::LookApply { name, for_ms: None }
+        }
+        "looks" => {
+            for flag in args.by_ref() {
+                match flag.as_str() {
+                    "--json" => json = true,
+                    other => {
+                        return Err(hinted("flag", other.to_owned(), &["--json"], "help looks"));
+                    }
+                }
+            }
+            Request::Looks
+        }
         other => {
             return Err(hinted(
                 "request",
@@ -714,6 +757,30 @@ mod tests {
     }
 
     #[test]
+    fn look_apply_refuses_a_path_at_parse() {
+        // A path is never a look: refused at parse (exit 2), never sent.
+        // The compositor re-checks before spawning, never trusting this.
+        for bad in [
+            "../evil",
+            "/abs",
+            "Moonrise",
+            "",
+            "a-very-long-look-name-over-32-chars",
+        ] {
+            let error = parse_msg_args(&["look-apply", bad]).expect_err("a non-name is refused");
+            assert_eq!(
+                error,
+                Error::Invalid {
+                    what: "look name",
+                    value: bad.to_owned(),
+                },
+                "`{bad}` refused as a look name"
+            );
+        }
+        assert!(parse_msg_args(&["look-apply"]).is_err());
+    }
+
+    #[test]
     fn a_bare_version_word_is_the_ipc_request_and_the_flag_is_not() {
         // The spelling decision, pinned: `version` (bare) is the remote
         // request answered by the compositor over the socket -- `scoot msg
@@ -791,6 +858,25 @@ mod tests {
             parse_msg_args(&["reload", "--look"]),
             Ok(Msg {
                 request: Request::ReloadLook,
+                out: None,
+                json: false,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["look-apply", "moonrise"]),
+            Ok(Msg {
+                request: Request::LookApply {
+                    name: "moonrise".into(),
+                    for_ms: None,
+                },
+                out: None,
+                json: false,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["looks"]),
+            Ok(Msg {
+                request: Request::Looks,
                 out: None,
                 json: false,
             })

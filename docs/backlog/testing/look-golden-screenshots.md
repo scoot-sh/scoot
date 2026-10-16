@@ -3,7 +3,7 @@ title: "Golden screenshots per shipped look from the headless harness"
 status: "open"
 area: "testing"
 priority: "medium"
-blocked: "look-ipc"
+blocked: null
 ---
 
 # Golden screenshots per shipped look from the headless harness

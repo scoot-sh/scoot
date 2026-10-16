@@ -57,6 +57,12 @@ pub struct ApplyOptions {
     pub lock_wait: Duration,
     /// Skip every dconf write (`--no-toolkit`).
     pub no_toolkit: bool,
+    /// This apply was spawned by the compositor for an IPC `look_apply`
+    /// (`--from-compositor`): recorded as the choice's provenance, so
+    /// `current` tells a local swap from a remote one. Changes nothing
+    /// else: the child still renders, records, repoints and drives every
+    /// scoped reload itself.
+    pub from_compositor: bool,
 }
 
 /// What one `apply` did.
@@ -1634,7 +1640,14 @@ pub fn apply_with(
         name: name.to_owned(),
         rendered: path_to_string(&target).map_err(refuse)?,
         generation,
-        chosen_by: Some("apply".to_owned()),
+        chosen_by: Some(
+            if options.from_compositor {
+                "compositor"
+            } else {
+                "apply"
+            }
+            .to_owned(),
+        ),
         declared_default: previous
             .as_ref()
             .and_then(|record| record.declared_default.clone()),

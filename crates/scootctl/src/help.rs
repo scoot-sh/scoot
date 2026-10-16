@@ -155,6 +155,20 @@ pub const REQUESTS: &[RequestDoc] = &[
         example: "scoot msg subscribe workspace",
         reply: "`{\"type\":\"subscribed\",...}`, then one event per line, e.g. `{\"type\":\"output_added\",...}`",
     },
+    RequestDoc {
+        verb: "look-apply",
+        syntax: "look-apply NAME",
+        description: "swap the active look and wait for the swap to land (answered when the swap's child exits)",
+        example: "scoot msg look-apply moonrise",
+        reply: "`{\"type\":\"look_applied\",...}`",
+    },
+    RequestDoc {
+        verb: "looks",
+        syntax: "looks",
+        description: "the catalog, the active look and the session's state directory",
+        example: "scoot msg looks",
+        reply: "`{\"type\":\"looks\",...}`",
+    },
 ];
 
 /// One layout action: its name, its argument shape, and what it does.

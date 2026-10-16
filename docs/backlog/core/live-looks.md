@@ -61,7 +61,7 @@ stated rule.
 | [`scootbar-style-reload`](../../scootbar/backlog/resolved/scootbar-style-reload-done.md) | medium | daily-drive | |
 | [`look-apply-cli`](../resolved/look-apply-cli-done.md) | high | both | `look-shipped`, `look-scoped-reload` |
 | [`look-cycle-preview`](look-cycle-preview.md) | medium | daily-drive | `look-apply-cli` |
-| [`look-ipc`](../ipc/look-ipc.md) | medium | computer use | `look-apply-cli` |
+| [`look-ipc`](../resolved/look-ipc-done.md) | medium | computer use | `look-apply-cli` |
 | [`look-golden-screenshots`](../testing/look-golden-screenshots.md) | medium | computer use | `look-ipc` |
 | [`look-nix-catalog`](../packaging/look-nix-catalog.md) | high | daily-drive | `look-apply-cli` |
 | [`look-import-base16`](look-import-base16.md) | medium | daily-drive | `look-format` |

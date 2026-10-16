@@ -62,6 +62,7 @@ fn options() -> ApplyOptions {
     ApplyOptions {
         lock_wait: Duration::from_millis(500),
         no_toolkit: false,
+        from_compositor: false,
     }
 }
 
@@ -335,6 +336,34 @@ fn an_offline_apply_records_repoints_and_renders() {
     assert!(
         cache_name.starts_with("look-a-") && cache_name.len() == "look-a-".len() + 16,
         "the cache dir carries the key: {cache_name}"
+    );
+}
+
+#[test]
+fn a_from_compositor_apply_records_its_provenance() {
+    let fixture = fixture("provenance");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::not_running();
+    let mut flagged = options();
+    flagged.from_compositor = true;
+    apply_with(
+        "look-a",
+        &flagged,
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("a compositor-driven apply succeeds");
+    assert_eq!(
+        record_of(&fixture.state).chosen_by.as_deref(),
+        Some("compositor")
     );
 }
 

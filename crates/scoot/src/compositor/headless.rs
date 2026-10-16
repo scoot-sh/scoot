@@ -1932,6 +1932,10 @@ fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -
     state.service_captures();
     state.settle_idle_waiters();
     state.settle_shots();
+    // The parked look swap: completion comes from the SIGCHLD drain,
+    // never from a tick; the tick still bounds a hung child past its
+    // timeout and drains a reply queued for a slow client.
+    let look_settling = state.settle_look();
     // Before the subscriber tails drain, so a part-written occupancy event
     // retries on this same tick: at most one event per output per tick,
     // however many applies marked it in between (see `ipc/workspace.rs`).
@@ -1942,6 +1946,7 @@ fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -
         || state.shots_draining()
         || state.subscribers_draining()
         || state.workspace_events_pending()
+        || look_settling
     {
         TimeoutAction::ToDuration(FRAME_INTERVAL)
     } else {

@@ -19,6 +19,8 @@ Every request, `type` vs `key`, and what the replies carry. All of these work as
 | `output-scale ID\|NAME SCALE\|reset` | Set an output's scale live, by id or connector name (`DP-1`), or `reset` it to the config file's. Range 0.5 to 4 (resolved to 1/120 like the file's); a value outside it, or not a number, is refused instead of clamped; an unknown id or name is refused too. Runtime state, like `output-power`: it beats the file's scale for that connector (a replugged monitor comes back at it), and a successful `reload` or restart returns to the file's scales. A repeat set, or a reset with nothing to reset, changes nothing. Applies while locked; refused under `--nested`. What the [display profiles](../desktop/index.md#displays) watcher drives. On the wire an additive request tag: `output` is a number (id) or a string (name), `scale` a number or `null` for reset, required either way (`{"type":"output_scale","output":"DP-1","scale":1.5}`); answered with the existing `ok`, so no newer protocol is needed (an older server refuses the unknown tag with an `error`). |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |
 | `reload [--look]` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale -- the default and each `[[outputs]]` entry's, `[[outputs]]` mode (a live resize per backend, refused under `--nested`), appearance, keybindings, new autostart spawn entries) — see [configuration.md](../scoot/configure.md#reloading-the-config). A successful reload also drops every live `output-scale` scale, and each one the file disagrees with is listed in `applied` as `outputs.<name>.scale`. Answers `reloaded` with applied-vs-refused field lists plus the `shadowed` file keys that override the active look (and the `invalid` ones whose bad values fell back to it), or `error` (running config untouched, live scales kept) when the file cannot load or validate. With `--look` only the look layer is re-read, under a snapshot of the file from the last successful plain load: appearance and wallpaper swap, pending edits wait, no autostart entry spawns and no bind swaps. The reply carries the scope that ran (`"scope":"look"` on a scoped reload, absent on a plain one). |
+| `look-apply NAME` | Swap the active look and wait for the swap to land — what `scoot look apply` does to local files, for a client with no files (a Mac driving a VM). Answers `look_applied` when the swap's child exits, or `error` when the swap is refused (unknown look, a path as the name, a second swap while one runs) with nothing touched. Applies while locked. |
+| `looks` | The look catalog in search order, the active look's name, and the session's state directory — what `scoot look list` and `scoot look current` read from local files, for a client with no files. |
 | `screenshot [--output ID] [--out FILE] [--no-cursor]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. Omitting it means the primary output. The pointer is drawn in unless `--no-cursor` — see [The pointer in a screenshot](#the-pointer-in-a-screenshot). |
 | `pointer move X Y` | Move the pointer to logical coordinates. |
 | `pointer click X Y [left\|right\|middle\|back\|forward]` | Move, then press and release (default button `left`). |
@@ -33,6 +35,8 @@ Every request, `type` vs `key`, and what the replies carry. All of these work as
 scoot msg windows
 scoot msg action focus-column left
 scoot msg reload
+scoot msg look-apply moonrise
+scoot msg looks
 scoot msg screenshot --out /tmp/shot.png
 scoot msg type "hello"
 scoot msg keyboard
@@ -261,3 +265,47 @@ nothing it was asked to -- except an unusable window rule and a
 `[wallpaper]` section with a problem, each refused on every reload that
 finds it, since neither is ever in effect. A reload that could not load or validate the file answers
 `error` with the running config untouched (`scoot msg` exits non-zero).
+
+**`look_applied`**, the answer to `look-apply`, names the look now
+active (`name`), the apps reloaded in order (`applied`: `compositor`,
+`bar <display>`, …), and every user-file key that overrides a look token
+(`shadowed`). `refused` is empty on this reply: a refusal fails the swap
+and answers `error` instead, naming the rollback. The reply arrives when
+the swap lands -- the compositor runs `scoot look apply` in a child and
+answers off the loop when the child exits, so one swap at a time (a
+second is refused).
+A timed preview (`{"type":"look_apply","name":"moonrise","for_ms":20000}`
+on the raw socket; `scoot msg` sends a stay) swaps back when the hold
+expires, unless a newer choice moved meanwhile. Zero holds nothing (a
+stay, like omitting it). A restart drops a pending revert -- the swap
+stays. The reply lands when the
+swap's reloads complete: ring, background and cursor are on screen with
+it, and the wallpaper follows through scootbg (handed over, never waited
+on -- its outcome is in the compositor log, so screenshot after
+`wait-idle` to see it).
+
+```json
+{ "type": "look_applied", "name": "moonrise",
+  "applied": ["compositor"], "refused": [],
+  "shadowed": ["appearance.focus_ring_active_color"] }
+```
+
+**`looks`**, the answer to `looks`, carries the catalog (`looks`: one
+entry per look with `name`, `title`, `polarity`, `origin` and `source`),
+the active look's name (`active`, or `null` with no recorded choice),
+and the session's state directory (`state_dir`).
+
+```json
+{ "type": "looks", "active": "moonrise",
+  "state_dir": "/run/user/1000/scoot-look-wayland-1",
+  "looks": [{ "name": "moonrise", "title": "Moonrise",
+    "polarity": "dark", "origin": "shipped",
+    "source": "/prefix/share/scoot/looks/moonrise" }] }
+```
+
+`look_applied` and `looks` are new reply variants, so they moved
+`PROTOCOL_VERSION` 11 → 12: an older client handed one would fail its
+decode, which can only happen to a client new enough to have asked. The
+request halves are additive (`{"type":"look_apply","name":"…"}`
+optionally with `"for_ms"`, `{"type":"looks"}`): an older server answers
+either with an ordinary `error`, never a misapplied swap.
