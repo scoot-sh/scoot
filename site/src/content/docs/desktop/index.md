@@ -183,9 +183,9 @@ catalog.
 ## Pick a look
 
 `look` names the declared default: one entry of `programs.scoot.looks`
-(default: every shipped look, plus paths to your own source look
-directories). Each look renders at build time into the catalog
-(`~/.local/share/scoot/looks` sources beside
+(default: every shipped look — list paths to your own source look
+directories beside the names to add them). Each look renders at build
+time into the catalog (`~/.local/share/scoot/looks` sources beside
 `~/.local/share/scoot/rendered` renders); each activation runs
 `scoot look sync`, which starts a fresh state on the declared
 default, switches when it changed, falls back when the live choice
@@ -194,6 +194,14 @@ left the catalog, and otherwise keeps the live choice. A swap
 the state link and reloads each running app's look layer at once; the
 declaration only wins when it changes. The default is `ginger-night`
 (the cat-peeking look): a profile with no `look` choice renders it.
+
+`programs.scoot.lookPackage` is the `scoot-look` binary that renders
+the catalog at build time: a package or null (default:
+`pkgs.scoot-look`, which the flake's overlay and module wrappers
+provide — without them, point it at
+`inputs.scoot.packages.${system}.scoot-look`). Null installs no
+catalog: no sources, no renders, no declared default, no sync step.
+It takes effect on the next build.
 
 | Look | Compositor ring / background | Bar | Wallpaper |
 |---|---|---|---|
@@ -259,8 +267,8 @@ variables only, no daemon, so the theme costs no wakeups.
 |---|---|---|---|---|
 | GTK apps | `desktop.theme.targets.gtk.enable` | bool | `true` | `settings.ini` (GTK 3 + 4): Adwaita, or Adwaita-dark for a dark look, with the look's proportional sans, cursor and dark preference — plus `gtk.css` carrying the look's accent and surfaces (named colors and the `:root` vars libadwaita paints with); the dark-mode signal is `color-scheme`, written by `scoot look sync` from the active look (no `GTK_THEME` force: it would make libadwaita skip its own providers) |
 | Qt apps | `desktop.theme.targets.qt.enable` | bool | `true` | `qt6ct.conf` through `QT_QPA_PLATFORMTHEME=qt6ct` (plus `QT_PLUGIN_PATH` for its platformtheme and style): the Adwaita Qt style in the look's polarity, Adwaita icons, and a generated color scheme from the look's palette — dark looks get a dark palette, the light look a light one |
-| Cursor | `desktop.theme.targets.cursor.enable` | bool | `true` | Mocu at its native 24 px: the look layer names it for the compositor plus `XCURSOR_THEME`/`XCURSOR_SIZE` for X11 apps — the same art as the built-in fallback, as real theme files |
-| Fonts | `desktop.theme.targets.fonts.enable` | bool | `true` | DejaVu Sans for sans-serif (proportional UI text in GTK/Qt apps and the greeter), FiraCode Nerd Font for monospace (DejaVu Sans Mono for `radial-burst`), through fontconfig — and the look layer carries the bar's DroidSansM Nerd Font Propo file, whose glyphs carry the module icons |
+| Cursor | `desktop.theme.targets.cursor.enable` | bool | `true` | Mocu at its native 24 px: the look layer names it for the compositor plus `XCURSOR_THEME`/`XCURSOR_SIZE` for X11 apps — the same art as the built-in fallback, as real theme files; the managed sync renders no cursor keys while the target is off |
+| Fonts | `desktop.theme.targets.fonts.enable` | bool | `true` | DejaVu Sans for sans-serif (proportional UI text in GTK/Qt apps and the greeter), FiraCode Nerd Font for monospace (DejaVu Sans Mono for `radial-burst`), through fontconfig — and the look layer carries the bar's DroidSansM Nerd Font Propo file, whose glyphs carry the module icons; the managed sync renders no bar font while the target is off |
 | Login screen | `desktop.theme.targets.greeter.enable` | bool | `true` | the session wallpaper behind the login card (nothing for `vinyl-sunset`: its illustration is license-barred), the dark setting, the look's ReGreet CSS and font — needs `greeter.enable` too |
 | Terminal | `desktop.theme.targets.terminal.enable` | bool | `true` | the look's `foot.ini` from the flake |
 | Prompt | `desktop.theme.targets.shell.enable` | bool | `true` | the look's `starship.toml` (`radial-burst` ships none: inert there) |

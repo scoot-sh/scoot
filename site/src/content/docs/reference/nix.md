@@ -13,6 +13,7 @@ Packages (`packages.<system>.*` on `x86_64-linux`):
 | Name | Gives you | Pick it when |
 |---|---|---|
 | `scoot` | the compositor plus the `scoot msg` client (`$out/bin` carries only `scoot`); GPU and CPU renderers in one binary, picked at run time, with the `xwayland` feature compiled in and Xwayland on `PATH` (Linux only) | the default everywhere; VM, container, nested-only, real hardware, X11 apps too |
+| `scoot-look` | the look format tool: validates a look and renders a catalog entry at build time (no compositor in its closure, Linux and macOS alike) | `programs.scoot.lookPackage` without the flake's wrappers, or a plain build-time render |
 | `scootbg` | the wallpaper daemon (Linux only) | `[wallpaper]` without the desktop profile |
 | `scootbar` | the status bar, no font in its closure (Linux only) | the bar with your own fonts |
 | `scootbar-demo` | the bar with a bundled font as its default | trying the bar on a box with no fonts |
@@ -39,8 +40,8 @@ bar.
 
 ## The overlay
 
-`overlays.default` adds `pkgs.scoot` and, on Linux, `pkgs.scootbg` and
-`pkgs.scootbar`:
+`overlays.default` adds `pkgs.scoot` and `pkgs.scoot-look` and, on
+Linux, `pkgs.scootbg` and `pkgs.scootbar`:
 
 ```nix title="configuration.nix"
 nixpkgs.overlays = [ inputs.scoot.overlays.default ];
@@ -70,7 +71,9 @@ On macOS, `scoot` is client-only: `scoot msg` drives a compositor
 running on Linux. The home-manager module manages the config file on
 any system (on macOS it also installs the client-only `scoot` — the
 config you edit here deploys to a Linux box), while the NixOS module's
-session entry only means anything on NixOS. `scootbg` and `scootbar`
+session entry only means anything on NixOS. `scoot-look` builds on
+macOS beside the client (it renders the catalog the Linux box
+installs); `scootbg` and `scootbar`
 are Linux-only: no macOS package, and on macOS a `[wallpaper]` section
 renders as written and installs nothing.
 
