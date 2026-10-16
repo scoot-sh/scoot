@@ -637,10 +637,11 @@ impl State {
             }
         }
         // A timer revert's child that failed on a still-held lock waits
-        // out the holder like a deferred revert, bounded: `settle_look`
-        // re-runs the stash below, and each round re-checks the
-        // generation. Anything else (a success, a superseded stand-down,
-        // a genuine refusal) is already answered in the log below.
+        // out the holder, bounded: the stash re-runs inline below when
+        // nothing is parked (or from `settle_look` once a drain clears),
+        // and each round re-checks the generation. Anything else (a
+        // success, a superseded stand-down, a genuine refusal) is already
+        // answered in the log below.
         let revert_lockout = match (&pending.revert_guard, &response) {
             (Some(guard), Response::Error { message }) if is_lock_contention(message) => {
                 Some(*guard)

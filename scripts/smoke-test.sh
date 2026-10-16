@@ -1244,6 +1244,12 @@ EOF
     fi
     echo "ok: the IPC swap landed, pixel-checked, and looks names it"
     echo "--- next steps the catalog, --for previews and reverts ---"
+    # Order-independent: the IPC section above leaves vinyl-sunset
+    # active, and catalog order is not pinned here, so the step target
+    # is whatever neighbor comes next -- only that it moved, and that a
+    # preview of the look just left reverts to it.
+    before="$("$SCOOT" look current --state "$state" --socket "$socket" | head -1)"
+    before_name="${before%% *}"
     if ! "$SCOOT" look next --state "$state" --socket "$socket" >"$dir/apply.out" 2>&1; then
         echo "BUG: look next failed:"
         cat "$dir/apply.out"
@@ -1251,23 +1257,21 @@ EOF
     fi
     stepped="$("$SCOOT" look current --state "$state" --socket "$socket" | head -1)"
     stepped_name="${stepped%% *}"
-    case "$stepped_name" in
-        ginger-night)
-            echo "BUG: look next stayed on ginger-night"
-            return 1
-            ;;
-    esac
+    if [ "$stepped_name" = "$before_name" ]; then
+        echo "BUG: look next stayed on $before_name"
+        return 1
+    fi
     if ! "$SCOOT" look list | grep -q "^$stepped_name"; then
         echo "BUG: look next landed outside the catalog: $stepped"
         return 1
     fi
-    echo "ok: next stepped to $stepped"
-    if ! "$SCOOT" look apply vinyl-sunset --for 2 --state "$state" --socket "$socket" >"$dir/apply.out" 2>&1; then
+    echo "ok: next stepped from $before_name to $stepped_name"
+    if ! "$SCOOT" look apply "$before_name" --for 2 --state "$state" --socket "$socket" >"$dir/apply.out" 2>&1; then
         echo "BUG: preview apply failed:"
         cat "$dir/apply.out"
         return 1
     fi
-    if ! "$SCOOT" look current --state "$state" | grep -q "vinyl-sunset"; then
+    if ! "$SCOOT" look current --state "$state" | grep -q "$before_name"; then
         echo "BUG: current does not name the preview"
         return 1
     fi
