@@ -130,7 +130,8 @@ new palette; running ones keep theirs.
   tool's first write and stops owning it; a key the tool never wrote,
   one someone else changed since, or one that cannot be read is
   left alone. Either way the record clears, so turning back `on` adopts
-  fresh on the next apply. `scoot look toolkit` shows the state.
+  fresh on the next apply. `off` leaves the written files in place; only
+  the keys are restored. `scoot look toolkit` shows the state.
 - A private look state (a headless or `--private-look` session) never
   runs the step: its swaps must not move the real desktop.
 

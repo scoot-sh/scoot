@@ -1483,9 +1483,27 @@ fn sync_dir(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The config home for this apply: the injected `config` when the caller
+/// pins one (every test does), else the live `$XDG_CONFIG_HOME`/`HOME`
+/// fallback, exactly as before. The toolkit files and the shadowed-keys
+/// read share this one resolution, so a pinned caller never touches the
+/// real `~/.config`.
+fn resolve_config_home(config: Option<&Path>) -> Option<PathBuf> {
+    match config {
+        Some(dir) => Some(dir.to_owned()),
+        None => {
+            let xdg = std::env::var_os("XDG_CONFIG_HOME");
+            let home = std::env::var_os("HOME");
+            config_home(xdg.as_deref(), home.as_deref())
+        }
+    }
+}
+
 /// Applies `name`: the full transaction. Pure over its `catalog`, `cache`,
-/// `state_dir` and peers except the lock, the record, the link, the cache
-/// and the reloads themselves.
+/// `state_dir`, `config` home and peers except the lock, the record, the
+/// link, the cache and the reloads themselves. `config` pins the config
+/// home (the toolkit files land there, the shadowed keys read there);
+/// `None` resolves it from the live environment, for production.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_with(
     name: &str,
@@ -1848,15 +1866,12 @@ pub fn apply_with(
                 "cannot record the toolkit state: {error}: the look applied, the record lags"
             ));
         }
-        let xdg = std::env::var_os("XDG_CONFIG_HOME");
-        let home = std::env::var_os("HOME");
-        let toolkit_home = config_home(xdg.as_deref(), home.as_deref());
         let link = state_dir.join(LINK_NAME);
         report.notes.extend(apply_toolkit_files(
             state_dir,
             &record,
             &merged,
-            toolkit_home.as_deref(),
+            resolve_config_home(config).as_deref(),
             &link,
         ));
     }
@@ -2058,16 +2073,10 @@ pub(crate) fn shadowed_from_files_in(
 ) -> (Vec<String>, Vec<String>) {
     let mut shadowed = Vec::new();
     let mut notes = Vec::new();
-    let owned;
-    let config = match config {
-        Some(dir) => Some(dir),
-        None => {
-            let xdg = std::env::var_os("XDG_CONFIG_HOME");
-            let home = std::env::var_os("HOME");
-            owned = config_home(xdg.as_deref(), home.as_deref());
-            owned.as_deref()
-        }
-    };
+    let owned = config
+        .map(Path::to_path_buf)
+        .or_else(|| resolve_config_home(None));
+    let config = owned.as_deref();
     let user_scoot = config.map(|base| base.join("scoot/config.toml"));
     let user_bar = config.map(|base| base.join("scoot/bar.toml"));
     let mut read_table = |path: &Path| -> Option<toml::Table> {

@@ -430,6 +430,7 @@ pub fn toolkit_off(state_dir: &Path, record: &mut Record, dconf: &dyn Dconf) -> 
 pub const MANAGED_MARK: &str = "Managed by scoot look";
 
 /// One toolkit file, relative to the config home.
+#[derive(Debug)]
 pub struct OwnedFile {
     /// `gtk-3.0/gtk.css`, `qt6ct/qt6ct.conf`, and so on: one `/`, no
     /// `..`, never absolute.
@@ -448,8 +449,12 @@ pub fn wanted_files(look: &ResolvedLook, link: &Path) -> Result<Vec<OwnedFile>, 
     let link_text = link
         .to_str()
         .ok_or_else(|| "the state link path is not UTF-8: toolkit files left alone".to_owned())?;
+    // A backslash would break the CSS `@import` (an escape character in a
+    // CSS string) while staying literal in the qt6ct value: refuse it
+    // rather than writing a file that points nowhere.
     if link_text.contains('\0')
         || link_text.contains('"')
+        || link_text.contains('\\')
         || link_text.chars().any(|c| c.is_control())
     {
         return Err("the state link path is not a plain path: toolkit files left alone".to_owned());

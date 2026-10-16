@@ -638,6 +638,17 @@ fn files_cover_gtk_qt_and_fonts() {
 }
 
 #[test]
+fn a_backslash_in_the_state_path_refuses_the_files() {
+    // A backslash is an escape in the CSS `@import` string while staying
+    // literal in the qt6ct value: refuse it rather than writing a file
+    // that points nowhere.
+    let state = state_dir("backslash");
+    let link = state.join("we\\ird");
+    let error = wanted_files(&look(), &link).expect_err("a backslash refuses");
+    assert!(error.contains("not a plain path"), "{error}");
+}
+
+#[test]
 fn absent_files_are_written_and_identical_ones_kept() {
     let home = super::super::catalog::tests::scratch("files-write");
     let state = state_dir("files-write");
