@@ -18,9 +18,9 @@ use scoot_look::grammar::is_name;
 use scoot_look::state::{self, PREVIEW_FILE};
 
 use super::apply::{ApplyOptions, PREVIEW_SUPERSEDED, apply_with};
-use super::catalog::Catalog;
 use super::reload::{BarReload, CompositorReload};
 use super::sync::read_nix_claims;
+use scoot_look::catalog::Catalog;
 
 /// How many times the detached reverter waits out a concurrent swap's
 /// lock past each attempt's own wait before giving up loudly: twelve

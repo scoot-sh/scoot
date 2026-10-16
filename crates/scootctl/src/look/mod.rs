@@ -19,7 +19,6 @@
 
 pub mod apply;
 pub mod build_dir;
-pub mod catalog;
 pub mod cycle;
 pub mod foot;
 pub mod leaves;
@@ -40,8 +39,8 @@ use apply::{
     ApplyOptions, BuildTarget, apply_with, build_to_out, resolve_state_dir, validate_dir,
     validate_entry,
 };
-use catalog::{Catalog, discover, origin_name};
 use reload::{CompositorReload, IpcCompositor, bar_targets};
+use scoot_look::catalog::{Catalog, discover, origin_name};
 use scoot_look::state::Record;
 use toolkit::{CliDconf, Dconf, toolkit_on};
 

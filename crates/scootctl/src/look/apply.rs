@@ -39,12 +39,12 @@ use scoot_look::{
     render_qt_scheme, render_scoot, render_swaylock, resolve, source_hash,
 };
 
-use super::catalog::{Catalog, Entry, cache_home, config_home};
 use super::cycle::{Preview, PreviewRead, clear_preview, read_preview, write_preview};
 use super::foot::foot_notes;
 use super::reload::{BarReload, CompositorReload, ReloadError};
 use super::sync::TargetSkips;
-use super::toolkit::{Dconf, apply_toolkit_files, apply_toolkit_with_claims};
+use super::toolkit::{Dconf, apply_toolkit, apply_toolkit_files, apply_toolkit_with_claims};
+use scoot_look::catalog::{Catalog, Entry, cache_home, config_home};
 
 /// How long a second writer waits on `<state>/look.lock` before refusing.
 pub const LOCK_WAIT: Duration = Duration::from_secs(10);
