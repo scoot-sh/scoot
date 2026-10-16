@@ -71,7 +71,7 @@ wrong.
 | Dark mode, GTK theme, icons, cursor, app font (`color-scheme`, `gtk-theme`, `icon-theme`, `cursor-theme`, `cursor-size`, `font-name`) | Live, on apply (see below) |
 | GTK `gtk.css` colors | Next launch: GTK 3 text selection plus libadwaita accent and surfaces follow; plain GTK 4 keeps its stock accent; running apps keep their palette |
 | Qt style variant and palette | Next launch of each app; under the Adwaita style QWidget apps keep Adwaita's fixed palette (see below) |
-| Notification colors (mako) | Live, on apply (`makoctl reload`) |
+| Notification colors (mako) | Live, on apply (D-Bus reload; `makoctl` fallback) |
 | OSD colors (wob) | Live, on apply (the unit restarts) |
 | Input-method candidate theme (fcitx5) | Live, on apply (D-Bus reload) |
 | Night-light temperature | Live, on apply (the unit restarts) |
@@ -93,8 +93,9 @@ that is not installed or not running is a note, never an error; a
 private look state (headless or `--private-look`) signals none of them.
 
 - mako reads the fragment through an `include=` of the link's file
-  (ahead of your own keys, which win) and `makoctl reload` restyles
-  on-screen notifications. On Nix the generated config carries the
+  (ahead of your own keys, which win) and a D-Bus `Reload` restyles
+  on-screen notifications without starting a stopped mako
+  (`makoctl reload` only where no `busctl` exists). On Nix the generated config carries the
   include; without Nix add
   `include=~/.local/state/scoot/look/mako` yourself.
 - wob reads a complete `wob.ini` from `-c` and the unit restarts (it

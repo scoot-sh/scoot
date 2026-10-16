@@ -20,6 +20,7 @@
 pub mod apply;
 pub mod build_dir;
 pub mod catalog;
+pub mod foot;
 pub mod leaves;
 pub mod reload;
 pub mod toolkit;

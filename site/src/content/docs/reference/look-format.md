@@ -246,7 +246,9 @@ look with `extends`: without the catalog only single-file looks
 resolve here. `build` takes a single source without `extends`
 and refuses one with it; resolve the catalog first. `build`
 writes `scoot.toml`, `bar.toml`, `gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`,
-`qt/scoot-look.conf`, `render.json` and the daemon leaves into the output dir (never
+`qt/scoot-look.conf`, `foot.ini` (only when the look has
+`[terminal]`), `render.json` and the daemon leaves into the output dir
+(never
 through a symlink, and never beside files it did not write). Both read `look.toml`
 only through a regular file opened without blocking: symlinks,
 directories, devices, FIFOs and
