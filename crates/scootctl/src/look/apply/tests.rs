@@ -15,8 +15,7 @@ use scoot_look::state::{LINK_NAME, RecordRead, read_record};
 
 use super::{
     ApplyOptions, ApplyReport, Availability, BuildTarget, Checks, apply_with, apply_with_live,
-    build_to_out,
-    shadowed_from_files_in, validate_dir, validate_entry,
+    build_to_out, shadowed_from_files_in, validate_dir, validate_entry,
 };
 use scoot_look::Origin;
 
