@@ -128,7 +128,8 @@ impl Harness {
             feature = "microphone",
             feature = "network",
             feature = "tray",
-            feature = "power"
+            feature = "power",
+            feature = "looks"
         )
     ))]
     pub fn popup(&mut self, content: &mut crate::popup::Content) -> bool {

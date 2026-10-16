@@ -103,6 +103,8 @@ mod ellipsis;
 pub mod exec;
 #[cfg(test)]
 pub mod harness;
+#[cfg(feature = "looks")]
+pub mod looks;
 #[cfg(feature = "media")]
 pub mod media;
 #[cfg(feature = "network")]
@@ -562,6 +564,18 @@ pub const REGISTRY: &[Spec] = &[
         #[cfg(test)]
         stand_in: None,
     },
+    #[cfg(feature = "looks")]
+    Spec {
+        id: looks::ID,
+        init: looks::init,
+        actions: looks::ACTIONS,
+        // Available on any machine the tests run on: with no state dir or
+        // record it shows `no look`, and the catalog is whatever is
+        // installed (possibly empty), so the contract drives it everywhere
+        // with no stand-in.
+        #[cfg(test)]
+        stand_in: None,
+    },
 ];
 
 /// The registry entry for `id`.
@@ -688,6 +702,8 @@ pub struct Settings {
     pub tray: tray::Settings,
     #[cfg(feature = "power")]
     pub power: power::Settings,
+    #[cfg(feature = "looks")]
+    pub looks: looks::Settings,
     /// The interaction keys the config sets, by module id: only modules
     /// that bind something are listed.
     pub bindings: Vec<(&'static str, Bindings)>,

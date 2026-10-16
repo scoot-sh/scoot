@@ -923,6 +923,7 @@ dependencies = [
  "scootbg-mem",
  "serde",
  "serde_json",
+ "tempfile",
  "toml",
  "wayland-client",
  "wayland-protocols",

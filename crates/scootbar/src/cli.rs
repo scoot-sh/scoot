@@ -179,7 +179,9 @@ fn modules_section() -> String {
 /// at a wrap is `",\n"` plus a 12-space hang, so the daemon page stays
 /// plain and narrow in every build no matter how many modules the registry
 /// holds. `used` is the visible width already on the line (the `Modules: `
-/// prefix the caller just pushed).
+/// prefix the caller just pushed). The wrap reserves the separator's own
+/// comma: a line filled to exactly the limit would otherwise print it one
+/// past.
 fn push_wrapped_ids(section: &mut String, ids: &[&str], mut used: usize) {
     const LIMIT: usize = 99;
     const HANG: &str = ",\n            ";
@@ -191,7 +193,7 @@ fn push_wrapped_ids(section: &mut String, ids: &[&str], mut used: usize) {
             first = false;
             continue;
         }
-        if used + ", ".len() + id.len() > LIMIT {
+        if used + ", ".len() + id.len() >= LIMIT {
             section.push_str(HANG);
             section.push_str(id);
             used = HANG.len() - ",\n".len() + id.len();
@@ -473,6 +475,28 @@ macro_rules! power_help {
     };
 }
 
+// What the looks module is, for the help page.
+#[cfg(feature = "looks")]
+macro_rules! looks_help {
+    () => {
+        "Looks (the looks module):
+    the active look's name, with a click opening the picker (bind a click
+    to \"popup\" with on-click = \"popup\", or click with no binding): one
+    row per look in catalog order, the active one selected, a long catalog
+    paged with `prev` and `next` rows. A row click runs `scoot look apply`
+    for that look and closes the picker. Its actions are `apply N` (the
+    picker's Nth row) and `page N`, each taking a number. Nothing is
+    polled
+"
+    };
+}
+#[cfg(not(feature = "looks"))]
+macro_rules! looks_help {
+    () => {
+        ""
+    };
+}
+
 // One daemon example line for the main help page: the trio when this
 // build places all three, a bare flag otherwise. Static text naming
 // a module the build lacks would fail `the_help_matches_the_build`, so
@@ -696,6 +720,7 @@ const DAEMON_POST: &str = concat!(
     media_help!(),
     bluetooth_help!(),
     power_help!(),
+    looks_help!(),
     "
 The config file ($XDG_CONFIG_HOME/scoot/bar.toml, ~/.config/scoot/bar.toml
 without it) holds every option above; `--config PATH` reads another file
