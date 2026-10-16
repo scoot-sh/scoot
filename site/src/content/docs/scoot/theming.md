@@ -20,9 +20,8 @@ The default is `ginger-night` (the cat-peeking look): an empty
 `desktop` config themes. Set `look = null` explicitly to theme
 nothing. `programs.scoot.looks` lists the catalog (default: every
 shipped look — add paths to your own source look directories beside
-the names). Each
-look renders at build time; each activation runs `scoot look sync`,
-which starts a fresh state on the declared default, switches when it
+the names). Each look renders at build time; each activation runs
+`scoot look sync`, which starts a fresh state on the declared default, switches when it
 changed, falls back when the live choice left the catalog, and
 otherwise keeps the live choice. A swap (`scoot look apply`, the
 `Mod+Shift+T` cycle, the IPC request) takes effect at once; the

@@ -251,10 +251,10 @@ the fragment against foot's own parser; `build --out` writes
 ## The Nix catalog
 
 `programs.scoot.looks` lists the catalog (default: every shipped
-look — add paths to your own source look directories beside the names);
-each look
-renders at build time and installs as `~/.local/share/scoot/looks/<name>`
-(sources) beside `~/.local/share/scoot/rendered/<name>` (renders).
+look — add paths to your own source look directories beside the
+names); each look renders at build time and installs as
+`~/.local/share/scoot/looks/<name>` (sources) beside
+`~/.local/share/scoot/rendered/<name>` (renders).
 `programs.scoot.look` is the declared default (`ginger-night` with the
 profile on, `null` for no layer), written to
 `~/.config/scoot/look-default`. Each activation runs `scoot look sync`
