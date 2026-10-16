@@ -214,9 +214,9 @@ impl CliLeaves {
     /// and macOS alike): no `pkill` dialect, no shell, and the uid
     /// filter is this code's, not the matcher's default, so another
     /// user's same-named process is never touched even as root. The
-    /// name compares against the command's basename (`comm` carries the
-    /// full path on macOS, the bare name on Linux), exactly, so
-    /// `hx-something` never matches `hx`. A pid
+    /// name compares against the command's basename, unwrapping a
+    /// Nix-style `.<name>-wrapped` launcher (see [`leaf_comm`]):
+    /// exactly, so `hx-something` never matches `hx`. A pid
     /// that exits between the listing and the kill is skipped silently
     /// (`ESRCH`); any other kill failure is reported, never a refusal
     /// (every leaf step is best-effort). Our own pid is never signaled.
@@ -234,8 +234,7 @@ impl CliLeaves {
             let Some((pid, owner, comm)) = parse_ps_line(line) else {
                 continue;
             };
-            let base = comm.rsplit('/').next().unwrap_or_default();
-            if base != name || owner != uid || pid == own {
+            if !leaf_comm(name, &comm) || owner != uid || pid == own {
                 continue;
             }
             let Some(target) = rustix::process::Pid::from_raw(pid as i32) else {
@@ -336,6 +335,23 @@ fn ps_table(ps: &Path) -> Result<String, String> {
         return Err(format!("`{}` failed", ps.display()));
     }
     String::from_utf8(out).map_err(|error| format!("`{}` wrote non-UTF-8: {error}", ps.display()))
+}
+
+/// Whether `comm` names the leaf's process: the command's basename,
+/// exactly (`comm` carries the full path on macOS, the bare name on
+/// Linux), unwrapping a Nix-style `.<name>-wrapped` launcher. nixpkgs
+/// wraps binaries with a launcher that execs `.<name>-wrapped` beside
+/// it, and the kernel reports the inner name: Helix on NixOS runs as
+/// `.hx-wrapped` (verified live), btop as `btop`. A longer name that
+/// merely starts the same (`hx-something`) never matches.
+fn leaf_comm(name: &str, comm: &str) -> bool {
+    let base = comm.rsplit('/').next().unwrap_or_default();
+    if base == name {
+        return true;
+    }
+    base.strip_prefix('.')
+        .and_then(|inner| inner.strip_suffix("-wrapped"))
+        == Some(name)
 }
 
 /// One `ps -e -o pid= -o uid= -o comm=` line: the pid, the owner's uid,

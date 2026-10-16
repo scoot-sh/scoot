@@ -188,7 +188,7 @@ fn stub_ps_table(bin: &std::path::Path, uid: u32, other: u32) {
     std::fs::write(
         &stub,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \\\n  '    PID   UID COMMAND' \\\n  'not a process line' \\\n  \"2000000001 {uid} hx\" \\\n  \"2000000002 {uid} hx\" \\\n  \"{own} {uid} hx\" \\\n  \"2000000003 {uid} btop\" \\\n  \"2000000004 {uid} foot\" \\\n  \"2000000005 {other} hx\" \\\n  \"2000000006 {other} btop\" \\\n  \"2000000007 {uid} /nix/store/abc-helix-25.07.1/bin/hx\" \\\n  \"2000000008 {uid} hx-something\"\n"
+            "#!/bin/sh\nprintf '%s\\n' \\\n  '    PID   UID COMMAND' \\\n  'not a process line' \\\n  \"2000000001 {uid} hx\" \\\n  \"2000000002 {uid} hx\" \\\n  \"{own} {uid} hx\" \\\n  \"2000000003 {uid} btop\" \\\n  \"2000000004 {uid} foot\" \\\n  \"2000000005 {other} hx\" \\\n  \"2000000006 {other} btop\" \\\n  \"2000000007 {uid} /nix/store/abc-helix-25.07.1/bin/hx\" \\\n  \"2000000008 {uid} hx-something\" \\\n  \"2000000009 {uid} .hx-wrapped\" \\\n  \"2000000010 {uid} .btop-wrapped\"\n"
         ),
     )
     .expect("a stub ps");
@@ -237,12 +237,13 @@ fn editor_signals_reach_only_the_users_own_processes() {
         unsafe { std::env::set_var("PATH", &path) };
         let leaves = CliLeaves::new();
         // Two own bare `hx` (our own pid excluded) plus one by store
-        // path (the macOS `comm` shape), one own `btop`: the other
-        // uid's pair, `foot` and `hx-something` are never counted. The
-        // kills hit pids no process holds (`ESRCH`), so nothing is
-        // side-effected.
-        assert_eq!(leaves.helix_signal().expect("hx signaled"), 3);
-        assert_eq!(leaves.btop_signal().expect("btop signaled"), 1);
+        // path (the macOS `comm` shape) plus the Nix wrapper (the
+        // NixOS `comm` shape), one own `btop` plus its wrapper: the
+        // other uid's pair, `foot` and `hx-something` are never
+        // counted. The kills hit pids no process holds (`ESRCH`), so
+        // nothing is side-effected.
+        assert_eq!(leaves.helix_signal().expect("hx signaled"), 4);
+        assert_eq!(leaves.btop_signal().expect("btop signaled"), 2);
         if let Some(path) = old.clone() {
             unsafe { std::env::set_var("PATH", path) };
         }
