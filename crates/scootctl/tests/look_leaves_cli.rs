@@ -420,8 +420,8 @@ fn a_table_past_the_pipe_buffer_still_reads() {
     for i in 0..2000 {
         use std::fmt::Write as _;
         let cont = if i + 1 == 2000 { "" } else { " \\" };
-        write!(table, "  '{} {} hx'{}\n", 2000000000 + i, uid, cont)
-            .expect("a table line");
+        write!(table, "  '{} {} hx'{}", 2000000000 + i, uid, cont).expect("a table line");
+        table.push('\n');
     }
     std::fs::write(&stub, table).expect("a stub ps");
     #[cfg(unix)]
