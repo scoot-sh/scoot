@@ -31,7 +31,7 @@
 //! A declared look renders at build time into the catalog's
 //! `rendered/<name>`; sync points the state link at that entry (never a
 //! raw store path, so the next generation re-resolves it), verifying
-//! name, source hash and both fragments first and rendering fresh into
+//! name, source hash and the fragments first and rendering fresh into
 //! the cache with a note when verification fails. Anything else (a kept
 //! user look, a hand-placed `look-default` on a non-Nix box) renders into
 //! the cache exactly like `apply`.
@@ -279,8 +279,10 @@ pub fn prerendered_for(
 }
 
 /// Verifies one pre-rendered directory: `render.json` names this look
-/// with this source hash, and both fragments exist. Returns the note for
-/// the fresh-render fallback when it does not.
+/// with this source hash, and the fragments exist (`scoot.toml`,
+/// `bar.toml` and the greeter's `greet.toml`: the state link points at
+/// this directory, so an incomplete catalog render re-renders fresh).
+/// Returns the note for the fresh-render fallback when it does not.
 fn verify_prerendered(name: &str, source_hash_hex: &str, dir: &Path) -> Result<(), String> {
     let refused = |why: String| {
         format!(
@@ -298,7 +300,7 @@ fn verify_prerendered(name: &str, source_hash_hex: &str, dir: &Path) -> Result<(
     if json.get("source_hash").and_then(|h| h.as_str()) != Some(source_hash_hex) {
         return Err(refused("render.json source hash differs".to_owned()));
     }
-    for file in ["scoot.toml", "bar.toml"] {
+    for file in ["scoot.toml", "bar.toml", "greet.toml"] {
         if !dir.join(file).is_file() {
             return Err(refused(format!("{file} is missing")));
         }

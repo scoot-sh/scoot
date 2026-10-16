@@ -31,7 +31,7 @@ use std::path::Path;
 
 use scoot_look::{
     ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar, render_foot,
-    render_fuzzel, render_gtk3_css, render_gtk4_css, render_json, render_leaf_files,
+    render_fuzzel, render_greet, render_gtk3_css, render_gtk4_css, render_json, render_leaf_files,
     render_qt_scheme, render_scoot, render_swaylock, resolve, source_hash, validate_apps_allowlist,
     validate_for_origin,
 };
@@ -470,6 +470,13 @@ fn build_dir(
         eprintln!("error: {e}");
         std::process::exit(1);
     });
+    // The login-screen fragment scootgreet reads at system build time
+    // (never live): beside the first-party ones, so every catalog render
+    // carries the greeter's look.
+    let greet = render_greet(&look).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
     let leaves = render_leaf_files(&look).unwrap_or_else(|e| {
         eprintln!("error: {e}");
         std::process::exit(1);
@@ -489,6 +496,7 @@ fn build_dir(
         ("bar.toml", bar),
         ("fuzzel.ini", fuzzel),
         ("swaylock", swaylock),
+        ("greet.toml", greet),
         (
             "render.json",
             render_json(&look.name, &source_hash(&bytes), inputs),
