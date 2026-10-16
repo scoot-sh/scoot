@@ -2647,7 +2647,7 @@ let
   # its own precedence over them at launch.
   hmAppsNetStubThemed = evalHome {
     enable = true;
-    desktop.look = "music-desk";
+    look = "music-desk";
     desktop.apps.network.enable = true;
     desktop.apps.network.cliPackage = appsStubs;
     desktop.apps.network.menuPackage = appsStubs;
