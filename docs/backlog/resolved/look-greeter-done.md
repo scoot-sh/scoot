@@ -1,9 +1,10 @@
 ---
 title: "The greeter's look: greeter.look rendered at NixOS build time"
-status: "open"
-area: "packaging"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-16"
 ---
 
 # The greeter's look: greeter.look rendered at NixOS build time
