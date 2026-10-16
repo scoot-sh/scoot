@@ -3,7 +3,7 @@ title: "The greeter's look: greeter.look rendered at NixOS build time"
 status: "open"
 area: "packaging"
 priority: "low"
-blocked: "look-nix-catalog"
+blocked: null
 ---
 
 # The greeter's look: greeter.look rendered at NixOS build time

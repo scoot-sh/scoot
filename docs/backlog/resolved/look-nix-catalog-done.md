@@ -1,9 +1,10 @@
 ---
 title: "Nix: the programs.scoot.looks catalog, look as the declared default, the switch rule"
-status: "open"
-area: "packaging"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-15"
 ---
 
 # Nix: the programs.scoot.looks catalog, look as the declared default, the switch rule
@@ -80,3 +81,34 @@ Stylix, the greeter, third-party leaves, retiring the registry,
 `lookPacks` (later, `look-share`).
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
+
+## Resolution (PR #634)
+
+Landed as two commits: `scoot look sync` and the home-manager rule
+(`scootctl`, `scoot-look`), then the Nix catalog, the removed
+eval-time merges, and the docs (`nix`, `resources/scoot-session`,
+`site`). Unblocked `look-greeter`, `look-stylix-source`, and (with
+the rest of its blockers) `look-nix-retire-registry`.
+
+Evidence: `cargo test -p scootctl -p scoot-look` (Linux: 118 + 164),
+clippy and fmt clean; a 13-test sync suite (rules 1–4, null removal
+with rollback, Nix claims, pre-rendered adopt/fallback) plus toolkit
+claims tests; `nix build .#checks.aarch64-linux.scoot-modules` and
+`.scootbar-modules` green (new `_lookCatalogPins`: priority table,
+custom paths, first-wins, the unknown-look and no-profile refusals,
+the NixOS catalog, the files-only activation); real build-time renders
+on the dev VM (moonrise and an `extends` child through `scoot-look
+build --catalog`, 7.9 MiB closure: 7.4 MiB fonts, 0.9 MiB wallpaper);
+real `home-manager switch` runs proving rule 1 (start), rule 2
+(follow), rule 4 (a manual choice kept), rule 3 (fallback on a reduced
+catalog) and null removal, plus a pixel diff of a live headless swap.
+
+Deviations from the design, with why: the priority table's Stylix row
+waits for `look-stylix-source` (declaring the default without the
+entry would refuse every Stylix user under the new assertion);
+render derivations take only the UI font package (the
+output-determining input); the maintainer's `~/nixos-config` update is
+outside this repo. Two bugs the work itself caught: extends-inherited
+wallpaper/font paths resolve through the chain at evaluation (a child
+without its own image rendered nothing), and files-only setups note
+instead of failing activation.
