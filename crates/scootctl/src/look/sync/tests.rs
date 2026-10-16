@@ -16,7 +16,7 @@ use super::super::catalog::tests::{look_toml, scratch, write_look};
 use super::super::leaves::ScriptedLeaves;
 use super::super::reload::{BarReload, CompositorReload, ReloadError, Reloaded};
 use super::super::toolkit::{COLOR_SCHEME_KEY, Dconf};
-use super::{SyncOptions, parse_declared, sync_with};
+use super::{SyncOptions, TargetSkips, parse_declared, sync_with};
 
 struct Fixture {
     catalog: super::super::catalog::Catalog,
@@ -272,6 +272,7 @@ fn run_sync(
     sync_with(
         declared,
         claims,
+        TargetSkips::default(),
         &options(),
         &fixture.catalog,
         &fixture.cache,
@@ -512,6 +513,7 @@ fn rule_three_falls_back_when_the_live_choice_left() {
     let report = sync_with(
         Some(Some("look-b".to_owned())),
         Vec::new(),
+        TargetSkips::default(),
         &options(),
         &catalog,
         &fixture.cache,
@@ -866,4 +868,305 @@ fn declared_files_parse() {
     assert!(error.contains("LOUD"), "names it: {error}");
     std::fs::remove_file(&default).expect("remove default");
     assert!(parse_declared(&default, &claims).expect("parses").is_none());
+}
+
+#[test]
+fn target_skips_parse_one_name_per_line() {
+    let lines = |text: &str| text.lines().map(str::to_owned).collect::<Vec<_>>();
+    assert_eq!(TargetSkips::from_lines(&[]), TargetSkips::default());
+    assert_eq!(
+        TargetSkips::from_lines(&lines("cursor\n")),
+        TargetSkips {
+            cursor: true,
+            fonts: false,
+        }
+    );
+    assert_eq!(
+        TargetSkips::from_lines(&lines("cursor\nfonts\n")),
+        TargetSkips {
+            cursor: true,
+            fonts: true,
+        }
+    );
+    // Blanks and unknown names never refuse: a newer writer's target
+    // does not break an older sync.
+    assert_eq!(
+        TargetSkips::from_lines(&lines("  \ncursor\nwallpaper\n")),
+        TargetSkips {
+            cursor: true,
+            fonts: false,
+        }
+    );
+    assert!(!TargetSkips::default().any());
+    assert!(
+        (TargetSkips {
+            cursor: true,
+            fonts: false,
+        })
+        .any()
+    );
+}
+
+/// [`Checks`] that refuses every font: proves a fonts-skipped sync
+/// never resolves a face (a missing face must not refuse a sync that
+/// themes no font). Bar and foot fragments pass; the fixture looks
+/// carry a color wallpaper, so no wallpaper resolves.
+struct FontRefusingChecks;
+
+impl Checks for FontRefusingChecks {
+    fn font_file(&self, family: &str) -> Result<Availability<String>, String> {
+        Err(format!("font `{family}` is not installed"))
+    }
+
+    fn wallpaper(&self, path: &Path) -> Result<Availability<()>, String> {
+        assert!(path.is_file(), "wallpaper resolves to a file");
+        Ok(Availability::Available(()))
+    }
+
+    fn bar_fragment(&self, fragment: &Path) -> Result<Availability<()>, String> {
+        assert!(fragment.is_file(), "the bar fragment renders");
+        Ok(Availability::Available(()))
+    }
+
+    fn foot_fragment(&self, fragment: &Path) -> Result<Availability<()>, String> {
+        assert!(fragment.is_file(), "the foot fragment renders");
+        Ok(Availability::Available(()))
+    }
+}
+
+fn sync_with_skips(
+    declared: Option<Option<String>>,
+    skips: TargetSkips,
+    fixture: &Fixture,
+    roots: &[PathBuf],
+    compositor: &mut dyn CompositorReload,
+    checks: &dyn Checks,
+    dconf: &dyn Dconf,
+) -> Result<super::super::apply::ApplyReport, super::super::apply::ApplyFailure> {
+    sync_with(
+        declared,
+        Vec::new(),
+        skips,
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        roots,
+        &fixture.state,
+        Some(&fixture.config),
+        compositor,
+        &[],
+        checks,
+        dconf,
+    )
+}
+
+#[test]
+fn cursor_skip_renders_fresh_without_cursor_keys() {
+    // The bug shape: a catalog render exists carrying the cursor keys,
+    // and the cursor target is off. Sync must not point the link at
+    // it: it renders fresh without the triple instead.
+    let fixture = fixture("cursor-skip");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::not_running();
+    let first = run_sync(
+        Some(Some("look-a".to_owned())),
+        Vec::new(),
+        &fixture,
+        std::slice::from_ref(&fixture.roots),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("first sync renders fresh");
+    let published = fixture.roots.join("look-a");
+    std::fs::create_dir_all(&published).expect("publish dir");
+    let from = PathBuf::from(&first.rendered);
+    for file in ["scoot.toml", "bar.toml", "render.json"] {
+        std::fs::copy(from.join(file), published.join(file)).expect("publish file");
+    }
+    let published_scoot =
+        std::fs::read_to_string(published.join("scoot.toml")).expect("published fragment");
+    assert!(
+        published_scoot.contains("cursor_theme"),
+        "the catalog render carries the cursor"
+    );
+    let mut compositor = FakeCompositor::ok();
+    let report = sync_with_skips(
+        Some(Some("look-a".to_owned())),
+        TargetSkips {
+            cursor: true,
+            fonts: false,
+        },
+        &fixture,
+        std::slice::from_ref(&fixture.roots),
+        &mut compositor,
+        &checks,
+        &FakeDconf::absent(),
+    )
+    .expect("cursor-skipped sync succeeds");
+    assert!(
+        report.rendered.contains("cache"),
+        "skipped renders fresh, never the catalog entry: {}",
+        report.rendered
+    );
+    let scoot =
+        std::fs::read_to_string(PathBuf::from(&report.rendered).join("scoot.toml")).expect("fresh");
+    for key in ["cursor_theme", "cursor_size", "cursor_color"] {
+        assert!(!scoot.contains(key), "the layer carries {key}:\n{scoot}");
+    }
+    assert!(
+        scoot.contains("background_color"),
+        "the rest still renders:\n{scoot}"
+    );
+    // The bar font is not skipped: it still renders.
+    let bar =
+        std::fs::read_to_string(PathBuf::from(&report.rendered).join("bar.toml")).expect("bar");
+    assert!(
+        bar.contains("font = \""),
+        "only the cursor is skipped:\n{bar}"
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("cursor target is off")),
+        "says so: {:?}",
+        report.notes
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .all(|note| !note.contains("catalog render")),
+        "no catalog render is used: {:?}",
+        report.notes
+    );
+    assert_eq!(compositor.calls.get(), 1, "the filtered layer reloads in");
+}
+
+#[test]
+fn fonts_skip_never_resolves_a_face_and_renders_no_bar_font() {
+    // Every font refuses, and the fonts target is off: sync still
+    // succeeds, the bar fragment carries no `font` key, and the
+    // toolkit writes no font name, no font line and no fontconfig file.
+    let fixture = fixture("fonts-skip");
+    let checks = FontRefusingChecks;
+    let dconf = FakeDconf::default();
+    let mut compositor = FakeCompositor::ok();
+    let report = sync_with_skips(
+        Some(Some("look-a".to_owned())),
+        TargetSkips {
+            cursor: false,
+            fonts: true,
+        },
+        &fixture,
+        std::slice::from_ref(&fixture.roots),
+        &mut compositor,
+        &checks,
+        &dconf,
+    )
+    .expect("fonts-skipped sync succeeds despite refusing fonts");
+    let bar =
+        std::fs::read_to_string(PathBuf::from(&report.rendered).join("bar.toml")).expect("bar");
+    assert!(
+        !bar.contains("font = \""),
+        "the layer carries a bar font:\n{bar}"
+    );
+    // The cursor is not skipped: it still renders and writes.
+    let scoot =
+        std::fs::read_to_string(PathBuf::from(&report.rendered).join("scoot.toml")).expect("fresh");
+    assert!(
+        scoot.contains("cursor_theme"),
+        "only the fonts are skipped:\n{scoot}"
+    );
+    let writes = dconf.writes.borrow();
+    assert!(
+        writes.iter().all(|(key, _)| !key.ends_with("/font-name")),
+        "font-name written: {writes:?}"
+    );
+    assert!(
+        writes.iter().any(|(key, _)| key.ends_with("/color-scheme")),
+        "the rest still writes: {writes:?}"
+    );
+    assert!(
+        !fixture
+            .config
+            .join("fontconfig/conf.d/10-scoot-look.conf")
+            .is_file(),
+        "the fontconfig file is written"
+    );
+    let ini = std::fs::read_to_string(fixture.config.join("gtk-3.0/settings.ini")).expect("ini");
+    assert!(
+        !ini.contains("gtk-font-name"),
+        "the ini names a font:\n{ini}"
+    );
+    assert!(
+        ini.contains("gtk-cursor-theme-name"),
+        "only the font line leaves the ini:\n{ini}"
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("fonts target is off")),
+        "says so: {:?}",
+        report.notes
+    );
+}
+
+#[test]
+fn cursor_skip_leaves_the_cursor_dconf_keys_and_ini_lines_alone() {
+    let fixture = fixture("cursor-skip-toolkit");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let dconf = FakeDconf::default();
+    let mut compositor = FakeCompositor::ok();
+    let report = sync_with_skips(
+        Some(Some("look-a".to_owned())),
+        TargetSkips {
+            cursor: true,
+            fonts: false,
+        },
+        &fixture,
+        std::slice::from_ref(&fixture.roots),
+        &mut compositor,
+        &checks,
+        &dconf,
+    )
+    .expect("cursor-skipped sync succeeds");
+    let writes = dconf.writes.borrow();
+    for key in ["cursor-theme", "cursor-size"] {
+        let suffix = format!("/{key}");
+        assert!(
+            writes
+                .iter()
+                .all(|(written, _)| !written.ends_with(&*suffix)),
+            "{key} written: {writes:?}"
+        );
+    }
+    assert!(
+        writes.iter().any(|(key, _)| key.ends_with("/font-name")),
+        "only the cursor keys stay: {writes:?}"
+    );
+    let ini = std::fs::read_to_string(fixture.config.join("gtk-3.0/settings.ini")).expect("ini");
+    assert!(
+        !ini.contains("gtk-cursor-theme-name") && !ini.contains("gtk-cursor-theme-size"),
+        "the ini names a cursor:\n{ini}"
+    );
+    assert!(
+        ini.contains("gtk-font-name"),
+        "only the cursor lines leave the ini:\n{ini}"
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("cursor-theme left alone")),
+        "says so: {:?}",
+        report.notes
+    );
 }

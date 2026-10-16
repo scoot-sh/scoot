@@ -38,6 +38,8 @@ use scoot_look::{
     ResolvedLook, font_desc, gtk_theme_name, render_fontconfig, render_gtk_ini, render_qt6ct_conf,
 };
 
+use super::sync::TargetSkips;
+
 /// The dconf key the tool owned first (kept for the tests and the reply).
 pub const COLOR_SCHEME_KEY: &str = "/org/gnome/desktop/interface/color-scheme";
 
@@ -255,16 +257,19 @@ pub fn apply_toolkit(
     look: &ResolvedLook,
     dconf: &dyn Dconf,
 ) -> Vec<String> {
-    apply_toolkit_with_claims(state_dir, record, look, dconf, &[])
+    apply_toolkit_with_claims(state_dir, record, look, dconf, &[], TargetSkips::default())
 }
 
-/// [`apply_toolkit`] with the Nix-claimed key paths skipped.
+/// [`apply_toolkit`] with the Nix-claimed key paths skipped, and the
+/// opted-out theme targets left alone: a skipped cursor writes no
+/// `cursor-theme`/`cursor-size`, skipped fonts no `font-name`.
 pub fn apply_toolkit_with_claims(
     state_dir: &Path,
     record: &mut Record,
     look: &ResolvedLook,
     dconf: &dyn Dconf,
     nix_claims: &[String],
+    target_skips: TargetSkips,
 ) -> Vec<String> {
     let mut notes = Vec::new();
     if !toolkit_on(record) {
@@ -298,6 +303,17 @@ pub fn apply_toolkit_with_claims(
         else {
             continue;
         };
+        // An opted-out target is left alone before anything else: the
+        // cursor pair and the font name are the toolkit's half of the
+        // "leave it alone entirely" promise, beside the layer.
+        if target_skips.cursor && (name == "cursor-theme" || name == "cursor-size") {
+            notes.push(format!("{name} left alone: the cursor target is off"));
+            continue;
+        }
+        if target_skips.fonts && name == "font-name" {
+            notes.push(format!("{name} left alone: the fonts target is off"));
+            continue;
+        }
         if nix_claims.iter().any(|key| key == path) {
             notes.push(format!(
                 "{name} is owned by the Nix configuration: left alone"
@@ -484,7 +500,16 @@ pub struct OwnedFile {
 /// the qt6ct config through the link's scheme, and the fontconfig
 /// default. `link` is the state link's own path, so the indirection
 /// survives every swap with no rewrite.
-pub fn wanted_files(look: &ResolvedLook, link: &Path) -> Result<Vec<OwnedFile>, String> {
+///
+/// An opted-out target leaves its traces out: a skipped cursor drops
+/// the cursor lines from both inis, skipped fonts drop the font line
+/// and the whole fontconfig file (Qt has no per-target content: the
+/// style and icons theme together or not at all).
+pub fn wanted_files(
+    look: &ResolvedLook,
+    link: &Path,
+    target_skips: TargetSkips,
+) -> Result<Vec<OwnedFile>, String> {
     let link_text = link
         .to_str()
         .ok_or_else(|| "the state link path is not UTF-8: toolkit files left alone".to_owned())?;
@@ -507,7 +532,7 @@ pub fn wanted_files(look: &ResolvedLook, link: &Path) -> Result<Vec<OwnedFile>, 
     };
     let css3 = shim("gtk-3.0.css");
     let css4 = shim("gtk-4.0.css");
-    let ini = render_gtk_ini(look);
+    let ini = filter_ini(&render_gtk_ini(look), target_skips);
     let scheme_path = format!("{link_text}/qt/scoot-look.conf");
     let qt_conf = render_qt6ct_conf(look, &scheme_path)
         .map_err(|error| format!("cannot render qt6ct.conf: {error}"))?;
@@ -523,7 +548,7 @@ pub fn wanted_files(look: &ResolvedLook, link: &Path) -> Result<Vec<OwnedFile>, 
         &format!("?>\n<!-- {MANAGED_MARK}. Do not edit: re-rendered on every apply. -->\n"),
         1,
     );
-    Ok(vec![
+    let mut owned = vec![
         OwnedFile {
             rel: "gtk-3.0/gtk.css",
             contents: css3,
@@ -544,22 +569,49 @@ pub fn wanted_files(look: &ResolvedLook, link: &Path) -> Result<Vec<OwnedFile>, 
             rel: "qt6ct/qt6ct.conf",
             contents: qt_conf,
         },
-        OwnedFile {
+    ];
+    // Skipped fonts own no fontconfig file: without it every app keeps
+    // whatever the box already resolves.
+    if !target_skips.fonts {
+        owned.push(OwnedFile {
             rel: "fontconfig/conf.d/10-scoot-look.conf",
             contents: fonts,
-        },
-    ])
+        });
+    }
+    Ok(owned)
+}
+
+/// Drops the opted-out lines from a generated `settings.ini`: the
+/// cursor pair and the font line. Exact `key=` matches on the
+/// renderer's own output (whose keys the unit tests pin), so a
+/// skipped target leaves no trace in the file. Comments and every
+/// other key pass through untouched.
+fn filter_ini(ini: &str, skips: TargetSkips) -> String {
+    if !skips.any() {
+        return ini.to_owned();
+    }
+    ini.lines()
+        .filter(|line| {
+            let key = line.split('=').next().unwrap_or("").trim();
+            !((skips.cursor && (key == "gtk-cursor-theme-name" || key == "gtk-cursor-theme-size"))
+                || (skips.fonts && key == "gtk-font-name"))
+        })
+        .map(|line| format!("{line}\n"))
+        .collect()
 }
 
 /// Applies the toolkit files for a swap: writes each owned file under
 /// `config_home`, leaving foreign files alone. Best-effort notes, never a
 /// refusal. `config_home` is `None` when no home resolves at all.
+/// Opted-out targets are named and left out (no fontconfig file at
+/// all for skipped fonts; no cursor or font lines in the inis).
 pub fn apply_toolkit_files(
     state_dir: &Path,
     record: &Record,
     look: &ResolvedLook,
     config_home: Option<&Path>,
     link: &Path,
+    target_skips: TargetSkips,
 ) -> Vec<String> {
     let mut notes = Vec::new();
     if !toolkit_on(record) {
@@ -578,7 +630,7 @@ pub fn apply_toolkit_files(
         notes.push("no home directory: toolkit files left alone".to_owned());
         return notes;
     };
-    let files = match wanted_files(look, link) {
+    let files = match wanted_files(look, link, target_skips) {
         Ok(files) => files,
         Err(error) => {
             notes.push(error);
@@ -587,6 +639,11 @@ pub fn apply_toolkit_files(
     };
     for file in &files {
         notes.extend(apply_one_file(config_home, file));
+    }
+    if target_skips.fonts {
+        notes.push(
+            "fontconfig/conf.d/10-scoot-look.conf left alone: the fonts target is off".to_owned(),
+        );
     }
     notes
 }

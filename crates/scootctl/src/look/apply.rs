@@ -43,6 +43,7 @@ use super::catalog::{Catalog, Entry, cache_home, config_home};
 use super::cycle::{Preview, PreviewRead, clear_preview, read_preview, write_preview};
 use super::foot::foot_notes;
 use super::reload::{BarReload, CompositorReload, ReloadError};
+use super::sync::TargetSkips;
 use super::toolkit::{Dconf, apply_toolkit_files, apply_toolkit_with_claims};
 
 /// How long a second writer waits on `<state>/look.lock` before refusing.
@@ -1166,6 +1167,7 @@ pub(crate) fn check_inputs(
             ui_font_file,
             bar_popup: true,
             bar_drop_sections: Vec::new(),
+            omit_cursor: false,
         },
         details,
     })
@@ -1320,6 +1322,9 @@ fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs) -> String {
         buffer.push(0);
     }
     buffer.push(if inputs.bar_popup { 1 } else { 0 });
+    // An opted-out cursor renders a different fragment (no cursor keys),
+    // so it keys apart from the full render of the same sources.
+    buffer.push(if inputs.omit_cursor { 1 } else { 0 });
     let mut dropped = inputs.bar_drop_sections.clone();
     dropped.sort();
     for section in &dropped {
@@ -1824,6 +1829,10 @@ pub(crate) struct SwapRequest {
     pub no_toolkit: bool,
     /// dconf key paths home-manager owns: left alone however they read.
     pub nix_claims: Vec<String>,
+    /// Theme targets the swap leaves alone (the Nix cursor/fonts
+    /// opt-outs, honored by `sync`; `apply` never skips: a manual
+    /// choice themes everything until the next managed sync).
+    pub target_skips: TargetSkips,
 }
 
 /// Records, repoints and reloads one swap: the design's section 4.5 steps
@@ -1936,6 +1945,7 @@ pub(crate) fn complete_swap(
                     merged,
                     dconf,
                     &swap.nix_claims,
+                    swap.target_skips,
                 ));
                 if let Err(error) = write_record(state_dir, &record) {
                     report.notes.push(format!(
@@ -1949,6 +1959,7 @@ pub(crate) fn complete_swap(
                     merged,
                     resolve_config_home(config).as_deref(),
                     &link,
+                    swap.target_skips,
                 ));
             }
             // Shadowed keys: the compositor's reply when it reloaded; else
@@ -2463,7 +2474,14 @@ pub fn apply_with_live(
     } else {
         report
             .notes
-            .extend(apply_toolkit_with_claims(state_dir, &mut record, &merged, dconf, &options.nix_claims));
+            .extend(apply_toolkit_with_claims(
+                state_dir,
+                &mut record,
+                &merged,
+                dconf,
+                &options.nix_claims,
+                TargetSkips::default(),
+            ));
         if let Err(error) = write_record(state_dir, &record) {
             report.notes.push(format!(
                 "cannot record the toolkit state: {error}: the look applied, the record lags"
@@ -2476,6 +2494,7 @@ pub fn apply_with_live(
             &merged,
             resolve_config_home(config).as_deref(),
             &link,
+            TargetSkips::default(),
         ));
     }
     // The daemon leaves are best-effort too: `makoctl reload`, the fcitx5

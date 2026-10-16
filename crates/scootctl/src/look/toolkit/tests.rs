@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use scoot_look::state::Record;
 use scoot_look::{Origin, ResolvedLook};
 
+use super::super::sync::TargetSkips;
 use super::{
     COLOR_SCHEME_KEY, Dconf, MANAGED_MARK, PREFER_DARK, PREFER_LIGHT, TOOL_KEYS, apply_toolkit,
     apply_toolkit_files, apply_toolkit_with_claims, toolkit_off, toolkit_off_with_claims,
@@ -596,7 +597,8 @@ fn records_round_trip_the_toolkit_half() {
 fn files_cover_gtk_qt_and_fonts() {
     // Six files: the two `@import` shims, the two inis, qt6ct through
     // the link's scheme, and the fontconfig default.
-    let files = wanted_files(&look(), &link(&state_dir("files"))).expect("files");
+    let files =
+        wanted_files(&look(), &link(&state_dir("files")), TargetSkips::default()).expect("files");
     let rels: Vec<&str> = files.iter().map(|file| file.rel).collect();
     assert_eq!(
         rels,
@@ -645,7 +647,8 @@ fn a_backslash_in_the_state_path_refuses_the_files() {
     // that points nowhere.
     let state = state_dir("backslash");
     let link = state.join("we\\ird");
-    let error = wanted_files(&look(), &link).expect_err("a backslash refuses");
+    let error =
+        wanted_files(&look(), &link, TargetSkips::default()).expect_err("a backslash refuses");
     assert!(error.contains("not a plain path"), "{error}");
 }
 
@@ -660,6 +663,7 @@ fn absent_files_are_written_and_identical_ones_kept() {
         &look(),
         Some(home.path()),
         &link(&state),
+        TargetSkips::default(),
     );
     assert_eq!(
         notes
@@ -685,6 +689,7 @@ fn absent_files_are_written_and_identical_ones_kept() {
         &look(),
         Some(home.path()),
         &link(&state),
+        TargetSkips::default(),
     );
     assert!(notes.is_empty(), "{notes:?}");
 }
@@ -713,6 +718,7 @@ fn marked_files_update_and_foreign_files_stay() {
         &look(),
         Some(home.path()),
         &link(&state),
+        TargetSkips::default(),
     );
     assert!(
         notes
@@ -735,16 +741,37 @@ fn files_off_and_private_and_homeless_all_skip() {
     let home = super::super::catalog::tests::scratch("files-gates");
     let state = state_dir("files-gates");
     let off = record(Some(false), &[], &[]);
-    let notes = apply_toolkit_files(&state, &off, &look(), Some(home.path()), &link(&state));
+    let notes = apply_toolkit_files(
+        &state,
+        &off,
+        &look(),
+        Some(home.path()),
+        &link(&state),
+        TargetSkips::default(),
+    );
     assert!(notes.iter().any(|note| note.contains("off")), "{notes:?}");
     let private = std::env::temp_dir().join(format!("scoot-look-gates-{}", std::process::id()));
     let on = record(None, &[], &[]);
-    let notes = apply_toolkit_files(&private, &on, &look(), Some(home.path()), &link(&private));
+    let notes = apply_toolkit_files(
+        &private,
+        &on,
+        &look(),
+        Some(home.path()),
+        &link(&private),
+        TargetSkips::default(),
+    );
     assert!(
         notes.iter().any(|note| note.contains("private look state")),
         "{notes:?}"
     );
-    let notes = apply_toolkit_files(&state, &on, &look(), None, &link(&state));
+    let notes = apply_toolkit_files(
+        &state,
+        &on,
+        &look(),
+        None,
+        &link(&state),
+        TargetSkips::default(),
+    );
     assert!(
         notes.iter().any(|note| note.contains("no home")),
         "{notes:?}"
@@ -774,7 +801,14 @@ fn a_claimed_key_is_left_alone_and_records_nothing() {
             live: live_map,
             ..FakeDconf::default()
         };
-        let notes = apply_toolkit_with_claims(&dir, &mut record, &look(), &dconf, &claims);
+        let notes = apply_toolkit_with_claims(
+            &dir,
+            &mut record,
+            &look(),
+            &dconf,
+            &claims,
+            TargetSkips::default(),
+        );
         assert!(
             dconf.wrote_to(COLOR_SCHEME_KEY).is_empty(),
             "claimed: never written"
@@ -826,5 +860,80 @@ fn off_leaves_a_claimed_key_alone() {
             .iter()
             .any(|note| note.contains("owned by the Nix configuration")),
         "says so: {notes:?}"
+    );
+}
+
+#[test]
+fn skipped_targets_leave_their_file_traces_out() {
+    // A skipped cursor drops the cursor lines from both inis; skipped
+    // fonts drop the font line and the whole fontconfig file. Nothing
+    // else changes.
+    let link = link(&state_dir("files-skipped"));
+    let files = wanted_files(
+        &look(),
+        &link,
+        TargetSkips {
+            cursor: true,
+            fonts: true,
+        },
+    )
+    .expect("files");
+    let rels: Vec<&str> = files.iter().map(|file| file.rel).collect();
+    assert_eq!(
+        rels,
+        vec![
+            "gtk-3.0/gtk.css",
+            "gtk-4.0/gtk.css",
+            "gtk-3.0/settings.ini",
+            "gtk-4.0/settings.ini",
+            "qt6ct/qt6ct.conf",
+        ]
+    );
+    for file in files
+        .iter()
+        .filter(|file| file.rel.ends_with("settings.ini"))
+    {
+        assert!(
+            !file.contents.contains("gtk-cursor-theme-name")
+                && !file.contents.contains("gtk-cursor-theme-size")
+                && !file.contents.contains("gtk-font-name"),
+            "skipped lines in {}:\n{}",
+            file.rel,
+            file.contents
+        );
+        assert!(
+            file.contents.contains("gtk-theme-name=Adwaita-dark"),
+            "the rest leaves the ini too:\n{}",
+            file.contents
+        );
+    }
+    let cursor_only = wanted_files(
+        &look(),
+        &link,
+        TargetSkips {
+            cursor: true,
+            fonts: false,
+        },
+    )
+    .expect("files");
+    let ini = cursor_only
+        .iter()
+        .find(|file| file.rel == "gtk-3.0/settings.ini")
+        .expect("an ini");
+    assert!(
+        !ini.contents.contains("gtk-cursor-theme-name"),
+        "cursor stays:\n{}",
+        ini.contents
+    );
+    assert!(
+        ini.contents.contains("gtk-font-name="),
+        "font leaves too:\n{}",
+        ini.contents
+    );
+    assert!(
+        cursor_only
+            .iter()
+            .any(|file| file.rel == "fontconfig/conf.d/10-scoot-look.conf"),
+        "only the cursor is skipped"
     );
 }

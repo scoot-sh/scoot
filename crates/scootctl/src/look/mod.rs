@@ -317,7 +317,9 @@ COMMANDS:
     sync        the home-manager rule: start on the declared default with
                 no state, switch when it changed, fall back when the live
                 choice left the catalog, else keep the live choice and
-                re-resolve it; a null default removes the layer
+                re-resolve it; a null default removes the layer; opted-out
+                theme targets (`look-nix-targets` beside the default)
+                render without their pieces
     toolkit     show whether the toolkit step is on, or persist
                 `toolkit on|off` in look.json
 
@@ -1389,6 +1391,9 @@ fn run_sync(look: &Look, no_toolkit: bool) -> Result<(), String> {
         Ok(Some(declared)) => (Some(declared.default), declared.claims),
         Err(error) => return Err(error),
     };
+    // The opted-out theme targets beside it (best-effort, like the
+    // claims): whatever sync points at renders without them.
+    let target_skips = sync::read_nix_targets();
     let catalog = discover();
     let cache = apply::render_cache_dir()?;
     let roots = sync::rendered_roots();
@@ -1412,6 +1417,7 @@ fn run_sync(look: &Look, no_toolkit: bool) -> Result<(), String> {
     match sync::sync_with(
         declared,
         nix_claims,
+        target_skips,
         &options,
         &catalog,
         &cache,

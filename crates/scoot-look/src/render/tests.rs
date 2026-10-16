@@ -21,6 +21,7 @@ fn inputs() -> RenderInputs {
         ui_font_file: None,
         bar_popup: true,
         bar_drop_sections: Vec::new(),
+        omit_cursor: false,
     }
 }
 
@@ -90,6 +91,27 @@ fn cursor_none_omits_color() {
         !frag.contains("cursor_color"),
         "none accent emits a color:\n{frag}"
     );
+}
+
+#[test]
+fn omit_cursor_leaves_no_cursor_keys() {
+    let omitted = RenderInputs {
+        omit_cursor: true,
+        ..inputs()
+    };
+    let frag = render_scoot(&moonrise(), &omitted).expect("renders");
+    for key in ["cursor_theme", "cursor_size", "cursor_color"] {
+        assert!(!frag.contains(key), "opted-out cursor emits {key}:\n{frag}");
+    }
+    // Everything else still renders.
+    for line in [
+        "background_color = \"#2B3648\"",
+        "corner_radius = 14",
+        "image = \"/cache/wallpaper.png\"",
+    ] {
+        assert!(frag.contains(line), "missing {line}:\n{frag}");
+    }
+    let _: toml::Value = toml::from_str(&frag).expect("fragment is TOML");
 }
 
 #[test]

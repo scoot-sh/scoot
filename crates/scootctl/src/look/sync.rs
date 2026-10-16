@@ -44,8 +44,9 @@ use scoot_look::source_hash;
 use scoot_look::state::{RecordRead, acquire_lock, ensure_link, read_capped_follow, read_record};
 
 use super::apply::{
-    ApplyFailure, ApplyReport, Checks, RenderSource, SwapRequest, SwapTarget, Validation,
-    absolutize, check_inputs, collect_chain, complete_swap, render_for_swap, unknown_look,
+    ApplyFailure, ApplyReport, Availability, Checks, RenderSource, SwapRequest, SwapTarget,
+    Validation, absolutize, check_inputs, collect_chain, complete_swap, render_for_swap,
+    unknown_look,
 };
 use super::catalog::{Catalog, config_home, data_home};
 use super::reload::{BarReload, CompositorReload};
@@ -73,10 +74,57 @@ pub struct Declared {
 pub const DEFAULT_FILE: &str = "look-default";
 /// The Nix-owned dconf key names beside it, one full path per line.
 pub const CLAIMS_FILE: &str = "look-nix-claims";
+/// The Nix theme targets opted out beside it, one name per line
+/// (`cursor`, `fonts`): written by the home-manager module (or the NixOS
+/// module system-wide) from `desktop.theme.targets.*.enable`, read here
+/// so the managed sync honors the opt-outs the eval-time theme already
+/// honors. A hand-written file works the same: no Nix is needed to
+/// leave the cursor or the fonts alone.
+pub const TARGETS_FILE: &str = "look-nix-targets";
 /// The NixOS-module-only declared default.
 pub const SYSTEM_DEFAULT_FILE: &str = "/etc/scoot/look-default";
 /// The NixOS-module-only claims file.
 pub const SYSTEM_CLAIMS_FILE: &str = "/etc/scoot/look-nix-claims";
+/// The NixOS-module-only opted-out targets.
+pub const SYSTEM_TARGETS_FILE: &str = "/etc/scoot/look-nix-targets";
+
+/// Which theme targets a sync leaves alone: the Nix `cursor` and
+/// `fonts` opt-outs (`desktop.theme.targets.*.enable = false`), read
+/// from [`TARGETS_FILE`]. A skipped cursor renders no cursor keys into
+/// the scoot fragment and writes no cursor dconf keys or settings.ini
+/// cursor lines; skipped fonts render no bar `font` key, resolve no
+/// font, and write no `font-name` key, settings.ini font line or
+/// fontconfig file. Everything else themes as usual.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TargetSkips {
+    /// The cursor target is off: leave the cursor alone entirely.
+    pub cursor: bool,
+    /// The fonts target is off: keep the box's own fonts (the bar
+    /// falls back to its well-known font paths).
+    pub fonts: bool,
+}
+
+impl TargetSkips {
+    /// Parses the opted-out target names, one per line. Blank lines
+    /// and unknown names are ignored (a newer writer's target never
+    /// refuses an older sync).
+    pub fn from_lines(lines: &[String]) -> Self {
+        let mut skips = TargetSkips::default();
+        for line in lines {
+            match line.trim() {
+                "cursor" => skips.cursor = true,
+                "fonts" => skips.fonts = true,
+                _ => {}
+            }
+        }
+        skips
+    }
+
+    /// Whether any target is skipped.
+    pub fn any(self) -> bool {
+        self.cursor || self.fonts
+    }
+}
 
 /// Reads the declared default and the claims: the config-home file when
 /// it exists, else the system one, else unmanaged (`None`). A present
@@ -122,6 +170,36 @@ pub fn read_nix_claims() -> Vec<String> {
     read_declared()
         .map(|declared| declared.map(|d| d.claims).unwrap_or_default())
         .unwrap_or_default()
+}
+
+/// Reads the opted-out theme targets (for `sync`, which honors them):
+/// the config-home file when it exists, else the system one, else no
+/// skips. Best-effort, like the claims: a missing or unreadable file
+/// themes everything, never a refusal.
+pub fn read_nix_targets() -> TargetSkips {
+    let xdg = std::env::var_os("XDG_CONFIG_HOME");
+    let home = std::env::var_os("HOME");
+    let user = config_home(xdg.as_deref(), home.as_deref())
+        .map(|base| base.join("scoot").join(TARGETS_FILE));
+    if let Some(path) = user
+        && path.is_file()
+    {
+        return TargetSkips::from_lines(&read_target_lines(&path));
+    }
+    let system = PathBuf::from(SYSTEM_TARGETS_FILE);
+    if system.is_file() {
+        return TargetSkips::from_lines(&read_target_lines(&system));
+    }
+    TargetSkips::default()
+}
+
+/// Reads one targets file: names, one per line, blanks kept for the
+/// parser to ignore. Missing or unreadable is no skips, never a refusal.
+fn read_target_lines(path: &Path) -> Vec<String> {
+    let Ok(text) = read_capped_follow(path) else {
+        return Vec::new();
+    };
+    text.lines().map(str::to_owned).collect()
 }
 
 /// Reads one `look-default` file: the trimmed first line is the name, an
@@ -228,6 +306,36 @@ fn verify_prerendered(name: &str, source_hash_hex: &str, dir: &Path) -> Result<(
     Ok(())
 }
 
+/// [`Checks`] with every font resolution answered "unchecked": the
+/// fonts target is off ("keep your own fonts"), so no face is resolved
+/// (a missing face must never refuse a sync that themes no font), no
+/// UI font feeds the render (the bar fragment carries no `font` key),
+/// and the notes say why. Wallpaper, bar and foot checks run
+/// unchanged.
+struct SkipFontsChecks<'a> {
+    inner: &'a dyn Checks,
+}
+
+impl Checks for SkipFontsChecks<'_> {
+    fn font_file(&self, family: &str) -> Result<Availability<String>, String> {
+        Ok(Availability::Unavailable(format!(
+            "font `{family}` unchecked: the fonts target is off"
+        )))
+    }
+
+    fn wallpaper(&self, path: &Path) -> Result<Availability<()>, String> {
+        self.inner.wallpaper(path)
+    }
+
+    fn bar_fragment(&self, fragment: &Path) -> Result<Availability<()>, String> {
+        self.inner.bar_fragment(fragment)
+    }
+
+    fn foot_fragment(&self, fragment: &Path) -> Result<Availability<()>, String> {
+        self.inner.foot_fragment(fragment)
+    }
+}
+
 /// Runs the rule: re-resolve the live choice or switch to the declared
 /// default, then swap exactly like `apply` (record, repoint, scoped
 /// reloads, rollback, shadowed keys). Pure over its `catalog`, `cache`,
@@ -236,11 +344,16 @@ fn verify_prerendered(name: &str, source_hash_hex: &str, dir: &Path) -> Result<(
 ///
 /// `declared` is the file just read: `None` unmanaged (leave the choice
 /// alone), `Some(None)` a null default (remove the layer),
-/// `Some(Some(name))` the declared look.
+/// `Some(Some(name))` the declared look. `target_skips` carries the
+/// opted-out theme targets from [`TARGETS_FILE`]: whatever sync points
+/// at renders without the skipped pieces, so an explicit Nix opt-out
+/// holds through the managed sync (a manual `apply` still themes
+/// everything: it is the live choice, not the declaration).
 #[allow(clippy::too_many_arguments)]
 pub fn sync_with(
     declared: Option<Option<String>>,
     nix_claims: Vec<String>,
+    target_skips: TargetSkips,
     options: &SyncOptions,
     catalog: &Catalog,
     cache: &Path,
@@ -403,6 +516,7 @@ pub fn sync_with(
                     declared_default: declared_default.clone(),
                     no_toolkit: options.no_toolkit,
                     nix_claims,
+                    target_skips,
                 };
                 complete_swap(
                     &mut report,
@@ -460,6 +574,16 @@ pub fn sync_with(
         ));
     }
     let mut validation = Validation::default();
+    // The fonts target is off: resolve no face at all (a missing face
+    // must never refuse a sync that themes no font). The wrapper only
+    // shapes this call: the catalog, the record and the peers see the
+    // same values either way.
+    let skip_fonts = SkipFontsChecks { inner: checks };
+    let checks: &dyn Checks = if target_skips.fonts {
+        &skip_fonts
+    } else {
+        checks
+    };
     let inputs = match check_inputs(&chain, &merged, checks, &mut validation) {
         Ok(inputs) => inputs,
         Err(_) => {
@@ -472,6 +596,22 @@ pub fn sync_with(
             return Err(refuse(format!("cannot sync `{name}`: {detail}")));
         }
     };
+    let mut inputs = inputs;
+    // The cursor target is off: the fragment carries no cursor keys, so
+    // the look layer leaves the compositor's own cursor alone. The flag
+    // rides the cache key, so the skipped render never collides with
+    // the full one.
+    if target_skips.cursor {
+        inputs.inputs.omit_cursor = true;
+        report
+            .notes
+            .push("the cursor target is off: rendering without the cursor keys".to_owned());
+    }
+    if target_skips.fonts {
+        report.notes.push(
+            "the fonts target is off: resolving no font, rendering without the bar font".to_owned(),
+        );
+    }
     report.notes.extend(validation.notes);
     let target_bytes = chain
         .last()
@@ -480,7 +620,15 @@ pub fn sync_with(
     let hash = source_hash(target_bytes);
     // A catalog render the derivation built, verified before use;
     // anything else (a kept user look, no Nix catalog) renders fresh.
-    let (prerendered, fallback_note) = prerendered_for(&name, &hash, roots);
+    // An opted-out target always renders fresh: the catalog's
+    // pre-rendered directory carries the cursor keys and the bar font
+    // unconditionally, so pointing the link at it would theme exactly
+    // what the target leaves alone.
+    let (prerendered, fallback_note) = if target_skips.any() {
+        (None, None)
+    } else {
+        prerendered_for(&name, &hash, roots)
+    };
     if let Some(note) = fallback_note {
         report.notes.push(note);
     }
@@ -529,6 +677,7 @@ pub fn sync_with(
         declared_default: declared_default.clone(),
         no_toolkit: options.no_toolkit,
         nix_claims,
+        target_skips,
     };
     complete_swap(
         &mut report,

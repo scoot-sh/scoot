@@ -663,6 +663,20 @@ in
         in
         lib.concatStringsSep "\n" (map (leaf: "/org/gnome/desktop/interface/${leaf}") claimed);
 
+      # The theme targets opted out, one name per line, so the managed
+      # `sync` honors them the way the eval-time theme already does: a
+      # `cursor` line renders no cursor keys into the scoot fragment
+      # and writes no cursor dconf keys or settings.ini cursor lines;
+      # a `fonts` line resolves no font, renders no bar `font` key and
+      # writes no `font-name` key, settings.ini font line or
+      # fontconfig file. Empty with every target on. `sync` reads this
+      # beside the declared default (see `scoot look sync`); a
+      # hand-written file works the same with no Nix involved.
+      xdg.configFile."scoot/look-nix-targets".text = lib.concatStringsSep "\n" (
+        lib.optional (!cfg.desktop.theme.targets.cursor.enable) "cursor"
+        ++ lib.optional (!cfg.desktop.theme.targets.fonts.enable) "fonts"
+      );
+
       # The rule of section 6.3, after the links and the dconf database
       # land: home-manager's own `dconfSettings` step writes first, so
       # the toolkit step never fights it over a claimed key. Without a

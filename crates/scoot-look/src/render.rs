@@ -49,6 +49,14 @@ pub struct RenderInputs {
     /// bar), so those tokens are not rendered at all. Sorted, deduplicated
     /// by the tool; the renderer skips them defensively.
     pub bar_drop_sections: Vec<String>,
+    /// Leave the cursor out of the scoot fragment: no `cursor_theme`,
+    /// `cursor_size` or `cursor_color` keys. The Nix theme target
+    /// `targets.cursor.enable = false` ("leave the cursor alone
+    /// entirely") reaches the runtime this way: `scoot look sync`
+    /// re-renders without the triple, so the look layer carries no
+    /// cursor and the compositor keeps its own. Absent (false) renders
+    /// exactly what it always has.
+    pub omit_cursor: bool,
 }
 
 /// Quote one TOML string value. Every input is already grammar-checked, so
@@ -183,10 +191,16 @@ pub fn render_scoot(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String
     appearance.insert("focus_ring_inactive_color".to_string(), toml_str(&p.border));
     appearance.insert("background_color".to_string(), toml_str(&p.background));
     appearance.insert("corner_radius".to_string(), look.shape.radius.to_string());
-    appearance.insert("cursor_theme".to_string(), toml_str(&look.cursor.theme));
-    appearance.insert("cursor_size".to_string(), look.cursor.size.to_string());
-    if look.cursor.accent != "none" {
-        appearance.insert("cursor_color".to_string(), toml_str(&look.cursor.accent));
+    // An opted-out cursor (`RenderInputs::omit_cursor`) leaves no cursor
+    // keys at all: the layer then carries no cursor and whatever the
+    // compositor already has (its own config, its built-in fallback)
+    // stands.
+    if !inputs.omit_cursor {
+        appearance.insert("cursor_theme".to_string(), toml_str(&look.cursor.theme));
+        appearance.insert("cursor_size".to_string(), look.cursor.size.to_string());
+        if look.cursor.accent != "none" {
+            appearance.insert("cursor_color".to_string(), toml_str(&look.cursor.accent));
+        }
     }
     if let Some(wallpaper) = &look.wallpaper {
         let table = sections.entry("wallpaper".to_string()).or_default();
