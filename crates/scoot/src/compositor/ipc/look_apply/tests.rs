@@ -301,8 +301,8 @@ fn recorded_state(generation: u64) -> tempfile::TempDir {
             chosen_by: Some("apply".to_owned()),
             declared_default: None,
             toolkit: None,
-            color_scheme: None,
-            color_scheme_orig: None,
+            dconf_wrote: Default::default(),
+            dconf_orig: Default::default(),
         },
     )
     .expect("a record");
