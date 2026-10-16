@@ -273,6 +273,40 @@ foot start, so a swap sends no signal. `validate` and `build` check
 the fragment against foot's own parser; `build --out` writes
 `foot.ini` beside the other fragments.
 
+## Helix, btop and starship
+
+Each shipped look with an `apps/` directory carries static leaves:
+`apps/helix.toml` (the Helix theme), `apps/btop.theme` (the btop
+theme) and `apps/starship.toml` (the prompt). `apply` copies them
+into the rendered look verbatim — they are the author's files, never
+generated from tokens — then `SIGUSR1` reaches your own `hx`
+processes (Helix re-reads its config and theme from disk) and
+`SIGUSR2` your own `btop` (it re-reads its config and theme).
+Starship is a new process per prompt, so the next prompt draws the
+look with no signal. A look without an `apps/` file renders no leaf
+for it (radial-burst ships none; music-desk ships no btop theme).
+
+New editors follow the look once each file is wired (one-time setup):
+`~/.config/helix/themes/scoot-look.toml` points at
+`~/.local/state/scoot/look/apps/helix.toml` with `theme =
+"scoot-look"` in `config.toml`;
+`~/.config/btop/themes/scoot-look.theme` points at
+`~/.local/state/scoot/look/apps/btop.theme` with `color_theme =
+"scoot-look"` in `btop.conf`; `STARSHIP_CONFIG` or
+`~/.config/starship.toml` points at
+`~/.local/state/scoot/look/apps/starship.toml`. The reply names this
+wiring on every swap that carries the leaves.
+
+- `scoot look apply --no-helix` and `--no-btop` skip that app's
+  signal for one apply (the leaf still renders).
+- Installed looks (someone else's) drop these leaves: their formats
+  are never generated, so a hostile file could carry anything
+  (starship custom commands run a shell). `apply`, `build` and
+  `validate` take `--trust` to keep them, printing each kept leaf
+  first so the reply shows what was trusted.
+- `build --out` writes `apps/` beside the other fragments; a rebuild
+  for a look that no longer carries a leaf removes the stale file.
+
 ## The Nix catalog
 
 `programs.scoot.looks` lists the catalog (default: every shipped

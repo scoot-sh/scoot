@@ -2276,9 +2276,7 @@ pub(crate) fn render_for_swap(
 ) -> Result<(PathBuf, RenderInputs), String> {
     let mut target = match source {
         RenderSource::PreRendered { path } => path,
-        RenderSource::Fresh => {
-            render_cached(name, chain, merged, &initial, cache, notes, trust)?
-        }
+        RenderSource::Fresh => render_cached(name, chain, merged, &initial, cache, notes, trust)?,
     };
     let mut render_inputs = initial;
     // The bar's own parser over the rendered fragment, against the

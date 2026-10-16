@@ -500,7 +500,9 @@ fn build_args(positionals: &[String]) -> Result<(String, Origin, PathBuf, bool),
             return Err(hinted(
                 "flag",
                 word.clone(),
-                &["--out", "--origin", "--trust", "--json", "--state", "--socket"],
+                &[
+                    "--out", "--origin", "--trust", "--json", "--state", "--socket",
+                ],
                 "scoot look build --help",
             ));
         }
@@ -1164,6 +1166,7 @@ fn run_build(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_apply(
     look: &Look,
     name: Option<&str>,

@@ -188,7 +188,7 @@ fn stub_ps_table(bin: &std::path::Path, uid: u32, other: u32) {
     std::fs::write(
         &stub,
         format!(
-            "#!/bin/sh\nprintf '%s\\n' \\\n  '    PID   UID COMMAND' \\\n  'not a process line' \\\n  \"2000000001 {uid} hx\" \\\n  \"2000000002 {uid} hx\" \\\n  \"{own} {uid} hx\" \\\n  \"2000000003 {uid} btop\" \\\n  \"2000000004 {uid} foot\" \\\n  \"2000000005 {other} hx\" \\\n  \"2000000006 {other} btop\"\n"
+            "#!/bin/sh\nprintf '%s\\n' \\\n  '    PID   UID COMMAND' \\\n  'not a process line' \\\n  \"2000000001 {uid} hx\" \\\n  \"2000000002 {uid} hx\" \\\n  \"{own} {uid} hx\" \\\n  \"2000000003 {uid} btop\" \\\n  \"2000000004 {uid} foot\" \\\n  \"2000000005 {other} hx\" \\\n  \"2000000006 {other} btop\" \\\n  \"2000000007 {uid} /nix/store/abc-helix-25.07.1/bin/hx\" \\\n  \"2000000008 {uid} hx-something\"\n"
         ),
     )
     .expect("a stub ps");
@@ -236,10 +236,12 @@ fn editor_signals_reach_only_the_users_own_processes() {
         }
         unsafe { std::env::set_var("PATH", &path) };
         let leaves = CliLeaves::new();
-        // Two own `hx` (our own pid excluded), one own `btop`: the
-        // other uid's pair and `foot` are never counted. The kills hit
-        // pids no process holds (`ESRCH`), so nothing is side-effected.
-        assert_eq!(leaves.helix_signal().expect("hx signaled"), 2);
+        // Two own bare `hx` (our own pid excluded) plus one by store
+        // path (the macOS `comm` shape), one own `btop`: the other
+        // uid's pair, `foot` and `hx-something` are never counted. The
+        // kills hit pids no process holds (`ESRCH`), so nothing is
+        // side-effected.
+        assert_eq!(leaves.helix_signal().expect("hx signaled"), 3);
         assert_eq!(leaves.btop_signal().expect("btop signaled"), 1);
         if let Some(path) = old.clone() {
             unsafe { std::env::set_var("PATH", path) };
@@ -390,12 +392,60 @@ fn editor_signals_are_really_delivered() {
         let want = [10, 12];
         for ((name, mut child), want) in children.into_iter().zip(want) {
             let status = child.wait().expect("a reaped sleeper");
-            assert_eq!(
-                status.signal(),
-                Some(want),
-                "{name} died by its signal"
-            );
+            assert_eq!(status.signal(), Some(want), "{name} died by its signal");
         }
     }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A process table past the pipe buffer (over 64 KiB of `hx` lines):
+/// the reader drains as it goes, so a busy box never deadlocks the
+/// child on a full pipe. Every pid is unreachable (`ESRCH`), so the
+/// count proves the parse, never a side effect.
+#[test]
+fn a_table_past_the_pipe_buffer_still_reads() {
+    let uid = own_uid();
+    let dir = std::env::temp_dir().join(format!(
+        "scoot-leaves-ps-{}-{}",
+        std::process::id(),
+        "bigtable"
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a stub dir");
+    // Two thousand own-`hx` lines: ~70 KiB, past the 64 KiB pipe.
+    // Pids sit where no process can be, so each kill is an `ESRCH`
+    // attempt and the suite side-effects nothing.
+    let stub = dir.join("ps");
+    let mut table = String::from("#!/bin/sh\nprintf '%s\\n' \\\n");
+    for i in 0..2000 {
+        use std::fmt::Write as _;
+        let cont = if i + 1 == 2000 { "" } else { " \\" };
+        write!(table, "  '{} {} hx'{}\n", 2000000000 + i, uid, cont)
+            .expect("a table line");
+    }
+    std::fs::write(&stub, table).expect("a stub ps");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .expect("an executable stub");
+    }
+    let old = std::env::var_os("PATH");
+    let count = {
+        let _guard = PATH_LOCK.lock().expect("the PATH lock");
+        let mut path = dir.display().to_string();
+        if let Some(real) = &old {
+            path.push(':');
+            path.push_str(&real.to_string_lossy());
+        }
+        unsafe { std::env::set_var("PATH", &path) };
+        let leaves = CliLeaves::new();
+        let count = leaves.helix_signal().expect("a big table reads");
+        if let Some(path) = old.clone() {
+            unsafe { std::env::set_var("PATH", path) };
+        }
+        count
+    };
+    assert_eq!(count, 2000);
     std::fs::remove_dir_all(&dir).ok();
 }

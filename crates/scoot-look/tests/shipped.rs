@@ -360,9 +360,8 @@ fn shipped_static_leaves_read_and_shape_check() {
         for leaf in scoot_look::STATIC_LEAVES {
             let path = dir.join(leaf.path);
             if leaves.contains(&leaf.path) {
-                let bytes = std::fs::read(&path).unwrap_or_else(|e| {
-                    panic!("{name}: cannot read {}: {e}", path.display())
-                });
+                let bytes = std::fs::read(&path)
+                    .unwrap_or_else(|e| panic!("{name}: cannot read {}: {e}", path.display()));
                 scoot_look::check_static_leaf(leaf.path, &bytes).unwrap_or_else(|e| {
                     panic!("{name}: {} does not shape-check: {e}", path.display())
                 });
@@ -378,11 +377,7 @@ fn shipped_static_leaves_read_and_shape_check() {
                     );
                 }
             } else {
-                assert!(
-                    !path.exists(),
-                    "{name}: unexpected {}",
-                    path.display()
-                );
+                assert!(!path.exists(), "{name}: unexpected {}", path.display());
             }
         }
     }

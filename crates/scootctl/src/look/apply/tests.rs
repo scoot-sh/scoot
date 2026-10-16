@@ -2178,7 +2178,8 @@ fn validate_and_build_cover_a_directory_and_a_name() {
     let fonts = fixture._root.join("fonts");
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
-    let validation = validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
+    let validation =
+        validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
     assert!(validate_entry(&fixture.catalog, "nope", &checks, false).is_err());
     let dir = fixture._root.join("looks").join("look-a");
@@ -2312,7 +2313,8 @@ fn effectful_refusals_are_structured_not_bare_errors() {
         bar_seen: RefCell::new(Vec::new()),
         foot_seen: RefCell::new(Vec::new()),
     };
-    let validation = validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
+    let validation =
+        validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert_eq!(validation.errors.len(), 3, "{:?}", validation.errors);
     for error in &validation.errors {
         assert!(error.contains("resolves to nothing"), "{error}");
@@ -2360,7 +2362,8 @@ fn validate_accepts_a_nameless_dir_path() {
     let fonts = root.join("fonts");
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
-    let validation = validate_dir(&probe, Origin::User, &catalog, &checks, false).expect("validatable");
+    let validation =
+        validate_dir(&probe, Origin::User, &catalog, &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
 }
 
@@ -2425,7 +2428,8 @@ fn validate_and_apply_agree_on_the_bar_fragment() {
         foot_refuse: None,
         foot_seen: RefCell::new(Vec::new()),
     };
-    let validation = validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
+    let validation =
+        validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert!(
         validation
             .errors
@@ -2479,7 +2483,8 @@ fn validate_retries_a_popup_refusal_without_popup_keys() {
         foot_refuse: None,
         foot_seen: RefCell::new(Vec::new()),
     };
-    let validation = validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
+    let validation =
+        validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
     let seen = checks.bar_seen.borrow();
     assert_eq!(
@@ -3287,7 +3292,8 @@ fn validate_reports_a_foot_refusal() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let mut checks = FakeChecks::with_fonts(&fonts);
     checks.foot_refuse = Some("foot says no".to_owned());
-    let validation = validate_entry(&fixture.catalog, "look-t", &checks, false).expect("a validation");
+    let validation =
+        validate_entry(&fixture.catalog, "look-t", &checks, false).expect("a validation");
     assert!(
         validation.errors.iter().any(|e| e.contains("foot says no")),
         "errors: {:?}",
@@ -3452,8 +3458,8 @@ fn a_second_apply_reuses_the_cached_foot_ini() {
     assert!(second.join("foot.ini").is_file(), "reuse loses foot.ini");
 }
 
-/// Static terminal leaves through the transaction: rendering, the trust
-/// drop, inheritance, opt-outs, and refusal before anything is touched.
+// Static terminal leaves through the transaction: rendering, the trust
+// drop, inheritance, opt-outs, and refusal before anything is touched.
 
 const HELIX_LEAF: &str =
     "\"ui.background\" = {}\n\"ui.text\" = \"#FF0000\"\n\"ui.selection\" = \"#FF0000\"\n";
@@ -3546,20 +3552,32 @@ fn static_leaves_render_verbatim_and_signal() {
         let read = std::fs::read(rendered.join(file)).expect("a rendered static leaf");
         assert_eq!(read, contents.as_bytes(), "{file} copies verbatim");
     }
-    assert_eq!(leaves.signaled(), vec!["helix".to_owned(), "btop".to_owned()]);
+    assert_eq!(
+        leaves.signaled(),
+        vec!["helix".to_owned(), "btop".to_owned()]
+    );
     assert!(report.reloaded.contains(&"helix".to_owned()), "{report:?}");
     assert!(report.reloaded.contains(&"btop".to_owned()), "{report:?}");
     // The one-time wiring for each leaf, and starship's next prompt.
     assert!(
-        report.notes.iter().any(|note| note.contains("scoot-look.toml")),
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("scoot-look.toml")),
         "{report:?}"
     );
     assert!(
-        report.notes.iter().any(|note| note.contains("scoot-look.theme")),
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("scoot-look.theme")),
         "{report:?}"
     );
     assert!(
-        report.notes.iter().any(|note| note.contains("STARSHIP_CONFIG")),
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("STARSHIP_CONFIG")),
         "{report:?}"
     );
 }
@@ -3575,15 +3593,15 @@ fn installed_look_drops_static_leaves_without_trust() {
         "no static leaf renders untrusted"
     );
     assert!(leaves.signaled().is_empty(), "no signal attempted");
+    assert!(!report.reloaded.contains(&"helix".to_owned()), "{report:?}");
     assert!(
-        !report.reloaded.contains(&"helix".to_owned()),
-        "{report:?}"
-    );
-    assert!(
-        report.notes.iter().any(|note| note.contains("dropping apps/btop.theme")
-            && note.contains("apps/helix.toml")
-            && note.contains("apps/starship.toml")
-            && note.contains("--trust")),
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("dropping apps/btop.theme")
+                && note.contains("apps/helix.toml")
+                && note.contains("apps/starship.toml")
+                && note.contains("--trust")),
         "{report:?}"
     );
 }
@@ -3607,7 +3625,10 @@ fn trusted_installed_look_keeps_and_prints_static_leaves() {
                 && note.contains("\"ui.text\"")),
         "{report:?}"
     );
-    assert_eq!(leaves.signaled(), vec!["helix".to_owned(), "btop".to_owned()]);
+    assert_eq!(
+        leaves.signaled(),
+        vec!["helix".to_owned(), "btop".to_owned()]
+    );
 }
 
 #[test]
@@ -3618,7 +3639,10 @@ fn trusted_non_installed_look_prints_no_trust_notes() {
     let leaves = ScriptedLeaves::ok();
     let report = offline_apply(&fixture, "look-a", &trust_options(), &leaves);
     assert!(
-        report.notes.iter().all(|note| !note.contains("trusted static leaf")),
+        report
+            .notes
+            .iter()
+            .all(|note| !note.contains("trusted static leaf")),
         "{report:?}"
     );
 }
@@ -3661,7 +3685,11 @@ fn static_leaves_inherit_unless_the_child_names_its_own() {
     // The child names its own: the file changes, the render follows (the
     // cache keys the leaf bytes, so no stale directory is reused).
     let own = "\"ui.background\" = {}\n\"ui.text\" = \"#00FF00\"\n\"ui.selection\" = \"#00FF00\"\n";
-    write_static(&fixture._root.join("looks"), "child-b", &[("apps/helix.toml", own)]);
+    write_static(
+        &fixture._root.join("looks"),
+        "child-b",
+        &[("apps/helix.toml", own)],
+    );
     let first = rendered.clone();
     let leaves = ScriptedLeaves::ok();
     let report = offline_apply(&fixture, "child-b", &options(), &leaves);
@@ -3730,7 +3758,10 @@ fn opt_outs_skip_signals_but_keep_leaves_and_notes() {
         "{report:?}"
     );
     assert!(
-        report.notes.iter().any(|note| note.contains("scoot-look.toml")),
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("scoot-look.toml")),
         "the setup hint still prints: {report:?}"
     );
 }

@@ -39,15 +39,24 @@ fn signals_run_and_setup_notes_follow() {
     let state = PathBuf::from("/tmp/scoot-terminals-state");
     let leaves = ScriptedLeaves::ok();
     let report = apply_terminals(&state, &dir, &leaves, false, false);
-    assert_eq!(leaves.signaled(), vec!["helix".to_owned(), "btop".to_owned()]);
+    assert_eq!(
+        leaves.signaled(),
+        vec!["helix".to_owned(), "btop".to_owned()]
+    );
     assert!(report.reloaded.contains(&"helix".to_owned()), "{report:?}");
     assert!(report.reloaded.contains(&"btop".to_owned()), "{report:?}");
     assert!(
-        report.notes.iter().any(|note| note.contains("scoot-look.toml")),
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("scoot-look.toml")),
         "{report:?}"
     );
     assert!(
-        report.notes.iter().any(|note| note.contains("scoot-look.theme")),
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("scoot-look.theme")),
         "{report:?}"
     );
 }
@@ -61,7 +70,10 @@ fn no_process_is_a_note_not_a_reload() {
     let report = apply_terminals(&state, &dir, &leaves, false, false);
     assert!(!report.reloaded.contains(&"helix".to_owned()), "{report:?}");
     assert!(
-        report.notes.iter().any(|note| note.contains("no hx running")),
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("no hx running")),
         "{report:?}"
     );
 }
@@ -85,7 +97,10 @@ fn opt_outs_skip_the_signal_but_keep_the_note() {
     // The setup hint still prints: the leaf applied, only the signal
     // was skipped.
     assert!(
-        report.notes.iter().any(|note| note.contains("scoot-look.toml")),
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("scoot-look.toml")),
         "{report:?}"
     );
 }
@@ -114,7 +129,10 @@ fn private_state_runs_no_signal() {
     let report = apply_terminals(&private, &dir, &leaves, false, false);
     assert!(leaves.signaled().is_empty(), "no signal attempted");
     assert!(
-        report.notes.iter().any(|note| note.contains("private look state")),
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("private look state")),
         "{report:?}"
     );
 }

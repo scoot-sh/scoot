@@ -2,7 +2,8 @@
 
 use super::*;
 
-const HELIX: &str = "\"ui.background\" = {}\n\"ui.text\" = \"#FF0000\"\n\"ui.selection\" = \"#FF0000\"\n";
+const HELIX: &str =
+    "\"ui.background\" = {}\n\"ui.text\" = \"#FF0000\"\n\"ui.selection\" = \"#FF0000\"\n";
 const BTOP: &str = "# a theme\ntheme[main_fg]=\"#FF0000\"\ntheme[title]=\"#00FF00\"\n";
 const STARSHIP: &str = "add_newline = false\nformat = \"$directory$character\"\n";
 
@@ -56,8 +57,7 @@ fn btop_shape_refuses() {
         check_static_leaf("apps/btop.theme", b"theme[main_fg]=\n").expect_err("empty value");
     assert!(error.to_string().contains("not a theme entry"), "{error}");
     // A carriage return would write a broken line into the render.
-    let error =
-        check_static_leaf("apps/btop.theme", b"theme[a]=\"b\"\r\n").expect_err("CR");
+    let error = check_static_leaf("apps/btop.theme", b"theme[a]=\"b\"\r\n").expect_err("CR");
     assert!(error.to_string().contains("carriage returns"), "{error}");
 }
 
