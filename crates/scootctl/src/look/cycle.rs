@@ -56,17 +56,31 @@ pub fn cycle_target(catalog: &Catalog, current: Option<&str>, step: Step) -> Opt
 }
 
 /// One catalog entry, picked at random (`/dev/urandom`, modulo the
-/// catalog length). `None` only when the catalog is empty. A one-entry
-/// catalog returns its only look.
-pub fn random_target(catalog: &Catalog) -> Option<String> {
+/// catalog length), never the active look: with more than one entry the
+/// draw runs over every other look, so a second press always moves. `None`
+/// only when the catalog is empty. A one-entry catalog returns its only
+/// look.
+pub fn random_target(catalog: &Catalog, current: Option<&str>) -> Option<String> {
     if catalog.entries.is_empty() {
         return None;
     }
-    Some(
-        catalog.entries[random_index(catalog.entries.len())]
-            .name
-            .clone(),
-    )
+    if catalog.entries.len() == 1 {
+        return Some(catalog.entries[0].name.clone());
+    }
+    match current.and_then(|name| catalog.entries.iter().position(|entry| entry.name == name)) {
+        // Draw in `0..n-1` and skip over the active entry: uniform over
+        // every other look.
+        Some(at) => {
+            let draw = random_index(catalog.entries.len() - 1);
+            let index = if draw >= at { draw + 1 } else { draw };
+            Some(catalog.entries[index].name.clone())
+        }
+        None => Some(
+            catalog.entries[random_index(catalog.entries.len())]
+                .name
+                .clone(),
+        ),
+    }
 }
 
 /// A random index in `0..n` (`n > 0`): eight bytes from the OS, reduced

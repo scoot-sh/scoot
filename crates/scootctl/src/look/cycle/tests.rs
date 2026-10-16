@@ -1,6 +1,6 @@
 //! Cycle and preview tests: catalog order, the preview file, and the
-//! generation-guarded revert. Hermetic: scratch catalogs, state dirs and
-//! caches, never the environment.
+//! generation-guarded revert. Hermetic: scratch catalogs, state dirs,
+//! caches and config homes, never the environment.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -24,10 +24,13 @@ struct Fixture {
     catalog: Catalog,
     cache: PathBuf,
     state: PathBuf,
+    config: PathBuf,
     _scratch: tempfile::TempDir,
 }
 
-/// Two looks (`look-a`, `look-b`), a cache and a state dir, all scratch.
+/// Two looks (`look-a`, `look-b`), a cache, a state dir and a config home,
+/// all scratch. Every `apply_with` and revert pins `config`, so no test
+/// consults the live `$HOME` or `$XDG_CONFIG_HOME`.
 fn fixture(tag: &str) -> Fixture {
     let scratch = scratch(tag);
     let root: PathBuf = scratch.path().to_owned();
@@ -43,6 +46,7 @@ fn fixture(tag: &str) -> Fixture {
         catalog,
         cache: root.join("cache"),
         state: root.join("state"),
+        config: root.join("config"),
         _scratch: scratch,
     }
 }
@@ -194,7 +198,7 @@ fn apply(fixture: &Fixture, name: &str, preview: bool) {
         &fixture.catalog,
         &fixture.cache,
         &fixture.state,
-        None,
+        Some(&fixture.config),
         &mut compositor,
         &bars,
         &FakeChecks,
@@ -249,14 +253,50 @@ fn order_wraps_at_both_ends() {
 fn random_stays_inside_the_catalog() {
     let fixture = fixture("cycle-random");
     for _ in 0..100 {
-        let name = random_target(&fixture.catalog).expect("a pick");
+        let name = random_target(&fixture.catalog, None).expect("a pick");
         assert!(
             name == "look-a" || name == "look-b",
             "random left the catalog: {name}"
         );
     }
     let empty = Catalog::default();
-    assert_eq!(random_target(&empty), None);
+    assert_eq!(random_target(&empty, None), None);
+    assert_eq!(random_target(&empty, Some("look-a")), None);
+}
+
+#[test]
+fn random_avoids_the_active_look() {
+    let fixture = fixture("cycle-random-avoids");
+    // Two looks: every draw off the active one is the other, so a second
+    // press always moves.
+    for _ in 0..200 {
+        assert_eq!(
+            random_target(&fixture.catalog, Some("look-a")),
+            Some("look-b".to_owned())
+        );
+        assert_eq!(
+            random_target(&fixture.catalog, Some("look-b")),
+            Some("look-a".to_owned())
+        );
+    }
+    // A choice that left the catalog draws from the whole catalog.
+    for _ in 0..100 {
+        let name = random_target(&fixture.catalog, Some("gone")).expect("a pick");
+        assert!(
+            name == "look-a" || name == "look-b",
+            "random left the catalog: {name}"
+        );
+    }
+    // One look: the only pick is a stay.
+    let scratch = scratch("cycle-random-single");
+    let sources = scratch.path().join("looks");
+    write_look(&sources, "look-a", "");
+    let single = discover_ordered(&[(sources, Origin::User)]);
+    assert_eq!(single.entries.len(), 1, "notes: {:?}", single.notes);
+    assert_eq!(
+        random_target(&single, Some("look-a")),
+        Some("look-a".to_owned())
+    );
 }
 
 #[test]
@@ -325,7 +365,7 @@ fn a_preview_reverts_through_the_transaction() {
         &fixture.catalog,
         &fixture.cache,
         &fixture.state,
-        None,
+        Some(&fixture.config),
         &mut compositor,
         &bars,
         &FakeChecks,
@@ -360,7 +400,7 @@ fn a_preview_never_undoes_a_newer_apply() {
         &fixture.catalog,
         &fixture.cache,
         &fixture.state,
-        None,
+        Some(&fixture.config),
         &mut compositor,
         &bars,
         &FakeChecks,
@@ -395,7 +435,7 @@ fn a_moved_generation_supersedes_a_live_preview_file() {
         &fixture.catalog,
         &fixture.cache,
         &fixture.state,
-        None,
+        Some(&fixture.config),
         &mut compositor,
         &bars,
         &FakeChecks,
@@ -431,7 +471,7 @@ fn a_newer_preview_owns_its_file() {
         &fixture.catalog,
         &fixture.cache,
         &fixture.state,
-        None,
+        Some(&fixture.config),
         &mut compositor,
         &bars,
         &FakeChecks,
@@ -507,7 +547,7 @@ fn the_generation_guard_refuses_atomically() {
         &fixture.catalog,
         &fixture.cache,
         &fixture.state,
-        None,
+        Some(&fixture.config),
         &mut compositor,
         &bars,
         &FakeChecks,
@@ -624,7 +664,7 @@ fn compositor_calls_count_through_a_revert() {
         &fixture.catalog,
         &fixture.cache,
         &fixture.state,
-        None,
+        Some(&fixture.config),
         &mut compositor,
         &bars,
         &FakeChecks,
@@ -676,7 +716,7 @@ fn a_revert_waits_out_a_held_lock() {
         &fixture.catalog,
         &fixture.cache,
         &fixture.state,
-        None,
+        Some(&fixture.config),
         &mut compositor,
         &bars,
         &FakeChecks,
@@ -712,7 +752,7 @@ fn a_revert_gives_up_when_the_lock_never_frees() {
         &fixture.catalog,
         &fixture.cache,
         &fixture.state,
-        None,
+        Some(&fixture.config),
         &mut compositor,
         &bars,
         &FakeChecks,
@@ -748,7 +788,7 @@ fn a_revert_does_not_retry_a_refusal() {
         &fixture.catalog,
         &fixture.cache,
         &fixture.state,
-        None,
+        Some(&fixture.config),
         &mut compositor,
         &bars,
         &FakeChecks,
@@ -823,7 +863,7 @@ fn unapply_restores_the_preview_written_toolkit_keys() {
         &fixture.catalog,
         &fixture.cache,
         &fixture.state,
-        None,
+        Some(&fixture.config),
         &mut compositor,
         &bars,
         &FakeChecks,
@@ -864,4 +904,154 @@ fn unapply_restores_the_preview_written_toolkit_keys() {
     written.sort();
     assert_eq!(resets, written, "each owned key reset");
     assert_eq!(record_name(&fixture.state), None);
+}
+
+/// The six toolkit files a swap owns under the config home (the same set
+/// `apply`'s guard asserts: duplicated here so this suite trips on its own
+/// if the owned set changes).
+const TOOLKIT_RELS: [&str; 6] = [
+    "gtk-3.0/gtk.css",
+    "gtk-4.0/gtk.css",
+    "gtk-3.0/settings.ini",
+    "gtk-4.0/settings.ini",
+    "qt6ct/qt6ct.conf",
+    "fontconfig/conf.d/10-scoot-look.conf",
+];
+
+/// One snapshotted toolkit file: its size plus its mtime (secs, nanos),
+/// or nothing when absent.
+type FileStamp = Option<(u64, u64, u32)>;
+
+/// The developer's real toolkit files, as (rel, stamp), read-only and
+/// never mutated: the parent guard compares these across the sandboxed
+/// child run.
+fn real_toolkit_snapshot() -> Vec<(String, FileStamp)> {
+    let mut out = Vec::new();
+    let home = std::env::var_os("HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
+    for rel in TOOLKIT_RELS {
+        let data = home
+            .as_deref()
+            .map(|home| home.join(".config").join(rel))
+            .and_then(|path| {
+                std::fs::metadata(&path).ok().and_then(|meta| {
+                    meta.modified().ok().and_then(|mtime| {
+                        mtime
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .ok()
+                            .map(|age| (meta.len(), age.as_secs(), age.subsec_nanos()))
+                    })
+                })
+            });
+        out.push((rel.to_owned(), data));
+    }
+    out
+}
+
+#[test]
+fn revert_writes_toolkit_files_inside_the_pinned_config_home() {
+    // The regression guard for the real-`~/.config` writes: the revert
+    // runs the full transaction (its toolkit step is always on), so it
+    // must honor its pinned config home with no home in the environment
+    // at all. The child process below reverts under a removed HOME and
+    // XDG_CONFIG_HOME; the parent asserts the child wrote exactly the
+    // owned files into its pinned dir and the developer's real `~/.config`
+    // is unchanged across the run. A child process (not in-process
+    // `set_var`, which is `unsafe` under the shared test process) keeps
+    // this hermetic under both test runners.
+    let sandbox = scratch("cycle-guard-sandbox");
+    let root = sandbox.path().to_owned();
+    let before = real_toolkit_snapshot();
+    let exe = std::env::current_exe().expect("the test binary");
+    // The child helper's libtest path (no crate name in harness paths).
+    let child = format!(
+        "{}::guard_child_reverts_inside_a_sandboxed_home",
+        module_path!()
+            .split_once("::")
+            .map(|(_, rest)| rest)
+            .unwrap_or(module_path!())
+    );
+    let out = std::process::Command::new(exe)
+        .arg("--exact")
+        .arg(&child)
+        .env_remove("HOME")
+        .env_remove("XDG_CONFIG_HOME")
+        .env("XDG_CACHE_HOME", root.join("cache-home"))
+        .env("XDG_STATE_HOME", root.join("state-home"))
+        .env("XDG_RUNTIME_DIR", root.join("runtime"))
+        .env("SCOOT_LOOK_CYCLE_GUARD", "1")
+        .env_remove("SCOOT_LOOK_STATE")
+        .env_remove("SCOOT_SOCKET")
+        .env_remove("SCOOT_LOOKS_DIR")
+        .env_remove("WAYLAND_DISPLAY")
+        .output()
+        .expect("the guard child runs");
+    assert!(
+        out.status.success(),
+        "the sandboxed revert failed:\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        real_toolkit_snapshot(),
+        before,
+        "the real ~/.config changed under a sandboxed run"
+    );
+}
+
+#[test]
+fn guard_child_reverts_inside_a_sandboxed_home() {
+    // The working half of
+    // `revert_writes_toolkit_files_inside_the_pinned_config_home`: runs
+    // only in the re-exec child (marker env set by the parent), where HOME
+    // and XDG_CONFIG_HOME are removed. A direct run without the marker
+    // returns immediately, so the normal suite never touches the process
+    // environment.
+    if std::env::var_os("SCOOT_LOOK_CYCLE_GUARD").is_none() {
+        return;
+    }
+    assert!(
+        std::env::var_os("HOME").is_none(),
+        "the sandbox must remove HOME"
+    );
+    assert!(
+        std::env::var_os("XDG_CONFIG_HOME").is_none(),
+        "the sandbox must remove XDG_CONFIG_HOME"
+    );
+    // The previously leaking path: a preview revert through the
+    // transaction, whose toolkit step must land in the pinned config home
+    // with no home resolvable at all (a `None` regression would skip the
+    // files with "no home", and fail below).
+    let fixture = fixture("cycle-guard-revert");
+    apply(&fixture, "look-a", false);
+    apply(&fixture, "look-b", true);
+    std::fs::remove_dir_all(&fixture.config).ok();
+    let mut compositor = FakeCompositor::ok();
+    let bars: Vec<&dyn BarReload> = Vec::new();
+    let outcome = revert_if_current(
+        2,
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &bars,
+        &FakeChecks,
+        &FakeDconf,
+        Duration::from_millis(500),
+    )
+    .expect("a revert with no home in the environment");
+    assert_eq!(
+        outcome,
+        super::RevertOutcome::Reverted {
+            name: Some("look-a".to_owned())
+        }
+    );
+    for rel in TOOLKIT_RELS {
+        assert!(
+            fixture.config.join(rel).is_file(),
+            "{rel} landed outside the pinned config home"
+        );
+    }
 }

@@ -704,12 +704,11 @@ fn cycle_next_prev_and_random_walk_the_catalog() {
     assert_eq!(active_name(&session), Some("look-b".to_owned()));
     session.check_look(&["prev"]);
     assert_eq!(active_name(&session), Some("look-a".to_owned()));
+    // `random` never repeats the active look: with two looks it flips.
     session.check_look(&["random"]);
-    let name = active_name(&session).expect("a look stays active");
-    assert!(
-        name == "look-a" || name == "look-b",
-        "random left the catalog: {name}"
-    );
+    assert_eq!(active_name(&session), Some("look-b".to_owned()));
+    session.check_look(&["random"]);
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
 }
 
 #[test]

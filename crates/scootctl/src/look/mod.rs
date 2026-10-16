@@ -296,7 +296,7 @@ COMMANDS:
                 revert stands down instead of undoing a newer choice)
     next        the next catalog look after the active one, wrapping
     prev        the previous catalog look before the active one, wrapping
-    random      a random catalog look
+    random      a random catalog look other than the active one
     toolkit     show whether the toolkit step is on, or persist
                 `toolkit on|off` in look.json
 
@@ -1076,7 +1076,9 @@ fn run_apply(
 }
 
 /// Runs one cycling step: resolves the neighbor in catalog order and
-/// applies it through the same transaction a named apply uses.
+/// applies it through the same transaction a named apply uses. The target
+/// is picked before the swap takes its lock, so two quick presses can land
+/// on the same look.
 fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
     let catalog = discover();
     let state_dir = resolve_state_dir(look.state.as_deref())?;
@@ -1090,7 +1092,7 @@ fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
     let target = match step {
         CycleStep::Next => cycle::cycle_target(&catalog, current.as_deref(), cycle::Step::Next),
         CycleStep::Prev => cycle::cycle_target(&catalog, current.as_deref(), cycle::Step::Prev),
-        CycleStep::Random => cycle::random_target(&catalog),
+        CycleStep::Random => cycle::random_target(&catalog, current.as_deref()),
     };
     let Some(target) = target else {
         return Err("the catalog is empty".to_owned());
