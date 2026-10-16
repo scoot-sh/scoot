@@ -22,13 +22,17 @@ pub mod build_dir;
 pub mod cycle;
 pub mod foot;
 pub mod leaves;
+pub mod new;
 pub mod pick;
+pub mod preview;
 pub mod reload;
 pub mod sync;
 pub mod terminals;
 pub mod toolkit;
+pub mod watch;
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use scoot_look::Origin;
 
@@ -105,6 +109,25 @@ pub enum Command {
     Sync { no_toolkit: bool },
     /// Show or persist the toolkit writes (`on` or `off`).
     Toolkit { action: Option<bool> },
+    /// A source look under `user-looks/` extending a catalog base.
+    New { name: String, base: String },
+    /// Validate and apply a source directory on every save, until
+    /// interrupted.
+    Watch {
+        dir: PathBuf,
+        no_toolkit: bool,
+        origin: Origin,
+    },
+    /// Show or capture a look's preview image.
+    Preview {
+        target: Option<String>,
+        capture: bool,
+        out: Option<PathBuf>,
+        width: u32,
+        height: u32,
+        timeout_secs: u64,
+        origin: Origin,
+    },
 }
 
 /// Which catalog step a `Cycle` command takes.
@@ -119,7 +142,7 @@ pub enum CycleStep {
 /// `_preview-revert` stays out: it is spawned, never typed.
 pub const COMMANDS: &[&str] = &[
     "list", "current", "show", "validate", "build", "apply", "next", "prev", "random", "pick",
-    "sync", "toolkit",
+    "sync", "toolkit", "new", "watch", "preview",
 ];
 
 /// The usage line, shared by `scoot look --help` and the top-level help.
@@ -134,6 +157,9 @@ pub const LOOK_USAGE: &str = "\
     look pick [--json]
     look sync [--no-toolkit] [--json]
     look toolkit [on|off] [--json]
+    look new NAME --from BASE [--json]
+    look watch DIR [--no-toolkit] [--origin shipped|declared|user|installed] [--json]
+    look preview [NAME] [--capture] [--out FILE] [--width N] [--height N] [--timeout SECS] [--origin shipped|declared|user|installed] [--json]
 
     --state DIR takes the look state (default: $SCOOT_LOOK_STATE, then
     $XDG_STATE_HOME/scoot, then ~/.local/state/scoot); --socket PATH takes
@@ -250,6 +276,9 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
             refuse_trailing(&positionals)?;
             Command::Pick
         }
+        "new" => parse_new(&positionals)?,
+        "watch" => parse_watch(&positionals)?,
+        "preview" => parse_preview(&positionals)?,
         "toolkit" => {
             let action = match positionals.as_slice() {
                 [] => None,
@@ -282,7 +311,7 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
                 other.to_owned(),
                 &[
                     "list", "current", "show", "validate", "build", "apply", "next", "prev",
-                    "random", "pick", "sync", "toolkit",
+                    "random", "pick", "sync", "toolkit", "new", "watch", "preview",
                 ],
                 "scoot look --help",
             ));
@@ -353,6 +382,15 @@ COMMANDS:
                 render without their pieces
     toolkit     show whether the toolkit step is on, or persist
                 `toolkit on|off` in look.json
+    new         start a user-authored look under `user-looks/` extending a
+                catalog base (`--from`, shipped, declared or user, never
+                installed)
+    watch       validate and apply a source directory on every save,
+                debounced, rendering into one reused cache slot; an invalid
+                save is refused loudly and the last good look stays; runs
+                until interrupted
+    preview     show a look's preview image, or `--capture` it from a
+                private headless session (the active look when unnamed)
 
 A look is presentation only (colors, fonts, opacity, shape, cursor, the
 wallpaper): a swap never applies pending edits to your own files, and a
@@ -619,6 +657,198 @@ fn parse_seconds(value: &str) -> Result<u64, Error> {
     }
 }
 
+/// `new NAME --from BASE`: the name is positional, the base rides
+/// `--from` (spelled `--from BASE` or `--from=BASE`).
+fn parse_new(positionals: &[String]) -> Result<Command, Error> {
+    let mut name: Option<String> = None;
+    let mut base: Option<String> = None;
+    let mut words = positionals.iter().peekable();
+    while let Some(word) = words.next() {
+        if word == "--from" {
+            let value = words
+                .next()
+                .ok_or(Error::Missing("a base look after --from"))?;
+            if base.is_some() {
+                return Err(Error::Unknown(word.clone()));
+            }
+            base = Some(value.clone());
+        } else if let Some(value) = word.strip_prefix("--from=") {
+            if value.is_empty() {
+                return Err(Error::Missing("a base look after --from"));
+            }
+            if base.is_some() {
+                return Err(Error::Unknown(word.clone()));
+            }
+            base = Some(value.to_owned());
+        } else if name.is_none() {
+            name = Some(word.clone());
+        } else {
+            return Err(Error::Unknown(word.clone()));
+        }
+    }
+    let name = name.ok_or(Error::Missing("a look name"))?;
+    let base = base.ok_or(Error::Missing("a base look after --from"))?;
+    check_name(&name)?;
+    check_name(&base)?;
+    Ok(Command::New { name, base })
+}
+
+/// `watch DIR [--no-toolkit] [--origin ...]`: the directory is
+/// positional; a slashless non-name is refused at parse (it can never be
+/// a look directory), like `validate`.
+fn parse_watch(positionals: &[String]) -> Result<Command, Error> {
+    let mut dir: Option<PathBuf> = None;
+    let mut no_toolkit = false;
+    let mut origin = Origin::User;
+    let mut words = positionals.iter().peekable();
+    while let Some(word) = words.next() {
+        if word == "--no-toolkit" {
+            no_toolkit = true;
+        } else if word == "--origin" {
+            let value = words.next().ok_or(Error::Missing(
+                "shipped|declared|user|installed after --origin",
+            ))?;
+            origin = parse_origin(value)?;
+        } else if dir.is_none() {
+            dir = Some(PathBuf::from(word));
+        } else {
+            return Err(hinted(
+                "flag",
+                word.clone(),
+                &["--no-toolkit", "--origin", "--json", "--state", "--socket"],
+                "scoot look --help",
+            ));
+        }
+    }
+    let dir = dir.ok_or(Error::Missing("a look directory"))?;
+    Ok(Command::Watch {
+        dir,
+        no_toolkit,
+        origin,
+    })
+}
+
+/// `preview [NAME] [--capture] [--out FILE] [--width N] [--height N]
+/// [--timeout SECS] [--origin ...]`: the name is optional (the active
+/// look when absent) and may be a directory like `validate`'s.
+fn parse_preview(positionals: &[String]) -> Result<Command, Error> {
+    let mut target: Option<String> = None;
+    let mut capture = false;
+    let mut out: Option<PathBuf> = None;
+    let mut width: u32 = 1600;
+    let mut height: u32 = 1000;
+    let mut timeout_secs: u64 = 60;
+    let mut origin = Origin::User;
+    let mut words = positionals.iter().peekable();
+    while let Some(word) = words.next() {
+        if word == "--capture" {
+            capture = true;
+        } else if word == "--out" {
+            let value = words.next().ok_or(Error::Missing("a file after --out"))?;
+            if out.is_some() {
+                return Err(Error::Unknown(word.clone()));
+            }
+            out = Some(PathBuf::from(value));
+        } else if let Some(value) = word.strip_prefix("--out=") {
+            if value.is_empty() {
+                return Err(Error::Missing("a file after --out"));
+            }
+            if out.is_some() {
+                return Err(Error::Unknown(word.clone()));
+            }
+            out = Some(PathBuf::from(value));
+        } else if word == "--width" {
+            let value = words.next().ok_or(Error::Missing("pixels after --width"))?;
+            width = parse_pixels("--width", value)?;
+        } else if let Some(value) = word.strip_prefix("--width=") {
+            if value.is_empty() {
+                return Err(Error::Missing("pixels after --width"));
+            }
+            width = parse_pixels("--width", value)?;
+        } else if word == "--height" {
+            let value = words
+                .next()
+                .ok_or(Error::Missing("pixels after --height"))?;
+            height = parse_pixels("--height", value)?;
+        } else if let Some(value) = word.strip_prefix("--height=") {
+            if value.is_empty() {
+                return Err(Error::Missing("pixels after --height"));
+            }
+            height = parse_pixels("--height", value)?;
+        } else if word == "--timeout" {
+            let value = words
+                .next()
+                .ok_or(Error::Missing("seconds after --timeout"))?;
+            timeout_secs = parse_timeout(value)?;
+        } else if let Some(value) = word.strip_prefix("--timeout=") {
+            if value.is_empty() {
+                return Err(Error::Missing("seconds after --timeout"));
+            }
+            timeout_secs = parse_timeout(value)?;
+        } else if word == "--origin" {
+            let value = words.next().ok_or(Error::Missing(
+                "shipped|declared|user|installed after --origin",
+            ))?;
+            origin = parse_origin(value)?;
+        } else if target.is_none() {
+            target = Some(word.clone());
+        } else {
+            return Err(Error::Unknown(word.clone()));
+        }
+    }
+    if let Some(name) = &target
+        && !name.contains('/')
+        && name != "."
+        && name != ".."
+    {
+        check_name(name)?;
+    }
+    Ok(Command::Preview {
+        target,
+        capture,
+        out,
+        width,
+        height,
+        timeout_secs,
+        origin,
+    })
+}
+
+/// An `--origin` value, shared by `watch` and `preview`.
+fn parse_origin(value: &str) -> Result<Origin, Error> {
+    match value {
+        "shipped" => Ok(Origin::Shipped),
+        "declared" => Ok(Origin::Declared),
+        "user" => Ok(Origin::User),
+        "installed" => Ok(Origin::Installed),
+        _ => Err(Error::Invalid {
+            what: "--origin",
+            value: value.to_owned(),
+        }),
+    }
+}
+
+/// Pixels for a preview capture: a headless output dimension.
+fn parse_pixels(what: &'static str, value: &str) -> Result<u32, Error> {
+    match value.parse::<u32>() {
+        Ok(pixels) if (1..=65535).contains(&pixels) => Ok(pixels),
+        _ => Err(Error::Invalid {
+            what,
+            value: value.to_owned(),
+        }),
+    }
+}
+
+/// Seconds for a preview capture: a positive integer.
+fn parse_timeout(value: &str) -> Result<u64, Error> {
+    match value.parse::<u64>() {
+        Ok(secs) if secs >= 1 => Ok(secs),
+        _ => Err(Error::Invalid {
+            what: "--timeout",
+            value: value.to_owned(),
+        }),
+    }
+}
 /// The detached reverter's argv (hidden: spawned by `apply --for`, never
 /// typed): `_preview-revert --from GENERATION --after SECONDS`.
 fn parse_preview_revert(positionals: &[String]) -> Result<Command, Error> {
@@ -712,6 +942,30 @@ pub fn run(look: &Look) -> Result<(), String> {
         Command::PreviewRevert { from, after } => run_preview_revert(look, *from, *after),
         Command::Sync { no_toolkit } => run_sync(look, *no_toolkit),
         Command::Toolkit { action } => run_toolkit(look, *action),
+        Command::New { name, base } => run_new(look, name, base),
+        Command::Watch {
+            dir,
+            no_toolkit,
+            origin,
+        } => run_watch(look, dir, *no_toolkit, *origin),
+        Command::Preview {
+            target,
+            capture,
+            out,
+            width,
+            height,
+            timeout_secs,
+            origin,
+        } => run_preview(
+            look,
+            target.as_deref(),
+            *capture,
+            out.as_deref(),
+            *width,
+            *height,
+            *timeout_secs,
+            *origin,
+        ),
     }
 }
 
@@ -1780,6 +2034,242 @@ fn run_toolkit(look: &Look, action: Option<bool>) -> Result<(), String> {
                     .map_err(|error| error.to_string())?;
             }
         }
+    }
+    Ok(())
+}
+
+/// Starts a user-authored look: writes `user-looks/NAME/look.toml` with
+/// `extends = "BASE"`, then validates it against the catalog (the base
+/// must resolve). The directory is the deliverable: validation notes ride
+/// along, but only a hard refusal fails the run.
+fn run_new(look: &Look, name: &str, base: &str) -> Result<(), String> {
+    let catalog = discover();
+    let dir = new::create_new(name, base, &catalog)?;
+    let checks = apply::ProdChecks::new();
+    let validation = apply::validate_dir(&dir, Origin::User, &catalog, &checks, false)?;
+    if look.json {
+        output::print_line(
+            &serde_json::to_string_pretty(&serde_json::json!({
+                "created": dir,
+                "name": name,
+                "extends": base,
+                "valid": validation.errors.is_empty(),
+                "errors": validation.errors,
+                "warnings": validation.warnings,
+                "notes": validation.notes,
+            }))
+            .unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
+    } else {
+        output::print_line(&format!("created: {}", dir.display()))
+            .map_err(|error| error.to_string())?;
+        for warning in &validation.warnings {
+            output::print_line(&format!("warning: {name}: {warning}"))
+                .map_err(|error| error.to_string())?;
+        }
+        warn_all(&validation.notes);
+        if !validation.errors.is_empty() {
+            for error in &validation.errors {
+                output::warn(format_args!("error: {error}"));
+            }
+        }
+        output::warn(format_args!(
+            "note: edit {}, then `scoot look watch {}` to try it live",
+            dir.join("look.toml").display(),
+            dir.display()
+        ));
+    }
+    if validation.errors.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "invalid: {name} (the directory stays: fix it and re-run)"
+        ))
+    }
+}
+
+/// Watches a source directory: an initial apply, then one debounced apply
+/// per save, until interrupted. Each save prints its own line; an invalid
+/// save is refused loudly and the last good look stays. Returns only when
+/// the directory goes away or the watcher fails (interrupting the process
+/// is the normal way out, and exits 0).
+fn run_watch(look: &Look, dir: &Path, no_toolkit: bool, origin: Origin) -> Result<(), String> {
+    let state_dir = resolve_state_dir(look.state.as_deref())?;
+    let cache = apply::render_cache_dir()?;
+    let catalog = discover();
+    let checks = apply::ProdChecks::new();
+    let dconf = CliDconf::new();
+    let leaves = CliLeaves::new();
+    let options = watch::WatchOptions {
+        lock_wait: apply::LOCK_WAIT,
+        no_toolkit,
+        origin,
+        nix_claims: sync::read_nix_claims(),
+    };
+    let socket = look.socket.clone();
+    let make_compositor = || -> Box<dyn CompositorReload> {
+        match &socket {
+            Some(path) => Box::new(IpcCompositor::explicit(path.clone())),
+            None => Box::new(IpcCompositor::default_socket()),
+        }
+    };
+    let make_bars = || -> Vec<Box<dyn reload::BarReload>> {
+        let (bars, _) = bar_targets();
+        bars.into_iter()
+            .map(|bar| Box::new(bar) as Box<dyn reload::BarReload>)
+            .collect()
+    };
+    let json = look.json;
+    let mut emit = |outcome: watch::SaveOutcome, report: &apply::ApplyReport| {
+        if json {
+            let doc = match &outcome {
+                watch::SaveOutcome::Applied {
+                    name,
+                    generation,
+                    reloaded,
+                } => serde_json::json!({
+                    "applied": name,
+                    "generation": generation,
+                    "rendered": report.rendered,
+                    "reloaded": reloaded,
+                    "shadowed": report.shadowed,
+                    "invalid": report.invalid,
+                    "notes": report.notes,
+                }),
+                watch::SaveOutcome::Refused { message } => serde_json::json!({
+                    "applied": serde_json::Value::Null,
+                    "error": message,
+                }),
+            };
+            output::print_line(&serde_json::to_string(&doc).unwrap_or_default()).ok();
+        } else {
+            match &outcome {
+                watch::SaveOutcome::Applied {
+                    name,
+                    generation,
+                    reloaded,
+                } => {
+                    output::print_line(&format!("applied: {name} (generation {generation})")).ok();
+                    if !reloaded.is_empty() {
+                        output::print_line(&format!("reloaded: {}", reloaded.join(", "))).ok();
+                    }
+                    if !report.shadowed.is_empty() {
+                        output::print_line(&format!(
+                            "shadowed keys: {}",
+                            report.shadowed.join(", ")
+                        ))
+                        .ok();
+                    }
+                    for note in &report.notes {
+                        output::warn(format_args!("note: {note}"));
+                    }
+                }
+                watch::SaveOutcome::Refused { message } => {
+                    output::warn(format_args!("refused: {message}"));
+                }
+            }
+        }
+    };
+    watch::watch_loop(
+        dir,
+        &options,
+        &catalog,
+        &cache,
+        &state_dir,
+        None,
+        &make_compositor,
+        &make_bars,
+        &checks,
+        &dconf,
+        &leaves,
+        &mut emit,
+    )
+}
+
+/// Shows or captures a look's preview image. Bare `preview` reports the
+/// image beside the look's `look.toml`; `--capture` renders the look and
+/// screenshots it in a private headless session.
+#[allow(clippy::too_many_arguments)]
+fn run_preview(
+    look: &Look,
+    target: Option<&str>,
+    capture: bool,
+    out: Option<&Path>,
+    width: u32,
+    height: u32,
+    timeout_secs: u64,
+    origin: Origin,
+) -> Result<(), String> {
+    let state_dir = resolve_state_dir(look.state.as_deref())?;
+    let catalog = discover();
+    let (name, dir, resolved_origin) =
+        preview::resolve_preview_target(target, origin, &catalog, &state_dir)?;
+    if !capture {
+        let png = dir.join("preview.png");
+        let exists = png.is_file();
+        if look.json {
+            output::print_line(
+                &serde_json::to_string_pretty(&serde_json::json!({
+                    "name": name,
+                    "preview": png,
+                    "exists": exists,
+                }))
+                .unwrap_or_default(),
+            )
+            .map_err(|error| error.to_string())?;
+        } else {
+            output::print_line(&format!("preview: {}", png.display()))
+                .map_err(|error| error.to_string())?;
+            if !exists {
+                output::warn(format_args!(
+                    "note: no preview yet: `scoot look preview {name} --capture` makes one"
+                ));
+            }
+        }
+        return Ok(());
+    }
+    let png = match out {
+        Some(path) => path.to_owned(),
+        None => dir.join("preview.png"),
+    };
+    let options = preview::CaptureOptions {
+        out: None,
+        width,
+        height,
+        timeout: Duration::from_secs(timeout_secs),
+    };
+    let checks = apply::ProdChecks::new();
+    let report = preview::capture(
+        &name,
+        &dir,
+        resolved_origin,
+        &png,
+        &options,
+        &catalog,
+        &checks,
+    )?;
+    if look.json {
+        output::print_line(
+            &serde_json::to_string_pretty(&serde_json::json!({
+                "name": report.name,
+                "preview": report.png,
+                "width": report.width,
+                "height": report.height,
+                "bytes": report.bytes,
+            }))
+            .unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
+    } else {
+        output::print_line(&format!(
+            "preview: {} ({}x{}, {} bytes)",
+            report.png.display(),
+            report.width,
+            report.height,
+            report.bytes
+        ))
+        .map_err(|error| error.to_string())?;
     }
     Ok(())
 }

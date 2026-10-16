@@ -450,3 +450,141 @@ fn apply_trust_and_editor_opt_outs_parse() {
         })
     );
 }
+
+#[test]
+fn new_takes_a_name_and_a_base() {
+    assert_eq!(
+        command(&["new", "my-look", "--from", "moonrise"]),
+        Ok(Command::New {
+            name: "my-look".to_owned(),
+            base: "moonrise".to_owned(),
+        })
+    );
+    assert_eq!(
+        command(&["new", "my-look", "--from=moonrise"]),
+        Ok(Command::New {
+            name: "my-look".to_owned(),
+            base: "moonrise".to_owned(),
+        })
+    );
+    assert_eq!(
+        command(&["new", "my-look"]),
+        Err(Error::Missing("a base look after --from"))
+    );
+    assert_eq!(
+        command(&["new", "--from", "moonrise"]),
+        Err(Error::Missing("a look name"))
+    );
+    assert_eq!(
+        command(&["new", "LOUD", "--from", "moonrise"]),
+        Err(Error::Invalid {
+            what: "look name",
+            value: "LOUD".to_owned(),
+        })
+    );
+    assert_eq!(
+        command(&["new", "my-look", "--from", "LOUD"]),
+        Err(Error::Invalid {
+            what: "look name",
+            value: "LOUD".to_owned(),
+        })
+    );
+}
+
+#[test]
+fn watch_takes_a_directory() {
+    assert_eq!(
+        command(&["watch", "user-looks/mine"]),
+        Ok(Command::Watch {
+            dir: PathBuf::from("user-looks/mine"),
+            no_toolkit: false,
+            origin: Origin::User,
+        })
+    );
+    assert_eq!(
+        command(&["watch", "user-looks/mine", "--no-toolkit", "--origin", "shipped"]),
+        Ok(Command::Watch {
+            dir: PathBuf::from("user-looks/mine"),
+            no_toolkit: true,
+            origin: Origin::Shipped,
+        })
+    );
+    assert_eq!(command(&["watch"]), Err(Error::Missing("a look directory")));
+    assert_eq!(
+        command(&["watch", "user-looks/mine", "--origin", "nix"]),
+        Err(Error::Invalid {
+            what: "--origin",
+            value: "nix".to_owned(),
+        })
+    );
+}
+
+#[test]
+fn preview_shows_or_captures() {
+    assert_eq!(
+        command(&["preview"]),
+        Ok(Command::Preview {
+            target: None,
+            capture: false,
+            out: None,
+            width: 1600,
+            height: 1000,
+            timeout_secs: 60,
+            origin: Origin::User,
+        })
+    );
+    assert_eq!(
+        command(&[
+            "preview",
+            "moonrise",
+            "--capture",
+            "--width",
+            "800",
+            "--height=600",
+            "--timeout",
+            "30"
+        ]),
+        Ok(Command::Preview {
+            target: Some("moonrise".to_owned()),
+            capture: true,
+            out: None,
+            width: 800,
+            height: 600,
+            timeout_secs: 30,
+            origin: Origin::User,
+        })
+    );
+    assert_eq!(
+        command(&["preview", "./mine", "--capture", "--out", "/tmp/shot.png"]),
+        Ok(Command::Preview {
+            target: Some("./mine".to_owned()),
+            capture: true,
+            out: Some(PathBuf::from("/tmp/shot.png")),
+            width: 1600,
+            height: 1000,
+            timeout_secs: 60,
+            origin: Origin::User,
+        })
+    );
+    assert_eq!(
+        command(&["preview", "LOUD"]),
+        Err(Error::Invalid {
+            what: "look name",
+            value: "LOUD".to_owned(),
+        })
+    );
+    assert_eq!(
+        command(&["preview", "moonrise", "--width", "0"]),
+        Err(Error::Invalid {
+            what: "--width",
+            value: "0".to_owned(),
+        })
+    );
+    assert_eq!(
+        command(&["preview", "moonrise", "--timeout", "0"]),
+        Err(Error::Invalid {
+            what: "--timeout",
+            value: "0".to_owned(),
+        })
+    );
+}
