@@ -3787,3 +3787,80 @@ fn look_without_static_leaves_signals_nothing() {
         "{report:?}"
     );
 }
+
+#[test]
+fn build_out_writes_static_leaves_and_clears_stale_ones() {
+    let fixture = static_fixture("static-build", Origin::User, ALL_LEAVES);
+    let out = fixture._root.join("out");
+    let report = build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &FakeChecks::default(),
+        false,
+    )
+    .expect("a build succeeds");
+    let _ = report;
+    for (file, contents) in ALL_LEAVES {
+        let read = std::fs::read(out.join(file)).expect("a built static leaf");
+        assert_eq!(read, contents.as_bytes(), "{file} builds verbatim");
+    }
+    // A rebuild for a look that no longer carries the leaf removes the
+    // stale file, so `--out` never carries them.
+    std::fs::remove_dir_all(fixture._root.join("looks/look-a/apps")).expect("leaves removed");
+    let report = build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &FakeChecks::default(),
+        false,
+    )
+    .expect("a rebuild succeeds");
+    let _ = report;
+    assert!(
+        !out.join("apps/helix.toml").exists(),
+        "the stale leaf is gone"
+    );
+}
+
+#[test]
+fn build_dir_target_honors_origin_and_trust() {
+    let fixture = static_fixture("static-builddir", Origin::Installed, ALL_LEAVES);
+    let dir = fixture._root.join("looks/look-a");
+    let out = fixture._root.join("out");
+    // A directory built as installed drops the leaves, like apply.
+    let report = build_to_out(
+        &BuildTarget::Dir {
+            path: dir.clone(),
+            origin: Origin::Installed,
+        },
+        &out,
+        &fixture.catalog,
+        &FakeChecks::default(),
+        false,
+    )
+    .expect("an untrusted build succeeds");
+    assert!(
+        report.notes.iter().any(|note| note.contains("dropping")),
+        "{report:?}"
+    );
+    assert!(!out.join("apps/helix.toml").exists(), "no leaf builds");
+    // With `--trust` they build and print first.
+    let out = fixture._root.join("out-trusted");
+    let report = build_to_out(
+        &BuildTarget::Dir {
+            path: dir,
+            origin: Origin::Installed,
+        },
+        &out,
+        &fixture.catalog,
+        &FakeChecks::default(),
+        true,
+    )
+    .expect("a trusted build succeeds");
+    assert!(
+        report.notes.iter().any(|note| note.contains("trusted static leaf")),
+        "{report:?}"
+    );
+    assert!(out.join("apps/helix.toml").is_file(), "the leaf builds");
+}
