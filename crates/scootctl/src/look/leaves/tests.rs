@@ -140,6 +140,12 @@ fn absent_units_are_silent() {
         fn unit_try_restart(&self, _unit: &str) -> Result<(), String> {
             Err(super::UNIT_ABSENT.to_owned())
         }
+        fn helix_signal(&self) -> Result<usize, String> {
+            Ok(0)
+        }
+        fn btop_signal(&self) -> Result<usize, String> {
+            Ok(0)
+        }
     }
     let report = apply_leaves(
         Path::new("/state"),

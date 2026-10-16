@@ -21,6 +21,10 @@
 //! every declared source down in one directory and builds each look
 //! against it, so a declared look with `extends` renders at build time
 //! like any other.
+//! Both take `--trust` to keep an installed look's static terminal
+//! leaves (`apps/helix.toml`, `apps/btop.theme`, `apps/starship.toml`):
+//! without it they are dropped, with it they render and print first (to
+//! stderr, so stdout stays machine-readable).
 //! `import-base16` takes `--name` to name the look instead of the
 //! scheme's slug, `--extends` to emit a child of that look, and `--out`
 //! to write `<dir>/look.toml` (without it the `look.toml` goes to
@@ -30,19 +34,19 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use scoot_look::{
-    ImportOptions, Origin, RenderInputs, check_contrast, import_base16, render_bar, render_foot,
-    render_fuzzel, render_greet, render_gtk3_css, render_gtk4_css, render_json, render_leaf_files,
-    render_qt_scheme, render_scoot, render_swaylock, resolve, source_hash, validate_apps_allowlist,
-    validate_for_origin,
+    ImportOptions, Origin, RenderInputs, STATIC_LEAVES, check_contrast, check_static_leaf,
+    import_base16, render_bar, render_foot, render_fuzzel, render_greet, render_gtk3_css,
+    render_gtk4_css, render_json, render_leaf_files, render_qt_scheme, render_scoot, render_swaylock,
+    resolve, source_hash, validate_apps_allowlist, validate_for_origin,
 };
 
 fn usage() -> ! {
     eprintln!("usage:");
     eprintln!(
-        "  scoot-look validate <dir> [--origin shipped|declared|user|installed] [--name NAME]"
+        "  scoot-look validate <dir> [--origin shipped|declared|user|installed] [--name NAME] [--trust]"
     );
     eprintln!(
-        "  scoot-look build <dir> --out <dir> [--wallpaper-abs PATH] [--ui-font-file PATH] [--no-popup] [--origin shipped|declared|user|installed] [--name NAME] [--catalog DIR]"
+        "  scoot-look build <dir> --out <dir> [--wallpaper-abs PATH] [--ui-font-file PATH] [--no-popup] [--origin shipped|declared|user|installed] [--name NAME] [--catalog DIR] [--trust]"
     );
     eprintln!(
         "  scoot-look import-base16 <file> [--name NAME] [--extends LOOK] [--out <dir>] [--origin shipped|declared|user|installed]"
@@ -157,14 +161,16 @@ fn main() {
             let dir = args.next().unwrap_or_else(|| usage());
             let mut origin = Origin::User;
             let mut name: Option<String> = None;
+            let mut trust = false;
             while let Some(flag) = args.next() {
                 match flag.as_str() {
                     "--origin" => origin = parse_origin(&args.next().unwrap_or_else(|| usage())),
                     "--name" => name = Some(args.next().unwrap_or_else(|| usage())),
+                    "--trust" => trust = true,
                     _ => usage(),
                 }
             }
-            validate_dir(Path::new(&dir), origin, name.as_deref());
+            validate_dir(Path::new(&dir), origin, name.as_deref(), trust);
         }
         "build" => {
             let dir = args.next().unwrap_or_else(|| usage());
@@ -176,6 +182,7 @@ fn main() {
             let mut origin = Origin::User;
             let mut name: Option<String> = None;
             let mut catalog: Option<String> = None;
+            let mut trust = false;
             while let Some(flag) = args.next() {
                 match flag.as_str() {
                     "--out" => out = Some(args.next().unwrap_or_else(|| usage())),
@@ -189,6 +196,7 @@ fn main() {
                     "--origin" => origin = parse_origin(&args.next().unwrap_or_else(|| usage())),
                     "--name" => name = Some(args.next().unwrap_or_else(|| usage())),
                     "--catalog" => catalog = Some(args.next().unwrap_or_else(|| usage())),
+                    "--trust" => trust = true,
                     _ => usage(),
                 }
             }
@@ -200,6 +208,7 @@ fn main() {
                 origin,
                 name.as_deref(),
                 catalog.as_deref().map(Path::new),
+                trust,
             );
         }
         "import-base16" => {
@@ -264,7 +273,7 @@ fn load_raw(dir: &Path, explicit_name: Option<&str>) -> (scoot_look::RawLook, Ve
     }
 }
 
-fn validate_dir(dir: &Path, origin: Origin, explicit_name: Option<&str>) {
+fn validate_dir(dir: &Path, origin: Origin, explicit_name: Option<&str>, trust: bool) {
     let (raw, _) = load_raw(dir, explicit_name);
     let mut failed = false;
     for e in validate_for_origin(&raw, origin) {
@@ -298,6 +307,11 @@ fn validate_dir(dir: &Path, origin: Origin, explicit_name: Option<&str>) {
             }
         }
     }
+    // The terminal static leaves, as `build` renders them (or drops
+    // them, for an installed look without `trust`). Without a catalog
+    // only this directory's own files are checked: an `extends` base is
+    // unknown here.
+    let _ = static_leaf_files(dir, None, &raw, origin, trust);
     if failed {
         std::process::exit(1);
     }
@@ -383,6 +397,118 @@ fn origin_name(origin: Origin) -> &'static str {
     }
 }
 
+/// One static terminal leaf read from a source tree: the rendered
+/// relative path with its bytes. The walk starts at `dir` and follows
+/// `extends` through `catalog` (one child directory per look, the Nix
+/// derivation's shape): the nearest look carrying the file wins, so a
+/// child inherits its base's leaves unless it names its own. Without a
+/// catalog only `dir`'s own files are read (`validate` takes none; an
+/// `extends` base is unknown there).
+///
+/// An installed look drops them without `trust` (its formats are never
+/// generated, so a hostile file could carry anything); with `trust` each
+/// prints to stderr first, so the reply shows what was trusted before
+/// anything renders. Reads refuse anything but a regular file, the way
+/// `look.toml` does; a missing file at every level simply renders no
+/// leaf for it.
+fn static_leaf_files(
+    dir: &Path,
+    catalog: Option<&Path>,
+    raw: &scoot_look::RawLook,
+    origin: Origin,
+    trust: bool,
+) -> Vec<(String, Vec<u8>)> {
+    // The chain of source dirs, nearest first, cycle-guarded (resolve
+    // already refused cycles through the manifest map; the dirs follow
+    // the same names, so this only bounds a divergent filesystem).
+    let mut chain: Vec<std::path::PathBuf> = vec![dir.to_path_buf()];
+    let mut extends = raw.extends.clone();
+    while let Some(base) = extends {
+        if chain.len() > scoot_look::schema::MAX_EXTENDS_DEPTH as usize {
+            eprintln!("error: extends chain deeper than expected");
+            std::process::exit(1);
+        }
+        let Some(catalog) = catalog else {
+            break;
+        };
+        let base_dir = catalog.join(&base);
+        let manifest = base_dir.join("look.toml");
+        let bytes = match read_regular_file(&manifest) {
+            Ok(bytes) => bytes,
+            Err(_) => break,
+        };
+        let base_raw = match scoot_look::parse_look_toml(&bytes) {
+            Ok(base_raw) => base_raw,
+            Err(errors) => {
+                for e in errors {
+                    eprintln!("error: catalog {base}: {e}");
+                }
+                std::process::exit(1);
+            }
+        };
+        chain.push(base_dir);
+        extends = base_raw.extends.clone();
+    }
+    if origin == Origin::Installed && !trust {
+        let mut dropped = Vec::new();
+        for dir in &chain {
+            for leaf in STATIC_LEAVES {
+                if dir.join(leaf.path).is_file() && !dropped.contains(&leaf.path) {
+                    dropped.push(leaf.path);
+                }
+            }
+        }
+        if !dropped.is_empty() {
+            dropped.sort();
+            eprintln!(
+                "note: dropping {}: `{}` is an installed look (pass --trust to keep them)",
+                dropped.join(", "),
+                raw.name,
+            );
+        }
+        return Vec::new();
+    }
+    let mut found: BTreeMap<&str, Vec<u8>> = BTreeMap::new();
+    for dir in &chain {
+        for leaf in STATIC_LEAVES {
+            if found.contains_key(leaf.path) {
+                continue;
+            }
+            let candidate = dir.join(leaf.path);
+            if std::fs::symlink_metadata(&candidate).is_err() {
+                continue;
+            }
+            let bytes = match read_regular_file(&candidate) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            };
+            if let Err(e) = check_static_leaf(leaf.path, &bytes) {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
+            found.insert(leaf.path, bytes);
+        }
+    }
+    let mut files = Vec::new();
+    for leaf in STATIC_LEAVES {
+        if let Some(bytes) = found.remove(leaf.path) {
+            if origin == Origin::Installed {
+                eprintln!(
+                    "trusted static leaf {} ({} bytes):\n{}",
+                    leaf.path,
+                    bytes.len(),
+                    String::from_utf8_lossy(&bytes),
+                );
+            }
+            files.push((leaf.path.to_owned(), bytes));
+        }
+    }
+    files
+}
+
 fn build_dir(
     dir: &Path,
     out: &Path,
@@ -390,6 +516,7 @@ fn build_dir(
     origin: Origin,
     explicit_name: Option<&str>,
     catalog: Option<&Path>,
+    trust: bool,
 ) {
     let (raw, bytes) = load_raw(dir, explicit_name);
     let map = match catalog {
@@ -481,11 +608,14 @@ fn build_dir(
         eprintln!("error: {e}");
         std::process::exit(1);
     });
+    // The terminal static leaves, inherited through the catalog when the
+    // look extends a base (dropped from installed looks without `trust`).
+    let static_files = static_leaf_files(dir, catalog, &raw, origin, trust);
     std::fs::create_dir_all(out).unwrap_or_else(|e| {
         eprintln!("cannot create {}: {e}", out.display());
         std::process::exit(1);
     });
-    for dir in ["gtk", "qt"] {
+    for dir in ["gtk", "qt", "apps"] {
         std::fs::create_dir_all(out.join(dir)).unwrap_or_else(|e| {
             eprintln!("cannot create {}: {e}", out.join(dir).display());
             std::process::exit(1);
@@ -517,6 +647,19 @@ fn build_dir(
         });
     }
     for (file, contents) in &leaves {
+        let path = out.join(file);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap_or_else(|e| {
+                eprintln!("cannot create {}: {e}", parent.display());
+                std::process::exit(1);
+            });
+        }
+        std::fs::write(&path, contents).unwrap_or_else(|e| {
+            eprintln!("cannot write {}: {e}", path.display());
+            std::process::exit(1);
+        });
+    }
+    for (file, contents) in &static_files {
         let path = out.join(file);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap_or_else(|e| {

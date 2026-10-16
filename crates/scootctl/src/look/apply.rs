@@ -67,6 +67,14 @@ pub struct ApplyOptions {
     /// Skip the toolkit step (`--no-toolkit`): no dconf key and no
     /// toolkit file is written for this apply.
     pub no_toolkit: bool,
+    /// Keep an installed look's static terminal leaves (`--trust`):
+    /// without it they are dropped, with it they render and their
+    /// contents print in the reply first.
+    pub trust: bool,
+    /// Skip the Helix signal (`--no-helix`): the leaf still renders.
+    pub no_helix: bool,
+    /// Skip the btop signal (`--no-btop`): the leaf still renders.
+    pub no_btop: bool,
     /// This apply was spawned by the compositor for an IPC `look_apply`
     /// (`--from-compositor`): recorded as the choice's provenance, so
     /// `current` tells a local swap from a remote one. Changes nothing
@@ -184,11 +192,14 @@ pub struct Validation {
 }
 
 /// Validates a catalog look without touching anything: resolve, contrast,
-/// and the effectful checks.
+/// and the effectful checks. `trust` keeps an installed look's static
+/// terminal leaves (and prints them); without it they are dropped, as in
+/// `apply`.
 pub fn validate_entry(
     catalog: &Catalog,
     name: &str,
     checks: &dyn Checks,
+    trust: bool,
 ) -> Result<Validation, String> {
     let entry = catalog
         .find(name)
@@ -222,6 +233,9 @@ pub fn validate_entry(
         check_foot_fragment(name, &merged, checks, &mut validation);
         // The launcher and locker leaves, as `apply` writes them.
         check_leaf_fragments(name, &merged, &mut validation);
+        // The terminal static leaves, as `apply` renders them (or drops
+        // them, for an installed look without `trust`).
+        check_static_fragments(&chain, trust, &mut validation);
     }
     Ok(validation)
 }
@@ -266,6 +280,7 @@ pub fn validate_dir(
     origin: Origin,
     catalog: &Catalog,
     checks: &dyn Checks,
+    trust: bool,
 ) -> Result<Validation, String> {
     use scoot_look::{parse_look_toml, validate_apps_allowlist, validate_for_origin};
     let bytes = read_regular(&dir.join("look.toml"))?;
@@ -334,6 +349,7 @@ pub fn validate_dir(
         );
         check_foot_fragment(&merged.name, &merged, checks, &mut validation);
         check_leaf_fragments(&merged.name, &merged, &mut validation);
+        check_static_fragments(&chain, trust, &mut validation);
         return Ok(validation);
     }
     Ok(validation)
@@ -1215,6 +1231,94 @@ fn wallpaper_image(chain: &[ChainEntry]) -> Option<(PathBuf, String)> {
     found
 }
 
+/// The static terminal leaves for a chain: each `apps/` file from the
+/// chain's last look whose source directory carries it (inherited unless
+/// the child names its own, like `[fonts.files]` and the wallpaper
+/// image), read capped and shape-checked. Returns the rendered relative
+/// paths with their bytes.
+///
+/// An installed (someone else's) look drops them without `trust`: its
+/// formats are never generated, so a hostile file could carry anything
+/// (starship custom commands run a shell). With `trust` they render and
+/// each prints into `notes` first, so the reply shows what was trusted.
+/// A look with no `apps/` file renders none, whatever the origin.
+pub(crate) fn static_leaf_files(
+    chain: &[ChainEntry],
+    trust: bool,
+    notes: &mut Vec<String>,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    use scoot_look::{STATIC_LEAVES, check_static_leaf};
+    let Some(root) = chain.last() else {
+        return Ok(Vec::new());
+    };
+    let name = root.entry.name.as_str();
+    if root.entry.origin == Origin::Installed && !trust {
+        let mut dropped = Vec::new();
+        for leaf in STATIC_LEAVES {
+            if static_leaf_source(chain, leaf.path).is_some() {
+                dropped.push(leaf.path.to_owned());
+            }
+        }
+        if !dropped.is_empty() {
+            dropped.sort();
+            notes.push(format!(
+                "dropping {}: `{name}` is an installed look (pass --trust to keep them)",
+                dropped.join(", ")
+            ));
+        }
+        return Ok(Vec::new());
+    }
+    let mut files = Vec::new();
+    for leaf in STATIC_LEAVES {
+        let Some(dir) = static_leaf_source(chain, leaf.path) else {
+            continue;
+        };
+        let path = contained_file(&dir, leaf.path)?;
+        // Capped at read time and required UTF-8, like every other
+        // look file read.
+        let text = read_capped_follow(&path)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let bytes = text.into_bytes();
+        check_static_leaf(leaf.path, &bytes)
+            .map_err(|error| format!("cannot render {name}: {error}"))?;
+        if root.entry.origin == Origin::Installed {
+            notes.push(format!(
+                "trusted static leaf {} ({len} bytes):\n{contents}",
+                leaf.path,
+                len = bytes.len(),
+                contents = String::from_utf8_lossy(&bytes),
+            ));
+        }
+        files.push((leaf.path.to_owned(), bytes));
+    }
+    Ok(files)
+}
+
+/// The manifest directory of the chain's last look carrying the `apps/`
+/// file at `rel`, if any. Existence only (no read): the caller resolves
+/// and reads through [`contained_file`], so an escape refuses there.
+fn static_leaf_source(chain: &[ChainEntry], rel: &str) -> Option<PathBuf> {
+    let mut found = None;
+    for link in chain {
+        if link.entry.manifest_dir.join(rel).is_file() {
+            found = Some(link.entry.manifest_dir.clone());
+        }
+    }
+    found
+}
+
+/// Validates the static terminal leaves the way `apply` renders them, so
+/// `validate` and `apply` agree: readability plus shape, under the same
+/// trust rule. Refusals land in `errors`; the trust drop and the trusted
+/// contents land in `notes`.
+fn check_static_fragments(chain: &[ChainEntry], trust: bool, validation: &mut Validation) {
+    let mut notes = Vec::new();
+    match static_leaf_files(chain, trust, &mut notes) {
+        Ok(_) => validation.notes.extend(notes),
+        Err(error) => validation.errors.push(error),
+    }
+}
+
 /// Resolves `rel` inside `dir`: the canonical target must stay inside the
 /// canonical directory and be a file. A planted symlink pointing outside
 /// refuses; a missing file refuses.
@@ -1317,15 +1421,17 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 /// cursor keys, opted-out fonts no bar `font` key — each keys apart
 /// through the inputs, so the bump only retires pre-opt-out caches); 9
 /// adds the greeter fragment (`greet.toml`, read at system build time
-/// only, never live).
-pub const RENDER_VERSION: u32 = 9;
+/// only, never live); 10 adds the terminal static leaves
+/// (`apps/helix.toml`, `apps/btop.theme`, `apps/starship.toml`, dropped
+/// from installed looks without `--trust`).
+pub const RENDER_VERSION: u32 = 10;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
 /// feature and dropped module sections), hashed like `source_hash`. A font
 /// package update or an edited source re-renders instead of reusing a stale
 /// directory.
-fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs) -> String {
+fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs, trust: bool) -> String {
     let mut buffer = Vec::new();
     buffer.extend_from_slice(&RENDER_VERSION.to_le_bytes());
     buffer.push(0);
@@ -1346,6 +1452,17 @@ fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs) -> String {
     // An opted-out cursor renders a different fragment (no cursor keys),
     // so it keys apart from the full render of the same sources.
     buffer.push(if inputs.omit_cursor { 1 } else { 0 });
+    // The static terminal leaves ride the key by origin and trust: an
+    // installed look renders them only with `--trust`, so the two
+    // renders must never share a directory.
+    buffer.push(match chain.last().map(|link| link.entry.origin) {
+        Some(Origin::Shipped) => 0,
+        Some(Origin::Declared) => 1,
+        Some(Origin::User) => 2,
+        Some(Origin::Installed) => 3,
+        None => 4,
+    });
+    buffer.push(if trust { 1 } else { 0 });
     let mut dropped = inputs.bar_drop_sections.clone();
     dropped.sort();
     for section in &dropped {
@@ -1376,7 +1493,10 @@ fn cache_key(chain: &[ChainEntry], inputs: &RenderInputs) -> String {
 /// (`greet.toml`, read at system build time only, never live),
 /// `render.json` and the daemon leaves (`mako`,
 /// `wob.ini`, `fcitx5/theme.conf`, `nightlight` when the look names a
-/// temperature), written into a fresh directory and renamed, so a reader
+/// temperature) and the terminal static leaves (`apps/helix.toml`,
+/// `apps/btop.theme`, `apps/starship.toml`, each only when the look
+/// carries it — and never from an installed look without `trust`),
+/// written into a fresh directory and renamed, so a reader
 /// racing the render sees the old or the new directory, never a half-written
 /// one. An existing directory with the same key is reused after its
 /// `render.json` names this look and every expected file is present.
@@ -1387,10 +1507,14 @@ pub(crate) fn render_cached(
     inputs: &RenderInputs,
     cache: &Path,
     notes: &mut Vec<String>,
+    trust: bool,
 ) -> Result<PathBuf, String> {
-    let target = cache.join(format!("{name}-{}", cache_key(chain, inputs)));
+    let target = cache.join(format!("{name}-{}", cache_key(chain, inputs, trust)));
     let leaves =
         render_leaf_files(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let mut static_notes = Vec::new();
+    let static_files = static_leaf_files(chain, trust, &mut static_notes)
+        .map_err(|error| format!("cannot render {name}: {error}"))?;
     if target.is_dir() {
         let render = target.join("render.json");
         let identity: serde_json::Value = read_capped(&render)
@@ -1408,13 +1532,18 @@ pub(crate) fn render_cached(
             && target.join("swaylock").is_file()
             && target.join("greet.toml").is_file()
             && leaves.iter().all(|(file, _)| target.join(file).is_file())
+            && static_files
+                .iter()
+                .all(|(file, _)| target.join(file).is_file())
         {
+            notes.extend(static_notes);
             notes.push(format!("reusing cached render {}", target.display()));
             return Ok(target);
         }
         std::fs::remove_dir_all(&target)
             .map_err(|error| format!("cannot clear {}: {error}", target.display()))?;
     }
+    notes.extend(static_notes);
     let scoot =
         render_scoot(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
     let bar =
@@ -1504,6 +1633,16 @@ pub(crate) fn render_cached(
             std::fs::write(&path, contents)?;
             std::fs::File::open(&path)?.sync_all()?;
         }
+        // The terminal static leaves (`apps/*` needs its directory first,
+        // like `fcitx5/`): verbatim bytes, already shape-checked.
+        for (file, contents) in &static_files {
+            let path = tmp.join(file);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&path, contents)?;
+            std::fs::File::open(&path)?.sync_all()?;
+        }
         std::fs::rename(&tmp, &target)?;
         Ok::<(), std::io::Error>(())
     })();
@@ -1522,6 +1661,9 @@ pub(crate) fn render_cached(
             && target.join("swaylock").is_file()
             && target.join("greet.toml").is_file()
             && leaves.iter().all(|(file, _)| target.join(file).is_file())
+            && static_files
+                .iter()
+                .all(|(file, _)| target.join(file).is_file())
         {
             notes.push(format!("reusing cached render {}", target.display()));
             return Ok(target);
@@ -1857,6 +1999,10 @@ pub(crate) struct SwapRequest {
     pub declared_default: Option<String>,
     /// Skip every toolkit write (`--no-toolkit`).
     pub no_toolkit: bool,
+    /// Skip the Helix signal (`--no-helix`).
+    pub no_helix: bool,
+    /// Skip the btop signal (`--no-btop`).
+    pub no_btop: bool,
     /// dconf key paths home-manager owns: left alone however they read.
     pub nix_claims: Vec<String>,
     /// Theme targets the swap leaves alone (the Nix cursor/fonts
@@ -2003,6 +2149,21 @@ pub(crate) fn complete_swap(
                 report.reloaded.extend(leaf_report.reloaded);
                 report.notes.extend(leaf_report.notes);
             }
+            // The terminal leaves are best-effort too: `SIGUSR1` to the
+            // user's own `hx`, `SIGUSR2` to their `btop` (each opt-out),
+            // and the starship next-prompt note. A private state runs no
+            // signal (it would reach the user's real editors).
+            if merged.is_some() {
+                let terminal_report = super::terminals::apply_terminals(
+                    state_dir,
+                    &target,
+                    leaves,
+                    swap.no_helix,
+                    swap.no_btop,
+                );
+                report.reloaded.extend(terminal_report.reloaded);
+                report.notes.extend(terminal_report.notes);
+            }
             // Shadowed keys: the compositor's reply when it reloaded; else
             // the files, read directly.
             if let Some(merged) = merged {
@@ -2082,6 +2243,8 @@ pub(crate) enum RenderSource {
 /// then the bar's own parser over the fragment, against the installed
 /// binary's features, re-rendering into the cache without what the
 /// installed bar lacks (see the downgrade note in `apply_with`).
+/// `trust` keeps an installed look's static terminal leaves; without it
+/// they are dropped (a managed sync never trusts).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn render_for_swap(
     name: &str,
@@ -2092,10 +2255,13 @@ pub(crate) fn render_for_swap(
     cache: &Path,
     checks: &dyn Checks,
     notes: &mut Vec<String>,
+    trust: bool,
 ) -> Result<(PathBuf, RenderInputs), String> {
     let mut target = match source {
         RenderSource::PreRendered { path } => path,
-        RenderSource::Fresh => render_cached(name, chain, merged, &initial, cache, notes)?,
+        RenderSource::Fresh => {
+            render_cached(name, chain, merged, &initial, cache, notes, trust)?
+        }
     };
     let mut render_inputs = initial;
     // The bar's own parser over the rendered fragment, against the
@@ -2129,7 +2295,7 @@ pub(crate) fn render_for_swap(
                     return Err(message);
                 }
                 drops.push(drop_);
-                target = render_cached(name, chain, merged, &render_inputs, cache, notes)?;
+                target = render_cached(name, chain, merged, &render_inputs, cache, notes, trust)?;
             }
         }
     }
@@ -2307,6 +2473,7 @@ pub fn apply_with_live(
         &render_inputs,
         cache,
         &mut report.notes,
+        options.trust,
     )
     .map_err(refuse)?;
     // The bar's own parser over the rendered fragment, against the
@@ -2347,6 +2514,7 @@ pub fn apply_with_live(
                     &render_inputs,
                     cache,
                     &mut report.notes,
+                    options.trust,
                 )
                 .map_err(refuse)?;
             }
@@ -2595,6 +2763,20 @@ pub fn apply_with_live(
     let leaf_report = super::leaves::apply_leaves(state_dir, &merged, leaves);
     report.reloaded.extend(leaf_report.reloaded);
     report.notes.extend(leaf_report.notes);
+    // The terminal leaves are best-effort too: `SIGUSR1` to the user's
+    // own `hx` and `SIGUSR2` to their `btop` (each opt-out, so an editor
+    // mid-flow can sit a swap out), and the starship next-prompt note.
+    // A private state runs no signal (it would reach the user's real
+    // editors, not the test's).
+    let terminal_report = super::terminals::apply_terminals(
+        state_dir,
+        &target,
+        leaves,
+        options.no_helix,
+        options.no_btop,
+    );
+    report.reloaded.extend(terminal_report.reloaded);
+    report.notes.extend(terminal_report.notes);
     // Shadowed keys: the compositor's reply when it reloaded; else the
     // files, read directly.
     report.notes.extend(foot_notes(&merged, state_dir, config));
@@ -2938,10 +3120,11 @@ pub fn build_to_out(
     out: &Path,
     catalog: &Catalog,
     checks: &dyn Checks,
+    trust: bool,
 ) -> Result<BuildReport, String> {
     let (chain, merged, name) = match target {
         BuildTarget::Dir { path, origin } => {
-            let validation = validate_dir(path, *origin, catalog, checks)?;
+            let validation = validate_dir(path, *origin, catalog, checks, trust)?;
             if !validation.errors.is_empty() {
                 return Err(validation.errors.join("; "));
             }
@@ -2986,6 +3169,12 @@ pub fn build_to_out(
     };
     let mut render_inputs = inputs.inputs;
     let render_details = inputs.details;
+    // The terminal static leaves render from the sources, not the
+    // inputs: read once, outside the bar-downgrade re-render loop.
+    let mut static_notes = Vec::new();
+    let static_files = static_leaf_files(&chain, trust, &mut static_notes)
+        .map_err(|error| format!("cannot build {name}: {error}"))?;
+    validation.notes.extend(static_notes);
     /// One full render: the two first-party fragments, foot's `foot.ini`
     /// (only when the look has a `[terminal]` table), the launcher and
     /// locker leaves (`fuzzel.ini`, `swaylock`), the greeter fragment
@@ -3060,7 +3249,8 @@ pub fn build_to_out(
                     gtk4: &str,
                     qt: &str,
                     json: &str,
-                    leaves: &[(String, String)]| {
+                    leaves: &[(String, String)],
+                    static_files: &[(String, Vec<u8>)]| {
         let mut staged = vec![
             ("scoot.toml".to_owned(), scoot.to_owned()),
             ("bar.toml".to_owned(), bar.to_owned()),
@@ -3076,6 +3266,12 @@ pub fn build_to_out(
             staged.push(("foot.ini".to_owned(), foot.clone()));
         }
         staged.extend(leaves.iter().cloned());
+        // Already shape-checked UTF-8, so this copies verbatim.
+        staged.extend(
+            static_files
+                .iter()
+                .map(|(file, bytes)| (file.clone(), String::from_utf8_lossy(bytes).into_owned())),
+        );
         staged
     };
     let (
@@ -3121,6 +3317,7 @@ pub fn build_to_out(
         &qt_scheme,
         &rendered_json,
         &leaf_files,
+        &static_files,
     );
     for (file, contents) in &staged {
         let path = stage.join(file);
@@ -3187,6 +3384,7 @@ pub fn build_to_out(
                     &qt_scheme,
                     &rendered_json,
                     &leaf_files,
+                    &static_files,
                 );
                 for (file, contents) in &staged {
                     let path = stage.join(file);
@@ -3226,7 +3424,8 @@ pub fn build_to_out(
     // Conditional outputs leave no stale copies behind: a rebuild of a look
     // without a `[terminal]` table removes a previous `foot.ini`, and a
     // rebuild for a look without `[night]` removes a previous `nightlight`,
-    // so `--out` never carries stale files.
+    // so `--out` never carries stale files. The same for the static
+    // leaves: a file under `apps/` the look no longer carries is removed.
     if foot.is_none()
         && let Err(error) = std::fs::remove_file(out.join("foot.ini"))
         && error.kind() != std::io::ErrorKind::NotFound
@@ -3241,6 +3440,19 @@ pub fn build_to_out(
         if stale.is_file() && !stale.is_symlink() {
             std::fs::remove_file(&stale)
                 .map_err(|error| format!("cannot clear {}: {error}", stale.display()))?;
+        }
+    }
+    if let Ok(entries) = std::fs::read_dir(out.join("apps")) {
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let rel = format!("apps/{name}");
+            if !staged.iter().any(|(file, _)| file == &rel) {
+                let stale = entry.path();
+                if stale.is_file() && !stale.is_symlink() {
+                    std::fs::remove_file(&stale)
+                        .map_err(|error| format!("cannot clear {}: {error}", stale.display()))?;
+                }
+            }
         }
     }
     Ok(BuildReport {

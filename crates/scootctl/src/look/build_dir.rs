@@ -12,7 +12,8 @@ use std::path::Path;
 /// login screen reads it at system build time, never live), the
 /// render record, and the daemon leaves. `foot.ini` joins them only when
 /// the look has a `[terminal]` table, and `nightlight` only when the look
-/// names a temperature; `fcitx5/theme.conf` lives under its directory.
+/// names a temperature; `fcitx5/theme.conf` lives under its directory,
+/// the terminal static leaves under `apps/`.
 /// `qt6ct.conf`, `settings.ini` and the fontconfig file stay
 /// apply-rendered (the conf points through the state link, which `build`
 /// does not know).
@@ -33,7 +34,8 @@ const BUILD_FILES: [&str; 13] = [
 ];
 /// Output directories holding only their named files (never followed
 /// through a symlink).
-const BUILD_DIRS: [(&str, &[&str]); 3] = [
+const BUILD_DIRS: [(&str, &[&str]); 4] = [
+    ("apps", &["helix.toml", "btop.theme", "starship.toml"]),
     ("fcitx5", &["theme.conf"]),
     ("gtk", &["gtk-3.0.css", "gtk-4.0.css"]),
     ("qt", &["scoot-look.conf"]),

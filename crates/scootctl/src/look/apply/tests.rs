@@ -131,6 +131,9 @@ fn options() -> ApplyOptions {
     ApplyOptions {
         lock_wait: Duration::from_millis(500),
         no_toolkit: false,
+        trust: false,
+        no_helix: false,
+        no_btop: false,
         from_compositor: false,
         preview: false,
         only_if_generation: None,
@@ -1952,6 +1955,7 @@ fn build_refuses_a_foreign_nonempty_out() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect_err("a foreign out refuses");
     assert!(error.contains("holds files"), "{error}");
@@ -1975,6 +1979,7 @@ fn build_refuses_a_symlinked_out_and_a_symlinked_fragment() {
         &link,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect_err("a symlinked out refuses");
     assert!(error.contains("symlink"), "{error}");
@@ -1988,6 +1993,7 @@ fn build_refuses_a_symlinked_out_and_a_symlinked_fragment() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect_err("a symlinked fragment refuses");
     assert!(error.contains("symlink"), "{error}");
@@ -2005,6 +2011,7 @@ fn build_into_an_out_holding_only_our_files_overwrites() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("the first build succeeds");
     // A second build into the same dir (only our five files) succeeds.
@@ -2013,6 +2020,7 @@ fn build_into_an_out_holding_only_our_files_overwrites() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("rebuilding over our own files succeeds");
 }
@@ -2034,6 +2042,7 @@ fn build_leaves_a_sibling_build_tmp_alone() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("the build succeeds");
     assert!(sibling.join("keep.txt").is_file(), "the sibling survives");
@@ -2082,7 +2091,7 @@ fn validate_names_a_bad_wallpaper_instead_of_blank() {
         let dir = root.join("looks").join("badlook");
         // `validate_dir` reads look.toml first; the wallpaper failure must
         // appear in errors, never as an empty command error.
-        match validate_dir(&dir, Origin::User, &catalog, &checks) {
+        match validate_dir(&dir, Origin::User, &catalog, &checks, false) {
             Ok(validation) => {
                 assert!(
                     !validation.errors.is_empty(),
@@ -2169,12 +2178,12 @@ fn validate_and_build_cover_a_directory_and_a_name() {
     let fonts = fixture._root.join("fonts");
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
-    let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
+    let validation = validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
-    assert!(validate_entry(&fixture.catalog, "nope", &checks).is_err());
+    assert!(validate_entry(&fixture.catalog, "nope", &checks, false).is_err());
     let dir = fixture._root.join("looks").join("look-a");
     let validation =
-        validate_dir(&dir, Origin::User, &fixture.catalog, &checks).expect("validatable");
+        validate_dir(&dir, Origin::User, &fixture.catalog, &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
     let out = fixture._root.join("out");
     let report = build_to_out(
@@ -2182,6 +2191,7 @@ fn validate_and_build_cover_a_directory_and_a_name() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("buildable");
     assert_eq!(report.name, "look-a");
@@ -2276,6 +2286,7 @@ fn a_directory_builds_itself_never_the_catalog_collision() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("the copy builds");
     assert_eq!(report.name, "look-a");
@@ -2301,7 +2312,7 @@ fn effectful_refusals_are_structured_not_bare_errors() {
         bar_seen: RefCell::new(Vec::new()),
         foot_seen: RefCell::new(Vec::new()),
     };
-    let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
+    let validation = validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert_eq!(validation.errors.len(), 3, "{:?}", validation.errors);
     for error in &validation.errors {
         assert!(error.contains("resolves to nothing"), "{error}");
@@ -2349,7 +2360,7 @@ fn validate_accepts_a_nameless_dir_path() {
     let fonts = root.join("fonts");
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
-    let validation = validate_dir(&probe, Origin::User, &catalog, &checks).expect("validatable");
+    let validation = validate_dir(&probe, Origin::User, &catalog, &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
 }
 
@@ -2414,7 +2425,7 @@ fn validate_and_apply_agree_on_the_bar_fragment() {
         foot_refuse: None,
         foot_seen: RefCell::new(Vec::new()),
     };
-    let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
+    let validation = validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert!(
         validation
             .errors
@@ -2468,7 +2479,7 @@ fn validate_retries_a_popup_refusal_without_popup_keys() {
         foot_refuse: None,
         foot_seen: RefCell::new(Vec::new()),
     };
-    let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
+    let validation = validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
     let seen = checks.bar_seen.borrow();
     assert_eq!(
@@ -2533,7 +2544,7 @@ fn a_minimal_bar_drops_module_tokens_with_a_note() {
     };
     // Validate drops both and says so.
     let checks = new_checks();
-    let validation = validate_entry(&catalog, "look-ws", &checks).expect("validatable");
+    let validation = validate_entry(&catalog, "look-ws", &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
     let seen = checks.bar_seen.borrow();
     assert!(
@@ -2606,6 +2617,7 @@ fn a_minimal_bar_drops_module_tokens_with_a_note() {
         &out,
         &catalog,
         &checks,
+        false,
     )
     .expect("a minimal bar builds a shipped-shaped look");
     let bar = std::fs::read_to_string(out.join("bar.toml")).expect("a bar fragment");
@@ -2762,6 +2774,7 @@ fn build_into_an_empty_out_writes_five_files_and_leaves_no_litter() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("an empty out builds");
     assert_eq!(report.name, "look-a");
@@ -2785,6 +2798,7 @@ fn build_into_an_empty_out_writes_five_files_and_leaves_no_litter() {
         &failing,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect_err("a foreign out refuses");
     assert_no_build_litter(&fixture._root);
@@ -3153,6 +3167,7 @@ fn build_writes_foot_ini_for_a_terminal_look() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("a terminal look builds");
     let foot = std::fs::read_to_string(out.join("foot.ini")).expect("a foot.ini");
@@ -3179,6 +3194,7 @@ fn build_removes_a_stale_foot_ini_when_the_look_has_none() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("a terminal look builds");
     assert!(out.join("foot.ini").is_file(), "no foot.ini to go stale");
@@ -3192,6 +3208,7 @@ fn build_removes_a_stale_foot_ini_when_the_look_has_none() {
         &out,
         &catalog,
         &checks,
+        false,
     )
     .expect("a plain look builds over the dir");
     assert!(
@@ -3270,7 +3287,7 @@ fn validate_reports_a_foot_refusal() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let mut checks = FakeChecks::with_fonts(&fonts);
     checks.foot_refuse = Some("foot says no".to_owned());
-    let validation = validate_entry(&fixture.catalog, "look-t", &checks).expect("a validation");
+    let validation = validate_entry(&fixture.catalog, "look-t", &checks, false).expect("a validation");
     assert!(
         validation.errors.iter().any(|e| e.contains("foot says no")),
         "errors: {:?}",

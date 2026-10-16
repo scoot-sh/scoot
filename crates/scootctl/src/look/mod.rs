@@ -25,6 +25,7 @@ pub mod leaves;
 pub mod pick;
 pub mod reload;
 pub mod sync;
+pub mod terminals;
 pub mod toolkit;
 
 use std::path::{Path, PathBuf};
@@ -66,17 +67,25 @@ pub enum Command {
     /// One look's tokens and contrast.
     Show { name: String },
     /// Validate a directory or a catalog name without touching anything.
-    Validate { target: String, origin: Origin },
+    Validate {
+        target: String,
+        origin: Origin,
+        trust: bool,
+    },
     /// Render a directory or a catalog name into `--out` without applying.
     Build {
         target: String,
         out: PathBuf,
         origin: Origin,
+        trust: bool,
     },
     /// Render, record, repoint, reload in order, roll back on refusal.
     Apply {
         name: Option<String>,
         no_toolkit: bool,
+        trust: bool,
+        no_helix: bool,
+        no_btop: bool,
         from_compositor: bool,
         for_secs: Option<u64>,
         keep: bool,
@@ -118,9 +127,9 @@ pub const LOOK_USAGE: &str = "\
     look list [--names] [--json]
     look current [--json]
     look show NAME [--json]
-    look validate DIR|NAME [--origin shipped|declared|user|installed] [--json]
-    look build DIR|NAME --out DIR [--origin shipped|declared|user|installed] [--json]
-    look apply [NAME] [--for SECONDS] [--keep] [--no-toolkit] [--from-compositor] [--only-if-generation N] [--json]
+    look validate DIR|NAME [--origin shipped|declared|user|installed] [--trust] [--json]
+    look build DIR|NAME --out DIR [--origin shipped|declared|user|installed] [--trust] [--json]
+    look apply [NAME] [--for SECONDS] [--keep] [--no-toolkit] [--trust] [--no-helix] [--no-btop] [--from-compositor] [--only-if-generation N] [--json]
     look next|prev|random [--json]
     look pick [--json]
     look sync [--no-toolkit] [--json]
@@ -201,15 +210,20 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
             }
         },
         "validate" => {
-            let (target, origin) = target_and_origin(&positionals)?;
-            Command::Validate { target, origin }
+            let (target, origin, trust) = target_and_origin(&positionals)?;
+            Command::Validate {
+                target,
+                origin,
+                trust,
+            }
         }
         "build" => {
-            let (target, origin, out) = build_args(&positionals)?;
+            let (target, origin, out, trust) = build_args(&positionals)?;
             Command::Build {
                 target,
                 out,
                 origin,
+                trust,
             }
         }
         "apply" => parse_apply(&positionals)?,
@@ -301,11 +315,18 @@ COMMANDS:
     apply       render, validate, record, repoint, then reload each app's
                 look layer in order (the compositor, then every bar),
                 signal the third-party daemons (mako, fcitx5, the OSD and
-                night-light units, best-effort), rolling back on a
+                night-light units, best-effort) and the terminal leaves
+                (SIGUSR1 to your own hx, SIGUSR2 to your own btop,
+                best-effort; starship follows on the next prompt),
+                rolling back on a
                 refusal; --no-toolkit skips the
                 toolkit step (dconf keys and toolkit files, including
                 the color-scheme write) for this apply (the first apply
                 with no record adopts each key whatever it holds);
+                --trust keeps an installed look's Helix, btop and
+                starship leaves (printing them first) instead of
+                dropping them; --no-helix and --no-btop skip that
+                app's signal for this apply (the leaf still renders);
                 --from-compositor marks the choice as compositor-driven
                 (what the compositor's own IPC child passes; `current`
                 shows it);
@@ -386,9 +407,10 @@ fn check_name(name: &str) -> Result<(), Error> {
     }
 }
 
-fn target_and_origin(positionals: &[String]) -> Result<(String, Origin), Error> {
+fn target_and_origin(positionals: &[String]) -> Result<(String, Origin, bool), Error> {
     let mut target: Option<String> = None;
     let mut origin = Origin::User;
+    let mut trust = false;
     let mut words = positionals.iter().peekable();
     while let Some(word) = words.next() {
         if word == "--origin" {
@@ -407,13 +429,15 @@ fn target_and_origin(positionals: &[String]) -> Result<(String, Origin), Error> 
                     });
                 }
             };
+        } else if word == "--trust" {
+            trust = true;
         } else if target.is_none() {
             target = Some(word.clone());
         } else {
             return Err(hinted(
                 "flag",
                 word.clone(),
-                &["--origin", "--json", "--state", "--socket"],
+                &["--origin", "--trust", "--json", "--state", "--socket"],
                 "scoot look --help",
             ));
         }
@@ -426,12 +450,13 @@ fn target_and_origin(positionals: &[String]) -> Result<(String, Origin), Error> 
     if !target.contains('/') && target != "." && target != ".." {
         check_name(&target)?;
     }
-    Ok((target, origin))
+    Ok((target, origin, trust))
 }
 
-fn build_args(positionals: &[String]) -> Result<(String, Origin, PathBuf), Error> {
+fn build_args(positionals: &[String]) -> Result<(String, Origin, PathBuf, bool), Error> {
     let mut target: Option<String> = None;
     let mut origin = Origin::User;
+    let mut trust = false;
     let mut out: Option<PathBuf> = None;
     let mut words = positionals.iter().peekable();
     while let Some(word) = words.next() {
@@ -467,13 +492,15 @@ fn build_args(positionals: &[String]) -> Result<(String, Origin, PathBuf), Error
                 return Err(Error::Unknown(word.clone()));
             }
             out = Some(PathBuf::from(value));
+        } else if word == "--trust" {
+            trust = true;
         } else if target.is_none() {
             target = Some(word.clone());
         } else {
             return Err(hinted(
                 "flag",
                 word.clone(),
-                &["--out", "--origin", "--json", "--state", "--socket"],
+                &["--out", "--origin", "--trust", "--json", "--state", "--socket"],
                 "scoot look build --help",
             ));
         }
@@ -484,12 +511,15 @@ fn build_args(positionals: &[String]) -> Result<(String, Origin, PathBuf), Error
     if !target.contains('/') && target != "." && target != ".." {
         check_name(&target)?;
     }
-    Ok((target, origin, out))
+    Ok((target, origin, out, trust))
 }
 
 fn parse_apply(positionals: &[String]) -> Result<Command, Error> {
     let mut name: Option<String> = None;
     let mut no_toolkit = false;
+    let mut trust = false;
+    let mut no_helix = false;
+    let mut no_btop = false;
     let mut from_compositor = false;
     let mut for_secs: Option<u64> = None;
     let mut keep = false;
@@ -498,6 +528,12 @@ fn parse_apply(positionals: &[String]) -> Result<Command, Error> {
     while let Some(word) = words.next() {
         if word == "--no-toolkit" {
             no_toolkit = true;
+        } else if word == "--trust" {
+            trust = true;
+        } else if word == "--no-helix" {
+            no_helix = true;
+        } else if word == "--no-btop" {
+            no_btop = true;
         } else if word == "--from-compositor" {
             from_compositor = true;
         } else if word == "--keep" {
@@ -543,6 +579,9 @@ fn parse_apply(positionals: &[String]) -> Result<Command, Error> {
             return Ok(Command::Apply {
                 name: None,
                 no_toolkit,
+                trust,
+                no_helix,
+                no_btop,
                 from_compositor,
                 for_secs: None,
                 keep: true,
@@ -555,6 +594,9 @@ fn parse_apply(positionals: &[String]) -> Result<Command, Error> {
     Ok(Command::Apply {
         name: Some(name),
         no_toolkit,
+        trust,
+        no_helix,
+        no_btop,
         from_compositor,
         for_secs,
         keep,
@@ -630,15 +672,23 @@ pub fn run(look: &Look) -> Result<(), String> {
         Command::List { names } => run_list(look, *names),
         Command::Current => run_current(look),
         Command::Show { name } => run_show(look, name),
-        Command::Validate { target, origin } => run_validate(look, target, *origin),
+        Command::Validate {
+            target,
+            origin,
+            trust,
+        } => run_validate(look, target, *origin, *trust),
         Command::Build {
             target,
             out,
             origin,
-        } => run_build(look, target, out, *origin),
+            trust,
+        } => run_build(look, target, out, *origin, *trust),
         Command::Apply {
             name,
             no_toolkit,
+            trust,
+            no_helix,
+            no_btop,
             from_compositor,
             for_secs,
             keep,
@@ -647,6 +697,9 @@ pub fn run(look: &Look) -> Result<(), String> {
             look,
             name.as_deref(),
             *no_toolkit,
+            *trust,
+            *no_helix,
+            *no_btop,
             *from_compositor,
             *for_secs,
             *keep,
@@ -998,7 +1051,7 @@ fn unknown_look_here(name: &str, catalog: &Catalog) -> String {
     format!("unknown look `{name}` (available: {})", names.join(", "))
 }
 
-fn run_validate(look: &Look, target: &str, origin: Origin) -> Result<(), String> {
+fn run_validate(look: &Look, target: &str, origin: Origin, trust: bool) -> Result<(), String> {
     let catalog = discover();
     let checks = apply::ProdChecks::new();
     // A bare name is always a catalog look; a path needs a slash (use
@@ -1008,14 +1061,14 @@ fn run_validate(look: &Look, target: &str, origin: Origin) -> Result<(), String>
     let path = PathBuf::from(target);
     let validation = if is_path {
         if path.is_dir() {
-            validate_dir(&path, origin, &catalog, &checks)?
+            validate_dir(&path, origin, &catalog, &checks, trust)?
         } else {
             return Err(format!(
                 "`{target}` is not a directory: validate takes a directory or a catalog name (`./{target}` for a cwd directory)"
             ));
         }
     } else {
-        let mut validation = validate_entry(&catalog, target, &checks)?;
+        let mut validation = validate_entry(&catalog, target, &checks, trust)?;
         if origin != Origin::User {
             validation.notes.push(
                 "`--origin` ignored for catalog names: the origin comes from the directory"
@@ -1058,7 +1111,13 @@ fn run_validate(look: &Look, target: &str, origin: Origin) -> Result<(), String>
     }
 }
 
-fn run_build(look: &Look, target: &str, out: &Path, origin: Origin) -> Result<(), String> {
+fn run_build(
+    look: &Look,
+    target: &str,
+    out: &Path,
+    origin: Origin,
+    trust: bool,
+) -> Result<(), String> {
     let catalog = discover();
     let checks = apply::ProdChecks::new();
     // Bare names are catalog looks; paths need a slash (`./name` for cwd).
@@ -1080,7 +1139,7 @@ fn run_build(look: &Look, target: &str, out: &Path, origin: Origin) -> Result<()
         }
         BuildTarget::Name(target.to_owned())
     };
-    let report = build_to_out(&build_target, out, &catalog, &checks)?;
+    let report = build_to_out(&build_target, out, &catalog, &checks, trust)?;
     if look.json {
         output::print_line(
             &serde_json::to_string_pretty(&serde_json::json!({
@@ -1109,6 +1168,9 @@ fn run_apply(
     look: &Look,
     name: Option<&str>,
     no_toolkit: bool,
+    trust: bool,
+    no_helix: bool,
+    no_btop: bool,
     from_compositor: bool,
     for_secs: Option<u64>,
     keep: bool,
@@ -1125,6 +1187,9 @@ fn run_apply(
     let options = ApplyOptions {
         lock_wait: apply::LOCK_WAIT,
         no_toolkit,
+        trust,
+        no_helix,
+        no_btop,
         from_compositor,
         preview: for_secs.is_some(),
         only_if_generation,
@@ -1167,6 +1232,9 @@ fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
     let options = ApplyOptions {
         lock_wait: apply::LOCK_WAIT,
         no_toolkit: false,
+        trust: false,
+        no_helix: false,
+        no_btop: false,
         from_compositor: false,
         preview: false,
         only_if_generation: None,
@@ -1217,6 +1285,9 @@ fn run_pick(look: &Look) -> Result<(), String> {
     let options = ApplyOptions {
         lock_wait: apply::LOCK_WAIT,
         no_toolkit: false,
+        trust: false,
+        no_helix: false,
+        no_btop: false,
         from_compositor: false,
         preview: false,
         only_if_generation: None,

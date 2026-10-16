@@ -315,6 +315,9 @@ pub fn revert_if_current(
             let options = ApplyOptions {
                 lock_wait,
                 no_toolkit: false,
+                trust: false,
+                no_helix: false,
+                no_btop: false,
                 from_compositor: false,
                 preview: false,
                 // Atomic with the revert itself: a newer apply between
