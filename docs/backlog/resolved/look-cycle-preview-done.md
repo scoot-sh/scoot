@@ -37,3 +37,26 @@ order wrapping; the bind added to the default keymap table and the docs.
 The picker popup (`look-picker`).
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
+
+## Resolution (2026-10-16, PR #636)
+
+`crates/scootctl/src/look/cycle.rs` (new): catalog-order `cycle_target`
+(wrap both ends, unknown/missing choice restarts at the near end) and
+`random_target` (`/dev/urandom`, time/pid fallback); the preview file
+(`look-preview.json`: `revert-to` + `from-generation`, atomic write,
+capped no-follow read, grammar-validated); `revert_if_current` (pre-check
+under the lock, guarded revert through `apply_with`, guarded file forget);
+`unapply` for first-choice previews; `keep_preview`; the detached
+`setsid` reverter argv/spawn. `apply_with` gained `preview` (arm under
+the lock, rollback when arming fails) and `only_if_generation` (refuse
+as superseded under the lock, atomically). CLI: `next`, `prev`,
+`random`, `apply [--for SECONDS] [--keep]`, hidden `_preview-revert`.
+Default bind `Super+Shift+T` spawns `scoot look next` with default flags
+(inert while locked). Docs in the same PR (looks page, keybindings page,
+configure example off the new chord).
+
+Evidence: ticket list all covered (preview reverting, newer-apply-wins,
+order wrapping both ends, bind in the default table + docs), each first
+as a failing shape then green: 13 cycle unit tests, 4 real-daemon
+integration tests (8/8 suite), smoke next/--for checks with pixel proofs.
+Full matrices on the dev VM in the report.
