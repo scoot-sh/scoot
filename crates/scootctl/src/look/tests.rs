@@ -17,7 +17,11 @@ fn command(args: &[&str]) -> Result<Command, Error> {
 
 #[test]
 fn verbs_parse_bare() {
-    assert_eq!(command(&["list"]), Ok(Command::List));
+    assert_eq!(command(&["list"]), Ok(Command::List { names: false }));
+    assert_eq!(
+        command(&["list", "--names"]),
+        Ok(Command::List { names: true })
+    );
     assert_eq!(command(&["current"]), Ok(Command::Current));
     assert_eq!(
         command(&["show", "moonrise"]),
@@ -57,6 +61,11 @@ fn verbs_parse_bare() {
     assert_eq!(
         command(&["toolkit", "on"]),
         Ok(Command::Toolkit { action: Some(true) })
+    );
+    assert_eq!(command(&["pick"]), Ok(Command::Pick));
+    assert_eq!(
+        command(&["pick", "extra"]),
+        Err(Error::Unknown("extra".to_owned()))
     );
     assert_eq!(command(&["sync"]), Ok(Command::Sync { no_toolkit: false }));
     assert_eq!(
@@ -347,6 +356,7 @@ fn the_usage_names_every_verb() {
         "--keep",
         "--out",
         "--origin",
+        "--names",
     ] {
         assert!(text.contains(flag), "--help hides `{flag}`");
     }

@@ -22,6 +22,7 @@ pub mod build_dir;
 pub mod cycle;
 pub mod foot;
 pub mod leaves;
+pub mod pick;
 pub mod reload;
 pub mod sync;
 pub mod toolkit;
@@ -58,7 +59,8 @@ pub struct Look {
 #[derive(Debug, PartialEq)]
 pub enum Command {
     /// The catalog, in search order, with shadowed names marked.
-    List,
+    /// `names` prints one name per line, for scripting.
+    List { names: bool },
     /// The active look, the link, and the shadowed keys.
     Current,
     /// One look's tokens and contrast.
@@ -82,6 +84,9 @@ pub enum Command {
     },
     /// The next, previous or a random catalog look, in search order.
     Cycle { step: CycleStep },
+    /// Choose a look through fuzzel's dmenu and apply it: the keyboard
+    /// picker until scootlaunch lands. A cancel applies nothing.
+    Pick,
     /// The detached `--for` reverter (hidden: spawned by `apply --for`,
     /// never typed). Sleeps out the delay, then reverts only while the
     /// generation still matches.
@@ -104,19 +109,20 @@ pub enum CycleStep {
 /// Every look command, for the JSON document and `did you mean` guesses.
 /// `_preview-revert` stays out: it is spawned, never typed.
 pub const COMMANDS: &[&str] = &[
-    "list", "current", "show", "validate", "build", "apply", "next", "prev", "random", "sync",
-    "toolkit",
+    "list", "current", "show", "validate", "build", "apply", "next", "prev", "random", "pick",
+    "sync", "toolkit",
 ];
 
 /// The usage line, shared by `scoot look --help` and the top-level help.
 pub const LOOK_USAGE: &str = "\
-    look list [--json]
+    look list [--names] [--json]
     look current [--json]
     look show NAME [--json]
     look validate DIR|NAME [--origin shipped|declared|user|installed] [--json]
     look build DIR|NAME --out DIR [--origin shipped|declared|user|installed] [--json]
     look apply [NAME] [--for SECONDS] [--keep] [--no-toolkit] [--from-compositor] [--only-if-generation N] [--json]
     look next|prev|random [--json]
+    look pick [--json]
     look sync [--no-toolkit] [--json]
     look toolkit [on|off] [--json]
 
@@ -174,10 +180,7 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
     }
     let verb = verb.ok_or(Error::Missing("a look command"))?;
     let command = match verb.as_str() {
-        "list" => {
-            refuse_trailing(&positionals)?;
-            Command::List
-        }
+        "list" => parse_list(&positionals)?,
         "current" => {
             refuse_trailing(&positionals)?;
             Command::Current
@@ -229,6 +232,10 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
             }
         }
         "_preview-revert" => parse_preview_revert(&positionals)?,
+        "pick" => {
+            refuse_trailing(&positionals)?;
+            Command::Pick
+        }
         "toolkit" => {
             let action = match positionals.as_slice() {
                 [] => None,
@@ -261,7 +268,7 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
                 other.to_owned(),
                 &[
                     "list", "current", "show", "validate", "build", "apply", "next", "prev",
-                    "random", "sync", "toolkit",
+                    "random", "pick", "sync", "toolkit",
                 ],
                 "scoot look --help",
             ));
@@ -313,6 +320,9 @@ COMMANDS:
     next        the next catalog look after the active one, wrapping
     prev        the previous catalog look before the active one, wrapping
     random      a random catalog look other than the active one
+    pick        choose a look through fuzzel's dmenu and apply it (until
+                scootlaunch lands): needs a Wayland display and `fuzzel`
+                on PATH; a cancel applies nothing
     sync        the home-manager rule: start on the declared default with
                 no state, switch when it changed, fall back when the live
                 choice left the catalog, else keep the live choice and
@@ -348,6 +358,20 @@ fn refuse_trailing(positionals: &[String]) -> Result<(), Error> {
         ));
     }
     Ok(())
+}
+
+/// `list`'s own flags: bare, or `--names` for one name per line.
+fn parse_list(positionals: &[String]) -> Result<Command, Error> {
+    match positionals {
+        [] => Ok(Command::List { names: false }),
+        [only] if only == "--names" => Ok(Command::List { names: true }),
+        [extra, ..] => Err(hinted(
+            "flag",
+            extra.clone(),
+            &["--names", "--json", "--state", "--socket"],
+            "scoot look --help",
+        )),
+    }
 }
 
 fn check_name(name: &str) -> Result<(), Error> {
@@ -602,7 +626,7 @@ fn hinted(kind: &'static str, what: String, candidates: &[&str], topic: &'static
 /// the document in `--json`; a failure is `Err` for exit 1.
 pub fn run(look: &Look) -> Result<(), String> {
     match &look.command {
-        Command::List => run_list(look),
+        Command::List { names } => run_list(look, *names),
         Command::Current => run_current(look),
         Command::Show { name } => run_show(look, name),
         Command::Validate { target, origin } => run_validate(look, target, *origin),
@@ -628,6 +652,7 @@ pub fn run(look: &Look) -> Result<(), String> {
             *only_if_generation,
         ),
         Command::Cycle { step } => run_cycle(look, *step),
+        Command::Pick => run_pick(look),
         Command::PreviewRevert { from, after } => run_preview_revert(look, *from, *after),
         Command::Sync { no_toolkit } => run_sync(look, *no_toolkit),
         Command::Toolkit { action } => run_toolkit(look, *action),
@@ -640,8 +665,25 @@ fn warn_all(notes: &[String]) {
     }
 }
 
-fn run_list(look: &Look) -> Result<(), String> {
+fn run_list(look: &Look, names: bool) -> Result<(), String> {
     let catalog = discover();
+    if names {
+        // One name per line, for scripting; a JSON array under `--json`.
+        if look.json {
+            let names: Vec<&str> = catalog
+                .entries
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect();
+            output::print_line(&serde_json::to_string_pretty(&names).unwrap_or_default())
+                .map_err(|error| error.to_string())?;
+        } else {
+            for entry in &catalog.entries {
+                output::print_line(&entry.name).map_err(|error| error.to_string())?;
+            }
+        }
+        return Ok(());
+    }
     if look.json {
         let looks: Vec<serde_json::Value> = catalog
             .entries
@@ -1130,6 +1172,39 @@ fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
         nix_claims: sync::read_nix_claims(),
     };
     apply_and_print(look, &target, &options, None).map(|_| ())
+}
+
+/// Picks a look through fuzzel's dmenu and applies it: the keyboard
+/// picker until scootlaunch lands. A cancel applies nothing and succeeds;
+/// an empty catalog, no Wayland display, a missing or broken fuzzel, and
+/// the apply's own refusal all fail loudly.
+fn run_pick(look: &Look) -> Result<(), String> {
+    // Fuzzel is Wayland-only: without a display it cannot choose, and its
+    // empty failure looks exactly like a cancel — refuse loudly instead of
+    // exiting success having applied nothing.
+    if std::env::var_os("WAYLAND_DISPLAY").is_none_or(|display| display.is_empty()) {
+        return Err("needs a Wayland display for fuzzel to choose a look".to_owned());
+    }
+    let catalog = discover();
+    if catalog.entries.is_empty() {
+        return Err("the catalog is empty".to_owned());
+    }
+    let names: Vec<String> = catalog
+        .entries
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect();
+    let Some(choice) = pick::menu_choice(&names)? else {
+        return Ok(());
+    };
+    let options = ApplyOptions {
+        lock_wait: apply::LOCK_WAIT,
+        no_toolkit: false,
+        from_compositor: false,
+        preview: false,
+        only_if_generation: None,
+    };
+    apply_and_print(look, &choice, &options, None).map(|_| ())
 }
 
 /// Keeps a timed preview: forgets the pending revert, staying on the

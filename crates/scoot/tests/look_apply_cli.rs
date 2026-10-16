@@ -73,6 +73,48 @@ esac
     dir
 }
 
+/// A `fuzzel --dmenu` stand-in beside the `fc-match` stub: it reads the
+/// catalog names on stdin and answers per `$STUB_FUZZEL` — `choose:NAME`
+/// prints the choice, `cancel` exits 1 silently (what a real Esc does),
+/// `fail` prints a choice and exits 3 (a broken menu: loud, never
+/// applied). Unset is a loud error, so a test that forgets the mode fails
+/// instead of applying.
+fn stub_fuzzel_menu(bin: &std::path::Path) {
+    let stub = bin.join("fuzzel");
+    std::fs::write(
+        &stub,
+        r#"#!/bin/sh
+mode="${STUB_FUZZEL:-unset}"
+case "$mode" in
+  choose:*)
+    name="${mode#choose:}"
+    while IFS= read -r line; do :; done
+    printf '%s\n' "$name"
+    ;;
+  cancel)
+    while IFS= read -r line; do :; done
+    exit 1
+    ;;
+  fail)
+    while IFS= read -r line; do :; done
+    printf 'look-b\n'
+    exit 3
+    ;;
+  *)
+    echo "STUB_FUZZEL mode unset (choose:NAME, cancel, fail)" >&2
+    exit 2
+    ;;
+esac
+"#,
+    )
+    .expect("a stub fuzzel");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .expect("an executable stub");
+    }
+}
 /// A real, loadable font file for the stub to answer, found without
 /// fontconfig: first the host `fc-match` (the normal case), then a direct
 /// scan of the usual font roots (an empty `FONTCONFIG_FILE` blinds the
@@ -244,6 +286,7 @@ struct Session {
 impl Session {
     fn start(scratch: &Scratch) -> Self {
         let stub = stub_fc_match_dir(scratch);
+        stub_fuzzel_menu(&stub);
         let path_env = path_with_stub(&stub);
         let runtime = scratch.sub("runtime");
         let cache = scratch.sub("cache");
@@ -356,7 +399,15 @@ impl Session {
     /// `PATH` carries the stub `fc-match` first, so the font check never
     /// reaches host fonts.
     fn look(&self, args: &[&str]) -> Output {
-        Command::new(scoot())
+        self.look_with(args, &[])
+    }
+
+    /// One `scoot look ...` invocation with extra environment (which wins
+    /// over the session's): the pick tests drive the stub menu through
+    /// `$STUB_FUZZEL` and take `fuzzel` off PATH this way.
+    fn look_with(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
+        let mut command = Command::new(scoot());
+        command
             .arg("look")
             .args(args)
             .arg("--state")
@@ -373,9 +424,11 @@ impl Session {
             .env("DBUS_SESSION_BUS_ADDRESS", "disabled:")
             .env_remove("WAYLAND_DISPLAY")
             .env_remove("SCOOT_SOCKET")
-            .env_remove("SCOOT_LOOK_STATE")
-            .output()
-            .expect("scoot look runs")
+            .env_remove("SCOOT_LOOK_STATE");
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        command.output().expect("scoot look runs")
     }
 
     fn msg(&self, args: &[&str]) -> Output {
@@ -720,6 +773,107 @@ fn cycle_next_prev_and_random_walk_the_catalog() {
     assert_eq!(active_name(&session), Some("look-b".to_owned()));
     session.check_look(&["random"]);
     assert_eq!(active_name(&session), Some("look-a".to_owned()));
+}
+
+#[test]
+fn list_names_prints_one_name_per_line() {
+    let scratch = Scratch::new("list-names");
+    let session = Session::start(&scratch);
+    let names = session.check_look(&["list", "--names"]);
+    let mut lines: Vec<&str> = names.lines().collect();
+    lines.sort_unstable();
+    assert_eq!(lines, ["look-a", "look-b"]);
+    let out = session.look(&["list", "--names", "--json"]);
+    assert!(out.status.success(), "{out:?}");
+    let mut names: Vec<String> =
+        serde_json::from_slice(&out.stdout).expect("a JSON array of names");
+    names.sort();
+    assert_eq!(names, ["look-a".to_owned(), "look-b".to_owned()]);
+}
+
+#[test]
+fn pick_applies_the_menu_choice() {
+    let scratch = Scratch::new("pick-apply");
+    let session = Session::start(&scratch);
+    session.check_look(&["apply", "look-a"]);
+    // Fuzzel is Wayland-only, so `pick` needs the variable set; the stub
+    // menu never dials it.
+    let out = session.look_with(
+        &["pick"],
+        &[
+            ("WAYLAND_DISPLAY", "stub"),
+            ("STUB_FUZZEL", "choose:look-b"),
+        ],
+    );
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(active_name(&session), Some("look-b".to_owned()));
+}
+
+#[test]
+fn pick_cancel_applies_nothing_and_succeeds() {
+    let scratch = Scratch::new("pick-cancel");
+    let session = Session::start(&scratch);
+    session.check_look(&["apply", "look-a"]);
+    let out = session.look_with(
+        &["pick"],
+        &[("WAYLAND_DISPLAY", "stub"), ("STUB_FUZZEL", "cancel")],
+    );
+    assert!(out.status.success(), "a cancel succeeds: {out:?}");
+    assert!(out.stdout.is_empty(), "a cancel prints nothing: {out:?}");
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+}
+
+#[test]
+fn pick_failure_is_loud_and_applies_nothing() {
+    let scratch = Scratch::new("pick-fail");
+    let session = Session::start(&scratch);
+    session.check_look(&["apply", "look-a"]);
+    let out = session.look_with(
+        &["pick"],
+        &[("WAYLAND_DISPLAY", "stub"), ("STUB_FUZZEL", "fail")],
+    );
+    assert_eq!(out.status.code(), Some(1), "a broken menu fails: {out:?}");
+    let stderr = String::from_utf8(out.stderr).expect("UTF-8 stderr");
+    assert!(
+        stderr.contains("menu"),
+        "the failure names the menu: {stderr}"
+    );
+    assert_eq!(active_name(&session), Some("look-a".to_owned()));
+}
+
+#[test]
+fn pick_without_a_display_names_it_loudly() {
+    let scratch = Scratch::new("pick-no-display");
+    let session = Session::start(&scratch);
+    // Fuzzel cannot choose with no display, and its empty failure looks
+    // exactly like a cancel: refuse loudly instead of succeeding.
+    let out = session.look(&["pick"]);
+    assert_eq!(out.status.code(), Some(1), "no display fails: {out:?}");
+    let stderr = String::from_utf8(out.stderr).expect("UTF-8 stderr");
+    assert!(
+        stderr.contains("Wayland display"),
+        "the failure names the display: {stderr}"
+    );
+}
+
+#[test]
+fn pick_without_fuzzel_names_it_loudly() {
+    let scratch = Scratch::new("pick-no-fuzzel");
+    let session = Session::start(&scratch);
+    // A PATH with no menu at all: the failure names `fuzzel`, and nothing
+    // applies.
+    let empty = scratch.sub("empty-path");
+    let path = empty.to_string_lossy().into_owned();
+    let out = session.look_with(
+        &["pick"],
+        &[("WAYLAND_DISPLAY", "stub"), ("PATH", path.as_str())],
+    );
+    assert_eq!(out.status.code(), Some(1), "no menu fails: {out:?}");
+    let stderr = String::from_utf8(out.stderr).expect("UTF-8 stderr");
+    assert!(
+        stderr.contains("`fuzzel`"),
+        "the failure names fuzzel: {stderr}"
+    );
 }
 
 #[test]
