@@ -2537,16 +2537,14 @@ pub fn apply_with_live(
             .notes
             .push("toolkit step off for this apply (--no-toolkit)".to_owned());
     } else {
-        report
-            .notes
-            .extend(apply_toolkit_with_claims(
-                state_dir,
-                &mut record,
-                &merged,
-                dconf,
-                &options.nix_claims,
-                TargetSkips::default(),
-            ));
+        report.notes.extend(apply_toolkit_with_claims(
+            state_dir,
+            &mut record,
+            &merged,
+            dconf,
+            &options.nix_claims,
+            TargetSkips::default(),
+        ));
         if let Err(error) = write_record(state_dir, &record) {
             report.notes.push(format!(
                 "cannot record the toolkit state: {error}: the look applied, the record lags"
