@@ -571,6 +571,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [virtual-input protocol-error tests race EPIPE after the server closes](./resolved/virtual-input-protocol-error-epipe-done.md)
   — RESOLVED 2026-10-05 (test-only): poison rides the round trip's own flush and `expect_error` drains read-side-only on I/O errors before deciding
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
+- [screencopy/window_commit timer tests flake under parallel load](./testing/screencopy-window-commit-timer-flakes.md) (medium, filed 2026-10-17): the probe-caused `timer_armed` reds are fixed in #655; the `parked_capture`/`desync_batch` base rate still needs main characterization
 - [scootbg-mem fd-close test races on fd reuse](./resolved/scootbg-mem-fd-close-test-race-done.md)
   — RESOLVED 2026-10-03 (already landed in #331): the dev+ino identity check was in the tree 4 minutes before the ticket was filed; verified with 46 green suite runs plus mutation checks.
 - [cursor_hide tests read the host cursor theme](./resolved/cursor-hide-tests-theme-hermetic-done.md)
