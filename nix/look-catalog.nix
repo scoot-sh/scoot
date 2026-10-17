@@ -10,7 +10,7 @@
 # `nix/lib/look-from-stylix.nix` for what each is checked against.
 # Returns `{ entries, sources, rendered, names, hasWallpaper,
 # fontPackages, stylixTheme }`: `fontPackages` (the Stylix font
-# packages to install) and `stylixTheme` (the registry-shaped theme
+# packages to install) and `stylixTheme` (the shipped-look-shaped theme
 # value for `stylix`) are empty/null without synthesis.
 #
 # `looks` (names of shipped looks or paths to source look directories)
@@ -37,10 +37,11 @@
 }:
 
 let
-  # The shipped look names, from the registry (sorted, like every
+  # The shipped look names, from their `looks/<name>/` directories
+  # (sorted, like every
   # directory scan in the catalog: order among declared entries is the
   # catalog's own, and the runtime scan sorts within a directory).
-  shippedNames = builtins.attrNames (import ./modules/desktop.nix { inherit lib; }).looks;
+  shippedNames = (import ./lib/look-shipped.nix { inherit lib; }).shippedNames;
 
   # Whether `value` is a look name (`[a-z0-9-]{1,32}`, the grammar
   # `scoot-look` enforces).
@@ -337,7 +338,7 @@ let
   # once (`nix/lib/look-from-stylix.nix`); the derivations below run
   # `scoot-look import-base16` on it and render it against the full
   # sources. `raw` carries the reads plus `extends` and `isDark`
-  # (resolved polarity); `baseLook` is the registry look behind
+  # (resolved polarity); `baseLook` is the shipped look behind
   # `extends`, or null without a resolvable base.
   stylixFrom = import ./lib/look-from-stylix.nix { inherit lib; };
   mkStylix =
@@ -409,7 +410,7 @@ let
               if (stylix.extends or null) == null then
                 null
               else
-                (import ./modules/desktop.nix { inherit lib; }).looks.${stylix.extends} or null;
+                (import ./lib/look-shipped.nix { inherit lib; }).looks.${stylix.extends} or null;
           };
       fullEntries =
         entries

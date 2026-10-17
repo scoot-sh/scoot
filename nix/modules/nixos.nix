@@ -9,9 +9,10 @@
 let
   cfg = config.programs.scoot;
 
-  # The desktop profile's shared option subtree (the look palettes stay
-  # where they are applied: the home-manager side and the bar module).
+  # The desktop profile's shared option subtree, and the shipped looks
+  # as evaluation data (read from their `looks/<name>/` directories).
   desktop = import ./desktop.nix { inherit lib; };
+  lookShipped = import ../lib/look-shipped.nix { inherit lib; };
 
   # The system side of the look catalog (design section 6.2): the same
   # builder the home-manager side uses, over the same `looks`. Null
@@ -74,12 +75,14 @@ let
   # The greeter's look (ticket `look-greeter`): `greeter.look`,
   # defaulting to the declared `look` (set beside the options below)
   # and resolved at system build time only — a live swap never touches
-  # it. The registry entry when the name is a shipped look, else the
+  # it. The shipped entry when the name is a shipped look (read from
+  # its `looks/<name>/` directory, the same record the session themes
+  # from), else the
   # catalog entry: a custom catalog look themes the login screen from
   # its manifest (polarity, sans, wallpaper, `apps/regreet.css`), so the
   # eval-time leaves stay out of no look's way.
   greeterRegistry =
-    if cfg.greeter.look == null then null else desktop.looks.${cfg.greeter.look} or null;
+    if cfg.greeter.look == null then null else lookShipped.looks.${cfg.greeter.look} or null;
   greeterEntry = lib.findFirst (entry: entry.name == cfg.greeter.look) null lookCatalog.entries;
 
   # The first catalog entry down the `extends` chain whose `get` of
@@ -109,11 +112,11 @@ let
     if cfg.greeter.look == null then null else walk cfg.greeter.look 0;
 
   # Whether the greeter themes at all: a shipped look, or a catalog
-  # entry (whose manifest carries what the registry would have).
+  # entry (whose manifest carries what the shipped record does).
   greeterThemed = greeterRegistry != null || greeterEntry != null;
 
   # The greeter backdrop pairs the session wallpaper behind the login
-  # card: the registry image for a shipped look (the same file the
+  # card: the shipped image for a shipped look (the same file the
   # session themes from — a license-barred look pairs nothing), else the
   # catalog entry's image file. Null for a color-only, URL, or missing
   # image: ReGreet then keeps its own background. The greeter never
@@ -148,7 +151,7 @@ let
       in
       if hit == null then true else hit.manifest.polarity == "dark";
 
-  # The greeter's proportional sans: the registry face for a shipped
+  # The greeter's proportional sans: the shipped face for a shipped
   # look, else the manifest's down the chain (DejaVu Sans when no entry
   # names one — the face the profile already ships, so zero closure).
   greeterSans =
@@ -1036,7 +1039,7 @@ in
     # (see `resources/scoot-session`). Read only with `desktop.enable`.
     looks = lib.mkOption {
       type = lib.types.listOf (lib.types.either lib.types.str lib.types.path);
-      default = builtins.attrNames (import ./desktop.nix { inherit lib; }).looks;
+      default = lookShipped.shippedNames;
       defaultText = lib.literalExpression "every shipped look";
       example = [
         "ginger-night"
@@ -2795,7 +2798,7 @@ in
         builtins.toJSON config.services.logind.settings.Login
       );
     })
-    # The look on the login screen (the `desktop-theme-look` child):
+    # The look on the login screen (the theme child):
     # backdrop pairing, the dark/light GTK setting, the look's CSS
     # and font, each at plain `mkDefault` so an explicit value still
     # wins. Off with no look behind the greeter, or while

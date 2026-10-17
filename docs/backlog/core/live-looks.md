@@ -71,7 +71,7 @@ stated rule.
 | [`look-leaves-launchers`](../resolved/look-leaves-launchers-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-leaves-terminal`](../resolved/look-leaves-terminal-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-greeter`](../resolved/look-greeter-done.md) | low | daily-drive | `look-nix-catalog` |
-| [`look-nix-retire-registry`](../packaging/look-nix-retire-registry.md) | medium | daily-drive | the Nix, Stylix, toolkit, leaves and greeter children |
+| [`look-nix-retire-registry`](../resolved/look-nix-retire-registry-done.md) | medium | daily-drive | the Nix, Stylix, toolkit, leaves and greeter children |
 | [`look-picker`](../../scootbar/backlog/resolved/look-picker-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-authoring`](../resolved/look-authoring-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-install`](look-install.md) | low | daily-drive | `look-authoring` |

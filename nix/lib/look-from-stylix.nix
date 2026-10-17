@@ -27,9 +27,9 @@
 # - `isDark`: the resolved polarity (the caller maps
 #   `config.stylix.polarity`: `light`/`dark` verbatim, `either` by the
 #   luma rule below);
-# - `baseLook`: the registry look behind `extends` (or null without a
+# - `baseLook`: the shipped look behind `extends` (or null without a
 #   resolvable base): supplies `appFiles`, `nightTemp` and the fallback
-#   faces. A custom-path base has no registry entry, so the static
+#   faces. A custom-path base has no shipped entry, so the static
 #   leaves stay inert for it (the runtime layer still works).
 #
 # Returns `{ json, themeLook, imageFile, fontPackages, hasWallpaper }`:
@@ -48,7 +48,7 @@
 #   one), the cursor to the default. `polarity` is always explicit
 #   here, so the rendered look and `themeLook` below agree by
 #   construction.
-# - `themeLook`: the registry-shaped look the theme reads for `stylix`
+# - `themeLook`: the shipped-look-shaped look the theme reads for `stylix`
 #   (the base with the palette, polarity and faces replaced). No module
 #   maps a base16 slot itself: this is the one mapping, and the theme
 #   reads tokens, never slots.

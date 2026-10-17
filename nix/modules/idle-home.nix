@@ -14,9 +14,8 @@ let
   cfg = config.programs.scoot;
   idle = cfg.desktop.idle;
 
-  # The desktop profile's shared option subtree and the one helper
-  # that reads look-derived values (never hand-mapped here).
-  themeLook = import ./theme-look.nix { inherit lib; };
+  # The one helper that reads look-derived values (never hand-mapped here).
+  themeLook = import ../lib/look-shipped.nix { inherit lib; };
   look = themeLook.lookFor cfg;
   themed = themeLook.themed cfg "lock";
   # The live look's locker config at runtime (never evaluation).

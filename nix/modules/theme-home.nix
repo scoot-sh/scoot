@@ -1,6 +1,6 @@
 # `programs.scoot.desktop.theme` for home-manager: fonts, cursor,
 # GTK/Qt settings and the look's app files, all derived from the
-# registry look behind `programs.scoot.look` (with and without Stylix).
+# shipped look behind `programs.scoot.look` (with and without Stylix).
 # The dark-mode signal is `scoot look sync`'s, not this module's. The
 # option shapes live in `./desktop.nix` (shared with the NixOS side);
 # the `package` defaults live here because only this side has `pkgs`.
@@ -28,7 +28,7 @@ let
   # The one helper that reads look-derived values (never hand-mapped
   # here): the look, whether a target applies, the one cursor and icon
   # theme, and the hex spellings.
-  themeLook = import ./theme-look.nix { inherit lib; };
+  themeLook = import ../lib/look-shipped.nix { inherit lib; };
   look = themeLook.lookFor cfg;
 
   # The whole theme renders while the slot is on with a look behind
