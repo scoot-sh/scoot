@@ -387,7 +387,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Golden screenshots per shipped look](./resolved/look-golden-screenshots-done.md) (medium, computer use) — RESOLVED 2026-10-16
 - [Nix: the `programs.scoot.looks` catalog and the switch rule](./packaging/look-nix-catalog.md) (high, breaking)
 - [`scoot look import-base16`: the one base16-to-token mapping](./core/look-import-base16.md) (medium)
-- [Stylix becomes a synthesized `stylix` look instead of a layer above the look](./packaging/look-stylix-source.md) (high, breaking)
+- [Stylix becomes a synthesized `stylix` look instead of a layer above the look](./resolved/look-stylix-source-done.md) (high, breaking) — RESOLVED 2026-10-16
 - [GTK, libadwaita, Qt, cursor and fonts follow a swap through dconf and the portal](./resolved/look-toolkit-live-done.md) (medium) — RESOLVED 2026-10-15
 - [Qt palette under the Adwaita style ignores the look (measured)](./packaging/qt-adwaita-palette.md) (low)
 - [`apply` follows an in-dir symlink for a leaf while `build` refuses all symlinks](./packaging/look-apply-symlink-leaf.md) (low)
