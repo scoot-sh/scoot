@@ -50,10 +50,12 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io;
-use std::os::fd::{FromRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{
@@ -137,12 +139,24 @@ impl WaylandListener {
     /// Binds the first `wayland-1..32` in `runtime_dir` that is neither
     /// excluded nor live.
     ///
-    /// A live name is skipped before any lock is taken, so a server that does
-    /// not share the flock scheme keeps its socket: only a stale file (or no
-    /// file) reaches [`ListeningSocket::bind_absolute`], whose `Drop` then
-    /// removes only what this session bound. `AlreadyInUse` (a flocking
-    /// compositor holds the lock, or a racing second scoot won it) moves to
-    /// the next name; anything else fails the bind, as `bind_auto` always did.
+    /// The flock is checked *before* probing, so a sibling scoot instance
+    /// (which always holds its `<name>.lock` while bound) is never even
+    /// connected to: no transient zero-byte client is injected into a running
+    /// fixture sharing this runtime dir. Only lock-free names are probed, so
+    /// a server that does not share the flock scheme (pixelflux in webtop
+    /// holds no lock) still keeps its socket: only a stale file (or no file)
+    /// reaches [`ListeningSocket::bind_absolute`], whose `Drop` then removes
+    /// only what this session bound. `AlreadyInUse` (a racing second scoot
+    /// won the lock between this check and the bind) moves to the next name;
+    /// anything else fails the bind, as `bind_auto` always did.
+    ///
+    /// Residual TOCTOU (inherent): lock-check -> probe -> `bind_absolute`
+    /// re-lock is not atomic. A lock-free host binding a probed-free name in
+    /// that microsecond window still loses its socket to the unlink in
+    /// `bind_absolute`. The `$WAYLAND_DISPLAY` exclusion closes this for the
+    /// nested case (the only shape where the colliding server is known ahead
+    /// of time); the probe closes it for every steady-state live socket and
+    /// narrows the window to a concurrent bind racing startup.
     fn bind_in(runtime_dir: &Path, exclude: Option<&OsStr>) -> Result<Self, BindError> {
         for index in 1..33 {
             let name = format!("wayland-{index}");
@@ -150,6 +164,14 @@ impl WaylandListener {
                 continue;
             }
             let path = runtime_dir.join(&name);
+            // Flock first: a held lock means a sibling scoot owns this name.
+            // Skip with no connect, so parallel suites sharing one runtime
+            // dir never see a probe client. Permission-denied (or any other
+            // lock-open failure but missing file) skips conservatively, the
+            // same orientation as the probe's conservative-live arm.
+            if lock_blocks_probe(&path.with_extension("lock")) {
+                continue;
+            }
             if socket_is_live(&path) {
                 continue;
             }
@@ -199,21 +221,163 @@ fn excluded_name_for(display: Option<&OsStr>, runtime_dir: Option<&OsStr>) -> Op
     Some(file.to_os_string())
 }
 
+/// Whether the lock file at `lock_path` is held or otherwise not provably
+/// free, in which case the candidate must be skipped with no `connect`.
+///
+/// Mirrors the open/flock/dev-ino check in `ListeningSocket::bind_absolute`
+/// (`socket.rs` at the pinned wayland-server rev): open the existing file
+/// (missing file = free, anything else that fails to open = conservative
+/// skip), try `LOCK_EX|LOCK_NB` (contended = skip), then verify the locked
+/// fd is still the file on disk (unlinked-between-open-and-flock = retry,
+/// exactly as `bind_absolute` does). A lock proved free is released on
+/// return -- `bind_absolute` re-locks as today -- so a racing sibling that
+/// wins between here and the bind still surfaces as `AlreadyInUse`.
+fn lock_blocks_probe(lock_path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    loop {
+        let lock = match File::open(lock_path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return false,
+            Err(_) => return true,
+        };
+        // SAFETY: `flock` on an open fd is always safe; the fd is valid.
+        if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+            return true;
+        }
+        let fd_meta = match lock.metadata() {
+            Ok(meta) => meta,
+            Err(_) => return true,
+        };
+        let disk_meta = match std::fs::metadata(lock_path) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(_) => return true,
+        };
+        if fd_meta.dev() == disk_meta.dev() && fd_meta.ino() == disk_meta.ino() {
+            return false;
+        }
+        // Locked a handle since unlinked: retry, as `bind_absolute` does.
+    }
+}
+
+/// How long one liveness probe may block startup waiting for a sibling
+/// backlog that never drains. Local `connect` answers immediately; this only
+/// fires against a listener that stopped accepting, and then the name counts
+/// as live rather than hanging the session.
+const PROBE_TIMEOUT: Duration = Duration::from_millis(100);
+
 /// Whether anything is listening at `path`: a successful `connect` means a
 /// live server owns it, whatever the lock files say.
 ///
 /// Only `ConnectionRefused` (a socket file with no listener: stale) and
 /// `NotFound` (no file at all) count as free. Any other failure is treated as
 /// live -- a socket this process may not connect to (permissions, a racing
-/// unlink) is someone else's either way, and unlinking it to find out would
-/// be the bug this probe exists to prevent.
+/// unlink, a full backlog, a connect that times out) is someone else's
+/// either way, and unlinking it to find out would be the bug this probe
+/// exists to prevent.
+///
+/// Nonblocking with a short timeout: a blocking `connect` against a sibling
+/// whose backlog is full (128 pending) would hang startup with no message,
+/// where the old code at least failed loudly-ish.
 fn socket_is_live(path: &Path) -> bool {
-    match UnixStream::connect(path) {
-        Ok(_) => true,
-        Err(error) => !matches!(
-            error.kind(),
-            io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
-        ),
+    let bytes = path.as_os_str().as_bytes();
+    if bytes.len() >= 108 {
+        return true;
+    }
+    // SAFETY: `socket` with these args either returns an owned fd or -1.
+    let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
+    if fd < 0 {
+        return true;
+    }
+    // Set nonblocking so a full backlog surfaces as `EINPROGRESS` + `poll`
+    // instead of hanging startup.
+    // SAFETY: `fcntl` on an owned, valid fd is safe.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } != 0 {
+        unsafe { libc::close(fd) };
+        return true;
+    }
+    // SAFETY: zeroed `sockaddr_un` with `sun_family` set and the path bytes
+    // copied into `sun_path`; length covers family + bytes + nul.
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (slot, byte) in addr.sun_path.iter_mut().zip(bytes.iter()) {
+        *slot = *byte as libc::c_char;
+    }
+    let addr_len = (std::mem::size_of::<libc::sa_family_t>() + bytes.len() + 1) as libc::socklen_t;
+    // SAFETY: `addr` is a valid `sockaddr_un` of `addr_len` bytes; `fd` is a
+    // unix-stream fd owned above and closed on every return below.
+    let connected =
+        unsafe { libc::connect(fd, (&addr as *const libc::sockaddr_un).cast(), addr_len) };
+    if connected == 0 {
+        unsafe { libc::close(fd) };
+        return true;
+    }
+    // SAFETY: `__errno_location` is thread-local and valid to read.
+    let errno = unsafe { *libc::__errno_location() };
+    match errno {
+        libc::ECONNREFUSED | libc::ENOENT => {
+            unsafe { libc::close(fd) };
+            false
+        }
+        libc::EAGAIN => {
+            // Full backlog on a nonblocking unix `connect`: live, not free.
+            unsafe { libc::close(fd) };
+            true
+        }
+        libc::EINPROGRESS => {
+            let mut waited = Duration::ZERO;
+            let step = Duration::from_millis(10);
+            let result = loop {
+                let mut pfd = libc::pollfd {
+                    fd,
+                    events: libc::POLLOUT,
+                    revents: 0,
+                };
+                // SAFETY: `pfd` is a valid one-entry poll set; timeout is small.
+                let ready = unsafe { libc::poll(&mut pfd, 1, 10) };
+                if ready > 0 {
+                    let mut so_error: libc::c_int = 0;
+                    let mut option_len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+                    // SAFETY: `getsockopt` writes one `c_int` into `so_error`.
+                    let got = unsafe {
+                        libc::getsockopt(
+                            fd,
+                            libc::SOL_SOCKET,
+                            libc::SO_ERROR,
+                            (&mut so_error as *mut libc::c_int).cast(),
+                            &mut option_len,
+                        )
+                    };
+                    if got != 0 {
+                        break true;
+                    }
+                    match so_error {
+                        0 => break true,
+                        libc::ECONNREFUSED | libc::ENOENT => break false,
+                        _ => break true,
+                    }
+                } else if ready == 0 {
+                    waited += step;
+                    if waited >= PROBE_TIMEOUT {
+                        break true;
+                    }
+                } else {
+                    // SAFETY: errno read as above.
+                    let poll_errno = unsafe { *libc::__errno_location() };
+                    if poll_errno == libc::EINTR {
+                        continue;
+                    }
+                    break true;
+                }
+            };
+            unsafe { libc::close(fd) };
+            result
+        }
+        _ => {
+            unsafe { libc::close(fd) };
+            true
+        }
     }
 }
 

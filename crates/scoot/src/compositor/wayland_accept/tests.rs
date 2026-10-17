@@ -530,8 +530,8 @@ fn a_stale_socket_file_is_reused() {
 #[test]
 fn a_flock_held_name_is_skipped() {
     // A flocking compositor holds its lock with no live socket behind it
-    // (nothing to probe): `bind_absolute` answers `AlreadyInUse`, which moves
-    // to the next name rather than failing the bind.
+    // (nothing to probe): the pre-bind lock check skips the name with no
+    // `connect`, and `bind_absolute` would answer `AlreadyInUse` as well.
     let _serial = serial();
     let dir = tempfile::tempdir().expect("a temp runtime dir");
     let lock_path = dir.path().join("wayland-1.lock");
@@ -543,6 +543,61 @@ fn a_flock_held_name_is_skipped() {
         bound.socket_name().to_string_lossy(),
         "wayland-2",
         "a lock-held name is skipped"
+    );
+}
+
+#[test]
+fn a_lock_held_live_sibling_sees_no_probe_connection() {
+    // The F1 regression: every `State::new` connect-probed each live sibling
+    // in a shared `$XDG_RUNTIME_DIR`, injecting transient zero-byte clients
+    // into running fixtures. A lock-held name must now be skipped with no
+    // `connect` at all, so the sibling's backlog stays empty.
+    let _serial = serial();
+    let dir = tempfile::tempdir().expect("a temp runtime dir");
+    let lock_path = dir.path().join("wayland-1.lock");
+    let lock = std::fs::File::create(&lock_path).expect("a lock file to hold");
+    let held = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    assert_eq!(held, 0, "setup: the test holds wayland-1's lock");
+    let sibling = UnixListener::bind(dir.path().join("wayland-1")).expect("a sibling socket");
+    sibling
+        .set_nonblocking(true)
+        .expect("a non-blocking sibling");
+    let bound = WaylandListener::bind_in(dir.path(), None).expect("binds past the held sibling");
+    assert_eq!(
+        bound.socket_name().to_string_lossy(),
+        "wayland-2",
+        "a lock-held live name is skipped"
+    );
+    match sibling.accept() {
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+        Ok(_) => panic!("the probe connected to a lock-held sibling"),
+        Err(error) => panic!("sibling accept failed: {error}"),
+    }
+}
+
+#[test]
+fn lock_blocks_probe_matches_flock_state() {
+    // Directly: missing and unlocked lock files are free (probe), a held one
+    // blocks (skip with no connect).
+    let _serial = serial();
+    let dir = tempfile::tempdir().expect("a temp runtime dir");
+    assert!(
+        !lock_blocks_probe(&dir.path().join("missing.lock")),
+        "no lock file is free"
+    );
+    let free_path = dir.path().join("free.lock");
+    std::fs::write(&free_path, b"").expect("an unlocked lock file");
+    assert!(
+        !lock_blocks_probe(&free_path),
+        "an unlocked lock file is free"
+    );
+    let held_path = dir.path().join("held.lock");
+    let held_file = std::fs::File::create(&held_path).expect("a lock file to hold");
+    let held = unsafe { libc::flock(held_file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    assert_eq!(held, 0, "setup: the test holds the lock");
+    assert!(
+        lock_blocks_probe(&held_path),
+        "a held lock blocks the probe"
     );
 }
 
