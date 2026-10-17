@@ -892,17 +892,30 @@ fn map_solid_window(socket: &Path) -> SolidWindow {
     // whose ack the mapped commit follows. Attaching before the initial
     // ack is a protocol error, the way the compositor says so.
     surface.commit();
-    let (serial, width, height) = loop {
+    // Drain configures until quiet: the bar maps around the same time
+    // and every map shrinks the usable area with a superseding size, so
+    // attaching at the first size races it (a short window under a tall
+    // golden). Ack every serial as it arrives; attach once, at the last
+    // size seen.
+    let mut seen = false;
+    let mut size = (0, 0);
+    let mut quiet = 0;
+    while quiet < 3 {
         queue.roundtrip(&mut client).expect("Wayland events");
-        if let Some(pending) = client.pending {
-            break pending;
+        if let Some((acked, width, height)) = client.pending.take() {
+            xdg.ack_configure(acked);
+            seen = true;
+            size = (width, height);
+            quiet = 0;
+        } else {
+            quiet += 1;
         }
         assert!(
             Instant::now() < deadline,
-            "the compositor never configured the test window"
+            "the compositor kept reconfiguring the test window"
         );
-    };
-    xdg.ack_configure(serial);
+    }
+    assert!(seen, "the compositor never configured the test window");
     let (width, height) = match (width, height) {
         (w, h) if w > 0 && h > 0 => (w, h),
         _ => (400, 300),
@@ -1186,12 +1199,17 @@ fn every_shipped_look_has_a_golden() {
             )
         })
         .filter_map(|entry| {
-            entry
+            let file = entry
                 .expect("a goldens entry")
                 .file_name()
                 .into_string()
-                .ok()?
-                .strip_prefix("look-")?
+                .ok()?;
+            // Failure debris, never a baseline: `check_golden` writes it
+            // beside the golden and CI uploads it.
+            if file.ends_with(".actual.png") {
+                return None;
+            }
+            file.strip_prefix("look-")?
                 .strip_suffix(".png")
                 .map(str::to_owned)
         })
