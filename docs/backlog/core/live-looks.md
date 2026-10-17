@@ -62,7 +62,7 @@ stated rule.
 | [`look-apply-cli`](../resolved/look-apply-cli-done.md) | high | both | `look-shipped`, `look-scoped-reload` |
 | [`look-cycle-preview`](../resolved/look-cycle-preview-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-ipc`](../resolved/look-ipc-done.md) | medium | computer use | `look-apply-cli` |
-| [`look-golden-screenshots`](../testing/look-golden-screenshots.md) | medium | computer use | `look-ipc` |
+| [`look-golden-screenshots`](../resolved/look-golden-screenshots-done.md) | medium | computer use | `look-ipc` |
 | [`look-nix-catalog`](../packaging/look-nix-catalog.md) | high | daily-drive | `look-apply-cli` |
 | [`look-import-base16`](look-import-base16.md) | medium | daily-drive | `look-format` |
 | [`look-stylix-source`](../packaging/look-stylix-source.md) | high | daily-drive | `look-nix-catalog`, `look-import-base16` |

@@ -384,7 +384,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [`scoot look apply`: the atomic swap, scoped reloads, rollback](./resolved/look-apply-cli-done.md) (high) — RESOLVED 2026-10-15
 - [`scoot look next`/`prev`/`random` and timed previews](./resolved/look-cycle-preview-done.md) (medium) — RESOLVED 2026-10-16
 - [IPC: look-apply and looks requests, a look event](./resolved/look-ipc-done.md) (medium, computer use) — RESOLVED 2026-10-15
-- [Golden screenshots per shipped look](./testing/look-golden-screenshots.md) (medium, computer use)
+- [Golden screenshots per shipped look](./resolved/look-golden-screenshots-done.md) (medium, computer use) — RESOLVED 2026-10-16
 - [Nix: the `programs.scoot.looks` catalog and the switch rule](./packaging/look-nix-catalog.md) (high, breaking)
 - [`scoot look import-base16`: the one base16-to-token mapping](./core/look-import-base16.md) (medium)
 - [Stylix becomes a synthesized `stylix` look instead of a layer above the look](./packaging/look-stylix-source.md) (high, breaking)

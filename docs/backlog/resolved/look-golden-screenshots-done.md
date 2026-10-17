@@ -1,9 +1,10 @@
 ---
 title: "Golden screenshots per shipped look from the headless harness"
-status: "open"
-area: "testing"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-16"
 ---
 
 # Golden screenshots per shipped look from the headless harness
