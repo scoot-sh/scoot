@@ -389,8 +389,16 @@ let
     let
       # A literal `stylix` in `looks` means the synthesized look: it is
       # filtered here and appended below when synthesis is on (an
-      # unknown shipped string still refuses in `toEntry`).
-      entries = mkEntries (builtins.filter (item: item != "stylix") looks);
+      # unknown shipped string still refuses in `toEntry`). With
+      # synthesis off it refuses loudly instead of vanishing: before
+      # the synthesis existed that string threw "unknown shipped
+      # look", and a silent drop would hide a typo'd intent.
+      withoutStylix = builtins.filter (item: item != "stylix") looks;
+      entries =
+        if stylix == null && builtins.length withoutStylix != builtins.length looks then
+          throw "programs.scoot.looks: `stylix` is the synthesized Stylix look, but its synthesis is off (needs Stylix in use, programs.scoot.stylix.enable and a lookPackage): drop it from `looks`, or turn the synthesis on"
+        else
+          mkEntries withoutStylix;
       sty =
         if stylix == null then
           null

@@ -254,7 +254,8 @@ in
     # `look.toml`, or a manifest whose `name` is not a look name fails
     # the evaluation naming it. Read only with `desktop.enable`. A
     # literal `stylix` means the synthesized Stylix look (below): it
-    # appends when synthesis is on, and a directory named `stylix`
+    # appends when synthesis is on (naming it while synthesis is off
+    # fails the evaluation), and a directory named `stylix`
     # goes as a path, not a string.
     looks = lib.mkOption {
       type = lib.types.listOf (lib.types.either lib.types.str lib.types.path);

@@ -2521,20 +2521,34 @@ in
     # without a choice (a value the user sets wins over this default,
     # including an explicit null to theme nothing). One rung above the
     # Stylix source's `mkDefault` (1000) and below the option's own
-    # `default = null` (1500). It lives here and on the home-manager
-    # side rather than as the option default, so a look never lands
-    # without the profile (the refusal below keeps firing then).
+    # `default = null` (1500): Stylix, when synthesized, beats the
+    # profile, and the profile beats nothing chosen. It lives here
+    # and on the home-manager side rather than as the option default,
+    # so a look never lands without the profile (the refusal below
+    # keeps firing then, except for the synthesized `stylix` look,
+    # which installs its own catalog).
     (lib.mkIf cfg.desktop.enable {
       programs.scoot.look = lib.mkOverride 1200 "ginger-night";
     })
+    # The Stylix source, when synthesized: the declared default
+    # `stylix` at `mkDefault` (1000), above the profile's `mkOverride
+    # 1200` and below the user. Same meaning as the home-manager
+    # side's: swapping away and back works like any other look; the
+    # apps never read Stylix, only this look.
+    (lib.mkIf stylixActive {
+      programs.scoot.look = lib.mkDefault "stylix";
+    })
     # A look without the profile is a silent no-op; refuse it loudly
-    # instead (kept outside `desktop.enable` so it still fires then).
-    # An unknown look fails here too, against the catalog — never a
-    # half-applied switch.
+    # instead (kept outside `desktop.enable` so it still fires then)
+    # — except the synthesized `stylix` look, whose catalog installs
+    # without the profile too. The catalog below installs with the
+    # profile (or that synthesis) for the same reason. An unknown
+    # look fails here too, against the catalog — never a half-applied
+    # switch.
     (lib.mkIf (cfg.look != null) {
       assertions = [
         {
-          assertion = cfg.desktop.enable;
+          assertion = cfg.desktop.enable || (stylixActive && cfg.look == "stylix");
           message = ''
             programs.scoot.look needs programs.scoot.desktop.enable:
             the look is applied by the profile, so the profile must be on.
@@ -2556,12 +2570,14 @@ in
       programs.scoot.greeter.look = lib.mkDefault cfg.look;
     }
     # A greeter look without the profile is a silent no-op; refuse it
-    # loudly instead. An unknown greeter look fails here too, against
+    # loudly instead — except the synthesized `stylix` look, which
+    # follows the declared default into the catalog without the
+    # profile too. An unknown greeter look fails here too, against
     # the catalog — never a half-themed login screen.
     (lib.mkIf (cfg.greeter.look != null) {
       assertions = [
         {
-          assertion = cfg.desktop.enable;
+          assertion = cfg.desktop.enable || (stylixActive && cfg.greeter.look == "stylix");
           message = ''
             programs.scoot.greeter.look needs programs.scoot.desktop.enable:
             the login screen's look is applied by the profile, so the profile must be on.
@@ -2584,8 +2600,9 @@ in
     # claims file (no `dconf.settings` merge is visible from this
     # side — the home-manager side writes the real claims, and with no
     # home-manager there is nothing to claim). Only with the profile
-    # and a render binary.
-    (lib.mkIf (cfg.desktop.enable && lookCatalog.sources != null) {
+    # (or the Stylix synthesis, which carries its own look) and a
+    # render binary.
+    (lib.mkIf ((cfg.desktop.enable || stylixActive) && lookCatalog.sources != null) {
       environment.systemPackages = [
         (pkgs.runCommand "scoot-looks-catalog" { } ''
           mkdir -p $out/share/scoot/looks $out/share/scoot/rendered

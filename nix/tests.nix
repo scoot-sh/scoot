@@ -83,8 +83,16 @@
 #   background equal today's leaves (`base0D`/`base03`/`base00`) and
 #   its bar tokens equal today's six; the cursor package is never
 #   installed (Stylix's own cursor target owns that); Stylix beside
-#   the profile evaluates with no priority clash; an explicit `look`
-#   wins over the synthesized default; and the module evaluates with
+#   the profile evaluates with no priority clash, on the
+#   home-manager side and on the NixOS side (whose declared default
+#   is `stylix` too, with the login screen following it, and whose
+#   system catalog installs without the profile as well); an explicit
+#   `look` wins over the synthesized default on both sides; a
+#   non-grammar companion name (non-Latin, over-long, punctuated) is
+#   left out with a warning naming the value instead of failing the
+#   build (the faces fall back, the cursor half stays out); a literal
+#   `stylix` in `looks` with synthesis off refuses loudly instead of
+#   vanishing; and the module evaluates with
 #   no Stylix option defined at all (every pre-existing evaluation
 #   below does exactly that).
 # - the desktop profile (`programs.scoot.desktop`, child
@@ -880,6 +888,8 @@ let
       image ? styImage,
       mode ? "fill",
       targets ? { },
+      sansName ? "DejaVu Sans",
+      monoName ? "DejaVu Sans Mono",
     }:
     {
       options.stylix.enable = lib.mkOption {
@@ -956,11 +966,11 @@ let
         stylix.image = image;
         stylix.imageScalingMode = mode;
         stylix.fonts.sansSerif = {
-          name = "DejaVu Sans";
+          name = sansName;
           package = pkgs.dejavu_fonts.minimal;
         };
         stylix.fonts.monospace = {
-          name = "DejaVu Sans Mono";
+          name = monoName;
           package = pkgs.dejavu_fonts.minimal;
         };
         stylix.fonts.sizes.desktop = 10;
@@ -1064,6 +1074,45 @@ let
       size = 300;
     };
   };
+  # Non-grammar companion names (a non-Latin face, an injection-shaped
+  # cursor name) drop out with a warning instead of refusing: the
+  # faces fall back, the cursor keeps its size without the name.
+  stylixSynthNonLatin = stylixSynthLib.synthesize {
+    colors = stylixPaletteFull;
+    fontsSans = {
+      name = "文泉驿微米黑";
+      package = "/store/sans";
+    };
+    fontsMono = {
+      name = "DejaVu Sans Mono";
+      package = "/store/mono";
+    };
+    isDark = true;
+    cursor = {
+      name = "Evil\"; rm -rf ~; echo \"";
+      size = 24;
+    };
+  };
+  # M1: a literal `stylix` in `looks` with synthesis off refuses
+  # loudly instead of vanishing (`tryEval` catches the throw;
+  # forcing `.names` forces the entries).
+  stylixLiteralOff = builtins.tryEval (
+    (
+      (import ./look-catalog.nix {
+        inherit lib pkgs;
+        scootLook = fakeLook;
+        fallbackUiPackage = null;
+        fallbackFont = null;
+      }).mkCatalog
+      {
+        looks = [
+          "ginger-night"
+          "stylix"
+        ];
+        stylix = null;
+      }
+    ).names
+  );
 
   evalHomeStylix =
     stub: cfg:
@@ -1135,6 +1184,32 @@ let
     ./modules/nixos.nix
     { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
   ] pkgs;
+
+  # Like `evalHomeStylix` for the NixOS side: the full Stylix stub
+  # beside the NixOS module (the greeter's regreet surroundings ride
+  # along, as in every NixOS evaluation).
+  evalNixosStylix =
+    stub: cfg:
+    lib.evalModules {
+      modules = [
+        ./modules/nixos.nix
+        baseStubs
+        nixosStubs
+        regreetStubs
+        (stylixStub stub)
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        ({ config, ... }: {
+          programs.scoot = {
+            lookPackage = lib.mkDefault fakeLook;
+          }
+          // cfg;
+        })
+      ];
+      specialArgs = {
+        pkgs = pkgs;
+        modulesPath = "${pkgs.path}/nixos/modules";
+      };
+    };
 
   fakePkg = pkgs.runCommand "fake-scoot" { } ''
     mkdir -p $out/bin
@@ -1364,6 +1439,12 @@ let
       {
         enable = true;
       };
+  # A non-Latin Stylix face: left out with a warning, the synthesis
+  # stays (the face falls back below).
+  hmStylixNonLatin = evalHomeStylix { sansName = "文泉驿微米黑"; } {
+    enable = true;
+    package = fakePkg;
+  };
 
   # --- the flake's wrappers, overlay and Darwin (only from flake.nix) ---
   withFlake = flake != null;
@@ -5023,6 +5104,28 @@ let
     package = fakePkg;
     desktop.enable = true;
   };
+  # Stylix beside the profile on the NixOS side, no explicit look:
+  # the synthesized `stylix` default wins (one rung above the
+  # profile), and the login screen follows it.
+  osDeskStylix = evalNixosStylix { } {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+  };
+  # ...with an explicit look: the user's look wins over the
+  # synthesized default.
+  osDeskStylixExplicit = evalNixosStylix { } {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    look = "music-desk";
+  };
+  # ...without the profile: the synthesis carries its own catalog
+  # (the look and greeter assertions exempt the synthesized look).
+  osStylixNoProfile = evalNixosStylix { } {
+    enable = true;
+    package = fakePkg;
+  };
   osDeskSlotOn = evalNixos {
     enable = true;
     package = fakePkg;
@@ -6222,6 +6325,48 @@ let
             size = 256;
           }
         && !(got ? image);
+      true
+    )
+    # ...while non-grammar companion names (a non-Latin face, an
+    # injection-shaped cursor name) are left out with a warning
+    # instead of refusing: no `sansSerif` key, the cursor keeps its
+    # size without the name, and the theme falls back to DejaVu.
+    (
+      assert
+        let
+          got = builtins.fromJSON stylixSynthNonLatin.json;
+        in
+        !(got.fonts ? sansSerif)
+        && got.fonts.monospace == "DejaVu Sans Mono"
+        && got.cursor == { size = 24; }
+        &&
+          stylixSynthNonLatin.themeLook.fonts == {
+            ui = "DejaVu Sans";
+            sans = "DejaVu Sans";
+            mono = "DejaVu Sans Mono";
+          };
+      true
+    )
+    # ...and through the module the synthesis stays: the declared
+    # default is still `stylix`, the evaluation holds, and the face
+    # falls back to DejaVu.
+    (
+      assert allAssertionsHold hmStylixNonLatin.config;
+      true
+    )
+    (
+      assert hmStylixNonLatin.config.programs.scoot.look == "stylix";
+      true
+    )
+    (
+      assert hmStylixNonLatin.config.programs.scoot.stylix.theme.fonts.sans == "DejaVu Sans";
+      true
+    )
+    # M1: a literal `stylix` in `looks` with synthesis off refuses
+    # loudly instead of vanishing (before the synthesis that string
+    # threw "unknown shipped look").
+    (
+      assert !stylixLiteralOff.success;
       true
     )
 
@@ -7663,6 +7808,66 @@ let
     )
     (
       assert allAssertionsHold hmDeskStylixExplicit.config;
+      true
+    )
+    # NixOS beside the profile with Stylix, no explicit look: the
+    # declared default is the synthesized `stylix` look (one rung
+    # above the profile's), the system catalog carries it, and the
+    # login screen follows it.
+    (
+      assert allAssertionsHold osDeskStylix.config;
+      true
+    )
+    (
+      assert osDeskStylix.config.programs.scoot.look == "stylix";
+      true
+    )
+    (
+      assert osDeskStylix.config.programs.scoot.greeter.look == "stylix";
+      true
+    )
+    (
+      assert osDeskStylix.config.environment.etc."scoot/look-default".text == "stylix";
+      true
+    )
+    (
+      assert lib.any (
+        p: (p.name or "") == "scoot-looks-catalog"
+      ) osDeskStylix.config.environment.systemPackages;
+      true
+    )
+    # ...while an explicit look wins over the synthesized default.
+    (
+      assert osDeskStylixExplicit.config.programs.scoot.look == "music-desk";
+      true
+    )
+    (
+      assert allAssertionsHold osDeskStylixExplicit.config;
+      true
+    )
+    # ...and without the profile the synthesis carries its own
+    # catalog: the look defaults to `stylix`, the login screen
+    # follows, the declared default lands, and no assertion fires.
+    (
+      assert allAssertionsHold osStylixNoProfile.config;
+      true
+    )
+    (
+      assert osStylixNoProfile.config.programs.scoot.look == "stylix";
+      true
+    )
+    (
+      assert osStylixNoProfile.config.programs.scoot.greeter.look == "stylix";
+      true
+    )
+    (
+      assert osStylixNoProfile.config.environment.etc."scoot/look-default".text == "stylix";
+      true
+    )
+    (
+      assert lib.any (
+        p: (p.name or "") == "scoot-looks-catalog"
+      ) osStylixNoProfile.config.environment.systemPackages;
       true
     )
     # The xwayland knob defaults the compositor flag on...

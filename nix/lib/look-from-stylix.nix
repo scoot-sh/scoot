@@ -40,8 +40,14 @@
 #   image is set. Sizes clamp into 4..192 points, opacity into 0..1
 #   and cursor size into 4..256 (Stylix's types are wider than the
 #   look grammar's; clamping keeps an odd value from failing the
-#   build). `polarity` is always explicit here, so the rendered
-#   look and `themeLook` below agree by construction.
+#   build). Companion names outside the look identifier grammar
+#   (ASCII letters, digits, space and `-_.+`, 1 to 64 bytes,
+#   starting with a letter or digit — a non-Latin face, say) are left
+#   out with an eval-time warning naming the value instead of failing
+#   the build: the faces fall back to the base look's (DejaVu without
+#   one), the cursor to the default. `polarity` is always explicit
+#   here, so the rendered look and `themeLook` below agree by
+#   construction.
 # - `themeLook`: the registry-shaped look the theme reads for `stylix`
 #   (the base with the palette, polarity and faces replaced). No module
 #   maps a base16 slot itself: this is the one mapping, and the theme
@@ -105,6 +111,28 @@ let
   # Whether `background` reads dark against `foreground`.
   isDarkByLuma = background: foreground: (luma background) <= (luma foreground);
 
+  # Whether `name` is expressible in a look (the grammar `scoot-look
+  # import-base16` enforces for font and cursor names: ASCII letters,
+  # digits, space and `-_.+`, 1 to 64 bytes, starting with a letter
+  # or digit).
+  isLookIdentifier =
+    name: builtins.isString name && builtins.match "^[A-Za-z0-9][A-Za-z0-9 _.+-]{0,63}$" name != null;
+
+  # Leave a non-grammar Stylix companion name out with an eval-time
+  # warning naming the value, instead of failing the build: a
+  # non-Latin face (or an over-long or punctuated one) falls back to
+  # the base look's face (DejaVu without one), a cursor name to the
+  # default, while `import-base16` itself stays strict (correct for
+  # user-authored schemes).
+  dropNonIdentifier =
+    what: name:
+    if name == null then
+      null
+    else if isLookIdentifier name then
+      name
+    else
+      lib.warn "programs.scoot.stylix: ${what} name `${name}` is not a look identifier (ASCII letters, digits, space and -_.+, 1 to 64 bytes, starting with a letter or digit) and is left out of the synthesized look" null;
+
   # The image file name inside the synthesized source: `wallpaper` plus
   # the image's own extension (scootbg sniffs content, but the suffix
   # keeps the source readable). Anything else is a loud eval error.
@@ -151,8 +179,9 @@ let
       urgent = get "base08";
       selection = get "base02";
       match = get "base0A";
-      sans = (fontsSans.name or null);
-      mono = (fontsMono.name or null);
+      sans = dropNonIdentifier "sansSerif font" (fontsSans.name or null);
+      mono = dropNonIdentifier "monospace font" (fontsMono.name or null);
+      cursorName = dropNonIdentifier "cursor" (cursor.name or null);
       ui = sans;
       imageFile = if image == null then null else imageFileFor image;
       fontPackages = lib.unique (
@@ -231,7 +260,7 @@ let
         }
         // lib.optionalAttrs (cursor != null) {
           cursor =
-            lib.optionalAttrs ((cursor.name or null) != null) { name = cursor.name; }
+            lib.optionalAttrs (cursorName != null) { name = cursorName; }
             // lib.optionalAttrs ((cursor.size or null) != null) { size = clampCursor cursor.size; };
         }
         // lib.optionalAttrs (imageFile != null) {

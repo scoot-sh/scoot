@@ -191,7 +191,10 @@ opacity, the cursor name and size, and `stylix.image` with its
 scaling mode. Everything the palette does not set comes from the
 base look: the wallpaper when no image is set, the terminal hues and
 static editor files, the night temperature, and the shape and
-opacity. Dark or light follows `stylix.polarity`.
+opacity. Dark or light follows `stylix.polarity`. A face or cursor
+name the look grammar cannot carry (a non-Latin name, for example)
+is left out with a warning naming it: the faces fall back to the
+base look's, the cursor to the default.
 
 - `programs.scoot.stylix.enable` — Type: bool. Default: `true`.
   Synthesize the `stylix` look and make it the declared default. Set
