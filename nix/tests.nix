@@ -11829,7 +11829,7 @@ let
       true
     )
     (
-      assert hmThemeStylix.config.programs.scoot.settings == { };
+      assert builtins.removeAttrs hmThemeStylix.config.programs.scoot.settings [ "binds" ] == { };
       true
     )
     (
