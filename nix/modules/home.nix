@@ -12,6 +12,10 @@ let
   # The desktop profile's shared option subtree.
   desktop = import ./desktop.nix { inherit lib; };
 
+  # The shipped looks' manifests (the single source of the catalog's
+  # shipped names).
+  lookShipped = import ../lib/look-shipped.nix { inherit lib; };
+
   # The Nix side of the look catalog (sources, build-time renders): names
   # of shipped looks or paths to source look directories, read with
   # `builtins.fromTOML` (no derivations, no import-from-derivation). Null
@@ -259,7 +263,7 @@ in
     # goes as a path, not a string.
     looks = lib.mkOption {
       type = lib.types.listOf (lib.types.either lib.types.str lib.types.path);
-      default = builtins.attrNames (import ./desktop.nix { inherit lib; }).looks;
+      default = lookShipped.shippedNames;
       defaultText = lib.literalExpression "every shipped look";
       example = [
         "ginger-night"
@@ -424,9 +428,9 @@ in
         '';
       };
 
-      # The registry-shaped theme value for `stylix` (the Stylix
+      # The shipped-look-shaped theme value for `stylix` (the Stylix
       # palette over the base look's static leaves): what
-      # `theme-look.nix` resolves the `stylix` look to. Internal: set
+      # `look-shipped.nix` resolves the `stylix` look to. Internal: set
       # beside the catalog, read by the theme.
       theme = lib.mkOption {
         type = lib.types.nullOr lib.types.attrs;

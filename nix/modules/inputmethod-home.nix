@@ -18,7 +18,7 @@ let
   # Whether the candidate window follows the live look (a look is set
   # and its target is on): the theme then comes from the look fragment,
   # never from this evaluation.
-  themeLook = import ./theme-look.nix { inherit lib; };
+  themeLook = import ../lib/look-shipped.nix { inherit lib; };
   themed = themeLook.themed cfg "inputMethod";
 
   isLinux = pkgs.stdenv.hostPlatform.isLinux;
@@ -35,7 +35,7 @@ let
   # into the live look fragment, and reloaded over D-Bus on every swap
   # (`ReloadAddonConfig "classicui"`). Unselected text in the look's
   # foreground, the selected row in its accent with the background on
-  # top (the AA pairing `theme-look.nix` measures for the bar:
+  # top (the AA pairing `look-shipped.nix` measures for the bar:
   # background on accent passes everywhere the bar does), the input
   # string in the accent on the background. Anything the fragment
   # leaves out keeps fcitx5's own default (a partial theme loads over

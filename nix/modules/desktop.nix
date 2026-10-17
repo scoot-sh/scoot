@@ -174,9 +174,11 @@ let
   ];
 in
 {
-  # The shared keymap table above, beside the option subtree and the
-  # look palettes: `keys-home.nix` reads it to render `[binds]`, so
-  # the combos live in exactly one place.
+  # The shared keymap table above, beside the option subtree:
+  # `keys-home.nix` reads it to render `[binds]`, so the combos live in
+  # exactly one place. (The shipped looks' values live in their own
+  # `looks/<name>/look.toml` directories, read through
+  # `nix/lib/look-shipped.nix`.)
   inherit keymap isStateIcon;
   # The option subtree, assigned to `options.programs.scoot.desktop` by
   # both modules.
@@ -186,11 +188,9 @@ in
     # Where the look choice lives now: `programs.scoot.look` (and the
     # catalog in `programs.scoot.looks`), declared beside the scoot
     # modules that have `pkgs`, not here — this file stays `lib`-only.
-    # The palettes below are still read by the eval-time leaves (the
-    # theme, the locker, the pickers) until the leaves tickets move each
-    # one onto the rendered look; `look-nix-retire-registry` removes
-    # them. An unknown `look` fails there, against the catalog — the
-    # `enum` below is gone with the option.
+    # The eval-time leaves (the theme, the locker, the pickers) read
+    # the shipped looks' manifests through `nix/lib/look-shipped.nix`;
+    # an unknown `look` fails there, against the catalog.
 
     # The bar half of `enable`: on, the profile enables and themes the bar
     # (through `programs.scootbar`, when that module is imported -- the
@@ -363,7 +363,7 @@ in
         # Free-form `key = value` lines merged over the look-themed
         # config (a value you set wins per key). An empty string renders
         # a bare flag (`{ show-failed-attempts = ""; }`). The look's
-        # leaves stay when the theme-look child arrives (user > look,
+        # leaves stay when the theme child arrives (user > look,
         # per key); `theme.targets.lock.enable = false`
         # drops the themed block but keeps these.
         settings = lib.mkOption {
@@ -1272,7 +1272,7 @@ in
     # (Stylix-style): every themed piece gets
     # `theme.targets.<name>.enable` here (default on), so a user can
     # keep one piece's own style while the rest follows the look.
-    # Filled by the `desktop-theme-look` child; without a look behind
+    # Filled by the theme child; without a look behind
     # the profile the slot is inert (there is nothing to derive
     # from), the way every other standalone slot runs unthemed.
     theme = {
@@ -1880,238 +1880,6 @@ in
           notification carrying a Browse action. Without it nothing
           mounts on insert.
         '';
-      };
-    };
-  };
-
-  # The palettes behind `look`, read from `docs/examples/*` (the
-  # `scoot.toml` `[appearance]` and `bar.toml` `[colors]` each look ships).
-  # `nightTemp` is each look's own night warmth for the nightlight slot
-  # (the espresso look warmest, the paper look brightest -- a value the
-  # user sets in `nightlight.nightTemp` wins per key).
-  # `wallpaper` is null where the look has no image to ship
-  # (`vinyl-sunset`: its illustration is license-barred from being
-  # committed, and from being fetched for the user automatically, so the
-  # session shows the flat `background_color` below
-  # unless the user sets `settings.wallpaper` themselves -- see
-  # site/src/content/docs/scootbg/index.md#the-wallpaper-section), else the in-repo file plus its mode. `image` is a path,
-  # or `{ url, hash }` (a link fetched once with `pkgs.fetchurl` when the
-  # profile applies it -- resolved in home.nix, since this module takes
-  # only `lib`).
-  looks = {
-    vinyl-sunset = {
-      appearance = {
-        background_color = "#271A1F";
-        focus_ring_active_color = "#E59560";
-        focus_ring_inactive_color = "#423F51";
-      };
-      barColors = {
-        background = "#271A1F";
-        foreground = "#F1E3C6";
-        accent = "#E59560";
-        hover = "#FDC58B";
-        dim = "#604F50";
-        urgent = "#C76B47";
-      };
-      nightTemp = 3200;
-      # Dark or light: what the GTK/Qt theme, the dark-mode signal
-      # and the greeter's dark setting follow.
-      isDark = true;
-      # The three faces the theme carries everywhere text is drawn:
-      # `ui` is the bar's face (Droid Sans Mono Nerd Font Propo: the
-      # module icons below need its Nerd glyphs, so the bar keeps this
-      # mono face); `sans` is the proportional UI sans for GTK/Qt
-      # apps, the greeter and fontconfig sans-serif (DejaVu Sans: the
-      # only proportional face the profile already ships -- the bar's
-      # own fallback file -- so it adds zero closure; its humanist
-      # warmth pairs with this look's espresso-and-orange vinyl dusk,
-      # and its open apertures stay legible on dark surfaces); `mono`
-      # is the terminal face (foot, fontconfig monospace). Names,
-      # resolved through fontconfig; the packages beside them live in
-      # the side modules (which own `pkgs`), so this file stays
-      # `lib`-only.
-      fonts = {
-        ui = "DroidSansM Nerd Font Propo";
-        sans = "DejaVu Sans";
-        mono = "FiraCode Nerd Font";
-      };
-      # The example's own app files, applied from the flake instead of
-      # copy-paste (see `theme-home.nix`): foot, starship, Helix and
-      # btop stay static files -- their palettes are hand-tuned per
-      # look, not derivable from the six bar roles without inventing
-      # colors -- while GTK/Qt/cursor/greeter settings generate from
-      # the roles above. Null where the example ships none
-      # (`radial-burst` has no shell, editor or monitor files): the
-      # target is then inert for that look.
-      appFiles = {
-        foot = ../../docs/examples/vinyl-sunset/foot.ini;
-        starship = ../../docs/examples/vinyl-sunset/starship.toml;
-        helixConfig = ../../docs/examples/vinyl-sunset/helix/config.toml;
-        helixTheme = ../../docs/examples/vinyl-sunset/helix/themes/scoot-vinyl.toml;
-        btopConf = ../../docs/examples/vinyl-sunset/btop/btop.conf;
-        btopTheme = ../../docs/examples/vinyl-sunset/btop/themes/vinyl.theme;
-        regreetCss = ../../docs/examples/vinyl-sunset/regreet.css;
-      };
-      wallpaper = null;
-    };
-    music-desk = {
-      appearance = {
-        background_color = "#FCFBFB";
-        focus_ring_active_color = "#3D579A";
-        focus_ring_inactive_color = "#D5D7DD";
-      };
-      barColors = {
-        background = "#FCFBFB";
-        foreground = "#1A2032";
-        accent = "#3D579A";
-        hover = "#5D7AB0";
-        dim = "#C9CBD0";
-        urgent = "#EE6F5E";
-      };
-      nightTemp = 4000;
-      isDark = false;
-      # `sans` is DejaVu Sans here too: bookish and paper-neutral, so
-      # the ink-blue accent carries the look while the type stays
-      # quiet -- and already shipped, so zero closure (see the
-      # vinyl-sunset note above for the `ui`/`sans`/`mono` split).
-      fonts = {
-        ui = "DroidSansM Nerd Font Propo";
-        sans = "DejaVu Sans";
-        mono = "FiraCode Nerd Font";
-      };
-      appFiles = {
-        foot = ../../docs/examples/music-desk/foot.ini;
-        starship = ../../docs/examples/music-desk/starship.toml;
-        helixConfig = ../../docs/examples/music-desk/helix/config.toml;
-        helixTheme = ../../docs/examples/music-desk/helix/themes/scoot-light.toml;
-        btopConf = ../../docs/examples/music-desk/btop.conf;
-        btopTheme = null;
-        regreetCss = ../../docs/examples/music-desk/regreet.css;
-      };
-      wallpaper = {
-        image = ../../docs/assets/wallpapers/music-desk.png;
-        mode = "fill";
-      };
-    };
-    radial-burst = {
-      appearance = {
-        background_color = "#241721";
-        focus_ring_active_color = "#31a9e5";
-        focus_ring_inactive_color = "#e36e38";
-      };
-      barColors = {
-        background = "#241721";
-        foreground = "#fdef1d";
-        accent = "#31a9e5";
-        dim = "#99911d";
-        urgent = "#bf128d";
-      };
-      nightTemp = 3500;
-      isDark = true;
-      # `sans` is DejaVu Sans: the sturdiest of the shipped faces at
-      # poster sizes, holding against this look's plum-and-yellow
-      # burst -- and this look already ships `dejavu_fonts` as its
-      # `mono`, so the sans adds nothing (see the vinyl-sunset note
-      # above for the `ui`/`sans`/`mono` split).
-      fonts = {
-        ui = "DroidSansM Nerd Font Propo";
-        sans = "DejaVu Sans";
-        mono = "DejaVu Sans Mono";
-      };
-      appFiles = {
-        foot = ../../docs/examples/radial-burst/foot.ini;
-        starship = null;
-        helixConfig = null;
-        helixTheme = null;
-        btopConf = null;
-        btopTheme = null;
-        regreetCss = ../../docs/examples/radial-burst/regreet.css;
-      };
-      wallpaper = {
-        image = ../../docs/assets/wallpapers/radial-burst.png;
-        mode = "fill";
-      };
-    };
-    moonrise = {
-      appearance = {
-        background_color = "#2B3648";
-        focus_ring_active_color = "#FF9A49";
-        focus_ring_inactive_color = "#5E4B5B";
-      };
-      barColors = {
-        background = "#2B3648";
-        foreground = "#F6EEDC";
-        accent = "#FFA45C";
-        hover = "#FFD54A";
-        dim = "#9C8B95";
-        urgent = "#E87F6A";
-      };
-      nightTemp = 3400;
-      isDark = true;
-      # `sans` is DejaVu Sans: open apertures stay legible on this
-      # look's translucent slate, while the cream text and amber disc
-      # carry the night mood -- already shipped, so zero closure (see
-      # the vinyl-sunset note above for the `ui`/`sans`/`mono` split).
-      fonts = {
-        ui = "DroidSansM Nerd Font Propo";
-        sans = "DejaVu Sans";
-        mono = "FiraCode Nerd Font";
-      };
-      appFiles = {
-        foot = ../../docs/examples/moonrise/foot.ini;
-        starship = ../../docs/examples/moonrise/starship.toml;
-        helixConfig = ../../docs/examples/moonrise/helix/config.toml;
-        helixTheme = ../../docs/examples/moonrise/helix/themes/scoot-moonrise.toml;
-        btopConf = ../../docs/examples/moonrise/btop/btop.conf;
-        btopTheme = ../../docs/examples/moonrise/btop/themes/moonrise.theme;
-        regreetCss = ../../docs/examples/moonrise/regreet.css;
-      };
-      wallpaper = {
-        image = ../../docs/assets/wallpapers/moonrise.png;
-        mode = "fill";
-      };
-    };
-    ginger-night = {
-      appearance = {
-        background_color = "#0E0E0E";
-        focus_ring_active_color = "#FF9A30";
-        focus_ring_inactive_color = "#4E2913";
-      };
-      barColors = {
-        background = "#0E0E0E";
-        foreground = "#F5EAD6";
-        accent = "#E57F29";
-        hover = "#FFB14B";
-        dim = "#8F7A63";
-        urgent = "#E05A4E";
-      };
-      nightTemp = 3300;
-      isDark = true;
-      # `sans` is DejaVu Sans: its open apertures stay legible on this
-      # look's near-black field, while the cream text and ginger glyphs
-      # carry the night mood -- already shipped, so zero closure (see
-      # the vinyl-sunset note above for the `ui`/`sans`/`mono` split).
-      fonts = {
-        ui = "DroidSansM Nerd Font Propo";
-        sans = "DejaVu Sans";
-        mono = "FiraCode Nerd Font";
-      };
-      appFiles = {
-        foot = ../../docs/examples/ginger-night/foot.ini;
-        starship = ../../docs/examples/ginger-night/starship.toml;
-        helixConfig = ../../docs/examples/ginger-night/helix/config.toml;
-        helixTheme = ../../docs/examples/ginger-night/helix/themes/scoot-ginger-night.toml;
-        btopConf = ../../docs/examples/ginger-night/btop/btop.conf;
-        btopTheme = ../../docs/examples/ginger-night/btop/themes/ginger-night.theme;
-        regreetCss = ../../docs/examples/ginger-night/regreet.css;
-      };
-      # `fit` (not `fill`): the cat peeks in from the right edge, so
-      # covering would crop it on narrower outputs; the `fill` letterbox
-      # is the look's own black, so the bars blend with the field.
-      wallpaper = {
-        image = ../../docs/examples/ginger-night/wallpaper.png;
-        mode = "fit";
-        fill = "#0E0E0E";
       };
     };
   };

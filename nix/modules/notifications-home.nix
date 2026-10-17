@@ -18,7 +18,7 @@ let
   # Whether the notification slot follows the live look (a look is set
   # and its target is on): the colors then come from the look fragment,
   # never from this evaluation.
-  themeLook = import ./theme-look.nix { inherit lib; };
+  themeLook = import ../lib/look-shipped.nix { inherit lib; };
   themed = themeLook.themed cfg "notifications";
 
   # The bar's build, when its module is imported beside this one (the

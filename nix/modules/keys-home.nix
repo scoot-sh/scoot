@@ -18,7 +18,7 @@ let
   # combos live there, so this file cannot disagree with them), plus
   # the one helper that reads look-derived values.
   desktop = import ./desktop.nix { inherit lib; };
-  themeLook = import ./theme-look.nix { inherit lib; };
+  themeLook = import ../lib/look-shipped.nix { inherit lib; };
 
   # A tool by absolute store path when its package is set, else by
   # bare name from PATH (off Linux, or a direct-module setup without

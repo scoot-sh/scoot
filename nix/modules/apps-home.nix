@@ -19,9 +19,8 @@ let
   apps = cfg.desktop.apps;
   automount = cfg.desktop.automount;
 
-  # The desktop profile's shared option subtree and the one helper
-  # that reads look-derived values (never hand-mapped here).
-  themeLook = import ./theme-look.nix { inherit lib; };
+  # The one helper that reads look-derived values (never hand-mapped here).
+  themeLook = import ../lib/look-shipped.nix { inherit lib; };
 
   isLinux = pkgs.stdenv.hostPlatform.isLinux;
   linuxPkg = name: if isLinux then (pkgs.${name} or null) else null;
