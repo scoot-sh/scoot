@@ -82,7 +82,11 @@
 //! skip into a failure so CI cannot go green by skipping it. CI builds
 //! `-p scootbar` in the default `linux` job before the suite and sets the
 //! requirement in that job's two test steps (nextest and cargo test);
-//! the feature jobs carry no bar and skip the scenes there.
+//! the feature jobs carry no bar and skip the scenes there (a stale
+//! cache-restored `scootbar` could still run them; green either way).
+//! The `foot` check degrades to a note under the stub `PATH` (no
+//! terminal client appears in the scene, so nothing pixel-relevant is
+//! lost).
 //!
 //! `every_shipped_look_has_a_golden` keeps the set complete: a look added
 //! to `looks/` without a golden (or a golden without a look) fails it.
@@ -940,8 +944,8 @@ fn map_solid_window(socket: &Path) -> SolidWindow {
     // Drain configures until quiet: the bar maps around the same time
     // and every map shrinks the usable area with a superseding size, so
     // attaching at the first size races it (a short window under a tall
-    // golden). Ack every serial as it arrives; attach once, at the last
-    // size seen.
+    // golden). Ack every serial as it arrives (one ack covers superseded
+    // configures); attach once, at the last size seen.
     let mut seen = false;
     let mut size = (0, 0);
     let mut quiet = 0;
@@ -961,6 +965,9 @@ fn map_solid_window(socket: &Path) -> SolidWindow {
         );
     }
     assert!(seen, "the compositor never configured the test window");
+    // A zero size means the client chooses; 400x300 is arbitrary but
+    // fixed, so a compositor that ever sends it still screenshots
+    // deterministically.
     let (width, height) = match size {
         (w, h) if w > 0 && h > 0 => (w, h),
         _ => (400, 300),
@@ -1308,12 +1315,12 @@ fn a_broken_look_is_nothing_like_its_golden() {
     let expected = read_png(&golden);
     let compared = diff(&expected, &actual);
     assert!(
-        compared.mismatched >= 100,
-        "a white ring moves at least hundreds of pixels, not {}",
+        compared.mismatched >= 1000,
+        "a white ring moves thousands of pixels, not {}",
         compared.mismatched
     );
     assert!(
-        compared.worst >= 100,
+        compared.worst >= 150,
         "a white ring misses by ~200 a channel, not {}",
         compared.worst
     );

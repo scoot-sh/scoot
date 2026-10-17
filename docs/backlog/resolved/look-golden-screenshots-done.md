@@ -55,7 +55,7 @@ five goldens in `crates/scoot/tests/goldens/look-<name>.png`.
 - Tolerance 2 per channel: PNG is lossless, so the only rounding is
   blending (focus ring and rounded corners composite once over what is
   behind them, 1 LSB each). A wrong color misses by tens or more.
-- Broken look (ginger-night with a white focus ring) misses by 3000+
+- Broken look (ginger-night with a white focus ring) misses by 3752
   pixels past tolerance, worst 207 in blue (`#FF9A30` to `#FFFFFF`).
 - Regen is one look at a time (`SCOOT_GOLDEN_REGENERATE=1`, see the
   module doc); CI never regenerates, compares, and uploads
