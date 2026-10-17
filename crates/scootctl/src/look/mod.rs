@@ -2093,7 +2093,9 @@ fn run_new(look: &Look, name: &str, base: &str) -> Result<(), String> {
 /// per save, until interrupted. Each save prints its own line; an invalid
 /// save is refused loudly and the last good look stays. Returns only when
 /// the directory goes away or the watcher fails (interrupting the process
-/// is the normal way out, and exits 0).
+/// with SIGINT/SIGTERM is the normal way out: with no handler installed
+/// the signal kills the process, so the shell reports it as killed by
+/// signal rather than an exit status).
 fn run_watch(look: &Look, dir: &Path, no_toolkit: bool, origin: Origin) -> Result<(), String> {
     let state_dir = resolve_state_dir(look.state.as_deref())?;
     let cache = apply::render_cache_dir()?;

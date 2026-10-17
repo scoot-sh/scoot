@@ -213,15 +213,22 @@ pub fn capture(
 
 /// A temp root for one capture, removed on return.
 fn scratch_root() -> Result<PathBuf, String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    // pid plus a per-process counter plus nanos: two captures in one
+    // process within the same nanos never share a root, and a planted
+    // symlink at a guessable name is never opened (`create_dir` refuses
+    // it instead of writing through one).
     let dir = std::env::temp_dir().join(format!(
-        "scoot-look-preview-{}-{}",
+        "scoot-look-preview-{}-{}-{}",
         std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .subsec_nanos()
     ));
-    std::fs::create_dir_all(&dir)
+    std::fs::create_dir(&dir)
         .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
     Ok(dir)
 }
