@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.3.1](https://github.com/scoot-sh/scoot/compare/v0.3.0...v0.3.1) - 2026-10-17
+
+### looks
+
+- added: bundle the maintainer's vinyl-sunset image and retheme ([#647](https://github.com/scoot-sh/scoot/pull/647))
+
+### scootctl
+
+- added: looks help covers every flag, errors name the fix ([#649](https://github.com/scoot-sh/scoot/pull/649))
+
 ## [0.3.0](https://github.com/scoot-sh/scoot/compare/v0.2.1...v0.3.0) - 2026-10-17
 
 ### looks
