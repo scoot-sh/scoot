@@ -1211,7 +1211,7 @@ EOF
         tail -30 "$log"
         return 1
     fi
-    wait_wallpaper_pixel "271A1F" "vinyl-sunset's flat wallpaper" || return 1
+    wait_wallpaper_pixel "0E120D" "vinyl-sunset's bundled wallpaper" || return 1
     if ! "$SCOOT" look apply ginger-night --state "$state" --socket "$socket" >"$dir/apply.out" 2>&1; then
         echo "BUG: applying ginger-night failed:"
         cat "$dir/apply.out"
@@ -1237,7 +1237,7 @@ EOF
         cat "$dir/msg-apply.out"
         return 1
     fi
-    wait_wallpaper_pixel "271A1F" "vinyl-sunset over IPC" || return 1
+    wait_wallpaper_pixel "0E120D" "vinyl-sunset over IPC" || return 1
     if ! "$SCOOT" msg looks | grep -q "vinyl-sunset"; then
         echo "BUG: msg looks does not name the applied look"
         return 1
