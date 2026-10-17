@@ -37,7 +37,10 @@
 # - `json`: the `scoot-look import-base16` input (a JSON string): the
 #   sixteen slots, the companion families/sizes/opacity/cursor, the
 #   title and description, and the image file name plus mode when an
-#   image is set. `polarity` is always explicit here, so the rendered
+#   image is set. Sizes clamp into 4..192 points, opacity into 0..1
+#   and cursor size into 4..256 (Stylix's types are wider than the
+#   look grammar's; clamping keeps an odd value from failing the
+#   build). `polarity` is always explicit here, so the rendered
 #   look and `themeLook` below agree by construction.
 # - `themeLook`: the registry-shaped look the theme reads for `stylix`
 #   (the base with the palette, polarity and faces replaced). No module
@@ -156,6 +159,36 @@ let
         lib.optional (fontsSans != null && (fontsSans.package or null) != null) fontsSans.package
         ++ lib.optional (fontsMono != null && (fontsMono.package or null) != null) fontsMono.package
       );
+      # `import-base16` refuses sizes outside 4..192 points, opacity
+      # outside 0..1 and cursor sizes outside 4..256 (the look
+      # grammar's ranges); Stylix's own types are wider (any unsigned
+      # int or float, any float, any int), so the mapping clamps into
+      # range instead of failing the build (the old bar path clamped
+      # its pixels the same way).
+      clampSize =
+        v:
+        if v < 4 then
+          4
+        else if v > 192 then
+          192
+        else
+          v;
+      clampOpacity =
+        v:
+        if v < 0.0 then
+          0.0
+        else if v > 1.0 then
+          1.0
+        else
+          v;
+      clampCursor =
+        v:
+        if v < 4 then
+          4
+        else if v > 256 then
+          256
+        else
+          v;
       baseFonts = if baseLook == null then { } else (baseLook.fonts or { });
       json = builtins.toJSON (
         {
@@ -184,18 +217,22 @@ let
             // lib.optionalAttrs (mono != null) { monospace = mono; }
           );
           sizes =
-            lib.optionalAttrs ((sizes.desktop or null) != null) { inherit (sizes) desktop; }
-            // lib.optionalAttrs ((sizes.popups or null) != null) { inherit (sizes) popups; }
-            // lib.optionalAttrs ((sizes.applications or null) != null) { inherit (sizes) applications; }
-            // lib.optionalAttrs ((sizes.terminal or null) != null) { inherit (sizes) terminal; };
+            lib.optionalAttrs ((sizes.desktop or null) != null) { desktop = clampSize sizes.desktop; }
+            // lib.optionalAttrs ((sizes.popups or null) != null) { popups = clampSize sizes.popups; }
+            // lib.optionalAttrs ((sizes.applications or null) != null) {
+              applications = clampSize sizes.applications;
+            }
+            // lib.optionalAttrs ((sizes.terminal or null) != null) { terminal = clampSize sizes.terminal; };
           opacity =
-            lib.optionalAttrs ((opacity.popups or null) != null) { inherit (opacity) popups; }
-            // lib.optionalAttrs ((opacity.terminal or null) != null) { inherit (opacity) terminal; };
+            lib.optionalAttrs ((opacity.popups or null) != null) { popups = clampOpacity opacity.popups; }
+            // lib.optionalAttrs ((opacity.terminal or null) != null) {
+              terminal = clampOpacity opacity.terminal;
+            };
         }
         // lib.optionalAttrs (cursor != null) {
           cursor =
             lib.optionalAttrs ((cursor.name or null) != null) { name = cursor.name; }
-            // lib.optionalAttrs ((cursor.size or null) != null) { size = cursor.size; };
+            // lib.optionalAttrs ((cursor.size or null) != null) { size = clampCursor cursor.size; };
         }
         // lib.optionalAttrs (imageFile != null) {
           image = imageFile;

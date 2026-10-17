@@ -1043,6 +1043,27 @@ let
     image = builtins.toFile "w.svg" "not an image scootbg decodes";
     imageMode = "fill";
   };
+  # Out-of-range numbers clamp into the look grammar's ranges instead
+  # of refusing (Stylix's own types admit them): sizes into 4..192
+  # points, opacity into 0..1, cursor size into 4..256.
+  stylixSynthClamped = stylixSynthLib.synthesize {
+    colors = stylixPaletteFull;
+    isDark = true;
+    sizes = {
+      desktop = 200;
+      popups = 0;
+      applications = 12;
+      terminal = 11;
+    };
+    opacity = {
+      popups = 1.5;
+      terminal = 0.9;
+    };
+    cursor = {
+      name = "Vanilla-DMZ";
+      size = 300;
+    };
+  };
 
   evalHomeStylix =
     stub: cfg:
@@ -6168,13 +6189,39 @@ let
       assert stylixSynthBase.themeLook.nightTemp == gingerNightLook.nightTemp;
       true
     )
-    # ...a missing slot and a bad image suffix each refuse loudly.
+    # ...a missing slot and a bad image suffix each refuse loudly...
     (
       assert !(builtins.tryEval stylixSynthMissingSlot.json).success;
       true
     )
     (
       assert !(builtins.tryEval stylixSynthBadImage.json).success;
+      true
+    )
+    # ...while out-of-range numbers clamp (200pt to 192, 0pt to 4,
+    # 1.5 opacity to 1.0, cursor 300 to 256) instead of refusing.
+    (
+      assert
+        let
+          got = builtins.fromJSON stylixSynthClamped.json;
+        in
+        got.sizes == {
+          desktop = 192;
+          popups = 4;
+          applications = 12;
+          terminal = 11;
+        }
+        &&
+          got.opacity == {
+            popups = 1.0;
+            terminal = 0.9;
+          }
+        &&
+          got.cursor == {
+            name = "Vanilla-DMZ";
+            size = 256;
+          }
+        && !(got ? image);
       true
     )
 

@@ -617,7 +617,8 @@ runCommand "scootbar-modules"
     # 2. The bar-only layer: the fragment each themed file points at carries
     #    the palette (background base00, foreground base05, accent and hover
     #    base0D like the compositor's focused ring, dim base03, urgent base08)
-    #    and the size in pixels (the bar clamps 1..256).
+    #    and the size in pixels (points clamp into 4..192 first, then convert
+    #    at 4/3: 200pt clamps to 192pt for 256px, 0pt clamps to 4pt for 5px).
     python3 - "$themedLayer" "$bigLayer" "$zeroLayer" <<'PY'
     import sys, tomllib
     themed, big, zero = (tomllib.load(open(p, "rb")) for p in sys.argv[1:4])
@@ -635,7 +636,7 @@ runCommand "scootbar-modules"
     )
     assert themed["bar"]["font-size"] == 13, themed["bar"]
     assert big["bar"]["font-size"] == 256, big["bar"]
-    assert zero["bar"]["font-size"] == 1, zero["bar"]
+    assert zero["bar"]["font-size"] == 5, zero["bar"]
     for name, frag in (("themed", themed), ("big", big), ("zero", zero)):
         font = frag["bar"]["font"]
         assert font.startswith("/nix/store/") and font.endswith((".ttf", ".otf")), (name, font)
