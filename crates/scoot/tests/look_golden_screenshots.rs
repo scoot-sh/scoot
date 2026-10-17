@@ -77,8 +77,9 @@
 //! build puts it there). Without one the tests print why and pass as
 //! skipped, unless `SCOOT_GOLDEN_REQUIRE_BAR` is set, which turns the
 //! skip into a failure so CI cannot go green by skipping it. CI builds
-//! `-p scootbar` before the suite and sets the requirement in every
-//! compositor test step.
+//! `-p scootbar` in the default `linux` job before the suite and sets the
+//! requirement in that job's two test steps (nextest and cargo test);
+//! the feature jobs carry no bar and skip the scenes there.
 //!
 //! `every_shipped_look_has_a_golden` keeps the set complete: a look added
 //! to `looks/` without a golden (or a golden without a look) fails it.
@@ -597,7 +598,7 @@ impl Session {
         let Some(after) = stat.rsplit_once(')') else {
             return false;
         };
-        match after.split_whitespace().next() {
+        match after.1.split_whitespace().next() {
             Some("Z") | Some("X") | Some("x") | None => false,
             Some(_) => true,
         }
