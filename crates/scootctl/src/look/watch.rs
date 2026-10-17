@@ -517,27 +517,30 @@ impl InotifyWatcher {
     /// Blocks until a debounced save lands: drains the qualifying events,
     /// then waits out one quiet [`DEBOUNCE`] period, extending it while
     /// saves keep arriving. `Ok(false)` when the watched directory
-    /// itself moved or was deleted.
+    /// itself moved or was deleted. The first wait blocks in `poll(2)`
+    /// with no timeout, so an idle watch sleeps with zero wakeups; a
+    /// signal with the default disposition (SIGINT/SIGTERM) still kills
+    /// the process out of the blocking wait, since no handler is
+    /// installed.
     fn wait_for_save(&mut self, dir: &Path) -> Result<bool, String> {
-        // A blocking first read: the loop sleeps here between saves. The
-        // fd is nonblocking, so pace it at 50 ms rather than spinning.
         loop {
             if !dir.is_dir() {
                 return Ok(false);
             }
+            self.wait_readable(None)?;
             match self.drain() {
                 Ok(Drain::Save) => break,
                 Ok(Drain::Gone) => return Ok(false),
                 Ok(Drain::Empty) => {}
                 Err(error) => return Err(error),
             }
-            std::thread::sleep(Duration::from_millis(50));
         }
         // The debounce: one quiet period with no qualifying event ends
-        // the save; every event restarts it.
+        // the save; every event restarts it. Each 50 ms slice blocks in
+        // `poll(2)`, so the debounce wakes only on events or slice ends.
         let mut quiet = 0u32;
         while quiet * 50 < DEBOUNCE.as_millis() as u32 {
-            std::thread::sleep(Duration::from_millis(50));
+            self.wait_readable(Some(Duration::from_millis(50)))?;
             match self.drain() {
                 Ok(Drain::Save) => quiet = 0,
                 Ok(Drain::Gone) => return Ok(false),
@@ -546,6 +549,30 @@ impl InotifyWatcher {
             }
         }
         Ok(true)
+    }
+
+    /// Blocks in `poll(2)` until the inotify fd reads (or `timeout`
+    /// elapses for `Some`): `None` waits forever. `EINTR` (a caught
+    /// signal) retries; anything else is a watcher error.
+    fn wait_readable(&self, timeout: Option<Duration>) -> Result<(), String> {
+        use rustix::event::{PollFd, PollFlags, Timespec, poll};
+        let spec;
+        let when = match timeout.as_ref() {
+            Some(within) => {
+                spec = Timespec::try_from(*within)
+                    .map_err(|error| format!("cannot watch for saves: {error}"))?;
+                Some(&spec)
+            }
+            None => None,
+        };
+        loop {
+            let mut fds = [PollFd::new(&self.fd, PollFlags::IN)];
+            match poll(&mut fds, when) {
+                Ok(_) => return Ok(()),
+                Err(rustix::io::Errno::INTR) => continue,
+                Err(error) => return Err(format!("cannot watch for saves: {error}")),
+            }
+        }
     }
 
     fn drain(&mut self) -> Result<Drain, String> {
