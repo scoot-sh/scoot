@@ -885,11 +885,9 @@ fn map_solid_window(socket: &Path) -> SolidWindow {
     let toplevel = xdg.get_toplevel(&qh, ());
     toplevel.set_app_id("scoot-golden".to_owned());
     toplevel.set_title("golden".to_owned());
-    // First commit at an arbitrary size: it provokes the configure whose
-    // size the second commit matches.
-    let (pool, buffer, file) = magenta_buffer(&shm, &qh, 400, 300);
-    surface.attach(Some(&buffer), 0, 0);
-    surface.damage(0, 0, 400, 300);
+    // The first commit attaches no buffer: it provokes the configure
+    // whose ack the mapped commit follows. Attaching before the initial
+    // ack is a protocol error, the way the compositor says so.
     surface.commit();
     let (serial, width, height) = loop {
         queue.roundtrip(&mut client).expect("Wayland events");
@@ -902,18 +900,15 @@ fn map_solid_window(socket: &Path) -> SolidWindow {
         );
     };
     xdg.ack_configure(serial);
-    let (pool, buffer, file) = if width > 0 && height > 0 {
-        let (pool, buffer, file) = magenta_buffer(&shm, &qh, width, height);
-        surface.attach(Some(&buffer), 0, 0);
-        surface.damage(0, 0, width, height);
-        surface.commit();
-        queue.roundtrip(&mut client).expect("Wayland events");
-        (pool, buffer, file)
-    } else {
-        surface.commit();
-        queue.roundtrip(&mut client).expect("Wayland events");
-        (pool, buffer, file)
+    let (width, height) = match (width, height) {
+        (w, h) if w > 0 && h > 0 => (w, h),
+        _ => (400, 300),
     };
+    let (pool, buffer, file) = magenta_buffer(&shm, &qh, width, height);
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage(0, 0, width, height);
+    surface.commit();
+    queue.roundtrip(&mut client).expect("Wayland events");
     SolidWindow {
         _conn: conn,
         _queue: queue,
