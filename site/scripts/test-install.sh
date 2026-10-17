@@ -694,4 +694,84 @@ grep -q "scoot-probe-user" "$work/out" || fail "sudo dry run names no invoking u
 h=$work/h1
 ok "sudo applies the look as the invoking user"
 
+# 10. --system vs per-user clarity: a per-user run prints the
+#     copy-pasteable --system command with the same flags; each direction
+#     warns when the other copy exists; and a --system run after a
+#     per-user one leaves both sides' files alone. The system record and
+#     login-screen entry point at a scratch tree (the
+#     SCOOT_INSTALL_SYSTEM_* hooks beside the release-URL ones), so no
+#     root is needed: --system runs are dry runs, per-user runs are real.
+export SCOOT_INSTALL_SYSTEM_MANIFEST="$work/sys/install-manifest"
+export SCOOT_INSTALL_SYSTEM_SESSION="$work/sys/scoot.desktop"
+
+# 10a. A per-user install says it adds no login-screen entry and prints
+#     the --system command with its flags (the unified tree: test 5
+#     tampered with the tagged scootbg above). Nothing system-side is
+#     touched.
+h=$work/h-cl
+releases=file://$f/tags-unified.json run_in "$h" --look moonrise --no-bar || { cat "$work/out"; fail "clarity per-user install"; }
+unset releases
+grep -Fq "This installed for you only and added no login-screen entry." "$work/out" || { cat "$work/out"; fail "no you-only sentence"; }
+grep -Fq "curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --system --look moonrise --no-bar" "$work/out" || { cat "$work/out"; fail "no copy-pasteable --system command"; }
+if grep -q "a system install exists" "$work/out"; then cat "$work/out"; fail "phantom system note with no system copy"; fi
+[ ! -e "$work/sys/install-manifest" ] || fail "per-user run touched the system record"
+[ ! -e "$work/sys/scoot.desktop" ] || fail "per-user run wrote a login-screen entry"
+ok "a per-user run prints the --system command with its flags"
+
+# 10b. --system after that per-user install warns that the per-user copy
+#     may shadow it, names the exact removal, and changes nothing: the
+#     per-user record is byte-identical after, and no system file lands.
+before_manifest=$(cat "$h/.local/share/scoot/install-manifest")
+releases=file://$f/tags-unified.json run_in "$h" --system --dry-run --look moonrise --no-bar || { cat "$work/out"; fail "system dry run after per-user"; }
+unset releases
+grep -Fq "a per-user install exists ($h/.local/share/scoot/install-manifest)" "$work/out" || { cat "$work/out"; fail "no per-user shadow warning"; }
+grep -Fq "To remove it, run: install.sh --uninstall" "$work/out" || { cat "$work/out"; fail "no per-user removal command"; }
+grep -Fq "That entry is $work/sys/scoot.desktop; your greeter and its config are untouched." "$work/out" || { cat "$work/out"; fail "no --system login-screen sentence"; }
+[ "$(cat "$h/.local/share/scoot/install-manifest")" = "$before_manifest" ] || fail "system dry run touched the per-user record"
+if [ -e "$work/sys/install-manifest" ] || [ -e "$work/sys/scoot.desktop" ]; then fail "system dry run wrote system files"; fi
+ok "--system warns about a per-user copy and stays file-safe"
+
+# 10c. The other order: a per-user run with a system install present says
+#     the login-screen session runs the system copy, and writes nothing
+#     system-side.
+mkdir -p "$work/sys"
+printf '%s\n' "/usr/local/bin/scoot" >"$work/sys/install-manifest"
+h2=$work/h-cl2
+releases=file://$f/tags-unified.json run_in "$h2" --dry-run || { cat "$work/out"; fail "per-user dry run with a system copy"; }
+unset releases
+grep -Fq "a system install exists ($work/sys/install-manifest)" "$work/out" || { cat "$work/out"; fail "no system-exists note"; }
+grep -q "a session picked from the login screen runs the system copy" "$work/out" || { cat "$work/out"; fail "no login-screen pointer"; }
+grep -Fq "curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --system" "$work/out" || { cat "$work/out"; fail "no --system pointer with a system copy"; }
+printf '%s\n' "/usr/local/bin/scoot" | cmp -s - "$work/sys/install-manifest" || fail "per-user run touched the system record"
+ok "a per-user run names the system copy a login-screen session runs"
+
+# 10d. Neither note fires when the other copy is absent.
+rm -f "$work/sys/install-manifest"
+releases=file://$f/tags-unified.json run_in "$work/h-cl3" --dry-run || { cat "$work/out"; fail "per-user dry run with no system copy"; }
+unset releases
+if grep -q "install exists" "$work/out"; then cat "$work/out"; fail "phantom coexistence note"; fi
+ok "no coexistence note without the other copy"
+
+# 10e. Under sudo the --system run finds the invoking user's per-user
+#      install through getent, not root's empty one. Needs getent; the
+#      stub answers the probe user with a scratch home and delegates the
+#      rest to the real tool.
+if command -v getent >/dev/null 2>&1; then
+    real_getent=$(command -v getent)
+    # shellcheck disable=SC2016 # every $ but the two %s runs in the stub, not here.
+    printf '#!/bin/sh\nif [ "${2:-}" = scoot-probe-user ]; then printf "scoot-probe-user:x:1001:1001::%s:\\n"; else exec "%s" "$@"; fi\n' "$work/probe-home" "$real_getent" >"$work/bin/getent"
+    chmod +x "$work/bin/getent"
+    mkdir -p "$work/probe-home/.local/share/scoot"
+    printf '%s\n' "$work/probe-home/.local/bin/scoot" >"$work/probe-home/.local/share/scoot/install-manifest"
+    export SUDO_USER=scoot-probe-user
+    releases=file://$f/tags-unified.json run_in "$work/h-cl-sudo" --system --dry-run || { cat "$work/out"; fail "sudo system dry run"; }
+    unset releases SUDO_USER
+    grep -Fq "a per-user install exists ($work/probe-home/.local/share/scoot/install-manifest)" "$work/out" || { cat "$work/out"; fail "no invoking-user shadow warning"; }
+    ok "--system finds the invoking user's per-user copy"
+else
+    ok "--system invoking-user check skipped (no getent here)"
+fi
+unset SCOOT_INSTALL_SYSTEM_MANIFEST SCOOT_INSTALL_SYSTEM_SESSION
+h=$work/h1
+
 printf 'test-install: all passed\n'
