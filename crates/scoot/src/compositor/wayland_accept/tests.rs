@@ -13,9 +13,10 @@
 //! is allocation- and lock-free by construction. No `assert!` in the child:
 //! explicit checks that write to stderr and `_exit`.
 
+use std::ffi::OsStr;
 use std::io::Read;
 use std::os::fd::AsRawFd;
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -446,4 +447,234 @@ fn an_unknown_table_admits() {
     let (server, peer) = UnixStream::pair().expect("a socket pair");
     admit(&mut state, server, None);
     expect_held(peer);
+}
+
+// --- never stealing the host's socket ----------------------------------------
+//
+// Regression net for `docs/backlog/core/nested-steals-host-wayland-socket`:
+// scoot's own bind took the host's name (`wayland-1` under pixelflux in
+// webtop) because wayland-server unlinks an existing socket file once it
+// holds the `.lock`, and a host that never takes an exclusive flock leaves
+// that lock free -- so the bind unlinked a LIVE server, `nested::init` then
+// connected to itself, and `Drop` deleted the host socket on exit. These pin
+// the two guards that replace lock-only evidence: the `$WAYLAND_DISPLAY`
+// exclusion and the pre-bind liveness probe.
+//
+// All hermetic: [`bind_in`] takes the runtime dir explicitly, so no test
+// here touches the process-global environment that every `State::new` in
+// this binary depends on.
+
+/// The pixelflux shape: a live socket whose lock file exists but is held by
+/// nobody. Lock evidence alone calls this name "free", which is exactly what
+/// the old `bind_auto` believed before unlinking it.
+fn fake_host_without_flock(dir: &std::path::Path, name: &str) -> (UnixListener, PathBuf) {
+    std::fs::write(dir.join(format!("{name}.lock")), b"").expect("an unlocked lock file");
+    let path = dir.join(name);
+    let listener = UnixListener::bind(&path).expect("a fake host socket");
+    (listener, path)
+}
+
+#[test]
+fn an_excluded_host_socket_is_never_bound() {
+    let _serial = serial();
+    let dir = tempfile::tempdir().expect("a temp runtime dir");
+    let (_host, host_path) = fake_host_without_flock(dir.path(), "wayland-1");
+    let bound = WaylandListener::bind_in(dir.path(), Some(OsStr::new("wayland-1")))
+        .expect("binds past the excluded host name");
+    assert_eq!(
+        bound.socket_name().to_string_lossy(),
+        "wayland-2",
+        "the first free name past the excluded host"
+    );
+    assert!(host_path.exists(), "the host socket file survives the bind");
+    UnixStream::connect(&host_path).expect("the host still answers after the bind");
+    // ...and the bound socket listens too: the session has its own name.
+    UnixStream::connect(dir.path().join("wayland-2")).expect("the new socket answers");
+}
+
+#[test]
+fn a_live_socket_without_a_lock_is_skipped_in_any_mode() {
+    // No exclusion at all: the liveness probe alone must skip a live server
+    // that never held a lock (this is the headless/tty half of the fix).
+    let _serial = serial();
+    let dir = tempfile::tempdir().expect("a temp runtime dir");
+    let (_host, host_path) = fake_host_without_flock(dir.path(), "wayland-1");
+    let bound = WaylandListener::bind_in(dir.path(), None).expect("binds past the live socket");
+    assert_eq!(
+        bound.socket_name().to_string_lossy(),
+        "wayland-2",
+        "a live name is skipped even when nothing excludes it"
+    );
+    UnixStream::connect(&host_path).expect("the host still answers after the bind");
+}
+
+#[test]
+fn a_stale_socket_file_is_reused() {
+    // A socket file with no listener is genuinely free: unlinking it deletes
+    // nothing live. `UnixListener`'s `Drop` (unlike `ListeningSocket`'s)
+    // leaves the file behind, which is the stale shape.
+    let _serial = serial();
+    let dir = tempfile::tempdir().expect("a temp runtime dir");
+    let stale = dir.path().join("wayland-1");
+    drop(UnixListener::bind(&stale).expect("a socket to abandon"));
+    assert!(stale.exists(), "setup: the abandoned file stays");
+    let bound = WaylandListener::bind_in(dir.path(), None).expect("reuses the stale name");
+    assert_eq!(
+        bound.socket_name().to_string_lossy(),
+        "wayland-1",
+        "a stale file is not skipped, it is reclaimed"
+    );
+    UnixStream::connect(&stale).expect("the reclaimed socket answers");
+}
+
+#[test]
+fn a_flock_held_name_is_skipped() {
+    // A flocking compositor holds its lock with no live socket behind it
+    // (nothing to probe): the pre-bind lock check skips the name with no
+    // `connect`, and `bind_absolute` would answer `AlreadyInUse` as well.
+    let _serial = serial();
+    let dir = tempfile::tempdir().expect("a temp runtime dir");
+    let lock_path = dir.path().join("wayland-1.lock");
+    let lock = std::fs::File::create(&lock_path).expect("a lock file to hold");
+    let held = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    assert_eq!(held, 0, "setup: the test holds wayland-1's lock");
+    let bound = WaylandListener::bind_in(dir.path(), None).expect("binds past the held lock");
+    assert_eq!(
+        bound.socket_name().to_string_lossy(),
+        "wayland-2",
+        "a lock-held name is skipped"
+    );
+}
+
+#[test]
+fn a_lock_held_live_sibling_sees_no_probe_connection() {
+    // The F1 regression: every `State::new` connect-probed each live sibling
+    // in a shared `$XDG_RUNTIME_DIR`, injecting transient zero-byte clients
+    // into running fixtures. A lock-held name must now be skipped with no
+    // `connect` at all, so the sibling's backlog stays empty.
+    let _serial = serial();
+    let dir = tempfile::tempdir().expect("a temp runtime dir");
+    let lock_path = dir.path().join("wayland-1.lock");
+    let lock = std::fs::File::create(&lock_path).expect("a lock file to hold");
+    let held = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    assert_eq!(held, 0, "setup: the test holds wayland-1's lock");
+    let sibling = UnixListener::bind(dir.path().join("wayland-1")).expect("a sibling socket");
+    sibling
+        .set_nonblocking(true)
+        .expect("a non-blocking sibling");
+    let bound = WaylandListener::bind_in(dir.path(), None).expect("binds past the held sibling");
+    assert_eq!(
+        bound.socket_name().to_string_lossy(),
+        "wayland-2",
+        "a lock-held live name is skipped"
+    );
+    match sibling.accept() {
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+        Ok(_) => panic!("the probe connected to a lock-held sibling"),
+        Err(error) => panic!("sibling accept failed: {error}"),
+    }
+}
+
+#[test]
+fn lock_blocks_probe_matches_flock_state() {
+    // Directly: missing and unlocked lock files are free (probe), a held one
+    // blocks (skip with no connect).
+    let _serial = serial();
+    let dir = tempfile::tempdir().expect("a temp runtime dir");
+    assert!(
+        !lock_blocks_probe(&dir.path().join("missing.lock")),
+        "no lock file is free"
+    );
+    let free_path = dir.path().join("free.lock");
+    std::fs::write(&free_path, b"").expect("an unlocked lock file");
+    assert!(
+        !lock_blocks_probe(&free_path),
+        "an unlocked lock file is free"
+    );
+    let held_path = dir.path().join("held.lock");
+    let held_file = std::fs::File::create(&held_path).expect("a lock file to hold");
+    let held = unsafe { libc::flock(held_file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    assert_eq!(held, 0, "setup: the test holds the lock");
+    assert!(
+        lock_blocks_probe(&held_path),
+        "a held lock blocks the probe"
+    );
+}
+
+#[test]
+fn thirty_two_live_sockets_refuse() {
+    // Every name live: the bind fails loudly instead of stealing one. 32
+    // listeners is cheap; all are held to the end of the test.
+    let _serial = serial();
+    let dir = tempfile::tempdir().expect("a temp runtime dir");
+    let _hosts: Vec<UnixListener> = (1..33)
+        .map(|index| {
+            UnixListener::bind(dir.path().join(format!("wayland-{index}")))
+                .expect("a live socket per name")
+        })
+        .collect();
+    match WaylandListener::bind_in(dir.path(), Some(OsStr::new("wayland-1"))) {
+        Err(BindError::AlreadyInUse) => {}
+        Err(other) => panic!("expected AlreadyInUse, got {other:?}"),
+        Ok(_) => panic!("expected AlreadyInUse, but a name was bound"),
+    }
+    match WaylandListener::bind_in(dir.path(), None) {
+        Err(BindError::AlreadyInUse) => {}
+        Err(other) => panic!("expected AlreadyInUse without exclusion too, got {other:?}"),
+        Ok(_) => panic!("expected AlreadyInUse without exclusion, but a name was bound"),
+    }
+}
+
+#[test]
+fn the_liveness_probe_reads_the_socket_not_the_lock() {
+    // Directly: live answers true, missing and stale answer false, and an
+    // unreadable verdict never counts as free.
+    let _serial = serial();
+    let dir = tempfile::tempdir().expect("a temp runtime dir");
+    let live_path = dir.path().join("live");
+    let _live = UnixListener::bind(&live_path).expect("a live socket");
+    assert!(socket_is_live(&live_path), "a listener answers live");
+    assert!(
+        !socket_is_live(&dir.path().join("missing")),
+        "no file is not live"
+    );
+    let stale_path = dir.path().join("stale");
+    drop(UnixListener::bind(&stale_path).expect("a socket to abandon"));
+    assert!(
+        !socket_is_live(&stale_path),
+        "a file with no listener is stale, not live"
+    );
+}
+
+/// `excluded_name_for` without sockets: every `$WAYLAND_DISPLAY` shape.
+#[test]
+fn the_host_exclusion_covers_every_display_shape() {
+    use std::ffi::OsString;
+    let runtime = OsString::from("/run/user/1000");
+    let excluded = |display: Option<&str>| {
+        excluded_name_for(display.map(OsStr::new), Some(runtime.as_os_str()))
+    };
+    // Bare names collide: `connect_to_env` resolves them against the runtime dir.
+    assert_eq!(
+        excluded(Some("wayland-1")).as_deref(),
+        Some(OsStr::new("wayland-1"))
+    );
+    // `wayland-0` stays excludable (the range already skips it; belt and braces).
+    assert_eq!(
+        excluded(Some("wayland-0")).as_deref(),
+        Some(OsStr::new("wayland-0"))
+    );
+    // An absolute host path in the same runtime dir excludes its file name.
+    assert_eq!(
+        excluded(Some("/run/user/1000/wayland-1")).as_deref(),
+        Some(OsStr::new("wayland-1"))
+    );
+    // ...elsewhere, it collides with nothing `bind_in` can take.
+    assert_eq!(excluded(Some("/tmp/wayland-1")), None);
+    // Relative with a separator resolves against the cwd, never the runtime dir.
+    assert_eq!(excluded(Some("sub/wayland-1")), None);
+    // Unset display, or a value with no file name: nothing to exclude.
+    assert_eq!(excluded(None), None);
+    assert_eq!(excluded(Some("")), None);
+    assert_eq!(excluded(Some("/")), None);
 }

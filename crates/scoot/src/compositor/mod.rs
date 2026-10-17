@@ -513,6 +513,22 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // ordering, not a crash). ipc::init has no such constraint; it's grouped
     // here only because it's the other one-time setup step.
     if options.nested {
+        // Defense in depth behind the bind-time exclusion (`State::new`
+        // never binds the host's own name, and skips every other live
+        // socket): if this session somehow still bound the host's name,
+        // `nested::init` would connect to itself and die only at the 10 s
+        // registry timeout, having already unlinked the host socket. Fail
+        // fast instead, naming the socket.
+        if let Some(host) = wayland_accept::WaylandListener::host_excluded_name()
+            && host == state.socket_name
+        {
+            return Err(format!(
+                "nested: this session bound the host compositor's own socket `{}`; \
+                 refusing to connect to itself",
+                host.to_string_lossy()
+            )
+            .into());
+        }
         nested::init(
             state.loop_handle.clone(),
             &mut state,
