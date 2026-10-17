@@ -27,6 +27,17 @@
 //!   workspace's digit. No third-party app appears: their fonts and
 //!   versions make pixels flaky, which is why this ticket excludes them.
 //!
+//! Hermetic `PATH`: every child runs with a `PATH` holding only the stub
+//! `bin/` dir above, never the host's. In particular no `scootbg` is
+//! reachable, so the compositor's `[wallpaper]` spawn fails with NotFound
+//! and every image-wallpaper look renders its flat background color
+//! instead (four of the five shipped looks name an image). The
+//! `scoot look apply` child the compositor spawns still finds its
+//! `scootbar` beside its own binary, so the bar-fragment check runs for
+//! real. Every `scoot msg` child also runs with a scratch `HOME`,
+//! `XDG_*` and `TMPDIR`, so no test command can read or write the real
+//! ones.
+//!
 //! Fonts: the looks' families (`DroidSansM Nerd Font Propo`, `FiraCode
 //! Nerd Font`, `DejaVu Sans`, `DejaVu Sans Mono`) are answered by a stub
 //! `fc-match` on `PATH` with a copy of a real font file, the way
@@ -83,7 +94,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::time::{Duration, Instant};
 
-use wayland_client::protocol::{wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface};
+use wayland_client::protocol::{
+    wl_buffer, wl_compositor, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+};
 use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 
@@ -276,15 +289,14 @@ esac
     dir
 }
 
-fn path_with_stub(stub: &Path) -> OsString {
-    let mut out = stub.as_os_str().to_owned();
-    if let Some(path) = std::env::var_os("PATH")
-        && !path.is_empty()
-    {
-        out.push(":");
-        out.push(path);
-    }
-    out
+/// The `PATH` every child runs with: the stub `bin/` dir alone, never
+/// the host's. Stub-only keeps `scootbg` (and every other host binary)
+/// out of reach, so image-wallpaper looks render their flat background
+/// color; see the module doc. `scoot` and `scootbar` are always spawned
+/// by absolute path (or found beside the running binary), so nothing
+/// they need is lost.
+fn hermetic_path(stub: &Path) -> OsString {
+    stub.as_os_str().to_owned()
 }
 
 struct Scratch {
@@ -293,12 +305,19 @@ struct Scratch {
 
 impl Scratch {
     fn new(tag: &str) -> Self {
-        // Short: the Unix socket paths inside must fit 107 bytes.
+        // Short: the Unix socket paths inside must fit 107 bytes. The
+        // counter keeps parallel tests in one process apart even when
+        // the clock does not (only the sub-second part is used).
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .subsec_nanos();
-        let dir = std::env::temp_dir().join(format!("lg-{tag}-{}-{nanos:08x}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "lg-{tag}-{}-{nanos:08x}-{unique}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).expect("a scratch dir");
         Self { dir }
     }
@@ -393,7 +412,7 @@ impl Session {
     /// socket, then starts the bar (which needs the display name).
     fn start(scratch: Scratch, catalog: &Path) -> Self {
         let stub = stub_fc_match_dir(&scratch);
-        let path_env = path_with_stub(&stub);
+        let path_env = hermetic_path(&stub);
         let fontconfig = scratch.fontconfig_file();
         let runtime = scratch.sub("runtime");
         let cache = scratch.sub("cache");
@@ -590,6 +609,14 @@ impl Session {
             .args(args)
             .env("PATH", &self.path_env)
             .env("SCOOT_SOCKET", &self.socket)
+            // A `msg` child never needs the real home: point every
+            // directory it could read at the scratch tree.
+            .env("HOME", self.scratch.dir.join("home"))
+            .env("XDG_CONFIG_HOME", self.scratch.dir.join("config"))
+            .env("XDG_CACHE_HOME", self.scratch.dir.join("cache"))
+            .env("XDG_STATE_HOME", &self.state_home)
+            .env("XDG_RUNTIME_DIR", &self.runtime)
+            .env("TMPDIR", self.scratch.dir.join("tmp"))
             .output()
             .expect("scoot msg runs")
     }
@@ -639,9 +666,7 @@ impl Session {
             let reply = self.check_msg(&["windows"]);
             let found = reply["windows"]
                 .as_array()
-                .map(|windows| {
-                    windows.iter().any(|w| w["app_id"].as_str() == Some(app_id))
-                })
+                .map(|windows| windows.iter().any(|w| w["app_id"].as_str() == Some(app_id)))
                 .unwrap_or(false);
             if found {
                 return;
@@ -655,9 +680,9 @@ impl Session {
         }
     }
 
-    /// One settled screenshot: waits for a quiet compositor, then captures
-    /// without the cursor.
-    fn screenshot(&self, tag: &str) -> PathBuf {
+    /// One quiet moment: waits until the compositor has been still for
+    /// 200 ms.
+    fn wait_idle(&self) {
         let out = self.msg(&["wait-idle", "--quiet-ms", "200"]);
         assert!(
             out.status.success(),
@@ -665,6 +690,12 @@ impl Session {
             String::from_utf8_lossy(&out.stderr),
             self.log_tail()
         );
+    }
+
+    /// One settled screenshot: waits for a quiet compositor, then captures
+    /// without the cursor.
+    fn screenshot(&self, tag: &str) -> PathBuf {
+        self.wait_idle();
         let shot = self.scratch.dir.join(format!("shot-{tag}.png"));
         let out = self.msg(&[
             "screenshot",
@@ -811,8 +842,8 @@ fn magenta_buffer(
     height: i32,
 ) -> (wl_shm_pool::WlShmPool, wl_buffer::WlBuffer, std::fs::File) {
     let len = (width as usize) * (height as usize) * 4;
-    let fd = rustix::fs::memfd_create("scoot-golden", rustix::fs::MemfdFlags::CLOEXEC)
-        .expect("a memfd");
+    let fd =
+        rustix::fs::memfd_create("scoot-golden", rustix::fs::MemfdFlags::CLOEXEC).expect("a memfd");
     rustix::fs::ftruncate(&fd, len as u64).expect("a sized pool file");
     let mut file = std::fs::File::from(fd);
     // ARGB8888 in memory order: B, G, R, A.
@@ -893,4 +924,348 @@ fn map_solid_window(socket: &Path) -> SolidWindow {
         _file: file,
     }
 }
-...[truncated 20887 chars]
+
+/// A decoded screenshot: 8-bit RGBA, row-major.
+struct Image {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+/// Decodes `path` (what `scoot msg screenshot` writes: 8-bit RGB or RGBA)
+/// to RGBA, so the compare below never depends on the encoder's color
+/// type choice.
+fn read_png(path: &Path) -> Image {
+    let file = std::fs::File::open(path)
+        .unwrap_or_else(|error| panic!("open {}: {error}", path.display()));
+    let decoder = png::Decoder::new(std::io::BufReader::new(file));
+    let mut reader = decoder.read_info().expect("a PNG reader");
+    let mut buf = vec![0; reader.output_buffer_size().expect("a PNG buffer size")];
+    let info = reader.next_frame(&mut buf).expect("a PNG frame");
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buf,
+        png::ColorType::Rgb => {
+            let mut rgba = Vec::with_capacity(buf.len() / 3 * 4);
+            for rgb in buf.chunks_exact(3) {
+                rgba.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 0xFF]);
+            }
+            rgba
+        }
+        other => panic!("an RGB(A) screenshot at {}, not {other:?}", path.display()),
+    };
+    Image {
+        width: info.width,
+        height: info.height,
+        rgba,
+    }
+}
+
+/// How far apart two screenshots are: the count of pixels past the
+/// tolerance, and the single worst channel miss with its position and
+/// colors, for the failure message.
+struct Diff {
+    mismatched: u64,
+    worst: u8,
+    worst_at: (u32, u32),
+    expected: [u8; 4],
+    actual: [u8; 4],
+}
+
+fn diff(expected: &Image, actual: &Image) -> Diff {
+    assert_eq!(
+        (actual.width, actual.height),
+        (expected.width, expected.height),
+        "a golden at {}x{} never resizes to {}x{}",
+        expected.width,
+        expected.height,
+        actual.width,
+        actual.height,
+    );
+    let mut out = Diff {
+        mismatched: 0,
+        worst: 0,
+        worst_at: (0, 0),
+        expected: [0; 4],
+        actual: [0; 4],
+    };
+    for (i, (want, got)) in expected.rgba.iter().zip(actual.rgba.iter()).enumerate() {
+        let miss = want.abs_diff(*got);
+        if miss <= TOLERANCE {
+            continue;
+        }
+        if i % 4 == 0 {
+            out.mismatched += 1;
+        }
+        if miss > out.worst {
+            let pixel = i / 4;
+            out.worst = miss;
+            out.worst_at = (
+                (pixel as u32) % expected.width,
+                (pixel as u32) / expected.width,
+            );
+            let base = pixel * 4;
+            out.expected = expected.rgba[base..base + 4].try_into().expect("a pixel");
+            out.actual = actual.rgba[base..base + 4].try_into().expect("a pixel");
+        }
+    }
+    out
+}
+
+/// Checks `actual` against the committed golden for `name`: with
+/// `SCOOT_GOLDEN_REGENERATE=1` writes the golden and passes (CI never
+/// sets it), else fails past the tolerance, saving the actual beside the
+/// golden for inspection and for CI's `look-golden-actual` artifact.
+fn check_golden(name: &str, actual: &Image) {
+    let golden = golden_path(name);
+    if std::env::var_os("SCOOT_GOLDEN_REGENERATE").is_some() {
+        std::fs::create_dir_all(goldens_dir()).expect("a goldens dir");
+        let mut file = std::fs::File::create(&golden)
+            .unwrap_or_else(|error| panic!("write {}: {error}", golden.display()));
+        let mut encoder = png::Encoder::new(&mut file, actual.width, actual.height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .expect("a PNG header")
+            .write_image_data(&actual.rgba)
+            .expect("a PNG body");
+        return;
+    }
+    let expected = read_png(&golden);
+    let compared = diff(&expected, actual);
+    if compared.mismatched > 0 {
+        let actual_path = goldens_dir().join(format!("look-{name}.actual.png"));
+        let mut file = std::fs::File::create(&actual_path)
+            .unwrap_or_else(|error| panic!("write {}: {error}", actual_path.display()));
+        let mut encoder = png::Encoder::new(&mut file, actual.width, actual.height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .expect("a PNG header")
+            .write_image_data(&actual.rgba)
+            .expect("a PNG body");
+        panic!(
+            "`{name}` moved {n} pixels past {TOLERANCE}/channel against {}: \
+             worst miss {worst} at ({x}, {y}), want rgba({er}, {eg}, {eb}, {ea}), \
+             got rgba({ar}, {ag}, {ab}, {aa}); actual saved to {}. \
+             If the move is intended, regenerate (see the module doc) and inspect the diff.",
+            golden.display(),
+            actual_path.display(),
+            n = compared.mismatched,
+            worst = compared.worst,
+            x = compared.worst_at.0,
+            y = compared.worst_at.1,
+            er = compared.expected[0],
+            eg = compared.expected[1],
+            eb = compared.expected[2],
+            ea = compared.expected[3],
+            ar = compared.actual[0],
+            ag = compared.actual[1],
+            ab = compared.actual[2],
+            aa = compared.actual[3],
+        );
+    }
+}
+
+/// One settled frame: screenshots until two in a row are byte-identical
+/// (the encoder is deterministic, so identical pixels mean identical
+/// bytes), bounding a scene that never stills. The bar mapping, the
+/// window mapping and the look reload each move pixels once; the loop
+/// absorbs all three without naming any look's colors.
+fn settled_png(session: &Session, tag: &str) -> Image {
+    let deadline = Instant::now() + PATIENCE;
+    let mut previous: Option<Vec<u8>> = None;
+    for round in 0.. {
+        session.wait_idle();
+        let shot = session.screenshot(&format!("{tag}-{round}"));
+        let bytes =
+            std::fs::read(&shot).unwrap_or_else(|error| panic!("read {}: {error}", shot.display()));
+        if previous.as_ref() == Some(&bytes) {
+            return read_png(&shot);
+        }
+        previous = Some(bytes);
+        assert!(
+            Instant::now() < deadline,
+            "the scene never settled for a screenshot; log:\n{}",
+            session.log_tail()
+        );
+        assert!(
+            session.bar_alive(),
+            "the bar died while settling; bar log:\n{}",
+            session.bar_log_tail()
+        );
+    }
+    unreachable!("the deadline above always fires first");
+}
+
+/// The full scene for one look out of `catalog`: a headless session, the
+/// bar, the magenta window, `look-apply`, then a settled screenshot.
+/// Returns `None` without running anything when there is no bar binary
+/// (see [`bar_or_skip`]).
+fn render_look(tag: &str, name: &str, catalog: &Path, bar_bin: &Path) -> Option<Image> {
+    let scratch = Scratch::new(tag);
+    let mut session = Session::start(scratch, catalog);
+    session.start_bar(bar_bin);
+    let socket = session.runtime.join(&session.wayland_display);
+    let held = map_solid_window(&socket);
+    session.wait_for_window("scoot-golden");
+    session.look_apply(name);
+    let image = settled_png(&session, name);
+    drop(held);
+    Some(image)
+}
+
+/// One shipped look, end to end.
+fn golden_case(name: &str) {
+    let Some(bar_bin) = bar_or_skip() else {
+        return;
+    };
+    let catalog = shipped_looks_dir();
+    let actual = render_look(name, name, &catalog, &bar_bin).expect("a screenshot");
+    check_golden(name, &actual);
+}
+
+#[test]
+fn golden_ginger_night() {
+    golden_case("ginger-night");
+}
+
+#[test]
+fn golden_moonrise() {
+    golden_case("moonrise");
+}
+
+#[test]
+fn golden_music_desk() {
+    golden_case("music-desk");
+}
+
+#[test]
+fn golden_radial_burst() {
+    golden_case("radial-burst");
+}
+
+#[test]
+fn golden_vinyl_sunset() {
+    golden_case("vinyl-sunset");
+}
+
+/// The set stays complete: a look added to `looks/` without a golden (or
+/// a golden without a look) fails here, naming the drift.
+#[test]
+fn every_shipped_look_has_a_golden() {
+    let catalog = shipped_looks_dir();
+    let mut looks: Vec<String> = std::fs::read_dir(&catalog)
+        .unwrap_or_else(|error| panic!("read {}: {error}", catalog.display()))
+        .filter_map(|entry| {
+            let entry = entry.expect("a catalog entry");
+            let look = entry.file_name().into_string().ok()?;
+            entry.path().join("look.toml").is_file().then_some(look)
+        })
+        .collect();
+    looks.sort();
+    let listed: Vec<String> = LOOKS.iter().map(|name| name.to_string()).collect();
+    assert_eq!(
+        looks,
+        listed,
+        "LOOKS matches the catalog dirs under {}",
+        catalog.display()
+    );
+    let mut goldens: Vec<String> = std::fs::read_dir(goldens_dir())
+        .unwrap_or_else(|error| {
+            panic!(
+                "read {}: {error} (regenerate, see the module doc)",
+                goldens_dir().display()
+            )
+        })
+        .filter_map(|entry| {
+            entry
+                .expect("a goldens entry")
+                .file_name()
+                .into_string()
+                .ok()?
+                .strip_prefix("look-")?
+                .strip_suffix(".png")
+                .map(str::to_owned)
+        })
+        .collect();
+    goldens.sort();
+    assert_eq!(
+        goldens,
+        listed,
+        "one golden per shipped look in {}",
+        goldens_dir().display()
+    );
+}
+
+/// The negative control: ginger-night with a white focus ring must miss
+/// its golden by a mile, proving the comparison is not vacuous. The ring
+/// is the only change, so the failure is all ring pixels: thousands of
+/// them, off by up to 207 in blue (`#FF9A30` to `#FFFFFF`).
+#[test]
+fn a_broken_look_is_nothing_like_its_golden() {
+    let Some(bar_bin) = bar_or_skip() else {
+        return;
+    };
+    let scratch = Scratch::new("broken");
+    let catalog = scratch.dir.join("catalog").join("broken-white");
+    let source = shipped_looks_dir().join("ginger-night");
+    copy_dir(&source, &catalog);
+    let manifest = catalog.join("look.toml");
+    let text = std::fs::read_to_string(&manifest).expect("a look manifest");
+    let text = text
+        .replace("name = \"ginger-night\"", "name = \"broken-white\"")
+        .replace("focus = \"#FF9A30\"", "focus = \"#FFFFFF\"");
+    assert!(
+        text.contains("focus = \"#FFFFFF\""),
+        "the broken look really changed the focus ring"
+    );
+    std::fs::write(&manifest, text).expect("a broken look manifest");
+    let actual = render_look(
+        "broken",
+        "broken-white",
+        scratch.dir.join("catalog").as_path(),
+        &bar_bin,
+    )
+    .expect("a screenshot");
+    let golden = golden_path("ginger-night");
+    assert!(
+        golden.is_file(),
+        "regenerate first (see the module doc): {}",
+        golden.display()
+    );
+    let expected = read_png(&golden);
+    let compared = diff(&expected, &actual);
+    assert!(
+        compared.mismatched >= 100,
+        "a white ring moves at least hundreds of pixels, not {}",
+        compared.mismatched
+    );
+    assert!(
+        compared.worst >= 100,
+        "a white ring misses by ~200 a channel, not {}",
+        compared.worst
+    );
+}
+
+/// Copies `source` (a look dir) to `target`, file by file, so the broken
+/// look keeps the image wallpaper and every other token of its parent.
+fn copy_dir(source: &Path, target: &Path) {
+    std::fs::create_dir_all(target)
+        .unwrap_or_else(|error| panic!("make {}: {error}", target.display()));
+    for entry in std::fs::read_dir(source)
+        .unwrap_or_else(|error| panic!("read {}: {error}", source.display()))
+    {
+        let entry = entry.expect("a look file");
+        let to = target.join(entry.file_name());
+        let from = entry.path();
+        if from.is_dir() {
+            copy_dir(&from, &to);
+        } else {
+            std::fs::copy(&from, &to).unwrap_or_else(|error| {
+                panic!("copy {} to {}: {error}", from.display(), to.display())
+            });
+        }
+    }
+}
