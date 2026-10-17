@@ -398,7 +398,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Retire the Nix look registry](./resolved/look-nix-retire-registry-done.md) (medium, last) — RESOLVED 2026-10-16
 - [Authoring: look new, watch and preview capture](./resolved/look-authoring-done.md) (medium) — RESOLVED 2026-10-16
 - [`scoot look install` from a path, export and save](./resolved/look-install-done.md) (low) — RESOLVED 2026-10-17
-- [Bundle the maintainer's vinyl-sunset image and retheme the look](./core/vinyl-sunset-image.md) (medium)
+- [Bundle the maintainer's vinyl-sunset image and retheme the look](./resolved/vinyl-sunset-image-done.md) (medium) — RESOLVED 2026-10-17
 - [install.sh `--look` installs the catalog and applies a look](./resolved/look-install-sh-done.md) (medium) — RESOLVED 2026-10-15
 - [Later: install looks from git and flake `lookPacks`](./core/look-share.md) (low, later)
 - [User and community look targets: render any app from a template](./core/look-user-targets.md) (medium)
