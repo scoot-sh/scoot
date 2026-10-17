@@ -29,7 +29,7 @@ look-reading helpers and the equality check; the per-look pins in
 
 `nix flake check` green with no registry; a grep showing no reader left.
 
-## Resolution (2026-10-17, PR #TBD)
+## Resolution (2026-10-17, PR #643)
 
 Deleted `desktop.nix`'s hand-maintained `looks` table (217 lines),
 `nix/modules/theme-look.nix` (its readers move to the new helper) and
