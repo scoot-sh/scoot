@@ -17,6 +17,11 @@ nested in the host compositor with the same session script:
 exec scoot --nested -- /path/to/session.sh
 ```
 
+Pull a glibc-based tag: the installer supports glibc only, while the
+default tag (`latest`) is Alpine/musl — `debian-xfce` is one that works.
+Run the container with `-e PIXELFLUX_WAYLAND=true`: without it the image
+boots X11 and there is no Wayland socket to nest into.
+
 scoot does not wait on the script and restarts nothing that dies —
 supervision is the container's job (there is no systemd here), and the
 D-Bus activation half is the session script's (see [the portal
