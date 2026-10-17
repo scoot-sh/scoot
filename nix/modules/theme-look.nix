@@ -17,18 +17,28 @@ let
   desktop = import ./desktop.nix { inherit lib; };
   # The registry look behind `scootCfg.look`, or null without one (or
   # without a registry entry: a custom `looks` path has no palette
-  # here, so the eval-time leaves stay out of its way).
+  # here, so the eval-time leaves stay out of its way). `stylix`
+  # resolves through the synthesized theme
+  # (`programs.scoot.stylix.theme`, set beside the catalog when Stylix
+  # synthesis is on): the Stylix palette with the base look's static
+  # leaves, so the eval-time files move with the active look.
   lookFor =
     scootCfg:
     let
       name = scootCfg.look or null;
     in
-    if name == null then null else desktop.looks.${name} or null;
+    if name == null then
+      null
+    else if name == "stylix" then
+      scootCfg.stylix.theme or null
+    else
+      desktop.looks.${name} or null;
 in
 {
   inherit lookFor;
 
-  # Whether a theme target applies: a registry look is set, and its
+  # Whether a theme target applies: a look is set (a registry look or
+  # the synthesized `stylix` one), and its
   # `theme.targets.<name>.enable` is on. The `or true` keeps this
   # reading with an older `desktop` subtree that predates the target.
   themed =

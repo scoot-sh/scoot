@@ -26,7 +26,51 @@ let
       else
         null;
   };
-  lookCatalog = lookCatalogLib.mkCatalog cfg.looks;
+  # Stylix synthesis (the `stylix` look): same rule as the
+  # home-manager side — on when scoot is managed, its switch is on,
+  # Stylix itself is in use, and a render binary is on hand. The
+  # system side always carries the image when one is set (it renders
+  # no config file, so there is no `wallpaper.enable` half here).
+  stylixPresent = config.lib ? stylix && (config.stylix.enable or false);
+  stylixActive = cfg.enable && cfg.stylix.enable && stylixPresent && cfg.lookPackage != null;
+  stylixLib = import ../lib/look-from-stylix.nix { inherit lib; };
+  stylixDark =
+    if !stylixActive then
+      false
+    else if (config.stylix.polarity or "either") == "dark" then
+      true
+    else if (config.stylix.polarity or "either") == "light" then
+      false
+    else
+      stylixLib.isDarkByLuma config.lib.stylix.colors.withHashtag.base00
+        config.lib.stylix.colors.withHashtag.base05;
+  lookCatalog = lookCatalogLib.mkCatalog {
+    looks = cfg.looks;
+    stylix =
+      if !stylixActive then
+        null
+      else
+        {
+          extends = cfg.stylix.extends;
+          colors = config.lib.stylix.colors.withHashtag;
+          fontsSans = config.stylix.fonts.sansSerif or null;
+          fontsMono = config.stylix.fonts.monospace or null;
+          sizes = {
+            desktop = (config.stylix.fonts.sizes or { }).desktop or null;
+            popups = (config.stylix.fonts.sizes or { }).popups or null;
+            applications = (config.stylix.fonts.sizes or { }).applications or null;
+            terminal = (config.stylix.fonts.sizes or { }).terminal or null;
+          };
+          opacity = {
+            popups = (config.stylix.opacity or { }).popups or null;
+            terminal = (config.stylix.opacity or { }).terminal or null;
+          };
+          cursor = config.stylix.cursor or null;
+          image = config.stylix.image or null;
+          imageMode = config.stylix.imageScalingMode or "fill";
+          isDark = stylixDark;
+        };
+  };
 
   # The greeter's look (ticket `look-greeter`): `greeter.look`,
   # defaulting to the declared `look` (set beside the options below)
@@ -1020,13 +1064,53 @@ in
       default = null;
       defaultText = lib.literalMD ''
         `"ginger-night"` when `desktop.enable` is on (the profile sets it),
-        `null` (nothing themed) otherwise
+        `"stylix"` when Stylix synthesis is on, `null` (nothing themed) otherwise
       '';
       example = "moonrise";
       description = ''
         One name from `looks`: the declared default look. Setting
         `look = null` explicitly is the opt-out, and themes nothing.
       '';
+    };
+
+    # Stylix as a source of a look (design section 5): on by default,
+    # effective only when Stylix itself is in use and a render binary
+    # is on hand. On, the catalog gains a synthesized look named
+    # `stylix` and the declared default follows it. Same meaning as
+    # the home-manager side's `programs.scoot.stylix`.
+    stylix = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Synthesize the `stylix` look from Stylix when it is in use
+          (`config.lib.stylix` exists and `stylix.enable` is on) and
+          make it the declared default. Nothing here needs Stylix, and
+          nothing changes without it.
+        '';
+      };
+
+      extends = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = if (cfg.desktop.enable or false) then "ginger-night" else null;
+        defaultText = lib.literalExpression ''
+          "ginger-night" when programs.scoot.desktop.enable is on, null otherwise
+        '';
+        example = "moonrise";
+        description = ''
+          The look the synthesized `stylix` look extends. Null extends
+          nothing: a standalone look of the Stylix palette alone.
+        '';
+      };
+
+      theme = lib.mkOption {
+        type = lib.types.nullOr lib.types.attrs;
+        internal = true;
+        default = lookCatalog.stylixTheme;
+        description = ''
+          The synthesized theme value for the `stylix` look.
+        '';
+      };
     };
 
     # The `scoot-look` binary that renders the catalog at build time:

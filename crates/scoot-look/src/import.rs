@@ -48,8 +48,10 @@
 //! `desktop` to `size`, `popups` to `popup-size`, `applications` to
 //! `app-size`, `terminal` to `terminal-size`. `opacity`: `popups` and
 //! `terminal`; the bar's is left unset, as today. `cursor`: `name` and
-//! `size`. `title`, `description`, `license`: overrides for the generated
-//! text. Unknown keys are ignored: scheme files vary, and the mapping only
+//! `size`. `image` (a file name inside the look directory, with an image
+//! extension) plus `imageScalingMode` (or `mode`): one of
+//! `fill | fit | stretch | center | tile`. `title`, `description`,
+//! `license`: overrides for the generated text. Unknown keys are ignored: scheme files vary, and the mapping only
 //! reads what it knows.
 //!
 //! # Output
@@ -61,9 +63,10 @@
 //! reports it). `--extends` names a base look but is never checked against
 //! a catalog here: any `[a-z0-9-]{1,32}` name is accepted. With `--extends`
 //! the output is a
-//! child: palette, companion fonts/sizes/opacity/cursor when given, and
-//! nothing else (terminal, shape and wallpaper inherit the base, design
-//! section 5.4). Without it the output is complete: title, polarity,
+//! child: palette, companion fonts/sizes/opacity/cursor when given, the
+//! wallpaper image when given, and nothing else (terminal and shape
+//! inherit the base, design section 5.4). Without it the output is
+//! complete: title, polarity,
 //! fonts, `ring-width`, cursor, a flat `background` wallpaper and the
 //! sixteen terminal hues. The generated display text (`title`,
 //! `description`, `license`, `credits`) is sanitized to the grammar
@@ -169,6 +172,8 @@ struct Scheme {
     opacity: BTreeMap<String, f64>,
     cursor_name: Option<String>,
     cursor_size: Option<i64>,
+    image: Option<String>,
+    image_mode: Option<String>,
     title: Option<String>,
     description: Option<String>,
     license: Option<String>,
@@ -310,6 +315,35 @@ impl Scheme {
             }
             None => (None, None),
         };
+        // The wallpaper image, when given: a file name inside the look
+        // directory (the caller places the file there; the Nix side
+        // copies Stylix's image to it), with an image extension, plus
+        // the scaling mode (`imageScalingMode`, Stylix's name, or
+        // `mode`). Refused unless both halves are present and shaped:
+        // an image without a mode (or the reverse) cannot render.
+        let image = match str_key("image") {
+            Some(v) => Some(check_image_file(&v)?),
+            None => None,
+        };
+        let image_mode = match str_key("imageScalingMode").or_else(|| str_key("mode")) {
+            Some(v) => Some(check_image_mode(&v)?),
+            None => None,
+        };
+        match (&image, &image_mode) {
+            (Some(_), None) => {
+                return Err(GrammarError::new(
+                    "imageScalingMode",
+                    "needs `imageScalingMode` (or `mode`) beside `image`",
+                ));
+            }
+            (None, Some(_)) => {
+                return Err(GrammarError::new(
+                    "image",
+                    "needs `image` beside `imageScalingMode` (or `mode`)",
+                ));
+            }
+            _ => {}
+        }
         // Display text never refuses: `emit` sanitizes `title`,
         // `description` and `license` to the grammar (bidi controls,
         // separators, `=[]{}\` and overlong text included).
@@ -333,6 +367,8 @@ impl Scheme {
             opacity,
             cursor_name,
             cursor_size,
+            image,
+            image_mode,
             title: str_key("title"),
             description: str_key("description"),
             license: str_key("license"),
@@ -349,6 +385,45 @@ fn normalize_hex(slot: &str, raw: &str) -> Result<String, GrammarError> {
         ));
     }
     Ok(format!("#{}", hex.to_ascii_lowercase()))
+}
+
+/// A wallpaper image file name inside the look directory: relative, no
+/// directory, an image extension scootbg decodes. The caller places the
+/// file there (the Nix side copies Stylix's image to it); `build`
+/// resolves it the way it resolves any bundled wallpaper.
+fn check_image_file(raw: &str) -> Result<String, GrammarError> {
+    let name = raw.trim();
+    let lower = name.to_ascii_lowercase();
+    let ok_ext = ["png", "jpg", "jpeg", "webp", "gif"]
+        .iter()
+        .any(|ext| lower.ends_with(&format!(".{ext}")));
+    if name.is_empty()
+        || name.len() > 128
+        || name.contains('/')
+        || name.contains('\\')
+        || name == "."
+        || name == ".."
+        || name.chars().any(|c| c.is_control())
+        || !ok_ext
+    {
+        return Err(GrammarError::new(
+            "image",
+            "must be a file name inside the look directory ending in .png, .jpg, .jpeg, .webp or .gif",
+        ));
+    }
+    Ok(name.to_string())
+}
+
+/// A wallpaper scaling mode: exactly scootbg's five.
+fn check_image_mode(raw: &str) -> Result<String, GrammarError> {
+    let mode = raw.trim();
+    if !["fill", "fit", "stretch", "center", "tile"].contains(&mode) {
+        return Err(GrammarError::new(
+            "imageScalingMode",
+            format!("`{mode}`: must be fill, fit, stretch, center or tile"),
+        ));
+    }
+    Ok(mode.to_string())
 }
 
 fn resolve_name(scheme: &Scheme, opts: &ImportOptions) -> Result<String, GrammarError> {
@@ -590,17 +665,40 @@ fn emit(scheme: &Scheme, name: &str, extends: Option<&str>) -> String {
         if let Some(size) = scheme.cursor_size {
             out.push_str(&format!("size = {size}\n"));
         }
-        out.push_str(&format!(
-            "\n[wallpaper]\ncolor = {}\n",
-            toml_str(&background)
-        ));
-    } else if scheme.cursor_name.is_some() || scheme.cursor_size.is_some() {
-        out.push_str("\n[cursor]\n");
-        if let Some(cursor_name) = &scheme.cursor_name {
-            out.push_str(&format!("theme = {}\n", toml_str(cursor_name)));
+        match (&scheme.image, &scheme.image_mode) {
+            (Some(image), Some(mode)) => {
+                out.push_str(&format!(
+                    "\n[wallpaper]\nimage = {}\nmode = {}\n",
+                    toml_str(image),
+                    toml_str(mode)
+                ));
+            }
+            _ => {
+                out.push_str(&format!(
+                    "\n[wallpaper]\ncolor = {}\n",
+                    toml_str(&background)
+                ));
+            }
         }
-        if let Some(size) = scheme.cursor_size {
-            out.push_str(&format!("size = {size}\n"));
+    } else {
+        if scheme.cursor_name.is_some() || scheme.cursor_size.is_some() {
+            out.push_str("\n[cursor]\n");
+            if let Some(cursor_name) = &scheme.cursor_name {
+                out.push_str(&format!("theme = {}\n", toml_str(cursor_name)));
+            }
+            if let Some(size) = scheme.cursor_size {
+                out.push_str(&format!("size = {size}\n"));
+            }
+        }
+        // A child with an image carries its own wallpaper unit (which
+        // swaps whole, replacing the base's); without one it inherits
+        // the base's, whatever that is.
+        if let (Some(image), Some(mode)) = (&scheme.image, &scheme.image_mode) {
+            out.push_str(&format!(
+                "\n[wallpaper]\nimage = {}\nmode = {}\n",
+                toml_str(image),
+                toml_str(mode)
+            ));
         }
     }
     out

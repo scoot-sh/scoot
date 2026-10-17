@@ -2,9 +2,21 @@
 # home-manager module (`nix/modules/home.nix`) and the NixOS module
 # (`nix/modules/nixos.nix`).
 #
+# `mkCatalog { looks, stylix }`: the entries plus, when `stylix` is
+# non-null, the synthesized `stylix` look (its source built by running
+# `scoot-look import-base16` over the serialized Stylix options, its
+# render against the full sources so `extends` resolves). `stylix`
+# carries the raw reads plus `extends` and the resolved `isDark`; see
+# `nix/lib/look-from-stylix.nix` for what each is checked against.
+# Returns `{ entries, sources, rendered, names, hasWallpaper,
+# fontPackages, stylixTheme }`: `fontPackages` (the Stylix font
+# packages to install) and `stylixTheme` (the registry-shaped theme
+# value for `stylix`) are empty/null without synthesis.
+#
 # `looks` (names of shipped looks or paths to source look directories)
-# normalizes to `{ name, src, manifest }` entries, first wins; each entry
-# renders at build time through the `scoot-look` binary into
+# normalizes to `{ name, src, manifest }` entries, first wins (a literal
+# `stylix` filters out here and appends below when synthesis is on);
+# each entry renders at build time through the `scoot-look` binary into
 # `rendered/<name>`. No derivations run at evaluation (sources read with
 # `builtins.fromTOML`, font carriers resolved with `lib.attrByPath`
 # against `pkgs`), and no import-from-derivation: every derivation input
@@ -157,12 +169,57 @@ let
   # The bar's UI face as a file, found at build time in the carrier
   # package's `share/fonts`: the regular face whose file name is the
   # family name, or that name plus `-Regular` (the same rule the bar
-  # module's `fontFile` uses, so the two never disagree). A look
-  # bundling the face in `[fonts.files]` uses that file instead; without
-  # either, the render carries no `--ui-font-file` and the runtime
+  # module's `fontFile` uses, so the two never disagree). Without a
+  # package, the render carries no `--ui-font-file` and the runtime
   # resolves the family through fontconfig. Unresolvable falls back to
   # the fallback face with a build-time warning (in the log and in
   # `$out/warning`), never a failed build.
+  mkFontFile =
+    { name, family, package }:
+    pkgs.runCommand "scoot-look-font-${lib.strings.sanitizeDerivationName name}"
+      {
+        nativeBuildInputs = [ pkgs.findutils ];
+        inherit family;
+        fontPackage = package;
+        # Null off Linux (no fallback face there): the build refuses
+        # instead of interpolating a null.
+        fallback = if fallbackFont == null then "" else fallbackFont;
+      }
+      ''
+        norm() { tr -d ' _-' | tr '[:upper:]' '[:lower:]'; }
+        want=$(printf '%s' "$family" | norm)
+        files=$(find -L "$fontPackage/share/fonts" -type f \( -iname '*.ttf' -o -iname '*.otf' \) 2>/dev/null | sort || true)
+        pick=
+        while IFS= read -r file; do
+          [ -n "$file" ] || continue
+          base=$(basename "$file"); base=''${base%.*}
+          have=$(printf '%s' "$base" | norm)
+          if [ "$have" = "$want" ] || [ "$have" = "''${want}regular" ]; then
+            pick=$file
+            break
+          fi
+        done <<<"$files"
+        mkdir $out
+        : > $out/warning
+        if [ -z "$pick" ]; then
+          if [ -n "$fallback" ]; then
+            msg="scoot-look: no regular-face file named for \"$family\" in $fontPackage/share/fonts; using the fallback face."
+            echo "warning: $msg" >&2
+            echo "$msg" > $out/warning
+            pick=$fallback
+          else
+            echo "error: scoot-look: no regular-face file named for \"$family\" and no fallback face" >&2
+            exit 1
+          fi
+        fi
+        ln -s "$pick" $out/font
+      '';
+
+  # The bar's UI face as a file, found at build time in the carrier
+  # package's `share/fonts`: a look bundling the face in
+  # `[fonts.files]` uses that file instead; without either, the render
+  # carries no `--ui-font-file` and the runtime resolves the family
+  # through fontconfig.
   uiFontFile =
     entries: entry:
     let
@@ -207,44 +264,10 @@ let
     else if package == null then
       null
     else
-      pkgs.runCommand "scoot-look-font-${lib.strings.sanitizeDerivationName entry.name}"
-        {
-          nativeBuildInputs = [ pkgs.findutils ];
-          inherit family;
-          fontPackage = package;
-          # Null off Linux (no fallback face there): the build refuses
-          # instead of interpolating a null.
-          fallback = if fallbackFont == null then "" else fallbackFont;
-        }
-        ''
-          norm() { tr -d ' _-' | tr '[:upper:]' '[:lower:]'; }
-          want=$(printf '%s' "$family" | norm)
-          files=$(find -L "$fontPackage/share/fonts" -type f \( -iname '*.ttf' -o -iname '*.otf' \) 2>/dev/null | sort || true)
-          pick=
-          while IFS= read -r file; do
-            [ -n "$file" ] || continue
-            base=$(basename "$file"); base=''${base%.*}
-            have=$(printf '%s' "$base" | norm)
-            if [ "$have" = "$want" ] || [ "$have" = "''${want}regular" ]; then
-              pick=$file
-              break
-            fi
-          done <<<"$files"
-          mkdir $out
-          : > $out/warning
-          if [ -z "$pick" ]; then
-            if [ -n "$fallback" ]; then
-              msg="scoot-look: no regular-face file named for \"$family\" in $fontPackage/share/fonts; using the fallback face."
-              echo "warning: $msg" >&2
-              echo "$msg" > $out/warning
-              pick=$fallback
-            else
-              echo "error: scoot-look: no regular-face file named for \"$family\" and no fallback face" >&2
-              exit 1
-            fi
-          fi
-          ln -s "$pick" $out/font
-        '';
+      mkFontFile {
+        name = entry.name;
+        inherit family package;
+      };
 
   # The wallpaper's absolute build-time path, or null: a color-only look
   # needs none, and a `https://` image fetches at first swap (the design's
@@ -305,10 +328,68 @@ let
           ${lib.optionalString (font != null) "--ui-font-file \"${font}/font\""}
       '';
 
-  mkCatalog =
-    looks:
+  # The synthesized `stylix` look (design section 5.3): `synthesize`
+  # maps the raw Stylix reads to the import input and the theme value
+  # once (`nix/lib/look-from-stylix.nix`); the derivations below run
+  # `scoot-look import-base16` on it and render it against the full
+  # sources. `raw` carries the reads plus `extends` and `isDark`
+  # (resolved polarity); `baseLook` is the registry look behind
+  # `extends`, or null without a resolvable base.
+  stylixFrom = import ./lib/look-from-stylix.nix { inherit lib; };
+  mkStylix =
+    { raw, baseLook }:
     let
-      entries = mkEntries looks;
+      synth = stylixFrom.synthesize ({
+        colors = raw.colors;
+        fontsSans = raw.fontsSans or null;
+        fontsMono = raw.fontsMono or null;
+        sizes = raw.sizes or { };
+        opacity = raw.opacity or { };
+        cursor = raw.cursor or null;
+        image = raw.image or null;
+        imageMode = raw.imageMode or "fill";
+        isDark = raw.isDark;
+        inherit baseLook;
+      });
+      jsonFile = pkgs.writeText "stylix-base16.json" synth.json;
+      src = pkgs.runCommand "scoot-look-stylix-src" { nativeBuildInputs = [ scootLook ]; } ''
+        mkdir -p $out/stylix
+        scoot-look import-base16 "${jsonFile}" --name stylix \
+          ${lib.optionalString ((raw.extends or null) != null) "--extends ${lib.escapeShellArg raw.extends}"} \
+          --out $out/stylix
+        ${lib.optionalString (synth.imageFile != null) "cp \"${raw.image}\" \"$out/stylix/${synth.imageFile}\""}
+      '';
+    in
+    {
+      inherit src;
+      inherit (synth) themeLook imageFile fontPackages hasWallpaper;
+      uiFamily = (raw.fontsSans or null).name or null;
+      uiPackage = (raw.fontsSans or null).package or null;
+      wallpaperAbs = if synth.imageFile == null then null else "${src}/stylix/${synth.imageFile}";
+    };
+
+  mkCatalog =
+    { looks, stylix ? null }:
+    let
+      # A literal `stylix` in `looks` means the synthesized look: it is
+      # filtered here and appended below when synthesis is on (an
+      # unknown shipped string still refuses in `toEntry`).
+      entries = mkEntries (builtins.filter (item: item != "stylix") looks);
+      sty = if stylix == null then null else mkStylix {
+        raw = stylix;
+        baseLook =
+          if (stylix.extends or null) == null then
+            null
+          else
+            (import ./modules/desktop.nix { inherit lib; }).looks.${stylix.extends} or null;
+      };
+      fullEntries =
+        entries
+        ++ lib.optional (sty != null) {
+          name = "stylix";
+          src = "${sty.src}/stylix";
+        };
+      hasWallpaperEntry = entry: ((entry.manifest.wallpaper or { }).image or null) != null;
     in
     if scootLook == null then
       # No render binary: the catalog side stays off (no sources, no
@@ -320,28 +401,58 @@ let
         sources = null;
         rendered = { };
         names = map (entry: entry.name) entries;
-        hasWallpaper = builtins.any (
-          entry: ((entry.manifest.wallpaper or { }).image or null) != null
-        ) entries;
+        hasWallpaper = builtins.any hasWallpaperEntry entries;
+        fontPackages = [ ];
+        stylixTheme = null;
       }
     else
       let
-        sources = catalogDir entries;
-      in
-      {
-        inherit entries sources;
-        rendered = lib.listToAttrs (
+        sources = catalogDir fullEntries;
+        renders = lib.listToAttrs (
           map (entry: {
             name = entry.name;
             value = renderLook sources entries entry;
           }) entries
         );
-        names = map (entry: entry.name) entries;
-        hasWallpaper = builtins.any (
-          entry: ((entry.manifest.wallpaper or { }).image or null) != null
-        ) entries;
+        styFont =
+          if sty == null || sty.uiFamily == null || sty.uiPackage == null then
+            null
+          else
+            mkFontFile {
+              name = "stylix";
+              family = sty.uiFamily;
+              package = sty.uiPackage;
+            };
+        styRendered =
+          if sty == null then
+            null
+          else
+            pkgs.runCommand "scoot-look-stylix-rendered"
+              {
+                nativeBuildInputs = [ scootLook ];
+              }
+              ''
+                mkdir -p $out
+                scoot-look build "${sty.src}/stylix" --out "$out" --name stylix --origin declared --catalog "${sources}" \
+                  ${lib.optionalString (sty.wallpaperAbs != null) "--wallpaper-abs \"${sty.wallpaperAbs}\""} \
+                  ${lib.optionalString (styFont != null) "--ui-font-file \"${styFont}/font\""}
+              '';
+      in
+      {
+        inherit sources;
+        # The full entries, declared plus the synthesized `stylix`
+        # source: every consumer linking `looks/` wants the complete
+        # catalog (the render chains above keep the declared-only
+        # list, where a manifest-less entry has no fields to walk).
+        entries = fullEntries;
+        rendered = renders // lib.optionalAttrs (styRendered != null) { stylix = styRendered; };
+        names = map (entry: entry.name) entries ++ lib.optional (sty != null) "stylix";
+        hasWallpaper =
+          builtins.any hasWallpaperEntry entries || (sty != null && sty.hasWallpaper);
+        fontPackages = if sty == null then [ ] else sty.fontPackages;
+        stylixTheme = if sty == null then null else sty.themeLook;
       };
 in
 {
-  inherit shippedNames mkEntries mkCatalog;
+  inherit shippedNames mkEntries mkCatalog catalogDir;
 }
