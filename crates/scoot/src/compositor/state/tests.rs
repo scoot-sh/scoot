@@ -17,7 +17,7 @@ use super::*;
 /// replaced turned into a core dump.
 #[test]
 fn an_unset_runtime_dir_says_which_variable_and_what_to_do() {
-    let message = socket_error(BindError::RuntimeDirNotSet);
+    let message = socket_error(BindError::RuntimeDirNotSet, None);
     assert!(
         message.contains("XDG_RUNTIME_DIR"),
         "the message must name the variable to set: {message}"
@@ -30,7 +30,7 @@ fn an_unset_runtime_dir_says_which_variable_and_what_to_do() {
 
 #[test]
 fn an_unwritable_runtime_dir_says_so() {
-    let message = socket_error(BindError::PermissionDenied);
+    let message = socket_error(BindError::PermissionDenied, None);
     assert!(
         message.contains("not writable"),
         "wrong diagnosis for a permission failure: {message}"
@@ -39,7 +39,7 @@ fn an_unwritable_runtime_dir_says_so() {
 
 #[test]
 fn every_socket_taken_says_how_many_were_tried() {
-    let message = socket_error(BindError::AlreadyInUse);
+    let message = socket_error(BindError::AlreadyInUse, None);
     assert!(
         message.contains("wayland-1") && message.contains("wayland-32"),
         "the message must name the range new_auto actually tries: {message}"
@@ -52,7 +52,7 @@ fn every_socket_taken_says_how_many_were_tried() {
 fn an_io_failure_keeps_the_underlying_error() {
     let source = io::Error::from(io::ErrorKind::NotFound);
     let expected = source.to_string();
-    let message = socket_error(BindError::Io(source));
+    let message = socket_error(BindError::Io(source), None);
     assert!(
         message.contains(&expected),
         "the io error's own text is missing from {message}"
@@ -70,10 +70,27 @@ fn every_variant_is_prefixed_with_what_failed() {
         BindError::AlreadyInUse,
         BindError::Io(io::Error::from(io::ErrorKind::PermissionDenied)),
     ] {
-        let message = socket_error(error);
+        let message = socket_error(error, None);
         assert!(
             message.starts_with("no wayland socket: "),
             "unprefixed startup error: {message}"
         );
     }
+}
+
+/// When the bind fails with the host excluded, the message names the host
+/// socket it refused to steal, so a nested session that cannot land says
+/// what it would not take rather than timing out at the registry roundtrip.
+#[test]
+fn an_excluded_host_is_named_in_the_refusal() {
+    let host = std::ffi::OsString::from("wayland-1");
+    let message = socket_error(BindError::AlreadyInUse, Some(host.as_os_str()));
+    assert!(
+        message.contains("wayland-1") && message.contains("wayland-32"),
+        "the range is still named with an exclusion: {message}"
+    );
+    assert!(
+        message.contains("wayland-1") && message.contains("never taken"),
+        "the refusal must name the host socket it would not steal: {message}"
+    );
 }

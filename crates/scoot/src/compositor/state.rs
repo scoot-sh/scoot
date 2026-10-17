@@ -4,7 +4,7 @@
 #[cfg(test)]
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Instant;
@@ -1567,7 +1567,9 @@ impl State {
         // First, before `display` moves into the `Generic` below: this is the
         // failure that actually happens, and nothing else should have been
         // set up by the time it is reported.
-        let socket = WaylandListener::bind_auto().map_err(socket_error)?;
+        let exclude = WaylandListener::host_excluded_name();
+        let socket = WaylandListener::bind_auto()
+            .map_err(|error| socket_error(error, exclude.as_deref()))?;
         let name = socket.socket_name();
         let handle = event_loop.handle();
         let listener = handle
@@ -1951,7 +1953,7 @@ impl State {
 /// attempt hit and abandoned. The end-to-end behavior is verified against a
 /// real release binary instead; see
 /// `docs/roadmap/12-four-bounds.md` for that verification.
-fn socket_error(error: BindError) -> String {
+fn socket_error(error: BindError, excluded: Option<&OsStr>) -> String {
     match error {
         BindError::RuntimeDirNotSet => {
             "no wayland socket: $XDG_RUNTIME_DIR is not set or invalid; \
@@ -1961,13 +1963,25 @@ fn socket_error(error: BindError) -> String {
         BindError::PermissionDenied => {
             "no wayland socket: $XDG_RUNTIME_DIR is not writable".to_string()
         }
-        // `WaylandListener::bind_auto` tries `wayland-1` through
-        // `wayland-32` (1..33, verified in the pinned rev's
-        // `wayland/socket.rs`), so reaching this means all 32 are taken.
+        // `WaylandListener::bind_in` tries `wayland-1` through `wayland-32`,
+        // so reaching this means all 32 are taken, live, or excluded: the
+        // host's own socket is never taken, and any other live socket is
+        // skipped rather than unlinked (a lock file alone never proves a
+        // socket is free). Names the excluded host name when there is one,
+        // so a nested session that cannot land says which socket it refused
+        // to steal.
         BindError::AlreadyInUse => {
-            "no wayland socket: wayland-1 through wayland-32 are all in use \
-             in $XDG_RUNTIME_DIR; stop another compositor, or remove a stale socket and its .lock"
-                .to_string()
+            let mut message =
+                "no wayland socket: wayland-1 through wayland-32 are all in use \
+                 in $XDG_RUNTIME_DIR; stop another compositor, or remove a stale socket and its .lock"
+                    .to_string();
+            if let Some(host) = excluded {
+                message.push_str(&format!(
+                    " (the host's own socket `{}` is never taken, and every other live socket is skipped)",
+                    host.to_string_lossy()
+                ));
+            }
+            message
         }
         BindError::Io(source) => format!("no wayland socket: {source}"),
     }

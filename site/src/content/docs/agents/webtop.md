@@ -22,14 +22,6 @@ default tag (`latest`) is Alpine/musl — `debian-xfce` is one that works.
 Run the container with `-e PIXELFLUX_WAYLAND=true`: without it the image
 boots X11 and there is no Wayland socket to nest into.
 
-> **Symptom:** `--nested` stops after 10 seconds with "the host compositor
-> did not answer the startup registry request", and the container's
-> `wayland-1` socket is gone afterwards. **Cause:** in this release scoot
-> binds `wayland-1` itself, unlinking the host's live socket, then connects
-> to itself. Do not run `--nested` inside a webtop until the fix lands
-> (backlog: `nested-steals-host-wayland-socket`). `scoot --headless` works
-> there as a stand-in.
-
 scoot does not wait on the script and restarts nothing that dies —
 supervision is the container's job (there is no systemd here), and the
 D-Bus activation half is the session script's (see [the portal
