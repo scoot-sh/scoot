@@ -62,6 +62,14 @@ pub trait Leaves {
     fn fcitx5_reload(&self) -> Result<(), String>;
     /// `systemctl --user try-restart <unit>`.
     fn unit_try_restart(&self, unit: &str) -> Result<(), String>;
+    /// `SIGUSR1` to the user's own `hx` processes: Helix 25.07.1
+    /// re-reads its config and theme from disk on it (verified against
+    /// its 25.07.1 source and live). Returns how many were signaled.
+    fn helix_signal(&self) -> Result<usize, String>;
+    /// `SIGUSR2` to the user's own `btop` processes: btop 1.4.7
+    /// re-reads its config and theme on it (verified against its 1.4.7
+    /// source and live). Returns how many were signaled.
+    fn btop_signal(&self) -> Result<usize, String>;
 }
 
 /// The real backends: `makoctl`, `busctl` and `systemctl` on `PATH`.
@@ -69,6 +77,7 @@ pub struct CliLeaves {
     makoctl: Option<std::path::PathBuf>,
     busctl: Option<std::path::PathBuf>,
     systemctl: Option<std::path::PathBuf>,
+    ps: Option<std::path::PathBuf>,
 }
 
 impl CliLeaves {
@@ -77,6 +86,7 @@ impl CliLeaves {
             makoctl: find_on_path("makoctl"),
             busctl: find_on_path("busctl"),
             systemctl: find_on_path("systemctl"),
+            ps: find_on_path("ps"),
         }
     }
 }
@@ -187,6 +197,176 @@ impl Leaves for CliLeaves {
             }
         }
     }
+
+    fn helix_signal(&self) -> Result<usize, String> {
+        self.signal_own("hx", rustix::process::Signal::USR1)
+    }
+
+    fn btop_signal(&self) -> Result<usize, String> {
+        self.signal_own("btop", rustix::process::Signal::USR2)
+    }
+}
+
+impl CliLeaves {
+    /// Sends `signal` to every process named exactly `name` owned by this
+    /// user, returning how many were signaled. The process list comes
+    /// from `ps -e -o pid= -o uid= -o comm=` (POSIX spellings, on Linux
+    /// and macOS alike): no `pkill` dialect, no shell, and the uid
+    /// filter is this code's, not the matcher's default, so another
+    /// user's same-named process is never touched even as root. The
+    /// name compares against the command's basename, unwrapping a
+    /// Nix-style `.<name>-wrapped` launcher (see [`leaf_comm`]):
+    /// exactly, so `hx-something` never matches `hx`. A pid
+    /// that exits between the listing and the kill is skipped silently
+    /// (`ESRCH`); any other kill failure is reported, never a refusal
+    /// (every leaf step is best-effort). Our own pid is never signaled.
+    fn signal_own(&self, name: &str, signal: rustix::process::Signal) -> Result<usize, String> {
+        let program = self
+            .ps
+            .as_ref()
+            .ok_or_else(|| "no `ps` on PATH".to_owned())?;
+        let table = ps_table(program)?;
+        let uid = rustix::process::getuid().as_raw();
+        let own = std::process::id();
+        let mut signaled = 0;
+        let mut failures = Vec::new();
+        for line in table.lines() {
+            let Some((pid, owner, comm)) = parse_ps_line(line) else {
+                continue;
+            };
+            if !leaf_comm(name, &comm) || owner != uid || pid == own {
+                continue;
+            }
+            let Some(target) = rustix::process::Pid::from_raw(pid as i32) else {
+                continue;
+            };
+            match rustix::process::kill_process(target, signal) {
+                // Delivered. (A pid that exits between the listing and
+                // the kill reads as `ESRCH` below: it existed when
+                // listed, so the attempt counts all the same.)
+                Ok(()) => signaled += 1,
+                Err(rustix::io::Errno::SRCH) => signaled += 1,
+                Err(error) => failures.push(format!("pid {pid}: {error}")),
+            }
+        }
+        if failures.is_empty() {
+            Ok(signaled)
+        } else {
+            Err(failures.join("; "))
+        }
+    }
+}
+
+/// The largest `ps` table read: process tables are kilobytes (tens on a
+/// busy box); anything past this is a runaway, killed, never buffered.
+const PS_MAX_BYTES: usize = 16 << 20;
+
+/// Runs `ps` for the process table, draining its stdout as it goes. The
+/// table exceeds the pipe buffer on a busy box (72 KiB measured), so
+/// collecting after exit — the way
+/// [`run_with_timeout`](super::apply::run_with_timeout) does — would
+/// deadlock the child on a full pipe instead. Nonblocking reads pump up
+/// to the cap under the same helper deadline; a stale `ps` is killed
+/// and reported, never waited on forever.
+fn ps_table(ps: &Path) -> Result<String, String> {
+    use std::io::Read as _;
+    use std::os::unix::io::AsFd as _;
+    let mut child = std::process::Command::new(ps)
+        .args(["-e", "-o", "pid=", "-o", "uid=", "-o", "comm="])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|error| format!("cannot run `{}`: {error}", ps.display()))?;
+    let mut stdout = child.stdout.take().expect("ps stdout is piped");
+    rustix::fs::fcntl_setfl(
+        stdout.as_fd(),
+        rustix::fs::fcntl_getfl(stdout.as_fd())
+            .map_err(|error| format!("cannot poll `{}`: {error}", ps.display()))?
+            | rustix::fs::OFlags::NONBLOCK,
+    )
+    .map_err(|error| format!("cannot poll `{}`: {error}", ps.display()))?;
+    let mut out = Vec::new();
+    let mut chunk = [0u8; 65536];
+    let deadline = std::time::Instant::now() + super::apply::HELPER_TIMEOUT;
+    loop {
+        match stdout.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                out.extend_from_slice(&chunk[..n]);
+                if out.len() > PS_MAX_BYTES {
+                    child.kill().ok();
+                    child.wait().ok();
+                    return Err(format!(
+                        "`{}` wrote past {PS_MAX_BYTES} bytes: killed",
+                        ps.display()
+                    ));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                match child.try_wait() {
+                    Ok(Some(_)) => {}
+                    Ok(None) => {
+                        if std::time::Instant::now() >= deadline {
+                            child.kill().ok();
+                            child.wait().ok();
+                            return Err(format!(
+                                "`{}` timed out after {}s",
+                                ps.display(),
+                                super::apply::HELPER_TIMEOUT.as_secs()
+                            ));
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    Err(error) => {
+                        return Err(format!("cannot run `{}`: {error}", ps.display()));
+                    }
+                }
+            }
+            Err(error) => {
+                return Err(format!("cannot run `{}`: {error}", ps.display()));
+            }
+        }
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("cannot run `{}`: {error}", ps.display()))?;
+    if !status.success() {
+        return Err(format!("`{}` failed", ps.display()));
+    }
+    String::from_utf8(out).map_err(|error| format!("`{}` wrote non-UTF-8: {error}", ps.display()))
+}
+
+/// Whether `comm` names the leaf's process: the command's basename,
+/// exactly (`comm` carries the full path on macOS, the bare name on
+/// Linux), unwrapping a Nix-style `.<name>-wrapped` launcher. nixpkgs
+/// wraps binaries with a launcher that execs `.<name>-wrapped` beside
+/// it, and the kernel reports the inner name: Helix on NixOS runs as
+/// `.hx-wrapped` (verified live), btop as `btop`. A longer name that
+/// merely starts the same (`hx-something`) never matches.
+fn leaf_comm(name: &str, comm: &str) -> bool {
+    let base = comm.rsplit('/').next().unwrap_or_default();
+    if base == name {
+        return true;
+    }
+    base.strip_prefix('.')
+        .and_then(|inner| inner.strip_suffix("-wrapped"))
+        == Some(name)
+}
+
+/// One `ps -e -o pid= -o uid= -o comm=` line: the pid, the owner's uid,
+/// and the command (a bare name on Linux, a full path on macOS — the
+/// caller matches on its basename — possibly with spaces, joined
+/// defensively). Anything else (a header, a truncated line) is skipped.
+fn parse_ps_line(line: &str) -> Option<(u32, u32, String)> {
+    let mut words = line.split_whitespace();
+    let pid: u32 = words.next()?.parse().ok()?;
+    let uid: u32 = words.next()?.parse().ok()?;
+    let comm: Vec<&str> = words.collect();
+    if comm.is_empty() || pid == 0 {
+        return None;
+    }
+    Some((pid, uid, comm.join(" ")))
 }
 
 /// A failed Reload over the bus: mako not running (never activated, so
@@ -285,14 +465,18 @@ pub fn apply_leaves(
 mod tests;
 
 /// A scripted [`Leaves`] for tests: each backend pops its next scripted
-/// result (unscripted calls succeed), recording every unit restart. Shared
-/// by the leaf tests and the apply-transaction tests.
+/// result (unscripted calls succeed), recording every unit restart and
+/// every editor signal. Shared by the leaf tests and the
+/// apply-transaction tests.
 #[cfg(test)]
 pub(crate) struct ScriptedLeaves {
     mako: std::cell::RefCell<Vec<Result<(), String>>>,
     fcitx5: std::cell::RefCell<Vec<Result<(), String>>>,
     units: std::cell::RefCell<Vec<Result<(), String>>>,
     restarted: std::cell::RefCell<Vec<String>>,
+    helix: std::cell::RefCell<Vec<Result<usize, String>>>,
+    btop: std::cell::RefCell<Vec<Result<usize, String>>>,
+    signaled: std::cell::RefCell<Vec<String>>,
 }
 
 #[cfg(test)]
@@ -303,6 +487,9 @@ impl ScriptedLeaves {
             fcitx5: std::cell::RefCell::new(vec![Ok(())]),
             units: std::cell::RefCell::new(vec![Ok(()), Ok(())]),
             restarted: std::cell::RefCell::new(Vec::new()),
+            helix: std::cell::RefCell::new(vec![Ok(1)]),
+            btop: std::cell::RefCell::new(vec![Ok(1)]),
+            signaled: std::cell::RefCell::new(Vec::new()),
         }
     }
 
@@ -315,11 +502,30 @@ impl ScriptedLeaves {
                 Err("no `systemctl` on PATH".to_owned()),
             ]),
             restarted: std::cell::RefCell::new(Vec::new()),
+            helix: std::cell::RefCell::new(vec![Err("no `ps` on PATH".to_owned())]),
+            btop: std::cell::RefCell::new(vec![Err("no `ps` on PATH".to_owned())]),
+            signaled: std::cell::RefCell::new(Vec::new()),
         }
     }
 
     pub(crate) fn restarted(&self) -> Vec<String> {
         self.restarted.borrow().clone()
+    }
+
+    pub(crate) fn signaled(&self) -> Vec<String> {
+        self.signaled.borrow().clone()
+    }
+
+    /// Scripts the next editor signals (popped per call, like every
+    /// other backend): `Ok(n)` signals `n` processes, `Err` fails the
+    /// step into a note.
+    pub(crate) fn script_signals(
+        &self,
+        helix: Vec<Result<usize, String>>,
+        btop: Vec<Result<usize, String>>,
+    ) {
+        self.helix.replace(helix);
+        self.btop.replace(btop);
     }
 }
 
@@ -336,5 +542,15 @@ impl Leaves for ScriptedLeaves {
     fn unit_try_restart(&self, unit: &str) -> Result<(), String> {
         self.restarted.borrow_mut().push(unit.to_owned());
         self.units.borrow_mut().pop().unwrap_or(Ok(()))
+    }
+
+    fn helix_signal(&self) -> Result<usize, String> {
+        self.signaled.borrow_mut().push("helix".to_owned());
+        self.helix.borrow_mut().pop().unwrap_or(Ok(1))
+    }
+
+    fn btop_signal(&self) -> Result<usize, String> {
+        self.signaled.borrow_mut().push("btop".to_owned());
+        self.btop.borrow_mut().pop().unwrap_or(Ok(1))
     }
 }

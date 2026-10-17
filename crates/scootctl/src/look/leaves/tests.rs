@@ -140,6 +140,12 @@ fn absent_units_are_silent() {
         fn unit_try_restart(&self, _unit: &str) -> Result<(), String> {
             Err(super::UNIT_ABSENT.to_owned())
         }
+        fn helix_signal(&self) -> Result<usize, String> {
+            Ok(0)
+        }
+        fn btop_signal(&self) -> Result<usize, String> {
+            Ok(0)
+        }
     }
     let report = apply_leaves(
         Path::new("/state"),
@@ -169,4 +175,27 @@ fn unit_absent_patterns() {
     ] {
         assert!(!super::is_unit_absent(output), "present: {output}");
     }
+}
+
+#[test]
+fn leaf_comm_shapes() {
+    // Bare names and full paths match exactly.
+    assert!(super::leaf_comm("hx", "hx"));
+    assert!(super::leaf_comm("hx", "/nix/store/abc-helix/bin/hx"));
+    assert!(super::leaf_comm("btop", "btop"));
+    // A Nix-style wrapper launcher unwraps to its inner name (Helix on
+    // NixOS runs as `.hx-wrapped`, verified live).
+    assert!(super::leaf_comm("hx", ".hx-wrapped"));
+    assert!(super::leaf_comm("btop", ".btop-wrapped"));
+    assert!(super::leaf_comm(
+        "hx",
+        "/run/current-system/sw/bin/.hx-wrapped"
+    ));
+    // Near misses never match: a longer name, a wrapper for another
+    // app, a bare `-wrapped` without the leading dot.
+    assert!(!super::leaf_comm("hx", "hx-something"));
+    assert!(!super::leaf_comm("hx", ".btop-wrapped"));
+    assert!(!super::leaf_comm("hx", "hx-wrapped"));
+    assert!(!super::leaf_comm("hx", ""));
+    assert!(!super::leaf_comm("hx", ".hx-wrappe"));
 }

@@ -519,6 +519,8 @@ pub fn sync_with(
                     chosen_by: "sync".to_owned(),
                     declared_default: declared_default.clone(),
                     no_toolkit: options.no_toolkit,
+                    no_helix: false,
+                    no_btop: false,
                     nix_claims,
                     target_skips,
                 };
@@ -657,6 +659,7 @@ pub fn sync_with(
         cache,
         checks,
         &mut report.notes,
+        false,
     )
     .map_err(refuse)?;
     // Already there: the same name, the same declared default, and the
@@ -682,6 +685,8 @@ pub fn sync_with(
         chosen_by: "sync".to_owned(),
         declared_default: declared_default.clone(),
         no_toolkit: options.no_toolkit,
+        no_helix: false,
+        no_btop: false,
         nix_claims,
         target_skips,
     };

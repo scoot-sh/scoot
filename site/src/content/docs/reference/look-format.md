@@ -21,9 +21,11 @@ ls ~/.local/share/scoot/user-looks/moonrise/
 A rendered look is the output of a build: `scoot.toml`, `bar.toml`,
 `gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`, `qt/scoot-look.conf`,
 `foot.ini` (only when the look has `[terminal]`), `fuzzel.ini`,
-`swaylock`, `render.json` and the
+`swaylock`, `render.json`, the
 daemon leaves (`mako`, `wob.ini`, `fcitx5/theme.conf`, `nightlight` when
-the look names a temperature). It is never edited and never a source for
+the look names a temperature) and the terminal static leaves
+(`apps/helix.toml`, `apps/btop.theme`, `apps/starship.toml`, each
+only when the look carries it). It is never edited and never a source for
 anything. The two never share a path.
 
 The catalog is the union of the source directories, in fixed order:
@@ -236,6 +238,12 @@ not a look token), `fcitx5/theme.conf` the classic UI theme,
 `nightlight` one `temperature=` line. Every interpolated value is a
 `#rrggbb` token the renderer re-checks, so no format ever receives a
 raw newline, `=` or section header from a look.
+The terminal static leaves are never rendered from tokens: each is
+the author's `apps/` file copied verbatim (shape-checked: size,
+text, well-formed TOML or btop theme lines), inherited through
+`extends` unless the child names its own. Installed looks (someone
+else's) drop them without `--trust`, which prints each kept leaf
+first; every other origin keeps them.
 
 ## Validate and build
 
@@ -259,11 +267,13 @@ resolve here. `build` takes a single source without `extends`
 and refuses one with it; resolve the catalog first. `build`
 writes `scoot.toml`, `bar.toml`, `gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`,
 `qt/scoot-look.conf`, `foot.ini` (only when the look has
-`[terminal]`), `fuzzel.ini`, `swaylock`, `render.json` and the daemon leaves into the output dir
+`[terminal]`), `fuzzel.ini`, `swaylock`, `render.json`, the daemon leaves and the
+terminal static leaves into the output dir
 (never through a symlink, and never beside files it did not write). Both
 read `look.toml` only through a regular file opened without blocking:
-symlinks, directories, devices, FIFOs and sockets refuse. On Nix the same
-binary
+symlinks, directories, devices, FIFOs and sockets refuse. The static
+leaves read the same way (an installed look's drop first, unless
+`--trust`). On Nix the same binary
 runs inside the render derivation with the look's font packages
 as build inputs. Exit nonzero names the field and the reason.
 

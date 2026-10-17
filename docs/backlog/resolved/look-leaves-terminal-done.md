@@ -1,9 +1,10 @@
 ---
 title: "Look leaves for foot, Helix, btop and starship"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-16"
 ---
 
 # Look leaves for foot, Helix, btop and starship
@@ -32,6 +33,27 @@ store (`theme-home.nix:657-678`).
 
 A swap observed in a running Helix and btop and a new foot; the trust drop
 tested.
+
+## Resolution (2026-10-16, PR #639)
+
+foot shipped in #633. This ticket landed Helix, btop and starship:
+
+- Static leaves (`apps/helix.toml`, `apps/btop.theme`,
+  `apps/starship.toml`) copy verbatim from the source look into the
+  render, inherited through `extends`, shape-checked; shipped looks
+  carry them (ginger-night, moonrise, vinyl-sunset all three;
+  music-desk helix + starship; radial-burst none).
+- `SIGUSR1` to the user's own `hx` and `SIGUSR2` to btop (both
+  verified against the pinned sources and live against the real
+  binaries, macOS and Linux), each opt-out (`--no-helix`,
+  `--no-btop`); starship follows on the next prompt.
+- Installed looks drop the leaves without `--trust` (which prints
+  them first); `RENDER_VERSION` 9; `install.sh` fetches the trio
+  best-effort.
+- Evidence: live theme swaps observed in running hx and btop on
+  macOS and Linux (pty captures, color counts before/after), the
+  trust drop tested at unit, CLI and binary level. Full report in
+  the scratchpad (`W5-look-leaves-terminal-rest-report.md`).
 
 ## Not in this ticket
 

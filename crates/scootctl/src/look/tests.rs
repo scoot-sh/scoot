@@ -34,6 +34,9 @@ fn verbs_parse_bare() {
         Ok(Command::Apply {
             name: Some("moonrise".to_owned()),
             no_toolkit: true,
+            trust: false,
+            no_helix: false,
+            no_btop: false,
             from_compositor: false,
             for_secs: None,
             keep: false,
@@ -45,6 +48,9 @@ fn verbs_parse_bare() {
         Ok(Command::Apply {
             name: Some("moonrise".to_owned()),
             no_toolkit: false,
+            trust: false,
+            no_helix: false,
+            no_btop: false,
             from_compositor: true,
             for_secs: None,
             keep: false,
@@ -89,6 +95,7 @@ fn validate_and_build_take_a_target_and_an_origin() {
         Ok(Command::Validate {
             target: "looks/moonrise".to_owned(),
             origin: Origin::User,
+            trust: false,
         })
     );
     assert_eq!(
@@ -96,6 +103,7 @@ fn validate_and_build_take_a_target_and_an_origin() {
         Ok(Command::Validate {
             target: "moonrise".to_owned(),
             origin: Origin::Shipped,
+            trust: false,
         })
     );
     assert_eq!(
@@ -104,6 +112,7 @@ fn validate_and_build_take_a_target_and_an_origin() {
             target: "looks/moonrise".to_owned(),
             out: PathBuf::from("/tmp/out"),
             origin: Origin::User,
+            trust: false,
         })
     );
     assert_eq!(
@@ -112,6 +121,7 @@ fn validate_and_build_take_a_target_and_an_origin() {
             target: "moonrise".to_owned(),
             out: PathBuf::from("/tmp/out"),
             origin: Origin::User,
+            trust: false,
         })
     );
     assert_eq!(
@@ -134,6 +144,9 @@ fn json_state_and_socket_ride_anywhere() {
         Command::Apply {
             name: Some("moonrise".to_owned()),
             no_toolkit: false,
+            trust: false,
+            no_helix: false,
+            no_btop: false,
             from_compositor: false,
             for_secs: None,
             keep: false,
@@ -176,6 +189,9 @@ fn apply_for_and_keep_parse() {
         Ok(Command::Apply {
             name: Some("moonrise".to_owned()),
             no_toolkit: false,
+            trust: false,
+            no_helix: false,
+            no_btop: false,
             from_compositor: false,
             for_secs: Some(20),
             keep: false,
@@ -187,6 +203,9 @@ fn apply_for_and_keep_parse() {
         Ok(Command::Apply {
             name: Some("moonrise".to_owned()),
             no_toolkit: false,
+            trust: false,
+            no_helix: false,
+            no_btop: false,
             from_compositor: false,
             for_secs: Some(20),
             keep: false,
@@ -198,6 +217,9 @@ fn apply_for_and_keep_parse() {
         Ok(Command::Apply {
             name: None,
             no_toolkit: false,
+            trust: false,
+            no_helix: false,
+            no_btop: false,
             from_compositor: false,
             for_secs: None,
             keep: true,
@@ -209,6 +231,9 @@ fn apply_for_and_keep_parse() {
         Ok(Command::Apply {
             name: Some("moonrise".to_owned()),
             no_toolkit: false,
+            trust: false,
+            no_helix: false,
+            no_btop: false,
             from_compositor: false,
             for_secs: None,
             keep: true,
@@ -247,6 +272,9 @@ fn apply_only_if_generation_parses() {
         Ok(Command::Apply {
             name: Some("moonrise".to_owned()),
             no_toolkit: false,
+            trust: false,
+            no_helix: false,
+            no_btop: false,
             from_compositor: false,
             for_secs: None,
             keep: false,
@@ -258,6 +286,9 @@ fn apply_only_if_generation_parses() {
         Ok(Command::Apply {
             name: Some("moonrise".to_owned()),
             no_toolkit: false,
+            trust: false,
+            no_helix: false,
+            no_btop: false,
             from_compositor: false,
             for_secs: None,
             keep: false,
@@ -333,6 +364,7 @@ fn unknown_verbs_teach_and_bad_names_refuse() {
             target: "../evil".to_owned(),
             out: PathBuf::from("/tmp/out"),
             origin: Origin::User,
+            trust: false,
         })
     );
     assert_eq!(
@@ -360,4 +392,61 @@ fn the_usage_names_every_verb() {
     ] {
         assert!(text.contains(flag), "--help hides `{flag}`");
     }
+}
+
+#[test]
+fn apply_trust_and_editor_opt_outs_parse() {
+    assert_eq!(
+        command(&["apply", "moonrise", "--trust"]),
+        Ok(Command::Apply {
+            name: Some("moonrise".to_owned()),
+            no_toolkit: false,
+            trust: true,
+            no_helix: false,
+            no_btop: false,
+            from_compositor: false,
+            for_secs: None,
+            keep: false,
+            only_if_generation: None,
+        })
+    );
+    assert_eq!(
+        command(&["apply", "moonrise", "--no-helix", "--no-btop"]),
+        Ok(Command::Apply {
+            name: Some("moonrise".to_owned()),
+            no_toolkit: false,
+            trust: false,
+            no_helix: true,
+            no_btop: true,
+            from_compositor: false,
+            for_secs: None,
+            keep: false,
+            only_if_generation: None,
+        })
+    );
+    assert_eq!(
+        command(&["validate", "looks/moonrise", "--trust"]),
+        Ok(Command::Validate {
+            target: "looks/moonrise".to_owned(),
+            origin: Origin::User,
+            trust: true,
+        })
+    );
+    assert_eq!(
+        command(&[
+            "build",
+            "looks/moonrise",
+            "--out",
+            "/tmp/out",
+            "--origin",
+            "installed",
+            "--trust"
+        ]),
+        Ok(Command::Build {
+            target: "looks/moonrise".to_owned(),
+            out: PathBuf::from("/tmp/out"),
+            origin: Origin::Installed,
+            trust: true,
+        })
+    );
 }

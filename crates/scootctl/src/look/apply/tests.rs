@@ -131,6 +131,9 @@ fn options() -> ApplyOptions {
     ApplyOptions {
         lock_wait: Duration::from_millis(500),
         no_toolkit: false,
+        trust: false,
+        no_helix: false,
+        no_btop: false,
         from_compositor: false,
         preview: false,
         only_if_generation: None,
@@ -1952,6 +1955,7 @@ fn build_refuses_a_foreign_nonempty_out() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect_err("a foreign out refuses");
     assert!(error.contains("holds files"), "{error}");
@@ -1975,6 +1979,7 @@ fn build_refuses_a_symlinked_out_and_a_symlinked_fragment() {
         &link,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect_err("a symlinked out refuses");
     assert!(error.contains("symlink"), "{error}");
@@ -1988,6 +1993,7 @@ fn build_refuses_a_symlinked_out_and_a_symlinked_fragment() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect_err("a symlinked fragment refuses");
     assert!(error.contains("symlink"), "{error}");
@@ -2005,6 +2011,7 @@ fn build_into_an_out_holding_only_our_files_overwrites() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("the first build succeeds");
     // A second build into the same dir (only our five files) succeeds.
@@ -2013,6 +2020,7 @@ fn build_into_an_out_holding_only_our_files_overwrites() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("rebuilding over our own files succeeds");
 }
@@ -2034,6 +2042,7 @@ fn build_leaves_a_sibling_build_tmp_alone() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("the build succeeds");
     assert!(sibling.join("keep.txt").is_file(), "the sibling survives");
@@ -2082,7 +2091,7 @@ fn validate_names_a_bad_wallpaper_instead_of_blank() {
         let dir = root.join("looks").join("badlook");
         // `validate_dir` reads look.toml first; the wallpaper failure must
         // appear in errors, never as an empty command error.
-        match validate_dir(&dir, Origin::User, &catalog, &checks) {
+        match validate_dir(&dir, Origin::User, &catalog, &checks, false) {
             Ok(validation) => {
                 assert!(
                     !validation.errors.is_empty(),
@@ -2169,12 +2178,13 @@ fn validate_and_build_cover_a_directory_and_a_name() {
     let fonts = fixture._root.join("fonts");
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
-    let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
+    let validation =
+        validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
-    assert!(validate_entry(&fixture.catalog, "nope", &checks).is_err());
+    assert!(validate_entry(&fixture.catalog, "nope", &checks, false).is_err());
     let dir = fixture._root.join("looks").join("look-a");
     let validation =
-        validate_dir(&dir, Origin::User, &fixture.catalog, &checks).expect("validatable");
+        validate_dir(&dir, Origin::User, &fixture.catalog, &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
     let out = fixture._root.join("out");
     let report = build_to_out(
@@ -2182,6 +2192,7 @@ fn validate_and_build_cover_a_directory_and_a_name() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("buildable");
     assert_eq!(report.name, "look-a");
@@ -2276,6 +2287,7 @@ fn a_directory_builds_itself_never_the_catalog_collision() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("the copy builds");
     assert_eq!(report.name, "look-a");
@@ -2301,7 +2313,8 @@ fn effectful_refusals_are_structured_not_bare_errors() {
         bar_seen: RefCell::new(Vec::new()),
         foot_seen: RefCell::new(Vec::new()),
     };
-    let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
+    let validation =
+        validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert_eq!(validation.errors.len(), 3, "{:?}", validation.errors);
     for error in &validation.errors {
         assert!(error.contains("resolves to nothing"), "{error}");
@@ -2349,7 +2362,8 @@ fn validate_accepts_a_nameless_dir_path() {
     let fonts = root.join("fonts");
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
-    let validation = validate_dir(&probe, Origin::User, &catalog, &checks).expect("validatable");
+    let validation =
+        validate_dir(&probe, Origin::User, &catalog, &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
 }
 
@@ -2414,7 +2428,8 @@ fn validate_and_apply_agree_on_the_bar_fragment() {
         foot_refuse: None,
         foot_seen: RefCell::new(Vec::new()),
     };
-    let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
+    let validation =
+        validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert!(
         validation
             .errors
@@ -2468,7 +2483,8 @@ fn validate_retries_a_popup_refusal_without_popup_keys() {
         foot_refuse: None,
         foot_seen: RefCell::new(Vec::new()),
     };
-    let validation = validate_entry(&fixture.catalog, "look-a", &checks).expect("validatable");
+    let validation =
+        validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
     let seen = checks.bar_seen.borrow();
     assert_eq!(
@@ -2533,7 +2549,7 @@ fn a_minimal_bar_drops_module_tokens_with_a_note() {
     };
     // Validate drops both and says so.
     let checks = new_checks();
-    let validation = validate_entry(&catalog, "look-ws", &checks).expect("validatable");
+    let validation = validate_entry(&catalog, "look-ws", &checks, false).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
     let seen = checks.bar_seen.borrow();
     assert!(
@@ -2606,6 +2622,7 @@ fn a_minimal_bar_drops_module_tokens_with_a_note() {
         &out,
         &catalog,
         &checks,
+        false,
     )
     .expect("a minimal bar builds a shipped-shaped look");
     let bar = std::fs::read_to_string(out.join("bar.toml")).expect("a bar fragment");
@@ -2762,6 +2779,7 @@ fn build_into_an_empty_out_writes_five_files_and_leaves_no_litter() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("an empty out builds");
     assert_eq!(report.name, "look-a");
@@ -2785,6 +2803,7 @@ fn build_into_an_empty_out_writes_five_files_and_leaves_no_litter() {
         &failing,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect_err("a foreign out refuses");
     assert_no_build_litter(&fixture._root);
@@ -3153,6 +3172,7 @@ fn build_writes_foot_ini_for_a_terminal_look() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("a terminal look builds");
     let foot = std::fs::read_to_string(out.join("foot.ini")).expect("a foot.ini");
@@ -3179,6 +3199,7 @@ fn build_removes_a_stale_foot_ini_when_the_look_has_none() {
         &out,
         &fixture.catalog,
         &checks,
+        false,
     )
     .expect("a terminal look builds");
     assert!(out.join("foot.ini").is_file(), "no foot.ini to go stale");
@@ -3192,6 +3213,7 @@ fn build_removes_a_stale_foot_ini_when_the_look_has_none() {
         &out,
         &catalog,
         &checks,
+        false,
     )
     .expect("a plain look builds over the dir");
     assert!(
@@ -3270,7 +3292,8 @@ fn validate_reports_a_foot_refusal() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let mut checks = FakeChecks::with_fonts(&fonts);
     checks.foot_refuse = Some("foot says no".to_owned());
-    let validation = validate_entry(&fixture.catalog, "look-t", &checks).expect("a validation");
+    let validation =
+        validate_entry(&fixture.catalog, "look-t", &checks, false).expect("a validation");
     assert!(
         validation.errors.iter().any(|e| e.contains("foot says no")),
         "errors: {:?}",
@@ -3433,4 +3456,414 @@ fn a_second_apply_reuses_the_cached_foot_ini() {
         report.notes
     );
     assert!(second.join("foot.ini").is_file(), "reuse loses foot.ini");
+}
+
+// Static terminal leaves through the transaction: rendering, the trust
+// drop, inheritance, opt-outs, and refusal before anything is touched.
+
+const HELIX_LEAF: &str =
+    "\"ui.background\" = {}\n\"ui.text\" = \"#FF0000\"\n\"ui.selection\" = \"#FF0000\"\n";
+const BTOP_LEAF: &str = "# a theme\ntheme[main_fg]=\"#FF0000\"\n";
+const STARSHIP_LEAF: &str = "add_newline = false\nformat = \"$directory$character\"\n";
+
+/// Writes `apps/` static leaves into the source look `sources/<name>`.
+fn write_static(sources: &Path, name: &str, leaves: &[(&str, &str)]) {
+    for (file, contents) in leaves {
+        let path = sources.join(name).join(file);
+        std::fs::create_dir_all(path.parent().expect("a parent")).expect("apps parents");
+        std::fs::write(&path, contents).expect("a static leaf");
+    }
+}
+
+const ALL_LEAVES: &[(&str, &str)] = &[
+    ("apps/helix.toml", HELIX_LEAF),
+    ("apps/btop.theme", BTOP_LEAF),
+    ("apps/starship.toml", STARSHIP_LEAF),
+];
+
+/// A fixture whose `look-a` carries static leaves, scanned as `origin`.
+fn static_fixture(tag: &str, origin: Origin, leaves: &[(&str, &str)]) -> Fixture {
+    let scratch = scratch(tag);
+    let root: PathBuf = scratch.path().to_owned();
+    let sources = root.join("looks");
+    write_look(&sources, "look-a", "");
+    write_static(&sources, "look-a", leaves);
+    let catalog = discover_ordered(&[(sources, origin)]);
+    assert_eq!(catalog.entries.len(), 1, "notes: {:?}", catalog.notes);
+    let cache = root.join("cache");
+    let state = root.join("state");
+    let config = root.join("config");
+    Fixture {
+        catalog,
+        cache,
+        state,
+        config,
+        _scratch: scratch,
+        _root: root,
+    }
+}
+
+fn trust_options() -> ApplyOptions {
+    ApplyOptions {
+        trust: true,
+        ..options()
+    }
+}
+
+fn opt_out_options() -> ApplyOptions {
+    ApplyOptions {
+        no_helix: true,
+        no_btop: true,
+        ..options()
+    }
+}
+
+fn offline_apply(
+    fixture: &Fixture,
+    name: &str,
+    options: &ApplyOptions,
+    leaves: &ScriptedLeaves,
+) -> ApplyReport {
+    let mut compositor = FakeCompositor::not_running();
+    apply_with_live(
+        name,
+        options,
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &FakeChecks::default(),
+        &FakeDconf::absent(),
+        leaves,
+        &[],
+    )
+    .expect("an offline apply succeeds")
+}
+
+#[test]
+fn static_leaves_render_verbatim_and_signal() {
+    let fixture = static_fixture("static-render", Origin::User, ALL_LEAVES);
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &options(), &leaves);
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    for (file, contents) in ALL_LEAVES {
+        let read = std::fs::read(rendered.join(file)).expect("a rendered static leaf");
+        assert_eq!(read, contents.as_bytes(), "{file} copies verbatim");
+    }
+    assert_eq!(
+        leaves.signaled(),
+        vec!["helix".to_owned(), "btop".to_owned()]
+    );
+    assert!(report.reloaded.contains(&"helix".to_owned()), "{report:?}");
+    assert!(report.reloaded.contains(&"btop".to_owned()), "{report:?}");
+    // The one-time wiring for each leaf, and starship's next prompt.
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("scoot-look.toml")),
+        "{report:?}"
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("scoot-look.theme")),
+        "{report:?}"
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("STARSHIP_CONFIG")),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn installed_look_drops_static_leaves_without_trust() {
+    let fixture = static_fixture("static-drop", Origin::Installed, ALL_LEAVES);
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &options(), &leaves);
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    assert!(
+        !rendered.join("apps").exists(),
+        "no static leaf renders untrusted"
+    );
+    assert!(leaves.signaled().is_empty(), "no signal attempted");
+    assert!(!report.reloaded.contains(&"helix".to_owned()), "{report:?}");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("dropping apps/btop.theme")
+                && note.contains("apps/helix.toml")
+                && note.contains("apps/starship.toml")
+                && note.contains("--trust")),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn trusted_installed_look_keeps_and_prints_static_leaves() {
+    let fixture = static_fixture("static-trust", Origin::Installed, ALL_LEAVES);
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &trust_options(), &leaves);
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    for (file, contents) in ALL_LEAVES {
+        let read = std::fs::read(rendered.join(file)).expect("a rendered static leaf");
+        assert_eq!(read, contents.as_bytes(), "{file} copies verbatim");
+    }
+    // `--trust` prints each kept leaf first: the contents ride the reply.
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("trusted static leaf apps/helix.toml")
+                && note.contains("\"ui.text\"")),
+        "{report:?}"
+    );
+    assert_eq!(
+        leaves.signaled(),
+        vec!["helix".to_owned(), "btop".to_owned()]
+    );
+}
+
+#[test]
+fn trusted_non_installed_look_prints_no_trust_notes() {
+    // `--trust` on a look that needs no trusting changes nothing and
+    // prints nothing: the leaves render like any trusted look's.
+    let fixture = static_fixture("static-notrust", Origin::User, ALL_LEAVES);
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &trust_options(), &leaves);
+    assert!(
+        report
+            .notes
+            .iter()
+            .all(|note| !note.contains("trusted static leaf")),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn static_leaves_inherit_unless_the_child_names_its_own() {
+    let scratch = scratch("static-inherit");
+    let root: PathBuf = scratch.path().to_owned();
+    let sources = root.join("looks");
+    write_look(&sources, "base-a", "");
+    write_static(&sources, "base-a", &[("apps/helix.toml", HELIX_LEAF)]);
+    // `extends` is a top-level key: appended text would land inside
+    // `[wallpaper]`, so the child's manifest is edited in place.
+    let child = look_toml("child-b").replacen(
+        "name = \"child-b\"",
+        "name = \"child-b\"\nextends = \"base-a\"",
+        1,
+    );
+    let child_dir = sources.join("child-b");
+    std::fs::create_dir_all(&child_dir).expect("a look dir");
+    std::fs::write(child_dir.join("look.toml"), child).expect("a look.toml");
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    let cache = root.join("cache");
+    let state = root.join("state");
+    let config = root.join("config");
+    let fixture = Fixture {
+        catalog,
+        cache,
+        state,
+        config,
+        _scratch: scratch,
+        _root: root,
+    };
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "child-b", &options(), &leaves);
+    let _ = report;
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    let read = std::fs::read_to_string(rendered.join("apps/helix.toml")).expect("inherited leaf");
+    assert_eq!(read, HELIX_LEAF, "the base's leaf renders under the child");
+    // The child names its own: the file changes, the render follows (the
+    // cache keys the leaf bytes, so no stale directory is reused).
+    let own = "\"ui.background\" = {}\n\"ui.text\" = \"#00FF00\"\n\"ui.selection\" = \"#00FF00\"\n";
+    write_static(
+        &fixture._root.join("looks"),
+        "child-b",
+        &[("apps/helix.toml", own)],
+    );
+    let first = rendered.clone();
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "child-b", &options(), &leaves);
+    let _ = report;
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    assert_ne!(rendered, first, "an edited leaf re-renders elsewhere");
+    let read = std::fs::read_to_string(rendered.join("apps/helix.toml")).expect("own leaf");
+    assert_eq!(read, own, "the child's own leaf wins");
+}
+
+#[test]
+fn broken_static_leaf_refuses_before_anything() {
+    let fixture = static_fixture(
+        "static-broken",
+        Origin::User,
+        &[("apps/helix.toml", "\"ui.text\" = ")],
+    );
+    let mut compositor = FakeCompositor::not_running();
+    let failure = apply_with_live(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &FakeChecks::default(),
+        &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
+    )
+    .expect_err("a broken static leaf refuses");
+    assert!(
+        failure.message.contains("apps/helix.toml"),
+        "the refusal names the leaf: {}",
+        failure.message
+    );
+    assert!(
+        !fixture.state.join("look.json").exists(),
+        "nothing is recorded"
+    );
+}
+
+#[test]
+fn opt_outs_skip_signals_but_keep_leaves_and_notes() {
+    let fixture = static_fixture("static-optout", Origin::User, ALL_LEAVES);
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &opt_out_options(), &leaves);
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    for (file, _) in ALL_LEAVES {
+        assert!(rendered.join(file).is_file(), "{file} still renders");
+    }
+    assert!(leaves.signaled().is_empty(), "no signal attempted");
+    assert!(
+        !report.reloaded.contains(&"helix".to_owned())
+            && !report.reloaded.contains(&"btop".to_owned()),
+        "{report:?}"
+    );
+    assert!(
+        report.notes.iter().any(|note| note.contains("--no-helix")),
+        "{report:?}"
+    );
+    assert!(
+        report.notes.iter().any(|note| note.contains("--no-btop")),
+        "{report:?}"
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("scoot-look.toml")),
+        "the setup hint still prints: {report:?}"
+    );
+}
+
+#[test]
+fn look_without_static_leaves_signals_nothing() {
+    // A look with no `apps/` files runs no editor step at all: no
+    // signal, no note, no silence broken.
+    let fixture = fixture("static-absent");
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &options(), &leaves);
+    assert!(leaves.signaled().is_empty(), "no signal attempted");
+    assert!(
+        !report.reloaded.contains(&"helix".to_owned())
+            && !report.reloaded.contains(&"btop".to_owned()),
+        "{report:?}"
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .all(|note| !note.contains("helix") && !note.contains("btop")),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn build_out_writes_static_leaves_and_clears_stale_ones() {
+    let fixture = static_fixture("static-build", Origin::User, ALL_LEAVES);
+    let out = fixture._root.join("out");
+    let report = build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &FakeChecks::default(),
+        false,
+    )
+    .expect("a build succeeds");
+    let _ = report;
+    for (file, contents) in ALL_LEAVES {
+        let read = std::fs::read(out.join(file)).expect("a built static leaf");
+        assert_eq!(read, contents.as_bytes(), "{file} builds verbatim");
+    }
+    // A rebuild for a look that no longer carries the leaf removes the
+    // stale file, so `--out` never carries them.
+    std::fs::remove_dir_all(fixture._root.join("looks/look-a/apps")).expect("leaves removed");
+    let report = build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &FakeChecks::default(),
+        false,
+    )
+    .expect("a rebuild succeeds");
+    let _ = report;
+    assert!(
+        !out.join("apps/helix.toml").exists(),
+        "the stale leaf is gone"
+    );
+}
+
+#[test]
+fn build_dir_target_honors_origin_and_trust() {
+    let fixture = static_fixture("static-builddir", Origin::Installed, ALL_LEAVES);
+    let dir = fixture._root.join("looks/look-a");
+    let out = fixture._root.join("out");
+    // A directory built as installed drops the leaves, like apply.
+    let report = build_to_out(
+        &BuildTarget::Dir {
+            path: dir.clone(),
+            origin: Origin::Installed,
+        },
+        &out,
+        &fixture.catalog,
+        &FakeChecks::default(),
+        false,
+    )
+    .expect("an untrusted build succeeds");
+    assert!(
+        report.notes.iter().any(|note| note.contains("dropping")),
+        "{report:?}"
+    );
+    assert!(!out.join("apps/helix.toml").exists(), "no leaf builds");
+    // With `--trust` they build and print first.
+    let out = fixture._root.join("out-trusted");
+    let report = build_to_out(
+        &BuildTarget::Dir {
+            path: dir,
+            origin: Origin::Installed,
+        },
+        &out,
+        &fixture.catalog,
+        &FakeChecks::default(),
+        true,
+    )
+    .expect("a trusted build succeeds");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("trusted static leaf")),
+        "{report:?}"
+    );
+    assert!(out.join("apps/helix.toml").is_file(), "the leaf builds");
 }

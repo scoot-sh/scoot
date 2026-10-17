@@ -132,6 +132,9 @@ fn apply_options() -> ApplyOptions {
     ApplyOptions {
         lock_wait: Duration::from_millis(500),
         no_toolkit: false,
+        trust: false,
+        no_helix: false,
+        no_btop: false,
         from_compositor: false,
         preview: false,
         only_if_generation: None,

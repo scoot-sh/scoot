@@ -139,6 +139,14 @@ for ref in scoot-v0.1.0 v0.3.0; do
                 printf 'command = ["cpu.sh"]\n'
             fi
         } >"$r/docs/examples/$look/bar.toml"
+        # Static terminal leaves for one look only (the rest 404, which
+        # the installer tolerates): the catalog install fetches them.
+        if [ "$look" = ginger-night ]; then
+            mkdir -p "$r/looks/$look/apps"
+            printf '"ui.background" = {}\n"ui.text" = "#FF0000"\n"ui.selection" = "#FF0000"\n' >"$r/looks/$look/apps/helix.toml"
+            printf '# fake\ntheme[main_fg]="#FF0000"\n' >"$r/looks/$look/apps/btop.theme"
+            printf 'add_newline = false\n' >"$r/looks/$look/apps/starship.toml"
+        fi
     done
     printf '#!/bin/sh\n' >"$r/docs/examples/ginger-night/cpu.sh"
     printf '#!/bin/sh\n' >"$r/docs/examples/ginger-night/load.sh"
@@ -217,6 +225,13 @@ for l in ginger-night moonrise music-desk radial-burst vinyl-sunset; do
 done
 [ -f "$h/.local/share/scoot/looks/moonrise/wallpaper.png" ] || fail "no catalog wallpaper"
 [ ! -e "$h/.local/share/scoot/looks/vinyl-sunset/wallpaper.png" ] || fail "the color look fetched a wallpaper"
+# The static terminal leaves: fetched where the release ships them,
+# tolerated where it does not.
+[ -f "$h/.local/share/scoot/looks/ginger-night/apps/helix.toml" ] || fail "no catalog helix leaf"
+[ -f "$h/.local/share/scoot/looks/ginger-night/apps/btop.theme" ] || fail "no catalog btop leaf"
+[ -f "$h/.local/share/scoot/looks/ginger-night/apps/starship.toml" ] || fail "no catalog starship leaf"
+[ ! -e "$h/.local/share/scoot/looks/moonrise/apps/helix.toml" ] || fail "a missing leaf was invented"
+grep -Fq "$h/.local/share/scoot/looks/ginger-night/apps/helix.toml" "$h/.local/share/scoot/install-manifest" || fail "leaf not in manifest"
 [ ! -e "$h/.config/scoot/config.toml" ] && [ ! -e "$h/.config/scoot/bar.toml" ] || fail "whole configs written"
 grep -q "look apply ginger-night" "$h/stub-scoot-calls" || fail "apply not invoked"
 grep -q "applied: ginger-night" "$work/out" || fail "no apply reply"

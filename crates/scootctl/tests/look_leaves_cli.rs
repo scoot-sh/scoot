@@ -175,3 +175,325 @@ fn failing_daemons_are_named_errors() {
         assert!(error.contains("scoot-osd"), "names the unit: {error}");
     });
 }
+
+/// The process table the signal tests read: our own uid's `hx` twice
+/// (one under our own pid, which must never be signaled) and `btop`
+/// once, another uid's `hx` and `btop` (never touched), plus a header
+/// and a garbage line (both skipped). Pids sit where no real process
+/// can be (above any pid_max), so the kills land on `ESRCH` and stay
+/// silent: the counts prove the selection, never a side effect.
+fn stub_ps_table(bin: &std::path::Path, uid: u32, other: u32) {
+    let own = std::process::id();
+    let stub = bin.join("ps");
+    std::fs::write(
+        &stub,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \\\n  '    PID   UID COMMAND' \\\n  'not a process line' \\\n  \"2000000001 {uid} hx\" \\\n  \"2000000002 {uid} hx\" \\\n  \"{own} {uid} hx\" \\\n  \"2000000003 {uid} btop\" \\\n  \"2000000004 {uid} foot\" \\\n  \"2000000005 {other} hx\" \\\n  \"2000000006 {other} btop\" \\\n  \"2000000007 {uid} /nix/store/abc-helix-25.07.1/bin/hx\" \\\n  \"2000000008 {uid} hx-something\" \\\n  \"2000000009 {uid} .hx-wrapped\" \\\n  \"2000000010 {uid} .btop-wrapped\"\n"
+        ),
+    )
+    .expect("a stub ps");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .expect("an executable stub");
+    }
+}
+
+fn own_uid() -> u32 {
+    // No subprocess: `id -u` resolves on `PATH`, which a concurrent
+    // exact-PATH test rewrites mid-flight (`NotFound`). `getuid` cannot
+    // race it, and matches the production uid filter in `leaves.rs`.
+    rustix::process::getuid().as_raw()
+}
+
+#[test]
+fn editor_signals_reach_only_the_users_own_processes() {
+    let uid = own_uid();
+    let dir = std::env::temp_dir().join(format!(
+        "scoot-leaves-ps-{}-{}",
+        std::process::id(),
+        "signals"
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a stub dir");
+    stub_ps_table(&dir, uid, uid + 1);
+    let fake = FakeBin::new("signals-ps", &[]);
+    // The stub ps beside (not inside) the fake bin dir: reuse the
+    // fake's PATH plumbing by pointing PATH at both.
+    let _ = &fake;
+    {
+        let _guard = PATH_LOCK.lock().expect("the PATH lock");
+        // Read inside the lock (as `with_path` does): outside, another
+        // test's body PATH could be observed and restored as ours.
+        let old = std::env::var_os("PATH");
+        let mut path = dir.display().to_string();
+        if let Some(real) = &old {
+            path.push(':');
+            path.push_str(&real.to_string_lossy());
+        }
+        unsafe { std::env::set_var("PATH", &path) };
+        let leaves = CliLeaves::new();
+        // Two own bare `hx` (our own pid excluded) plus one by store
+        // path (the macOS `comm` shape) plus the Nix wrapper (the
+        // NixOS `comm` shape), one own `btop` plus its wrapper: the
+        // other uid's pair, `foot` and `hx-something` are never
+        // counted. The kills hit pids no process holds (`ESRCH`), so
+        // nothing is side-effected.
+        assert_eq!(leaves.helix_signal().expect("hx signaled"), 4);
+        assert_eq!(leaves.btop_signal().expect("btop signaled"), 2);
+        if let Some(path) = old.clone() {
+            unsafe { std::env::set_var("PATH", path) };
+        }
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn no_running_editor_is_a_count_of_zero() {
+    let uid = own_uid();
+    let dir = std::env::temp_dir().join(format!(
+        "scoot-leaves-ps-{}-{}",
+        std::process::id(),
+        "empty"
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a stub dir");
+    let stub = dir.join("ps");
+    std::fs::write(
+        &stub,
+        format!("#!/bin/sh\nprintf '%s\\n' '    PID   UID COMMAND' '2000000007 {uid} foot'\n"),
+    )
+    .expect("a stub ps");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .expect("an executable stub");
+    }
+    {
+        let _guard = PATH_LOCK.lock().expect("the PATH lock");
+        // Read inside the lock (as `with_path` does): outside, another
+        // test's body PATH could be observed and restored as ours.
+        let old = std::env::var_os("PATH");
+        let mut path = dir.display().to_string();
+        if let Some(real) = &old {
+            path.push(':');
+            path.push_str(&real.to_string_lossy());
+        }
+        unsafe { std::env::set_var("PATH", &path) };
+        let leaves = CliLeaves::new();
+        assert_eq!(leaves.helix_signal().expect("hx counted"), 0);
+        assert_eq!(leaves.btop_signal().expect("btop counted"), 0);
+        if let Some(path) = old.clone() {
+            unsafe { std::env::set_var("PATH", path) };
+        }
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn missing_ps_is_a_named_error() {
+    // An exact PATH with no `ps`: the step reports, never refuses the
+    // swap (the caller turns this into a note).
+    let fake = FakeBin::new("signals-nops", &[]);
+    with_exact_path(&fake, || {
+        let leaves = CliLeaves::new();
+        let error = leaves.helix_signal().expect_err("no ps surfaces");
+        assert!(error.contains("`ps`"), "names the tool: {error}");
+        let error = leaves.btop_signal().expect_err("no ps surfaces");
+        assert!(error.contains("`ps`"), "names the tool: {error}");
+    });
+}
+
+/// Real delivery, hermetically: copies of `sleep` named `hx` and `btop`
+/// run as our own children, and a stub `ps` lists only their pids — so
+/// the real `ps` output parse, the uid match and the real `kill` run
+/// with nothing else in reach. Both sleepers must die by their signal
+/// (`SIGUSR1` for Helix, `SIGUSR2` for btop), proving the signal lands.
+#[test]
+fn editor_signals_are_really_delivered() {
+    use std::process::{Command, Stdio};
+    // The whole test holds the PATH lock: the sleep lookup shells `sh`
+    // and the comm probe shells `ps` (both PATH-resolved), so they must
+    // not run while a concurrent exact-PATH test rewrites PATH — the
+    // same class as `own_uid`'s old `id -u` race.
+    let _path_guard = PATH_LOCK.lock().expect("the PATH lock");
+    let uid = own_uid();
+    let dir = std::env::temp_dir().join(format!(
+        "scoot-leaves-ps-{}-{}",
+        std::process::id(),
+        "deliver"
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a stub dir");
+    // A `sleep` by another name: a copy (never a symlink, which some
+    // platforms resolve for `comm`) run under the leaf's process name.
+    // Multicall platforms (NixOS coreutils dispatches on `argv[0]`)
+    // cannot host one: the probe below skips there instead of failing.
+    let sleep = ["/bin/sleep", "/usr/bin/sleep"]
+        .into_iter()
+        .map(std::path::PathBuf::from)
+        .find(|path| path.is_file())
+        .or_else(|| {
+            Command::new("sh")
+                .args(["-c", "command -v sleep"])
+                .output()
+                .ok()
+                .and_then(|out| {
+                    String::from_utf8_lossy(&out.stdout)
+                        .lines()
+                        .next()
+                        .map(|line| std::path::PathBuf::from(line.trim()))
+                })
+                .filter(|path| path.is_file())
+        });
+    let Some(sleep) = sleep else {
+        eprintln!("skipped -- no sleep to host a named sleeper");
+        return;
+    };
+    // The capability probe: a copy under a probe name must report that
+    // name as its comm, or no renamed sleeper can prove delivery here.
+    let probe = dir.join("scoot-probe-sleeper");
+    std::fs::copy(&sleep, &probe).expect("a probe copy");
+    let mut probe_child = Command::new(&probe)
+        .arg("30")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("a probe sleeper");
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let seen = Command::new("ps")
+        .args(["-o", "comm=", "-p", &probe_child.id().to_string()])
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        .unwrap_or_default();
+    probe_child.kill().ok();
+    let _ = probe_child.wait();
+    if seen.rsplit('/').next().unwrap_or_default() != "scoot-probe-sleeper" {
+        eprintln!("skipped -- renamed copies do not keep their comm here ({seen:?})");
+        return;
+    }
+    let mut children = Vec::new();
+    for name in ["hx", "btop"] {
+        let dest = dir.join(name);
+        std::fs::copy(&sleep, &dest).expect("a named sleeper");
+        let child = Command::new(&dest)
+            .arg("30")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("a sleeper");
+        children.push((name, child));
+    }
+    // The stub lists only the two sleepers (plus a header and garbage,
+    // both skipped): no ambient process is in reach.
+    let table = format!(
+        "#!/bin/sh\nprintf '%s\\n' 'PID UID COMMAND' 'junk' '{} {} hx' '{} {} btop'\n",
+        children[0].1.id(),
+        uid,
+        children[1].1.id(),
+        uid,
+    );
+    let stub = dir.join("ps");
+    std::fs::write(&stub, table).expect("a stub ps");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .expect("an executable stub");
+    }
+    let old = std::env::var_os("PATH");
+    let (hx_count, btop_count) = {
+        // No second lock: `_path_guard` above already holds PATH_LOCK
+        // (`Mutex` is not reentrant, so this block only sets PATH).
+        let mut path = dir.display().to_string();
+        if let Some(real) = &old {
+            path.push(':');
+            path.push_str(&real.to_string_lossy());
+        }
+        unsafe { std::env::set_var("PATH", &path) };
+        let leaves = CliLeaves::new();
+        let counts = (
+            leaves.helix_signal().expect("hx signaled"),
+            leaves.btop_signal().expect("btop signaled"),
+        );
+        if let Some(path) = old.clone() {
+            unsafe { std::env::set_var("PATH", path) };
+        }
+        counts
+    };
+    assert_eq!((hx_count, btop_count), (1, 1));
+    // Both sleepers died by their signal (never an exit code): the
+    // delivery is real, through the real `kill`.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt as _;
+        // SIGUSR1/SIGUSR2: 30/31 on macOS, 10/12 on Linux.
+        #[cfg(target_os = "macos")]
+        let want = [30, 31];
+        #[cfg(not(target_os = "macos"))]
+        let want = [10, 12];
+        for ((name, mut child), want) in children.into_iter().zip(want) {
+            let status = child.wait().expect("a reaped sleeper");
+            assert_eq!(status.signal(), Some(want), "{name} died by its signal");
+        }
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A process table past the pipe buffer (over 64 KiB of `hx` lines):
+/// the reader drains as it goes, so a busy box never deadlocks the
+/// child on a full pipe. Every pid is unreachable (`ESRCH`), so the
+/// count proves the parse, never a side effect.
+#[test]
+fn a_table_past_the_pipe_buffer_still_reads() {
+    let uid = own_uid();
+    let dir = std::env::temp_dir().join(format!(
+        "scoot-leaves-ps-{}-{}",
+        std::process::id(),
+        "bigtable"
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("a stub dir");
+    // Two thousand own-`hx` lines: ~70 KiB, past the 64 KiB pipe.
+    // Pids sit where no process can be, so each kill is an `ESRCH`
+    // attempt and the suite side-effects nothing.
+    let stub = dir.join("ps");
+    let mut table = String::from("#!/bin/sh\nprintf '%s\\n' \\\n");
+    for i in 0..2000 {
+        use std::fmt::Write as _;
+        let cont = if i + 1 == 2000 { "" } else { " \\" };
+        write!(table, "  '{} {} hx'{}", 2000000000 + i, uid, cont).expect("a table line");
+        table.push('\n');
+    }
+    std::fs::write(&stub, table).expect("a stub ps");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755))
+            .expect("an executable stub");
+    }
+    let count = {
+        let _guard = PATH_LOCK.lock().expect("the PATH lock");
+        // Read inside the lock: outside, another test's body PATH could
+        // be observed and restored as ours.
+        let old = std::env::var_os("PATH");
+        let mut path = dir.display().to_string();
+        if let Some(real) = &old {
+            path.push(':');
+            path.push_str(&real.to_string_lossy());
+        }
+        unsafe { std::env::set_var("PATH", &path) };
+        let leaves = CliLeaves::new();
+        let count = leaves.helix_signal().expect("a big table reads");
+        if let Some(path) = old.clone() {
+            unsafe { std::env::set_var("PATH", path) };
+        }
+        count
+    };
+    assert_eq!(count, 2000);
+    std::fs::remove_dir_all(&dir).ok();
+}

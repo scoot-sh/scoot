@@ -69,7 +69,7 @@ stated rule.
 | [`look-toolkit-live`](../resolved/look-toolkit-live-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-leaves-daemons`](../resolved/look-leaves-daemons-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-leaves-launchers`](../resolved/look-leaves-launchers-done.md) | medium | daily-drive | `look-apply-cli` |
-| [`look-leaves-terminal`](../packaging/look-leaves-terminal.md) | medium | daily-drive | `look-apply-cli` |
+| [`look-leaves-terminal`](../resolved/look-leaves-terminal-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-greeter`](../resolved/look-greeter-done.md) | low | daily-drive | `look-nix-catalog` |
 | [`look-nix-retire-registry`](../packaging/look-nix-retire-registry.md) | medium | daily-drive | the Nix, Stylix, toolkit, leaves and greeter children |
 | [`look-picker`](../../scootbar/backlog/resolved/look-picker-done.md) | medium | daily-drive | `look-apply-cli` |

@@ -619,6 +619,25 @@ place_look() {
     place "$tmp/lookfile" "$dest" 644
 }
 
+# Like place_look, but a missing file is fine: older releases and looks
+# without a given leaf answer 404, and `scoot look apply` renders
+# whatever is there. A file this script did not install is still never
+# replaced.
+place_look_optional() {
+    rel=$1
+    dest=$looks_dest/$rel
+    if [ -e "$dest" ] || [ -L "$dest" ]; then
+        if ours "$dest"; then
+            [ "$skip_install" = 1 ] && return 0
+        else
+            note "kept $dest (it was not installed by this script)"
+            return 0
+        fi
+    fi
+    fetch "$RAW_URL/$source_ref/looks/$rel" "$tmp/lookfile" 2>/dev/null || return 0
+    place "$tmp/lookfile" "$dest" 644
+}
+
 # The image a look.toml names under [wallpaper], when it is a file in
 # the look directory (a color look names none; a URL is scootbg's to
 # fetch, never the installer's).
@@ -641,6 +660,12 @@ install_look_catalog() {
         "" | "~"* | /* | http* | *://*) ;;
         *) place_look "$l/$image" ;;
         esac
+        # The look's static terminal leaves, when the release ships
+        # them: best-effort (older releases and looks without leaves
+        # 404, and that is fine -- apply renders whatever is there).
+        for leaf in apps/helix.toml apps/btop.theme apps/starship.toml; do
+            place_look_optional "$l/$leaf"
+        done
     done
 }
 
