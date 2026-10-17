@@ -144,6 +144,11 @@ xcursor = "0.3"
 libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
+# For look_authoring_cli.rs's screenshot assertions: decodes the headless
+# session's PNGs to check the screen follows a watched save. Already in
+# the tree (scootbg decodes with it), so this adds no new version, just a
+# direct dev-dependency on one already resolved.
+png = "0.18"
 # For compositor/config.rs's tests, which write real temp files to exercise
 # `load`'s file-reading paths end to end. Already in the tree transitively
 # (smithay itself depends on it), so this adds no new version, just a

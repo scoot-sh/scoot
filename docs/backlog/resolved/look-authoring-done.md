@@ -1,9 +1,10 @@
 ---
 title: "Authoring: look new, watch and preview capture"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-16"
 ---
 
 # Authoring: look new, watch and preview capture
@@ -39,3 +40,22 @@ the cache not growing per save.
 `install`, `export`, `save` (`look-install`).
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
+
+## Resolution (2026-10-16, PR #640)
+
+`scoot look new NAME --from BASE` writes a user-looks source look with
+`extends = "BASE"` (shipped, declared or user-authored bases only;
+installed bases refused). `scoot look watch DIR` validates and applies on
+every save, debounced on `close_write`/`moved_to`, under the lock,
+rendering into one reused `<name>-watch` cache slot; an invalid save
+refuses loudly and the last good look stays. `scoot look preview [NAME]`
+reports the preview image, and `--capture` renders it from a private
+headless session into `preview.png`. Works without Nix; tests never touch
+the real HOME/XDG.
+
+Evidence: `crates/scoot/tests/look_authoring_cli.rs` against a real
+headless session (new applies, watch follows three edits and refuses an
+invalid save with the screen following, cache holds one reused slot,
+capture writes a real PNG); unit coverage for new/watch/preview parsing
+and the reused-slot/invalid-save paths. Docs in the same PR (looks
+Authoring section, theming Make a look).

@@ -1499,6 +1499,192 @@ fn cache_key(
     source_hash(&buffer)
 }
 
+/// Every fragment one render writes, owned: the per-app configs plus the
+/// daemon leaves, the greeter fragment, the terminal static leaves and the
+/// identity document. Both cache slots (the content-keyed one and `watch`'s
+/// reused one) render through this, so a watched save renders exactly what
+/// an apply would.
+struct RenderedFragments {
+    scoot: String,
+    bar: String,
+    gtk3: String,
+    gtk4: String,
+    qt: String,
+    foot: Option<String>,
+    fuzzel: String,
+    swaylock: String,
+    greet: String,
+    rendered_json: String,
+    leaves: Vec<(String, String)>,
+    static_files: Vec<(String, Vec<u8>)>,
+}
+
+/// Renders every fragment for `name`, and proves the TOML ones parse (the
+/// renderers quote, and this is where a quoting failure shows itself, before
+/// any app reads them). `gtk.css` and the Qt scheme have no strict parser
+/// handy; their renderers only interpolate `#rrggbb` tokens and are pinned
+/// by unit tests instead. `static_files` are the already-checked terminal
+/// static leaves (verbatim bytes); the caller computed them with
+/// [`static_leaf_files`] so their notes ride the caller's notes.
+fn render_all_fragments(
+    name: &str,
+    chain: &[ChainEntry],
+    merged: &scoot_look::ResolvedLook,
+    inputs: &RenderInputs,
+    static_files: Vec<(String, Vec<u8>)>,
+) -> Result<RenderedFragments, String> {
+    let scoot =
+        render_scoot(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let bar =
+        render_bar(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let gtk3_css = render_gtk3_css(merged);
+    let gtk4_css = render_gtk4_css(merged);
+    let qt_scheme = render_qt_scheme(merged);
+    let foot = render_foot(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let fuzzel = render_fuzzel(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let swaylock =
+        render_swaylock(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let greet = render_greet(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let leaves =
+        render_leaf_files(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+    for (file, text) in [
+        ("scoot.toml", &scoot),
+        ("bar.toml", &bar),
+        ("greet.toml", &greet),
+    ] {
+        text.parse::<toml::Table>()
+            .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
+    }
+    for (file, text) in [("fuzzel.ini", &fuzzel), ("swaylock", &swaylock)] {
+        parse_kv_config(text)
+            .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
+    }
+    let target_bytes = chain
+        .last()
+        .map(|link| link.bytes.as_slice())
+        .unwrap_or_default();
+    let rendered_json = render_json(name, &source_hash(target_bytes), inputs);
+    Ok(RenderedFragments {
+        scoot,
+        bar,
+        gtk3: gtk3_css,
+        gtk4: gtk4_css,
+        qt: qt_scheme,
+        foot,
+        fuzzel,
+        swaylock,
+        greet,
+        rendered_json,
+        leaves,
+        static_files,
+    })
+}
+
+/// Writes every fragment into `tmp` (an empty dir the caller owns) and syncs
+/// each file, so the renamed directory is complete on disk. Every path here
+/// is joined to the tool-owned temp dir, never attacker-controlled.
+fn write_render_dir(tmp: &Path, fragments: &RenderedFragments) -> Result<(), std::io::Error> {
+    let mut files: Vec<(&str, &str)> = vec![
+        ("scoot.toml", fragments.scoot.as_str()),
+        ("bar.toml", fragments.bar.as_str()),
+        ("render.json", fragments.rendered_json.as_str()),
+        ("gtk/gtk-3.0.css", fragments.gtk3.as_str()),
+        ("gtk/gtk-4.0.css", fragments.gtk4.as_str()),
+        ("qt/scoot-look.conf", fragments.qt.as_str()),
+        ("fuzzel.ini", fragments.fuzzel.as_str()),
+        ("swaylock", fragments.swaylock.as_str()),
+        ("greet.toml", fragments.greet.as_str()),
+    ];
+    if let Some(foot) = &fragments.foot {
+        files.push(("foot.ini", foot.as_str()));
+    }
+    for (file, contents) in &files {
+        let path = tmp.join(file);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, contents)?;
+        std::fs::File::open(&path)?.sync_all()?;
+    }
+    for (file, contents) in &fragments.leaves {
+        let path = tmp.join(file);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, contents)?;
+        std::fs::File::open(&path)?.sync_all()?;
+    }
+    // The terminal static leaves (`apps/*` needs its directory first,
+    // like `fcitx5/`): verbatim bytes, already shape-checked.
+    for (file, contents) in &fragments.static_files {
+        let path = tmp.join(file);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, contents)?;
+        std::fs::File::open(&path)?.sync_all()?;
+    }
+    Ok(())
+}
+
+/// A render temp dir unique across processes and threads of this process:
+/// two renders into one cache never share a temp name, and a planted
+/// symlink at a guessable name is never opened (`create_dir` refuses it
+/// instead of writing through one).
+fn render_tmp_dir(cache: &Path, name: &str) -> PathBuf {
+    static RENDER_COUNTER: AtomicU64 = AtomicU64::new(0);
+    cache.join(format!(
+        ".{name}.tmp.{}-{}-{}",
+        std::process::id(),
+        RENDER_COUNTER.fetch_add(1, Ordering::SeqCst),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos()
+    ))
+}
+
+/// Whether the cached directory holds a complete render of `name`: its
+/// `render.json` names this look and every expected file is present,
+/// including the greeter fragment and the expected terminal static leaves
+/// (recomputed with `trust`, notes discarded: completeness only).
+fn cached_complete(
+    target: &Path,
+    name: &str,
+    chain: &[ChainEntry],
+    merged: &scoot_look::ResolvedLook,
+    trust: bool,
+) -> bool {
+    let leaves = match render_leaf_files(merged) {
+        Ok(leaves) => leaves,
+        Err(_) => return false,
+    };
+    let mut discard = Vec::new();
+    let static_files = match static_leaf_files(chain, trust, &mut discard) {
+        Ok(files) => files,
+        Err(_) => return false,
+    };
+    let render = target.join("render.json");
+    let identity: serde_json::Value = read_capped(&render)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or(serde_json::Value::Null);
+    identity.get("name").and_then(|n| n.as_str()) == Some(name)
+        && target.join("scoot.toml").is_file()
+        && target.join("bar.toml").is_file()
+        && target.join("gtk/gtk-3.0.css").is_file()
+        && target.join("gtk/gtk-4.0.css").is_file()
+        && target.join("qt/scoot-look.conf").is_file()
+        && (merged.terminal.is_none() || target.join("foot.ini").is_file())
+        && target.join("fuzzel.ini").is_file()
+        && target.join("swaylock").is_file()
+        && target.join("greet.toml").is_file()
+        && leaves.iter().all(|(file, _)| target.join(file).is_file())
+        && static_files
+            .iter()
+            .all(|(file, _)| target.join(file).is_file())
+}
+
 /// Renders the look into the cache: `<cache>/<name>-<hash>/` with
 /// `scoot.toml`, `bar.toml`, the toolkit fragments
 /// (`gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`, `qt/scoot-look.conf`),
@@ -1530,29 +1716,8 @@ pub(crate) fn render_cached(
         "{name}-{}",
         cache_key(chain, inputs, trust, &static_files)
     ));
-    let leaves =
-        render_leaf_files(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     if target.is_dir() {
-        let render = target.join("render.json");
-        let identity: serde_json::Value = read_capped(&render)
-            .ok()
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or(serde_json::Value::Null);
-        if identity.get("name").and_then(|n| n.as_str()) == Some(name)
-            && target.join("scoot.toml").is_file()
-            && target.join("bar.toml").is_file()
-            && target.join("gtk/gtk-3.0.css").is_file()
-            && target.join("gtk/gtk-4.0.css").is_file()
-            && target.join("qt/scoot-look.conf").is_file()
-            && (merged.terminal.is_none() || target.join("foot.ini").is_file())
-            && target.join("fuzzel.ini").is_file()
-            && target.join("swaylock").is_file()
-            && target.join("greet.toml").is_file()
-            && leaves.iter().all(|(file, _)| target.join(file).is_file())
-            && static_files
-                .iter()
-                .all(|(file, _)| target.join(file).is_file())
-        {
+        if cached_complete(&target, name, chain, merged, trust) {
             notes.extend(static_notes);
             notes.push(format!("reusing cached render {}", target.display()));
             return Ok(target);
@@ -1561,105 +1726,18 @@ pub(crate) fn render_cached(
             .map_err(|error| format!("cannot clear {}: {error}", target.display()))?;
     }
     notes.extend(static_notes);
-    let scoot =
-        render_scoot(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
-    let bar =
-        render_bar(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
-    let gtk3_css = render_gtk3_css(merged);
-    let gtk4_css = render_gtk4_css(merged);
-    let qt_scheme = render_qt_scheme(merged);
-    let foot = render_foot(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
-    let fuzzel = render_fuzzel(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
-    let swaylock =
-        render_swaylock(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
-    let greet = render_greet(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
-    // The fragments must parse as TOML: the renderers quote, and this is
-    // where a quoting failure shows itself, before any app reads them.
-    // (`gtk.css` and the Qt scheme have no strict parser handy; their
-    // renderers only interpolate `#rrggbb` tokens and are pinned by unit
-    // tests instead.)
-    for (file, text) in [
-        ("scoot.toml", &scoot),
-        ("bar.toml", &bar),
-        ("greet.toml", &greet),
-    ] {
-        text.parse::<toml::Table>()
-            .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
-    }
-    for (file, text) in [("fuzzel.ini", &fuzzel), ("swaylock", &swaylock)] {
-        parse_kv_config(text)
-            .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
-    }
-    let target_bytes = chain
-        .last()
-        .map(|link| link.bytes.as_slice())
-        .unwrap_or_default();
-    let rendered_json = render_json(name, &source_hash(target_bytes), inputs);
-    let mut files: Vec<(&str, &str)> = vec![
-        ("scoot.toml", scoot.as_str()),
-        ("bar.toml", bar.as_str()),
-        ("render.json", rendered_json.as_str()),
-        ("gtk/gtk-3.0.css", gtk3_css.as_str()),
-        ("gtk/gtk-4.0.css", gtk4_css.as_str()),
-        ("qt/scoot-look.conf", qt_scheme.as_str()),
-        ("fuzzel.ini", fuzzel.as_str()),
-        ("swaylock", swaylock.as_str()),
-        ("greet.toml", greet.as_str()),
-    ];
-    if let Some(foot) = &foot {
-        files.push(("foot.ini", foot.as_str()));
-    }
+    let fragments = render_all_fragments(name, chain, merged, inputs, static_files)?;
     std::fs::create_dir_all(cache)
         .map_err(|error| format!("cannot create {}: {error}", cache.display()))?;
-    // Unique across processes and threads of this process: two applies of
-    // different looks into one cache never share a temp name, and a
-    // planted symlink at a guessable name is never opened (`create_dir`
-    // refuses it instead of writing through one).
-    static RENDER_COUNTER: AtomicU64 = AtomicU64::new(0);
-    let tmp = cache.join(format!(
-        ".{name}.tmp.{}-{}-{}",
-        std::process::id(),
-        RENDER_COUNTER.fetch_add(1, Ordering::SeqCst),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos()
-    ));
+    let tmp = render_tmp_dir(cache, name);
     // `create_dir` (not `create_dir_all`) refuses a planted symlink at the
     // temp path instead of writing through one.
     std::fs::create_dir(&tmp)
         .map_err(|error| format!("cannot create {}: {error}", tmp.display()))?;
     // The write: every file syncs before the rename, so the renamed
-    // directory is complete on disk. The `fcitx5/` leaf needs its
-    // directory first; every path here is joined to the tool-owned temp
-    // dir, never attacker-controlled.
+    // directory is complete on disk.
     let write = (|| {
-        for (file, contents) in &files {
-            let path = tmp.join(file);
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&path, contents)?;
-            std::fs::File::open(&path)?.sync_all()?;
-        }
-        for (file, contents) in &leaves {
-            let path = tmp.join(file);
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&path, contents)?;
-            std::fs::File::open(&path)?.sync_all()?;
-        }
-        // The terminal static leaves (`apps/*` needs its directory first,
-        // like `fcitx5/`): verbatim bytes, already shape-checked.
-        for (file, contents) in &static_files {
-            let path = tmp.join(file);
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&path, contents)?;
-            std::fs::File::open(&path)?.sync_all()?;
-        }
+        write_render_dir(&tmp, &fragments)?;
         std::fs::rename(&tmp, &target)?;
         Ok::<(), std::io::Error>(())
     })();
@@ -1667,26 +1745,91 @@ pub(crate) fn render_cached(
         std::fs::remove_dir_all(&tmp).ok();
         // A concurrent apply won the rename: reuse its directory when it
         // is complete, else refuse.
-        if target.is_dir()
-            && target.join("scoot.toml").is_file()
-            && target.join("bar.toml").is_file()
-            && target.join("gtk/gtk-3.0.css").is_file()
-            && target.join("gtk/gtk-4.0.css").is_file()
-            && target.join("qt/scoot-look.conf").is_file()
-            && (merged.terminal.is_none() || target.join("foot.ini").is_file())
-            && target.join("fuzzel.ini").is_file()
-            && target.join("swaylock").is_file()
-            && target.join("greet.toml").is_file()
-            && leaves.iter().all(|(file, _)| target.join(file).is_file())
-            && static_files
-                .iter()
-                .all(|(file, _)| target.join(file).is_file())
-        {
+        if cached_complete(&target, name, chain, merged, trust) {
             notes.push(format!("reusing cached render {}", target.display()));
             return Ok(target);
         }
         return Err(format!("cannot render into {}: {error}", target.display()));
     }
+    Ok(target)
+}
+
+/// Renders the look into one reused cache slot (`<cache>/<slot>/`, where
+/// `watch` passes `<name>-watch`): every save re-renders the same directory
+/// instead of keying a new one per content hash, so the cache never grows
+/// per save. The swap runs through a temp dir plus a `<slot>.old` aside
+/// dance, so a reader racing the render sees the old or the new directory,
+/// never a half-written one; a stale `.old` from a crashed render is cleared
+/// first. The slot name never matches [`is_render_name`], so the prune never
+/// collects it: the last good render stays until the next watched save.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_fixed_slot(
+    name: &str,
+    chain: &[ChainEntry],
+    merged: &scoot_look::ResolvedLook,
+    inputs: &RenderInputs,
+    cache: &Path,
+    slot: &str,
+    notes: &mut Vec<String>,
+    trust: bool,
+) -> Result<PathBuf, String> {
+    if slot.is_empty() || slot.contains('/') || slot.starts_with('.') {
+        return Err(format!("refusing a cache slot outside the cache: `{slot}`"));
+    }
+    let target = cache.join(slot);
+    let mut static_notes = Vec::new();
+    let static_files = static_leaf_files(chain, trust, &mut static_notes)
+        .map_err(|error| format!("cannot render {name}: {error}"))?;
+    notes.extend(static_notes);
+    let fragments = render_all_fragments(name, chain, merged, inputs, static_files)?;
+    std::fs::create_dir_all(cache)
+        .map_err(|error| format!("cannot create {}: {error}", cache.display()))?;
+    let tmp = render_tmp_dir(cache, name);
+    // `create_dir` (not `create_dir_all`) refuses a planted symlink at the
+    // temp path instead of writing through one.
+    std::fs::create_dir(&tmp)
+        .map_err(|error| format!("cannot create {}: {error}", tmp.display()))?;
+    let write = (|| {
+        write_render_dir(&tmp, &fragments)?;
+        // Clear a stale aside from a crashed render before swapping.
+        let old = cache.join(format!(".{slot}.old"));
+        if old.is_dir() {
+            std::fs::remove_dir_all(&old)?;
+        } else if old.is_symlink() || old.is_file() {
+            std::fs::remove_file(&old)?;
+        }
+        match std::fs::symlink_metadata(&target) {
+            Ok(meta) if meta.is_dir() && !meta.is_symlink() => {
+                // `rename` cannot replace a non-empty dir: move it aside,
+                // move the render in, then drop the aside.
+                std::fs::rename(&target, &old)?;
+                let swapped = std::fs::rename(&tmp, &target).and_then(|()| {
+                    std::fs::remove_dir_all(&old)?;
+                    Ok(())
+                });
+                if swapped.is_err() {
+                    // The new render did not land: put the old one back so
+                    // the slot still names the last good look.
+                    std::fs::rename(&old, &target).ok();
+                    swapped?;
+                }
+            }
+            Ok(_) => {
+                std::fs::remove_file(&target)?;
+                std::fs::rename(&tmp, &target)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::rename(&tmp, &target)?;
+            }
+            Err(error) => return Err(error),
+        }
+        Ok::<(), std::io::Error>(())
+    })();
+    if let Err(error) = write {
+        std::fs::remove_dir_all(&tmp).ok();
+        return Err(format!("cannot render into {}: {error}", target.display()));
+    }
+    notes.push(format!("rendered watched save into {}", target.display()));
     Ok(target)
 }
 
@@ -1809,8 +1952,9 @@ fn is_render_name(name: &str) -> bool {
 
 /// Repoints the `look` link at the recorded directory: temp symlink plus
 /// `rename`, after `write_record`. The link is derived from the record, so
-/// a crash between the two renames heals on the next repair.
-fn point_link(dir: &Path, rendered: &str) -> Result<(), String> {
+/// a crash between the two renames heals on the next repair. Shared with
+/// `preview --capture`, which seeds a scratch state the same way.
+pub(crate) fn point_link(dir: &Path, rendered: &str) -> Result<(), String> {
     let link = dir.join(LINK_NAME);
     // Unique temp names, so a planted symlink at a guessable name is never
     // opened: the counter lives in this process, the pid across them.
@@ -2246,19 +2390,24 @@ pub(crate) fn complete_swap(
     Ok(())
 }
 
-/// Where one swap renders from: a fresh cache render, or the Nix
-/// catalog's pre-rendered directory (verified by the caller before use).
+/// Where one swap renders from: a fresh cache render, the Nix
+/// catalog's pre-rendered directory (verified by the caller before use),
+/// or `watch`'s one reused cache slot (re-rendered every save, so the
+/// cache never grows per save).
 pub(crate) enum RenderSource {
     /// Render into the cache, reusing a matching render.
     Fresh,
     /// Use this catalog directory as the render.
     PreRendered { path: PathBuf },
+    /// Render into `<cache>/<slot>/`, reusing the same directory every
+    /// time (never pruned: the name never matches [`is_render_name`]).
+    FixedSlot { slot: String },
 }
 
 /// Renders `name` for a swap from `initial` inputs: a verified
-/// pre-rendered catalog directory when given, else the render cache —
-/// then the bar's own parser over the fragment, against the installed
-/// binary's features, re-rendering into the cache without what the
+/// pre-rendered catalog directory when given, `watch`'s reused slot, else
+/// the render cache — then the bar's own parser over the fragment, against
+/// the installed binary's features, re-rendering without what the
 /// installed bar lacks (see the downgrade note in `apply_with`).
 /// `trust` keeps an installed look's static terminal leaves; without it
 /// they are dropped (a managed sync never trusts).
@@ -2274,9 +2423,12 @@ pub(crate) fn render_for_swap(
     notes: &mut Vec<String>,
     trust: bool,
 ) -> Result<(PathBuf, RenderInputs), String> {
-    let mut target = match source {
-        RenderSource::PreRendered { path } => path,
+    let mut target = match &source {
+        RenderSource::PreRendered { path } => path.clone(),
         RenderSource::Fresh => render_cached(name, chain, merged, &initial, cache, notes, trust)?,
+        RenderSource::FixedSlot { slot } => {
+            render_fixed_slot(name, chain, merged, &initial, cache, slot, notes, trust)?
+        }
     };
     let mut render_inputs = initial;
     // The bar's own parser over the rendered fragment, against the
@@ -2310,7 +2462,22 @@ pub(crate) fn render_for_swap(
                     return Err(message);
                 }
                 drops.push(drop_);
-                target = render_cached(name, chain, merged, &render_inputs, cache, notes, trust)?;
+                target = match &source {
+                    RenderSource::PreRendered { path } => path.clone(),
+                    RenderSource::Fresh => {
+                        render_cached(name, chain, merged, &render_inputs, cache, notes, trust)?
+                    }
+                    RenderSource::FixedSlot { slot } => render_fixed_slot(
+                        name,
+                        chain,
+                        merged,
+                        &render_inputs,
+                        cache,
+                        slot,
+                        notes,
+                        trust,
+                    )?,
+                };
             }
         }
     }
