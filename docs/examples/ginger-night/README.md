@@ -139,7 +139,7 @@ opt-in and you can drop any of them:
 The image is the
 maintainer's own asset, already committed in this repository, so it
 ships with the look under the repository's MIT license — unlike the
-Unsplash/Pixabay illustrations behind the other looks, which stay
+Unsplash illustrations behind moonrise, music-desk and radial-burst, which stay
 under their own licenses (see [NOTICE](../../../NOTICE)). To drop it,
 remove the file and the `[wallpaper]` table: the session falls back to
 the flat `background_color`.

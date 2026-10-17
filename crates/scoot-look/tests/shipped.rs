@@ -301,10 +301,12 @@ fn every_shipped_look_validates_and_renders() {
 #[test]
 fn shipped_contrast_warnings_are_the_known_dim_and_urgent_pairs() {
     // Design section 3.5: `dim` and `urgent` report but never refuse, and
-    // two shipped looks sit under 3.0 (music-desk dim 1.57 and urgent
-    // 2.88, vinyl-sunset dim 2.18; ratios round to one decimal). Locked
-    // here so a retune shows up as a test change; the maintainer call
-    // (retune or accept) rides in the PR, not in a refusal.
+    // one shipped look sits under 3.0 (music-desk dim 1.57 and urgent
+    // 2.88; ratios round to one decimal). vinyl-sunset's 2026-10-17 retheme
+    // to the maintainer's image lifted dim to 4.4 and urgent to 5.1, so it
+    // no longer warns. Locked here so a retune shows up as a test change;
+    // the maintainer call (retune or accept) rides in the PR, not in a
+    // refusal.
     let mut below: Vec<(String, String, f64)> = Vec::new();
     for name in SHIPPED {
         let look = resolved(name);
@@ -320,11 +322,6 @@ fn shipped_contrast_warnings_are_the_known_dim_and_urgent_pairs() {
                 "music-desk".to_string(),
                 "urgent/background".to_string(),
                 2.9
-            ),
-            (
-                "vinyl-sunset".to_string(),
-                "dim/background".to_string(),
-                2.2
             ),
         ]
     );

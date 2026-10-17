@@ -141,7 +141,7 @@ full per-feature cycle.
 
 ## Milestone 3: extras
 
-- [Wallpapers from a link, downloaded once and cached](resolved/wallpaper-from-url-done.md) — RESOLVED 2026-10-05: `set`/section URLs via `curl` + cache, state format v2, Nix `{ url, hash }`; vinyl-sunset deliberately not auto-fetched (Pixabay terms)
+- [Wallpapers from a link, downloaded once and cached](resolved/wallpaper-from-url-done.md) — RESOLVED 2026-10-05: `set`/section URLs via `curl` + cache, state format v2, Nix `{ url, hash }`; vinyl-sunset bundles its own image, so it never needed fetching
 - [A wallpaper per workspace](resolved/per-workspace-done.md) (`ext-workspace-v1`) — RESOLVED 2026-10-08: `set --workspace` / `clear --workspace` (new protocol types), per-output actives from the manager bound only while mapped, transitions on switch, preloaded buffers, state v3; `[wallpaper]` keys split to [a follow-up](resolved/config-workspace-wallpapers-done.md)
 - [Workspace wallpapers in scoot's `[wallpaper]` section](resolved/config-workspace-wallpapers-done.md) — RESOLVED 2026-10-08: `workspace."NAME"` and `output."NAME".workspace."WS"` tables (image/color plus transition keys, each standing alone), precedence and recheck like the base choices, preloaded on apply
 - [A config file, and rotating through a directory](resolved/config-and-rotation-done.md) — RESOLVED 2026-10-08: the slideshow ships (`scootbg set DIR --every`, PR #514); the config file is split into [config-file](config-file.md), deferred per the ticket's "only if people ask"

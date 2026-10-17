@@ -78,4 +78,4 @@ Pick one:
 - **No GPU required.** The CPU renderer draws without a GPU, so scoot runs on a webtop container, a VM, and real hardware alike — and the same build scans out from the GPU where there is one ([picking takes one look](./start/install.md#which-build-do-i-need)).
 - **Scriptable to the core.** Every action in [Keybindings](./scoot/keybindings.md) is also an IPC action an agent can send — windows, screenshots, input, the lot.
 
-*Home-page art: the project logo (`docs/assets/logo.png`). Look previews: [vinyl-sunset](https://github.com/scoot-sh/scoot/tree/main/docs/examples/vinyl-sunset) (the wallpaper illustration stays under its [Pixabay license](https://pixabay.com/service/license/)), moonrise, music-desk and radial-burst.*
+*Home-page art: the project logo (`docs/assets/logo.png`). Look previews: [vinyl-sunset](https://github.com/scoot-sh/scoot/tree/main/docs/examples/vinyl-sunset), moonrise, music-desk and radial-burst.*

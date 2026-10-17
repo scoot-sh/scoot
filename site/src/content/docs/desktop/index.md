@@ -209,7 +209,7 @@ It takes effect on the next build.
 | `music-desk` | blue ring `#3D579A`, paper `#FCFBFB` | paper, ink and blue | ships (copied to the store) |
 | `radial-burst` | blue ring `#31a9e5`, plum `#241721` | plum, yellow and blue | ships (copied to the store) |
 | `moonrise` | amber ring `#FF9A49`, slate navy `#2B3648` | navy, cream and amber | ships (copied to the store) |
-| `vinyl-sunset` | orange ring `#E59560`, espresso `#271A1F` | espresso, cream and orange | **no image ships**: the illustration's license forbids passing it on standalone, so the session shows the flat espresso `background_color` unless you set `wallpaper` yourself |
+| `vinyl-sunset` | orange ring `#FE9949`, espresso `#270E0A` | espresso, cream and orange | ships (copied to the store) |
 
 With the profile on and no `look` set, the look is `ginger-night`: that is the
 default. `null` themes nothing and is only reached by setting `look = null`
@@ -234,23 +234,8 @@ by scoot, fail-safe — the session carries on with `background_color`).
 Set your own `image` instead (it wins per key: a `[wallpaper]` key of
 yours keeps your whole section), or drop to `look = null`.
 
-For `vinyl-sunset`, the illustration is yours to download: point the
-wallpaper at your copy and the flat color steps aside:
-
-```nix title="home.nix"
-programs.scoot.settings.wallpaper = {
-  image = "~/Pictures/wallpapers/vinyl-sunset.png";
-  mode = "fill";
-};
-```
-
-The look does not fetch it for you, deliberately: the illustration's
-license forbids passing it on standalone and automated downloading is at
-best unclear under its terms, so no URL is wired into the look. To drop
-the illustration entirely, remove the `[wallpaper]` table: the flat
-espresso `background_color` is the look without it. Every look is
-previewed in [Theming](../scoot/theming.md) — including how to make your
-own.
+Every look is previewed in [Theming](../scoot/theming.md) — including
+how to make your own.
 
 ## App theme
 
@@ -269,7 +254,7 @@ variables only, no daemon, so the theme costs no wakeups.
 | Qt apps | `desktop.theme.targets.qt.enable` | bool | `true` | `qt6ct.conf` through `QT_QPA_PLATFORMTHEME=qt6ct` (plus `QT_PLUGIN_PATH` for its platformtheme and style): the Adwaita Qt style in the look's polarity, Adwaita icons, and a generated color scheme from the look's palette — dark looks get a dark palette, the light look a light one |
 | Cursor | `desktop.theme.targets.cursor.enable` | bool | `true` | Mocu at its native 24 px: the look layer names it for the compositor plus `XCURSOR_THEME`/`XCURSOR_SIZE` for X11 apps — the same art as the built-in fallback, as real theme files; the managed sync renders no cursor keys while the target is off |
 | Fonts | `desktop.theme.targets.fonts.enable` | bool | `true` | DejaVu Sans for sans-serif (proportional UI text in GTK/Qt apps and the greeter), FiraCode Nerd Font for monospace (DejaVu Sans Mono for `radial-burst`), through fontconfig — and the look layer carries the bar's DroidSansM Nerd Font Propo file, whose glyphs carry the module icons; the managed sync renders no bar font while the target is off |
-| Login screen | `desktop.theme.targets.greeter.enable` | bool | `true` | the session wallpaper behind the login card (nothing for `vinyl-sunset`: its illustration is license-barred), the dark setting, the look's ReGreet CSS and font — needs `greeter.enable` too |
+| Login screen | `desktop.theme.targets.greeter.enable` | bool | `true` | the session wallpaper behind the login card, the dark setting, the look's ReGreet CSS and font — needs `greeter.enable` too |
 | Terminal | `desktop.theme.targets.terminal.enable` | bool | `true` | the look's `foot.ini` from the flake |
 | Prompt | `desktop.theme.targets.shell.enable` | bool | `true` | the look's `starship.toml` (`radial-burst` ships none: inert there) |
 | Editor | `desktop.theme.targets.editor.enable` | bool | `true` | the look's Helix config beside its theme (`radial-burst` ships none: inert there) |

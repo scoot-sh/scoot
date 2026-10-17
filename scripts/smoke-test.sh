@@ -1141,6 +1141,14 @@ esac
 EOF
     } >"$stub_dir/fc-match"
     chmod +x "$stub_dir/fc-match"
+    # The looks under test include image wallpapers (vinyl-sunset bundles
+    # its own), which the session's compositor serves through `scootbg`
+    # by command name. CI's daemon is not named `scootbg`, so a wrapper of
+    # that name rides PATH beside the stub.
+    if [ -n "$SCOOTBG" ]; then
+        printf '#!/bin/sh\nexec %s "$@"\n' "'$SCOOTBG'" >"$stub_dir/scootbg"
+        chmod +x "$stub_dir/scootbg"
+    fi
     export PATH="$stub_dir:$PATH"
 
     local repo
@@ -1211,7 +1219,7 @@ EOF
         tail -30 "$log"
         return 1
     fi
-    wait_wallpaper_pixel "271A1F" "vinyl-sunset's flat wallpaper" || return 1
+    wait_wallpaper_pixel "0E120D" "vinyl-sunset's bundled wallpaper" || return 1
     if ! "$SCOOT" look apply ginger-night --state "$state" --socket "$socket" >"$dir/apply.out" 2>&1; then
         echo "BUG: applying ginger-night failed:"
         cat "$dir/apply.out"
@@ -1237,7 +1245,7 @@ EOF
         cat "$dir/msg-apply.out"
         return 1
     fi
-    wait_wallpaper_pixel "271A1F" "vinyl-sunset over IPC" || return 1
+    wait_wallpaper_pixel "0E120D" "vinyl-sunset over IPC" || return 1
     if ! "$SCOOT" msg looks | grep -q "vinyl-sunset"; then
         echo "BUG: msg looks does not name the applied look"
         return 1

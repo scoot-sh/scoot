@@ -95,8 +95,9 @@ let
     ++ (
       if image == null then
         [
-          # vinyl-sunset: the illustration cannot be committed, so no
-          # image on either side; the look shows the flat background.
+          # A color-only look shows the flat background (no shipped
+          # look is color-only now that vinyl-sunset bundles the
+          # maintainer's image; the branch stays for custom looks).
           (
             assert (wall.mode or null) == null;
             true
