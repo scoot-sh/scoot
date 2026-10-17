@@ -3,7 +3,7 @@ title: "scoot look install from a path, export and save, behind the trust bounda
 status: "open"
 area: "core"
 priority: "low"
-blocked: "look-authoring"
+blocked: null
 ---
 
 # scoot look install from a path, export and save, behind the trust boundary

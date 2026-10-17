@@ -73,7 +73,7 @@ stated rule.
 | [`look-greeter`](../resolved/look-greeter-done.md) | low | daily-drive | `look-nix-catalog` |
 | [`look-nix-retire-registry`](../packaging/look-nix-retire-registry.md) | medium | daily-drive | the Nix, Stylix, toolkit, leaves and greeter children |
 | [`look-picker`](../../scootbar/backlog/resolved/look-picker-done.md) | medium | daily-drive | `look-apply-cli` |
-| [`look-authoring`](look-authoring.md) | medium | daily-drive | `look-apply-cli` |
+| [`look-authoring`](../resolved/look-authoring-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-install`](look-install.md) | low | daily-drive | `look-authoring` |
 | [`look-install-sh`](../resolved/look-install-sh-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-share`](look-share.md) (later) | low | daily-drive | `look-install` |
