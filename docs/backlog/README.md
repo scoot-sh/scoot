@@ -395,7 +395,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Look leaves for swaylock, fuzzel and the pickers](./resolved/look-leaves-launchers-done.md) (medium) — RESOLVED 2026-10-15
 - [Look leaves for foot, Helix, btop and starship](./resolved/look-leaves-terminal-done.md) (medium) — RESOLVED 2026-10-16
 - [The greeter's look](./resolved/look-greeter-done.md) (low) — RESOLVED 2026-10-16
-- [Retire the Nix look registry](./packaging/look-nix-retire-registry.md) (medium, last)
+- [Retire the Nix look registry](./resolved/look-nix-retire-registry-done.md) (medium, last) — RESOLVED 2026-10-16
 - [Authoring: look new, watch and preview capture](./resolved/look-authoring-done.md) (medium) — RESOLVED 2026-10-16
 - [`scoot look install` from a path, export and save](./core/look-install.md) (low)
 - [install.sh `--look` installs the catalog and applies a look](./resolved/look-install-sh-done.md) (medium) — RESOLVED 2026-10-15
