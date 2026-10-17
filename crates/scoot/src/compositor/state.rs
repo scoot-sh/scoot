@@ -1568,7 +1568,7 @@ impl State {
         // failure that actually happens, and nothing else should have been
         // set up by the time it is reported.
         let exclude = WaylandListener::host_excluded_name();
-        let socket = WaylandListener::bind_auto_excluding(exclude.as_deref())
+        let socket = WaylandListener::bind_auto()
             .map_err(|error| socket_error(error, exclude.as_deref()))?;
         let name = socket.socket_name();
         let handle = event_loop.handle();
