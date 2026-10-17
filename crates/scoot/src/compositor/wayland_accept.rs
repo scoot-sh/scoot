@@ -47,11 +47,12 @@
 //! [`Spare`]: super::ipc::accept::Spare
 //! [`Spare::put`]: super::ipc::accept::Spare::put
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io;
 use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use smithay::reexports::calloop::generic::Generic;
@@ -77,6 +78,13 @@ mod tests;
 pub(super) struct WaylandListener {
     socket: Generic<ListeningSocket>,
     spare: Spare,
+    /// The name bound in `$XDG_RUNTIME_DIR`, e.g. `wayland-2`.
+    ///
+    /// Stored (rather than read back out of the [`ListeningSocket`]) because
+    /// binding goes through [`ListeningSocket::bind_absolute`], which leaves
+    /// `socket_name()` as `None`: the name is a property of which candidate
+    /// this listener claimed, not of the socket object.
+    name: OsString,
 }
 
 impl WaylandListener {
@@ -85,25 +93,126 @@ impl WaylandListener {
     /// site): `wayland-0` is skipped because clients may connect to the wrong
     /// compositor, and everything downstream reads the name out of the
     /// environment this process sets after `State::new`.
+    ///
+    /// Never takes the host compositor's own socket (see
+    /// [`host_excluded_name`]): under `--nested` that name is the one
+    /// `nested::init` must connect to, and binding it unlinks the live host
+    /// socket -- wayland-server unlinks an existing file once it holds the
+    /// `.lock`, which a host that never takes an exclusive `flock` (pixelflux
+    /// in webtop) leaves free -- and then the session talks to itself. A live
+    /// socket is never taken on lock evidence alone either (see
+    /// [`socket_is_live`]), in any mode.
     pub(super) fn bind_auto() -> Result<Self, BindError> {
-        let socket = ListeningSocket::bind_auto("wayland", 1..33)?;
-        Ok(Self {
-            socket: Generic::new(socket, Interest::READ, Mode::Level),
-            spare: Spare::new(),
-        })
+        Self::bind_auto_excluding(host_excluded_name().as_deref())
     }
 
-    /// The name clients connect to, e.g. `wayland-1`.
+    /// The `$WAYLAND_DISPLAY` name that must not be bound, if it names a
+    /// socket in the same `$XDG_RUNTIME_DIR` this process binds in.
     ///
-    /// Always `Some`: [`ListeningSocket::bind_auto`] names what it binds.
-    /// `expect` rather than a propagated error because a just-bound socket
-    /// without a name is a backend bug, not an operator-facing failure.
+    /// A bare name (`wayland-1`) is what `connect_to_env` resolves against
+    /// `$XDG_RUNTIME_DIR`, so it collides directly. An absolute path only
+    /// collides when its parent is the runtime dir; otherwise the host socket
+    /// lives elsewhere and no candidate collides with it. Anything else
+    /// (unset display, a name with no file-name part): nothing to exclude,
+    /// and binding then fails with the runtime-dir error as before.
+    pub(super) fn host_excluded_name() -> Option<OsString> {
+        excluded_name_for(
+            std::env::var_os("WAYLAND_DISPLAY").as_deref(),
+            std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
+        )
+    }
+
+    /// [`bind_auto`] over an explicit exclusion, so tests can drive the bind
+    /// without touching the process-global environment.
+    pub(super) fn bind_auto_excluding(exclude: Option<&OsStr>) -> Result<Self, BindError> {
+        let runtime: PathBuf =
+            std::env::var("XDG_RUNTIME_DIR").map_err(|_| BindError::RuntimeDirNotSet)?;
+        if !runtime.is_absolute() {
+            return Err(BindError::RuntimeDirNotSet);
+        }
+        Self::bind_in(&runtime, exclude)
+    }
+
+    /// Binds the first `wayland-1..32` in `runtime_dir` that is neither
+    /// excluded nor live.
+    ///
+    /// A live name is skipped before any lock is taken, so a server that does
+    /// not share the flock scheme keeps its socket: only a stale file (or no
+    /// file) reaches [`ListeningSocket::bind_absolute`], whose `Drop` then
+    /// removes only what this session bound. `AlreadyInUse` (a flocking
+    /// compositor holds the lock, or a racing second scoot won it) moves to
+    /// the next name; anything else fails the bind, as `bind_auto` always did.
+    fn bind_in(runtime_dir: &Path, exclude: Option<&OsStr>) -> Result<Self, BindError> {
+        for index in 1..33 {
+            let name = format!("wayland-{index}");
+            if exclude.is_some_and(|excluded| excluded == OsStr::new(&name)) {
+                continue;
+            }
+            let path = runtime_dir.join(&name);
+            if socket_is_live(&path) {
+                continue;
+            }
+            match ListeningSocket::bind_absolute(path) {
+                Ok(socket) => {
+                    return Ok(Self {
+                        socket: Generic::new(socket, Interest::READ, Mode::Level),
+                        spare: Spare::new(),
+                        name: OsString::from(name),
+                    });
+                }
+                Err(BindError::AlreadyInUse) => continue,
+                Err(BindError::RuntimeDirNotSet) => return Err(BindError::RuntimeDirNotSet),
+                Err(other) => return Err(other),
+            }
+        }
+        Err(BindError::AlreadyInUse)
+    }
+
+    /// The name clients connect to, e.g. `wayland-1`: the candidate
+    /// [`bind_in`] claimed.
     pub(super) fn socket_name(&self) -> OsString {
-        self.socket
-            .get_ref()
-            .socket_name()
-            .expect("a just-bound wayland socket has a name")
-            .to_os_string()
+        self.name.clone()
+    }
+}
+
+/// Which `$WAYLAND_DISPLAY` value excludes a bind candidate, if any.
+///
+/// Pure (both inputs passed in) so tests can pin every shape without touching
+/// the process-global environment, which `State::new`'s own tests cannot do
+/// (see `state::tests`).
+fn excluded_name_for(display: Option<&OsStr>, runtime_dir: Option<&OsStr>) -> Option<OsString> {
+    let display_path = Path::new(display?);
+    let file = display_path.file_name()?;
+    if display_path.is_absolute() {
+        // Only a host socket in the same runtime dir collides with a
+        // candidate; anything elsewhere binds nowhere near `bind_in`'s names.
+        if display_path.parent() != runtime_dir.map(Path::new) {
+            return None;
+        }
+    } else if display_path.components().count() != 1 {
+        // Relative with a separator: resolved against the cwd, never against
+        // the runtime dir, so no candidate collides with it.
+        return None;
+    }
+    // Bare name: `connect_to_env` resolves it against `$XDG_RUNTIME_DIR`.
+    Some(file.to_os_string())
+}
+
+/// Whether anything is listening at `path`: a successful `connect` means a
+/// live server owns it, whatever the lock files say.
+///
+/// Only `ConnectionRefused` (a socket file with no listener: stale) and
+/// `NotFound` (no file at all) count as free. Any other failure is treated as
+/// live -- a socket this process may not connect to (permissions, a racing
+/// unlink) is someone else's either way, and unlinking it to find out would
+/// be the bug this probe exists to prevent.
+fn socket_is_live(path: &Path) -> bool {
+    match UnixStream::connect(path) {
+        Ok(_) => true,
+        Err(error) => !matches!(
+            error.kind(),
+            io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+        ),
     }
 }
 
