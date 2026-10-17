@@ -242,7 +242,9 @@ One command installs scoot, the wallpaper daemon and the bar from
 GitHub, checks each binary against the release's checksums, and tells
 you which system libraries are missing. Any distro with glibc 2.36 or
 newer (Debian 12, Ubuntu 24.04, current Fedora, Arch, openSUSE),
-x86_64 or aarch64. It never replaces a scoot that a distro package
+x86_64 or aarch64. Musl-based distributions (Alpine, including the
+default linuxserver webtop tag) are not supported: build from source
+instead. It never replaces a scoot that a distro package
 installed.
 
 ```sh
