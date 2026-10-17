@@ -1326,6 +1326,7 @@ let
   # half off -- just the color, no image beside it.
   hmStylixColor = evalHomeStylix { } {
     enable = true;
+    wallpaper.package = fakeBg;
     stylix.wallpaper.enable = false;
     settings.wallpaper.color = "#101014";
   };
@@ -5988,10 +5989,10 @@ let
     # (no `[wallpaper]` settings exist for it to serve).
     (
       assert
-        sorted (drvs hmStylix.config.home.packages) == sorted (drvs [
+        sorted hmStylix.config.home.packages == sorted [
           fakePkg
           pkgs.dejavu_fonts.minimal
-        ]);
+        ];
       true
     )
     # A user value beside the synthesis still renders as written (it

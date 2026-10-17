@@ -223,9 +223,9 @@ let
             nightTemp = null;
             inherit isDark;
             fonts = {
-              ui = ui || "DejaVu Sans";
-              sans = sans || "DejaVu Sans";
-              mono = mono || "DejaVu Sans Mono";
+              ui = if ui != null then ui else "DejaVu Sans";
+              sans = if sans != null then sans else "DejaVu Sans";
+              mono = if mono != null then mono else "DejaVu Sans Mono";
             };
             appFiles = {
               foot = null;
@@ -258,9 +258,9 @@ let
             };
             inherit isDark;
             fonts = (baseLook.fonts or { }) // {
-              ui = ui || baseLook.fonts.ui or "DejaVu Sans";
-              sans = sans || baseLook.fonts.sans or "DejaVu Sans";
-              mono = mono || baseLook.fonts.mono or "DejaVu Sans Mono";
+              ui = if ui != null then ui else baseLook.fonts.ui or "DejaVu Sans";
+              sans = if sans != null then sans else baseLook.fonts.sans or "DejaVu Sans";
+              mono = if mono != null then mono else baseLook.fonts.mono or "DejaVu Sans Mono";
             };
           };
     in

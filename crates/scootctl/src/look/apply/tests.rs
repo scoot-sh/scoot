@@ -138,6 +138,7 @@ fn options() -> ApplyOptions {
         preview: false,
         only_if_generation: None,
         nix_claims: Vec::new(),
+        stylix_targets: Vec::new(),
     }
 }
 

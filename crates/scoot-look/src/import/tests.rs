@@ -300,7 +300,10 @@ fn image_emits_wallpaper_unit() {
     let look = import_base16(with_image.as_bytes(), &opts()).expect("imports");
     assert!(look.contains("image = \"wallpaper.png\""), ":\n{look}");
     assert!(look.contains("mode = \"fill\""), ":\n{look}");
-    assert!(!look.contains("color = "), "flat color beside the image:\n{look}");
+    assert!(
+        !look.contains("color = "),
+        "flat color beside the image:\n{look}"
+    );
     crate::parse_look_toml(look.as_bytes()).expect("re-parses");
     // The mode also spells `mode`.
     let mode_key = DARK_3024.replace(
@@ -328,7 +331,10 @@ fn image_emits_wallpaper_unit() {
 /// name each refuse naming the field.
 #[test]
 fn image_needs_mode_and_shape() {
-    let no_mode = DARK_3024.replace("variant: \"dark\"", "variant: \"dark\"\nimage: wallpaper.png");
+    let no_mode = DARK_3024.replace(
+        "variant: \"dark\"",
+        "variant: \"dark\"\nimage: wallpaper.png",
+    );
     let err = import_base16(no_mode.as_bytes(), &opts()).expect_err("image without mode");
     assert_eq!(err.field, "imageScalingMode", "{err:?}");
     let no_image = DARK_3024.replace(
@@ -339,19 +345,31 @@ fn image_needs_mode_and_shape() {
     assert_eq!(err.field, "image", "{err:?}");
     for (input, field) in [
         (
-            DARK_3024.replace("variant: \"dark\"", "variant: \"dark\"\nimage: wallpaper.png\nimageScalingMode: zoom"),
+            DARK_3024.replace(
+                "variant: \"dark\"",
+                "variant: \"dark\"\nimage: wallpaper.png\nimageScalingMode: zoom",
+            ),
             "imageScalingMode",
         ),
         (
-            DARK_3024.replace("variant: \"dark\"", "variant: \"dark\"\nimage: ../evil.png\nimageScalingMode: fill"),
+            DARK_3024.replace(
+                "variant: \"dark\"",
+                "variant: \"dark\"\nimage: ../evil.png\nimageScalingMode: fill",
+            ),
             "image",
         ),
         (
-            DARK_3024.replace("variant: \"dark\"", "variant: \"dark\"\nimage: wallpaper.svg\nimageScalingMode: fill"),
+            DARK_3024.replace(
+                "variant: \"dark\"",
+                "variant: \"dark\"\nimage: wallpaper.svg\nimageScalingMode: fill",
+            ),
             "image",
         ),
         (
-            DARK_3024.replace("variant: \"dark\"", "variant: \"dark\"\nimage: /abs/wall.png\nimageScalingMode: fill"),
+            DARK_3024.replace(
+                "variant: \"dark\"",
+                "variant: \"dark\"\nimage: /abs/wall.png\nimageScalingMode: fill",
+            ),
             "image",
         ),
     ] {

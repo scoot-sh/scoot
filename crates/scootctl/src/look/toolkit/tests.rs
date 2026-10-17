@@ -722,6 +722,7 @@ fn absent_files_are_written_and_identical_ones_kept() {
         Some(home.path()),
         &link(&state),
         TargetSkips::default(),
+        &[],
     );
     assert_eq!(
         notes
@@ -748,6 +749,7 @@ fn absent_files_are_written_and_identical_ones_kept() {
         Some(home.path()),
         &link(&state),
         TargetSkips::default(),
+        &[],
     );
     assert!(notes.is_empty(), "{notes:?}");
 }
@@ -777,6 +779,7 @@ fn marked_files_update_and_foreign_files_stay() {
         Some(home.path()),
         &link(&state),
         TargetSkips::default(),
+        &[],
     );
     assert!(
         notes
@@ -795,6 +798,92 @@ fn marked_files_update_and_foreign_files_stay() {
 }
 
 #[test]
+fn a_stylix_owned_file_is_named_not_merely_foreign() {
+    // A foreign file whose app the Stylix targets list names is
+    // reported as owned by Stylix's target; any other foreign file
+    // keeps the generic note; and an app outside the toolkit files
+    // never matches (foot lists but owns no toolkit file).
+    let home = scratch("files-stylix");
+    let state = state_dir("files-stylix");
+    let state_record = record(None, &[], &[]);
+    for (rel, contents) in [
+        (
+            "gtk-3.0/settings.ini",
+            "[Settings]\ngtk-theme-name=adw-gtk3\n",
+        ),
+        ("qt6ct/qt6ct.conf", "[Appearance]\nstyle=Fusion\n"),
+        (
+            "fontconfig/conf.d/10-scoot-look.conf",
+            "<?xml version=\"1.0\"?>\n< Marianne Ashford>\n",
+        ),
+    ] {
+        let path = home.path().join(rel);
+        std::fs::create_dir_all(path.parent().expect("a parent")).expect("a dir");
+        std::fs::write(&path, contents).expect("a foreign file");
+    }
+    let listed = vec![
+        "gtk".to_owned(),
+        "qt".to_owned(),
+        "foot".to_owned(),
+        "  ".to_owned(),
+    ];
+    let notes = apply_toolkit_files(
+        &state,
+        &state_record,
+        &look(),
+        Some(home.path()),
+        &link(&state),
+        TargetSkips::default(),
+        &listed,
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|note| note == "gtk-3.0/settings.ini is owned by Stylix's gtk target: left alone"),
+        "{notes:?}"
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|note| note == "qt6ct/qt6ct.conf is owned by Stylix's qt target: left alone"),
+        "{notes:?}"
+    );
+    assert!(
+        notes.iter().any(|note| note
+            == "fontconfig/conf.d/10-scoot-look.conf is managed outside `scoot look`: left alone"),
+        "{notes:?}"
+    );
+    for rel in [
+        "gtk-3.0/settings.ini",
+        "qt6ct/qt6ct.conf",
+        "fontconfig/conf.d/10-scoot-look.conf",
+    ] {
+        let live = std::fs::read_to_string(home.path().join(rel)).expect("readable");
+        assert!(!live.contains(MANAGED_MARK), "{rel} was touched");
+    }
+    // Without the listing, the same files are merely foreign.
+    let notes = apply_toolkit_files(
+        &state,
+        &state_record,
+        &look(),
+        Some(home.path()),
+        &link(&state),
+        TargetSkips::default(),
+        &[],
+    );
+    assert!(
+        notes
+            .iter()
+            .any(|note| note == "gtk-3.0/settings.ini is managed outside `scoot look`: left alone"),
+        "{notes:?}"
+    );
+    assert!(
+        !notes.iter().any(|note| note.contains("Stylix")),
+        "{notes:?}"
+    );
+}
+
+#[test]
 fn files_off_and_private_and_homeless_all_skip() {
     let home = scratch("files-gates");
     let state = state_dir("files-gates");
@@ -806,6 +895,7 @@ fn files_off_and_private_and_homeless_all_skip() {
         Some(home.path()),
         &link(&state),
         TargetSkips::default(),
+        &[],
     );
     assert!(notes.iter().any(|note| note.contains("off")), "{notes:?}");
     let private = std::env::temp_dir().join(format!("scoot-look-gates-{}", std::process::id()));
@@ -817,6 +907,7 @@ fn files_off_and_private_and_homeless_all_skip() {
         Some(home.path()),
         &link(&private),
         TargetSkips::default(),
+        &[],
     );
     assert!(
         notes.iter().any(|note| note.contains("private look state")),
@@ -829,6 +920,7 @@ fn files_off_and_private_and_homeless_all_skip() {
         None,
         &link(&state),
         TargetSkips::default(),
+        &[],
     );
     assert!(
         notes.iter().any(|note| note.contains("no home")),
