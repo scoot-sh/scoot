@@ -196,10 +196,13 @@ mode = "fill"
 
 struct Scratch {
     dir: PathBuf,
+    tmp: PathBuf,
 }
 
 impl Scratch {
     fn new(tag: &str) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
             "scoot-look-authoring-{tag}-{}-{}",
             std::process::id(),
@@ -209,7 +212,21 @@ impl Scratch {
                 .subsec_nanos()
         ));
         std::fs::create_dir_all(&dir).expect("a scratch dir");
-        Self { dir }
+        // The children's TMPDIR, beside (never under) the scratch dir:
+        // unix sockets bind at most 107 bytes, and a TMPDIR nested under
+        // the long scratch name pushes the capture session's sockets over
+        // it. Short on purpose; the counter keeps parallel tests apart.
+        let tmp = std::env::temp_dir().join(format!(
+            "slt-{}-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::SeqCst),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .subsec_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).expect("a scratch tmp dir");
+        Self { dir, tmp }
     }
 
     fn sub(&self, name: &str) -> PathBuf {
@@ -227,6 +244,7 @@ impl Scratch {
 impl Drop for Scratch {
     fn drop(&mut self) {
         std::fs::remove_dir_all(&self.dir).ok();
+        std::fs::remove_dir_all(&self.tmp).ok();
     }
 }
 
@@ -253,7 +271,7 @@ impl Session {
         let cache = scratch.sub("cache");
         let config = scratch.sub("config");
         let home = scratch.sub("home");
-        let tmp = scratch.sub("tmp");
+        let tmp = scratch.tmp.clone();
         let data_home = scratch.sub("data-home");
         let state_home = scratch.sub("state-home");
         let shipped = scratch.dir.join("shipped");
@@ -446,7 +464,8 @@ impl Drop for Session {
 }
 
 /// A `scoot look watch` child with its output streaming: the test reads
-/// one line per save. Stdout carries `applied:` lines; refusals and notes
+/// one `applied:` line per save. Stdout also carries each save's
+/// companion lines (`reloaded:`, `shadowed keys:`); refusals and notes
 /// go to stderr, loudly, and keep the last good look.
 struct Watch {
     child: Child,
@@ -482,13 +501,22 @@ impl Watch {
         Self { child, lines }
     }
 
-    /// The next stdout line: an `applied:` line for a good save.
+    /// The next `applied:` line for a good save. A save also prints its
+    /// companion lines (`reloaded:`, `shadowed keys:`) on stdout, which
+    /// belong to the previous save when they arrive first, so they are
+    /// skipped; anything else on stdout is unexpected and panics.
     fn next_line(&self, what: &str) -> String {
         let deadline = Instant::now() + PATIENCE;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             match self.lines.recv_timeout(left) {
-                Ok((true, line)) => return line,
+                Ok((true, line)) if line.contains("applied:") => return line,
+                Ok((true, line))
+                    if line.starts_with("reloaded:") || line.starts_with("shadowed keys:") =>
+                {
+                    continue;
+                }
+                Ok((true, line)) => panic!("unexpected watch output for {what}: {line}"),
                 Ok((false, _)) => continue,
                 Err(_) => panic!("no watch output for {what}"),
             }
