@@ -560,11 +560,13 @@ fn thirty_two_live_sockets_refuse() {
         .collect();
     match WaylandListener::bind_in(dir.path(), Some(OsStr::new("wayland-1"))) {
         Err(BindError::AlreadyInUse) => {}
-        other => panic!("expected AlreadyInUse, got {other:?}"),
+        Err(other) => panic!("expected AlreadyInUse, got {other:?}"),
+        Ok(_) => panic!("expected AlreadyInUse, but a name was bound"),
     }
     match WaylandListener::bind_in(dir.path(), None) {
         Err(BindError::AlreadyInUse) => {}
-        other => panic!("expected AlreadyInUse without exclusion too, got {other:?}"),
+        Err(other) => panic!("expected AlreadyInUse without exclusion too, got {other:?}"),
+        Ok(_) => panic!("expected AlreadyInUse without exclusion, but a name was bound"),
     }
 }
 

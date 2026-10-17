@@ -103,7 +103,7 @@ impl WaylandListener {
     /// socket is never taken on lock evidence alone either (see
     /// [`socket_is_live`]), in any mode.
     pub(super) fn bind_auto() -> Result<Self, BindError> {
-        Self::bind_auto_excluding(host_excluded_name().as_deref())
+        Self::bind_auto_excluding(Self::host_excluded_name().as_deref())
     }
 
     /// The `$WAYLAND_DISPLAY` name that must not be bound, if it names a
@@ -125,8 +125,9 @@ impl WaylandListener {
     /// [`bind_auto`] over an explicit exclusion, so tests can drive the bind
     /// without touching the process-global environment.
     pub(super) fn bind_auto_excluding(exclude: Option<&OsStr>) -> Result<Self, BindError> {
-        let runtime: PathBuf =
-            std::env::var("XDG_RUNTIME_DIR").map_err(|_| BindError::RuntimeDirNotSet)?;
+        let runtime: PathBuf = std::env::var("XDG_RUNTIME_DIR")
+            .map_err(|_| BindError::RuntimeDirNotSet)?
+            .into();
         if !runtime.is_absolute() {
             return Err(BindError::RuntimeDirNotSet);
         }
