@@ -1,5 +1,5 @@
 # `programs.scootbar` for home-manager: the config file and the systemd
-# user service. The options and the Stylix defaults are in ./scootbar.nix;
+# user service. The options and the rendered file are in ./scootbar.nix;
 # the NixOS side is ./scootbar-nixos.nix. See See site/src/content/docs/scootbar/index.md..
 { config, lib, ... }:
 

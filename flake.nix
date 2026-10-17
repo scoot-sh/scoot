@@ -831,6 +831,7 @@
           # without Stylix, and the rendered file run through the real bar.
           scootbar-modules = pkgs.callPackage ./nix/scootbar-tests.nix {
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) scootbar;
+            scootLook = self.packages.${pkgs.stdenv.hostPlatform.system}.scoot-look;
             homeModule = self.homeModules.scootbar;
             nixosModule = self.nixosModules.scootbar;
           };

@@ -54,8 +54,7 @@ let
     else if (config.stylix.polarity or "either") == "light" then
       false
     else
-      stylixLib.isDarkByLuma config.lib.stylix.colors.withHashtag.base00
-        config.lib.stylix.colors.withHashtag.base05;
+      stylixLib.isDarkByLuma config.lib.stylix.colors.withHashtag.base00 config.lib.stylix.colors.withHashtag.base05;
 
   lookCatalog = lookCatalogLib.mkCatalog {
     looks = cfg.looks;
@@ -82,8 +81,7 @@ let
           # Gated by `stylix.wallpaper.enable` (on by default): off
           # leaves the image out, so a `color` set beside it stands
           # alone instead of pairing an image with a color.
-          image =
-            if cfg.stylix.wallpaper.enable then (config.stylix.image or null) else null;
+          image = if cfg.stylix.wallpaper.enable then (config.stylix.image or null) else null;
           imageMode = config.stylix.imageScalingMode or "fill";
           isDark = stylixDark;
         };
@@ -634,9 +632,9 @@ in
     # defaults this side has (the portal config; the session entry and the
     # system packages are the NixOS side's, the bar is the bar module's,
     # which reads this profile). `look` themes the rendered config, each
-    # leaf at `mkOptionDefault` so a value the user wrote wins and Stylix
-    # (a `mkDefault` one level up) wins where present -- Stylix stays the
-    # override path.
+    # leaf at `mkOptionDefault` so a value the user wrote wins -- the look
+    # is the override path (Stylix reaches the desktop only as the
+    # synthesized `stylix` look).
     (lib.mkIf cfg.desktop.enable {
       assertions = [
         {

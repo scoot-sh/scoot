@@ -65,22 +65,28 @@
 #   demo is a separate derivation running the bare bar; and no input of
 #   `scootbar` names a font (its built closure is checked by
 #   .github/workflows/nix-build.yml).
-# - Stylix for the compositor (`programs.scoot.stylix.enable`, on by
-#   default): the `[appearance]` ring/background colors from base16
-#   (`base0D`/`base03`/`base00`, what Stylix's own sway, hyprland and
-#   river targets use), `cursor_theme`/`cursor_size` from
-#   `stylix.cursor`, `[wallpaper]` `image`/`mode` from `stylix.image` /
-#   `stylix.imageScalingMode` (same five modes as scootbg's); each at
-#   its own leaf so a user value wins per key; either switch off
-#   (`stylix.enable`, `programs.scoot.stylix.enable`) is as if Stylix
-#   were absent; with no `cursor` no cursor keys appear, with no `image`
-#   no `[wallpaper]` table is added (so no scootbg is installed for it);
-#   `programs.scoot.stylix.wallpaper.enable = false` turns off just the
-#   wallpaper pair (a user `color` then stands alone: the trap resolved),
-#   keeping the appearance and cursor defaults;
-#   the cursor package is never installed (Stylix's own cursor target
-#   owns that); and the module evaluates with no Stylix option defined
-#   at all (every pre-existing evaluation below does exactly that).
+# - Stylix as a source of a look (`programs.scoot.stylix`, on by
+#   default): with Stylix present and a render binary on hand the catalog
+#   gains a synthesized look named `stylix` (the sixteen base16 slots,
+#   the sans/mono faces, the four sizes, popups/terminal opacity, the
+#   cursor name/size, the image plus mode, serialized through
+#   `scoot-look import-base16`) and the declared default becomes
+#   `stylix` at `mkDefault` (1000), above the profile's `mkOverride`
+#   1200 and below the user. No settings carry Stylix: `settings` stays
+#   the user's alone, and either switch off (`stylix.enable`,
+#   `programs.scoot.stylix.enable`) is as if Stylix were absent. With
+#   no `cursor`/`image` those halves stay out of the synthesis (a
+#   `wallpaper.enable = false` leaves the image out while the rest
+#   stays Stylix's, so a user `color` stands alone); `extends`
+#   (default `ginger-night` with the profile, else null) fills what
+#   the palette does not set. The `stylix` look's compositor ring and
+#   background equal today's leaves (`base0D`/`base03`/`base00`) and
+#   its bar tokens equal today's six; the cursor package is never
+#   installed (Stylix's own cursor target owns that); Stylix beside
+#   the profile evaluates with no priority clash; an explicit `look`
+#   wins over the synthesized default; and the module evaluates with
+#   no Stylix option defined at all (every pre-existing evaluation
+#   below does exactly that).
 # - the desktop profile (`programs.scoot.desktop`, child
 #   `desktop-profile`): `enable` turns on the session entry and its units
 #   plus the wallpaper default on the NixOS side (staying additive: no
@@ -311,8 +317,8 @@ let
     };
     # `config.lib` is an option in both real module systems. Declared so
     # the Stylix detection (`config.lib ? stylix`, as in
-    # `nix/modules/scootbar.nix`) has something to ask: without Stylix
-    # it is empty and every Stylix default stays off. It also carries
+    # `nix/lib/scootbar-stylix-layer.nix`) has something to ask: without Stylix
+    # it is empty and the synthesis stays off. It also carries
     # home-manager's out-of-store symlink helper, as `modules/files.nix`
     # defines it (a derivation symlinking out of the store): the leaf
     # modules link the live look fragments this way, and the stub
@@ -809,27 +815,63 @@ let
 
   # The things the scoot module reads of Stylix, as Stylix defines them
   # (checked by hand against nix-community/stylix at fb28acd, the rev
-  # `nix/scootbar-tests.nix` names: `stylix/palette.nix` for `image` and
-  # `imageScalingMode`, `stylix/cursor.nix` for `cursor`, the palette
-  # module for `lib.stylix.colors`). A rename there would pass this file
-  # and miss on a real Stylix; the color, cursor and image reads are the
-  # sites to look at. `image` is a store path, as Stylix's `pathInStore`
-  # coercion makes it.
+  # `nix/scootbar-tests.nix` names: `stylix/palette.nix` for `polarity`,
+  # `image` and `imageScalingMode`, `stylix/cursor.nix` for `cursor`,
+  # `stylix/fonts.nix` for the faces and the four sizes,
+  # `stylix/opacity.nix` for the two opacities, `stylix/target.nix` for
+  # `enable`, the palette module for `lib.stylix.colors`). A rename
+  # there would pass this file and miss on a real Stylix; the reads
+  # below are the sites to look at. `image` is a store path, as
+  # Stylix's `pathInStore` coercion makes it. Every slot has its own
+  # value, so a swapped slot fails the synthesis pins below.
   #
-  # Plus what the scootbar module reads of it (the same rev:
-  # `stylix/target.nix` for the palette, `stylix/fonts.nix` for the font
-  # and size): `base05`/`base08` beside the three the compositor reads,
-  # and the sans-serif family plus the desktop size. Only the combined
-  # desktop-plus-bar evaluations below touch those; the compositor-only
-  # pins above are unchanged by them.
+  # Plus what the scootbar module's bar-only path reads of it (the same
+  # rev, the same files): only the combined desktop-plus-bar
+  # evaluations below touch those, through the same stub.
   styImage = builtins.toFile "stylix-wallpaper.png" "fake wallpaper";
   fakeCursorPkg = pkgs.runCommand "fake-cursor-theme" { } ''
     mkdir -p $out/share/icons/Vanilla-DMZ/cursors
     : > $out/share/icons/Vanilla-DMZ/cursors/left_ptr
   '';
+  # The stub palette, shared with the synthesis pins below: one value
+  # per slot, so a swapped slot fails.
+  stylixPaletteFull = {
+    base00 = "#101010";
+    base01 = "#1c1c1c";
+    base02 = "#2a2a2a";
+    base03 = "#303030";
+    base04 = "#4a4a4a";
+    base05 = "#e0e0e0";
+    base06 = "#ececec";
+    base07 = "#f5f5f5";
+    base08 = "#ff0000";
+    base09 = "#ff8800";
+    base0A = "#ffee00";
+    base0B = "#00dd00";
+    base0C = "#00dddd";
+    base0D = "#0000ff";
+    base0E = "#cc00cc";
+    base0F = "#885522";
+  };
+  # The eleven Stylix targets that can own a path scoot also themes
+  # (D14): the `look-stylix-targets` file lists the enabled ones.
+  stylixTargetNames = [
+    "gtk"
+    "qt"
+    "foot"
+    "mako"
+    "fuzzel"
+    "swaylock"
+    "wob"
+    "fcitx5"
+    "starship"
+    "helix"
+    "btop"
+  ];
   stylixStub =
     {
       enable ? true,
+      polarity ? "either",
       cursor ? {
         name = "Vanilla-DMZ";
         package = fakeCursorPkg;
@@ -837,11 +879,20 @@ let
       },
       image ? styImage,
       mode ? "fill",
+      targets ? { },
     }:
     {
       options.stylix.enable = lib.mkOption {
         type = lib.types.bool;
         default = false;
+      };
+      options.stylix.polarity = lib.mkOption {
+        type = lib.types.enum [
+          "either"
+          "light"
+          "dark"
+        ];
+        default = "either";
       };
       options.stylix.cursor = lib.mkOption {
         type = lib.types.nullOr lib.types.raw;
@@ -859,12 +910,48 @@ let
         type = lib.types.nullOr lib.types.raw;
         default = null;
       };
+      options.stylix.fonts.monospace = lib.mkOption {
+        type = lib.types.nullOr lib.types.raw;
+        default = null;
+      };
       options.stylix.fonts.sizes.desktop = lib.mkOption {
         type = lib.types.int;
         default = 10;
       };
+      options.stylix.fonts.sizes.applications = lib.mkOption {
+        type = lib.types.int;
+        default = 12;
+      };
+      options.stylix.fonts.sizes.terminal = lib.mkOption {
+        type = lib.types.int;
+        default = 12;
+      };
+      options.stylix.fonts.sizes.popups = lib.mkOption {
+        type = lib.types.int;
+        default = 10;
+      };
+      options.stylix.opacity.popups = lib.mkOption {
+        type = lib.types.float;
+        default = 1.0;
+      };
+      options.stylix.opacity.terminal = lib.mkOption {
+        type = lib.types.float;
+        default = 1.0;
+      };
+      options.stylix.targets = lib.listToAttrs (
+        map (name: {
+          inherit name;
+          value = {
+            enable = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+            };
+          };
+        }) stylixTargetNames
+      );
       config = {
         stylix.enable = enable;
+        stylix.polarity = polarity;
         stylix.cursor = cursor;
         stylix.image = image;
         stylix.imageScalingMode = mode;
@@ -872,16 +959,90 @@ let
           name = "DejaVu Sans";
           package = pkgs.dejavu_fonts.minimal;
         };
-        stylix.fonts.sizes.desktop = 10;
-        lib.stylix.colors.withHashtag = {
-          base00 = "#101010";
-          base03 = "#303030";
-          base05 = "#e0e0e0";
-          base08 = "#ff0000";
-          base0D = "#0000ff";
+        stylix.fonts.monospace = {
+          name = "DejaVu Sans Mono";
+          package = pkgs.dejavu_fonts.minimal;
         };
+        stylix.fonts.sizes.desktop = 10;
+        stylix.fonts.sizes.applications = 12;
+        stylix.fonts.sizes.terminal = 11;
+        stylix.fonts.sizes.popups = 9;
+        stylix.opacity.popups = 0.8;
+        stylix.opacity.terminal = 0.9;
+        stylix.targets = targets;
+        lib.stylix.colors.withHashtag = stylixPaletteFull;
       };
     };
+  # The pure synthesis, called directly: the full input (every read
+  # the stub declares) and the base variant (no image, no cursor, an
+  # explicit light resolution over the ginger-night registry look),
+  # plus the two refusals.
+  stylixSynthLib = import ./lib/look-from-stylix.nix { inherit lib; };
+  gingerNightLook = (import ./modules/desktop.nix { inherit lib; }).looks."ginger-night";
+  stylixSynthFull = stylixSynthLib.synthesize {
+    colors = stylixPaletteFull;
+    fontsSans = {
+      name = "DejaVu Sans";
+      package = "/store/sans";
+    };
+    fontsMono = {
+      name = "DejaVu Sans Mono";
+      package = "/store/mono";
+    };
+    sizes = {
+      desktop = 10;
+      popups = 9;
+      applications = 12;
+      terminal = 11;
+    };
+    opacity = {
+      popups = 0.8;
+      terminal = 0.9;
+    };
+    cursor = {
+      name = "Vanilla-DMZ";
+      size = 24;
+    };
+    image = styImage;
+    imageMode = "tile";
+    isDark = true;
+    baseLook = null;
+  };
+  stylixSynthBase = stylixSynthLib.synthesize {
+    colors = stylixPaletteFull;
+    fontsSans = {
+      name = "DejaVu Sans";
+      package = "/store/sans";
+    };
+    fontsMono = {
+      name = "DejaVu Sans Mono";
+      package = "/store/mono";
+    };
+    sizes = {
+      desktop = 10;
+      popups = 9;
+      applications = 12;
+      terminal = 11;
+    };
+    opacity = {
+      popups = 0.8;
+      terminal = 0.9;
+    };
+    cursor = null;
+    image = null;
+    isDark = false;
+    baseLook = gingerNightLook;
+  };
+  stylixSynthMissingSlot = stylixSynthLib.synthesize {
+    colors = builtins.removeAttrs stylixPaletteFull [ "base05" ];
+    isDark = true;
+  };
+  stylixSynthBadImage = stylixSynthLib.synthesize {
+    colors = stylixPaletteFull;
+    isDark = true;
+    image = builtins.toFile "w.svg" "not an image scootbg decodes";
+    imageMode = "fill";
+  };
 
   evalHomeStylix =
     stub: cfg:
@@ -1122,14 +1283,17 @@ let
   };
 
   # --- Stylix evaluations under test ---
-  # Themed: colors, cursor and wallpaper from the stub. `package` and
-  # `wallpaper.package` set so the install pins below mean something.
+  # Themed: the synthesis is on (the `stylix` look, the declared
+  # default). `package` set so the install pins below mean something.
   hmStylix = evalHomeStylix { } {
     enable = true;
     package = fakePkg;
-    wallpaper.package = fakeBg;
   };
-  # A non-default scaling mode passes through verbatim.
+  # An explicit light polarity resolves light even for a dark palette.
+  hmStylixLight = evalHomeStylix { polarity = "light"; } {
+    enable = true;
+  };
+  # A non-default scaling mode passes into the synthesis verbatim.
   hmStylixTile = evalHomeStylix { mode = "tile"; } {
     enable = true;
   };
@@ -1142,32 +1306,42 @@ let
     enable = true;
     stylix.enable = false;
   };
-  # No cursor set (Stylix without one): no cursor keys, colors stay.
+  # No cursor set (Stylix without one): the synthesis stays, without
+  # the cursor half.
   hmStylixNoCursor = evalHomeStylix { cursor = null; } {
     enable = true;
   };
-  # No image set: no `[wallpaper]` table added (and so no scootbg), colors
-  # and cursor stay.
+  # No image set: the synthesis stays, without the image half (so no
+  # wallpaper from Stylix).
   hmStylixNoImage = evalHomeStylix { image = null; } {
     enable = true;
-    wallpaper.package = fakeBg;
   };
-  # The wallpaper defaults off (`stylix.wallpaper.enable = false`): no
-  # `[wallpaper]` table added even with an image set (and so no scootbg),
-  # while appearance and cursor stay Stylix's.
+  # The wallpaper half off (`stylix.wallpaper.enable = false`): the
+  # image stays out even with one set, while the rest stays Stylix's.
   hmStylixWallpaperOff = evalHomeStylix { } {
     enable = true;
-    wallpaper.package = fakeBg;
     stylix.wallpaper.enable = false;
   };
   # The trap resolved: a user color with Stylix's image set, wallpaper
-  # defaults off -- just the color, no image beside it.
+  # half off -- just the color, no image beside it.
   hmStylixColor = evalHomeStylix { } {
     enable = true;
-    wallpaper.package = fakeBg;
     stylix.wallpaper.enable = false;
     settings.wallpaper.color = "#101014";
   };
+  # Stylix targets owning paths scoot themes (D14): the file lists
+  # them, one app per line.
+  hmStylixTargets =
+    evalHomeStylix
+      {
+        targets = {
+          gtk.enable = true;
+          foot.enable = true;
+        };
+      }
+      {
+        enable = true;
+      };
 
   # --- the flake's wrappers, overlay and Darwin (only from flake.nix) ---
   withFlake = flake != null;
@@ -1788,9 +1962,19 @@ let
     settings.wallpaper.image = "/user/wall.png";
     settings.wallpaper.mode = "center";
   };
-  # Stylix beside a look: Stylix wins every leaf (one priority above the
-  # look), so this renders exactly what the Stylix-only evaluation does.
+  # Stylix beside the profile, no explicit look: the synthesized
+  # `stylix` default (one rung above the profile) wins, with no
+  # priority clash.
   hmDeskStylix = evalHomeStylix { } {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+  };
+  # Stylix with an explicit look: the user's look wins over the
+  # synthesized default (the profile's own default loses the same
+  # way).
+  hmDeskStylixExplicit = evalHomeStylix { } {
     enable = true;
     package = fakePkg;
     wallpaper.package = fakeBg;
@@ -4251,16 +4435,23 @@ let
     look = "music-desk";
     desktop.theme.enable = false;
   };
-  # ...Stylix beside a look: Stylix wins per key (cursor, appearance),
-  # the look carries the rest (GTK/Qt/files, which Stylix does not
-  # set here).
+  # ...Stylix with an explicit look: the look carries everything (the
+  # theme reads the registry look, never Stylix slots), and the
+  # synthesized theme waits for the `stylix` look.
   hmThemeStylix = evalHomeStylix { } {
     enable = true;
     desktop.enable = true;
     look = "music-desk";
   };
+  # ...Stylix with no explicit look: the theme reads the synthesized
+  # `stylix` look (the Stylix palette over the base look's static
+  # leaves).
+  hmThemeStylixLook = evalHomeStylix { } {
+    enable = true;
+    desktop.enable = true;
+  };
   # ...Stylix, a look, and user values: the user wins per key over
-  # both (compositor cursor, one GTK key).
+  # the look (compositor cursor, one GTK key).
   hmThemeStylixUser = evalHomeStylix { } {
     enable = true;
     desktop.enable = true;
@@ -5696,174 +5887,293 @@ let
       true
     )
 
-    # --- Stylix (`programs.scoot.stylix.enable`) ---
-    # On: the ring and background colors from base16, the cursor name
-    # and size from `stylix.cursor`, the wallpaper image and mode from
-    # `stylix.image` / `stylix.imageScalingMode`.
+    # --- Stylix synthesis (`programs.scoot.stylix`) ---
+    # On: the declared default is the synthesized `stylix` look, the
+    # catalog installs it beside the configs, and no settings carry
+    # Stylix (a value set there is the user's alone).
     (
       assert allAssertionsHold hmStylix.config;
       true
     )
     (
-      assert
-        hmStylix.config.programs.scoot.settings == {
-          appearance = {
-            focus_ring_active_color = "#0000ff";
-            focus_ring_inactive_color = "#303030";
-            background_color = "#101010";
-            cursor_theme = "Vanilla-DMZ";
-            cursor_size = 24;
-          };
-          wallpaper = {
-            image = "${styImage}";
-            mode = "fill";
-          };
-        };
-      true
-    )
-    # A non-default scaling mode passes through verbatim.
-    (
-      assert hmStylixTile.config.programs.scoot.settings.wallpaper.mode == "tile";
-      true
-    )
-    # Either switch off is as if Stylix were absent: no key appears.
-    (
-      assert hmStylixDisabled.config.programs.scoot.settings == { };
+      assert hmStylix.config.programs.scoot.look == "stylix";
       true
     )
     (
-      assert hmStylixOptOut.config.programs.scoot.settings == { };
+      assert hmStylix.config.programs.scoot.settings == { };
       true
     )
-    # Every Stylix leaf, one user override at a time: each yields to the
-    # user while the rest stay Stylix's (a leaf defined without mkDefault
-    # would conflict, and fail here).
     (
-      assert lib.all
-        (
-          leaf:
-          let
-            s =
-              (evalHomeStylix { } {
-                enable = true;
-                settings.${leaf.table}.${leaf.token} = leaf.value;
-              }).config.programs.scoot.settings;
-            t = hmStylix.config.programs.scoot.settings;
-          in
-          s.${leaf.table}.${leaf.token} == leaf.value
-          &&
-            builtins.removeAttrs s.${leaf.table} [ leaf.token ]
-            == builtins.removeAttrs t.${leaf.table} [ leaf.token ]
-        )
-        [
-          {
-            table = "appearance";
-            token = "focus_ring_active_color";
-            value = "#abcdef";
-          }
-          {
-            table = "appearance";
-            token = "focus_ring_inactive_color";
-            value = "#bcdefa";
-          }
-          {
-            table = "appearance";
-            token = "background_color";
-            value = "#cdefab";
-          }
-          {
-            table = "appearance";
-            token = "cursor_theme";
-            value = "Adwaita";
-          }
-          {
-            table = "appearance";
-            token = "cursor_size";
-            value = 32;
-          }
-          {
-            table = "wallpaper";
-            token = "image";
-            value = "/user/wall.png";
-          }
-          {
-            table = "wallpaper";
-            token = "mode";
-            value = "center";
-          }
-        ];
+      assert hmStylix.config.xdg.dataFile ? "scoot/looks/stylix";
       true
     )
-    # No cursor set: no cursor keys, the colors stay.
+    # The `stylix` look's compositor colors equal today's leaves (the
+    # focused ring `base0D`, every other ring `base03`, the background
+    # `base00` -- what Stylix's own sway, hyprland and river targets
+    # use), over the null base (no `extends` without the profile).
     (
       assert
-        hmStylixNoCursor.config.programs.scoot.settings.appearance == {
+        hmStylix.config.programs.scoot.stylix.theme.appearance == {
+          background_color = "#101010";
           focus_ring_active_color = "#0000ff";
           focus_ring_inactive_color = "#303030";
-          background_color = "#101010";
         };
       true
     )
-    # No image set: no `[wallpaper]` table is added, so `wallpaper.enable`
-    # stays off and no scootbg is installed for it.
+    # ...and its bar tokens equal today's six (background `base00`,
+    # foreground `base05`, accent and hover `base0D`, dim `base03`,
+    # urgent `base08`).
     (
-      assert !(hmStylixNoImage.config.programs.scoot.settings ? wallpaper);
+      assert
+        hmStylix.config.programs.scoot.stylix.theme.barColors == {
+          background = "#101010";
+          foreground = "#e0e0e0";
+          accent = "#0000ff";
+          hover = "#0000ff";
+          dim = "#303030";
+          urgent = "#ff0000";
+        };
       true
     )
+    # ...dark by the luma rule (`either` over a dark background
+    # against light text), with the Stylix faces (sans for UI).
     (
-      assert !hmStylixNoImage.config.programs.scoot.wallpaper.enable;
-      true
-    )
-    (
-      assert hmStylixNoImage.config.home.packages == [ ];
-      true
-    )
-    # A Stylix image turns `wallpaper.enable` on (it follows
-    # `settings ? wallpaper`) and installs scootbg beside scoot -- but
-    # never the cursor package, which Stylix's own cursor target owns.
-    (
-      assert hmStylix.config.programs.scoot.wallpaper.enable;
+      assert hmStylix.config.programs.scoot.stylix.theme.isDark;
       true
     )
     (
       assert
-        sorted hmStylix.config.home.packages == sorted [
+        hmStylix.config.programs.scoot.stylix.theme.fonts == {
+          ui = "DejaVu Sans";
+          sans = "DejaVu Sans";
+          mono = "DejaVu Sans Mono";
+        };
+      true
+    )
+    # ...while an explicit light polarity resolves light even for a
+    # dark palette.
+    (
+      assert !hmStylixLight.config.programs.scoot.stylix.theme.isDark;
+      true
+    )
+    (
+      assert hmStylixLight.config.programs.scoot.look == "stylix";
+      true
+    )
+    # Either switch off is as if Stylix were absent: the default stays
+    # null and no `stylix` look installs.
+    (
+      assert hmStylixDisabled.config.programs.scoot.look == null;
+      true
+    )
+    (
+      assert !(hmStylixDisabled.config.xdg.dataFile ? "scoot/looks/stylix");
+      true
+    )
+    (
+      assert !(hmStylixDisabled.config.xdg.configFile ? "scoot/look-stylix-targets");
+      true
+    )
+    (
+      assert hmStylixOptOut.config.programs.scoot.look == null;
+      true
+    )
+    (
+      assert !(hmStylixOptOut.config.xdg.dataFile ? "scoot/looks/stylix");
+      true
+    )
+    # The install carries the Stylix font packages (sans and mono,
+    # unique: one store path) beside scoot -- but never the cursor
+    # package, which Stylix's own cursor target owns, and no scootbg
+    # (no `[wallpaper]` settings exist for it to serve).
+    (
+      assert
+        sorted (drvs hmStylix.config.home.packages) == sorted (drvs [
           fakePkg
-          fakeBg
-        ];
+          pkgs.dejavu_fonts.minimal
+        ]);
       true
     )
-    # `stylix.wallpaper.enable = false` turns off just the wallpaper
-    # defaults: no `[wallpaper]` table added even with an image set, so
-    # no scootbg is installed for it...
-    (
-      assert !(hmStylixWallpaperOff.config.programs.scoot.settings ? wallpaper);
-      true
-    )
-    (
-      assert !hmStylixWallpaperOff.config.programs.scoot.wallpaper.enable;
-      true
-    )
-    (
-      assert hmStylixWallpaperOff.config.home.packages == [ ];
-      true
-    )
-    # ...while the appearance and cursor defaults stay Stylix's.
+    # A user value beside the synthesis still renders as written (it
+    # is the user's own file, above any look), while the rest of the
+    # table stays absent -- the look, not settings, carries the theme.
     (
       assert
-        hmStylixWallpaperOff.config.programs.scoot.settings.appearance
-        == hmStylix.config.programs.scoot.settings.appearance;
+        (evalHomeStylix { } {
+          enable = true;
+          settings.appearance.focus_ring_active_color = "#abcdef";
+        }).config.programs.scoot.settings.appearance.focus_ring_active_color == "#abcdef";
+      true
+    )
+    (
+      assert
+        (evalHomeStylix { } {
+          enable = true;
+          settings.wallpaper.color = "#101014";
+          stylix.wallpaper.enable = false;
+        }).config.programs.scoot.settings == {
+          wallpaper = {
+            color = "#101014";
+          };
+        };
+      true
+    )
+    # No cursor set: the synthesis stays, without the cursor half (the
+    # theme carries no cursor from Stylix either way -- the cursor
+    # files are never installed here).
+    (
+      assert hmStylixNoCursor.config.programs.scoot.look == "stylix";
+      true
+    )
+    # No image set: the synthesis stays, without the image half.
+    (
+      assert hmStylixNoImage.config.programs.scoot.look == "stylix";
+      true
+    )
+    # `stylix.wallpaper.enable = false` leaves the image out even with
+    # one set, while the palette stays Stylix's...
+    (
+      assert hmStylixWallpaperOff.config.programs.scoot.look == "stylix";
+      true
+    )
+    (
+      assert hmStylixWallpaperOff.config.programs.scoot.stylix.theme.barColors.background == "#101010";
+      true
+    )
+    # ...and a non-default scaling mode reaches the synthesis (the
+    # derivation input pins it field by field below).
+    (
+      assert hmStylixTile.config.programs.scoot.look == "stylix";
       true
     )
     # The trap resolved: a user color with Stylix's image set and the
-    # wallpaper defaults off is just the color (the injected scootbg
-    # `command` joins it at render, as for any `[wallpaper]` table).
+    # wallpaper half off is just the color (no image beside it), and
+    # no appearance keys leak into settings.
     (
       assert hmStylixColor.config.programs.scoot.settings.wallpaper == { color = "#101014"; };
       true
     )
     (
-      assert hmStylixColor.config.programs.scoot.wallpaper.enable;
+      assert !(hmStylixColor.config.programs.scoot.settings ? appearance);
+      true
+    )
+    # D14: the targets file lists the owning Stylix targets, one app
+    # per line -- and stays empty with none on.
+    (
+      assert hmStylixTargets.config.xdg.configFile."scoot/look-stylix-targets".text == "gtk\nfoot";
+      true
+    )
+    (
+      assert hmStylix.config.xdg.configFile."scoot/look-stylix-targets".text == "";
+      true
+    )
+    # The pure mapping, pinned field by field through `fromJSON` (the
+    # derivation input `scoot-look import-base16` reads): every slot
+    # echoes, the faces/sizes/opacities/cursor/image/mode land under
+    # their keys, and polarity is explicit.
+    (
+      assert
+        builtins.fromJSON stylixSynthFull.json == {
+          name = "stylix";
+          title = "Stylix";
+          description = "The Stylix palette as a scoot look.";
+          polarity = "dark";
+          base00 = "#101010";
+          base01 = "#1c1c1c";
+          base02 = "#2a2a2a";
+          base03 = "#303030";
+          base04 = "#4a4a4a";
+          base05 = "#e0e0e0";
+          base06 = "#ececec";
+          base07 = "#f5f5f5";
+          base08 = "#ff0000";
+          base09 = "#ff8800";
+          base0A = "#ffee00";
+          base0B = "#00dd00";
+          base0C = "#00dddd";
+          base0D = "#0000ff";
+          base0E = "#cc00cc";
+          base0F = "#885522";
+          fonts = {
+            sansSerif = "DejaVu Sans";
+            monospace = "DejaVu Sans Mono";
+          };
+          sizes = {
+            desktop = 10;
+            popups = 9;
+            applications = 12;
+            terminal = 11;
+          };
+          opacity = {
+            popups = 0.8;
+            terminal = 0.9;
+          };
+          cursor = {
+            name = "Vanilla-DMZ";
+            size = 24;
+          };
+          image = "wallpaper.png";
+          imageScalingMode = "tile";
+        };
+      true
+    )
+    (
+      assert stylixSynthFull.imageFile == "wallpaper.png";
+      true
+    )
+    (
+      assert
+        stylixSynthFull.fontPackages == [
+          "/store/sans"
+          "/store/mono"
+        ];
+      true
+    )
+    (
+      assert stylixSynthFull.hasWallpaper;
+      true
+    )
+    # ...without an image or cursor, and over a base: no image keys,
+    # no wallpaper, the palette over the base's static leaves.
+    (
+      assert !(builtins.fromJSON stylixSynthBase.json ? image);
+      true
+    )
+    (
+      assert !(builtins.fromJSON stylixSynthBase.json ? cursor);
+      true
+    )
+    (
+      assert stylixSynthBase.imageFile == null;
+      true
+    )
+    (
+      assert !stylixSynthBase.hasWallpaper;
+      true
+    )
+    (
+      assert stylixSynthBase.themeLook.appearance.background_color == "#101010";
+      true
+    )
+    (
+      assert stylixSynthBase.themeLook.barColors.hover == "#0000ff";
+      true
+    )
+    (
+      assert !stylixSynthBase.themeLook.isDark;
+      true
+    )
+    (
+      assert stylixSynthBase.themeLook.nightTemp == gingerNightLook.nightTemp;
+      true
+    )
+    # ...a missing slot and a bad image suffix each refuse loudly.
+    (
+      assert !(builtins.tryEval stylixSynthMissingSlot.json).success;
+      true
+    )
+    (
+      assert !(builtins.tryEval stylixSynthBadImage.json).success;
       true
     )
 
@@ -7280,12 +7590,31 @@ let
       assert hmDeskUserWins.config.programs.scoot.settings.wallpaper.mode == "center";
       true
     )
-    # Stylix beside a look wins every leaf: identical to Stylix alone
-    # (minus the keymap's `[binds]`, which only the profile side has).
+    # Stylix beside the profile, no explicit look: the declared
+    # default is the synthesized `stylix` look (one rung above the
+    # profile's), and the evaluation holds -- no priority clash
+    # between the `mkDefault`, the profile's `mkOverride 1200` and the
+    # option's own default.
     (
-      assert
-        builtins.removeAttrs hmDeskStylix.config.programs.scoot.settings [ "binds" ]
-        == hmStylix.config.programs.scoot.settings;
+      assert allAssertionsHold hmDeskStylix.config;
+      true
+    )
+    (
+      assert hmDeskStylix.config.programs.scoot.look == "stylix";
+      true
+    )
+    (
+      assert hmDeskStylix.config.xdg.dataFile ? "scoot/looks/stylix";
+      true
+    )
+    # ...while an explicit look wins over the synthesized default (the
+    # user's rung beats both).
+    (
+      assert hmDeskStylixExplicit.config.programs.scoot.look == "music-desk";
+      true
+    )
+    (
+      assert allAssertionsHold hmDeskStylixExplicit.config;
       true
     )
     # The xwayland knob defaults the compositor flag on...
@@ -7595,31 +7924,30 @@ let
       assert (hmDeskBarUserWins.config.programs.scootbar.settings.colors.background or null) == null;
       true
     )
-    # ...Stylix wins every bar leaf as well...
+    # ...Stylix reaches the bar only as a look layer at runtime, never
+    # as eval-time values: with the catalog present the bar-only path
+    # stays off...
     (
-      assert
-        hmDeskBarStylix.config.programs.scootbar.settings.colors == {
-          background = "#101010";
-          foreground = "#e0e0e0";
-          accent = "#0000ff";
-          hover = "#0000ff";
-          dim = "#303030";
-          urgent = "#ff0000";
-        };
+      assert (hmDeskBarStylix.config.programs.scootbar.settings.colors or { }) == { };
       true
     )
     (
-      assert hmDeskBarStylix.config.programs.scootbar.settings.bar."font-size" == 13;
+      assert (hmDeskBarStylix.config.programs.scootbar.settings.look or { }) == { };
+      true
+    )
+    # ...and says so in an evaluation warning naming the opt-out...
+    (
+      assert lib.any (w: lib.hasInfix "has no effect" w) hmDeskBarStylix.config.warnings;
+      true
+    )
+    # ...while the compositor side follows the explicit look (the
+    # user's rung), with no Stylix keys beside it.
+    (
+      assert hmDeskBarStylix.config.programs.scoot.look == "music-desk";
       true
     )
     (
-      assert lib.hasPrefix builtins.storeDir hmDeskBarStylix.config.programs.scootbar.settings.bar.font;
-      true
-    )
-    (
-      assert
-        builtins.removeAttrs hmDeskBarStylix.config.programs.scoot.settings [ "binds" ]
-        == hmStylix.config.programs.scoot.settings;
+      assert !(hmDeskBarStylix.config.programs.scoot.settings ? appearance);
       true
     )
     # ...and `bar.enable = false` leaves the bar entirely alone (no
@@ -11492,23 +11820,48 @@ let
         };
       true
     )
-    # ...Stylix beside a look wins per key (its base16 ring over the
-    # look's), the look carrying the rest...
+    # ...Stylix with an explicit look: the look carries everything
+    # (the theme reads the registry look, never Stylix slots), the
+    # compositor settings stay the user's alone...
     (
       assert allAssertionsHold hmThemeStylix.config;
       true
     )
     (
-      assert hmThemeStylix.config.programs.scoot.settings.appearance.focus_ring_active_color == "#0000ff";
+      assert hmThemeStylix.config.programs.scoot.settings == { };
+      true
+    )
+    (
+      assert hmThemeStylix.config.programs.scoot.look == "music-desk";
       true
     )
     (
       assert hmThemeStylix.config.xdg.configFile ? "gtk-3.0/settings.ini";
       true
     )
-    # ...a user value wins per key over both (compositor cursor over
-    # Stylix's, one GTK key over the generated theme name -- pinned by
-    # content below)...
+    # ...while with no explicit look the theme reads the synthesized
+    # `stylix` look: dark, over the ginger-night base's static leaves.
+    (
+      assert allAssertionsHold hmThemeStylixLook.config;
+      true
+    )
+    (
+      assert hmThemeStylixLook.config.programs.scoot.look == "stylix";
+      true
+    )
+    (
+      assert
+        (import ./modules/theme-look.nix { inherit lib; }).lookFor hmThemeStylixLook.config.programs.scoot
+        == hmThemeStylixLook.config.programs.scoot.stylix.theme;
+      true
+    )
+    (
+      assert hmThemeStylixLook.config.programs.scoot.stylix.theme.isDark;
+      true
+    )
+    # ...a user value wins per key over the look (compositor cursor,
+    # one GTK key over the generated theme name -- pinned by content
+    # below)...
     (
       assert hmThemeStylixUser.config.programs.scoot.settings.appearance.cursor_theme == "Adwaita";
       true
@@ -15337,38 +15690,26 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   ' ${hmWallPerOutputUrlToml}
   echo "ok: a per-output [wallpaper] { url, hash } image renders as the fetched file"
 
-  # 9. Stylix: the rendered file carries the themed appearance, cursor
-  #    and wallpaper (with the injected scootbg `command` beside the
-  #    Stylix image and mode), and nothing else.
+  # 9. Stylix: the rendered file carries no Stylix -- the synthesis
+  #    lives in the `stylix` look, never in settings, so the file is
+  #    the base file (neither an `[appearance]` nor a `[wallpaper]`
+  #    table).
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
-  want = {
-      "appearance": {
-          "focus_ring_active_color": "#0000ff",
-          "focus_ring_inactive_color": "#303030",
-          "background_color": "#101010",
-          "cursor_theme": "Vanilla-DMZ",
-          "cursor_size": 24,
-      },
-      "wallpaper": {
-          "command": sys.argv[2],
-          "image": sys.argv[3],
-          "mode": "fill",
-      },
-  }
-  assert got == want, f"{got} != {want}"
-  ' ${hmStylixToml} '${fakeBg}/bin/scootbg' '${styImage}'
-  echo "ok: Stylix defaults render (appearance, cursor, wallpaper + command)"
+  assert "appearance" not in got, got
+  assert "wallpaper" not in got, got
+  ' ${hmStylixToml}
+  echo "ok: with Stylix the file carries no Stylix (the stylix look does)"
 
-  # 9b. Stylix wallpaper defaults off with a user color: just the color
-  #    (and the injected `command`), no Stylix image beside it -- while
-  #    the themed appearance renders as before.
+  # 9b. Stylix wallpaper half off with a user color: just the color
+  #    (and the injected `command`), no Stylix image beside it -- and
+  #    still no `[appearance]` table.
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
   assert got["wallpaper"] == {"color": "#101014", "command": sys.argv[2]}, got["wallpaper"]
-  assert got["appearance"]["background_color"] == "#101010", got["appearance"]
+  assert "appearance" not in got, got
   ' ${hmStylixColorToml} '${fakeBg}/bin/scootbg'
   echo "ok: stylix.wallpaper.enable = false leaves a user color alone"
 
@@ -15714,13 +16055,13 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
 
     # 13j. A theme setting wins per key (verbatim theme name over the
     #      generated one, plus a new key), and a user value wins over
-    #      Stylix and the look alike.
+    #      the look (Stylix only themes through the `stylix` look).
     grep -F -x "gtk-theme-name=HighContrast" ${gtkSettingsConf}
     if grep -q "^gtk-theme-name=Adwaita$" ${gtkSettingsConf}; then echo "overridden default still present" >&2; exit 1; fi
     grep -F -x "gtk-xft-hintstyle=hintslight" ${gtkSettingsConf}
     grep -F -x "gtk-xft-hintstyle=hintslight" ${gtkStylixUserConf}
     grep -F -x "gtk-theme-name=Adwaita" ${gtkStylixUserConf}
-    echo "ok: theme settings win per key, user over Stylix over look"
+    echo "ok: theme settings win per key, user over look"
 
     # 13k. Theme Qt config: the Adwaita style in the look's polarity
     #      (capitalized exactly as the plugin registers it), the icon

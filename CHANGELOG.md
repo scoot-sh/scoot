@@ -17,6 +17,47 @@ release, entries were dated.
 
 ## Unreleased
 
+### Stylix becomes a synthesized `stylix` look (breaking)
+
+- **With Stylix in use, the desktop themes from a look named
+  `stylix`, synthesized from the Stylix palette at build time, and
+  the declared default follows it.** No app module reads Stylix
+  anymore; the per-setting Stylix defaults in `settings` are gone.
+  **Breaking:** `programs.scoot.stylix.enable` keeps its name and
+  changes meaning ("synthesize the look and make it the default",
+  still default true), `programs.scoot.stylix.extends` is new
+  (`"ginger-night"` with the desktop profile on, null otherwise),
+  and `programs.scootbar.stylix.enable` is now the bar-only path
+  (below). `programs.scoot.stylix.wallpaper.enable` keeps its
+  meaning: whether the look carries `stylix.image` (set it to
+  `false` for a solid color). Migration: nothing to edit unless you
+  set these options for their old meaning; to pin a look under
+  Stylix, set `programs.scoot.look`.
+- **Profile users with Stylix and no explicit `look` see one
+  palette now.** GTK and Qt colors, mako, fuzzel and the pickers,
+  swaylock, wob and fcitx5 move from ginger-night's palette to
+  Stylix's. Compositor and bar colors and fonts, the wallpaper, the
+  night temperature, and the terminal, shell, editor and monitor
+  files are unchanged. The `stylix` look inherits shape and opacity
+  from its base like every look: rounded windows arrive, the bar
+  stays opaque (`bar = 1.0` in every shipped look).
+- **Stylix with an explicit `look`: the look now wins in the
+  compositor and bar where Stylix used to.** Paths a Stylix
+  home-manager target writes stay Stylix's — scoot never writes a
+  path an upstream module owns — so turn those targets off for one
+  look everywhere (`stylix.targets.<app>.enable = false`; `scoot
+  look apply` names the owned apps). Stylix without the profile is
+  unchanged.
+  See [Theming](site/src/content/docs/scoot/theming.md#stylix).
+- **Standalone scootbar under Stylix renders a fixed layer.**
+  `programs.scootbar.stylix.enable` (default true) now renders the
+  `stylix` look's bar fragment at build time and pins it as `[look]
+  layer`, instead of baking Stylix values into `settings`. Your file
+  and flags still win per key over the layer. With a scoot catalog
+  present the option does nothing and warns; set it to `false` to
+  silence the warning.
+  See [scootbar theming](site/src/content/docs/scootbar/theming.md#from-stylix).
+
 ## [0.2.1](https://github.com/scoot-sh/scoot/compare/v0.2.0...v0.2.1) - 2026-10-14
 
 ### scoot

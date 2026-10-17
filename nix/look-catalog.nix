@@ -175,7 +175,11 @@ let
   # the fallback face with a build-time warning (in the log and in
   # `$out/warning`), never a failed build.
   mkFontFile =
-    { name, family, package }:
+    {
+      name,
+      family,
+      package,
+    }:
     pkgs.runCommand "scoot-look-font-${lib.strings.sanitizeDerivationName name}"
       {
         nativeBuildInputs = [ pkgs.findutils ];
@@ -355,34 +359,50 @@ let
       src = pkgs.runCommand "scoot-look-stylix-src" { nativeBuildInputs = [ scootLook ]; } ''
         mkdir -p $out/stylix
         scoot-look import-base16 "${jsonFile}" --name stylix \
-          ${lib.optionalString ((raw.extends or null) != null) "--extends ${lib.escapeShellArg raw.extends}"} \
+          ${
+            lib.optionalString ((raw.extends or null) != null) "--extends ${lib.escapeShellArg raw.extends}"
+          } \
           --out $out/stylix
-        ${lib.optionalString (synth.imageFile != null) "cp \"${raw.image}\" \"$out/stylix/${synth.imageFile}\""}
+        ${lib.optionalString (
+          synth.imageFile != null
+        ) "cp \"${raw.image}\" \"$out/stylix/${synth.imageFile}\""}
       '';
     in
     {
       inherit src;
-      inherit (synth) themeLook imageFile fontPackages hasWallpaper;
+      inherit (synth)
+        themeLook
+        imageFile
+        fontPackages
+        hasWallpaper
+        ;
       uiFamily = (raw.fontsSans or null).name or null;
       uiPackage = (raw.fontsSans or null).package or null;
       wallpaperAbs = if synth.imageFile == null then null else "${src}/stylix/${synth.imageFile}";
     };
 
   mkCatalog =
-    { looks, stylix ? null }:
+    {
+      looks,
+      stylix ? null,
+    }:
     let
       # A literal `stylix` in `looks` means the synthesized look: it is
       # filtered here and appended below when synthesis is on (an
       # unknown shipped string still refuses in `toEntry`).
       entries = mkEntries (builtins.filter (item: item != "stylix") looks);
-      sty = if stylix == null then null else mkStylix {
-        raw = stylix;
-        baseLook =
-          if (stylix.extends or null) == null then
-            null
-          else
-            (import ./modules/desktop.nix { inherit lib; }).looks.${stylix.extends} or null;
-      };
+      sty =
+        if stylix == null then
+          null
+        else
+          mkStylix {
+            raw = stylix;
+            baseLook =
+              if (stylix.extends or null) == null then
+                null
+              else
+                (import ./modules/desktop.nix { inherit lib; }).looks.${stylix.extends} or null;
+          };
       fullEntries =
         entries
         ++ lib.optional (sty != null) {
@@ -447,12 +467,16 @@ let
         entries = fullEntries;
         rendered = renders // lib.optionalAttrs (styRendered != null) { stylix = styRendered; };
         names = map (entry: entry.name) entries ++ lib.optional (sty != null) "stylix";
-        hasWallpaper =
-          builtins.any hasWallpaperEntry entries || (sty != null && sty.hasWallpaper);
+        hasWallpaper = builtins.any hasWallpaperEntry entries || (sty != null && sty.hasWallpaper);
         fontPackages = if sty == null then [ ] else sty.fontPackages;
         stylixTheme = if sty == null then null else sty.themeLook;
       };
 in
 {
-  inherit shippedNames mkEntries mkCatalog catalogDir;
+  inherit
+    shippedNames
+    mkEntries
+    mkCatalog
+    catalogDir
+    ;
 }

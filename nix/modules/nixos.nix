@@ -42,8 +42,7 @@ let
     else if (config.stylix.polarity or "either") == "light" then
       false
     else
-      stylixLib.isDarkByLuma config.lib.stylix.colors.withHashtag.base00
-        config.lib.stylix.colors.withHashtag.base05;
+      stylixLib.isDarkByLuma config.lib.stylix.colors.withHashtag.base00 config.lib.stylix.colors.withHashtag.base05;
   lookCatalog = lookCatalogLib.mkCatalog {
     looks = cfg.looks;
     stylix =

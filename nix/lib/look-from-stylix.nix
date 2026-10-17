@@ -82,12 +82,8 @@ let
     e = 14;
     f = 15;
   };
-  digit =
-    c:
-    hexVal.${lib.toLower c}
-      or (throw "programs.scoot.stylix: `${c}` is not a hex digit");
-  hexPair =
-    pair: 16 * (digit (builtins.substring 0 1 pair)) + (digit (builtins.substring 1 1 pair));
+  digit = c: hexVal.${lib.toLower c} or (throw "programs.scoot.stylix: `${c}` is not a hex digit");
+  hexPair = pair: 16 * (digit (builtins.substring 0 1 pair)) + (digit (builtins.substring 1 1 pair));
 
   # sRGB luma, scaled by 1000 (exact integer math): `0.299 R + 0.587 G
   # + 0.114 B`. An approximation of the WCAG luminance `import-base16`
@@ -187,15 +183,18 @@ let
             lib.optionalAttrs (sans != null) { sansSerif = sans; }
             // lib.optionalAttrs (mono != null) { monospace = mono; }
           );
-          sizes = lib.optionalAttrs ((sizes.desktop or null) != null) { inherit (sizes) desktop; }
+          sizes =
+            lib.optionalAttrs ((sizes.desktop or null) != null) { inherit (sizes) desktop; }
             // lib.optionalAttrs ((sizes.popups or null) != null) { inherit (sizes) popups; }
             // lib.optionalAttrs ((sizes.applications or null) != null) { inherit (sizes) applications; }
             // lib.optionalAttrs ((sizes.terminal or null) != null) { inherit (sizes) terminal; };
-          opacity = lib.optionalAttrs ((opacity.popups or null) != null) { inherit (opacity) popups; }
+          opacity =
+            lib.optionalAttrs ((opacity.popups or null) != null) { inherit (opacity) popups; }
             // lib.optionalAttrs ((opacity.terminal or null) != null) { inherit (opacity) terminal; };
         }
         // lib.optionalAttrs (cursor != null) {
-          cursor = lib.optionalAttrs ((cursor.name or null) != null) { name = cursor.name; }
+          cursor =
+            lib.optionalAttrs ((cursor.name or null) != null) { name = cursor.name; }
             // lib.optionalAttrs ((cursor.size or null) != null) { size = cursor.size; };
         }
         // lib.optionalAttrs (imageFile != null) {
@@ -212,7 +211,13 @@ let
               focus_ring_inactive_color = dim;
             };
             barColors = {
-              inherit background foreground accent urgent dim;
+              inherit
+                background
+                foreground
+                accent
+                urgent
+                dim
+                ;
               hover = accent;
             };
             nightTemp = null;
@@ -242,7 +247,13 @@ let
               focus_ring_inactive_color = dim;
             };
             barColors = (baseLook.barColors or { }) // {
-              inherit background foreground accent urgent dim;
+              inherit
+                background
+                foreground
+                accent
+                urgent
+                dim
+                ;
               hover = accent;
             };
             inherit isDark;
@@ -254,7 +265,12 @@ let
           };
     in
     {
-      inherit json themeLook imageFile fontPackages;
+      inherit
+        json
+        themeLook
+        imageFile
+        fontPackages
+        ;
       hasWallpaper = image != null;
     };
 in
