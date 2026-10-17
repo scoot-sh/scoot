@@ -987,24 +987,31 @@ fn diff(expected: &Image, actual: &Image) -> Diff {
         expected: [0; 4],
         actual: [0; 4],
     };
-    for (i, (want, got)) in expected.rgba.iter().zip(actual.rgba.iter()).enumerate() {
-        let miss = want.abs_diff(*got);
+    for (pixel, (want_px, got_px)) in expected
+        .rgba
+        .chunks_exact(4)
+        .zip(actual.rgba.chunks_exact(4))
+        .enumerate()
+    {
+        // One pixel: past tolerance when ANY channel is, so a recolor
+        // that keeps one channel (white over ginger keeps red) still
+        // counts every pixel it moves.
+        let mut miss = 0;
+        for (want, got) in want_px.iter().zip(got_px) {
+            miss = miss.max(want.abs_diff(*got));
+        }
         if miss <= TOLERANCE {
             continue;
         }
-        if i % 4 == 0 {
-            out.mismatched += 1;
-        }
+        out.mismatched += 1;
         if miss > out.worst {
-            let pixel = i / 4;
             out.worst = miss;
             out.worst_at = (
                 (pixel as u32) % expected.width,
                 (pixel as u32) / expected.width,
             );
-            let base = pixel * 4;
-            out.expected = expected.rgba[base..base + 4].try_into().expect("a pixel");
-            out.actual = actual.rgba[base..base + 4].try_into().expect("a pixel");
+            out.expected = want_px.try_into().expect("a pixel");
+            out.actual = got_px.try_into().expect("a pixel");
         }
     }
     out
