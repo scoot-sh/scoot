@@ -247,8 +247,16 @@ default linuxserver webtop tag) are not supported: build from source
 instead. It never replaces a scoot that a distro package
 installed.
 
+Two installs. `--system` is for all users and adds **scoot** to the
+login screen. A plain run is for you only and adds no login-screen
+entry.
+
 ```sh
 curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --system --look ginger-night
+```
+
+```sh
+curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --look ginger-night
 ```
 
 You need `curl` (or `wget`) and `sh`: `sudo apt install curl` on
@@ -266,12 +274,23 @@ The command it prints waits for confirmation; for a non-interactive run,
 add `-y` (`apt`, `dnf`) or `--noconfirm` (`pacman`). `--dry-run` lists
 the missing libraries and fonts without changing anything.
 
-Then log out and pick **scoot** on your login screen.
+If you used `--system`, log out and pick **scoot** on your login screen.
 
-- `--system` installs under `/usr/local` and adds scoot to the login
-  screen; it asks for `sudo`. Leave it off to install into `~/.local`
-  with no root, and start a session from a text console with
-  `scoot-session`.
+- `--system` installs under `/usr/local` (needs root) and writes
+  `/usr/share/wayland-sessions/scoot.desktop` for the login-screen
+  entry. Your greeter and its config are untouched.
+- Without `--system` the script installs into `~/.local` with no root
+  and no login-screen entry. Start a session from a text console with
+  `scoot-session`. To get the login-screen entry later, run the
+  `--system` command the script prints at the end (it carries your
+  `--look` and `--no-bar` flags).
+- The two installs coexist: each keeps its own files and record, and a
+  `--system` run never touches the per-user copy. But the per-user copy
+  may shadow the system one for you (`~/.local/bin` is often first on
+  `PATH`, and `~/.config/systemd/user` beats the system units), so a
+  login-screen session can mix old user units with the newer system
+  install. Either direction prints a note when the other copy exists.
+  To remove the per-user copy: `install.sh --uninstall`.
 - `--look` installs the five [looks](../../scoot/theming/) under
   `<prefix>/share/scoot/looks` and applies one with `scoot look apply`.
   Your `config.toml` and `bar.toml` are never written, only read: the

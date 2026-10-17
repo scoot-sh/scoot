@@ -12,8 +12,11 @@
 #      each binary against the release's SHA256SUMS before installing it
 #      (the session files come from the same tagged commit);
 #   3. installs them and the `scoot-session` launcher into a bin directory,
-#      the session's systemd user units, and the portal config;
-#   4. with --system, also adds "scoot" to your login screen;
+#      the session's systemd user units, and the portal config. A plain
+#      run installs for you only and adds no login-screen entry;
+#   4. with --system, also adds "scoot" to your login screen
+#      (/usr/share/wayland-sessions/scoot.desktop; your greeter and its
+#      config are untouched);
 #   5. with --look, installs the shipped looks under the prefix's share
 #      dir and applies one with `scoot look apply` (your config files are
 #      never written, only read; old look configs migrate only after the
@@ -69,11 +72,16 @@ usage() {
     cat <<'EOF'
 Install scoot, scootbg and scootbar from GitHub releases.
 
+A plain run installs for you only (~/.local) and adds no
+login-screen entry. --system installs for all users (/usr/local)
+and adds "scoot" to the login screen.
+
 Usage: install.sh [options]
 
   --system            install under /usr/local and add scoot to the login
-                      screen (asks for sudo); default is ~/.local, started
-                      with `scoot-session` from a text console
+                      screen (needs root; writes
+                      /usr/share/wayland-sessions/scoot.desktop and leaves
+                      your greeter and its config alone)
   --look NAME         install the shipped looks and apply one:
                       ginger-night, moonrise, music-desk, radial-burst
                       or vinyl-sunset
@@ -156,12 +164,18 @@ data_home=${XDG_DATA_HOME:-$HOME/.local/share}
 
 # --- where things go ----------------------------------------------------
 
+# The system install's record and login-screen entry. Overridable the way
+# the release URLs are, so the test suite can point them at a scratch
+# tree; in production they are always these two paths.
+sys_manifest=${SCOOT_INSTALL_SYSTEM_MANIFEST:-/usr/local/share/scoot/install-manifest}
+sys_session=${SCOOT_INSTALL_SYSTEM_SESSION:-/usr/share/wayland-sessions/scoot.desktop}
+
 if [ "$system" = 1 ]; then
     bin_dir=${prefix:-/usr/local}/bin
     unit_dir=/usr/local/lib/systemd/user
     portal_dir=/etc/xdg-desktop-portal
-    session_file=/usr/share/wayland-sessions/scoot.desktop
-    manifest=/usr/local/share/scoot/install-manifest
+    session_file=$sys_session
+    manifest=$sys_manifest
     version_file=/usr/local/share/scoot/install-version
     if [ "$(id -u)" = 0 ]; then
         sudo=""
@@ -489,6 +503,35 @@ if [ "$check" = 1 ]; then
         exit 0
     else
         exit 10
+    fi
+fi
+
+# The two installs coexist file-safely (different paths, manifests and
+# version records; a foreign file is never overwritten), but one shadows
+# the other for this user. Say so before anything else is decided: the
+# note fires on up-to-date and dry runs too, never only on a fresh
+# install. Nothing is ever removed here; removal is an explicit
+# `install.sh --uninstall` by the user.
+if [ "$system" = 1 ]; then
+    # The per-user copy that would shadow this install: the invoking
+    # user's under sudo (their variables did not survive sudo, so plain
+    # ~/.local/share, like the look config above), else this user's.
+    if [ -n "${SUDO_USER:-}" ]; then
+        user_home=/home/$SUDO_USER
+        if command -v getent >/dev/null 2>&1; then
+            sudo_home=$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)
+            if [ -n "$sudo_home" ]; then user_home=$sudo_home; fi
+        fi
+        user_manifest=$user_home/.local/share/scoot/install-manifest
+    else
+        user_manifest=$data_home/scoot/install-manifest
+    fi
+    if [ -f "$user_manifest" ]; then
+        note "a per-user install exists ($user_manifest) and may take precedence for you: ~/.local/bin is often first on PATH and ~/.config/systemd/user beats the system units. To remove it, run: install.sh --uninstall"
+    fi
+else
+    if [ -f "$sys_manifest" ]; then
+        note "a system install exists ($sys_manifest); a session picked from the login screen runs the system copy."
     fi
 fi
 
@@ -1043,10 +1086,19 @@ say "Try it in a window inside your current desktop:"
 say "  scoot --nested -- foot"
 if [ -n "$session_file" ]; then
     say "Then log out and pick \"scoot\" on your login screen."
+    say "That entry is $session_file; your greeter and its config are untouched."
 else
     say "Or run a whole session from a text console (Ctrl+Alt+F3, log in):"
     say "  scoot-session"
-    say "(Re-run with --system to add scoot to your login screen.)"
+    say ""
+    say "This installed for you only and added no login-screen entry."
+    say "To add scoot to the login screen, run:"
+    # The same install, system-wide: the look and bar flags the user
+    # just used travel along, so the entry matches this install.
+    sys_flags=""
+    if [ -n "$look" ]; then sys_flags="$sys_flags --look $look"; fi
+    if [ "$with_bar" = 0 ]; then sys_flags="$sys_flags --no-bar"; fi
+    say "  curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --system$sys_flags"
 fi
 say ""
 say "Next: https://www.scoot.sh/start/first-session/  ·  Remove: install.sh --uninstall$([ "$system" = 1 ] && printf ' --system')"
