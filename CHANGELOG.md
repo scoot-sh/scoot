@@ -17,6 +17,81 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.3.0](https://github.com/scoot-sh/scoot/compare/v0.2.1...v0.3.0) - 2026-10-17
+
+### looks
+
+- added: the five shipped looks as look.toml, validated in CI ([#610](https://github.com/scoot-sh/scoot/pull/610))
+
+### nix
+
+- added: [**breaking**] the programs.scoot.looks catalog, look as the declared default, the switch rule ([#634](https://github.com/scoot-sh/scoot/pull/634))
+
+### nix,scootctl
+
+- added: [**breaking**] Stylix becomes a synthesized stylix look ([#642](https://github.com/scoot-sh/scoot/pull/642))
+
+### scoot,scoot-ipc,scootctl
+
+- added: look-scoped reload in the compositor ([#617](https://github.com/scoot-sh/scoot/pull/617))
+- added: compositor IPC for looks (look-apply and looks) ([#635](https://github.com/scoot-sh/scoot/pull/635))
+
+### scoot,scoot-ipc,scootctl,looks
+
+- added: [**breaking**] the compositor reads a look layer under the user config ([#613](https://github.com/scoot-sh/scoot/pull/613))
+
+### scoot,scootbar,scoot-look
+
+- added: per-session look state for headless and --private-look sessions ([#616](https://github.com/scoot-sh/scoot/pull/616))
+
+### scoot,scootctl,scoot-look
+
+- added: look next, prev, random and timed previews ([#636](https://github.com/scoot-sh/scoot/pull/636))
+
+### scoot-look
+
+- added: finish look-format: CI job, site reference, non-Nix test, panic-safe contrast ([#608](https://github.com/scoot-sh/scoot/pull/608))
+- added: import-base16 maps any scheme to a source look ([#611](https://github.com/scoot-sh/scoot/pull/611))
+
+### scoot-look,scootctl
+
+- added: Helix, btop and starship look leaves ([#639](https://github.com/scoot-sh/scoot/pull/639))
+
+### scoot-look,scootctl,nix
+
+- added: look leaves for mako, wob, fcitx5 and the night light ([#632](https://github.com/scoot-sh/scoot/pull/632))
+- added: the greeter's look follows the declared look, resolved at build time ([#638](https://github.com/scoot-sh/scoot/pull/638))
+
+### scoot-look,scootctl,scoot
+
+- added: foot follows a swap via a rendered foot.ini ([#633](https://github.com/scoot-sh/scoot/pull/633))
+
+### scoot-look,scootctl,scoot,nix
+
+- added: look leaves for swaylock, fuzzel and the pickers ([#631](https://github.com/scoot-sh/scoot/pull/631))
+
+### scootbar
+
+- added: keep modules running on a style-only reload ([#609](https://github.com/scoot-sh/scoot/pull/609))
+- added: looks picker bar module and launcher list ([#637](https://github.com/scoot-sh/scoot/pull/637))
+
+### scootbar,scoot-look
+
+- added: read a look layer under bar.toml, with a look-scoped reload ([#612](https://github.com/scoot-sh/scoot/pull/612))
+
+### scootctl,scoot,docs
+
+- added: look new, watch and preview capture ([#640](https://github.com/scoot-sh/scoot/pull/640))
+
+### scootctl,scoot,scootbg
+
+- added: scoot look apply and the atomic swap ([#628](https://github.com/scoot-sh/scoot/pull/628))
+
+### scootctl,scoot-look
+
+- added: toolkit keys and files follow a swap ([#630](https://github.com/scoot-sh/scoot/pull/630))
+- added: look install, export and save behind the trust boundary ([#644](https://github.com/scoot-sh/scoot/pull/644))
+
 ### `install.sh --look` installs the look catalog (breaking)
 
 - **`install.sh --look NAME` no longer writes `config.toml`,
