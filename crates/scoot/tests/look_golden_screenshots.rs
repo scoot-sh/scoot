@@ -59,14 +59,17 @@
 //! screenshot beside the golden's name for inspection.
 //!
 //! Regenerating the goldens (after an intended visual change, or on a box
-//! whose font file differs from CI's):
+//! whose font file differs from CI's), one look at a time: each golden is
+//! written by its own test, while `every_shipped_look_has_a_golden` reads
+//! the directory, so a whole-suite regenerate races the gate.
 //!
 //! ```sh
 //! cargo build -p scootbar
-//! SCOOT_GOLDEN_REGENERATE=1 cargo nextest run -p scoot --test look_golden_screenshots
+//! SCOOT_GOLDEN_REGENERATE=1 cargo nextest run -p scoot --test look_golden_screenshots golden_ginger_night
 //! ```
 //!
-//! which writes `tests/goldens/look-<name>.png` and passes. Inspect the
+//! which writes `tests/goldens/look-ginger-night.png` and passes. Repeat
+//! for each `golden_<name>` test. Inspect the
 //! diff before committing: a regenerate that also moves pixels it should
 //! not have moved is a bug, not a baseline update. CI never regenerates;
 //! it compares, and uploads the actual screenshots as the
@@ -1242,6 +1245,10 @@ fn a_broken_look_is_nothing_like_its_golden() {
         compared.worst >= 100,
         "a white ring misses by ~200 a channel, not {}",
         compared.worst
+    );
+    eprintln!(
+        "the broken look misses ginger-night by {} pixels past {}/channel, worst {} at ({}, {})",
+        compared.mismatched, TOLERANCE, compared.worst, compared.worst_at.0, compared.worst_at.1,
     );
 }
 
