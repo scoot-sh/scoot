@@ -633,7 +633,20 @@ fn install_tarball_refuses_hostile_entries() {
                 let mut h = tar::Header::new_ustar();
                 h.set_size(0);
                 h.set_entry_type(tar::EntryType::Symlink);
-                b.append_link(&mut h, "link", "/etc/hostname").ok();
+                // A permitted name (`wallpaper.png`), so the refusal pins
+                // the kind gate, not the name gate: neutering the
+                // `!kind.is_file()` arm must fail this test.
+                b.append_link(&mut h, "wallpaper.png", "/etc/hostname").ok();
+            }),
+        ),
+        (
+            "hardlink",
+            Box::new(|b| {
+                let mut h = tar::Header::new_ustar();
+                h.set_size(0);
+                h.set_entry_type(tar::EntryType::Link);
+                // Same permitted-name pin for hard links.
+                b.append_link(&mut h, "wallpaper.png", "look.toml").ok();
             }),
         ),
         (
@@ -1428,4 +1441,164 @@ fn permitted_places_hold() {
     ] {
         assert!(!permitted_rel(bad), "{bad} refuses");
     }
+}
+
+#[test]
+fn install_dir_and_tar_accept_large_image_and_font() {
+    // A real-sized wallpaper (past the old 64 KiB `read_regular` cap) and
+    // a font-sized file install from a directory AND from a tarball: the
+    // directory path reads with the same per-kind caps the tarball path
+    // has. Regression for the 64 KiB directory refusal of every shipped
+    // look.
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let with_wallpaper =
+        manifest("big-look").replace("[fonts]", "[wallpaper]\nimage = \"wallpaper.png\"\n[fonts]");
+    let src_dir = root.path().join("src").join("big-look");
+    std::fs::create_dir_all(src_dir.join("fonts")).expect("a source look");
+    std::fs::write(src_dir.join("look.toml"), with_wallpaper).expect("a manifest");
+    let mut wallpaper = PNG.to_vec();
+    wallpaper.extend(vec![0u8; 100 * 1024]);
+    std::fs::write(src_dir.join("wallpaper.png"), &wallpaper).expect("a large image");
+    let font = vec![0u8; 200 * 1024];
+    std::fs::write(src_dir.join("fonts").join("big.ttf"), &font).expect("a font-sized file");
+    let dest_parent = root.path().join("installed-looks");
+    let report = install_dir_into(
+        &src_dir,
+        &dest_parent,
+        &empty_catalog(),
+        &ProdChecks::none(),
+        false,
+        &ScriptedNet::failing(),
+    )
+    .expect("a large image installs from a directory");
+    assert_eq!(
+        std::fs::read(report.dir.join("wallpaper.png")).expect("an installed image"),
+        wallpaper,
+    );
+    assert_eq!(
+        std::fs::read(report.dir.join("fonts").join("big.ttf")).expect("an installed font"),
+        font,
+    );
+    // And the same content installs from a tarball: export the installed
+    // look, then install the tarball under a fresh parent.
+    let catalog = catalog(
+        &root.path().join("user-looks"),
+        &dest_parent,
+        &root.path().join("shipped"),
+    );
+    let tarball = root.path().join("big-look.tar");
+    export_into("big-look", &catalog, &tarball).expect("the large look exports");
+    let again = root.path().join("installed-again");
+    let report = install_tar_into(
+        &tarball,
+        &again,
+        &empty_catalog(),
+        &ProdChecks::none(),
+        false,
+        &ScriptedNet::failing(),
+    )
+    .expect("a large image installs from a tarball");
+    assert_eq!(
+        std::fs::read(report.dir.join("wallpaper.png")).expect("a re-installed image"),
+        wallpaper,
+    );
+}
+
+#[test]
+fn install_dir_refuses_a_hardlinked_leaf() {
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let src_dir = root.path().join("src").join("evil-look");
+    std::fs::create_dir_all(&src_dir).expect("a source look");
+    std::fs::write(src_dir.join("look.toml"), manifest("evil-look")).expect("a manifest");
+    let secret = root.path().join("secret.txt");
+    std::fs::write(&secret, b"secret-bytes").expect("outside bytes");
+    std::fs::hard_link(&secret, src_dir.join("README.md")).expect("a hardlink leaf");
+    let error = install_dir_into(
+        &src_dir,
+        &root.path().join("installed-looks"),
+        &empty_catalog(),
+        &ProdChecks::none(),
+        false,
+        &ScriptedNet::failing(),
+    )
+    .expect_err("a hardlink installs");
+    assert!(
+        error.contains("hard link"),
+        "names the hardlink refusal: {error}"
+    );
+    assert!(
+        !root.path().join("installed-looks").exists(),
+        "nothing lands on refusal"
+    );
+}
+
+#[test]
+fn export_skips_a_symlinked_leaf_with_a_note() {
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let user = root.path().join("user-looks");
+    let src = source_look(&user, "linky", &[("README.md", b"hi")]);
+    std::os::unix::fs::symlink("/etc/hostname", src.join("wallpaper.png")).expect("a symlink leaf");
+    let catalog = catalog(
+        &user,
+        &root.path().join("installed-looks"),
+        &root.path().join("shipped"),
+    );
+    let tarball = root.path().join("linky.tar");
+    let report = export_into("linky", &catalog, &tarball).expect("export skips, never refuses");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|n| n.contains("wallpaper.png") && n.contains("symlink")),
+        "the symlink skips with a note: {:?}",
+        report.notes
+    );
+    assert!(tarball.is_file(), "the tarball still lands");
+}
+
+#[test]
+fn save_with_a_url_wallpaper_says_to_reinstall_on_a_miss() {
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let user = root.path().join("user-looks");
+    source_look(&user, "live-base", &[]);
+    let state = root.path().join("state");
+    std::fs::create_dir_all(&state).expect("a state dir");
+    std::fs::write(
+        state.join("look.json"),
+        r#"{"name": "live-base", "rendered": "/tmp/nowhere", "generation": 1}"#,
+    )
+    .expect("a record");
+    let catalog = catalog(
+        &user,
+        &root.path().join("installed-looks"),
+        &root.path().join("shipped"),
+    );
+    let config = root.path().join("config");
+    std::fs::create_dir_all(config.join("scoot")).expect("a config tree");
+    let url = "https://example.com/wall.png";
+    let pin = sha256_of(PNG);
+    std::fs::write(
+        config.join("scoot/config.toml"),
+        format!(
+            "[appearance]\nbackground_color = \"#2B3648\"\n[wallpaper]\nimage = \"{url}\"\nsha256 = \"{pin}\"\n"
+        ),
+    )
+    .expect("a compositor file");
+    // The URL resolves from the download cache at apply time; the save
+    // itself never fetches, so the check answers from a canned path here
+    // and the reply still names the reinstall the first swap may owe.
+    let cached = root.path().join("cached.png");
+    std::fs::write(&cached, PNG).expect("cached bytes");
+    let checks = UrlChecks {
+        answer: Ok(Availability::Available(
+            cached.to_string_lossy().into_owned(),
+        )),
+    };
+    let report = save_into("saved-url", &config, &user, Some(&state), &catalog, &checks)
+        .expect("a URL wallpaper saves");
+    assert!(
+        report.notes.iter().any(|n| n.contains("reinstall")),
+        "the save reply says when a reinstall is owed: {:?}",
+        report.notes
+    );
 }

@@ -261,6 +261,15 @@ fn collect_dir_into(
                 "refused: {rel} is not a regular file: installed looks carry regular files only"
             ));
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            if meta.nlink() != 1 {
+                return Err(format!(
+                    "refused: {rel} is a hard link: installed looks carry regular files only"
+                ));
+            }
+        }
         if let Some(error) = check_relative_path("file", &rel) {
             return Err(format!("refused: {rel}: {error}"));
         }
@@ -271,9 +280,11 @@ fn collect_dir_into(
         }
         gate_file(&rel, meta.len(), files.len(), *total)?;
         // The pre-check above is `symlink_metadata` (never follows) and
-        // this read refuses symlinks again, so a link swapped in between
-        // refuses instead of landing outside bytes.
-        let bytes = apply::read_regular(&path)?;
+        // this read opens `O_NOFOLLOW` and re-checks the handle (regular
+        // file, single link), reading at most the kind cap, so a link or
+        // a FIFO swapped in between refuses instead of landing outside
+        // bytes.
+        let bytes = apply::read_regular_capped(&path, kind_cap(&rel))?;
         *total += bytes.len() as u64;
         if *total > MAX_INSTALL_BYTES {
             return Err(format!(
@@ -682,6 +693,8 @@ pub struct ExportReport {
 /// `<name>/` prefix, deterministic (sorted, zeroed mtime/ownership). The
 /// tarball installs back through [`install_tar_into`], unchanged.
 pub fn export_into(name: &str, catalog: &Catalog, out: &Path) -> Result<ExportReport, String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static EXPORT_COUNTER: AtomicU64 = AtomicU64::new(0);
     let entry = catalog
         .find(name)
         .ok_or_else(|| apply::unknown_look(name, catalog))?;
@@ -699,8 +712,12 @@ pub fn export_into(name: &str, catalog: &Catalog, out: &Path) -> Result<ExportRe
         ));
     }
     files.sort_by(|a, b| a.rel.cmp(&b.rel));
-    let tmp = out.with_extension("part");
-    {
+    let tmp = out.with_extension(format!(
+        "part-{}-{}",
+        std::process::id(),
+        EXPORT_COUNTER.fetch_add(1, Ordering::SeqCst)
+    ));
+    let result: Result<(), String> = (|| {
         let file = std::fs::File::create(&tmp)
             .map_err(|error| format!("cannot write {}: {error}", tmp.display()))?;
         let mut builder = tar::Builder::new(file);
@@ -719,6 +736,11 @@ pub fn export_into(name: &str, catalog: &Catalog, out: &Path) -> Result<ExportRe
         builder
             .finish()
             .map_err(|error| format!("cannot write the tarball: {error}"))?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        std::fs::remove_file(&tmp).ok();
+        return Err(error);
     }
     std::fs::rename(&tmp, out)
         .map_err(|error| format!("cannot write {}: {error}", out.display()))?;
@@ -733,11 +755,12 @@ pub fn export_into(name: &str, catalog: &Catalog, out: &Path) -> Result<ExportRe
     })
 }
 
-/// Collects one source directory for export: regular files (following the
-/// manifest's own links, e.g. a home-manager farm) with permitted names
-/// and places land; anything else is a note, never a refusal — the source
-/// is already the user's or the catalog's, and install re-gates whatever
-/// the tarball carries.
+/// Collects one source directory for export: regular files with permitted
+/// names and places land; anything else is a note, never a refusal — the
+/// source is already the user's or the catalog's, and install re-gates
+/// whatever the tarball carries. Symlinks (even to regular files) skip
+/// with a note like every other skip, so a stray link never bakes outside
+/// bytes into the handed-over tarball.
 fn export_dir_into(
     root: &Path,
     dir: &Path,
@@ -760,7 +783,11 @@ fn export_dir_into(
             .replace('\\', "/");
         let meta = std::fs::symlink_metadata(&path)
             .map_err(|error| format!("cannot stat {}: {error}", path.display()))?;
-        if meta.is_dir() && !meta.is_symlink() {
+        if meta.is_symlink() {
+            notes.push(format!("skipping {rel}: is a symlink"));
+            continue;
+        }
+        if meta.is_dir() {
             if dir != root || (rel != "fonts" && rel != "apps") {
                 notes.push(format!("skipping {rel}/: not a directory a look uses"));
                 continue;
@@ -772,21 +799,29 @@ fn export_dir_into(
             notes.push(format!("skipping {rel}: not a file a look uses"));
             continue;
         }
-        // Follow links here (a declared farm is links into the store); the
-        // read still refuses devices, FIFOs and sockets, and the caps
-        // still bound it.
-        let bytes = match std::fs::read(&path) {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                notes.push(format!("skipping {rel}: cannot read it: {error}"));
-                continue;
-            }
-        };
-        if !meta.is_file() && !meta.is_symlink() {
+        if !meta.is_file() {
             notes.push(format!("skipping {rel}: not a regular file"));
             continue;
         }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt as _;
+            if meta.nlink() != 1 {
+                notes.push(format!("skipping {rel}: is a hard link"));
+                continue;
+            }
+        }
+        // Never follows: symlinks already skipped above, and the capped
+        // read re-checks the handle, so a link raced in refuses as a
+        // skip instead of landing outside bytes.
         let cap = kind_cap(&rel);
+        let bytes = match apply::read_regular_capped(&path, cap) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                notes.push(format!("skipping {rel}: {error}"));
+                continue;
+            }
+        };
         if bytes.len() as u64 > cap {
             notes.push(format!(
                 "skipping {rel}: {} bytes (over the {cap} byte cap)",
@@ -1087,6 +1122,9 @@ fn save_wallpaper(
                 Some(pin) if pin.len() == 64 && pin.bytes().all(|b| b.is_ascii_hexdigit()) => {
                     wallpaper.push(("image".to_owned(), image.to_owned()));
                     wallpaper.push(("sha256".to_owned(), pin.to_owned()));
+                    notes.push(format!(
+                        "wallpaper `{image}` is a URL: the saved look's first swap needs its download cached, so reinstall the look if that swap refuses a cache miss"
+                    ));
                 }
                 _ => {
                     return Err("cannot save a URL wallpaper without its sha256 pin".to_owned());
@@ -1095,13 +1133,15 @@ fn save_wallpaper(
         } else {
             // The user's own path: followed (their file, their links),
             // then gated like any wallpaper — an image kind, within the
-            // byte cap — and copied in under its own name.
+            // byte cap — and copied in under its own name. Capped before
+            // reading (never `std::fs::read`), so a huge file or FIFO
+            // refuses instead of wedging the save.
             let source = if Path::new(image).is_absolute() {
                 PathBuf::from(image)
             } else {
                 config.join("scoot").join(image)
             };
-            let bytes = std::fs::read(&source)
+            let bytes = read_user_bytes_capped(&source, apply::MAX_IMAGE_BYTES)
                 .map_err(|error| format!("cannot save wallpaper `{image}`: {error}"))?;
             if bytes.len() as u64 > apply::MAX_IMAGE_BYTES {
                 return Err(format!(
@@ -1141,6 +1181,38 @@ fn save_wallpaper(
         notes.push("wallpaper.command is not a look key and was not saved".to_owned());
     }
     Ok(())
+}
+
+/// Reads the user's own wallpaper file with a byte cap: follows their
+/// links (like the shadowed-keys read), but opens `O_NONBLOCK`, requires
+/// a regular file, and reads at most `cap + 1` bytes, so a FIFO never
+/// hangs the save and a huge file refuses instead of landing.
+fn read_user_bytes_capped(path: &Path, cap: u64) -> Result<Vec<u8>, String> {
+    let fd = rustix::fs::open(
+        path,
+        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NONBLOCK | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )
+    .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let stat = rustix::fs::fstat(&fd)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile {
+        return Err(format!("refused: {} is not a regular file", path.display()));
+    }
+    let mut bytes = Vec::new();
+    use std::io::Read as _;
+    std::fs::File::from(fd)
+        .take(cap + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    if bytes.len() as u64 > cap {
+        return Err(format!(
+            "{} is {} bytes (over the {cap} byte cap)",
+            path.display(),
+            bytes.len()
+        ));
+    }
+    Ok(bytes)
 }
 
 /// Whether `bytes` start as a PNG, JPEG, GIF or WebP: the signatures
@@ -1395,12 +1467,18 @@ pub fn fetch_url_wallpaper(
     // Pin the first checked address: one lookup, one connection, no second
     // resolution to rebind between the check and the bytes.
     let addr = addrs[0];
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static FETCH_COUNTER: AtomicU64 = AtomicU64::new(0);
     let tmp = cache_dir.join(format!(
-        "{}.part-{}",
+        "{}.part-{}-{}",
         url_cache_name(url),
-        std::process::id()
+        std::process::id(),
+        FETCH_COUNTER.fetch_add(1, Ordering::SeqCst)
     ));
-    fetch.fetch(url, &host, addr, &tmp)?;
+    if let Err(error) = fetch.fetch(url, &host, addr, &tmp) {
+        std::fs::remove_file(&tmp).ok();
+        return Err(error);
+    }
     let bytes =
         std::fs::read(&tmp).map_err(|error| format!("cannot read the download: {error}"))?;
     if bytes.len() as u64 > apply::MAX_IMAGE_BYTES {

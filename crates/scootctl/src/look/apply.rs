@@ -421,6 +421,15 @@ fn resolve_dir(
 /// refuses instead of hanging, and a symlink raced into the same window
 /// fails with `ELOOP` and refuses.
 pub fn read_regular(path: &Path) -> Result<Vec<u8>, String> {
+    read_regular_capped(path, scoot_look::state::MAX_FILE)
+}
+
+/// Reads one file like [`read_regular`] but with the caller's byte cap
+/// (the install gate's per-kind caps): opens `O_NONBLOCK | O_NOFOLLOW`,
+/// re-checks the handle is a regular file with a single link, and reads
+/// at most `cap + 1` bytes so a header that lied about a small size
+/// refuses instead of landing outside bytes.
+pub fn read_regular_capped(path: &Path, cap: u64) -> Result<Vec<u8>, String> {
     let refusal = |why: &str| format!("refused: {} is {why}", path.display());
     let meta = std::fs::symlink_metadata(path)
         .map_err(|error| format!("cannot stat {}: {error}", path.display()))?;
@@ -429,6 +438,15 @@ pub fn read_regular(path: &Path) -> Result<Vec<u8>, String> {
     }
     if !meta.is_file() {
         return Err(refusal("not a regular file"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        if meta.nlink() != 1 {
+            return Err(refusal(
+                "a hard link: installed looks carry regular files only",
+            ));
+        }
     }
     let fd = rustix::fs::open(
         path,
@@ -450,24 +468,27 @@ pub fn read_regular(path: &Path) -> Result<Vec<u8>, String> {
     if rustix::fs::FileType::from_raw_mode(stat.st_mode) != rustix::fs::FileType::RegularFile {
         return Err(refusal("not a regular file"));
     }
-    if stat.st_size as u64 > scoot_look::state::MAX_FILE {
+    if stat.st_nlink != 1 {
+        return Err(refusal(
+            "a hard link: installed looks carry regular files only",
+        ));
+    }
+    if stat.st_size as u64 > cap {
         return Err(format!(
-            "refused: {} is larger than {} bytes",
+            "refused: {} is larger than {cap} bytes",
             path.display(),
-            scoot_look::state::MAX_FILE
         ));
     }
     let mut bytes = Vec::new();
     use std::io::Read as _;
     std::fs::File::from(fd)
-        .take(scoot_look::state::MAX_FILE + 1)
+        .take(cap + 1)
         .read_to_end(&mut bytes)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    if bytes.len() as u64 > scoot_look::state::MAX_FILE {
+    if bytes.len() as u64 > cap {
         return Err(format!(
-            "refused: {} is larger than {} bytes",
+            "refused: {} is larger than {cap} bytes",
             path.display(),
-            scoot_look::state::MAX_FILE
         ));
     }
     Ok(bytes)
