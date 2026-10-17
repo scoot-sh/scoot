@@ -848,7 +848,7 @@ fn magenta_buffer(
     rustix::fs::ftruncate(&fd, len as u64).expect("a sized pool file");
     let mut file = std::fs::File::from(fd);
     // ARGB8888 in memory order: B, G, R, A.
-    let pixel = [0x00u8, 0x00, 0xFF, 0xFF];
+    let pixel = [MAGENTA[2], MAGENTA[1], MAGENTA[0], 0xFF];
     let bytes: Vec<u8> = pixel.into_iter().cycle().take(len).collect();
     file.write_all(&bytes).expect("a filled pool file");
     let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
