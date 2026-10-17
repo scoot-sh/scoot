@@ -1,9 +1,10 @@
 ---
 title: "nested binds the host's own wayland socket, talks to itself, and deletes the host socket on exit"
-status: "open"
-area: "core"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-17"
 ---
 
 # nested binds the host's own wayland socket, talks to itself, and deletes the host socket on exit
