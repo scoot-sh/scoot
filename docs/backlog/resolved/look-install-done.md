@@ -1,9 +1,10 @@
 ---
 title: "scoot look install from a path, export and save, behind the trust boundary"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-17"
 ---
 
 # scoot look install from a path, export and save, behind the trust boundary
@@ -63,5 +64,33 @@ never resolves to an installed look.
 ## Not in this ticket
 
 Git URLs and `lookPacks` (`look-share`, later).
+
+## Resolution (2026-10-17, PR #644)
+
+`scoot look install PATH [--trust]` takes a look directory or a plain
+`.tar` tarball into `installed-looks/`: regular files only, only the
+file kinds a look uses by name and place, 64 files / 96 MiB total (32
+MiB images, 16 MiB fonts, 64 KiB everything else), `license` required,
+never under a shipped, declared or user-authored name, `apps/` leaves
+dropped unless `--trust` (printed first). A URL wallpaper is fetched at
+install time — no redirects, the host resolved and classified (loopback,
+private, link-local, unique-local and the rest refuse), the checked
+address pinned with `curl --resolve`, the bytes verified against
+`sha256` and the image magic — into scootbg's cache, so the swap
+resolves the cache hit and never makes a network request. `scoot look
+export NAME [--out FILE]` writes a deterministic ustar tarball that
+installs back byte for byte. `scoot look save NAME` snapshots the
+user's `[appearance]`/`[wallpaper]`/`[colors]` as a user-look extending
+the recorded live look. Works without Nix; tests never touch the real
+HOME/XDG.
+
+Evidence: 31 unit tests in `crates/scootctl/src/look/install/tests.rs`
+(one per refusal, `extends`-never-installed end to end, the
+export/install and save round-trips, the fetch refusals with the curl
+argv pinned, all mutation-proved on the symlink and redirect guards) and
+3 CLI parse tests; the dev-VM gates on the exact head (nextest 481
+passed, `cargo test` clean, DejaVu-only `FONTCONFIG_FILE`, scratch
+HOME/XDG) plus a real-binary end-to-end run. Docs in the same PR
+(`looks/index.md` Sharing).
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
