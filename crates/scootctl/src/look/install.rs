@@ -504,13 +504,19 @@ fn finish_install(
         )
     })?;
     let name = raw.name.clone();
+    let dest = dest_parent.join(&name);
     if let Some(entry) = catalog.find(&name) {
+        if entry.origin == Origin::Installed {
+            return Err(format!(
+                "refused: `{name}` is already installed: remove {} first",
+                dest.display()
+            ));
+        }
         return Err(format!(
             "refused: `{name}` is already a {} look: an installed look may not take the name of a shipped, declared or user-authored look",
             scoot_look::catalog::origin_name(entry.origin)
         ));
     }
-    let dest = dest_parent.join(&name);
     if dest.exists() {
         return Err(format!(
             "refused: {} already exists: remove it first",

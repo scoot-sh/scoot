@@ -348,13 +348,13 @@ fn install_refuses_taken_names_and_existing_dirs() {
     let user = root.path().join("user-looks");
     source_look(&user, "taken-user", &[]);
     let installed = root.path().join("installed-looks");
-    let catalog = catalog(&user, &installed, &shipped);
+    let taken = catalog(&user, &installed, &shipped);
     for (name, origin) in [("taken-shipped", "shipped"), ("taken-user", "user")] {
         let src = source_look(&root.path().join("src"), name, &[]);
         let error = install_dir_into(
             &src,
             &installed,
-            &catalog,
+            &taken,
             &ProdChecks::none(),
             false,
             &ScriptedNet::failing(),
@@ -386,6 +386,25 @@ fn install_refuses_taken_names_and_existing_dirs() {
     )
     .expect_err("the second install lands");
     assert!(error.contains("already exists"), "{error}");
+    // And once it catalogs, the refusal names the installed look.
+    let cataloged = catalog(
+        &root.path().join("user-looks"),
+        &installed,
+        &root.path().join("shipped"),
+    );
+    let error = install_dir_into(
+        &src,
+        &installed,
+        &cataloged,
+        &ProdChecks::none(),
+        false,
+        &ScriptedNet::failing(),
+    )
+    .expect_err("an installed name installs");
+    assert!(
+        error.contains("planted") && error.contains("already installed"),
+        "{error}"
+    );
 }
 
 #[test]
