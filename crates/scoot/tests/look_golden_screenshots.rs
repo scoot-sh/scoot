@@ -116,6 +116,9 @@ const HEIGHT: u32 = 600;
 /// The per-channel tolerance, and why 2: see the module doc.
 const TOLERANCE: u8 = 2;
 
+/// The bar's height, matching the config [`Session::start_bar`] writes.
+const BAR_HEIGHT: u32 = 28;
+
 /// The test client's fill, `#FF00FF`: no shipped look uses it.
 const MAGENTA: [u8; 3] = [0xFF, 0x00, 0xFF];
 
@@ -557,8 +560,11 @@ impl Session {
     /// a swap reloads it. Its stderr goes to the bar log.
     fn start_bar(&mut self, scootbar: &Path) {
         let config = self.scratch.dir.join("bar.toml");
-        std::fs::write(&config, "left = [\"workspaces\"]\n[bar]\nheight = 28\n")
-            .expect("a bar config");
+        std::fs::write(
+            &config,
+            format!("left = [\"workspaces\"]\n[bar]\nheight = {BAR_HEIGHT}\n"),
+        )
+        .expect("a bar config");
         let log_path = self.scratch.dir.join("scootbar.log");
         let log_file = std::fs::File::create(&log_path).expect("a bar log file");
         let mut command = Command::new(scootbar);
@@ -660,6 +666,45 @@ impl Session {
                 "the bar died around the swap; bar log:\n{}",
                 self.bar_log_tail()
             );
+        }
+    }
+
+    /// Polls `scoot msg outputs` until output 1's usable rectangle shows
+    /// the bar's reserved zone: the bar maps before the test window, so
+    /// the window's first configure already carries its final size and no
+    /// later map can supersede it.
+    fn wait_for_bar_zone(&self) {
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let reply = self.check_msg(&["outputs"]);
+            let reserved = reply["outputs"]
+                .as_array()
+                .map(|outputs| {
+                    outputs.iter().any(|o| {
+                        o["id"] == 1
+                            && o["usable"]["x"] == 0
+                            && o["usable"]["y"] == BAR_HEIGHT
+                            && o["usable"]["width"] == WIDTH
+                            && o["usable"]["height"] == HEIGHT - BAR_HEIGHT
+                    })
+                })
+                .unwrap_or(false);
+            if reserved {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the bar never reserved its zone; log:\n{}",
+                self.log_tail()
+            );
+            if self.bar.is_some() {
+                assert!(
+                    self.bar_alive(),
+                    "the bar died before reserving its zone; bar log:\n{}",
+                    self.bar_log_tail()
+                );
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 
@@ -1126,6 +1171,7 @@ fn render_look(tag: &str, name: &str, catalog: &Path, bar_bin: &Path) -> Option<
     let scratch = Scratch::new(tag);
     let mut session = Session::start(scratch, catalog);
     session.start_bar(bar_bin);
+    session.wait_for_bar_zone();
     let socket = session.runtime.join(&session.wayland_display);
     let held = map_solid_window(&socket);
     session.wait_for_window("scoot-golden");
