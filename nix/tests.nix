@@ -12548,7 +12548,7 @@ let
       true
     )
     (
-      assert lib.hasSuffix "wallpaper.png" (
+      assert lib.hasSuffix "vinyl-sunset.png" (
         toString osThemeGreeterVinyl.config.programs.scoot.greeter.background
       );
       true
