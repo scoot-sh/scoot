@@ -100,3 +100,25 @@ by deleting the host socket.
   `--socket /tmp/...` or a normal-fs `XDG_RUNTIME_DIR` works. Probably
   fs-specific; noted in the field report, file separately if it reproduces
   on a real fs.
+
+## Resolution (PR #655)
+
+`WaylandListener::bind_auto` (`crates/scoot/src/compositor/wayland_accept.rs`)
+excludes the `$WAYLAND_DISPLAY` name that resolves into the same
+`$XDG_RUNTIME_DIR` (bare names directly, absolute paths by parent dir) and
+skips every other live socket via a pre-bind `connect` probe, so lock-file
+evidence alone never takes a name in any mode. Only a stale socket file (or
+no file) reaches `bind_absolute`, whose `Drop` then removes only what the
+session bound. The `AlreadyInUse` message names the excluded host socket,
+and `run` fails fast naming it if the session somehow still bound the host's
+name instead of dying at the 10 s registry timeout. `site/.../agents/webtop.md`
+drops the Symptom warning.
+
+Evidence: 7 new regression tests (fake pixelflux host with an unlocked lock,
+probe-only skip, stale reclaim, flock-held skip, all-32 refusal, probe
+semantics, every `$WAYLAND_DISPLAY` shape), mutation-proved on the dev VM
+(guards neutered → the steal tests fail binding `wayland-1`); full
+`cargo nextest run -p scoot` 2772/2773 (the one failure is the pre-existing
+`xwayland-refused-cost-fd-leak`); real nested end-to-end against a headless
+scoot host on `wayland-1` lands on `wayland-2` with the host socket surviving
+and the host answering before and after.
