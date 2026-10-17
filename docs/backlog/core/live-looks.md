@@ -77,6 +77,7 @@ stated rule.
 | [`look-install`](../resolved/look-install-done.md) | low | daily-drive | `look-authoring` |
 | [`look-install-sh`](../resolved/look-install-sh-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-share`](look-share.md) (later) | low | daily-drive | `look-install` |
+| [`look-user-targets`](look-user-targets.md) | medium | daily-drive | `look-install` |
 | [`look-auto-switch`](look-auto-switch.md) (later) | low | daily-drive | `look-toolkit-live` |
 
 **The minimum slice** is `look-format` → `look-shipped`, `look-layer-scoot`
