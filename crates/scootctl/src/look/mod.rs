@@ -2116,6 +2116,7 @@ fn run_watch(look: &Look, dir: &Path, no_toolkit: bool, origin: Origin) -> Resul
         no_toolkit,
         origin,
         nix_claims: sync::read_nix_claims(),
+        stylix_targets: sync::read_stylix_targets(),
     };
     let socket = look.socket.clone();
     let make_compositor = || -> Box<dyn CompositorReload> {
