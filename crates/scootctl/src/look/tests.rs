@@ -594,3 +594,86 @@ fn preview_shows_or_captures() {
         })
     );
 }
+
+#[test]
+fn install_takes_a_path_and_trust() {
+    assert_eq!(
+        command(&["install", "./handed-over"]),
+        Ok(Command::Install {
+            path: PathBuf::from("./handed-over"),
+            trust: false,
+        })
+    );
+    assert_eq!(
+        command(&["install", "handed-over.tar", "--trust"]),
+        Ok(Command::Install {
+            path: PathBuf::from("handed-over.tar"),
+            trust: true,
+        })
+    );
+    assert_eq!(
+        command(&["install"]),
+        Err(Error::Missing("a look directory or tarball"))
+    );
+    assert_eq!(
+        command(&["install", "a", "b"]),
+        Err(Error::Unknown("b".to_owned()))
+    );
+}
+
+#[test]
+fn export_takes_a_name_and_an_out() {
+    assert_eq!(
+        command(&["export", "moonrise"]),
+        Ok(Command::Export {
+            name: "moonrise".to_owned(),
+            out: None,
+        })
+    );
+    assert_eq!(
+        command(&["export", "moonrise", "--out", "/tmp/moonrise.tar"]),
+        Ok(Command::Export {
+            name: "moonrise".to_owned(),
+            out: Some(PathBuf::from("/tmp/moonrise.tar")),
+        })
+    );
+    assert_eq!(
+        command(&["export", "moonrise", "--out=/tmp/moonrise.tar"]),
+        Ok(Command::Export {
+            name: "moonrise".to_owned(),
+            out: Some(PathBuf::from("/tmp/moonrise.tar")),
+        })
+    );
+    assert_eq!(
+        command(&["export"]),
+        Err(Error::Missing("a look name"))
+    );
+    assert_eq!(
+        command(&["export", "LOUD"]),
+        Err(Error::Invalid {
+            what: "look name",
+            value: "LOUD".to_owned(),
+        })
+    );
+}
+
+#[test]
+fn save_takes_a_name() {
+    assert_eq!(
+        command(&["save", "my-tweak"]),
+        Ok(Command::Save {
+            name: "my-tweak".to_owned(),
+        })
+    );
+    assert_eq!(
+        command(&["save"]),
+        Err(Error::Missing("a look name"))
+    );
+    assert_eq!(
+        command(&["save", "LOUD"]),
+        Err(Error::Invalid {
+            what: "look name",
+            value: "LOUD".to_owned(),
+        })
+    );
+}

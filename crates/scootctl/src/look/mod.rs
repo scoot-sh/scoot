@@ -2425,14 +2425,16 @@ fn run_install(look: &Look, path: &Path, trust: bool) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     } else {
         for kept in &report.kept {
-            output::print_line(&format!("trusted: {kept}"))
-                .map_err(|error| error.to_string())?;
+            output::print_line(&format!("trusted: {kept}")).map_err(|error| error.to_string())?;
         }
         output::print_line(&format!("installed: {}", report.name))
             .map_err(|error| error.to_string())?;
         if !report.dropped.is_empty() {
-            output::print_line(&format!("dropped without --trust: {}", report.dropped.join(", ")))
-                .map_err(|error| error.to_string())?;
+            output::print_line(&format!(
+                "dropped without --trust: {}",
+                report.dropped.join(", ")
+            ))
+            .map_err(|error| error.to_string())?;
         }
         if let Some(fetched) = &report.fetched {
             output::print_line(&format!("cached wallpaper: {}", fetched.display()))
@@ -2500,8 +2502,7 @@ fn run_save(look: &Look, name: &str) -> Result<(), String> {
         output::print_line(&format!("saved: {}", report.dir.display()))
             .map_err(|error| error.to_string())?;
         if let Some(base) = &report.extends {
-            output::print_line(&format!("extends: {base}"))
-                .map_err(|error| error.to_string())?;
+            output::print_line(&format!("extends: {base}")).map_err(|error| error.to_string())?;
         }
         output::warn(format_args!(
             "note: edit {}, then `scoot look watch {}` to try it live",

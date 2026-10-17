@@ -36,9 +36,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 
 use scoot_look::catalog::{Catalog, cache_home, config_home, data_home};
-use scoot_look::grammar::{
-    check_relative_path, is_font_file_name, is_image_file_name,
-};
+use scoot_look::grammar::{check_relative_path, is_font_file_name, is_image_file_name};
 use scoot_look::{Origin, parse_look_toml, validate_apps_allowlist, validate_for_origin};
 
 use super::apply::{self, Checks, Validation};
@@ -282,10 +280,7 @@ fn collect_dir_into(
                 "refused: the look is larger than {MAX_INSTALL_BYTES} bytes in total"
             ));
         }
-        files.push(LookFile {
-            rel,
-            bytes,
-        });
+        files.push(LookFile { rel, bytes });
     }
     Ok(())
 }
@@ -298,7 +293,7 @@ fn gate_file(rel: &str, size: u64, have: usize, total: u64) -> Result<(), String
             "refused: more than {MAX_INSTALL_FILES} files: {rel} does not fit"
         ));
     }
-    let cap = kind_cap(&rel);
+    let cap = kind_cap(rel);
     if size > cap {
         return Err(format!(
             "refused: {rel} is {size} bytes (over the {cap} byte cap)"
@@ -376,15 +371,12 @@ fn collect_tar(path: &Path) -> Result<Vec<LookFile>, String> {
         .entries()
         .map_err(|error| format!("cannot read the tarball: {error}"))?
     {
-        let entry =
-            entry.map_err(|error| format!("cannot read the tarball: {error}"))?;
+        let entry = entry.map_err(|error| format!("cannot read the tarball: {error}"))?;
         let kind = entry.header().entry_type();
         let mut rel = entry
             .header()
             .path()
-            .map_err(|_| {
-                "refused: a tarball entry is not valid UTF-8".to_owned()
-            })?
+            .map_err(|_| "refused: a tarball entry is not valid UTF-8".to_owned())?
             .to_string_lossy()
             .replace('\\', "/");
         // Tar writers prefix entries with `./`: strip one harmless leading
@@ -471,9 +463,7 @@ fn shared_prefix(paths: &[String]) -> Option<String> {
         while path.starts_with("./") {
             path = &path["./".len()..];
         }
-        let Some((first, _)) = path.split_once('/') else {
-            return None;
-        };
+        let (first, _) = path.split_once('/')?;
         if first.is_empty() {
             return None;
         }
@@ -1051,9 +1041,10 @@ pub fn save_into(
 /// file may still save), unparsable refuses loudly.
 fn read_user_table(path: &Path) -> Result<Option<toml::Table>, String> {
     match scoot_look::state::read_capped_follow(path) {
-        Ok(text) => text.parse::<toml::Table>().map(Some).map_err(|error| {
-            format!("cannot parse {}: {error}", path.display())
-        }),
+        Ok(text) => text
+            .parse::<toml::Table>()
+            .map(Some)
+            .map_err(|error| format!("cannot parse {}: {error}", path.display())),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(format!("cannot read {}: {error}", path.display())),
     }
@@ -1061,9 +1052,7 @@ fn read_user_table(path: &Path) -> Result<Option<toml::Table>, String> {
 
 /// Whether `value` is a `#rrggbb` color, the only color shape a look takes.
 fn is_hex_color(value: &str) -> bool {
-    value.len() == 7
-        && value.starts_with('#')
-        && value[1..].bytes().all(|b| b.is_ascii_hexdigit())
+    value.len() == 7 && value.starts_with('#') && value[1..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// Captures the user's `[wallpaper]` unit: a color carries over; an image
@@ -1079,7 +1068,9 @@ fn save_wallpaper(
 ) -> Result<(), String> {
     if let Some(color) = table.get("color").and_then(|v| v.as_str()) {
         if !is_hex_color(color) {
-            notes.push(format!("skipping wallpaper.color `{color}`: not a #rrggbb color"));
+            notes.push(format!(
+                "skipping wallpaper.color `{color}`: not a #rrggbb color"
+            ));
         } else {
             wallpaper.push(("color".to_owned(), color.to_owned()));
         }
@@ -1092,9 +1083,7 @@ fn save_wallpaper(
                     wallpaper.push(("sha256".to_owned(), pin.to_owned()));
                 }
                 _ => {
-                    return Err(
-                        "cannot save a URL wallpaper without its sha256 pin".to_owned()
-                    );
+                    return Err("cannot save a URL wallpaper without its sha256 pin".to_owned());
                 }
             }
         } else {
@@ -1106,9 +1095,8 @@ fn save_wallpaper(
             } else {
                 config.join("scoot").join(image)
             };
-            let bytes = std::fs::read(&source).map_err(|error| {
-                format!("cannot save wallpaper `{image}`: {error}")
-            })?;
+            let bytes = std::fs::read(&source)
+                .map_err(|error| format!("cannot save wallpaper `{image}`: {error}"))?;
             if bytes.len() as u64 > apply::MAX_IMAGE_BYTES {
                 return Err(format!(
                     "cannot save wallpaper `{image}`: {} bytes (over the {} byte cap)",
@@ -1308,7 +1296,11 @@ impl Fetcher for CurlFetcher {
         let detail = detail.lines().next().unwrap_or_default().trim();
         Err(format!(
             "cannot download {url}: curl exited {}{}",
-            out.status.code().map(|c| c.to_string()).as_deref().unwrap_or("?"),
+            out.status
+                .code()
+                .map(|c| c.to_string())
+                .as_deref()
+                .unwrap_or("?"),
             if detail.is_empty() {
                 String::new()
             } else {
@@ -1403,8 +1395,8 @@ pub fn fetch_url_wallpaper(
         std::process::id()
     ));
     fetch.fetch(url, &host, addr, &tmp)?;
-    let bytes = std::fs::read(&tmp)
-        .map_err(|error| format!("cannot read the download: {error}"))?;
+    let bytes =
+        std::fs::read(&tmp).map_err(|error| format!("cannot read the download: {error}"))?;
     if bytes.len() as u64 > apply::MAX_IMAGE_BYTES {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!(
@@ -1504,10 +1496,7 @@ fn cache_hit(cached: &Path, expected: &str) -> Result<Option<PathBuf>, String> {
         Ok(meta) => meta,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            return Err(format!(
-                "cannot stat {}: {error}",
-                cached.display()
-            ));
+            return Err(format!("cannot stat {}: {error}", cached.display()));
         }
     };
     if !meta.is_file() {

@@ -265,10 +265,7 @@ fn install_refuses_a_non_regular_leaf() {
         &ScriptedNet::failing(),
     )
     .expect_err("a FIFO installs");
-    assert!(
-        error.contains("regular file"),
-        "names the refusal: {error}"
-    );
+    assert!(error.contains("regular file"), "names the refusal: {error}");
 }
 
 /// A FIFO without `nix`: plain Rust cannot make one, so a `/dev/null`
@@ -285,10 +282,7 @@ fn nix_fifo(path: &Path) {
 #[test]
 fn install_refuses_dotdot_and_absolute_wallpapers() {
     let root = tempfile::tempdir().expect("a scratch tree");
-    for (tag, image) in [
-        ("dotdot", "../evil.png"),
-        ("absolute", "/etc/hostname"),
-    ] {
+    for (tag, image) in [("dotdot", "../evil.png"), ("absolute", "/etc/hostname")] {
         let mangled = manifest(tag).replace(
             "[fonts]",
             &format!("[wallpaper]\nimage = \"{image}\"\n[fonts]"),
@@ -414,10 +408,8 @@ fn install_refuses_a_missing_license() {
 #[test]
 fn install_refuses_an_oversized_image() {
     let root = tempfile::tempdir().expect("a scratch tree");
-    let huge = manifest("huge").replace(
-        "[fonts]",
-        "[wallpaper]\nimage = \"wallpaper.png\"\n[fonts]",
-    );
+    let huge =
+        manifest("huge").replace("[fonts]", "[wallpaper]\nimage = \"wallpaper.png\"\n[fonts]");
     let src = source_look_raw(&root.path().join("src"), "huge", &huge);
     let big = vec![0u8; 32 * 1024 * 1024 + 1];
     std::fs::write(src.join("wallpaper.png"), &big).expect("a huge image");
@@ -527,10 +519,7 @@ fn installed_looks_never_extend() {
         &ScriptedNet::failing(),
     )
     .expect_err("an installed base extends");
-    assert!(
-        error.contains("never extended"),
-        "names the rule: {error}"
-    );
+    assert!(error.contains("never extended"), "names the rule: {error}");
 }
 
 #[test]
@@ -617,25 +606,35 @@ fn install_tarball_refuses_hostile_entries() {
     let dest = root.path().join("installed-looks");
     // Each hostile tarball carries a valid manifest plus one hostile
     // member; the install refuses naming it.
-    let hostile: Vec<(&str, Box<dyn Fn(&mut tar::Builder<std::fs::File>)>)> = vec![
-        ("symlink", Box::new(|b| {
-            let mut h = tar::Header::new_ustar();
-            h.set_size(0);
-            h.set_entry_type(tar::EntryType::Symlink);
-            b.append_link(&mut h, "link", "/etc/hostname").ok();
-        })),
-        ("duplicate", Box::new(|b| {
-            for _ in 0..2 {
+    type TarHostile<'a> = Vec<(&'a str, Box<dyn Fn(&mut tar::Builder<std::fs::File>) + 'a>)>;
+    let hostile: TarHostile = vec![
+        (
+            "symlink",
+            Box::new(|b| {
                 let mut h = tar::Header::new_ustar();
-                h.set_size(7);
-                b.append_data(&mut h, "README.md", &b"twice! "[..]).ok();
-            }
-        })),
-        ("so", Box::new(|b| {
-            let mut h = tar::Header::new_ustar();
-            h.set_size(4);
-            b.append_data(&mut h, "payload.so", &b"ELF!"[..]).ok();
-        })),
+                h.set_size(0);
+                h.set_entry_type(tar::EntryType::Symlink);
+                b.append_link(&mut h, "link", "/etc/hostname").ok();
+            }),
+        ),
+        (
+            "duplicate",
+            Box::new(|b| {
+                for _ in 0..2 {
+                    let mut h = tar::Header::new_ustar();
+                    h.set_size(7);
+                    b.append_data(&mut h, "README.md", &b"twice! "[..]).ok();
+                }
+            }),
+        ),
+        (
+            "so",
+            Box::new(|b| {
+                let mut h = tar::Header::new_ustar();
+                h.set_size(4);
+                b.append_data(&mut h, "payload.so", &b"ELF!"[..]).ok();
+            }),
+        ),
     ];
     // `..` and absolute members bypass the `tar` crate's writer (which
     // refuses them itself) with raw headers: a real attacker writes raw
@@ -689,10 +688,7 @@ fn refuse_hostile(path: &Path, dest: &Path, tag: &str) {
         &ScriptedNet::failing(),
     )
     .expect_err("a hostile tarball installs");
-    assert!(
-        error.contains("refused"),
-        "{tag}: refuses loudly: {error}"
-    );
+    assert!(error.contains("refused"), "{tag}: refuses loudly: {error}");
     assert!(
         !dest.join(&name).exists(),
         "{tag}: nothing lands on refusal"
@@ -1050,7 +1046,13 @@ fn url_fetch_refuses_private_mixed_and_empty_answers() {
     let url = "https://example.com/wall.png";
     let pin = sha256_of(PNG);
     for (tag, addrs) in [
-        ("rfc1918", vec!["93.184.216.34".parse().unwrap(), "192.168.1.5".parse().unwrap()]),
+        (
+            "rfc1918",
+            vec![
+                "93.184.216.34".parse().unwrap(),
+                "192.168.1.5".parse().unwrap(),
+            ],
+        ),
         ("loopback", vec!["127.0.0.1".parse().unwrap()]),
         ("link-local-v6", vec!["fe80::1".parse().unwrap()]),
         ("mapped-loopback", vec!["::ffff:127.0.0.1".parse().unwrap()]),
@@ -1108,12 +1110,17 @@ fn url_fetch_refuses_mismatch_non_image_and_oversize() {
     let error = fetch_url_wallpaper(url, &sha256_of(b"other"), &cache, &net, &net)
         .expect_err("a mismatch caches");
     assert!(error.contains("sha256"), "{error}");
-    assert!(cache.read_dir().map(|mut d| d.next().is_none()).unwrap_or(true));
+    assert!(
+        cache
+            .read_dir()
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true)
+    );
     // HTML, not an image: refused even with a matching pin.
     let html = b"<html>302 found</html>";
     let net = ScriptedNet::once(public.clone(), html);
-    let error = fetch_url_wallpaper(url, &sha256_of(html), &cache, &net, &net)
-        .expect_err("HTML caches");
+    let error =
+        fetch_url_wallpaper(url, &sha256_of(html), &cache, &net, &net).expect_err("HTML caches");
     assert!(error.contains("not a PNG"), "{error}");
     // Past the byte cap: refused.
     let big = vec![0x89u8; 32 * 1024 * 1024 + 1];
@@ -1167,10 +1174,12 @@ fn curl_argv_pins_without_redirects() {
     assert_eq!(std::fs::read(&out).expect("downloaded bytes"), PNG);
     let argv = std::fs::read_to_string(&argv_file).expect("recorded argv");
     let args: Vec<&str> = argv.lines().collect();
-    assert!(!args.contains(&"--location"), "no redirects followed:\n{argv}");
     assert!(
-        args.contains(&"--resolve")
-            && args.contains(&"example.com:443:93.184.216.34"),
+        !args.contains(&"--location"),
+        "no redirects followed:\n{argv}"
+    );
+    assert!(
+        args.contains(&"--resolve") && args.contains(&"example.com:443:93.184.216.34"),
         "the checked address pins the connection:\n{argv}"
     );
     assert!(
@@ -1188,7 +1197,12 @@ fn curl_argv_pins_without_redirects() {
 #[test]
 fn curl_argv_shape() {
     let out = PathBuf::from("/tmp/o.png");
-    let argv = super::curl_argv("https://example.com/w.png", "example.com", "93.184.216.34".parse().unwrap(), &out);
+    let argv = super::curl_argv(
+        "https://example.com/w.png",
+        "example.com",
+        "93.184.216.34".parse().unwrap(),
+        &out,
+    );
     assert!(!argv.iter().any(|a| a == "--location"));
     assert!(argv.contains(&"--resolve".to_owned()));
     assert!(argv.contains(&"example.com:443:93.184.216.34".to_owned()));
@@ -1205,13 +1219,11 @@ fn cache_hit_serves_matching_pins_and_refuses_the_rest() {
     let error = cached_url_wallpaper_in(url, Some(&pin), &cache).expect_err("a miss serves");
     assert!(error.contains("not in the download cache"), "{error}");
     // Hit: pinned bytes serve.
-    std::fs::write(cache.join(super::url_cache_name_for_test(url)), PNG)
-        .expect("cached bytes");
+    std::fs::write(cache.join(super::url_cache_name_for_test(url)), PNG).expect("cached bytes");
     let hit = cached_url_wallpaper_in(url, Some(&pin), &cache).expect("a hit serves");
     assert_eq!(std::fs::read(hit).expect("hit bytes"), PNG);
     // Stale: other bytes under the name refuse.
-    std::fs::write(cache.join(super::url_cache_name_for_test(url)), b"stale")
-        .expect("stale bytes");
+    std::fs::write(cache.join(super::url_cache_name_for_test(url)), b"stale").expect("stale bytes");
     let error = cached_url_wallpaper_in(url, Some(&pin), &cache).expect_err("stale serves");
     assert!(error.contains("no longer matches"), "{error}");
 }
@@ -1224,10 +1236,14 @@ struct UrlChecks {
 
 impl Checks for UrlChecks {
     fn font_file(&self, _family: &str) -> Result<Availability<String>, String> {
-        Ok(Availability::Unavailable("test: fonts unchecked".to_owned()))
+        Ok(Availability::Unavailable(
+            "test: fonts unchecked".to_owned(),
+        ))
     }
     fn wallpaper(&self, _path: &Path) -> Result<Availability<()>, String> {
-        Ok(Availability::Unavailable("test: wallpaper unchecked".to_owned()))
+        Ok(Availability::Unavailable(
+            "test: wallpaper unchecked".to_owned(),
+        ))
     }
     fn bar_fragment(&self, _fragment: &Path) -> Result<Availability<()>, String> {
         Ok(Availability::Unavailable("test: bar unchecked".to_owned()))
@@ -1294,7 +1310,10 @@ fn url_wallpaper_resolves_from_cache_and_refuses_on_miss() {
     };
     let validation = validate_entry(&catalog, "url-look", &miss, false).expect("validation runs");
     assert!(
-        validation.errors.iter().any(|e| e.contains("not in the download cache")),
+        validation
+            .errors
+            .iter()
+            .any(|e| e.contains("not in the download cache")),
         "a miss refuses: {:?}",
         validation.errors
     );
