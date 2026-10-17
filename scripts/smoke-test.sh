@@ -1143,8 +1143,13 @@ EOF
     chmod +x "$stub_dir/fc-match"
     # The looks under test include image wallpapers (vinyl-sunset bundles
     # its own), which the session's compositor serves through `scootbg`
-    # by command name: the daemon's directory rides PATH beside the stub.
-    export PATH="$stub_dir:$(dirname "$SCOOTBG"):$PATH"
+    # by command name. CI's daemon is not named `scootbg`, so a wrapper of
+    # that name rides PATH beside the stub.
+    if [ -n "$SCOOTBG" ]; then
+        printf '#!/bin/sh\nexec %s "$@"\n' "'$SCOOTBG'" >"$stub_dir/scootbg"
+        chmod +x "$stub_dir/scootbg"
+    fi
+    export PATH="$stub_dir:$PATH"
 
     local repo
     repo="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
