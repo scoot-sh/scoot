@@ -916,7 +916,7 @@ fn map_solid_window(socket: &Path) -> SolidWindow {
         );
     }
     assert!(seen, "the compositor never configured the test window");
-    let (width, height) = match (width, height) {
+    let (width, height) = match size {
         (w, h) if w > 0 && h > 0 => (w, h),
         _ => (400, 300),
     };
