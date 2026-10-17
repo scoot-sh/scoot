@@ -519,15 +519,15 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
         // `nested::init` would connect to itself and die only at the 10 s
         // registry timeout, having already unlinked the host socket. Fail
         // fast instead, naming the socket.
-        if let Some(host) = wayland_accept::WaylandListener::host_excluded_name() {
-            if host == state.socket_name {
-                return Err(format!(
-                    "nested: this session bound the host compositor's own socket `{}`; \
-                     refusing to connect to itself",
-                    host.to_string_lossy()
-                )
-                .into());
-            }
+        if let Some(host) = wayland_accept::WaylandListener::host_excluded_name()
+            && host == state.socket_name
+        {
+            return Err(format!(
+                "nested: this session bound the host compositor's own socket `{}`; \
+                 refusing to connect to itself",
+                host.to_string_lossy()
+            )
+            .into());
         }
         nested::init(
             state.loop_handle.clone(),
