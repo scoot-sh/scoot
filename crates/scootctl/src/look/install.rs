@@ -5,8 +5,8 @@
 //! (never `user-looks/`, so its origin is on disk), may not take the name
 //! of a shipped, declared or user-authored look, and can be applied but
 //! never extended. Everything arriving is validated before it lands:
-//! regular files only (a symlink, device, FIFO or socket refuses the
-//! install), only the file kinds a look uses, by name and place
+//! regular files only (a symlink, a hard link, a device, a FIFO or a
+//! socket refuses the install), only the file kinds a look uses, by name and place
 //! (`look.toml`, `preview.png`, image wallpapers, `fonts/*.ttf|otf`, the
 //! five named `apps/` leaves, `LICENSE*`, `COPYING*`, `README.md`), every
 //! referenced path inside the look directory, file count and total size

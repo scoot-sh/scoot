@@ -438,12 +438,13 @@ scoot look save my-tweak                        # your own files as a user look
 ```
 
 `export NAME` writes a plain `.tar` of the source look (`<name>.tar`
-here unless `--out FILE` moves it): every file a look uses, under one
-`<name>/` prefix. The tarball installs back unchanged.
+here unless `--out FILE` moves it): every regular file a look uses,
+under one `<name>/` prefix (a symlink skips with a note). The tarball
+installs back unchanged.
 
 `install PATH` takes a directory or a tarball into
 `~/.local/share/scoot/installed-looks/`: regular files only (a symlink,
-device, FIFO or socket refuses the install), only the file kinds a look
+a hard link, a device, a FIFO or a socket refuses the install), only the file kinds a look
 uses (`look.toml`, `preview.png`, image wallpapers, `fonts/*.ttf|otf`,
 the five `apps/` leaves, `LICENSE*`, `COPYING*`, `README.md`), file
 count and total size capped, `license` required. An installed look may
