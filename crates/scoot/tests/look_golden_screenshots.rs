@@ -491,7 +491,7 @@ impl Session {
                     (name.starts_with("wayland-") && is_socket(&entry.path())).then_some(name)
                 })
             });
-            if ipc_up && wayland.is_some() {
+            if ipc_up && let Some(name) = wayland {
                 let up = Command::new(scoot())
                     .arg("msg")
                     .arg("version")
@@ -502,7 +502,7 @@ impl Session {
                     .status()
                     .is_ok_and(|status| status.success());
                 if up {
-                    return wayland.expect("a Wayland socket name");
+                    return name;
                 }
             }
             assert!(
