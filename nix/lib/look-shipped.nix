@@ -43,7 +43,12 @@ let
   );
 
   # One example file, or null where the example ships none.
-  exampleFile = name: rel: if builtins.pathExists (exampleDir + "/${name}/${rel}") then exampleDir + "/${name}/${rel}" else null;
+  exampleFile =
+    name: rel:
+    if builtins.pathExists (exampleDir + "/${name}/${rel}") then
+      exampleDir + "/${name}/${rel}"
+    else
+      null;
 
   # The one file with `suffix` directly under the example's `relDir`,
   # or null (missing directory, none, or more than one).
@@ -85,15 +90,14 @@ let
         focus_ring_active_color = t.palette.focus;
         focus_ring_inactive_color = t.palette.border;
       };
-      barColors =
-        {
-          background = t.palette.background;
-          foreground = t.palette.foreground;
-          accent = t.palette.accent;
-          dim = t.palette.dim;
-          urgent = t.palette.urgent;
-        }
-        // lib.optionalAttrs (t.palette ? hover) { hover = t.palette.hover; };
+      barColors = {
+        background = t.palette.background;
+        foreground = t.palette.foreground;
+        accent = t.palette.accent;
+        dim = t.palette.dim;
+        urgent = t.palette.urgent;
+      }
+      // lib.optionalAttrs (t.palette ? hover) { hover = t.palette.hover; };
       nightTemp = t.night.temperature;
       isDark = t.polarity == "dark";
       fonts = {
@@ -114,13 +118,19 @@ let
         if image == null then
           null
         else
-          { inherit image; mode = wall.mode; } // lib.optionalAttrs (fill != null) { inherit fill; };
+          {
+            inherit image;
+            mode = wall.mode;
+          }
+          // lib.optionalAttrs (fill != null) { inherit fill; };
     };
 
-  looks = lib.listToAttrs (map (name: {
-    inherit name;
-    value = toLook name;
-  }) shippedNames);
+  looks = lib.listToAttrs (
+    map (name: {
+      inherit name;
+      value = toLook name;
+    }) shippedNames
+  );
 
   # The shipped look behind `scootCfg.look`, or null without one (or
   # without a shipped entry: a custom `looks` path has no palette
