@@ -261,10 +261,15 @@ the directory through `canonicalize` first, so `validate .`
 checks the real directory name. A Nix store path
 (`<hash>-<name>`) strips its hash prefix; `--name NAME` checks
 against that instead of the directory for callers that lay the
-source down under another name. `validate` skips contrast for a
+source down under another name. `--trust` keeps an installed
+look's `apps/` leaves (like `scoot look validate --trust`).
+`validate` skips contrast for a
 look with `extends`: without the catalog only single-file looks
 resolve here. `build` takes a single source without `extends`
-and refuses one with it; resolve the catalog first. `build`
+and refuses one with it; resolve the catalog first. `--no-popup`
+renders the bar fragment without the `popup` feature's keys (for
+minimal bar builds); `--catalog DIR` resolves font files and the
+wallpaper against that tree instead of the live directories. `build`
 writes `scoot.toml`, `bar.toml`, `gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`,
 `qt/scoot-look.conf`, `foot.ini` (only when the look has
 `[terminal]`), `fuzzel.ini`, `swaylock`, `render.json`, the daemon leaves and the

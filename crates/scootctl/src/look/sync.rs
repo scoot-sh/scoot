@@ -768,7 +768,7 @@ fn catalog_names(catalog: &Catalog) -> String {
         .collect();
     names.sort();
     if names.is_empty() {
-        return "the catalog is empty".to_owned();
+        return super::empty_catalog_hint().to_owned();
     }
     format!("available: {}", names.join(", "))
 }
