@@ -237,6 +237,7 @@ struct Session {
     cache: PathBuf,
     config: PathBuf,
     home: PathBuf,
+    tmp: PathBuf,
     data_home: PathBuf,
     state_home: PathBuf,
     shipped: PathBuf,
@@ -252,6 +253,7 @@ impl Session {
         let cache = scratch.sub("cache");
         let config = scratch.sub("config");
         let home = scratch.sub("home");
+        let tmp = scratch.sub("tmp");
         let data_home = scratch.sub("data-home");
         let state_home = scratch.sub("state-home");
         let shipped = scratch.dir.join("shipped");
@@ -277,6 +279,7 @@ impl Session {
             .env("XDG_CONFIG_HOME", &config)
             .env("XDG_CACHE_HOME", &cache)
             .env("HOME", &home)
+            .env("TMPDIR", &tmp)
             .env_remove("WAYLAND_DISPLAY")
             .env_remove("SCOOT_SOCKET")
             .env_remove("SCOOT_LOOK_STATE")
@@ -292,6 +295,7 @@ impl Session {
             cache,
             config,
             home,
+            tmp,
             data_home,
             state_home,
             shipped,
@@ -376,6 +380,7 @@ impl Session {
             .env("XDG_DATA_HOME", &self.data_home)
             .env("XDG_STATE_HOME", &self.state_home)
             .env("XDG_RUNTIME_DIR", &self.runtime)
+            .env("TMPDIR", &self.tmp)
             .env("DBUS_SESSION_BUS_ADDRESS", "disabled:")
             .env_remove("WAYLAND_DISPLAY")
             .env_remove("SCOOT_SOCKET")
@@ -481,7 +486,7 @@ impl Watch {
     fn next_line(&self, what: &str) -> String {
         let deadline = Instant::now() + PATIENCE;
         loop {
-            let left = deadline.saturating_sub(Instant::now());
+            let left = deadline.saturating_duration_since(Instant::now());
             match self.lines.recv_timeout(left) {
                 Ok((true, line)) => return line,
                 Ok((false, _)) => continue,
@@ -494,7 +499,7 @@ impl Watch {
     fn next_stderr(&self, needle: &str, what: &str) -> String {
         let deadline = Instant::now() + PATIENCE;
         loop {
-            let left = deadline.saturating_sub(Instant::now());
+            let left = deadline.saturating_duration_since(Instant::now());
             match self.lines.recv_timeout(left) {
                 Ok((false, line)) if line.contains(needle) => return line,
                 Ok(_) => continue,
@@ -508,7 +513,7 @@ impl Watch {
     fn no_stdout_within(&self, within: Duration, what: &str) {
         let deadline = Instant::now() + within;
         loop {
-            let left = deadline.saturating_sub(Instant::now());
+            let left = deadline.saturating_duration_since(Instant::now());
             match self.lines.recv_timeout(left) {
                 Ok((true, line)) => panic!("unexpected watch output for {what}: {line}"),
                 Ok((false, _)) => continue,
@@ -538,7 +543,7 @@ fn close_enough(got: (u8, u8, u8), want: (u8, u8, u8)) -> bool {
 /// The pixel at (`x`, `y`) of a headless screenshot PNG.
 fn pixel_at(png: &[u8], x: u32, y: u32) -> Result<(u8, u8, u8), String> {
     use png::ColorType;
-    let decoder = png::Decoder::new(png);
+    let decoder = png::Decoder::new(std::io::Cursor::new(png));
     let mut reader = decoder.read_info().map_err(|error| error.to_string())?;
     let mut buf = vec![0; reader.output_buffer_size().ok_or("no PNG size")?];
     let info = reader
