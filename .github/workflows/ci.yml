@@ -578,7 +578,10 @@ jobs:
       - name: Build the default compositor, and assert it links no GPU stack
         shell: nix develop --command bash -euo pipefail {0}
         run: |
-          cargo build -p scoot -p scootbg
+          # scootbar too: the look-golden-screenshots suite below runs the
+          # real bar beside the test's scoot (see its module doc), and
+          # REQUIRE in the test steps turns a missing bar into a failure.
+          cargo build -p scoot -p scootbg -p scootbar
           # Kept aside: the smoke test below must run this default build, and
           # `linux-features` builds its own feature binaries from the same
           # restored cache rather than overwriting these. scootbg too: the
@@ -638,6 +641,10 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
           export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
+          # The golden suite must run its scenes, not skip them: REQUIRE
+          # turns its "no scootbar beside the test's scoot" skip into a
+          # failure (scootbar is built in the step above).
+          export SCOOT_GOLDEN_REQUIRE_BAR=1
           # --no-fail-fast, unlike the local loop: CI's job is to report every
           # failure in one run. Without it a single early failure hides the
           # rest -- run 35453015885 stopped with 333 tests unrun.
@@ -662,8 +669,21 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
           export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
+          # Same golden-suite requirement as the nextest step above.
+          export SCOOT_GOLDEN_REQUIRE_BAR=1
           # Same scope as the nextest step above, for the same reason.
           cargo test -p scoot -p scoot-core -p scoot-ipc -p scootctl
+
+      # The golden suite's failures, pixel by pixel: each failed look leaves
+      # `look-<name>.actual.png` beside its golden, uploaded here so a
+      # red run shows what the runner actually rendered.
+      - name: Upload golden-suite actuals
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: look-golden-actual
+          path: crates/scoot/tests/goldens/*.actual.png
+          if-no-files-found: ignore
 
       # End to end over IPC: starts the compositor, spawns a terminal in it,
       # types into that terminal, reads the characters back out of the shell,

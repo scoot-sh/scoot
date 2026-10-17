@@ -27,3 +27,8 @@ __pycache__/
 /crates/scootbg/oom-*
 /crates/scootbg/timeout-*
 /crates/scootbg/slow-unit-*
+
+# The golden suite's failure outputs: `look-<name>.actual.png` files the
+# harness writes beside the committed goldens (and CI uploads). The
+# goldens themselves (`look-<name>.png`) are committed.
+crates/scoot/tests/goldens/*.actual.png
