@@ -17,6 +17,18 @@ release, entries were dated.
 
 ## Unreleased
 
+### `install.sh --look` installs the look catalog (breaking)
+
+- **`install.sh --look NAME` no longer writes `config.toml`,
+  `bar.toml`, helper scripts or wallpapers into `~/.config/scoot`.**
+  It installs the five shipped looks as plain files under
+  `<prefix>/share/scoot/looks` and runs `scoot look apply NAME`, so
+  switching looks later is `scoot look apply`. A `config.toml` or
+  `bar.toml` that is still byte-identical to an earlier `--look`
+  run's output has its look keys removed so the look layer shows
+  through; any other file is left alone, and the apply names the
+  keys it shadows. `--uninstall` removes the catalog files.
+
 ### Stylix becomes a synthesized `stylix` look (breaking)
 
 - **With Stylix in use, the desktop themes from a look named
