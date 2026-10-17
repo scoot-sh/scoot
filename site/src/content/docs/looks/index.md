@@ -21,6 +21,9 @@ scoot look current                    # the active look and shadowed keys
 scoot look validate ./my-look         # check a directory without touching anything
 scoot look build ./my-look --out /tmp/my-look   # render without applying
 scoot look sync                       # follow the Nix declared default (below)
+scoot look new my-look --from moonrise  # start a user look extending moonrise
+scoot look watch ./my-look             # validate and apply on every save
+scoot look preview my-look --capture   # screenshot the look into preview.png
 ```
 
 ## Cycle and preview
@@ -167,7 +170,9 @@ start against a missing fragment.
 The choice is per-session state: `<state>/look.json` (the record) plus a
 `look` link to one complete rendered look, under one lock. Renders live
 in the cache (`$XDG_CACHE_HOME/scoot/rendered/<name>-<hash>/`), pruned to
-the active, the previous and the four most recent. An unwritable state dir
+the active, the previous and the four most recent. A watched look's
+reused `<name>-watch` slot is never pruned: it holds the last good
+render until the next watched save. An unwritable state dir
 refuses loudly. The rendered look holds `fuzzel.ini` and `swaylock`
 beside the first-party fragments: layer them over your own configs and
 the next launch picks the look up, no Nix involved. It also holds
@@ -368,14 +373,58 @@ until the next sync re-resolves it.
 
 ## Authoring
 
+Start from a catalog look, then watch the directory while you edit it.
+Your own looks live in `~/.local/share/scoot/user-looks/<name>/`. No step
+here needs Nix.
+
+```sh
+scoot look new my-green --from moonrise   # writes user-looks/my-green/look.toml
+scoot look watch ./my-green --no-toolkit  # validate and apply on every save
+scoot look preview my-green --capture     # screenshot the look into preview.png
+```
+
+`new NAME --from BASE` writes a source look with `extends = "BASE"`: the
+new look inherits every token and overrides from there. `BASE` names a
+source look — shipped, declared or user-authored — never an installed
+one (applied but never extended) and never a rendered one. A look made
+with `new` is user-authored, so it can be the next `new`'s base. A name
+the catalog or the directory already holds refuses, and nothing is
+written.
+
+`watch DIR` validates and applies the directory on every save, until
+interrupted. Saves are the file events editors produce (`close_write`
+on plain writes, `moved_to` on atomic renames), debounced, so one save
+applies once. Each save takes the look lock and swaps through the same
+transaction as `apply`: the watched directory wins over any same-named
+catalog entry, its `extends` base resolves through the catalog, and it
+renders into one reused cache slot (`<cache>/<name>-watch/`), so the
+cache never grows per save. An invalid save is refused loudly — the
+reply names the file and the reason — and the last good look stays:
+the record, the link and the slot are untouched. A plain `apply`
+cancels a pending timed preview before the loop starts. `--no-toolkit`
+skips the toolkit step per save; `--origin` sets the origin the
+directory validates as (like `validate`).
+
+`preview [NAME]` reports the look's `preview.png` (beside its
+`look.toml`) and whether it exists yet; with no name it reports the
+active look's. `--capture` renders the image instead: it renders the
+look into a scratch cache, seeds a scratch state with it, starts a
+private headless session on that state, screenshots it, and writes the
+PNG (beside `look.toml` by default, `--out FILE` to move it). The
+scratch state, cache, config and home live under one temp root,
+removed when the capture ends: your real session, home and cache are
+never read or written. `--width`/`--height` size the session's output
+(default 1600x1000); `--timeout` bounds the wait (default 60 seconds).
+Capture needs Linux: the headless session is the compositor, which
+only runs there.
+
 Write a directory with a `look.toml` (see the
 [format](../reference/look-format.md)), then `scoot look validate DIR`
 and `scoot look build DIR --out OUT`. `validate` resolves, contrast-checks
 and runs the effectful checks: fonts through fontconfig (the family must
 be installed; a `[fonts.files]` path must exist), the wallpaper
 through `scootbg check-image`, the bar fragment through the installed
-bar's own parser. Your own looks live in
-`~/.local/share/scoot/user-looks/<name>/`.
+bar's own parser.
 
 > **Symptom:** `apply` answers applied and nothing changes.
 > A key in your own files shadows the look. `scoot look current` names

@@ -465,7 +465,7 @@ impl Watcher {
             let Some(watcher) = self.inotify.as_mut() else {
                 return Err("the watcher is closed".to_owned());
             };
-            return watcher.wait_for_save(&self.dir);
+            watcher.wait_for_save(&self.dir)
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -519,7 +519,6 @@ impl InotifyWatcher {
     /// saves keep arriving. `Ok(false)` when the watched directory
     /// itself moved or was deleted.
     fn wait_for_save(&mut self, dir: &Path) -> Result<bool, String> {
-        use rustix::fs::inotify::ReadFlags;
         // A blocking first read: the loop sleeps here between saves. The
         // fd is nonblocking, so pace it at 50 ms rather than spinning.
         loop {
@@ -568,7 +567,7 @@ impl InotifyWatcher {
                     {
                         return Ok(Drain::Gone);
                     }
-                    if flags.intersects(ReadFlags::Q_OVERFLOW) {
+                    if flags.intersects(ReadFlags::QUEUE_OVERFLOW) {
                         // The queue overflowed: something saved faster
                         // than the loop drains. Re-validate once rather
                         // than trust the lost events.

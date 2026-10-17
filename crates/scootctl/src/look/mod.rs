@@ -2133,6 +2133,7 @@ fn run_watch(look: &Look, dir: &Path, no_toolkit: bool, origin: Origin) -> Resul
                     "generation": generation,
                     "rendered": report.rendered,
                     "reloaded": reloaded,
+                    "skipped": report.skipped,
                     "shadowed": report.shadowed,
                     "invalid": report.invalid,
                     "notes": report.notes,
@@ -2160,6 +2161,9 @@ fn run_watch(look: &Look, dir: &Path, no_toolkit: bool, origin: Origin) -> Resul
                             report.shadowed.join(", ")
                         ))
                         .ok();
+                    }
+                    for skipped in &report.skipped {
+                        output::warn(format_args!("skipped: {skipped}"));
                     }
                     for note in &report.notes {
                         output::warn(format_args!("note: {note}"));

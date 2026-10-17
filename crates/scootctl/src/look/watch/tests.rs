@@ -12,7 +12,7 @@ use scoot_look::catalog::{Catalog, discover_ordered};
 use scoot_look::state::{LINK_NAME, RecordRead, read_record};
 
 use super::super::leaves::ScriptedLeaves;
-use super::super::reload::{BarReload, CompositorReload, ReloadError, Reloaded};
+use super::super::reload::{CompositorReload, ReloadError, Reloaded};
 use super::super::toolkit::Dconf;
 use super::{WatchOptions, apply_watched_dir, watch_slot};
 use crate::look::apply::{ApplyFailure, ApplyReport, Availability, Checks};
@@ -138,11 +138,10 @@ impl CompositorReload for FakeCompositor {
         self.calls.set(self.calls.get() + 1);
         // Unscripted saves behave like a stopped compositor: skipped with
         // a note, so multi-save tests script nothing per save.
-        self.script.borrow_mut().pop_front().unwrap_or_else(|| {
-            Err(ReloadError::NotRunning(
-                "no compositor answers".to_owned(),
-            ))
-        })
+        self.script
+            .borrow_mut()
+            .pop_front()
+            .unwrap_or_else(|| Err(ReloadError::NotRunning("no compositor answers".to_owned())))
     }
 }
 
@@ -266,7 +265,8 @@ fn a_save_applies_into_one_reused_slot() {
     std::fs::create_dir_all(&dir).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&dir);
     let mut compositor = FakeCompositor::not_running();
-    let report = save(&fixture, &options(), &checks, &mut compositor).expect("the first save applies");
+    let report =
+        save(&fixture, &options(), &checks, &mut compositor).expect("the first save applies");
     assert_eq!(report.name, "mine");
     assert_eq!(report.generation, 1);
     let slot = fixture.cache.join(watch_slot("mine"));
@@ -292,7 +292,10 @@ fn a_save_applies_into_one_reused_slot() {
     assert_eq!(PathBuf::from(&report.rendered), slot);
     assert_eq!(rendered_dirs(&fixture.cache), vec![slot.clone()]);
     let scoot = std::fs::read_to_string(slot.join("scoot.toml")).expect("a fragment");
-    assert!(scoot.contains("#1A2B3C"), "the slot carries the edit:\n{scoot}");
+    assert!(
+        scoot.contains("#1A2B3C"),
+        "the slot carries the edit:\n{scoot}"
+    );
 }
 
 #[test]
@@ -312,11 +315,22 @@ fn an_invalid_save_is_refused_loudly_and_keeps_the_last_good_look() {
         look_toml("mine", "#2B3648").replace("#FFA45C", "amber"),
     )
     .expect("a broken look.toml");
-    let failure = save(&fixture, &options(), &checks, &mut compositor)
-        .expect_err("an invalid save refuses");
-    assert!(failure.message.contains("invalid save"), "loud: {}", failure.message);
-    assert!(failure.message.contains("mine"), "names the look kept: {}", failure.message);
-    assert!(failure.rolled_back_to.is_none(), "nothing moved: no rollback");
+    let failure =
+        save(&fixture, &options(), &checks, &mut compositor).expect_err("an invalid save refuses");
+    assert!(
+        failure.message.contains("invalid save"),
+        "loud: {}",
+        failure.message
+    );
+    assert!(
+        failure.message.contains("mine"),
+        "names the look kept: {}",
+        failure.message
+    );
+    assert!(
+        failure.rolled_back_to.is_none(),
+        "nothing moved: no rollback"
+    );
     let after = record_of(&fixture.state);
     assert_eq!(after.rendered, before.rendered, "the record stays");
     assert_eq!(after.generation, before.generation, "no generation bump");
@@ -349,11 +363,12 @@ fn a_save_extends_its_base_through_the_catalog() {
     let mut compositor = FakeCompositor::not_running();
     let report = save(&fixture, &options(), &checks, &mut compositor).expect("the child applies");
     assert_eq!(report.name, "mine");
-    let scoot = std::fs::read_to_string(
-        fixture.cache.join(watch_slot("mine")).join("scoot.toml"),
-    )
-    .expect("a fragment");
-    assert!(scoot.contains("#2B3648"), "the base color shows through:\n{scoot}");
+    let scoot = std::fs::read_to_string(fixture.cache.join(watch_slot("mine")).join("scoot.toml"))
+        .expect("a fragment");
+    assert!(
+        scoot.contains("#2B3648"),
+        "the base color shows through:\n{scoot}"
+    );
 }
 
 #[test]
@@ -416,7 +431,10 @@ fn inotify_sees_a_save_and_a_rename() {
     let mut watcher = Watcher::open(&dir).expect("a watcher");
     // A plain write: `close_write`.
     std::fs::write(dir.join("look.toml"), "schema = 1\n").expect("a save");
-    assert!(watcher.wait_for_save().expect("no watcher error"), "a save wakes it");
+    assert!(
+        watcher.wait_for_save().expect("no watcher error"),
+        "a save wakes it"
+    );
     // An atomic save: temp file plus rename (`moved_to`).
     let tmp = dir.join(".look.toml.tmp.1");
     let mut file = std::fs::File::create(&tmp).expect("a temp file");
@@ -424,7 +442,10 @@ fn inotify_sees_a_save_and_a_rename() {
     file.sync_all().expect("a sync");
     drop(file);
     std::fs::rename(&tmp, dir.join("look.toml")).expect("a rename");
-    assert!(watcher.wait_for_save().expect("no watcher error"), "a rename wakes it");
+    assert!(
+        watcher.wait_for_save().expect("no watcher error"),
+        "a rename wakes it"
+    );
 }
 
 #[cfg(target_os = "linux")]

@@ -502,7 +502,13 @@ fn watch_takes_a_directory() {
         })
     );
     assert_eq!(
-        command(&["watch", "user-looks/mine", "--no-toolkit", "--origin", "shipped"]),
+        command(&[
+            "watch",
+            "user-looks/mine",
+            "--no-toolkit",
+            "--origin",
+            "shipped"
+        ]),
         Ok(Command::Watch {
             dir: PathBuf::from("user-looks/mine"),
             no_toolkit: true,

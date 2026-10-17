@@ -96,7 +96,10 @@ fn new_chains_onto_a_user_look() {
     create_new_into("my-look", "look-a", &catalog, &parent).expect("a first look");
     // A look made with `new` is user-authored, so it can be the next
     // `new`'s base: rebuild the catalog over the parent dir.
-    let catalog = discover_ordered(&[(parent.clone(), Origin::User), (scratch.path().join("shipped"), Origin::Shipped)]);
+    let catalog = discover_ordered(&[
+        (parent.clone(), Origin::User),
+        (scratch.path().join("shipped"), Origin::Shipped),
+    ]);
     let dir = create_new_into("my-look-2", "my-look", &catalog, &parent).expect("a chained look");
     let text = std::fs::read_to_string(dir.join("look.toml")).expect("a manifest");
     assert!(text.contains("extends = \"my-look\""), "{text}");
@@ -153,7 +156,10 @@ fn new_refuses_a_taken_name() {
     // Nothing was written for any of them.
     assert!(
         std::fs::read_dir(&parent).is_err()
-            || std::fs::read_dir(&parent).expect("readable").next().is_none(),
+            || std::fs::read_dir(&parent)
+                .expect("readable")
+                .next()
+                .is_none(),
         "no look dir lingers"
     );
 }

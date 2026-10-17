@@ -79,9 +79,8 @@ fn a_directory_resolves_through_its_manifest() {
     let catalog = discover_ordered(&[(scratch.path().join("empty"), Origin::Shipped)]);
     let state = scratch.path().join("state");
     let arg = dir.to_string_lossy().into_owned();
-    let (name, resolved, _) =
-        resolve_preview_target(Some(&arg), Origin::User, &catalog, &state)
-            .expect("a directory resolves");
+    let (name, resolved, _) = resolve_preview_target(Some(&arg), Origin::User, &catalog, &state)
+        .expect("a directory resolves");
     assert_eq!(name, "mine");
     assert_eq!(resolved, std::fs::canonicalize(&dir).expect("canonical"));
 }
