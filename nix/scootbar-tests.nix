@@ -620,7 +620,7 @@ runCommand "scootbar-modules"
     #    and the size in pixels (points clamp into 4..192 first, then convert
     #    at 4/3: 200pt clamps to 192pt for 256px, 0pt clamps to 4pt for 5px).
     python3 - "$themedLayer" "$bigLayer" "$zeroLayer" <<'PY'
-    import sys, tomllib
+    import os, sys, tomllib
     themed, big, zero = (tomllib.load(open(p, "rb")) for p in sys.argv[1:4])
     assert themed["colors"] == {
         "background": "#101010",
@@ -639,8 +639,12 @@ runCommand "scootbar-modules"
     assert zero["bar"]["font-size"] == 5, zero["bar"]
     for name, frag in (("themed", themed), ("big", big), ("zero", zero)):
         font = frag["bar"]["font"]
-        assert font.startswith("/nix/store/") and font.endswith((".ttf", ".otf")), (name, font)
-        print("layer ok:", name, "size", frag["bar"]["font-size"], "font", font)
+        # The fragment points at the font derivation's `font` symlink;
+        # the target is the real file.
+        real = os.path.realpath(font)
+        assert font.startswith("/nix/store/"), (name, font)
+        assert real.endswith((".ttf", ".otf")) and os.path.getsize(real) > 1000, (name, font, real)
+        print("layer ok:", name, "size", frag["bar"]["font-size"], "font", real)
     PY
 
     # 3. The font is found by family inside its package, through the
