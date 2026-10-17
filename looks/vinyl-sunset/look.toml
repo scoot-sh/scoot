@@ -17,8 +17,8 @@ dim = "#AA6D5F"
 accent = "#FE9949"
 urgent = "#CE6B4B"
 hover = "#FEC69A"
-focus = "#FFD757"
-border = "#573046"
+focus = "#FE9949"
+border = "#7D4564"
 
 [terminal]
 colors = ["#411711", "#c85b37", "#a5c643", "#da973e", "#6a7fbd", "#b2676d", "#878cb6", "#eac985", "#803a23", "#d58267", "#b8d26a", "#ffd757", "#95a4d0", "#c89397", "#adb0cd", "#f6e8cb"]

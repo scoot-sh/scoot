@@ -2803,8 +2803,7 @@ in
     # and font, each at plain `mkDefault` so an explicit value still
     # wins. Off with no look behind the greeter, or while
     # `theme.targets.greeter` opts out. A look without a shippable
-    # backdrop (`vinyl-sunset`, license-barred from being committed)
-    # leaves the backdrop alone; a custom catalog look without its own
+    # backdrop leaves the backdrop alone; a custom catalog look without its own
     # `apps/regreet.css` leaf leaves ReGreet's own CSS alone. No extra
     # daemons: ReGreet reads its config and CSS at startup, and the
     # packages below put the font, icons and cursor on the system

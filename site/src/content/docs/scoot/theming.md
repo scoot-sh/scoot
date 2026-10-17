@@ -33,7 +33,7 @@ declaration only wins when it changes.
 | [`music-desk`](https://github.com/scoot-sh/scoot/tree/main/looks/music-desk) | blue `#3D579A` on paper `#FCFBFB` | ships | ![music-desk](../../../assets/music-desk-preview.png) |
 | [`radial-burst`](https://github.com/scoot-sh/scoot/tree/main/looks/radial-burst) | blue `#31a9e5` on plum `#241721` | ships | ![radial-burst](../../../assets/radial-burst-preview.png) |
 | [`moonrise`](https://github.com/scoot-sh/scoot/tree/main/looks/moonrise) | amber `#FF9A49` on slate navy `#2B3648` | ships | ![moonrise](../../../assets/moonrise-preview.png) |
-| [`vinyl-sunset`](https://github.com/scoot-sh/scoot/tree/main/looks/vinyl-sunset) | orange `#E59560` on espresso `#271A1F` | flat color (the illustration is yours to download) | ![vinyl-sunset](../../../assets/vinyl-sunset-preview.png) |
+| [`vinyl-sunset`](https://github.com/scoot-sh/scoot/tree/main/looks/vinyl-sunset) | orange `#FE9949` on espresso `#270E0A` | ships | ![vinyl-sunset](../../../assets/vinyl-sunset-preview.png) |
 
 Each look's tokens live in `looks/<name>/look.toml`, in the [look format](../reference/look-format.md): the same manifest on a Nix install and a plain binary install, with no Nix-only step anywhere in it. A check validates and renders every look there and fails on a missing role.
 
@@ -44,9 +44,7 @@ their swaps survive a restart; `--private-look` gives any session a
 private copy instead. See [backends](./backends.md#private-look-state).
 
 (Previews: real screenshots of each example, captured from live
-sessions. The vinyl-sunset wallpaper illustration stays under its
-Pixabay license — the example's `[wallpaper]` table points at a copy
-you download, never a committed file.)
+sessions.)
 
 ## What one look sets
 
@@ -91,8 +89,7 @@ set `settings.appearance.corner_radius = 0`: your file wins per key.
 
 `radial-burst` ships no shell, editor or monitor files, so those
 three targets are inert for it; `music-desk` ships a btop config with
-no theme file; `vinyl-sunset` pairs no greeter backdrop (its
-illustration cannot be committed or auto-fetched under its license).
+no theme file.
 
 Two session variables carry the theme into apps:
 `QT_QPA_PLATFORMTHEME=qt6ct` (reads the config above) and

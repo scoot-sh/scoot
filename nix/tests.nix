@@ -105,8 +105,9 @@
 #   build-time renders), writes the declared default, and runs
 #   `scoot look sync` after the links and dconf land — the compositor
 #   and bar configs carry no look values themselves (a value the user
-#   sets still renders there); a look without an in-repo wallpaper
-#   (`vinyl-sunset`) renders no image, only its color; the `[xwayland]`
+#   sets still renders there); every shipped look with an in-repo
+#   wallpaper (all five now that vinyl-sunset bundles the maintainer's
+#   image) installs its image through the look; the `[xwayland]`
 #   knob defaults on; the
 #   idle policy (`desktop-idle-lock` child) runs with the profile -- dim
 #   2 min to 10%, lock at 4, screens off at 5, lock-before-sleep, audio
@@ -239,8 +240,7 @@
 #   each per-target opt-out drops just its piece, an upstream
 #   home-manager module owning the same path wins, and each null
 #   tool fails eval; the greeter wears the look too (backdrop
-#   pairing, dark setting, the look's CSS and font -- `vinyl-sunset`
-#   leaves the backdrop alone, its illustration license-barred); the
+#   pairing, dark setting, the look's CSS and font); the
 #   login screen follows `greeter.look` (null follows `look`, an
 #   explicit null themes nothing, an unknown name fails eval), a custom
 #   look themes from its manifest with the CSS walking the `extends`
@@ -1903,8 +1903,7 @@ let
   };
   # One per look: the example palette as `[appearance]` plus, where the
   # look ships an in-repo wallpaper, its image and mode (which is what
-  # installs scootbg for it); `vinyl-sunset` ships none, so no table
-  # appears and the session shows the flat `background_color`.
+  # installs scootbg for it); all five looks ship one now.
   hmDeskLookMusic = evalHome {
     enable = true;
     package = fakePkg;
@@ -4900,8 +4899,8 @@ let
     look = "ginger-night";
     greeter.enable = true;
   } greeterUser;
-  # ...vinyl-sunset: no shippable backdrop (license-barred), so the
-  # backdrop stays alone while the rest themes.
+  # ...vinyl-sunset: the maintainer's image ships, so the backdrop
+  # pairs while the rest themes.
   osThemeGreeterVinyl = evalNixosRegreet {
     enable = true;
     package = fakePkg;
@@ -7668,11 +7667,9 @@ let
         ];
       true
     )
-    # vinyl-sunset: no eval-time values at all (the illustration cannot
-    # be committed, and colors arrive as a runtime layer) — but the
-    # catalog installs its source and render, and the declared default
-    # names it. scootbg still installs: other catalog looks ship
-    # images, and a manual apply needs it.
+    # vinyl-sunset: no eval-time colors (they arrive as a runtime
+    # layer) — but the catalog installs its source and render, the
+    # declared default names it, and the shipped wallpaper pairs.
     (
       assert !(hmDeskLookVinyl.config.programs.scoot.settings ? appearance);
       true
@@ -12544,14 +12541,16 @@ let
         osThemeGreeterMoon.config.fonts.packages;
       true
     )
-    # ...vinyl-sunset: no shippable backdrop, so the backdrop stays
-    # alone (null) while the rest themes...
+    # ...vinyl-sunset: the maintainer's image ships, so the backdrop
+    # pairs like the other image looks...
     (
       assert allAssertionsHold osThemeGreeterVinyl.config;
       true
     )
     (
-      assert osThemeGreeterVinyl.config.programs.scoot.greeter.background == null;
+      assert lib.hasSuffix "wallpaper.png" (
+        toString osThemeGreeterVinyl.config.programs.scoot.greeter.background
+      );
       true
     )
     (
@@ -15986,15 +15985,16 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   ' ${hmDeskBarToml}
   echo "ok: desktop look leaves the bar config alone"
 
-  # 10b. Desktop profile, vinyl-sunset: no wallpaper table (the
-  #      illustration cannot be committed) — and no appearance either.
+  # 10b. Desktop profile, vinyl-sunset: no wallpaper or appearance
+  #      table in the compositor config (the look arrives as a runtime
+  #      layer, never as user values).
   python3 -c '
   import sys,tomllib
   got = tomllib.load(open(sys.argv[1],"rb"))
   assert "appearance" not in got, got
   assert "wallpaper" not in got, got
   ' ${hmDeskVinylToml}
-  echo "ok: a look without an in-repo wallpaper sets no wallpaper table"
+  echo "ok: the vinyl-sunset look stays out of the compositor config"
 
   # 10c. Desktop profile, radial-burst on the NixOS side: no colors in
   #      the bar file either.
@@ -16351,9 +16351,9 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -x "@define-color accent_color #3D579A;" ${gtkCssLight}
     grep -F -x "@define-color window_bg_color #FCFBFB;" ${gtkCssLight}
     grep -F -x "@define-color window_fg_color #1A2032;" ${gtkCssLight}
-    grep -F -x "@define-color accent_bg_color #E59560;" ${gtkCssDark}
-    grep -F -x "@define-color accent_fg_color #271A1F;" ${gtkCssDark}
-    grep -F -x "@define-color window_bg_color #271A1F;" ${gtkCssDark}
+    grep -F -x "@define-color accent_bg_color #FE9949;" ${gtkCssDark}
+    grep -F -x "@define-color accent_fg_color #270E0A;" ${gtkCssDark}
+    grep -F -x "@define-color window_bg_color #270E0A;" ${gtkCssDark}
     grep -F -x "@define-color accent_bg_color #31a9e5;" ${gtkCssBurst}
     grep -F -x "@define-color window_bg_color #241721;" ${gtkCssBurst}
     grep -F -x "@define-color accent_bg_color #FFA45C;" ${gtkCssMoon}
@@ -16400,7 +16400,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q "active_colors=#ff1a2032, #fffcfbfb" ${qtSchemeLight}
     grep -F -q "#ff3d579a, #fffcfbfb" ${qtSchemeLight}
     grep -F -q "active_colors=#fffdef1d, #ff241721" ${qtSchemeBurst}
-    grep -F -q "active_colors=#fff1e3c6, #ff271a1f" ${qtSchemeDark}
+    grep -F -q "active_colors=#fff6e8cb, #ff270e0a" ${qtSchemeDark}
     grep -F -q "active_colors=#fff5ead6, #ff0e0e0e" ${qtSchemeGinger}
     grep -F -q "#ffe57f29, #ff0e0e0e" ${qtSchemeGinger}
     echo "ok: Qt schemes carry each look's palette and polarity"
@@ -16910,8 +16910,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
 
     # 19b. Every look themes it (music-desk above; the other four
     #      here: each background role as its opaque flag).
-    grep -F -q -- "--background-color=271A1Fff" ${launchVinyl}
-    grep -F -q -- "--text-color=F1E3C6ff" ${launchVinyl}
+    grep -F -q -- "--background-color=270E0Aff" ${launchVinyl}
+    grep -F -q -- "--text-color=F6E8CBff" ${launchVinyl}
     grep -F -q -- "--background-color=241721ff" ${launchBurst}
     grep -F -q -- "--match-color=31a9e5ff" ${launchBurst}
     grep -F -q -- "--background-color=2B3648ff" ${launchMoon}
