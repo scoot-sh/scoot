@@ -1,9 +1,10 @@
 ---
 title: "Stylix becomes a synthesized stylix look instead of a layer above the look"
-status: "open"
-area: "packaging"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-16"
 ---
 
 # Stylix becomes a synthesized stylix look instead of a layer above the look
@@ -60,3 +61,21 @@ green, including the bar-only path on sway.
 Stylix's own targets for apps scoot does not theme.
 
 The design this implements against: [live looks](../../../dev/research/live-looks-design.md).
+
+## Resolution (2026-10-16, PR #642)
+
+Landed as designed: `nix/lib/look-from-stylix.nix` serializes the Stylix
+reads and a derivation runs `scoot-look import-base16` over them; the
+`stylix` look extends `programs.scoot.stylix.extends` and is the declared
+default at `mkDefault`; per-module Stylix leaves are deleted;
+`programs.scootbar.stylix.enable` is the bar-only path (fixed `[look]
+layer`, warning with a catalog); `scoot look apply` names Stylix-target
+owned apps via `look-stylix-targets` (D14). Every read checked by hand
+against nix-community/stylix at `fb28acd`; the stub extended (all sixteen
+slots, faces, sizes, opacities, polarity, targets); the `stylix` theme's
+compositor ring/background and six bar tokens pinned equal to today's
+leaves; Stylix + profile evaluates with no clash; an explicit look wins.
+`scoot-modules` and `scootbar-modules` checks green on aarch64-linux and
+aarch64-darwin (plus both Linux evals); the real-Stylix script run on sway
+remains for a Linux session. Follow-ups: the script's bar-only-path run,
+and a `lookPackage` default in the scootbar flake wrappers.

@@ -26,19 +26,66 @@ let
       else
         null;
   };
-  lookCatalog = lookCatalogLib.mkCatalog cfg.looks;
 
   # Stylix is not an input of this flake: its presence is
   # `config.lib.stylix` (defined by its palette module whether or not it is
   # enabled), and `stylix.enable` (false by default in Stylix itself) says
   # whether it is asked to theme anything. Same detection as
   # `nix/modules/scootbar.nix`.
-  stylix = config.lib ? stylix && (config.stylix.enable or false);
+  stylixPresent = config.lib ? stylix && (config.stylix.enable or false);
 
-  # The base16 slots this module reads, as `#rrggbb`. Read here so the
-  # mapping below names slots, not literals; lazy, so untouched without
-  # Stylix (as is everything under the `mkIf` at the bottom).
-  palette = config.lib.stylix.colors.withHashtag;
+  # Stylix synthesis (the `stylix` look): on when scoot is managed, its
+  # switch is on, Stylix itself is in use, and a render binary is on
+  # hand. The look carries the palette; the declared default below
+  # follows it.
+  stylixActive = cfg.enable && cfg.stylix.enable && stylixPresent && cfg.lookPackage != null;
+
+  # The resolved polarity for the synthesis: `light`/`dark` verbatim,
+  # `either` (Stylix's default: automatic) by the luma rule (exact
+  # integer math over `base00`/`base05`; the Nix side always passes
+  # polarity explicitly, so the static files and the rendered look
+  # agree by construction).
+  stylixLib = import ../lib/look-from-stylix.nix { inherit lib; };
+  stylixDark =
+    if !stylixActive then
+      false
+    else if (config.stylix.polarity or "either") == "dark" then
+      true
+    else if (config.stylix.polarity or "either") == "light" then
+      false
+    else
+      stylixLib.isDarkByLuma config.lib.stylix.colors.withHashtag.base00 config.lib.stylix.colors.withHashtag.base05;
+
+  lookCatalog = lookCatalogLib.mkCatalog {
+    looks = cfg.looks;
+    stylix =
+      if !stylixActive then
+        null
+      else
+        {
+          extends = cfg.stylix.extends;
+          colors = config.lib.stylix.colors.withHashtag;
+          fontsSans = config.stylix.fonts.sansSerif or null;
+          fontsMono = config.stylix.fonts.monospace or null;
+          sizes = {
+            desktop = (config.stylix.fonts.sizes or { }).desktop or null;
+            popups = (config.stylix.fonts.sizes or { }).popups or null;
+            applications = (config.stylix.fonts.sizes or { }).applications or null;
+            terminal = (config.stylix.fonts.sizes or { }).terminal or null;
+          };
+          opacity = {
+            popups = (config.stylix.opacity or { }).popups or null;
+            terminal = (config.stylix.opacity or { }).terminal or null;
+          };
+          cursor = config.stylix.cursor or null;
+          # Gated by `stylix.wallpaper.enable` (on by default): off
+          # leaves the image out, so a `color` set beside it stands
+          # alone instead of pairing an image with a color.
+          image = if cfg.stylix.wallpaper.enable then (config.stylix.image or null) else null;
+          imageMode = config.stylix.imageScalingMode or "fill";
+          isDark = stylixDark;
+        };
+  };
 
   # Rendered from the user's free-form settings. A value with no TOML
   # representation at all (e.g. a function) fails the option type-check
@@ -205,7 +252,11 @@ in
     # first wins, so a path named like a shipped look shadows it. A
     # shipped name outside the five, a directory without a readable
     # `look.toml`, or a manifest whose `name` is not a look name fails
-    # the evaluation naming it. Read only with `desktop.enable`.
+    # the evaluation naming it. Read only with `desktop.enable`. A
+    # literal `stylix` means the synthesized Stylix look (below): it
+    # appends when synthesis is on (naming it while synthesis is off
+    # fails the evaluation), and a directory named `stylix`
+    # goes as a path, not a string.
     looks = lib.mkOption {
       type = lib.types.listOf (lib.types.either lib.types.str lib.types.path);
       default = builtins.attrNames (import ./desktop.nix { inherit lib; }).looks;
@@ -217,8 +268,8 @@ in
       ];
       description = ''
         The looks home-manager installs: shipped look names or paths to
-        source look directories. Default: every shipped look (plus
-        `stylix` when Stylix synthesis lands). A look with `extends`
+        source look directories, plus `stylix` when Stylix synthesis is
+        on. Default: every shipped look. A look with `extends`
         resolves its base through this same list, so list the base too.
       '';
     };
@@ -314,46 +365,75 @@ in
       '';
     };
 
-    # Stylix, without depending on it. Same shape as
-    # `programs.scootbar.stylix.enable` in `nix/modules/scootbar.nix`:
-    # on by default, effective only when Stylix itself is in use (see
-    # the `stylix` detection above); every value below is `lib.mkDefault`
-    # at its own leaf, so a value the user wrote in `settings` wins.
+    # Stylix as a source of a look (design section 5): on by default,
+    # effective only when Stylix itself is in use (see `stylixPresent`
+    # above) and a render binary is on hand. On, the catalog gains a
+    # synthesized look named `stylix` (the palette, fonts, sizes,
+    # opacity, cursor and image serialized through `scoot-look
+    # import-base16`) and the declared default below follows it. No app
+    # module reads Stylix: it reaches the desktop only as that look.
     # Nothing here needs Stylix, and nothing changes without it.
     stylix = {
       enable = lib.mkOption {
         type = lib.types.bool;
         default = true;
         description = ''
-          Take defaults from Stylix when it is in use (`config.lib.stylix`
-          exists and `stylix.enable` is on): the `[appearance]` ring and
-          background colors from its base16 palette, `cursor_theme` and
-          `cursor_size` from `stylix.cursor`, and `[wallpaper]` `image` and
-          `mode` from `stylix.image` and `stylix.imageScalingMode` (the
-          wallpaper pair further gated by `wallpaper.enable` below). A value
-          you set in `settings` always wins; this only turns the defaults
-          off. Nothing here needs Stylix, and nothing changes without it.
+          Synthesize the `stylix` look from Stylix when it is in use
+          (`config.lib.stylix` exists and `stylix.enable` is on) and
+          make it the declared default. A value you set in `settings`
+          always wins over the look; this only turns the synthesis off.
+          Nothing here needs Stylix, and nothing changes without it.
+        '';
+      };
+
+      # The base the synthesized look extends: what fills every token
+      # the palette does not set (the wallpaper when `stylix.image` is
+      # unset, the terminal hues and static editor leaves, the night
+      # temperature, shape and opacity). Default: `ginger-night` with
+      # the desktop profile on (closest to what profile users see
+      # today), none otherwise. The base resolves through `looks`, so
+      # list it there; a custom path leaves the eval-time static
+      # leaves inert (the runtime layer still works).
+      extends = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = if (cfg.desktop.enable or false) then "ginger-night" else null;
+        defaultText = lib.literalExpression ''
+          "ginger-night" when programs.scoot.desktop.enable is on, null otherwise
+        '';
+        example = "moonrise";
+        description = ''
+          The look the synthesized `stylix` look extends. Null extends
+          nothing: a standalone look of the Stylix palette alone.
         '';
       };
 
       # Just the Stylix wallpaper defaults, so a solid-color background
-      # stays reachable under Stylix: set this to `false` to choose your
-      # own wallpaper color (`settings.wallpaper.color`) without Stylix's
-      # `image` beside it (the two together are refused by scoot). The
-      # themed `[appearance]` and cursor defaults stay. An explicit
-      # switch, read here rather than the merged `settings.wallpaper`,
-      # is what keeps the evaluation acyclic (see the `wallpaper` block
-      # below).
+      # stays reachable under Stylix: set this to `false` to leave
+      # `stylix.image` out of the synthesized look and choose your own
+      # wallpaper color (a `color` you set stands alone) or image. The
+      # palette, fonts, cursor and the rest stay Stylix's.
       wallpaper.enable = lib.mkOption {
         type = lib.types.bool;
         default = true;
         description = ''
-          Take the `[wallpaper]` `image` and `mode` defaults from Stylix
-          (`stylix.image` and `stylix.imageScalingMode`) when theming is
-          on. Set to `false` to choose your own wallpaper color instead:
-          the Stylix `image` and `mode` are then not defaulted, so a
-          `color` you set stands alone. The `[appearance]` and cursor
-          defaults are unaffected.
+          Carry `stylix.image` and `stylix.imageScalingMode` into the
+          synthesized `stylix` look when theming is on. Set to `false`
+          to leave the image out: the look inherits its wallpaper from
+          `extends` (or carries a flat background color without one),
+          so a `color` you set stands alone.
+        '';
+      };
+
+      # The registry-shaped theme value for `stylix` (the Stylix
+      # palette over the base look's static leaves): what
+      # `theme-look.nix` resolves the `stylix` look to. Internal: set
+      # beside the catalog, read by the theme.
+      theme = lib.mkOption {
+        type = lib.types.nullOr lib.types.attrs;
+        internal = true;
+        default = lookCatalog.stylixTheme;
+        description = ''
+          The synthesized theme value for the `stylix` look.
         '';
       };
     };
@@ -553,9 +633,9 @@ in
     # defaults this side has (the portal config; the session entry and the
     # system packages are the NixOS side's, the bar is the bar module's,
     # which reads this profile). `look` themes the rendered config, each
-    # leaf at `mkOptionDefault` so a value the user wrote wins and Stylix
-    # (a `mkDefault` one level up) wins where present -- Stylix stays the
-    # override path.
+    # leaf at `mkOptionDefault` so a value the user wrote wins -- the look
+    # is the override path (Stylix reaches the desktop only as the
+    # synthesized `stylix` look).
     (lib.mkIf cfg.desktop.enable {
       assertions = [
         {
@@ -586,23 +666,34 @@ in
     # without a choice (a value the user sets wins over this default,
     # including an explicit null to theme nothing). One rung above the
     # Stylix source's `mkDefault` (1000) and below the option's own
-    # `default = null` (1500): Stylix, when its synthesis lands, beats
-    # the profile, and the profile beats nothing chosen. It lives here
+    # `default = null` (1500): Stylix, when synthesized, beats the
+    # profile, and the profile beats nothing chosen. It lives here
     # and on the NixOS side rather than as the option default, so a look
     # never lands without the profile (the refusal below keeps firing
-    # then).
+    # then, except for the synthesized `stylix` look, which installs
+    # its own catalog).
     (lib.mkIf cfg.desktop.enable {
       programs.scoot.look = lib.mkOverride 1200 "ginger-night";
     })
 
+    # The Stylix source, when synthesized: the declared default
+    # `stylix` at `mkDefault` (1000), above the profile's `mkOverride
+    # 1200` and below the user. Swapping away and back works like any
+    # other look; the apps never read Stylix, only this look.
+    (lib.mkIf stylixActive {
+      programs.scoot.look = lib.mkDefault "stylix";
+    })
+
     # A look without the profile is a silent no-op; refuse it loudly
     # instead (kept outside `desktop.enable` so it still fires then, the
-    # way the greeter's assertions sit outside `enable`). The catalog
-    # below only installs with the profile for the same reason.
+    # way the greeter's assertions sit outside `enable`) — except the
+    # synthesized `stylix` look, whose catalog installs without the
+    # profile too. The catalog below installs with the profile (or that
+    # synthesis) for the same reason.
     (lib.mkIf (cfg.look != null) {
       assertions = [
         {
-          assertion = cfg.desktop.enable;
+          assertion = cfg.desktop.enable || (stylixActive && cfg.look == "stylix");
           message = ''
             programs.scoot.look needs programs.scoot.desktop.enable:
             the look is applied by the profile, so the profile must be on.
@@ -627,12 +718,16 @@ in
 
     # The look catalog: each declared source linked as
     # `~/.local/share/scoot/looks/<name>`, each build-time render as
-    # `~/.local/share/scoot/rendered/<name>`. The link targets the
+    # `~/.local/share/scoot/rendered/<name>`, plus the synthesized
+    # `stylix` look when Stylix is in use. The link targets the
     # catalog's rendered entry, never a raw store path, so the next
-    # generation re-resolves it. Only with the profile and a render
-    # binary: without either, no declaration can win, so nothing is
-    # installed and `scoot look sync` stays unmanaged.
-    (lib.mkIf (cfg.desktop.enable && lookCatalog.sources != null) {
+    # generation re-resolves it. Only with the profile (or the Stylix
+    # synthesis, which carries its own look) and a render binary:
+    # without either, no declaration can win, so nothing is installed
+    # and `scoot look sync` stays unmanaged.
+    (lib.mkIf ((cfg.desktop.enable || stylixActive) && lookCatalog.sources != null) {
+      home.packages = lookCatalog.fontPackages;
+
       xdg.dataFile = lib.listToAttrs (
         map (entry: {
           name = "scoot/looks/${entry.name}";
@@ -677,6 +772,30 @@ in
         ++ lib.optional (!cfg.desktop.theme.targets.fonts.enable) "fonts"
       );
 
+      # The Stylix targets owning a path scoot also themes, one app per
+      # line (D14): `scoot look apply` names these as "owned by Stylix's
+      # target" instead of pretending the look reached them. Read with
+      # the same `or` guards as the synthesis above, so an older Stylix
+      # without a target, or no Stylix at all, evaluates to no lines.
+      xdg.configFile."scoot/look-stylix-targets".text =
+        let
+          targets = ((config.stylix or { }).targets or { });
+          owned = name: (((targets.${name} or { }).enable or false));
+        in
+        lib.concatStringsSep "\n" (
+          lib.optional (owned "gtk") "gtk"
+          ++ lib.optional (owned "qt") "qt"
+          ++ lib.optional (owned "foot") "foot"
+          ++ lib.optional (owned "mako") "mako"
+          ++ lib.optional (owned "fuzzel") "fuzzel"
+          ++ lib.optional (owned "swaylock") "swaylock"
+          ++ lib.optional (owned "wob") "wob"
+          ++ lib.optional (owned "fcitx5") "fcitx5"
+          ++ lib.optional (owned "starship") "starship"
+          ++ lib.optional (owned "helix") "helix"
+          ++ lib.optional (owned "btop") "btop"
+        );
+
       # The rule of section 6.3, after the links and the dconf database
       # land: home-manager's own `dconfSettings` step writes first, so
       # the toolkit step never fights it over a claimed key. Without a
@@ -703,65 +822,10 @@ in
       };
     })
 
-    # Stylix defaults, each at its own leaf (`settings.appearance.X`, not
-    # `settings.appearance`), which is what lets the user's one value
-    # replace one default and keep the rest from Stylix: a priority
-    # applies to the whole value it wraps, so wrapping a table would make
-    # the user's one key discard it all. Same rule as `scootbar.nix`.
-    #
-    # The mapping is what Stylix's own compositor targets use for the
-    # same three things (checked against nix-community/stylix at fb28acd,
-    # the rev `nix/scootbar-tests.nix` names): sway's
-    # `modules/sway/hm.nix` (`focused = base0D`, every unfocused border
-    # `base03`, `background = base00`), hyprland's
-    # `modules/hyprland/hm.nix` (`col.active_border = base0D`,
-    # `col.inactive_border = base03`, `misc.background_color = base00`)
-    # and river's `modules/river/hm.nix` (`border-color-focused =
-    # base0D`, `border-color-unfocused = base03`, `background-color =
-    # base00`). There is no niri target at that rev (nor on current
-    # master) to check against. `cursor_color` has no Stylix convention
-    # (Stylix's cursor is name, size and package only), so it is left
-    # alone.
-    (lib.mkIf (cfg.enable && cfg.stylix.enable && stylix) {
-      programs.scoot.settings = {
-        appearance = {
-          focus_ring_active_color = lib.mkDefault palette.base0D;
-          focus_ring_inactive_color = lib.mkDefault palette.base03;
-          background_color = lib.mkDefault palette.base00;
-        }
-        // lib.optionalAttrs (config.stylix.cursor != null) {
-          # The theme's package needs no installing here: Stylix's own
-          # cursor target (`home.pointerCursor`, set by Stylix itself on
-          # the home-manager side) already installs it and puts its
-          # `share/icons` on the lookup path (`~/.icons`,
-          # `$XDG_DATA_HOME/icons`, `$XCURSOR_PATH`), which is where
-          # scoot's `xcursor::CursorTheme::load` searches. This only
-          # names the theme and the size.
-          cursor_theme = lib.mkDefault config.stylix.cursor.name;
-          cursor_size = lib.mkDefault config.stylix.cursor.size;
-        };
-      }
-      // lib.optionalAttrs (cfg.stylix.wallpaper.enable && config.stylix.image != null) {
-        # Gated on `image`: a `mode` without one is meaningless, and an
-        # unconditional table would turn `wallpaper.enable` (which
-        # follows `settings ? wallpaper`) on for every Stylix user,
-        # installing scootbg where no wallpaper was asked for. The five
-        # `imageScalingMode` values are exactly scootbg's five `mode`
-        # values (`fill | fit | stretch | center | tile`), so the mode
-        # maps one to one. Gated also on
-        # `programs.scoot.stylix.wallpaper.enable` (on by default): set
-        # it to `false` to choose your own wallpaper `color` -- a `color`
-        # beside Stylix's `image` is refused by scoot (fail-safe, the
-        # session carries on with `background_color`, the error in the
-        # log naming it). The condition reads this explicit switch, not
-        # the merged `settings.wallpaper` this block defines, which is
-        # what keeps the evaluation acyclic (a home-manager assertion on
-        # the merged section would cycle the same way).
-        wallpaper = {
-          image = lib.mkDefault (toString config.stylix.image);
-          mode = lib.mkDefault config.stylix.imageScalingMode;
-        };
-      };
-    })
+    # No app module reads Stylix: the compositor's `[appearance]`,
+    # cursor and `[wallpaper]` theming moved into the synthesized
+    # `stylix` look above (the catalog and the declared default), which
+    # the runtime layer carries. A value set in `settings` still wins
+    # per key over any look.
   ];
 }

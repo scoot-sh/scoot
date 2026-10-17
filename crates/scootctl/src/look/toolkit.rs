@@ -605,6 +605,9 @@ fn filter_ini(ini: &str, skips: TargetSkips) -> String {
 /// refusal. `config_home` is `None` when no home resolves at all.
 /// Opted-out targets are named and left out (no fontconfig file at
 /// all for skipped fonts; no cursor or font lines in the inis).
+/// `stylix_targets` names the apps whose Stylix target owns its path
+/// (the `look-stylix-targets` file): a foreign file of a listed app is
+/// named as owned by Stylix's target instead of merely foreign.
 pub fn apply_toolkit_files(
     state_dir: &Path,
     record: &Record,
@@ -612,6 +615,7 @@ pub fn apply_toolkit_files(
     config_home: Option<&Path>,
     link: &Path,
     target_skips: TargetSkips,
+    stylix_targets: &[String],
 ) -> Vec<String> {
     let mut notes = Vec::new();
     if !toolkit_on(record) {
@@ -638,7 +642,7 @@ pub fn apply_toolkit_files(
         }
     };
     for file in &files {
-        notes.extend(apply_one_file(config_home, file));
+        notes.extend(apply_one_file(config_home, file, stylix_targets));
     }
     if target_skips.fonts {
         notes.push(
@@ -648,6 +652,25 @@ pub fn apply_toolkit_files(
     notes
 }
 
+/// The Stylix target owning a toolkit file, when its app lists in
+/// `stylix_targets` (the `look-stylix-targets` file): the four GTK
+/// files are the `gtk` target's, the qt6ct config the `qt` target's.
+/// The fontconfig file is no target's (Stylix sets no
+/// `stylix.targets` name for fonts), so it stays merely foreign.
+fn stylix_owner(rel: &str, stylix_targets: &[String]) -> Option<&'static str> {
+    let app = if rel.starts_with("gtk-") {
+        "gtk"
+    } else if rel.starts_with("qt6ct/") {
+        "qt"
+    } else {
+        return None;
+    };
+    stylix_targets
+        .iter()
+        .any(|owned| owned.trim() == app)
+        .then_some(app)
+}
+
 /// Whether `text` is a tool-owned file: the marker sits in the first
 /// lines (line 1 for CSS, INI and qt6ct; line 4 for fontconfig, behind
 /// the XML declaration and doctype, which must stay first).
@@ -655,8 +678,10 @@ fn is_managed(text: &str) -> bool {
     text.lines().take(5).any(|line| line.contains(MANAGED_MARK))
 }
 
-/// One file under the own-it-if-absent-or-marked rule.
-fn apply_one_file(config_home: &Path, file: &OwnedFile) -> Vec<String> {
+/// One file under the own-it-if-absent-or-marked rule. A foreign file
+/// whose app lists in `stylix_targets` is named as owned by Stylix's
+/// target; any other foreign file is merely outside `scoot look`.
+fn apply_one_file(config_home: &Path, file: &OwnedFile, stylix_targets: &[String]) -> Vec<String> {
     let mut notes = Vec::new();
     let path = config_home.join(file.rel);
     let live = match read_capped_follow(&path) {
@@ -683,12 +708,16 @@ fn apply_one_file(config_home: &Path, file: &OwnedFile) -> Vec<String> {
                 notes.push(format!("updated {}", file.rel));
             }
         }
-        Some(_) => {
-            notes.push(format!(
+        Some(_) => match stylix_owner(file.rel, stylix_targets) {
+            Some(app) => notes.push(format!(
+                "{rel} is owned by Stylix's {app} target: left alone",
+                rel = file.rel
+            )),
+            None => notes.push(format!(
                 "{} is managed outside `scoot look`: left alone",
                 file.rel
-            ));
-        }
+            )),
+        },
     }
     notes
 }

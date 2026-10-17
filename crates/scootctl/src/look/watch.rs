@@ -67,6 +67,10 @@ pub struct WatchOptions {
     pub origin: Origin,
     /// dconf key paths home-manager owns: left alone however they read.
     pub nix_claims: Vec<String>,
+    /// Apps whose Stylix target owns its path (the
+    /// `look-stylix-targets` file beside the declared default): the
+    /// reply names those instead of pretending the look reached them.
+    pub stylix_targets: Vec<String>,
 }
 
 /// One watched save: takes the lock, reads the directory fresh, validates
@@ -271,6 +275,7 @@ pub fn apply_watched_dir(
         no_helix: false,
         no_btop: false,
         nix_claims: options.nix_claims.clone(),
+        stylix_targets: options.stylix_targets.clone(),
         target_skips: TargetSkips::default(),
     };
     complete_swap(

@@ -46,25 +46,40 @@ desktop piece uses (as with the [lock screen](../desktop/index.md#idle-and-lock)
 
 ## From Stylix
 
-When `config.lib.stylix` exists and `stylix.enable` is on, `settings`
-gets defaults from it: the six `colors` tokens from the base16 palette
-(`background` base00, `foreground` base05, `accent` base0D, `hover`
-base0D like the compositor's focused ring, `dim` base03, `urgent`
-base08), `bar.font` from `stylix.fonts.sansSerif` and `bar.font-size`
-from `stylix.fonts.sizes.desktop` (points, converted at 4/3, clamped
-1–256). The font is a **file path**: the bar has no fontconfig, so a
-build step finds the regular face in the font package (`DejaVuSans.ttf`
-for "DejaVu Sans", `Family-Regular.ttf` for Noto or a Nerd Font).
-Variable fonts, `.ttc` collections and odd namings are not resolved —
-the bar then gets the plain default font rather than a failed build.
-`programs.scootbar.stylix.enable = false` turns the defaults off with
-Stylix present.
+Without scoot, a bar under Stylix themes from the `stylix` look
+instead of eval-time values: nothing Stylix lands in `settings`.
+With a scoot catalog in the configuration, the bar follows the
+`stylix` look like any look (through `scoot look sync`), and this
+path stays off.
 
-Those values land in the file rung, so each shadows the look layer per
-key, exactly like a value written by hand. To let a look show through,
-unset the key (or turn the target off). Precedence, highest first, per
-key: daemon flags, the file (hand-written, Stylix-derived or
-look-derived alike), the look layer, the module's plain default.
+- `programs.scootbar.stylix.enable` — Type: bool. Default: `true`.
+  The bar-only path: with Stylix present and enabled, and no scoot
+  look catalog in this configuration, render the `stylix` look's bar
+  fragment at build time (the same `scoot-look` binary the catalog
+  uses) and pin it as a fixed `[look] layer` in the rendered
+  `bar.toml`. A value you set in `settings` still wins per key at
+  runtime; this only turns the layer off. A `look.layer` you set in
+  `settings` wins over the pinned one.
+  ```nix title="home.nix"
+  programs.scootbar.stylix.enable = false;
+  ```
+
+Your file and flags still win per key over the layer; every other
+key follows it. The fragment carries its own face, and the
+plain-default font stays out while the layer is active, so the
+layer's face shows. The face is the regular file found in the Stylix
+sans package (`DejaVuSans.ttf` for "DejaVu Sans",
+`Family-Regular.ttf` for Noto or a Nerd Font). Variable fonts,
+`.ttc` collections and odd namings are not resolved — the bar then
+falls back to its default face with a build-time warning rather than
+a failed build.
+
+With a catalog present the option does nothing and warns at
+evaluation: the bar follows the active look instead of a fixed Stylix
+layer. Set it to `false` to silence the warning.
+
+Precedence, highest first, per key: daemon flags, the file, the look
+layer, the module's plain default.
 
 The six tokens, and how icons follow them (path icons tint from the
 theme; image icons keep their own colors), are in

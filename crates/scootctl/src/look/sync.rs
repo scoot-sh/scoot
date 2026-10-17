@@ -81,12 +81,21 @@ pub const CLAIMS_FILE: &str = "look-nix-claims";
 /// honors. A hand-written file works the same: no Nix is needed to
 /// leave the cursor or the fonts alone.
 pub const TARGETS_FILE: &str = "look-nix-targets";
+/// The Stylix targets owning a path scoot also themes, one app per line
+/// (`gtk`, `qt`, `foot`, `mako`, `fuzzel`, `swaylock`, `wob`,
+/// `fcitx5`, `starship`, `helix`, `btop`): written by the
+/// home-manager module from `stylix.targets.*.enable`, read here so
+/// the apply reply names those apps as owned by Stylix's target
+/// instead of pretending the look reached them.
+pub const STYLIX_TARGETS_FILE: &str = "look-stylix-targets";
 /// The NixOS-module-only declared default.
 pub const SYSTEM_DEFAULT_FILE: &str = "/etc/scoot/look-default";
 /// The NixOS-module-only claims file.
 pub const SYSTEM_CLAIMS_FILE: &str = "/etc/scoot/look-nix-claims";
 /// The NixOS-module-only opted-out targets.
 pub const SYSTEM_TARGETS_FILE: &str = "/etc/scoot/look-nix-targets";
+/// The NixOS-module-only Stylix-owned apps.
+pub const SYSTEM_STYLIX_TARGETS_FILE: &str = "/etc/scoot/look-stylix-targets";
 
 /// Which theme targets a sync leaves alone: the Nix `cursor` and
 /// `fonts` opt-outs (`desktop.theme.targets.*.enable = false`), read
@@ -170,6 +179,36 @@ pub fn read_nix_claims() -> Vec<String> {
     read_declared()
         .map(|declared| declared.map(|d| d.claims).unwrap_or_default())
         .unwrap_or_default()
+}
+
+/// Reads the Stylix-owned app names (for `apply`, which names them in
+/// the reply instead of pretending the look reached them): the
+/// config-home file when it exists, else the system one, else none.
+/// Best-effort, like the claims: a missing or unreadable file owns
+/// nothing, never a refusal. Blank lines are kept for the caller to
+/// ignore; names are matched verbatim.
+pub fn read_stylix_targets() -> Vec<String> {
+    let xdg = std::env::var_os("XDG_CONFIG_HOME");
+    let home = std::env::var_os("HOME");
+    let user = config_home(xdg.as_deref(), home.as_deref())
+        .map(|base| base.join("scoot").join(STYLIX_TARGETS_FILE));
+    parse_stylix_targets(user.as_deref(), &PathBuf::from(SYSTEM_STYLIX_TARGETS_FILE))
+}
+
+/// Picks the Stylix-owned app names: the config-home file when it
+/// exists, else the system one, else none. Pure over the paths, so
+/// tests pin the precedence without touching the process
+/// environment.
+fn parse_stylix_targets(user: Option<&Path>, system: &Path) -> Vec<String> {
+    if let Some(path) = user
+        && path.is_file()
+    {
+        return read_target_lines(path);
+    }
+    if system.is_file() {
+        return read_target_lines(system);
+    }
+    Vec::new()
 }
 
 /// Reads the opted-out theme targets (for `sync`, which honors them):
@@ -356,6 +395,7 @@ pub fn sync_with(
     declared: Option<Option<String>>,
     nix_claims: Vec<String>,
     target_skips: TargetSkips,
+    stylix_targets: Vec<String>,
     options: &SyncOptions,
     catalog: &Catalog,
     cache: &Path,
@@ -522,6 +562,7 @@ pub fn sync_with(
                     no_helix: false,
                     no_btop: false,
                     nix_claims,
+                    stylix_targets: stylix_targets.clone(),
                     target_skips,
                 };
                 complete_swap(
@@ -688,6 +729,7 @@ pub fn sync_with(
         no_helix: false,
         no_btop: false,
         nix_claims,
+        stylix_targets,
         target_skips,
     };
     complete_swap(

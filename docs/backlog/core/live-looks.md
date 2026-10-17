@@ -65,7 +65,7 @@ stated rule.
 | [`look-golden-screenshots`](../resolved/look-golden-screenshots-done.md) | medium | computer use | `look-ipc` |
 | [`look-nix-catalog`](../packaging/look-nix-catalog.md) | high | daily-drive | `look-apply-cli` |
 | [`look-import-base16`](look-import-base16.md) | medium | daily-drive | `look-format` |
-| [`look-stylix-source`](../packaging/look-stylix-source.md) | high | daily-drive | `look-nix-catalog`, `look-import-base16` |
+| [`look-stylix-source`](../resolved/look-stylix-source-done.md) | high | daily-drive | `look-nix-catalog`, `look-import-base16` |
 | [`look-toolkit-live`](../resolved/look-toolkit-live-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-leaves-daemons`](../resolved/look-leaves-daemons-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-leaves-launchers`](../resolved/look-leaves-launchers-done.md) | medium | daily-drive | `look-apply-cli` |

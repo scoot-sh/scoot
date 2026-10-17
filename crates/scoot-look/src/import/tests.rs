@@ -288,6 +288,96 @@ fn extends_omits_terminal_shape_wallpaper() {
     assert_eq!(resolved.palette.background, "#002b36");
 }
 
+/// An image plus a mode emits a wallpaper unit carrying both, with and
+/// without `--extends`; without an image a child inherits the base's
+/// and a root keeps the flat color.
+#[test]
+fn image_emits_wallpaper_unit() {
+    let with_image = DARK_3024.replace(
+        "variant: \"dark\"",
+        "variant: \"dark\"\nimage: wallpaper.png\nimageScalingMode: fill",
+    );
+    let look = import_base16(with_image.as_bytes(), &opts()).expect("imports");
+    assert!(look.contains("image = \"wallpaper.png\""), ":\n{look}");
+    assert!(look.contains("mode = \"fill\""), ":\n{look}");
+    assert!(
+        !look.contains("color = "),
+        "flat color beside the image:\n{look}"
+    );
+    crate::parse_look_toml(look.as_bytes()).expect("re-parses");
+    // The mode also spells `mode`.
+    let mode_key = DARK_3024.replace(
+        "variant: \"dark\"",
+        "variant: \"dark\"\nimage: wall.webp\nmode: tile",
+    );
+    let look = import_base16(mode_key.as_bytes(), &opts()).expect("imports");
+    assert!(look.contains("image = \"wall.webp\""), ":\n{look}");
+    assert!(look.contains("mode = \"tile\""), ":\n{look}");
+    // A child with an image carries its own unit; without one it
+    // inherits the base's (no unit at all).
+    let child_opts = ImportOptions {
+        extends: Some("ginger-night".to_string()),
+        ..ImportOptions::default()
+    };
+    let look = import_base16(with_image.as_bytes(), &child_opts).expect("imports");
+    assert!(look.contains("[wallpaper]"), ":\n{look}");
+    assert!(look.contains("image = \"wallpaper.png\""), ":\n{look}");
+    let plain = import_base16(DARK_SOLARIZED.as_bytes(), &child_opts).expect("imports");
+    assert!(!plain.contains("[wallpaper]"), "child inherits:\n{plain}");
+    crate::parse_look_toml(look.as_bytes()).expect("re-parses");
+}
+
+/// An image without a mode (or the reverse), a bad mode, and a bad file
+/// name each refuse naming the field.
+#[test]
+fn image_needs_mode_and_shape() {
+    let no_mode = DARK_3024.replace(
+        "variant: \"dark\"",
+        "variant: \"dark\"\nimage: wallpaper.png",
+    );
+    let err = import_base16(no_mode.as_bytes(), &opts()).expect_err("image without mode");
+    assert_eq!(err.field, "imageScalingMode", "{err:?}");
+    let no_image = DARK_3024.replace(
+        "variant: \"dark\"",
+        "variant: \"dark\"\nimageScalingMode: fill",
+    );
+    let err = import_base16(no_image.as_bytes(), &opts()).expect_err("mode without image");
+    assert_eq!(err.field, "image", "{err:?}");
+    for (input, field) in [
+        (
+            DARK_3024.replace(
+                "variant: \"dark\"",
+                "variant: \"dark\"\nimage: wallpaper.png\nimageScalingMode: zoom",
+            ),
+            "imageScalingMode",
+        ),
+        (
+            DARK_3024.replace(
+                "variant: \"dark\"",
+                "variant: \"dark\"\nimage: ../evil.png\nimageScalingMode: fill",
+            ),
+            "image",
+        ),
+        (
+            DARK_3024.replace(
+                "variant: \"dark\"",
+                "variant: \"dark\"\nimage: wallpaper.svg\nimageScalingMode: fill",
+            ),
+            "image",
+        ),
+        (
+            DARK_3024.replace(
+                "variant: \"dark\"",
+                "variant: \"dark\"\nimage: /abs/wall.png\nimageScalingMode: fill",
+            ),
+            "image",
+        ),
+    ] {
+        let err = import_base16(input.as_bytes(), &opts()).expect_err("refuses");
+        assert_eq!(err.field, field, "{err:?} for {input:?}");
+    }
+}
+
 /// Malformed input refuses naming the field, never panics.
 #[test]
 fn malformed_refuses_by_name() {

@@ -53,10 +53,9 @@ you download, never a committed file.)
 The compositor and the bar read the active look as a runtime layer
 under your own files: per key, your file wins, then the look, then
 the app default (`[wallpaper]` is one unit — a key of yours there
-keeps your whole section). A swap never rewrites your files. What
-Stylix sets in your files (where present) sits above the layer, so a
-live swap cannot change those keys; a value you set beats everything.
-GTK, Qt and the rest below still read files, so a look change reaches
+keeps your whole section). A swap never rewrites your files, and
+nothing sits above the look except your own values. GTK, Qt and the
+rest below still read files, so a look change reaches
 newly started apps, running ones where their toolkit watches:
 
 | File the profile writes | From the look | Takes effect |
@@ -179,30 +178,81 @@ symptom](../desktop/index.md#app-theme).
 
 ## Stylix
 
-When `config.lib.stylix` exists and `stylix.enable` is on,
-`programs.scoot.settings` gets defaults from it — the compositor's
-half of a themed desktop, next to the bar's. The module never imports
-Stylix; nothing changes without it, and
-`programs.scoot.stylix.enable = false` turns the defaults off with it
-present. (Home-manager only: the NixOS module renders no config file.)
+With Stylix in use (`config.lib.stylix` exists and `stylix.enable`
+is on), the catalog gains a look named `stylix`, synthesized from
+the Stylix palette at build time, and the declared default follows
+it. No app module reads Stylix: it reaches the desktop only as that
+look. Nothing here needs Stylix, and nothing changes without it.
 
-| Setting | From | Notes |
-|---|---|---|
-| `appearance.focus_ring_active_color` | base16 `base0D` | The focused ring. |
-| `appearance.focus_ring_inactive_color` | base16 `base03` | Every other ring. |
-| `appearance.background_color` | base16 `base00` | The frame clear color. |
-| `appearance.cursor_theme` | `stylix.cursor.name` | Only when `stylix.cursor` is set. |
-| `appearance.cursor_size` | `stylix.cursor.size` | Only when `stylix.cursor` is set. |
-| `wallpaper.image` | `stylix.image` | Only when set; setting it is what turns `wallpaper.enable` on. |
-| `wallpaper.mode` | `stylix.imageScalingMode` | Only when set (`fill`, `fit`, `stretch`, `center`, `tile`). |
+The look carries the sixteen base16 slots as its palette, the
+sans-serif and monospace faces, the `desktop` / `popups` /
+`applications` / `terminal` sizes, the `popups` and `terminal`
+opacity, the cursor name and size, and `stylix.image` with its
+scaling mode. Everything the palette does not set comes from the
+base look: the wallpaper when no image is set, the terminal hues and
+static editor files, the night temperature, and the shape and
+opacity. Dark or light follows `stylix.polarity`. A face or cursor
+name the look grammar cannot carry (a non-Latin name, for example)
+is left out with a warning naming it: the faces fall back to the
+base look's, the cursor to the default.
 
-Precedence per key: your `settings` value, then Stylix's, then the
-compositor default. One combination is invalid: your own
-`wallpaper.color` plus Stylix's `image` (scoot takes `image` or
-`color`, never both) — for a solid color under Stylix, set
-`programs.scoot.stylix.wallpaper.enable = false`, set your own
-`image`, or turn `stylix.enable` off. `cursor_color` has no Stylix
-convention and stays at the compositor default.
+- `programs.scoot.stylix.enable` — Type: bool. Default: `true`.
+  Synthesize the `stylix` look and make it the declared default. Set
+  to `false` to drop the synthesis with Stylix present.
+  ```nix title="home.nix"
+  programs.scoot.stylix.enable = false;
+  ```
+- `programs.scoot.stylix.extends` — Type: null or string. Default:
+  `"ginger-night"` with the desktop profile on, null otherwise. The
+  base the synthesized look extends; it resolves through `looks`, so
+  list a custom base there. Null extends nothing: the Stylix palette
+  alone.
+  ```nix title="home.nix"
+  programs.scoot.stylix.extends = "moonrise";
+  ```
+- `programs.scoot.stylix.wallpaper.enable` — Type: bool. Default:
+  `true`. Carry `stylix.image` and its scaling mode into the look.
+  Set to `false` for a solid color: the image stays out, so a
+  `color` you set stands alone (the palette, fonts, cursor and the
+  rest stay Stylix's).
+  ```nix title="home.nix"
+  programs.scoot.stylix.wallpaper.enable = false;
+  ```
+
+The declared default follows a ladder, highest first: a `look` you
+set, then `stylix` while it is synthesized, then the profile's
+`ginger-night`, then nothing (plain value, `mkDefault`, `mkOverride
+1200`, the option default). To pin a look under Stylix, set `look`;
+the live choice in `<state>/look.json` still beats the declaration
+until it changes (see `scoot look sync`).
+
+What changes, by setup:
+
+- Profile users with Stylix and no explicit `look`: GTK and Qt
+  colors, mako, fuzzel and the pickers, swaylock, wob and fcitx5 move
+  from ginger-night's palette to Stylix's, matching the compositor
+  and bar. Compositor and bar colors and fonts, the wallpaper, the
+  night temperature, and the terminal, shell, editor and monitor
+  files stay as they are.
+- Stylix with an explicit `look`: the look now wins in the
+  compositor and bar where Stylix used to. Paths a Stylix target
+  writes stay Stylix's (next paragraph), so the desktop stays split
+  until those targets go off.
+- Stylix without the profile: nothing visible changes. The `stylix`
+  look has no base; its colors, fonts, cursor and wallpaper equal
+  what the old per-setting defaults produced.
+
+One look everywhere needs the Stylix targets off: scoot never writes
+a path an upstream module owns, so with `stylix.targets.<app>.enable`
+on, that app's files stay Stylix's whatever the look. `scoot look
+apply` names those apps as owned by Stylix's target; the module
+records them in `~/.config/scoot/look-stylix-targets` (gtk, qt,
+foot, mako, fuzzel, swaylock, wob, fcitx5, starship, helix, btop).
+Turn off each target you want themed:
+
+```nix title="home.nix"
+stylix.targets.mako.enable = false;
+```
 
 A direct-module setup without the flake's overlay has no `scootbg`
 package: the wallpaper default then stays off rather than failing.

@@ -107,6 +107,7 @@ fn options() -> WatchOptions {
         no_toolkit: true,
         origin: Origin::User,
         nix_claims: Vec::new(),
+        stylix_targets: Vec::new(),
     }
 }
 

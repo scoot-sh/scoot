@@ -94,6 +94,10 @@ pub struct ApplyOptions {
     /// beside the declared default): the toolkit step leaves those alone
     /// however the live value reads.
     pub nix_claims: Vec<String>,
+    /// Apps whose Stylix target owns its path (the
+    /// `look-stylix-targets` file beside the declared default): the
+    /// reply names those instead of pretending the look reached them.
+    pub stylix_targets: Vec<String>,
 }
 
 /// What one `apply` did.
@@ -2166,6 +2170,9 @@ pub(crate) struct SwapRequest {
     pub no_btop: bool,
     /// dconf key paths home-manager owns: left alone however they read.
     pub nix_claims: Vec<String>,
+    /// Apps whose Stylix target owns its path: the reply names those
+    /// instead of pretending the look reached them.
+    pub stylix_targets: Vec<String>,
     /// Theme targets the swap leaves alone (the Nix cursor/fonts
     /// opt-outs, honored by `sync`; `apply` never skips: a manual
     /// choice themes everything until the next managed sync).
@@ -2299,6 +2306,7 @@ pub(crate) fn complete_swap(
                     resolve_config_home(config).as_deref(),
                     &link,
                     swap.target_skips,
+                    &swap.stylix_targets,
                 ));
             }
             // The daemon leaves are best-effort too, like the toolkit
@@ -2935,6 +2943,7 @@ pub fn apply_with_live(
             resolve_config_home(config).as_deref(),
             &link,
             TargetSkips::default(),
+            &options.stylix_targets,
         ));
     }
     // The daemon leaves are best-effort too: `makoctl reload`, the fcitx5

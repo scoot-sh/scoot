@@ -15,7 +15,7 @@ use super::super::apply::{ApplyOptions, Availability, Checks, apply_with};
 use super::super::leaves::ScriptedLeaves;
 use super::super::reload::{BarReload, CompositorReload, ReloadError, Reloaded};
 use super::super::toolkit::{COLOR_SCHEME_KEY, Dconf};
-use super::{SyncOptions, TargetSkips, parse_declared, sync_with};
+use super::{SyncOptions, TargetSkips, parse_declared, parse_stylix_targets, sync_with};
 use scoot_look::catalog::discover_ordered;
 
 static FIXTURE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -139,6 +139,7 @@ fn apply_options() -> ApplyOptions {
         preview: false,
         only_if_generation: None,
         nix_claims: Vec::new(),
+        stylix_targets: Vec::new(),
     }
 }
 
@@ -342,6 +343,7 @@ fn run_sync(
         declared,
         claims,
         TargetSkips::default(),
+        Vec::new(),
         &options(),
         &fixture.catalog,
         &fixture.cache,
@@ -599,6 +601,7 @@ fn rule_three_falls_back_when_the_live_choice_left() {
         Some(Some("look-b".to_owned())),
         Vec::new(),
         TargetSkips::default(),
+        Vec::new(),
         &options(),
         &catalog,
         &fixture.cache,
@@ -978,6 +981,29 @@ fn declared_files_parse() {
 }
 
 #[test]
+fn stylix_target_files_prefer_the_user_file() {
+    // `parse_stylix_targets` over scratch files: the user file wins
+    // when present, else the system one, else nothing. Lines pass
+    // through verbatim (matching trims at use).
+    let scratch = scratch("stylix-target-files");
+    let root = scratch.path();
+    let user = root.join("user-targets");
+    let system = root.join("system-targets");
+    assert!(parse_stylix_targets(Some(&user), &system).is_empty());
+    std::fs::write(&system, "gtk\n").expect("system file");
+    assert_eq!(
+        parse_stylix_targets(Some(&user), &system),
+        vec!["gtk".to_owned()]
+    );
+    std::fs::write(&user, "qt\nfoot\n").expect("user file");
+    assert_eq!(
+        parse_stylix_targets(Some(&user), &system),
+        vec!["qt".to_owned(), "foot".to_owned()]
+    );
+    assert_eq!(parse_stylix_targets(None, &system), vec!["gtk".to_owned()]);
+}
+
+#[test]
 fn target_skips_parse_one_name_per_line() {
     let lines = |text: &str| text.lines().map(str::to_owned).collect::<Vec<_>>();
     assert_eq!(TargetSkips::from_lines(&[]), TargetSkips::default());
@@ -1056,6 +1082,7 @@ fn sync_with_skips(
         declared,
         Vec::new(),
         skips,
+        Vec::new(),
         &options(),
         &fixture.catalog,
         &fixture.cache,

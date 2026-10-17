@@ -4,25 +4,36 @@
 # standalone with stub options standing in for what home-manager and NixOS
 # own, and the rendered files are validated by python's tomllib. Then the
 # part no stub can stand in for: the REAL scootbar binary reads each rendered
-# file.
+# file, and the REAL scoot-look binary renders the bar-only Stylix layer.
 #
 # Stylix is stubbed too, and that is what this cannot vouch for: its input is
-# not this flake's, so the stub declares just the four things the module
-# reads (`lib.stylix.colors.withHashtag.baseNN`, `stylix.enable`,
-# `stylix.fonts.sansSerif.{name,package}`, `stylix.fonts.sizes.desktop`),
-# checked by hand against nix-community/stylix at fb28acd (stylix/palette.nix,
-# stylix/target.nix, stylix/fonts.nix). A rename there would pass this file
-# and miss on a real Stylix; the font and color reads are the sites to look at.
+# not this flake's, so the stub declares just what the bar-only path reads
+# (`config.lib.stylix.colors.withHashtag.baseNN` for all sixteen slots,
+# `stylix.enable`, `stylix.fonts.sansSerif` and `.monospace` (`{ name,
+# package }`), `stylix.fonts.sizes.desktop/popups/applications/terminal`,
+# `stylix.opacity.popups/terminal`, `stylix.cursor`, `stylix.image`,
+# `stylix.imageScalingMode`, `stylix.polarity`), checked by hand against
+# nix-community/stylix at fb28acd (stylix/palette.nix, stylix/target.nix,
+# stylix/fonts.nix, stylix/opacity.nix, stylix/cursor.nix). A rename there
+# would pass this file and miss on a real Stylix; the real-Stylix run
+# `scripts/scootbar-stylix-test.sh` covers that.
 #
 # What this pins:
-# - precedence, highest first: a value the user wrote, then Stylix's, then the
-#   module's plain default (a font); per key, so a user's one color keeps
-#   Stylix's other four;
-# - Stylix is used only when `config.lib.stylix` exists AND `stylix.enable`
-#   is on AND `programs.scootbar.stylix.enable` is; otherwise not one Stylix
-#   key appears, and the module needs no Stylix option to evaluate;
-# - the font is a store FILE path (found in the family's package), never a
-#   name, and the size is in pixels;
+# - precedence, highest first: a value the user wrote, then the look layer
+#   at runtime, then the module's plain default (a font); Stylix reaches the
+#   file only as the `[look] layer`, never as eval-time values;
+# - the bar-only path: with Stylix in use and no scoot catalog, `settings`
+#   carry only `[look] layer`, pointing at a fragment whose six colors are
+#   the palette, whose `bar.font-size` is Stylix's size in pixels and whose
+#   `bar.font` is a store FILE found in the family's package; the
+#   plain-default font is left out while the layer covers it;
+# - the option does nothing with a catalog present (a warning, no layer),
+#   and stays silent without Stylix, opted out, or with no render binary;
+# - a scoot module beside the bar without a catalog (desktop off, no
+#   scoot-side synthesis) still takes the layer;
+# - the font is found by name inside the family's package, through the
+#   fragment (Noto and Nerd Font resolve, Inter and Ubuntu fall back with
+#   a warning naming the family);
 # - `features` reaches the build as `buildNoDefaultFeatures` +
 #   `buildFeatures` and an empty list sets no font;
 # - the unit: Restart=on-failure, KillMode=process (apps the bar launches
@@ -39,6 +50,7 @@
   runCommand,
   python3,
   scootbar,
+  scootLook,
   homeModule,
   nixosModule,
 }:
@@ -46,7 +58,7 @@
 let
   tomlFormat = pkgs.formats.toml { };
 
-  # A real font, so the real binary can load it: Stylix names one by family
+  # A real font, so the real binaries can load it: Stylix names one by family
   # and package, as it would for DejaVu Sans.
   dejavu = pkgs.dejavu_fonts.minimal;
   dejavuFile = "${dejavu}/share/fonts/truetype/DejaVuSans.ttf";
@@ -126,12 +138,19 @@ let
     };
   };
 
-  # The four things the module reads of Stylix, as it defines them.
+  # What the bar-only path reads of Stylix, as it defines it: all sixteen
+  # base16 slots (each distinct here, so a swapped slot fails the fragment
+  # pin), the families, the sizes, the two opacities, and the null cursor,
+  # image and either-polarity Stylix itself defaults to.
   stylixStub =
     {
       enable ? true,
       font ? {
         name = "DejaVu Sans";
+        package = dejavu;
+      },
+      monoFont ? {
+        name = "DejaVu Sans Mono";
         package = dejavu;
       },
       size ? 10,
@@ -142,18 +161,78 @@ let
         default = false;
       };
       options.stylix.fonts.sansSerif = lib.mkOption { type = lib.types.raw; };
-      options.stylix.fonts.sizes.desktop = lib.mkOption { type = lib.types.int; };
+      options.stylix.fonts.monospace = lib.mkOption { type = lib.types.raw; };
+      options.stylix.fonts.sizes = lib.mkOption { type = lib.types.raw; };
+      options.stylix.opacity = lib.mkOption { type = lib.types.raw; };
+      options.stylix.cursor = lib.mkOption { type = lib.types.raw; };
+      options.stylix.image = lib.mkOption { type = lib.types.raw; };
+      options.stylix.imageScalingMode = lib.mkOption { type = lib.types.str; };
+      options.stylix.polarity = lib.mkOption { type = lib.types.str; };
       config = {
         stylix.enable = enable;
         stylix.fonts.sansSerif = font;
-        stylix.fonts.sizes.desktop = size;
+        stylix.fonts.monospace = monoFont;
+        stylix.fonts.sizes = {
+          desktop = size;
+          popups = size;
+          applications = 12;
+          terminal = 12;
+        };
+        stylix.opacity = {
+          popups = 1.0;
+          terminal = 1.0;
+        };
+        stylix.cursor = null;
+        stylix.image = null;
+        stylix.imageScalingMode = "fill";
+        stylix.polarity = "either";
         lib.stylix.colors.withHashtag = {
           base00 = "#101010";
+          base01 = "#111111";
+          base02 = "#222222";
           base03 = "#303030";
+          base04 = "#444444";
           base05 = "#e0e0e0";
+          base06 = "#e6e6e6";
+          base07 = "#f0f0f0";
           base08 = "#ff0000";
+          base09 = "#ff8800";
+          base0A = "#ffff00";
+          base0B = "#00ff00";
+          base0C = "#00ffff";
           base0D = "#0000ff";
+          base0E = "#ff00ff";
+          base0F = "#885533";
         };
+      };
+    };
+
+  # The scoot side as the bar-only path sees it: just the four reads the
+  # catalog-presence check uses (`enable`, `desktop.enable`,
+  # `stylix.enable`, `lookPackage`), mirroring the catalog-install
+  # condition in `nix/modules/home.nix`.
+  scootStub =
+    {
+      enable ? true,
+      desktop ? true,
+      stylixEnable ? true,
+      lookPackage ? fakeBar,
+    }:
+    {
+      options.programs.scoot.enable = lib.mkEnableOption "scoot";
+      options.programs.scoot.desktop.enable = lib.mkEnableOption "scoot desktop profile";
+      options.programs.scoot.stylix.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+      };
+      options.programs.scoot.lookPackage = lib.mkOption {
+        type = lib.types.nullOr lib.types.package;
+        default = null;
+      };
+      config.programs.scoot = {
+        inherit enable lookPackage;
+        desktop.enable = desktop;
+        stylix.enable = stylixEnable;
       };
     };
 
@@ -178,6 +257,7 @@ let
         {
           programs.scootbar = cfg // {
             package = cfg.package or scootbar;
+            lookPackage = cfg.lookPackage or scootLook;
           };
         }
       ]
@@ -195,18 +275,30 @@ let
       extra = [ (stylixStub stub) ];
     })
       cfg;
+  evalHomeCataloged =
+    scoot: cfg:
+    (evalWith {
+      side = "home";
+      extra = [
+        (stylixStub { })
+        (scootStub scoot)
+      ];
+    })
+      cfg;
   evalNixos = evalWith {
     side = "nixos";
     extra = [ ];
   };
 
   settingsOf = e: e.config.programs.scootbar.settings;
+  warningsOf = e: e.config.warnings;
+  layerOf = e: (settingsOf e).look.layer;
   failing = e: map (a: a.message) (lib.filter (a: !a.assertion) e.config.assertions);
 
   # --- the evaluations ---
   plain = evalHome { enable = true; };
   themed = evalHomeStylix { } { enable = true; };
-  # The user's values beat Stylix's, per key.
+  # The user's values render as written, beside the same layer.
   userWins = evalHomeStylix { } {
     enable = true;
     settings = {
@@ -222,6 +314,10 @@ let
       bar.font-size = 20;
     };
   };
+  oneToken = evalHomeStylix { } {
+    enable = true;
+    settings.colors.accent = "#abcdef";
+  };
   # The flake's own module system: the user's `lib.mkForce`-free plain value
   # against a `mkDefault` set by another module (a profile, say) is the
   # same rule one level up.
@@ -234,6 +330,28 @@ let
     enable = true;
     stylix.enable = false;
   };
+  noLookPackage = evalHomeStylix { } {
+    enable = true;
+    lookPackage = null;
+  };
+  # A scoot catalog present: the desktop profile with a render binary.
+  cataloged = evalHomeCataloged { } { enable = true; };
+  # Scoot beside the bar but no catalog: the desktop off without
+  # scoot-side synthesis.
+  standaloneWithScoot =
+    evalHomeCataloged
+      {
+        desktop = false;
+        stylixEnable = false;
+      }
+      {
+        enable = true;
+      };
+  # The desktop on but no render binary there: no catalog installs, so the
+  # bar-only layer still applies.
+  filesOnlyScoot = evalHomeCataloged { lookPackage = null; } {
+    enable = true;
+  };
   bigSize = evalHomeStylix { size = 200; } { enable = true; };
   zeroSize = evalHomeStylix { size = 0; } { enable = true; };
   pickNoto = evalHomeStylix {
@@ -242,7 +360,7 @@ let
       package = distractors;
     };
   } { enable = true; };
-  # No regular-face file by these names: the plain default, with a warning.
+  # No regular-face file by these names: the fallback face, with a warning.
   pickInter = evalHomeStylix {
     font = {
       name = "Inter";
@@ -262,6 +380,10 @@ let
     };
   } { enable = true; };
   noFont = evalHomeStylix { } {
+    enable = true;
+    features = [ ];
+  };
+  noFontPlain = evalHome {
     enable = true;
     features = [ ];
   };
@@ -328,29 +450,21 @@ let
 
   is = a: b: a == b;
   checks = {
-    "no Stylix: no colors, the plain-default font file, no size" =
+    "no Stylix: the plain-default font file and nothing else, silently" =
       settingsOf plain == {
         bar.font = dejavuFile;
-      };
-    "Stylix on: six colors from base16, the font FILE, the size in pixels" =
+      }
+      && warningsOf plain == [ ];
+    "Stylix on, no catalog: settings carry only [look] layer, silently" =
       let
         s = settingsOf themed;
       in
-      s.colors == {
-        background = "#101010";
-        foreground = "#e0e0e0";
-        accent = "#0000ff";
-        hover = "#0000ff";
-        dim = "#303030";
-        urgent = "#ff0000";
-      }
-      && s.bar."font-size" == 13
-      && builtins.isString s.bar.font
-      && s.bar.font != dejavuFile
-      && lib.hasPrefix builtins.storeDir s.bar.font;
-    # Every Stylix leaf, one user override at a time: each must yield to the
-    # user (a leaf defined without mkDefault would conflict, and fail here).
-    "user beats Stylix beats plain: every Stylix key yields to a user value" =
+      builtins.attrNames s == [ "look" ]
+      && builtins.attrNames s.look == [ "layer" ]
+      && lib.hasPrefix builtins.storeDir s.look.layer
+      && lib.hasSuffix "/bar.toml" s.look.layer
+      && warningsOf themed == [ ];
+    "a user's values render as written beside the same layer" =
       let
         s = settingsOf userWins;
       in
@@ -363,50 +477,44 @@ let
         urgent = "#6789ab";
       }
       && s.bar.font == "/user/font.ttf"
-      && s.bar."font-size" == 20;
-    "user beats Stylix beats plain: one user token keeps the other five Stylix's" =
-      lib.all
-        (
-          token:
-          let
-            s =
-              (evalHomeStylix { } {
-                enable = true;
-                settings.colors.${token} = "#abcdef";
-              }).config.programs.scootbar.settings.colors;
-          in
-          s.${token} == "#abcdef"
-          && builtins.removeAttrs s [ token ] == builtins.removeAttrs (settingsOf themed).colors [ token ]
-        )
-        [
-          "background"
-          "foreground"
-          "accent"
-          "hover"
-          "dim"
-          "urgent"
-        ];
+      && s.bar."font-size" == 20
+      && s.look.layer == (settingsOf themed).look.layer;
+    "a user's one token renders beside the layer, and nothing else" =
+      settingsOf oneToken == {
+        colors.accent = "#abcdef";
+        look.layer = (settingsOf themed).look.layer;
+      };
     "a user's one token without Stylix adds only that token" =
       settingsOf profileVsUser == {
         colors.accent = "#abcdef";
         bar.font = dejavuFile;
       };
     "stylix.enable = false (Stylix's own switch) is as if absent" =
-      settingsOf stylixDisabled == settingsOf plain;
+      settingsOf stylixDisabled == settingsOf plain && warningsOf stylixDisabled == [ ];
     "programs.scootbar.stylix.enable = false is as if absent" =
-      settingsOf stylixOptOut == settingsOf plain;
-    "the size is clamped to the bar's 1..256" =
-      (settingsOf bigSize).bar."font-size" == 256 && (settingsOf zeroSize).bar."font-size" == 1;
-    "features = [ ] sets no font, with or without Stylix" =
+      settingsOf stylixOptOut == settingsOf plain && warningsOf stylixOptOut == [ ];
+    "no render binary is as if absent: the plain default returns, silently" =
+      settingsOf noLookPackage == settingsOf plain && warningsOf noLookPackage == [ ];
+    "with a scoot catalog present the option warns and sets no layer" =
+      !(settingsOf cataloged ? look)
+      && lib.any (lib.hasInfix "programs.scootbar.stylix.enable has no effect") (warningsOf cataloged);
+    "scoot beside the bar without a catalog still takes the same layer, silently" =
+      layerOf standaloneWithScoot == layerOf themed && warningsOf standaloneWithScoot == [ ];
+    "the desktop on but no render binary there installs no catalog, so the layer stays" =
+      layerOf filesOnlyScoot == layerOf themed && warningsOf filesOnlyScoot == [ ];
+    "a large and a zero size still render a layer (clamped in the fragment)" =
+      lib.hasSuffix "/bar.toml" (layerOf bigSize) && lib.hasSuffix "/bar.toml" (layerOf zeroSize);
+    "every picked family still renders a layer" = lib.all (e: lib.hasSuffix "/bar.toml" (layerOf e)) [
+      pickNoto
+      pickInter
+      pickUbuntu
+      pickNerd
+    ];
+    "features = [ ] sets no font: only the layer with Stylix, nothing without" =
       settingsOf noFont == {
-        colors = (settingsOf themed).colors;
-        bar."font-size" = 13;
+        look.layer = (settingsOf themed).look.layer;
       }
-      &&
-        (evalHome {
-          enable = true;
-          features = [ ];
-        }).config.programs.scootbar.settings == { };
+      && settingsOf noFontPlain == { };
     "features reaches the build as no-default-features + the list" =
       recorded.config.programs.scootbar.finalPackage.overrideArgs == {
         buildNoDefaultFeatures = true;
@@ -457,7 +565,8 @@ let
       && u.after == [ "graphical-session.target" ]
       && u.unitConfig.StartLimitIntervalSec == 0
       && u.wantedBy == [ "graphical-session.target" ];
-    "nixos: Stylix defaults apply there too" = (settingsOf osThemed).colors.accent == "#0000ff";
+    "nixos: the bar-only layer applies there too, the same fragment" =
+      layerOf osThemed == layerOf themed;
   };
   failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
 
@@ -481,19 +590,22 @@ runCommand "scootbar-modules"
     );
     passAsFile = [ "expectations" ];
     inherit unknownKey;
-    # The two font pins read the symlink the module builds.
-    pickNoto = (settingsOf pickNoto).bar.font;
-    pickInter = (settingsOf pickInter).bar.font;
-    pickUbuntu = (settingsOf pickUbuntu).bar.font;
-    pickNerd = (settingsOf pickNerd).bar.font;
-    themedFont = (settingsOf themed).bar.font;
+    # The bar-only layers whose fragments the pins below read: each build
+    # runs the real `scoot-look` over the synthesized Stylix reads.
+    themedLayer = layerOf themed;
+    bigLayer = layerOf bigSize;
+    zeroLayer = layerOf zeroSize;
+    notoLayer = layerOf pickNoto;
+    interLayer = layerOf pickInter;
+    ubuntuLayer = layerOf pickUbuntu;
+    nerdLayer = layerOf pickNerd;
     inherit dejavuFile distractors;
     files = lib.concatStringsSep " " (lib.mapAttrsToList (n: f: "${n}=${f}") rendered);
     checkNames = builtins.toJSON (lib.attrNames checks);
   }
   ''
     # 1. Every rendered file parses, and reads back as exactly the settings
-    #    the module evaluated to.
+    #    the module evaluated to (user values verbatim, the layer under them).
     python3 - <<'PY'
     import json, os, tomllib
     for x in json.load(open(os.environ["expectationsPath"])):
@@ -502,26 +614,61 @@ runCommand "scootbar-modules"
         print("toml ok:", x["name"])
     PY
 
-    # 2. The font is found by name inside the family's package.
-    [ "$(readlink -f "$themedFont")" = "$dejavuFile" ] || { echo "themed font is not DejaVuSans.ttf: $themedFont"; exit 1; }
-    [ "$(readlink -f "$pickNoto")" = "$distractors/share/fonts/truetype/NotoSans-Regular.ttf" ] || { echo "Noto picked $(readlink -f "$pickNoto")"; exit 1; }
-    # No regular face by that name (variable font, .ttc, Ubuntu-R): the plain
-    # default font, and the derivation's warning names the family.
-    for pair in "Inter=$pickInter" "Ubuntu=$pickUbuntu"; do
-      fam=''${pair%%=*}; font=''${pair#*=}
+    # 2. The bar-only layer: the fragment each themed file points at carries
+    #    the palette (background base00, foreground base05, accent and hover
+    #    base0D like the compositor's focused ring, dim base03, urgent base08)
+    #    and the size in pixels (points clamp into 4..192 first, then convert
+    #    at 4/3: 200pt clamps to 192pt for 256px, 0pt clamps to 4pt for 5px).
+    python3 - "$themedLayer" "$bigLayer" "$zeroLayer" <<'PY'
+    import os, sys, tomllib
+    themed, big, zero = (tomllib.load(open(p, "rb")) for p in sys.argv[1:4])
+    assert themed["colors"] == {
+        "background": "#101010",
+        "foreground": "#e0e0e0",
+        "accent": "#0000ff",
+        "hover": "#0000ff",
+        "dim": "#303030",
+        "urgent": "#ff0000",
+    }, themed["colors"]
+    assert len(set(themed["colors"].values())) == 5, (
+        "two tokens share a color beyond hover==accent, so a swapped slot would pass",
+        themed["colors"],
+    )
+    assert themed["bar"]["font-size"] == 13, themed["bar"]
+    assert big["bar"]["font-size"] == 256, big["bar"]
+    assert zero["bar"]["font-size"] == 5, zero["bar"]
+    for name, frag in (("themed", themed), ("big", big), ("zero", zero)):
+        font = frag["bar"]["font"]
+        # The fragment points at the font derivation's `font` symlink;
+        # the target is the real file.
+        real = os.path.realpath(font)
+        assert font.startswith("/nix/store/"), (name, font)
+        assert real.endswith((".ttf", ".otf")) and os.path.getsize(real) > 1000, (name, font, real)
+        print("layer ok:", name, "size", frag["bar"]["font-size"], "font", real)
+    PY
+
+    # 3. The font is found by family inside its package, through the
+    #    fragment. No regular face by that name (variable font, .ttc,
+    #    Ubuntu-R): the fallback face, and the derivation's warning names
+    #    the family.
+    fontOf() { python3 -c 'import sys,tomllib; print(tomllib.load(open(sys.argv[1],"rb"))["bar"]["font"])' "$1"; }
+    [ "$(readlink -f "$(fontOf "$themedLayer")")" = "$dejavuFile" ] || { echo "themed font is not DejaVuSans.ttf: $(fontOf "$themedLayer")"; exit 1; }
+    [ "$(readlink -f "$(fontOf "$notoLayer")")" = "$distractors/share/fonts/truetype/NotoSans-Regular.ttf" ] || { echo "Noto picked $(readlink -f "$(fontOf "$notoLayer")")"; exit 1; }
+    for pair in "Inter=$interLayer" "Ubuntu=$ubuntuLayer"; do
+      fam=''${pair%%=*}; layer=''${pair#*=}; font=$(fontOf "$layer")
       [ "$(readlink -f "$font")" = "$dejavuFile" ] || { echo "$fam did not fall back to DejaVu Sans: $(readlink -f "$font")"; exit 1; }
       grep -q "no regular-face file named for \"$fam\"" "$(dirname "$font")/warning" || { echo "no warning for $fam:"; cat "$(dirname "$font")/warning"; exit 1; }
     done
     # A resolved font leaves the warning empty.
-    [ ! -s "$(dirname "$pickNoto")/warning" ] || { echo "warning on a resolved font"; exit 1; }
-    [ "$(readlink -f "$pickNerd")" = "$distractors/share/fonts/opentype/JetBrainsMonoNerdFont-Regular.otf" ] || { echo "Nerd picked $(readlink -f "$pickNerd")"; exit 1; }
+    [ ! -s "$(dirname "$(fontOf "$notoLayer")")/warning" ] || { echo "warning on a resolved font"; exit 1; }
+    [ "$(readlink -f "$(fontOf "$nerdLayer")")" = "$distractors/share/fonts/opentype/JetBrainsMonoNerdFont-Regular.otf" ] || { echo "Nerd picked $(readlink -f "$(fontOf "$nerdLayer")")"; exit 1; }
 
-    # 3. The real binary, `daemon --check` (its output goes in `got`, not
+    # 4. The real binary, `daemon --check` (its output goes in `got`, not
     #    `out`, which is $out): what a start does before it
-    #    connects (the file, the font, the modules), with nothing to connect
-    #    to. A bad file is refused at the file, exit 1. An empty runtime dir
-    #    and no `WAYLAND_DISPLAY`: --check touches neither, and the check
-    #    would catch it if that changed.
+    #    connects (the file, the font, the modules, the layer merge), with
+    #    nothing to connect to. A bad file is refused at the file, exit 1.
+    #    An empty runtime dir and no `WAYLAND_DISPLAY`: --check touches
+    #    neither, and the check would catch it if that changed.
     export XDG_RUNTIME_DIR=$TMPDIR/run HOME=$TMPDIR/home
     mkdir -p "$XDG_RUNTIME_DIR" "$HOME"
     unset WAYLAND_DISPLAY

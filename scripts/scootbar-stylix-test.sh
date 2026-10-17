@@ -2,15 +2,20 @@
 # homeModules.scootbar against a REAL Stylix and a REAL home-manager, not the stand-ins
 # of nix/scootbar-tests.nix: evaluates both from their flakes (pinned revisions below),
 # themes from a real image (Stylix runs its palette generator on it), builds the
-# home-manager generation and then checks, on the file the generation renders:
-#   T1  the six color tokens are the base16 palette's (background base00, foreground
-#       base05, accent base0D, hover base0D like the compositor's focused ring, dim base03,
+# home-manager generation and then checks the bar-only path (standalone scootbar +
+# real Stylix, no scoot module: the module renders the `stylix` look's bar fragment
+# itself and pins it as `[look] layer`):
+#   T1  the `[look] layer` fragment's six color tokens are the base16
+#       palette's (background base00, foreground base05, accent base0D,
+#       hover base0D like the compositor's focused ring, dim base03,
 #       urgent base08), and not the bar's own defaults
-#   T2  bar.font is a store path to a real font file, bar.font-size Stylix's size in pixels
+#   T2  the fragment's bar.font is a store path to a real font file, its
+#       bar.font-size Stylix's size in pixels; `settings` carry no Stylix
+#       values anymore, only the layer
 #   T3  the rendered bar.toml reads back as exactly the evaluated settings
 #   T4  `scootbar daemon --check` accepts it
-#   T5  a user value wins over Stylix's, one token at a time (the other tokens stay
-#       Stylix's), in the evaluation and in the file
+#   T5  a user value wins over the layer, one token at a time (the other
+#       tokens stay the layer's), in the evaluation and in the file
 #   T6  on a headless scoot, the bar run with that file draws base00 as its background,
 #       and a user's background in place of it when the user sets one
 # Ends with RESULT: PASS n FAIL m (exit 1 on any FAIL, 2 on a setup problem).
@@ -102,6 +107,7 @@ let
   };
   facts = c: {
     settings = c.config.programs.scootbar.settings;
+    layer = c.config.programs.scootbar.settings.look.layer;
     palette = builtins.mapAttrs (_: v: v) {
       inherit (c.config.lib.stylix.colors.withHashtag) base00 base03 base05 base08 base0D;
     };
@@ -137,9 +143,12 @@ echo "   themed settings: $(python3 -c 'import json,sys; print(json.dumps(json.l
 echo "   user settings:   $(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["settings"], sort_keys=True))' "$W/user.json")"
 
 pyck() { python3 - "$@"; }
-t1() { pyck "$W/themed.json" <<'PY'
-import json, sys
-f = json.load(open(sys.argv[1])); s, p = f["settings"]["colors"], f["palette"]
+t1() { pyck "$THEMED_TOML" "$W/themed.json" <<'PY'
+import json, sys, tomllib
+bar = tomllib.load(open(sys.argv[1], "rb"))
+frag = tomllib.load(open(bar["look"]["layer"], "rb"))
+p = json.load(open(sys.argv[2]))["palette"]
+s = frag["colors"]
 want = {"background": p["base00"], "foreground": p["base05"], "accent": p["base0D"], "hover": p["base0D"], "dim": p["base03"], "urgent": p["base08"]}
 bar_defaults = {"background": "#1e1e2e", "foreground": "#cdd6f4"}
 assert s == want, (s, want)
@@ -147,10 +156,13 @@ assert all(s[k] != v for k, v in bar_defaults.items()), "the tokens are the bar'
 assert len(set(s.values())) == 5, ("two tokens share a color beyond hover==accent, so a swapped slot would pass", s)
 PY
 }
-ck "T1 the six color tokens are base16 base00/05/0D/0D/03/08 of the image's palette, not the bar's defaults" t1
-t2() { pyck "$W/themed.json" <<'PY'
-import json, os, sys
-f = json.load(open(sys.argv[1])); bar = f["settings"]["bar"]
+ck "T1 the layer fragment's six color tokens are base16 base00/05/0D/0D/03/08 of the image's palette, not the bar's defaults" t1
+t2() { pyck "$W/themed.json" "$THEMED_TOML" <<'PY'
+import json, os, sys, tomllib
+f = json.load(open(sys.argv[1]))
+assert set(f["settings"]) == {"look"}, ("settings carry Stylix values, only the layer may", f["settings"])
+assert f["layer"] == tomllib.load(open(sys.argv[2], "rb"))["look"]["layer"], "the file's layer is not the evaluated one"
+bar = tomllib.load(open(f["layer"], "rb"))["bar"]
 assert f["family"] == "DejaVu Sans", f["family"]
 real = os.path.realpath(bar["font"])
 assert real.startswith("/nix/store/") and real.endswith(".ttf") and os.path.getsize(real) > 1000, real
@@ -158,7 +170,7 @@ assert bar["font-size"] == (f["desktopSize"] * 4 + 1) // 3 == 13, (bar["font-siz
 print("   font ->", real, " size", f["desktopSize"], "pt ->", bar["font-size"], "px")
 PY
 }
-ck "T2 bar.font is a real font file in the store, bar.font-size Stylix's size in pixels" t2
+ck "T2 the fragment's bar.font is a real font file in the store, its bar.font-size Stylix's size in pixels, settings carry only the layer" t2
 t3() { pyck "$W/themed.json" "$THEMED_TOML" "$W/user.json" "$USER_TOML" <<'PY'
 import json, sys, tomllib
 for js, toml in ((sys.argv[1], sys.argv[2]), (sys.argv[3], sys.argv[4])):
@@ -172,16 +184,19 @@ check_ok() { [ "$("$BAR" daemon --check --config "$1" 2>"$W/check.err")" = ok ] 
 ck "T4 scootbar daemon --check accepts the themed file" check_ok "$THEMED_TOML"
 ck "T4 scootbar daemon --check accepts the user-override file" check_ok "$USER_TOML"
 t5() { pyck "$W/themed.json" "$W/user.json" <<'PY'
-import json, sys
+import json, sys, tomllib
 t, u = (json.load(open(a)) for a in sys.argv[1:3])
-tc, uc = t["settings"]["colors"], u["settings"]["colors"]
-assert uc["accent"] == "#abcdef" and uc["background"] == "#123456", uc
+ts, us = t["settings"], u["settings"]
+assert us["colors"] == {"accent": "#abcdef", "background": "#123456"}, us["colors"]
+assert us["bar"] == {"font-size": 20}, us["bar"]
+assert us["look"]["layer"] == ts["look"]["layer"] == t["layer"], "the user file points at another layer"
+frag = tomllib.load(open(t["layer"], "rb"))
 for k in ("foreground", "dim", "urgent"):
-    assert uc[k] == tc[k], (k, uc[k], tc[k])
-assert u["settings"]["bar"]["font-size"] == 20 and u["settings"]["bar"]["font"] == t["settings"]["bar"]["font"]
+    assert k in frag["colors"] and k not in us.get("colors", {}), (k, us)
+assert "font" in frag["bar"] and "font" not in us.get("bar", {}), us.get("bar")
 PY
 }
-ck "T5 a user's values win per key (accent, background, size); Stylix keeps the other tokens and the font" t5
+ck "T5 a user's values win per key (accent, background, size); the layer keeps the other tokens and the font" t5
 
 # T6: pixels. A headless scoot, the bar run with each file, a screenshot of the output.
 RUN=$W/run; mkdir -p "$RUN"; chmod 700 "$RUN"

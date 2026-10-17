@@ -363,8 +363,8 @@ in
         # Free-form `key = value` lines merged over the look-themed
         # config (a value you set wins per key). An empty string renders
         # a bare flag (`{ show-failed-attempts = ""; }`). The look's
-        # leaves stay when Stylix/the theme-look child arrives (user >
-        # Stylix > look, per key); `theme.targets.lock.enable = false`
+        # leaves stay when the theme-look child arrives (user > look,
+        # per key); `theme.targets.lock.enable = false`
         # drops the themed block but keeps these.
         settings = lib.mkOption {
           type = lib.types.attrsOf lib.types.str;

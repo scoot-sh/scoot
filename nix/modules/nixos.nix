@@ -26,7 +26,50 @@ let
       else
         null;
   };
-  lookCatalog = lookCatalogLib.mkCatalog cfg.looks;
+  # Stylix synthesis (the `stylix` look): same rule as the
+  # home-manager side — on when scoot is managed, its switch is on,
+  # Stylix itself is in use, and a render binary is on hand. The
+  # system side always carries the image when one is set (it renders
+  # no config file, so there is no `wallpaper.enable` half here).
+  stylixPresent = config.lib ? stylix && (config.stylix.enable or false);
+  stylixActive = cfg.enable && cfg.stylix.enable && stylixPresent && cfg.lookPackage != null;
+  stylixLib = import ../lib/look-from-stylix.nix { inherit lib; };
+  stylixDark =
+    if !stylixActive then
+      false
+    else if (config.stylix.polarity or "either") == "dark" then
+      true
+    else if (config.stylix.polarity or "either") == "light" then
+      false
+    else
+      stylixLib.isDarkByLuma config.lib.stylix.colors.withHashtag.base00 config.lib.stylix.colors.withHashtag.base05;
+  lookCatalog = lookCatalogLib.mkCatalog {
+    looks = cfg.looks;
+    stylix =
+      if !stylixActive then
+        null
+      else
+        {
+          extends = cfg.stylix.extends;
+          colors = config.lib.stylix.colors.withHashtag;
+          fontsSans = config.stylix.fonts.sansSerif or null;
+          fontsMono = config.stylix.fonts.monospace or null;
+          sizes = {
+            desktop = (config.stylix.fonts.sizes or { }).desktop or null;
+            popups = (config.stylix.fonts.sizes or { }).popups or null;
+            applications = (config.stylix.fonts.sizes or { }).applications or null;
+            terminal = (config.stylix.fonts.sizes or { }).terminal or null;
+          };
+          opacity = {
+            popups = (config.stylix.opacity or { }).popups or null;
+            terminal = (config.stylix.opacity or { }).terminal or null;
+          };
+          cursor = config.stylix.cursor or null;
+          image = config.stylix.image or null;
+          imageMode = config.stylix.imageScalingMode or "fill";
+          isDark = stylixDark;
+        };
+  };
 
   # The greeter's look (ticket `look-greeter`): `greeter.look`,
   # defaulting to the declared `look` (set beside the options below)
@@ -1020,13 +1063,53 @@ in
       default = null;
       defaultText = lib.literalMD ''
         `"ginger-night"` when `desktop.enable` is on (the profile sets it),
-        `null` (nothing themed) otherwise
+        `"stylix"` when Stylix synthesis is on, `null` (nothing themed) otherwise
       '';
       example = "moonrise";
       description = ''
         One name from `looks`: the declared default look. Setting
         `look = null` explicitly is the opt-out, and themes nothing.
       '';
+    };
+
+    # Stylix as a source of a look (design section 5): on by default,
+    # effective only when Stylix itself is in use and a render binary
+    # is on hand. On, the catalog gains a synthesized look named
+    # `stylix` and the declared default follows it. Same meaning as
+    # the home-manager side's `programs.scoot.stylix`.
+    stylix = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Synthesize the `stylix` look from Stylix when it is in use
+          (`config.lib.stylix` exists and `stylix.enable` is on) and
+          make it the declared default. Nothing here needs Stylix, and
+          nothing changes without it.
+        '';
+      };
+
+      extends = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = if (cfg.desktop.enable or false) then "ginger-night" else null;
+        defaultText = lib.literalExpression ''
+          "ginger-night" when programs.scoot.desktop.enable is on, null otherwise
+        '';
+        example = "moonrise";
+        description = ''
+          The look the synthesized `stylix` look extends. Null extends
+          nothing: a standalone look of the Stylix palette alone.
+        '';
+      };
+
+      theme = lib.mkOption {
+        type = lib.types.nullOr lib.types.attrs;
+        internal = true;
+        default = lookCatalog.stylixTheme;
+        description = ''
+          The synthesized theme value for the `stylix` look.
+        '';
+      };
     };
 
     # The `scoot-look` binary that renders the catalog at build time:
@@ -2438,20 +2521,34 @@ in
     # without a choice (a value the user sets wins over this default,
     # including an explicit null to theme nothing). One rung above the
     # Stylix source's `mkDefault` (1000) and below the option's own
-    # `default = null` (1500). It lives here and on the home-manager
-    # side rather than as the option default, so a look never lands
-    # without the profile (the refusal below keeps firing then).
+    # `default = null` (1500): Stylix, when synthesized, beats the
+    # profile, and the profile beats nothing chosen. It lives here
+    # and on the home-manager side rather than as the option default,
+    # so a look never lands without the profile (the refusal below
+    # keeps firing then, except for the synthesized `stylix` look,
+    # which installs its own catalog).
     (lib.mkIf cfg.desktop.enable {
       programs.scoot.look = lib.mkOverride 1200 "ginger-night";
     })
+    # The Stylix source, when synthesized: the declared default
+    # `stylix` at `mkDefault` (1000), above the profile's `mkOverride
+    # 1200` and below the user. Same meaning as the home-manager
+    # side's: swapping away and back works like any other look; the
+    # apps never read Stylix, only this look.
+    (lib.mkIf stylixActive {
+      programs.scoot.look = lib.mkDefault "stylix";
+    })
     # A look without the profile is a silent no-op; refuse it loudly
-    # instead (kept outside `desktop.enable` so it still fires then).
-    # An unknown look fails here too, against the catalog — never a
-    # half-applied switch.
+    # instead (kept outside `desktop.enable` so it still fires then)
+    # — except the synthesized `stylix` look, whose catalog installs
+    # without the profile too. The catalog below installs with the
+    # profile (or that synthesis) for the same reason. An unknown
+    # look fails here too, against the catalog — never a half-applied
+    # switch.
     (lib.mkIf (cfg.look != null) {
       assertions = [
         {
-          assertion = cfg.desktop.enable;
+          assertion = cfg.desktop.enable || (stylixActive && cfg.look == "stylix");
           message = ''
             programs.scoot.look needs programs.scoot.desktop.enable:
             the look is applied by the profile, so the profile must be on.
@@ -2473,12 +2570,14 @@ in
       programs.scoot.greeter.look = lib.mkDefault cfg.look;
     }
     # A greeter look without the profile is a silent no-op; refuse it
-    # loudly instead. An unknown greeter look fails here too, against
+    # loudly instead — except the synthesized `stylix` look, which
+    # follows the declared default into the catalog without the
+    # profile too. An unknown greeter look fails here too, against
     # the catalog — never a half-themed login screen.
     (lib.mkIf (cfg.greeter.look != null) {
       assertions = [
         {
-          assertion = cfg.desktop.enable;
+          assertion = cfg.desktop.enable || (stylixActive && cfg.greeter.look == "stylix");
           message = ''
             programs.scoot.greeter.look needs programs.scoot.desktop.enable:
             the login screen's look is applied by the profile, so the profile must be on.
@@ -2501,8 +2600,9 @@ in
     # claims file (no `dconf.settings` merge is visible from this
     # side — the home-manager side writes the real claims, and with no
     # home-manager there is nothing to claim). Only with the profile
-    # and a render binary.
-    (lib.mkIf (cfg.desktop.enable && lookCatalog.sources != null) {
+    # (or the Stylix synthesis, which carries its own look) and a
+    # render binary.
+    (lib.mkIf ((cfg.desktop.enable || stylixActive) && lookCatalog.sources != null) {
       environment.systemPackages = [
         (pkgs.runCommand "scoot-looks-catalog" { } ''
           mkdir -p $out/share/scoot/looks $out/share/scoot/rendered

@@ -1451,6 +1451,7 @@ fn run_apply(
         preview: for_secs.is_some(),
         only_if_generation,
         nix_claims: sync::read_nix_claims(),
+        stylix_targets: sync::read_stylix_targets(),
     };
     let armed = apply_and_print(look, name, &options, for_secs)?;
     if keep && had_preview {
@@ -1496,6 +1497,7 @@ fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
         preview: false,
         only_if_generation: None,
         nix_claims: sync::read_nix_claims(),
+        stylix_targets: sync::read_stylix_targets(),
     };
     apply_and_print(look, &target, &options, None).map(|_| ())
 }
@@ -1549,6 +1551,7 @@ fn run_pick(look: &Look) -> Result<(), String> {
         preview: false,
         only_if_generation: None,
         nix_claims: sync::read_nix_claims(),
+        stylix_targets: sync::read_stylix_targets(),
     };
     apply_and_print(look, &choice, &options, None).map(|_| ())
 }
@@ -1814,6 +1817,10 @@ fn run_sync(look: &Look, no_toolkit: bool) -> Result<(), String> {
     // The opted-out theme targets beside it (best-effort, like the
     // claims): whatever sync points at renders without them.
     let target_skips = sync::read_nix_targets();
+    // The Stylix-owned apps beside it (best-effort, like the claims):
+    // the reply names those instead of pretending the look reached
+    // them.
+    let stylix_targets = sync::read_stylix_targets();
     let catalog = discover();
     let cache = apply::render_cache_dir()?;
     let roots = sync::rendered_roots();
@@ -1840,6 +1847,7 @@ fn run_sync(look: &Look, no_toolkit: bool) -> Result<(), String> {
         declared,
         nix_claims,
         target_skips,
+        stylix_targets,
         &options,
         &catalog,
         &cache,
@@ -2108,6 +2116,7 @@ fn run_watch(look: &Look, dir: &Path, no_toolkit: bool, origin: Origin) -> Resul
         no_toolkit,
         origin,
         nix_claims: sync::read_nix_claims(),
+        stylix_targets: sync::read_stylix_targets(),
     };
     let socket = look.socket.clone();
     let make_compositor = || -> Box<dyn CompositorReload> {
