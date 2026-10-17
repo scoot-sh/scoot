@@ -224,7 +224,7 @@
 #   directory entry each fail eval; neither picker touches its
 #   service (no NetworkManager takeover, no Bluetooth hardware
 #   switch -- pinned off);
-#   the theme (`desktop-theme-look` child) runs with the profile --
+#   the theme child runs with the profile --
 #   the theme files on disk (both `Mocu` and `Mocu-Black` carry every
 #   canonical and legacy cursor name, each file loading through
 #   libXcursor), GTK settings, the qt6ct config plus
@@ -985,10 +985,10 @@ let
     };
   # The pure synthesis, called directly: the full input (every read
   # the stub declares) and the base variant (no image, no cursor, an
-  # explicit light resolution over the ginger-night registry look),
+  # explicit light resolution over the ginger-night shipped look),
   # plus the two refusals.
   stylixSynthLib = import ./lib/look-from-stylix.nix { inherit lib; };
-  gingerNightLook = (import ./modules/desktop.nix { inherit lib; }).looks."ginger-night";
+  gingerNightLook = (import ./lib/look-shipped.nix { inherit lib; }).looks."ginger-night";
   stylixSynthFull = stylixSynthLib.synthesize {
     colors = stylixPaletteFull;
     fontsSans = {
@@ -4487,7 +4487,7 @@ let
         desktop.audio.daemon = "bogus-daemon";
       }).config.programs.scoot.desktop.audio.daemon;
 
-  # --- theme-look (`programs.scoot.desktop.theme`) evaluations ---
+  # --- theme (`programs.scoot.desktop.theme`) evaluations ---
   #
   # The profile with a light look: the whole theme on (GTK settings,
   # Qt config, fontconfig default, cursor in the compositor config,
@@ -4539,7 +4539,7 @@ let
     desktop.theme.enable = false;
   };
   # ...Stylix with an explicit look: the look carries everything (the
-  # theme reads the registry look, never Stylix slots), and the
+  # theme reads the shipped look, never Stylix slots), and the
   # synthesized theme waits for the `stylix` look.
   hmThemeStylix = evalHomeStylix { } {
     enable = true;
@@ -4882,7 +4882,7 @@ let
     desktop.theme.fonts.uiPackage = fakeUiPkg;
   } { package = fakeBar; };
 
-  # --- theme-look greeter evaluations (NixOS) ---
+  # --- theme greeter evaluations (NixOS) ---
   #
   # The greeter behind the profile with a look: backdrop pairing, the
   # dark setting, the look's CSS and font.
@@ -4936,7 +4936,7 @@ let
     greeter.enable = true;
     greeter.look = "ginger-night";
   } greeterUser;
-  # ...a custom catalog look outside the registry: polarity, sans,
+  # ...a custom catalog look outside the shipped set: polarity, sans,
   # backdrop and CSS all read from its manifest down the `extends`
   # chain (light through no local table, DejaVu Sans through
   # ginger-night, no backdrop from a color wallpaper, its own CSS
@@ -12074,7 +12074,7 @@ let
       true
     )
     # ...Stylix with an explicit look: the look carries everything
-    # (the theme reads the registry look, never Stylix slots), the
+    # (the theme reads the shipped look, never Stylix slots), the
     # compositor settings stay the user's alone...
     (
       assert allAssertionsHold hmThemeStylix.config;
@@ -12104,7 +12104,7 @@ let
     )
     (
       assert
-        (import ./modules/theme-look.nix { inherit lib; }).lookFor hmThemeStylixLook.config.programs.scoot
+        (import ./lib/look-shipped.nix { inherit lib; }).lookFor hmThemeStylixLook.config.programs.scoot
         == hmThemeStylixLook.config.programs.scoot.stylix.theme;
       true
     )
@@ -12756,11 +12756,14 @@ let
     )
   ];
 
-  # The shipped looks agree with the registry (`looks-shipped-check.nix`):
-  # each `looks/<name>/look.toml` against `nix/modules/desktop.nix`, and
-  # the style tokens against the example files. Pure evaluation, so it
-  # runs on every platform, not only where the desktop profile can run.
-  _lookShippedPins = import ./looks-shipped-check.nix { inherit lib; };
+  # The shipped looks agree with their examples (`looks-examples-check.nix`):
+  # each `looks/<name>/look.toml` against `docs/examples/<name>/`, over
+  # the style tokens and the foot hues. The look directories are the
+  # single source of truth -- the Nix side reads the same manifests at
+  # evaluation -- so no registry counterpart is left to compare. Pure
+  # evaluation, so it runs on every platform, not only where the
+  # desktop profile can run.
+  _lookShippedPins = import ./looks-examples-check.nix { inherit lib; };
 
   # --- the look catalog (`programs.scoot.looks`, `programs.scoot.look`) ---
   # The declared default, the catalog links, the claims file and the
@@ -12844,7 +12847,7 @@ let
       true
     )
     # ...first wins: the path entry for moonrise beside the shipped
-    # `"moonrise"` keeps the shipped source (registry order, not store
+    # `"moonrise"` keeps the shipped source (catalog order, not store
     # basename)...
     (
       assert lib.hasSuffix "looks/moonrise" (
@@ -13005,7 +13008,7 @@ let
 
   # --- auth/secrets slots off Linux (fail `nix flake check` at eval) ---
   #
-  # --- theme-look off Linux (fail `nix flake check` at eval) ---
+  # --- theme off Linux (fail `nix flake check` at eval) ---
   #
   # The tools above are Linux-only: off Linux each package defaults to
   # null, which the slot's own assertions refuse loudly instead of
