@@ -406,6 +406,8 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Later: opt-in automatic look switching](./core/look-auto-switch.md) (low, later)
 
 ### Core / config / rendering
+- [Idle lock shows a blank white screen with no prompt](./core/lock-screen-blank-no-prompt.md) — medium, filed 2026-10-17 from the scoot-iso aarch64/HVF install walkthrough: idle lock past 4m shows plain white fullscreen (config says navy `2B3648`), no prompt; typing the password blind unlocks
+- [`scoot look list` prints every look twice (shadowed duplicates)](./core/look-list-shadowed-duplicates.md) — low, filed 2026-10-17 from the same walkthrough: system + home halves both register the catalog; applies work
 - [scoot-look test litter in the system temp dir](./core/scoot-look-test-litter.md) — low, filed 2026-10-16 from the #634 review: `tmp_case` in `crates/scoot-look/src/main.rs` never removes its per-case dirs
 - [A refused managed X window costs the server fds](./core/xwayland-refused-cost-fd-leak.md) (medium, filed 2026-10-15 from the #613 review: `refused_cost` counts 273 fds against a 264 cap, pre-existing)
 - [`scoot --help`/JSON config section list omits `[virtual_input]`](./core/help-config-sections-omit-virtual-input.md) — low, filed 2026-10-14 (docs1 slice review): help text and `config_sections` JSON list eleven sections; the compositor implements twelve.
