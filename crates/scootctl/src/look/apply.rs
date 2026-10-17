@@ -2389,6 +2389,7 @@ pub(crate) fn complete_swap(
                     leaves,
                     swap.no_helix,
                     swap.no_btop,
+                    config,
                 );
                 report.reloaded.extend(terminal_report.reloaded);
                 report.notes.extend(terminal_report.notes);
@@ -3025,6 +3026,7 @@ pub fn apply_with_live(
         leaves,
         options.no_helix,
         options.no_btop,
+        config,
     );
     report.reloaded.extend(terminal_report.reloaded);
     report.notes.extend(terminal_report.notes);
@@ -3238,7 +3240,7 @@ pub(crate) fn unknown_look(name: &str, catalog: &Catalog) -> String {
         .collect();
     names.sort();
     if names.is_empty() {
-        return format!("unknown look `{name}`: the catalog is empty");
+        return format!("unknown look `{name}`: {}", super::empty_catalog_hint());
     }
     format!("unknown look `{name}` (available: {})", names.join(", "))
 }

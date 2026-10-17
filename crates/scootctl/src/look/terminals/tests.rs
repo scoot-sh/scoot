@@ -38,7 +38,7 @@ fn signals_run_and_setup_notes_follow() {
     let (_guard, dir) = render_dir("signals", &["apps/helix.toml", "apps/btop.theme"]);
     let state = PathBuf::from("/tmp/scoot-terminals-state");
     let leaves = ScriptedLeaves::ok();
-    let report = apply_terminals(&state, &dir, &leaves, false, false);
+    let report = apply_terminals(&state, &dir, &leaves, false, false, None);
     assert_eq!(
         leaves.signaled(),
         vec!["helix".to_owned(), "btop".to_owned()]
@@ -67,7 +67,7 @@ fn no_process_is_a_note_not_a_reload() {
     let state = PathBuf::from("/tmp/scoot-terminals-state");
     let leaves = ScriptedLeaves::ok();
     leaves.script_signals(vec![Ok(0)], vec![Ok(1)]);
-    let report = apply_terminals(&state, &dir, &leaves, false, false);
+    let report = apply_terminals(&state, &dir, &leaves, false, false, None);
     assert!(!report.reloaded.contains(&"helix".to_owned()), "{report:?}");
     assert!(
         report
@@ -83,7 +83,7 @@ fn opt_outs_skip_the_signal_but_keep_the_note() {
     let (_guard, dir) = render_dir("optout", &["apps/helix.toml", "apps/btop.theme"]);
     let state = PathBuf::from("/tmp/scoot-terminals-state");
     let leaves = ScriptedLeaves::ok();
-    let report = apply_terminals(&state, &dir, &leaves, true, true);
+    let report = apply_terminals(&state, &dir, &leaves, true, true, None);
     assert!(leaves.signaled().is_empty(), "no signal attempted");
     assert!(report.reloaded.is_empty(), "{report:?}");
     assert!(
@@ -110,7 +110,7 @@ fn absent_leaves_stay_silent() {
     let (_guard, dir) = render_dir("absent", &[]);
     let state = PathBuf::from("/tmp/scoot-terminals-state");
     let leaves = ScriptedLeaves::ok();
-    let report = apply_terminals(&state, &dir, &leaves, false, false);
+    let report = apply_terminals(&state, &dir, &leaves, false, false, None);
     assert!(leaves.signaled().is_empty(), "no signal attempted");
     assert!(report.reloaded.is_empty(), "{report:?}");
     assert!(report.notes.is_empty(), "{report:?}");
@@ -126,7 +126,7 @@ fn private_state_runs_no_signal() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
     let private = runtime.join("scoot-look-test-display");
-    let report = apply_terminals(&private, &dir, &leaves, false, false);
+    let report = apply_terminals(&private, &dir, &leaves, false, false, None);
     assert!(leaves.signaled().is_empty(), "no signal attempted");
     assert!(
         report
@@ -134,5 +134,33 @@ fn private_state_runs_no_signal() {
             .iter()
             .any(|note| note.contains("private look state")),
         "{report:?}"
+    );
+}
+
+#[test]
+fn a_pinned_config_home_prints_real_paths() {
+    let (_guard, dir) = render_dir("pinned", &["apps/helix.toml", "apps/starship.toml"]);
+    let state = PathBuf::from("/tmp/scoot-terminals-state");
+    let config = PathBuf::from("/tmp/scoot-terminals-config");
+    let leaves = ScriptedLeaves::ok();
+    let report = apply_terminals(&state, &dir, &leaves, false, false, Some(&config));
+    let helix = report
+        .notes
+        .iter()
+        .find(|note| note.contains("scoot-look.toml"))
+        .expect("a helix note");
+    assert!(
+        helix.contains("/tmp/scoot-terminals-config/helix/themes/scoot-look.toml"),
+        "{helix}"
+    );
+    assert!(!helix.contains('~'), "no tilde in a pinned note: {helix}");
+    let starship = report
+        .notes
+        .iter()
+        .find(|note| note.contains("starship.toml"))
+        .expect("a starship note");
+    assert!(
+        starship.contains("/tmp/scoot-terminals-config/starship.toml"),
+        "{starship}"
     );
 }

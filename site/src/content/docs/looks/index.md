@@ -8,16 +8,35 @@ List, inspect and swap the desktop's looks. A look is presentation only
 the compositor, the bar and the wallpaper together. The format is
 [documented](../reference/look-format.md); the five shipped looks are
 listed under [Theming](../scoot/theming.md). No step here needs Nix: a
-plain binary install with a `looks/` directory lists, previews, applies
-and authors looks with these commands alone.
+plain binary install lists, previews, applies and authors looks with
+these commands alone, once the catalog has looks in it.
+
+The catalog is the union of the source directories, in fixed order:
+your own looks, installed looks, home-manager looks, system looks,
+then the shipped ones. Shipped looks come from `$SCOOT_LOOKS_DIR`,
+then `share/scoot/looks` beside the binary (a release tarball lays
+them there), then `/usr/local` and `/usr`. A name that exists twice
+resolves to the earliest; `list` marks the later one shadowed. An
+empty catalog is never an error in itself: `list` prints `no looks
+found`, and every other command names the fix (set `SCOOT_LOOKS_DIR`
+to a `looks/` directory, or install a handed-over tarball as below).
+
+There are no per-command help pages: `scoot look apply --help`
+refuses. This page and `scoot look --help` list every command and
+flag; the [drift gate](#exit-codes-and-json) keeps the three in
+agreement.
 
 ```sh
 scoot look list                       # the catalog, in search order
 scoot look show moonrise              # tokens, wallpaper, fonts, contrast
 scoot look apply moonrise             # render, validate, swap, reload
 scoot look next                       # step through the catalog (wraps)
+scoot look prev                       # step back through the catalog
+scoot look random                     # a look other than the active one
+scoot look pick                       # choose a look in fuzzel, apply it
 scoot look apply moonrise --for 20    # preview 20 seconds, then revert
 scoot look current                    # the active look and shadowed keys
+scoot look wiring                     # the one-time setup still missing
 scoot look validate ./my-look         # check a directory without touching anything
 scoot look build ./my-look --out /tmp/my-look   # render without applying
 scoot look sync                       # follow the Nix declared default (below)
@@ -45,16 +64,15 @@ newer choice lands. The timer is a detached child of the applying CLI, so
 closing the terminal never strands it, and a compositor restart does not
 drop it either (only the IPC `for_ms` timer is dropped by a restart). A
 swap running when the delay ends waits the reverter out (bounded retries
-with the guard re-checked), instead of dropping the revert. `scoot look
-apply --keep` keeps the preview (and cancels the timer); `apply NAME
---keep` applies for good and cancels any pending preview.
+with the guard re-checked), instead of dropping the revert. `SECONDS`
+is 1 or more. `scoot look apply --keep` keeps the preview (and cancels
+the timer); `apply NAME --keep` applies for good and cancels any pending
+preview; bare `--keep` with no pending preview refuses.
 
 ## Pick and apply
 
-`list` shows the catalog in search order: your own looks, installed
-looks, home-manager looks, system looks, then the shipped ones. A name
-that exists twice resolves to the earliest; `list` marks the later one
-shadowed. `list --names` prints one name per line, for scripting.
+`list` shows the catalog above, one row per look. `list --names`
+prints one name per line, for scripting.
 
 `apply NAME` renders the look, validates it, records the choice, repoints
 the state link, reloads each running app's look layer in order (the
@@ -106,8 +124,8 @@ the new look still shows it while no look is recorded, and the
 reply names exactly that.
 
 Every command takes `--json` (the reply as JSON on stdout, notes on
-stderr). Exit status: 0 applied, 1 the run failed, 2 the invocation was
-wrong.
+stderr); the shapes and the exit codes are under [Exit codes and
+JSON](#exit-codes-and-json).
 
 ## What is live and what is next-launch
 
@@ -314,6 +332,41 @@ wiring on every swap that carries the leaves.
 - `build --out` writes `apps/` beside the other fragments; a rebuild
   for a look that no longer carries a leaf removes the stale file.
 
+## One-time setup (no Nix)
+
+A swap renders every fragment but wires none of them into your own
+files: each app needs one manual step, once. `scoot look wiring`
+checks each step for the active look against the live files and prints
+the exact missing command or line, with real paths. Read-only: it
+writes nothing, starts nothing, signals nothing.
+
+```sh
+scoot look wiring                  # every step, with the exact fix
+scoot look wiring --json           # the same report as JSON
+```
+
+Each item reports one status: `wired` (nothing to do), `missing`
+(with the exact fix), `manual` (no file records the step, so the
+detail gives the command: wob, the night-light temperature, the
+launcher flags, the lock merger) or `absent` (the look carries no
+leaf for that app: nothing to do). The steps, per app:
+
+- foot: add the printed `include=...` line to `foot.ini`.
+- mako: add the printed `include=...` line to `mako/config`, then
+  `makoctl reload`.
+- wob: run the printed `wob -c ...` command.
+- fcitx5: link the theme as printed and keep `Theme=scoot-look` in
+  `classicui.conf`.
+- Helix, btop, starship: point the theme files as printed (above).
+- fuzzel, swaylock: run the printed merger commands
+  ([below](#files-and-flags)).
+- night-light: read the printed `temperature=` file in your own
+  warmer's startup.
+
+Exit status is 0 once the report prints, even with missing items.
+With no look applied yet it refuses and names the fix (`apply` one
+first).
+
 ## The Nix catalog
 
 `programs.scoot.looks` lists the catalog (default: every shipped
@@ -458,6 +511,42 @@ refuses if that fails — so a later swap makes no network request.
 compositor's `[appearance]` and `[wallpaper]`, the bar's `[colors]`) as
 a source look in `user-looks/`, extending the recorded live look (apply
 one first). The save is user-authored, so it can be extended.
+
+## Exit codes and JSON
+
+Exit status: 0 the command ran (help counts; `wiring` counts even with
+missing items), 1 the run failed (an unknown look, a refused value, a
+refused reload, `toolkit` with no applied look, bare `--keep` with no
+pending preview), 2 the invocation was wrong (an unknown command, flag
+or value; a flag-shaped word where a name belongs, since there are no
+per-command help pages).
+
+Every command takes `--json`: the reply as JSON on stdout, notes on
+stderr. The shapes:
+
+| Command | `--json` document |
+|---|---|
+| `list` | `{"looks": [{`name`, `title`, `polarity`, `origin`, `source`}], "shadowed": [{`name`, `source`}], "notes": [...]}` (`--names`: a bare array of names) |
+| `current` | `{"active": {`name`, `rendered`, `generation`, `chosen_by`, `toolkit`} or null, "link": ..., "consistent": ..., "shadowed": [...], "notes": [...]}` |
+| `show` | the merged tokens (`palette`, `terminal`, `fonts`, `opacity`, `shape`, `cursor`, `wallpaper`, `icons`, `night`, `extends`) plus `contrast`, `warnings` and `refusals` |
+| `validate` | `{"target": ..., "valid": ..., "errors": [...], "warnings": [...], "notes": [...]}` |
+| `build` | `{"source": ..., "name": ..., "out": ..., "warnings": [...], "notes": [...]}` |
+| `apply`, `next`, `prev`, `random`, `sync` | `{"applied": ..., "rendered": ..., "generation": ..., "reloaded": [...], "skipped": [...], "shadowed": [...], "invalid": [...], "preview": {`revert_to`, `from_generation`} or null, "notes": [...]}` (a refusal prints `{"target", "applied": false, "error", "rolled_back_to", "rollback_errors"}` instead; `sync` adds `"target"` and `"removed"`) |
+| `pick` | the apply document above, or `{"applied": null, "cancelled": true}` on Esc |
+| `toolkit` | `{"toolkit": ..., "color_scheme": ..., "keys": {...}}` |
+| `new` | `{"created": ..., "name": ..., "extends": ..., "valid": ..., "errors": [...], "warnings": [...], "notes": [...]}` |
+| `watch` | one document per save: `{"applied": ..., "generation": ..., "rendered": ..., "reloaded": [...], "skipped": [...], "shadowed": [...], "invalid": [...], "notes": [...]}` (a refused save prints `{"applied": null, "error": ...}`) |
+| `preview` | `{"name": ..., "preview": ..., "exists": ...}` (with `--capture`: `{"name", "preview", "width", "height", "bytes"}`) |
+| `install` | `{"installed": ..., "dir": ..., "dropped": [...], "kept": [...], "fetched": ... or null, "notes": [...]}` |
+| `export` | `{"exported": ..., "tarball": ..., "files": [...], "notes": [...]}` |
+| `save` | `{"saved": ..., "dir": ..., "extends": ..., "tokens": [...], "notes": [...]}` |
+| `wiring` | `{"active": {`name`, `rendered`, `generation`}, "items": [{`app`, `status`, `detail`}], "notes": [...]}` (`status` is `wired`, `missing`, `manual` or `absent`) |
+
+Two flags are internal: the compositor's own IPC child passes
+`--from-compositor` and `--only-if-generation` (a timed-preview revert
+passes the generation its preview wrote, so the revert stands down
+instead of undoing a newer choice). You never need either: `apply`
+without them is the whole interface.
 
 > **Symptom:** `apply` answers applied and nothing changes.
 > A key in your own files shadows the look. `scoot look current` names

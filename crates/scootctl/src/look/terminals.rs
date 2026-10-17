@@ -44,12 +44,18 @@ pub fn presence_in(rendered: &Path) -> TerminalPresence {
 
 /// Runs the terminal steps for a swap over the rendered `rendered` look.
 /// Returns who reloaded and the notes. Never fails the swap.
+///
+/// `config` is the pinned config home the caller applies against (`None`
+/// resolves the live `$XDG_CONFIG_HOME`/`HOME`): the setup notes print
+/// that real directory, never `~`, so the line stays copy-pasteable
+/// under a scratch home.
 pub fn apply_terminals(
     state_dir: &Path,
     rendered: &Path,
     leaves: &dyn Leaves,
     no_helix: bool,
     no_btop: bool,
+    config: Option<&Path>,
 ) -> LeafReport {
     let mut report = LeafReport::default();
     if super::toolkit::is_private_state(state_dir) {
@@ -60,6 +66,7 @@ pub fn apply_terminals(
         return report;
     }
     let presence = presence_in(rendered);
+    let config_base = config_display(config);
     if presence.helix {
         if no_helix {
             report
@@ -74,7 +81,7 @@ pub fn apply_terminals(
                 Err(error) => report.notes.push(format!("helix not reloaded: {error}")),
             }
         }
-        report.notes.push(helix_setup_note(state_dir));
+        report.notes.push(helix_setup_note(state_dir, &config_base));
     }
     if presence.btop {
         if no_btop {
@@ -90,30 +97,47 @@ pub fn apply_terminals(
                 Err(error) => report.notes.push(format!("btop not reloaded: {error}")),
             }
         }
-        report.notes.push(btop_setup_note(state_dir));
+        report.notes.push(btop_setup_note(state_dir, &config_base));
     }
     if presence.starship {
-        report.notes.push(starship_setup_note(state_dir));
+        report
+            .notes
+            .push(starship_setup_note(state_dir, &config_base));
     }
     report
+}
+
+/// The config home for the setup notes: the caller's pinned dir, else
+/// the live environment, else the literal `~/.config` when no home
+/// resolves at all (the note still reads, it just needs the prefix
+/// resolved by hand).
+fn config_display(config: Option<&Path>) -> String {
+    if let Some(dir) = config {
+        return dir.display().to_string();
+    }
+    let xdg = std::env::var_os("XDG_CONFIG_HOME");
+    let home = std::env::var_os("HOME");
+    scoot_look::catalog::config_home(xdg.as_deref(), home.as_deref())
+        .map(|base| base.display().to_string())
+        .unwrap_or_else(|| "~/.config".to_owned())
 }
 
 /// The one-time Helix wiring: a fixed theme name (`scoot-look`, the way
 /// the fcitx5 leaf takes a fixed name) whose file follows the state link,
 /// so a swap rewrites no file per look. Running `hx` re-reads it on the
 /// signal above; new ones read it at start.
-fn helix_setup_note(state_dir: &Path) -> String {
+fn helix_setup_note(state_dir: &Path, config_base: &str) -> String {
     format!(
-        "helix: new hx windows follow the look once ~/.config/helix/themes/scoot-look.toml points at {} with theme = \"scoot-look\" in config.toml",
+        "helix: new hx windows follow the look once {config_base}/helix/themes/scoot-look.toml points at {} with theme = \"scoot-look\" in config.toml",
         state_dir.join("look/apps/helix.toml").display()
     )
 }
 
 /// The one-time btop wiring: the same fixed-name theme beside the user's
 /// own `btop.conf` (which keeps naming it in `color_theme`).
-fn btop_setup_note(state_dir: &Path) -> String {
+fn btop_setup_note(state_dir: &Path, config_base: &str) -> String {
     format!(
-        "btop: new btop runs follow the look once ~/.config/btop/themes/scoot-look.theme points at {} with color_theme = \"scoot-look\" in btop.conf",
+        "btop: new btop runs follow the look once {config_base}/btop/themes/scoot-look.theme points at {} with color_theme = \"scoot-look\" in btop.conf",
         state_dir.join("look/apps/btop.theme").display()
     )
 }
@@ -121,9 +145,9 @@ fn btop_setup_note(state_dir: &Path) -> String {
 /// The one-time starship wiring: starship reads one config file per
 /// process, so the file itself follows the state link and every next
 /// prompt draws the look with no signal.
-fn starship_setup_note(state_dir: &Path) -> String {
+fn starship_setup_note(state_dir: &Path, config_base: &str) -> String {
     format!(
-        "starship: the next prompt reads the look once STARSHIP_CONFIG or ~/.config/starship.toml points at {}",
+        "starship: the next prompt reads the look once STARSHIP_CONFIG or {config_base}/starship.toml points at {}",
         state_dir.join("look/apps/starship.toml").display()
     )
 }

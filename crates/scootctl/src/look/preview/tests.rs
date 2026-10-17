@@ -144,5 +144,37 @@ fn a_missing_directory_refuses() {
     let missing = scratch.path().join("nosuchdir").display().to_string();
     let error = resolve_preview_target(Some(&missing), Origin::User, &catalog, &state)
         .expect_err("a missing directory refuses");
-    assert!(error.contains("not a directory"), "{error}");
+    assert!(error.contains("does not exist"), "{error}");
+}
+
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn capture_off_linux_refuses_in_one_line() {
+    use super::{CaptureOptions, capture};
+    use crate::look::apply::ProdChecks;
+    let scratch = scratch("nonlinux");
+    let dir = scratch.path().join("look-a");
+    std::fs::create_dir_all(&dir).expect("a look dir");
+    std::fs::write(dir.join("look.toml"), look_toml("look-a")).expect("a look");
+    let catalog = discover_ordered(&[(scratch.path().join("empty"), Origin::Shipped)]);
+    let options = CaptureOptions {
+        out: None,
+        width: 1600,
+        height: 1000,
+        timeout: std::time::Duration::from_secs(1),
+    };
+    let error = capture(
+        "look-a",
+        &dir,
+        Origin::User,
+        &scratch.path().join("preview.png"),
+        &options,
+        &catalog,
+        &ProdChecks::new(),
+    )
+    .expect_err("capture off Linux refuses");
+    assert!(
+        error.contains("needs Linux"),
+        "one actionable line, not a startup log tail: {error}"
+    );
 }

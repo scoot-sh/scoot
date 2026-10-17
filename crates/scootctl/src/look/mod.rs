@@ -31,6 +31,7 @@ pub mod sync;
 pub mod terminals;
 pub mod toolkit;
 pub mod watch;
+pub mod wiring;
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -137,6 +138,10 @@ pub enum Command {
     /// Save the user's own appearance and color values as a source look
     /// in `user-looks/`.
     Save { name: String },
+    /// The one-time non-Nix setup the active look still needs: each
+    /// wiring step checked against the live files, with the exact
+    /// missing command or line. Read-only.
+    Wiring,
 }
 
 /// Which catalog step a `Cycle` command takes.
@@ -151,7 +156,7 @@ pub enum CycleStep {
 /// `_preview-revert` stays out: it is spawned, never typed.
 pub const COMMANDS: &[&str] = &[
     "list", "current", "show", "validate", "build", "apply", "next", "prev", "random", "pick",
-    "sync", "toolkit", "new", "watch", "preview", "install", "export", "save",
+    "sync", "toolkit", "new", "watch", "preview", "install", "export", "save", "wiring",
 ];
 
 /// The usage line, shared by `scoot look --help` and the top-level help.
@@ -172,11 +177,13 @@ pub const LOOK_USAGE: &str = "\
     look install PATH [--trust] [--json]
     look export NAME [--out FILE] [--json]
     look save NAME [--json]
+    look wiring [--json]
 
     --state DIR takes the look state (default: $SCOOT_LOOK_STATE, then
     $XDG_STATE_HOME/scoot, then ~/.local/state/scoot); --socket PATH takes
     the compositor socket (default: $SCOOT_SOCKET, then
-    $XDG_RUNTIME_DIR/scoot.sock)";
+    $XDG_RUNTIME_DIR/scoot.sock); shipped looks come from $SCOOT_LOOKS_DIR,
+    then share/scoot/looks beside the binary, then /usr/local and /usr";
 
 /// Parses the arguments after `look`.
 pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error> {
@@ -234,6 +241,7 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
         }
         "show" => match positionals.as_slice() {
             [name] => {
+                refuse_flag_shaped(name)?;
                 check_name(name)?;
                 Command::Show { name: name.clone() }
             }
@@ -294,6 +302,10 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
         "install" => parse_install(&positionals)?,
         "export" => parse_export(&positionals)?,
         "save" => parse_save(&positionals)?,
+        "wiring" => {
+            refuse_trailing(&positionals)?;
+            Command::Wiring
+        }
         "toolkit" => {
             let action = match positionals.as_slice() {
                 [] => None,
@@ -327,7 +339,7 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
                 &[
                     "list", "current", "show", "validate", "build", "apply", "next", "prev",
                     "random", "pick", "sync", "toolkit", "new", "watch", "preview", "install",
-                    "export", "save",
+                    "export", "save", "wiring",
                 ],
                 "scoot look --help",
             ));
@@ -352,37 +364,45 @@ USAGE:
 
 COMMANDS:
     list        the catalog in search order (user, installed, home-manager,
-                system, shipped), with shadowed names marked
+                system, shipped), with shadowed names marked. --names
+                prints one name per line, for scripting
     current     the active look, the link, and every shadowed key
     show        one look's tokens, wallpaper, fonts and contrast
-    validate    resolve and check a look without touching anything
-    build       render a look into --out without applying it
+    validate    resolve and check a look without touching anything (a
+                directory or a catalog name: paths need a slash, `./name`
+                for the working directory; --origin sets the origin a
+                directory validates as; --trust keeps an installed look's
+                apps/ leaves)
+    build       render a look into --out without applying it (same target
+                and flags as validate; --out is required)
     apply       render, validate, record, repoint, then reload each app's
                 look layer in order (the compositor, then every bar),
                 signal the third-party daemons (mako, fcitx5, the OSD and
                 night-light units, best-effort) and the terminal leaves
                 (SIGUSR1 to your own hx, SIGUSR2 to your own btop,
                 best-effort; starship follows on the next prompt),
-                rolling back on a
-                refusal; --no-toolkit skips the
-                toolkit step (dconf keys and toolkit files, including
-                the color-scheme write) for this apply (the first apply
-                with no record adopts each key whatever it holds);
-                --trust keeps an installed look's Helix, btop and
-                starship leaves (printing them first) instead of
-                dropping them; --no-helix and --no-btop skip that
-                app's signal for this apply (the leaf still renders);
+                rolling back on a refusal. NAME is required, except for
+                bare `apply --keep`, which keeps the previewed look.
+                --no-toolkit skips the toolkit step (dconf keys and
+                toolkit files, including the color-scheme write) for this
+                apply (the first apply with no record adopts each key
+                whatever it holds); --trust keeps an installed look's
+                Helix, btop and starship leaves (printing them first)
+                instead of dropping them; --no-helix and --no-btop skip
+                that app's signal for this apply (the leaf still renders);
                 --from-compositor marks the choice as compositor-driven
-                (what the compositor's own IPC child passes; `current`
-                shows it);
-                --for SECONDS previews the look and reverts after the
-                delay (a detached child, so closing the terminal never
-                strands it); --keep with a name applies for good and
-                cancels any pending preview, bare keeps the current look;
-                --only-if-generation N applies only while the recorded
-                generation still equals N (the compositor's timed-preview
-                revert passes the generation its preview wrote, so the
-                revert stands down instead of undoing a newer choice)
+                (internal: the compositor's own IPC child passes it;
+                `current` shows it); --for SECONDS previews the look and
+                reverts after the delay (a detached child, so closing the
+                terminal never strands it; SECONDS is 1 or more); --keep
+                with a name applies for good and cancels any pending
+                preview, bare cancels a pending preview and stays on the
+                current look (refuses when none is pending);
+                --only-if-generation
+                N applies only while the recorded generation still equals
+                N (internal: the compositor's timed-preview revert passes
+                the generation its preview wrote, so the revert stands
+                down instead of undoing a newer choice)
     next        the next catalog look after the active one, wrapping
     prev        the previous catalog look before the active one, wrapping
     random      a random catalog look other than the active one
@@ -404,9 +424,15 @@ COMMANDS:
     watch       validate and apply a source directory on every save,
                 debounced, rendering into one reused cache slot; an invalid
                 save is refused loudly and the last good look stays; runs
-                until interrupted
+                until interrupted. --no-toolkit skips the toolkit step per
+                save; --origin sets the origin the directory validates as
     preview     show a look's preview image, or `--capture` it from a
-                private headless session (the active look when unnamed)
+                private headless session (the active look when unnamed;
+                Linux only: the headless session is the compositor).
+                --out FILE moves the PNG (default: beside the look's
+                look.toml); --width/--height size the output (default
+                1600x1000); --timeout SECS bounds the wait (default 60);
+                --origin sets the origin a directory validates as
     install     install someone else's look from a directory or a tarball
                 into `installed-looks/`: regular files only, only the file
                 kinds a look uses, `license` required, never under another
@@ -420,6 +446,27 @@ COMMANDS:
                 compositor's `[appearance]` and `[wallpaper]`, the bar's
                 `[colors]`) as a source look in `user-looks/`, extending
                 the recorded live look (apply one first)
+    wiring      check the one-time non-Nix setup the active look still
+                needs (foot include, mako include, wob command, fcitx5
+                theme link, Helix/btop/starship pointers, launcher flags,
+                lock merger): each step reported wired, missing (with the
+                exact fix), manual (the command to run) or absent (the
+                look carries no leaf for it). Read-only; needs an applied
+                look first
+
+There are no per-command help pages: `scoot look apply --help` refuses
+(NAME-shaped words starting with `-` never name a look). This page
+lists every command and flag.
+
+The catalog is the union of the source directories, in fixed order:
+your own looks, installed looks, home-manager looks, system looks,
+then the shipped ones (see the --state/--socket/SCOOT_LOOKS_DIR lines
+above for where each half comes from). A name that exists twice
+resolves to the earliest; `list` marks the later one shadowed. An
+empty catalog is never an error in itself: `list` prints `no looks
+found`, and every other command names the fix (set SCOOT_LOOKS_DIR
+to a looks/ directory, or `scoot look install` a handed-over
+tarball).
 
 A look is presentation only (colors, fonts, opacity, shape, cursor, the
 wallpaper): a swap never applies pending edits to your own files, and a
@@ -447,6 +494,58 @@ fn refuse_trailing(positionals: &[String]) -> Result<(), Error> {
         ));
     }
     Ok(())
+}
+
+/// A word shaped like a flag (`--help`, `--bogus`) where a look name, a
+/// directory or a path belongs. There are no per-command help pages, so
+/// `scoot look show --help` must not look up a look literally named
+/// `--help` (exit 1, confusing): it refuses as a usage error (exit 2)
+/// pointing at the one help page. A real path starting with `-` still
+/// spells with `./` in front.
+fn refuse_flag_shaped(word: &str) -> Result<(), Error> {
+    if word.starts_with('-') {
+        return Err(Error::Unknown(word.to_owned()));
+    }
+    Ok(())
+}
+
+/// What an empty catalog means and how to fill it. Every command that
+/// needs a catalog appends this instead of stopping at "the catalog is
+/// empty", so a fresh binary install answers with the fix, not a shrug.
+pub(crate) fn empty_catalog_hint() -> &'static str {
+    "the catalog is empty (no user, installed, declared or shipped looks found: \
+     set SCOOT_LOOKS_DIR to a looks/ directory, or `scoot look install` a handed-over tarball)"
+}
+
+/// Identical notes printed twice carry no information (three font
+/// families each reporting the same missing `fc-match`, for example), so
+/// human-mode listings and JSON documents print each distinct note once,
+/// in first-seen order.
+pub(crate) fn dedup_notes(notes: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    notes
+        .into_iter()
+        .filter(|note| seen.insert(note.clone()))
+        .collect()
+}
+
+/// A directory-or-name target that is not a directory: say whether it is
+/// missing or the wrong kind. Bare names are catalog looks (only a slash
+/// forces a path, `./name` for the working directory), and absolute
+/// paths never get a `./` suggestion.
+pub(crate) fn not_a_dir(target: &str, verb: &str) -> String {
+    let path = PathBuf::from(target);
+    if !path.exists() {
+        if target.starts_with('/') {
+            return format!(
+                "`{target}` does not exist: {verb} takes a directory or a catalog name"
+            );
+        }
+        return format!(
+            "`{target}` does not exist: {verb} takes a directory or a catalog name (`./{target}` for a directory in the working directory)"
+        );
+    }
+    format!("`{target}` is not a directory: {verb} takes a directory or a catalog name")
 }
 
 /// `list`'s own flags: bare, or `--names` for one name per line.
@@ -499,6 +598,7 @@ fn target_and_origin(positionals: &[String]) -> Result<(String, Origin, bool), E
         } else if word == "--trust" {
             trust = true;
         } else if target.is_none() {
+            refuse_flag_shaped(word)?;
             target = Some(word.clone());
         } else {
             return Err(hinted(
@@ -562,6 +662,7 @@ fn build_args(positionals: &[String]) -> Result<(String, Origin, PathBuf, bool),
         } else if word == "--trust" {
             trust = true;
         } else if target.is_none() {
+            refuse_flag_shaped(word)?;
             target = Some(word.clone());
         } else {
             return Err(hinted(
@@ -632,6 +733,7 @@ fn parse_apply(positionals: &[String]) -> Result<Command, Error> {
             }
             for_secs = Some(parse_seconds(value)?);
         } else if name.is_none() {
+            refuse_flag_shaped(word)?;
             name = Some(word.clone());
         } else {
             return Err(Error::Unknown(word.clone()));
@@ -680,7 +782,7 @@ fn parse_seconds(value: &str) -> Result<u64, Error> {
     match value.parse::<u64>() {
         Ok(secs) if secs >= 1 => Ok(secs),
         _ => Err(Error::Invalid {
-            what: "--for",
+            what: "--for (preview seconds, 1 or more)",
             value: value.to_owned(),
         }),
     }
@@ -697,6 +799,7 @@ fn parse_new(positionals: &[String]) -> Result<Command, Error> {
             let value = words
                 .next()
                 .ok_or(Error::Missing("a base look after --from"))?;
+            refuse_flag_shaped(value)?;
             if base.is_some() {
                 return Err(Error::Unknown(word.clone()));
             }
@@ -705,11 +808,13 @@ fn parse_new(positionals: &[String]) -> Result<Command, Error> {
             if value.is_empty() {
                 return Err(Error::Missing("a base look after --from"));
             }
+            refuse_flag_shaped(value)?;
             if base.is_some() {
                 return Err(Error::Unknown(word.clone()));
             }
             base = Some(value.to_owned());
         } else if name.is_none() {
+            refuse_flag_shaped(word)?;
             name = Some(word.clone());
         } else {
             return Err(Error::Unknown(word.clone()));
@@ -739,6 +844,7 @@ fn parse_watch(positionals: &[String]) -> Result<Command, Error> {
             ))?;
             origin = parse_origin(value)?;
         } else if dir.is_none() {
+            refuse_flag_shaped(word)?;
             dir = Some(PathBuf::from(word));
         } else {
             return Err(hinted(
@@ -820,6 +926,7 @@ fn parse_preview(positionals: &[String]) -> Result<Command, Error> {
             ))?;
             origin = parse_origin(value)?;
         } else if target.is_none() {
+            refuse_flag_shaped(word)?;
             target = Some(word.clone());
         } else {
             return Err(Error::Unknown(word.clone()));
@@ -852,6 +959,7 @@ fn parse_install(positionals: &[String]) -> Result<Command, Error> {
         if word == "--trust" {
             trust = true;
         } else if path.is_none() {
+            refuse_flag_shaped(word)?;
             path = Some(PathBuf::from(word));
         } else {
             return Err(hinted(
@@ -889,6 +997,7 @@ fn parse_export(positionals: &[String]) -> Result<Command, Error> {
             }
             out = Some(PathBuf::from(value));
         } else if name.is_none() {
+            refuse_flag_shaped(word)?;
             name = Some(word.clone());
         } else {
             return Err(Error::Unknown(word.clone()));
@@ -903,6 +1012,7 @@ fn parse_export(positionals: &[String]) -> Result<Command, Error> {
 fn parse_save(positionals: &[String]) -> Result<Command, Error> {
     match positionals {
         [name] => {
+            refuse_flag_shaped(name)?;
             check_name(name)?;
             Ok(Command::Save { name: name.clone() })
         }
@@ -932,6 +1042,11 @@ fn parse_origin(value: &str) -> Result<Origin, Error> {
 
 /// Pixels for a preview capture: a headless output dimension.
 fn parse_pixels(what: &'static str, value: &str) -> Result<u32, Error> {
+    let what = match what {
+        "--width" => "--width (pixels, 1-65535)",
+        "--height" => "--height (pixels, 1-65535)",
+        _ => what,
+    };
     match value.parse::<u32>() {
         Ok(pixels) if (1..=65535).contains(&pixels) => Ok(pixels),
         _ => Err(Error::Invalid {
@@ -946,7 +1061,7 @@ fn parse_timeout(value: &str) -> Result<u64, Error> {
     match value.parse::<u64>() {
         Ok(secs) if secs >= 1 => Ok(secs),
         _ => Err(Error::Invalid {
-            what: "--timeout",
+            what: "--timeout (seconds, 1 or more)",
             value: value.to_owned(),
         }),
     }
@@ -1071,11 +1186,12 @@ pub fn run(look: &Look) -> Result<(), String> {
         Command::Install { path, trust } => run_install(look, path, *trust),
         Command::Export { name, out } => run_export(look, name, out.as_deref()),
         Command::Save { name } => run_save(look, name),
+        Command::Wiring => run_wiring(look),
     }
 }
 
 fn warn_all(notes: &[String]) {
-    for note in notes {
+    for note in dedup_notes(notes.to_vec()) {
         output::warn(format_args!("note: {note}"));
     }
 }
@@ -1130,6 +1246,10 @@ fn run_list(look: &Look, names: bool) -> Result<(), String> {
     } else {
         if catalog.entries.is_empty() {
             output::print_line("no looks found").map_err(|error| error.to_string())?;
+            output::print_line(
+                "set SCOOT_LOOKS_DIR to a looks/ directory, or `scoot look install` a handed-over tarball",
+            )
+            .map_err(|error| error.to_string())?;
         }
         for entry in &catalog.entries {
             let title = entry.raw.title.clone().unwrap_or_default();
@@ -1197,6 +1317,7 @@ fn run_current(look: &Look) -> Result<(), String> {
     }
     shadowed.sort();
     shadowed.dedup();
+    let notes = dedup_notes(notes);
     if look.json {
         output::print_line(
             &serde_json::to_string_pretty(&serde_json::json!({
@@ -1407,7 +1528,7 @@ fn unknown_look_here(name: &str, catalog: &Catalog) -> String {
         .collect();
     names.sort();
     if names.is_empty() {
-        return format!("unknown look `{name}`: the catalog is empty");
+        return format!("unknown look `{name}`: {}", empty_catalog_hint());
     }
     format!("unknown look `{name}` (available: {})", names.join(", "))
 }
@@ -1424,9 +1545,7 @@ fn run_validate(look: &Look, target: &str, origin: Origin, trust: bool) -> Resul
         if path.is_dir() {
             validate_dir(&path, origin, &catalog, &checks, trust)?
         } else {
-            return Err(format!(
-                "`{target}` is not a directory: validate takes a directory or a catalog name (`./{target}` for a cwd directory)"
-            ));
+            return Err(not_a_dir(target, "validate"));
         }
     } else {
         let mut validation = validate_entry(&catalog, target, &checks, trust)?;
@@ -1439,6 +1558,7 @@ fn run_validate(look: &Look, target: &str, origin: Origin, trust: bool) -> Resul
         validation
     };
     let valid = validation.errors.is_empty();
+    let notes = dedup_notes(validation.notes.clone());
     if look.json {
         output::print_line(
             &serde_json::to_string_pretty(&serde_json::json!({
@@ -1446,7 +1566,7 @@ fn run_validate(look: &Look, target: &str, origin: Origin, trust: bool) -> Resul
                 "valid": valid,
                 "errors": validation.errors,
                 "warnings": validation.warnings,
-                "notes": validation.notes,
+                "notes": notes,
             }))
             .unwrap_or_default(),
         )
@@ -1488,9 +1608,7 @@ fn run_build(
         if path.is_dir() {
             BuildTarget::Dir { path, origin }
         } else {
-            return Err(format!(
-                "`{target}` is not a directory: build takes a directory or a catalog name"
-            ));
+            return Err(not_a_dir(target, "build"));
         }
     } else {
         if origin != Origin::User {
@@ -1501,6 +1619,7 @@ fn run_build(
         BuildTarget::Name(target.to_owned())
     };
     let report = build_to_out(&build_target, out, &catalog, &checks, trust)?;
+    let notes = dedup_notes(report.notes.clone());
     if look.json {
         output::print_line(
             &serde_json::to_string_pretty(&serde_json::json!({
@@ -1508,7 +1627,7 @@ fn run_build(
                 "name": report.name,
                 "out": report.out,
                 "warnings": report.warnings,
-                "notes": report.notes,
+                "notes": notes,
             }))
             .unwrap_or_default(),
         )
@@ -1590,7 +1709,7 @@ fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
         CycleStep::Random => cycle::random_target(&catalog, current.as_deref()),
     };
     let Some(target) = target else {
-        return Err("the catalog is empty".to_owned());
+        return Err(empty_catalog_hint().to_owned());
     };
     let options = ApplyOptions {
         lock_wait: apply::LOCK_WAIT,
@@ -1622,11 +1741,13 @@ fn run_pick(look: &Look) -> Result<(), String> {
     // left is a real Esc.
     let live = pick::wayland_socket().is_some_and(|path| pick::socket_live(&path));
     if !live {
-        return Err("needs a Wayland display for fuzzel to choose a look".to_owned());
+        return Err(
+            "needs a live Wayland display for fuzzel to choose a look (run inside the session; `scoot look list` shows the names)".to_owned(),
+        );
     }
     let catalog = discover();
     if catalog.entries.is_empty() {
-        return Err("the catalog is empty".to_owned());
+        return Err(empty_catalog_hint().to_owned());
     }
     let names: Vec<String> = catalog
         .entries
@@ -1827,6 +1948,7 @@ fn apply_and_print(
         Ok(report) => {
             let mut all_notes = notes;
             all_notes.extend(report.notes.iter().cloned());
+            let all_notes = dedup_notes(all_notes);
             let preview_json = report.preview.as_ref().map(|preview| {
                 serde_json::json!({
                     "revert_to": preview.revert_to,
@@ -1990,6 +2112,7 @@ fn print_swap_report(
 ) -> Result<(), String> {
     let mut all_notes = extra.to_vec();
     all_notes.extend(report.notes.iter().cloned());
+    let all_notes = dedup_notes(all_notes);
     if look.json {
         output::print_line(
             &serde_json::to_string_pretty(&serde_json::json!({
@@ -2510,6 +2633,75 @@ fn run_save(look: &Look, name: &str) -> Result<(), String> {
             report.dir.display()
         ));
         warn_all(&report.notes);
+    }
+    Ok(())
+}
+
+/// Checks the one-time non-Nix setup the active look still needs. Each
+/// wiring step reports `wired`, `missing` (with the exact fix), `manual`
+/// (the command to run) or `absent` (the look carries no leaf for it).
+/// Read-only: nothing is written, started or signaled. Exit 0 means the
+/// report printed, even with missing items; exit 1 means no look is
+/// applied yet or the state cannot be read.
+fn run_wiring(look: &Look) -> Result<(), String> {
+    use wiring::{WiringInput, check_wiring, resolve_input};
+    let state_dir = resolve_state_dir(look.state.as_deref())?;
+    let (record, rendered, config, data) = resolve_input(&state_dir)?;
+    let input = WiringInput {
+        state_dir: &state_dir,
+        record: &record,
+        rendered: &rendered,
+        config_home: config.as_deref(),
+        data_home: data.as_deref(),
+    };
+    let items = check_wiring(&input);
+    let mut notes = Vec::new();
+    if toolkit::is_private_state(&state_dir) {
+        notes.push(
+            "private look state (headless or --private-look): paths point at the session copy, not the desktop"
+                .to_owned(),
+        );
+    }
+    if look.json {
+        let items: Vec<serde_json::Value> = items
+            .iter()
+            .map(|item| {
+                serde_json::json!({
+                    "app": item.app,
+                    "status": item.status.as_str(),
+                    "detail": item.detail,
+                })
+            })
+            .collect();
+        output::print_line(
+            &serde_json::to_string_pretty(&serde_json::json!({
+                "active": {
+                    "name": record.name,
+                    "rendered": record.rendered,
+                    "generation": record.generation,
+                },
+                "items": items,
+                "notes": notes,
+            }))
+            .unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
+    } else {
+        output::print_line(&format!(
+            "active look: {} (generation {})",
+            record.name, record.generation
+        ))
+        .map_err(|error| error.to_string())?;
+        for item in &items {
+            output::print_line(&format!(
+                "{}: {} ({})",
+                item.app,
+                item.status.as_str(),
+                item.detail
+            ))
+            .map_err(|error| error.to_string())?;
+        }
+        warn_all(&notes);
     }
     Ok(())
 }

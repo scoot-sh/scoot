@@ -246,14 +246,14 @@ fn apply_for_and_keep_parse() {
     assert_eq!(
         command(&["apply", "moonrise", "--for", "0"]),
         Err(Error::Invalid {
-            what: "--for",
+            what: "--for (preview seconds, 1 or more)",
             value: "0".to_owned(),
         })
     );
     assert_eq!(
         command(&["apply", "moonrise", "--for", "soon"]),
         Err(Error::Invalid {
-            what: "--for",
+            what: "--for (preview seconds, 1 or more)",
             value: "soon".to_owned(),
         })
     );
@@ -389,9 +389,25 @@ fn the_usage_names_every_verb() {
         "--out",
         "--origin",
         "--names",
+        "--trust",
+        "--no-helix",
+        "--no-btop",
+        "--from-compositor",
+        "--only-if-generation",
+        "--capture",
+        "--width",
+        "--height",
+        "--timeout",
+        "--from",
     ] {
         assert!(text.contains(flag), "--help hides `{flag}`");
     }
+    // The hidden revert child stays out of the help and the command
+    // list: it is spawned, never typed.
+    assert!(
+        !text.contains("_preview-revert"),
+        "--help leaks the hidden revert child"
+    );
 }
 
 #[test]
@@ -582,14 +598,14 @@ fn preview_shows_or_captures() {
     assert_eq!(
         command(&["preview", "moonrise", "--width", "0"]),
         Err(Error::Invalid {
-            what: "--width",
+            what: "--width (pixels, 1-65535)",
             value: "0".to_owned(),
         })
     );
     assert_eq!(
         command(&["preview", "moonrise", "--timeout", "0"]),
         Err(Error::Invalid {
-            what: "--timeout",
+            what: "--timeout (seconds, 1 or more)",
             value: "0".to_owned(),
         })
     );
@@ -668,6 +684,49 @@ fn save_takes_a_name() {
         Err(Error::Invalid {
             what: "look name",
             value: "LOUD".to_owned(),
+        })
+    );
+}
+
+#[test]
+fn wiring_takes_no_positionals() {
+    assert_eq!(command(&["wiring"]), Ok(Command::Wiring));
+    assert_eq!(
+        command(&["wiring", "moonrise"]),
+        Err(Error::Unknown("moonrise".to_owned()))
+    );
+}
+
+#[test]
+fn flag_shaped_names_refuse_as_usage_errors() {
+    // There are no per-command help pages: a trailing `--help` is a
+    // usage error (exit 2) pointing at the one page, never a look
+    // lookup (exit 1).
+    for (args, word) in [
+        (&["show", "--help"] as &[&str], "--help"),
+        (&["apply", "--help"], "--help"),
+        (&["save", "--help"], "--help"),
+        (&["export", "--help"], "--help"),
+        (&["new", "--help", "--from", "moonrise"], "--help"),
+        (&["new", "mine", "--from", "--help"], "--help"),
+        (&["watch", "--help"], "--help"),
+        (&["install", "--help"], "--help"),
+        (&["validate", "--bogus"], "--bogus"),
+        (&["build", "--bogus", "--out", "/tmp/out"], "--bogus"),
+        (&["preview", "--help"], "--help"),
+    ] {
+        assert_eq!(
+            command(args),
+            Err(Error::Unknown(word.to_owned())),
+            "{args:?}"
+        );
+    }
+    // Real paths starting with `-` still spell with `./` in front.
+    assert_eq!(
+        command(&["install", "./-handed-over"]),
+        Ok(Command::Install {
+            path: PathBuf::from("./-handed-over"),
+            trust: false,
         })
     );
 }

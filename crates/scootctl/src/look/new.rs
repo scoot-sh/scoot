@@ -42,7 +42,10 @@ pub fn create_new_into(
             .collect();
         names.sort();
         if names.is_empty() {
-            format!("unknown base look `{base}`: the catalog is empty")
+            format!(
+                "unknown base look `{base}`: {}",
+                super::empty_catalog_hint()
+            )
         } else {
             format!(
                 "unknown base look `{base}` (available: {})",

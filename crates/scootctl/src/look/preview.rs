@@ -60,12 +60,15 @@ pub fn resolve_preview_target(
         Some(given) => {
             let is_path = given.contains('/') || given == "." || given == "..";
             if is_path {
-                let dir = std::fs::canonicalize(given)
-                    .map_err(|error| format!("`{given}` is not a directory: {error}"))?;
+                let dir = match std::fs::canonicalize(given) {
+                    Ok(dir) => dir,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        return Err(super::not_a_dir(given, "preview"));
+                    }
+                    Err(error) => return Err(format!("cannot resolve `{given}`: {error}")),
+                };
                 if !dir.is_dir() {
-                    return Err(format!(
-                        "`{given}` is not a directory: preview takes a directory or a catalog name (`./{given}` for a cwd directory)"
-                    ));
+                    return Err(super::not_a_dir(given, "preview"));
                 }
                 let bytes = super::apply::read_regular(&dir.join("look.toml"))
                     .map_err(|error| format!("cannot preview `{given}`: {error}"))?;
@@ -86,7 +89,7 @@ pub fn resolve_preview_target(
                         .collect();
                     names.sort();
                     if names.is_empty() {
-                        format!("unknown look `{given}`: the catalog is empty")
+                        format!("unknown look `{given}`: {}", super::empty_catalog_hint())
                     } else {
                         format!("unknown look `{given}` (available: {})", names.join(", "))
                     }
@@ -133,6 +136,15 @@ pub fn capture(
     catalog: &Catalog,
     checks: &dyn Checks,
 ) -> Result<CaptureReport, String> {
+    // The scratch session is the compositor, which only runs on Linux:
+    // refuse before building, with one line instead of a failed startup
+    // plus its log tail.
+    if cfg!(not(target_os = "linux")) {
+        return Err(
+            "preview --capture needs Linux: the headless session is the compositor, which only runs there"
+                .to_owned(),
+        );
+    }
     let root = scratch_root()?;
     let rendered = root.join("rendered");
     let build = build_to_out(

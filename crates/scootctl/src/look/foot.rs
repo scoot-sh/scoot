@@ -6,7 +6,6 @@
 use std::path::Path;
 
 use scoot_look::catalog::config_home;
-use scoot_look::state::read_capped_follow;
 
 /// The foot leaf after a swap: new terminals read the rendered `foot.ini`
 /// through the state link, so the reply names the one-time setup until the
@@ -56,24 +55,7 @@ fn foot_include_present(config: Option<&Path>) -> bool {
         return false;
     };
     // The user's own file: home-manager links it into the store, so
-    // symlinks are followed here, like the shadowed-keys read.
-    let text = match read_capped_follow(&path) {
-        Ok(text) => text,
-        Err(_) => return false,
-    };
-    text.lines().any(|line| {
-        let line = line.trim();
-        if line.starts_with('#') || line.starts_with(';') {
-            return false;
-        }
-        let Some(rest) = line.strip_prefix("include") else {
-            return false;
-        };
-        // `include`, `include =`, `include=` all spell the directive; a
-        // longer word (`included`) is not it.
-        if !rest.is_empty() && !rest.starts_with(['=', ' ', '\t']) {
-            return false;
-        }
-        rest.contains("look/foot.ini")
-    })
+    // symlinks are followed here, like the shadowed-keys read. The
+    // line scan itself is shared with `scoot look wiring`.
+    super::wiring::foot_include_present(&path)
 }
