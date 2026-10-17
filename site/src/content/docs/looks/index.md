@@ -426,6 +426,39 @@ be installed; a `[fonts.files]` path must exist), the wallpaper
 through `scootbg check-image`, the bar fragment through the installed
 bar's own parser.
 
+## Sharing
+
+Hand a look over as a tarball, or install one someone handed you. No
+step here needs Nix.
+
+```sh
+scoot look export moonrise --out moonrise.tar   # a tarball of the source look
+scoot look install ./handed-over                # a directory or a tarball
+scoot look save my-tweak                        # your own files as a user look
+```
+
+`export NAME` writes a plain `.tar` of the source look (`<name>.tar`
+here unless `--out FILE` moves it): every regular file a look uses,
+under one `<name>/` prefix (a symlink skips with a note). The tarball
+installs back unchanged.
+
+`install PATH` takes a directory or a tarball into
+`~/.local/share/scoot/installed-looks/`: regular files only (a symlink,
+a hard link, a device, a FIFO or a socket refuses the install), only the file kinds a look
+uses (`look.toml`, `preview.png`, image wallpapers, `fonts/*.ttf|otf`,
+the five `apps/` leaves, `LICENSE*`, `COPYING*`, `README.md`), file
+count and total size capped, `license` required. An installed look may
+not take the name of a shipped, declared or user-authored look, and it
+can be applied but never extended. Its `apps/` leaves drop unless
+`--trust` keeps them (printed first). A wallpaper given by URL is
+fetched, verified against its `sha256` and cached now — the install
+refuses if that fails — so a later swap makes no network request.
+
+`save NAME` snapshots your own appearance and color values (the
+compositor's `[appearance]` and `[wallpaper]`, the bar's `[colors]`) as
+a source look in `user-looks/`, extending the recorded live look (apply
+one first). The save is user-authored, so it can be extended.
+
 > **Symptom:** `apply` answers applied and nothing changes.
 > A key in your own files shadows the look. `scoot look current` names
 > every shadowing key; remove or change yours to let the look through.

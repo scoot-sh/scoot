@@ -3,7 +3,7 @@ title: "Later: install looks from git and flake lookPacks"
 status: "open"
 area: "core"
 priority: "low"
-blocked: "look-install"
+blocked: null
 milestone: "later"
 ---
 
