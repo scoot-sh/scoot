@@ -400,9 +400,9 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [`scoot look install` from a path, export and save](./resolved/look-install-done.md) (low) — RESOLVED 2026-10-17
 - [Bundle the maintainer's vinyl-sunset image and retheme the look](./resolved/vinyl-sunset-image-done.md) (medium) — RESOLVED 2026-10-17
 - [install.sh `--look` installs the catalog and applies a look](./resolved/look-install-sh-done.md) (medium) — RESOLVED 2026-10-15
+- [install.sh: say clearly that `--system` adds the login-screen entry, and warn about a per-user copy](./resolved/install-sh-system-clarity-done.md) (medium) — RESOLVED 2026-10-17
 - [Later: install looks from git and flake `lookPacks`](./core/look-share.md) (low, later)
 - [User and community look targets: render any app from a template](./core/look-user-targets.md) (medium)
-- [install.sh: say clearly that `--system` adds the login-screen entry, and warn about a per-user copy](./packaging/install-sh-system-clarity.md) (medium)
 - [Later: opt-in automatic look switching](./core/look-auto-switch.md) (low, later)
 
 ### Core / config / rendering

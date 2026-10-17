@@ -1,9 +1,10 @@
 ---
 title: "install.sh: say clearly that --system adds the login-screen entry, and warn about a per-user copy"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-17"
 ---
 
 # install.sh: say clearly that --system adds the login-screen entry, and warn about a per-user copy
@@ -51,3 +52,16 @@ under a newer launcher.
 
 Installing or configuring any greeter, a scoot greeter for non-Nix systems,
 or changing how the session file is written.
+
+Landed in PR #654 (`feat(install)`): the usage header, the Any Linux
+install page (both commands, side by side) and the end-of-run messages
+state the choice; a per-user run prints its matching `--system` command
+with `--look`/`--no-bar`; each direction warns when the other copy
+exists (the `--system` side resolves the invoking user through
+`SUDO_USER`/getent); removal stays an explicit `install.sh --uninstall`.
+`test-install.sh` 10a-10e prove the command, both warnings, the quiet
+case and the sudo path; mutation-proved (a dead note fails 10b, a
+dropped `--no-bar` fails 10a). Verified end to end as root in an
+ubuntu:24.04 container (real installs both ways, warnings in order,
+uninstalls exact) plus the suite green under ShellCheck 0.11.0 on macOS
+and Linux. The greeter is untouched.
