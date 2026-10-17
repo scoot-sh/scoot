@@ -212,14 +212,29 @@ at it, or leave the section to find `scootbg` on `PATH`).
 
 ## Make a look
 
-A look is data, so new ones are cheap: one directory with a `look.toml`
-(see the [format](../reference/look-format.md)) — palette, fonts,
-opacity, shape, cursor, wallpaper — plus a wallpaper image and,
-where the look has its own, terminal/shell/editor/monitor files and a
-preview. Validate it with `scoot look validate DIR`, render it with
-`scoot look build DIR --out OUT`, and list it in
-`programs.scoot.looks` to install it through the catalog (a look with
-`extends` resolves its base through the same list, so list the base
-too). Your own looks live in `~/.local/share/scoot/user-looks/` with
-no Nix involved; a look with `extends` names a shipped, declared or
-user-authored look, never an installed one.
+A look is data, so new ones are cheap. Start from a catalog look, then
+watch the directory while you edit it. No step here needs Nix. See
+[Authoring](../looks/index.md#authoring) for the full pass.
+
+```sh
+scoot look new my-green --from moonrise   # writes user-looks/my-green/look.toml
+scoot look watch ./my-green --no-toolkit  # validate and apply on every save
+scoot look preview my-green --capture     # screenshot the look into preview.png
+```
+
+`new NAME --from BASE` writes a source look with `extends = "BASE"`: the
+new look inherits every token and overrides from there. `BASE` names a
+shipped, declared or user-authored source look, never an installed one
+and never a rendered one. A look made with `new` is user-authored, so it
+can be the next `new`'s base. `watch DIR` validates and applies on every
+save (debounced, under the lock, into one reused cache slot, so the cache
+never grows per save); an invalid save is refused loudly and the last
+good look stays. `preview --capture` renders the look in a private
+headless session and writes `preview.png` beside its `look.toml`.
+
+A directory still validates with `scoot look validate DIR` and renders
+with `scoot look build DIR --out OUT` without applying. The manifest
+shape is the [format](../reference/look-format.md): palette, fonts,
+opacity, shape, cursor, wallpaper, plus a wallpaper image and, where the
+look has its own, terminal and shell files and a preview. Your own looks
+live in `~/.local/share/scoot/user-looks/`.

@@ -1762,6 +1762,7 @@ pub(crate) fn render_cached(
 /// never a half-written one; a stale `.old` from a crashed render is cleared
 /// first. The slot name never matches [`is_render_name`], so the prune never
 /// collects it: the last good render stays until the next watched save.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_fixed_slot(
     name: &str,
     chain: &[ChainEntry],
