@@ -7,7 +7,7 @@ scootbar or scootbg changes unless you use these files. The wallpaper ships
 in this repository (`docs/assets/wallpapers/vinyl-sunset.png`, under MIT;
 see "Image credit and license"), and [`scoot.toml`](scoot.toml) points at it.
 
-![scoot with the vinyl sunset look: a floating translucent bar with circled workspaces and the focused window's title over two translucent terminal columns (fastfetch over btop, Helix on scoot's source), the sunset illustration showing through on the right](../../assets/vinyl-sunset-preview.png)
+![scoot with the vinyl sunset look: a floating translucent bar with circled workspaces and the focused window's title over two translucent terminal columns (the look's palette as swatches, the example's file list), the desk-sunset wallpaper showing through](../../assets/vinyl-sunset-preview.png)
 
 | File | For |
 | --- | --- |
