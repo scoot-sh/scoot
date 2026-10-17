@@ -227,6 +227,16 @@ pub fn is_permitted_look_file(name: &str) -> bool {
     false
 }
 
+/// Bundled font files only: `is_permitted_look_file` also passes
+/// `look.toml`, `preview.png`, `README.md`, `LICENSE*`/`COPYING*` and image
+/// wallpapers, none of which belongs under `fonts/`. Suffixes match the
+/// refusal message the install gate prints.
+pub fn is_font_file_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    (lower.ends_with(".ttf") || lower.ends_with(".otf"))
+        && check_relative_path("file", name).is_none()
+}
+
 /// Wallpaper images only: `is_permitted_look_file` also passes
 /// `look.toml`, `preview.png`, `README.md`, `LICENSE*`/`COPYING*` and
 /// bundled `.ttf`/`.otf` fonts, none of which decodes as a wallpaper

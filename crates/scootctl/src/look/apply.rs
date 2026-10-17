@@ -182,6 +182,22 @@ pub trait Checks {
     /// parser (`foot --check-config --config`). A missing binary is
     /// [`Availability::Unavailable`]; a failing check refuses.
     fn foot_fragment(&self, fragment: &Path) -> Result<Availability<()>, String>;
+    /// Resolves a URL wallpaper from the download cache: `install` fetched
+    /// and verified it at install time, and a swap never fetches. A miss
+    /// refuses (never fetches here); `install` owns the fetch.
+    fn url_wallpaper(
+        &self,
+        url: &str,
+        sha256: Option<&str>,
+    ) -> Result<Availability<String>, String> {
+        match super::install::cached_url_wallpaper(url, sha256) {
+            Ok(path) => match path_to_string(&path) {
+                Ok(text) => Ok(Availability::Available(text)),
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
+        }
+    }
 }
 
 /// What `validate` found.
@@ -1161,29 +1177,46 @@ pub(crate) fn check_inputs(
     // it (the unit is inherited whole, so that directory is the chain's
     // last entry with a `[wallpaper]` table); a color needs no path.
     let mut wallpaper_abs: Option<String> = None;
-    if let Some((dir, image)) = wallpaper_image(chain) {
-        match contained_file(&dir, &image) {
-            Ok(path) => {
-                match checks.wallpaper(&path) {
-                    Ok(Availability::Available(())) => {
-                        details.push(format!("wallpaper: {}", path.display()));
-                    }
-                    Ok(Availability::Unavailable(note)) => {
-                        validation.notes.push(note);
-                        details.push(format!("wallpaper: {}", path.display()));
-                    }
-                    Err(refusal) => validation.errors.push(refusal),
+    if let Some((dir, image, sha256)) = wallpaper_image(chain) {
+        if image.starts_with("https://") {
+            // A URL wallpaper resolves from the download cache only:
+            // `install` fetched and verified it at install time, and a
+            // swap never makes a network request. Anything uncached
+            // refuses here (it never fetches).
+            match checks.url_wallpaper(&image, sha256.as_deref()) {
+                Ok(Availability::Available(path)) => {
+                    details.push(format!("wallpaper: {image} (cached)"));
+                    wallpaper_abs = Some(path);
                 }
-                match path_to_string(&path) {
-                    Ok(text) => wallpaper_abs = Some(text),
-                    Err(error) => validation
-                        .errors
-                        .push(format!("wallpaper `{image}`: {error}")),
+                Ok(Availability::Unavailable(note)) => {
+                    validation.notes.push(note);
                 }
+                Err(refusal) => validation.errors.push(refusal),
             }
-            Err(error) => validation
-                .errors
-                .push(format!("wallpaper `{image}`: {error}")),
+        } else {
+            match contained_file(&dir, &image) {
+                Ok(path) => {
+                    match checks.wallpaper(&path) {
+                        Ok(Availability::Available(())) => {
+                            details.push(format!("wallpaper: {}", path.display()));
+                        }
+                        Ok(Availability::Unavailable(note)) => {
+                            validation.notes.push(note);
+                            details.push(format!("wallpaper: {}", path.display()));
+                        }
+                        Err(refusal) => validation.errors.push(refusal),
+                    }
+                    match path_to_string(&path) {
+                        Ok(text) => wallpaper_abs = Some(text),
+                        Err(error) => validation
+                            .errors
+                            .push(format!("wallpaper `{image}`: {error}")),
+                    }
+                }
+                Err(error) => validation
+                    .errors
+                    .push(format!("wallpaper `{image}`: {error}")),
+            }
         }
     }
     if !validation.errors.is_empty() {
@@ -1222,14 +1255,20 @@ fn carrier_file(chain: &[ChainEntry], key: &str) -> Option<(PathBuf, String)> {
 }
 
 /// The wallpaper image from the chain's last look that names a
-/// `[wallpaper]` table with one, with the manifest directory that names it.
-fn wallpaper_image(chain: &[ChainEntry]) -> Option<(PathBuf, String)> {
+/// `[wallpaper]` table with one: the manifest directory that names it, the
+/// image (a relative path or an `https://` URL), and that table's `sha256`
+/// pin, if any.
+fn wallpaper_image(chain: &[ChainEntry]) -> Option<(PathBuf, String, Option<String>)> {
     let mut found = None;
     for link in chain {
         if let Some(wallpaper) = &link.entry.raw.wallpaper
             && let Some(image) = &wallpaper.image
         {
-            found = Some((link.entry.manifest_dir.clone(), image.clone()));
+            found = Some((
+                link.entry.manifest_dir.clone(),
+                image.clone(),
+                wallpaper.sha256.clone(),
+            ));
         }
     }
     found

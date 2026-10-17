@@ -21,6 +21,7 @@ pub mod apply;
 pub mod build_dir;
 pub mod cycle;
 pub mod foot;
+pub mod install;
 pub mod leaves;
 pub mod new;
 pub mod pick;
@@ -128,6 +129,14 @@ pub enum Command {
         timeout_secs: u64,
         origin: Origin,
     },
+    /// Install someone else's look from a directory or a tarball into
+    /// `installed-looks/`, behind the trust boundary.
+    Install { path: PathBuf, trust: bool },
+    /// Export a source look as a tarball (plain ustar `.tar`).
+    Export { name: String, out: Option<PathBuf> },
+    /// Save the user's own appearance and color values as a source look
+    /// in `user-looks/`.
+    Save { name: String },
 }
 
 /// Which catalog step a `Cycle` command takes.
@@ -142,7 +151,7 @@ pub enum CycleStep {
 /// `_preview-revert` stays out: it is spawned, never typed.
 pub const COMMANDS: &[&str] = &[
     "list", "current", "show", "validate", "build", "apply", "next", "prev", "random", "pick",
-    "sync", "toolkit", "new", "watch", "preview",
+    "sync", "toolkit", "new", "watch", "preview", "install", "export", "save",
 ];
 
 /// The usage line, shared by `scoot look --help` and the top-level help.
@@ -160,6 +169,9 @@ pub const LOOK_USAGE: &str = "\
     look new NAME --from BASE [--json]
     look watch DIR [--no-toolkit] [--origin shipped|declared|user|installed] [--json]
     look preview [NAME] [--capture] [--out FILE] [--width N] [--height N] [--timeout SECS] [--origin shipped|declared|user|installed] [--json]
+    look install PATH [--trust] [--json]
+    look export NAME [--out FILE] [--json]
+    look save NAME [--json]
 
     --state DIR takes the look state (default: $SCOOT_LOOK_STATE, then
     $XDG_STATE_HOME/scoot, then ~/.local/state/scoot); --socket PATH takes
@@ -279,6 +291,9 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
         "new" => parse_new(&positionals)?,
         "watch" => parse_watch(&positionals)?,
         "preview" => parse_preview(&positionals)?,
+        "install" => parse_install(&positionals)?,
+        "export" => parse_export(&positionals)?,
+        "save" => parse_save(&positionals)?,
         "toolkit" => {
             let action = match positionals.as_slice() {
                 [] => None,
@@ -311,7 +326,8 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
                 other.to_owned(),
                 &[
                     "list", "current", "show", "validate", "build", "apply", "next", "prev",
-                    "random", "pick", "sync", "toolkit", "new", "watch", "preview",
+                    "random", "pick", "sync", "toolkit", "new", "watch", "preview", "install",
+                    "export", "save",
                 ],
                 "scoot look --help",
             ));
@@ -391,6 +407,19 @@ COMMANDS:
                 until interrupted
     preview     show a look's preview image, or `--capture` it from a
                 private headless session (the active look when unnamed)
+    install     install someone else's look from a directory or a tarball
+                into `installed-looks/`: regular files only, only the file
+                kinds a look uses, `license` required, never under another
+                look's name; `apps/` leaves drop unless `--trust` (which
+                prints them first); a URL wallpaper is fetched, verified
+                and cached now, so a later swap makes no network request
+    export      write a source look as a tarball (plain ustar `.tar`,
+                `--out FILE`, else `<name>.tar` here) for handing over;
+                installs back unchanged
+    save        snapshot your own appearance and color values (the
+                compositor's `[appearance]` and `[wallpaper]`, the bar's
+                `[colors]`) as a source look in `user-looks/`, extending
+                the recorded live look (apply one first)
 
 A look is presentation only (colors, fonts, opacity, shape, cursor, the
 wallpaper): a swap never applies pending edits to your own files, and a
@@ -814,6 +843,79 @@ fn parse_preview(positionals: &[String]) -> Result<Command, Error> {
     })
 }
 
+/// `install PATH [--trust]`: the path is positional (a directory or a
+/// plain `.tar` tarball); anything else is a flag error.
+fn parse_install(positionals: &[String]) -> Result<Command, Error> {
+    let mut path: Option<PathBuf> = None;
+    let mut trust = false;
+    for word in positionals {
+        if word == "--trust" {
+            trust = true;
+        } else if path.is_none() {
+            path = Some(PathBuf::from(word));
+        } else {
+            return Err(hinted(
+                "flag",
+                word.clone(),
+                &["--trust", "--json", "--state", "--socket"],
+                "scoot look --help",
+            ));
+        }
+    }
+    let path = path.ok_or(Error::Missing("a look directory or tarball"))?;
+    Ok(Command::Install { path, trust })
+}
+
+/// `export NAME [--out FILE]`: the name is positional, the tarball path
+/// rides `--out` (spelled `--out FILE` or `--out=FILE`), else
+/// `<name>.tar` in the working directory.
+fn parse_export(positionals: &[String]) -> Result<Command, Error> {
+    let mut name: Option<String> = None;
+    let mut out: Option<PathBuf> = None;
+    let mut words = positionals.iter().peekable();
+    while let Some(word) = words.next() {
+        if word == "--out" {
+            let value = words.next().ok_or(Error::Missing("a file after --out"))?;
+            if out.is_some() {
+                return Err(Error::Unknown(word.clone()));
+            }
+            out = Some(PathBuf::from(value));
+        } else if let Some(value) = word.strip_prefix("--out=") {
+            if value.is_empty() {
+                return Err(Error::Missing("a file after --out"));
+            }
+            if out.is_some() {
+                return Err(Error::Unknown(word.clone()));
+            }
+            out = Some(PathBuf::from(value));
+        } else if name.is_none() {
+            name = Some(word.clone());
+        } else {
+            return Err(Error::Unknown(word.clone()));
+        }
+    }
+    let name = name.ok_or(Error::Missing("a look name"))?;
+    check_name(&name)?;
+    Ok(Command::Export { name, out })
+}
+
+/// `save NAME`: the name is positional, nothing else.
+fn parse_save(positionals: &[String]) -> Result<Command, Error> {
+    match positionals {
+        [name] => {
+            check_name(name)?;
+            Ok(Command::Save { name: name.clone() })
+        }
+        [] => Err(Error::Missing("a look name")),
+        [extra, ..] => Err(hinted(
+            "flag",
+            extra.clone(),
+            &["--json", "--state", "--socket"],
+            "scoot look --help",
+        )),
+    }
+}
+
 /// An `--origin` value, shared by `watch` and `preview`.
 fn parse_origin(value: &str) -> Result<Origin, Error> {
     match value {
@@ -966,6 +1068,9 @@ pub fn run(look: &Look) -> Result<(), String> {
             *timeout_secs,
             *origin,
         ),
+        Command::Install { path, trust } => run_install(look, path, *trust),
+        Command::Export { name, out } => run_export(look, name, out.as_deref()),
+        Command::Save { name } => run_save(look, name),
     }
 }
 
@@ -2285,6 +2390,125 @@ fn run_preview(
             report.bytes
         ))
         .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/// Installs someone else's look from a directory or a tarball into
+/// `installed-looks/`: the trust-boundary gate, then the same validation
+/// an apply runs. With `--trust` the `apps/` leaves are kept and printed
+/// first; without it they are dropped and named.
+fn run_install(look: &Look, path: &Path, trust: bool) -> Result<(), String> {
+    let catalog = discover();
+    let checks = apply::ProdChecks::new();
+    let parent = install::installed_looks_dir()?;
+    let fetch = install::ProdFetch;
+    let meta = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot stat {}: {error}", path.display()))?;
+    let report = if meta.is_dir() && !meta.is_symlink() {
+        install::install_dir_into(path, &parent, &catalog, &checks, trust, &fetch)?
+    } else {
+        install::install_tar_into(path, &parent, &catalog, &checks, trust, &fetch)?
+    };
+    if look.json {
+        output::print_line(
+            &serde_json::to_string_pretty(&serde_json::json!({
+                "installed": report.name,
+                "dir": report.dir,
+                "dropped": report.dropped,
+                "kept": report.kept,
+                "fetched": report.fetched,
+                "notes": report.notes,
+            }))
+            .unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
+    } else {
+        for kept in &report.kept {
+            output::print_line(&format!("trusted: {kept}"))
+                .map_err(|error| error.to_string())?;
+        }
+        output::print_line(&format!("installed: {}", report.name))
+            .map_err(|error| error.to_string())?;
+        if !report.dropped.is_empty() {
+            output::print_line(&format!("dropped without --trust: {}", report.dropped.join(", ")))
+                .map_err(|error| error.to_string())?;
+        }
+        if let Some(fetched) = &report.fetched {
+            output::print_line(&format!("cached wallpaper: {}", fetched.display()))
+                .map_err(|error| error.to_string())?;
+        }
+        warn_all(&report.notes);
+    }
+    Ok(())
+}
+
+/// Exports a source look as a tarball for handing over: `--out FILE`, else
+/// `<name>.tar` in the working directory.
+fn run_export(look: &Look, name: &str, out: Option<&Path>) -> Result<(), String> {
+    let catalog = discover();
+    let owned;
+    let tarball = match out {
+        Some(path) => path,
+        None => {
+            owned = PathBuf::from(format!("{name}.tar"));
+            &owned
+        }
+    };
+    let report = install::export_into(name, &catalog, tarball)?;
+    if look.json {
+        output::print_line(
+            &serde_json::to_string_pretty(&serde_json::json!({
+                "exported": report.name,
+                "tarball": report.tarball,
+                "files": report.files,
+                "notes": report.notes,
+            }))
+            .unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
+    } else {
+        output::print_line(&format!("exported: {}", report.tarball.display()))
+            .map_err(|error| error.to_string())?;
+        warn_all(&report.notes);
+    }
+    Ok(())
+}
+
+/// Saves the user's own appearance and color values as a source look in
+/// `user-looks/`, extending the live look when one is recorded.
+fn run_save(look: &Look, name: &str) -> Result<(), String> {
+    let catalog = discover();
+    let checks = apply::ProdChecks::new();
+    let config = install::config_home_dir()?;
+    let parent = new::user_looks_dir()?;
+    let state_dir = resolve_state_dir(look.state.as_deref())?;
+    let report = install::save_into(name, &config, &parent, Some(&state_dir), &catalog, &checks)?;
+    if look.json {
+        output::print_line(
+            &serde_json::to_string_pretty(&serde_json::json!({
+                "saved": report.name,
+                "dir": report.dir,
+                "extends": report.extends,
+                "tokens": report.tokens,
+                "notes": report.notes,
+            }))
+            .unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
+    } else {
+        output::print_line(&format!("saved: {}", report.dir.display()))
+            .map_err(|error| error.to_string())?;
+        if let Some(base) = &report.extends {
+            output::print_line(&format!("extends: {base}"))
+                .map_err(|error| error.to_string())?;
+        }
+        output::warn(format_args!(
+            "note: edit {}, then `scoot look watch {}` to try it live",
+            report.dir.join("look.toml").display(),
+            report.dir.display()
+        ));
+        warn_all(&report.notes);
     }
     Ok(())
 }

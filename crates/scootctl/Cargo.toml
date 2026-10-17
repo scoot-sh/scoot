@@ -11,6 +11,12 @@ license.workspace = true
 scoot-ipc.workspace = true
 scoot-look.workspace = true
 serde_json.workspace = true
+# `look export`/`install` tarballs: plain ustar, read entry by entry (never
+# `unpack`), every entry re-validated against the trust boundary.
+tar = "0.4"
+# The install-time URL wallpaper fetch: the `sha256` pin check and the
+# download-cache file name (hex of the URL's hash, as scootbg names it).
+sha2 = "0.10"
 toml = "1"
 # The uid behind the `/run/user/<uid>` fallback (see `look/reload.rs`)
 # and the gated file reads (see `look/apply.rs`): no Wayland, no
