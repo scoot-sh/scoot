@@ -1,27 +1,27 @@
-# Vinyl Sunset: espresso background, sunset-orange ring. Tokens lifted from
-# nix/modules/desktop.nix (palette, fonts, nightTemp) and
-# docs/examples/vinyl-sunset/ (terminal hues, ring widths, bar style) per
-# docs/backlog/core/look-shipped.md. The illustration cannot be committed
-# under its license, so the wallpaper is the flat background color.
+# Vinyl Sunset: warm espresso background, sunset-orange ring, desk-sunset
+# wallpaper. Tokens lifted from nix/modules/desktop.nix (palette, fonts,
+# nightTemp) and docs/examples/vinyl-sunset/ (terminal hues, ring widths,
+# bar style) per docs/backlog/core/look-shipped.md. The wallpaper is an
+# AI-generated image made by the maintainer, shipped under MIT (see NOTICE).
 schema = 1
 name = "vinyl-sunset"
 title = "Vinyl Sunset"
-description = "Espresso background, sunset-orange ring."
+description = "Warm espresso, sunset-orange ring, desk-sunset wallpaper."
 polarity = "dark"
 license = "MIT"
 
 [palette]
-background = "#271A1F"
-foreground = "#F1E3C6"
-dim = "#604F50"
-accent = "#E59560"
-urgent = "#C76B47"
-hover = "#FDC58B"
-focus = "#E59560"
-border = "#423F51"
+background = "#270E0A"
+foreground = "#F6E8CB"
+dim = "#AA6D5F"
+accent = "#FE9949"
+urgent = "#CE6B4B"
+hover = "#FEC69A"
+focus = "#FFD757"
+border = "#573046"
 
 [terminal]
-colors = ["#3a2a2e", "#c76b47", "#8a9a5b", "#e59560", "#6f7cb3", "#b47a8c", "#7fa3a0", "#ddb590", "#604f50", "#e0866a", "#a6b67a", "#fdc58b", "#8f9bd0", "#d097a8", "#9cc0bc", "#f6ead2"]
+colors = ["#411711", "#c85b37", "#a5c643", "#da973e", "#6a7fbd", "#b2676d", "#878cb6", "#eac985", "#803a23", "#d58267", "#b8d26a", "#ffd757", "#95a4d0", "#c89397", "#adb0cd", "#f6e8cb"]
 
 [fonts]
 ui = "DroidSansM Nerd Font Propo"
@@ -43,7 +43,8 @@ theme = "Mocu"
 size = 24
 
 [wallpaper]
-color = "#271A1F"
+image = "wallpaper.png"
+mode = "fill"
 
 [night]
 temperature = 3200
@@ -52,4 +53,4 @@ temperature = 3200
 "bar.padding" = 10
 "bar.separator" = 1
 "bar.spacing" = 8
-"workspaces.inactive-color" = "#A08C7A"
+"workspaces.inactive-color" = "#BE7E84"

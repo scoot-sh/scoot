@@ -7,12 +7,12 @@ gui:
   showRandomTip: false
   border: rounded
   theme:
-    activeBorderColor: ["#E59560", bold]
-    inactiveBorderColor: ["#604F50"]
-    selectedLineBgColor: ["#522C27"]
-    optionsTextColor: ["#E59560"]
-    unstagedChangesColor: ["#E0866A"]
-    defaultFgColor: ["#F1E3C6"]
+    activeBorderColor: ["#FE9949", bold]
+    inactiveBorderColor: ["#AA6D5F"]
+    selectedLineBgColor: ["#582818"]
+    optionsTextColor: ["#FE9949"]
+    unstagedChangesColor: ["#D58267"]
+    defaultFgColor: ["#F6E8CB"]
 git:
   autoFetch: false
   autoRefresh: false

@@ -1,7 +1,7 @@
-# The "vinyl sunset" look for scoot: a dark espresso background, a sunset-orange
-# ring around the focused window and a muted plum one around the rest, rounded
-# corners, and the vinyl illustration (downloaded separately, see README.md in
-# this directory).
+# The "vinyl sunset" look for scoot: a warm espresso background, a
+# sunset-orange ring around the focused window and a muted mauve one around
+# the rest, rounded corners, and the maintainer's desk-sunset wallpaper in
+# ../../assets/wallpapers. See README.md in this directory.
 #
 #   scoot --config docs/examples/vinyl-sunset/scoot.toml
 #
@@ -15,15 +15,14 @@
 gap = 20
 
 [appearance]
-background_color = "#271A1F"          # shows until the wallpaper is up, and behind it
+background_color = "#270E0A"          # shows until the wallpaper is up, and behind it
 corner_radius = 12                    # costs a little per frame: 0 is free
 focus_ring_width = 2                  # the color, not the weight, says which is focused
-focus_ring_active_color = "#E59560"
-focus_ring_inactive_color = "#423F51"
+focus_ring_active_color = "#FE9949"
+focus_ring_inactive_color = "#7D4564"
 
 [wallpaper]
-# Download the illustration (see README.md) and point this at your copy,
-# or at its Pixabay link (downloaded once and cached on your machine).
-# A relative path is resolved against this file's directory.
-image = "~/Pictures/wallpapers/vinyl-sunset.png"
+# The maintainer's wallpaper, committed beside the docs. A relative path is
+# resolved against this file's directory.
+image = "../../assets/wallpapers/vinyl-sunset.png"
 mode = "fill"

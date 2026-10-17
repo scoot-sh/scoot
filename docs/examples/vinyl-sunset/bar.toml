@@ -31,12 +31,12 @@ spacing = 8
 separator = 1        # a 1 px line in dim, centered in each 8 px gap
 
 [colors]
-background = "#271A1F"
-foreground = "#F1E3C6"
-accent = "#E59560"
-hover = "#FDC58B"
-dim = "#604F50"
-urgent = "#C76B47"
+background = "#270E0A"
+foreground = "#F6E8CB"
+accent = "#FE9949"
+hover = "#FEC69A"
+dim = "#AA6D5F"
+urgent = "#CE6B4B"
 
 [workspaces]
 pill-shape = "circle"
@@ -44,7 +44,7 @@ pill-inset = 7
 item-gap = 3           # spaces between the numbers
 margin = 8             # room either side of the module
 disc = true            # grow the span to the disc, so a digit is round at any padding
-inactive-color = "#A08C7A"
+inactive-color = "#BE7E84"
 
 [window-title]
 icon = "\U000F08C6"    # application
