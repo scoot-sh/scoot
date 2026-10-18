@@ -100,6 +100,17 @@ and the keyboard spike's pick. It must show:
 - a mouse-picked entry re-activating an already-running single-instance app, the case scoot's
   own source documents fuzzel failing (`crates/scoot/src/compositor/activation.rs:81-99`).
 
+**Verdict: GO, measured 2026-10-18** (record in
+[`launch-prototype.md`](../../docs/scootbar/backlog/resolved/launch-prototype-done.md),
+screenshots in `dev/spikes/scootbar/launch-prototype/`).
+Dev-VM-only rows (no M2 access that session): first frame 25-37 ms vs
+fuzzel's 64-78 ms at 300 and 3,000 entries; open RSS 4.9/6.2 MB vs
+~14 MB; keystroke-to-pixels tied at 25-37 ms; AZERTY and `us(intl)`
+queries correct; button-serial token re-activates the running app
+while a focus-serial token is refused, the fuzzel failure shape.
+Identical-list stress shows a 47 ms desktop-parse cost at 3,000 files,
+which the planned index cache removes.
+
 The RSS and closure rows are close to certain to pass. Keystroke latency and typing
 correctness are the real risks. On a no, fuzzel stays, and nothing has been extracted for it.
 
@@ -568,7 +579,7 @@ TOML only, into `scoot/launch.toml`). There is no `stylix.enable` and no unit.
 | Slug | Serves | Blocked by |
 |---|---|---|
 | [`launcher`](../../docs/scootbar/backlog/launcher.md) (epic) | daily-drive, computer use | its children |
-| [`launch-prototype`](../../docs/scootbar/backlog/launch-prototype.md): the go/no-go gate, out of the workspace | daily-drive | `scootui-keyboard-spike`, the go-ahead |
+| [`launch-prototype`](../../docs/scootbar/backlog/resolved/launch-prototype-done.md): the go/no-go gate, out of the workspace | daily-drive | `scootui-keyboard-spike`, the go-ahead |
 | [`launch-desktop-index`](../../docs/scootbar/backlog/launch-desktop-index.md): parser, ids, locale, Exec, cache; `--list --json` | computer use, daily-drive | the GO verdict in `launch-prototype` |
 | [`launch-match-rank`](../../docs/scootbar/backlog/launch-match-rank.md): fuzzy, frecency; `--query --json` | both | `launch-desktop-index` |
 | [`launch-ui`](../../docs/scootbar/backlog/launch-ui.md): the panel, keys, list, the look layer | daily-drive | `launch-match-rank`, `scootui-entry-and-list`, `scootui-surfaces-on-demand`, `look-format` |
