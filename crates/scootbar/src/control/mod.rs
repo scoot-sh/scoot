@@ -11,10 +11,10 @@
 pub mod client;
 pub mod protocol;
 
+pub use scootui::control::paths;
 pub use scootui::control::{
     Claim, ClaimError, Handler, Kinds, MAX_CONNECTIONS, MAX_SUBSCRIBERS, Server,
 };
-pub use scootui::control::paths;
 
 #[cfg(test)]
 mod subscribe_tests;

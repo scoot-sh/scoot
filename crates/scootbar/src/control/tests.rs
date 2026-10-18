@@ -51,7 +51,12 @@ impl Drop for Scratch {
 #[test]
 fn paths_follow_the_display() {
     let dir = std::ffi::OsStr::new("/run/user/1");
-    let paths = paths::resolve("scootbar", Some(std::ffi::OsStr::new("wayland-0")), Some(dir)).unwrap();
+    let paths = paths::resolve(
+        "scootbar",
+        Some(std::ffi::OsStr::new("wayland-0")),
+        Some(dir),
+    )
+    .unwrap();
     assert_eq!(paths.display, "wayland-0");
     assert_eq!(
         paths.socket,
@@ -62,7 +67,12 @@ fn paths_follow_the_display() {
         PathBuf::from("/run/user/1/scootbar-wayland-0.lock")
     );
     // An absolute display keeps its final component, sanitised.
-    let paths = paths::resolve("scootbar", Some(std::ffi::OsStr::new("/tmp/a b/c:d")), Some(dir)).unwrap();
+    let paths = paths::resolve(
+        "scootbar",
+        Some(std::ffi::OsStr::new("/tmp/a b/c:d")),
+        Some(dir),
+    )
+    .unwrap();
     assert_eq!(paths.display, "c_d");
     // Unset and empty mean the default.
     let paths = paths::resolve("scootbar", None, Some(dir)).unwrap();
@@ -78,14 +88,16 @@ fn paths_refuse_what_they_cannot_serve() {
         Err(PathError::NoRuntimeDir)
     );
     assert_eq!(
-        paths::resolve("scootbar", 
+        paths::resolve(
+            "scootbar",
             Some(std::ffi::OsStr::new("w")),
             Some(std::ffi::OsStr::new("relative/dir"))
         ),
         Err(PathError::RelativeRuntimeDir(PathBuf::from("relative/dir")))
     );
     assert!(matches!(
-        paths::resolve("scootbar", 
+        paths::resolve(
+            "scootbar",
             Some(std::ffi::OsStr::new("/tmp/")),
             Some(std::ffi::OsStr::new("/run/user/1"))
         ),
@@ -93,7 +105,8 @@ fn paths_refuse_what_they_cannot_serve() {
     ));
     let long = format!("/run/{}/x", "d".repeat(200));
     assert!(matches!(
-        paths::resolve("scootbar", 
+        paths::resolve(
+            "scootbar",
             Some(std::ffi::OsStr::new("wayland-0")),
             Some(std::ffi::OsStr::new(&long))
         ),
