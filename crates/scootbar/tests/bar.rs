@@ -239,7 +239,12 @@ fn device_height(shot: &Shot) -> u32 {
 
 #[test]
 fn a_fractional_scale_is_drawn_at_device_pixels_and_follows_a_change() {
-    let Some(session) = Session::scoot(&common::scootbar_bin(), "scale", 1, "[output]\nscale = 1.5\n") else {
+    let Some(session) = Session::scoot(
+        &common::scootbar_bin(),
+        "scale",
+        1,
+        "[output]\nscale = 1.5\n",
+    ) else {
         return;
     };
     let mut bar = Reaper(session.bar_with_env(&["--background", BAR], &[("WAYLAND_DEBUG", "1")]));
@@ -292,7 +297,12 @@ fn without_a_viewporter_it_draws_at_the_integer_scale() {
         eprintln!("skipped -- SCOOTBAR_DEBUG_NO_VIEWPORTER needs a debug build");
         return;
     }
-    let Some(session) = Session::scoot(&common::scootbar_bin(), "noviewport", 1, "[output]\nscale = 1.5\n") else {
+    let Some(session) = Session::scoot(
+        &common::scootbar_bin(),
+        "noviewport",
+        1,
+        "[output]\nscale = 1.5\n",
+    ) else {
         return;
     };
     let mut bar = Reaper(session.bar_with_env(

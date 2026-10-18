@@ -299,8 +299,7 @@ pub fn run(
         wayland.state.pump_tooltip(&wayland.qh, &mut now);
         // What changed, to the subscribers (one branch with none).
         wayland.state.pump_events(&mut server, &mut now);
-        scootui::wayland::flush(&wayland.conn, &mut wants_write)
-            .map_err(Error::Disconnected)?;
+        scootui::wayland::flush(&wayland.conn, &mut wants_write).map_err(Error::Disconnected)?;
         let Some(guard) = wayland.queue.prepare_read() else {
             // Events arrived for our queue meanwhile: dispatch them.
             continue;

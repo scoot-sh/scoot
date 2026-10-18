@@ -219,7 +219,12 @@ fn hide_and_show_keep_to_the_list() {
 #[test]
 fn a_second_output_adds_no_fds() {
     let fds = |outputs: u32| {
-        let session = Session::scoot(&common::scootbar_bin(), &format!("fds{outputs}"), outputs, "")?;
+        let session = Session::scoot(
+            &common::scootbar_bin(),
+            &format!("fds{outputs}"),
+            outputs,
+            "",
+        )?;
         let path = config(&session, "left = [\"workspaces\"]\nright = [\"clock\"]", "");
         let mut bar = daemon(&session, &path);
         session.wait_for(&mut bar.0, "every output's bar", |session| {

@@ -49,7 +49,9 @@ fn a_click_in_a_cut_corner_reaches_the_window_behind() {
         return;
     }
     for (radius, reaches) in [(60, true), (0, false)] {
-        let Some(session) = Session::scoot(&common::scootbar_bin(), &format!("input-{radius}"), 1, "") else {
+        let Some(session) =
+            Session::scoot(&common::scootbar_bin(), &format!("input-{radius}"), 1, "")
+        else {
             return;
         };
         // A tall bar over the windows (`exclusive = false`, on the `top`

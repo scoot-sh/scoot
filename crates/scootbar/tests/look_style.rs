@@ -167,7 +167,8 @@ fn a_look_swap_of_colors_only_keeps_modules_and_repaints() {
 #[test]
 #[cfg(feature = "clock")]
 fn a_look_swap_with_a_module_key_takes_the_full_path() {
-    let Some(session) = Session::scoot(&common::scootbar_bin(), "look-style-module-key", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "look-style-module-key", 1, "")
+    else {
         return;
     };
     let dir = session.runtime_dir().join("out");
