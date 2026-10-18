@@ -8,6 +8,9 @@
 //! Needs the daemon binary beside the test
 //! (`CARGO_BIN_EXE_scootnotify`, as built).
 
+use std::io::{Read, Write};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -214,6 +217,109 @@ fn kill(mut child: Child) -> Option<std::process::ExitStatus> {
     child.wait().ok()
 }
 
+/// A scripted peer: a raw bus connection without the client's pending
+/// table. Hand-framed giants go through `queue_raw` on a `Conn`, but a
+/// reply to one has no pending serial, and `dispatch` drops it —
+/// correctly (an unmatched error is a forgery or a stranger's answer).
+/// So the over-cap row reads its answer off the wire itself: the full
+/// handshake, the unique name, framed sends, framed reads, each bounded
+/// so a regression fails the test instead of hanging it.
+struct RawClient {
+    stream: UnixStream,
+    unique: String,
+    serial: u32,
+}
+
+impl RawClient {
+    fn connect(path: &Path) -> Self {
+        use std::io::{BufRead, BufReader};
+        let mut stream = UnixStream::connect(path).expect("the bus accepts");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        stream.write_all(&[0]).unwrap();
+        stream.write_all(b"AUTH EXTERNAL\r\n").unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(line.starts_with("DATA"), "the bus challenges");
+        stream.write_all(b"DATA\r\n").unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        assert!(line.starts_with("OK "), "the bus accepts EXTERNAL");
+        stream.write_all(b"BEGIN\r\n").unwrap();
+        let mut client = Self {
+            stream,
+            unique: String::new(),
+            serial: 0,
+        };
+        let hello = client.call(
+            conn::BUS_NAME,
+            conn::BUS_PATH,
+            conn::BUS_INTERFACE,
+            "Hello",
+            "",
+            &[],
+        );
+        assert_eq!(hello.0, "s");
+        client.unique = Reader::le(&hello.1).str().unwrap().to_owned();
+        client
+    }
+
+    /// One call, answered whole: the reply signature and body.
+    fn call(
+        &mut self,
+        destination: &str,
+        path: &str,
+        interface: &str,
+        member: &str,
+        body_sig: &str,
+        body: &[u8],
+    ) -> (String, Vec<u8>) {
+        self.serial = self.serial.wrapping_add(1).max(1);
+        let serial = self.serial;
+        let mut frame = Writer::new();
+        frame.begin_call(serial, destination, path, interface, member, body_sig, 0);
+        frame.raw(body);
+        let bytes = frame.finish().unwrap();
+        self.stream.write_all(&bytes).unwrap();
+        loop {
+            let frame = self.read_frame();
+            let message = proto::Message::parse(&frame).unwrap();
+            use proto::Kind;
+            match message.kind {
+                Kind::MethodReturn if message.reply_serial == Some(serial) => {
+                    return (message.signature.to_owned(), message.body.rest().to_vec());
+                }
+                Kind::Error if message.reply_serial == Some(serial) => {
+                    panic!("the bus errored the call: {:?}", message.error);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Sends pre-framed bytes as they are: the giant's way in.
+    fn send_raw(&mut self, bytes: &[u8]) {
+        self.stream.write_all(bytes).unwrap();
+    }
+
+    /// Reads one whole frame, bounded: a missing answer fails loud.
+    fn read_frame(&mut self) -> Vec<u8> {
+        let mut staged = Vec::new();
+        let mut chunk = [0u8; 65536];
+        loop {
+            if let Ok(Some(len)) = proto::frame_at(&staged) {
+                return staged.drain(..len).collect();
+            }
+            use std::io::Read as _;
+            let n = self.stream.read(&mut chunk).expect("the bus answers");
+            assert!(n > 0, "the bus answers before closing");
+            staged.extend_from_slice(&chunk[..n]);
+        }
+    }
+}
+
 #[test]
 fn every_method_and_signal_with_the_right_reasons() {
     let Some(daemon) = bus_or_skip() else {
@@ -354,13 +460,13 @@ fn a_5_mib_call_gets_limits_exceeded_with_no_hang() {
     };
     let runtime = runtime_dir("limits");
     let server = spawn_server(&daemon, &runtime);
-    let mut client = connect(&daemon);
-    // The test sends giants: the client's own outbox bound moves with
-    // its cap (receiving still refuses past it — nothing here does).
-    client.set_max_message(6 * 1024 * 1024);
-    wait_serving(&mut client);
+    let mut prober = connect(&daemon);
+    wait_serving(&mut prober);
+    drop(prober);
     // A 5 MiB `Notify`, framed by hand (the client's own `Writer` cap
-    // rightly refuses to build one).
+    // rightly refuses to build one), read off the wire by a scripted
+    // peer: the daemon answers on its next pump, not on the client's
+    // 25 s timeout.
     let big = "b".repeat(5 * 1024 * 1024);
     let mut out = Writer::with_cap(6 * 1024 * 1024);
     out.begin_call(500, BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, 0);
@@ -376,30 +482,45 @@ fn a_5_mib_call_gets_limits_exceeded_with_no_hang() {
     out.i32(-1);
     let frame = out.finish().unwrap();
     assert!(frame.len() > 5 * 1024 * 1024);
-    client.queue_raw(&frame);
-    // Flushes the megabytes out (several turns); the daemon answers on
-    // its next pump, not on the client's timeout.
+    let mut giant = RawClient::connect(&daemon.path());
     let start = Instant::now();
-    while client.want_write() {
-        let _ = client.pump();
-        assert!(!client.dead(), "the bus died flushing the huge call");
-        assert!(start.elapsed() < Duration::from_secs(20), "the bus never drained");
-    }
-    let Event::CallError { name, .. } = until(&mut client, |event| {
-        matches!(event, Event::CallError { .. })
-    }) else {
-        unreachable!()
+    giant.send_raw(&frame);
+    let error = loop {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no answer to the giant call"
+        );
+        let frame = giant.read_frame();
+        let message = proto::Message::parse(&frame).unwrap();
+        if message.reply_serial == Some(500) {
+            break message;
+        }
     };
     let waited = start.elapsed();
-    assert_eq!(name, "org.freedesktop.DBus.Error.LimitsExceeded");
+    assert_eq!(message_kind(&error), "Error");
+    assert_eq!(
+        error.error.unwrap_or(""),
+        "org.freedesktop.DBus.Error.LimitsExceeded"
+    );
     assert!(
         waited < Duration::from_secs(10),
         "answered in {waited:?}, never the client's timeout"
     );
     // And the daemon still serves after the giant.
+    let mut client = connect(&daemon);
     let id = notify(&mut client, "Mail", 0, -1, 41);
     assert!(id > 0);
     kill(server);
+}
+
+/// The wire kind's name, for the assertion above.
+fn message_kind(message: &proto::Message<'_>) -> &'static str {
+    match message.kind {
+        proto::Kind::MethodReturn => "MethodReturn",
+        proto::Kind::Error => "Error",
+        proto::Kind::Signal => "Signal",
+        proto::Kind::MethodCall => "MethodCall",
+    }
 }
 
 #[test]
