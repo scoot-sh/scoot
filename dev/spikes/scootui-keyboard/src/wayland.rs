@@ -108,6 +108,11 @@ impl<B: ClientBackend> Dispatch<wl_keyboard::WlKeyboard, ()> for State<B> {
                 match file.read_to_end(&mut bytes) {
                     Ok(_) => {
                         state.keymap_bytes = bytes.len();
+                        // Test hook only: persist the exact bytes scoot sent
+                        // so `keymap-file` can replay them through both stacks.
+                        if let Ok(path) = std::env::var("SPIKE_SAVE_KEYMAP") {
+                            let _ = std::fs::write(&path, &bytes);
+                        }
                         let t = Instant::now();
                         match B::compile(&bytes) {
                             Ok(b) => {
