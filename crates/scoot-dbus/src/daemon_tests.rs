@@ -638,62 +638,183 @@ fn over_cap_call(dest: &str, serial: u32, len: usize) -> Vec<u8> {
     writer.finish().unwrap()
 }
 
+/// A scripted caller: the handshake and framed I/O on a raw socket,
+/// without the pending table. A huge call cannot go through `Conn::call
+///` (the `Writer` cap rightly refuses to build one), and a `queue_raw`
+/// frame's answer has no pending serial for `dispatch` to correlate —
+/// rightly dropped as unmatched. So the over-cap row reads its answer
+/// off the wire. Bounded throughout: a missing answer fails the test,
+/// never hangs it.
+struct RawCaller {
+    stream: std::os::unix::net::UnixStream,
+    serial: u32,
+}
+
+impl RawCaller {
+    fn connect(path: &std::path::Path) -> Self {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let mut stream = std::os::unix::net::UnixStream::connect(path).expect("the bus accepts");
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+            .unwrap();
+        stream.write_all(&[0]).unwrap();
+        stream.write_all(b"AUTH EXTERNAL\r\n").unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(line.starts_with("DATA"), "the bus challenges");
+        stream.write_all(b"DATA\r\n").unwrap();
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        assert!(line.starts_with("OK "), "the bus accepts EXTERNAL");
+        stream.write_all(b"BEGIN\r\n").unwrap();
+        let mut caller = Self { stream, serial: 0 };
+        let _ = caller.roundtrip(
+            conn::BUS_NAME,
+            conn::BUS_PATH,
+            conn::BUS_INTERFACE,
+            "Hello",
+            "",
+            &[],
+        );
+        caller
+    }
+
+    /// One call's reply, whole: the error name (empty for a return) with
+    /// the reply's signature and body.
+    fn roundtrip(
+        &mut self,
+        destination: &str,
+        path: &str,
+        interface: &str,
+        member: &str,
+        body_sig: &str,
+        body: &[u8],
+    ) -> (String, String, Vec<u8>) {
+        use std::io::Write;
+        self.serial = self.serial.wrapping_add(1).max(1);
+        let serial = self.serial;
+        let mut frame = Writer::new();
+        frame.begin_call(serial, destination, path, interface, member, body_sig, 0);
+        frame.raw(body);
+        self.stream
+            .write_all(&frame.finish().unwrap())
+            .unwrap();
+        loop {
+            let frame = self.read_frame();
+            let message = proto::Message::parse(&frame).unwrap();
+            if message.reply_serial != Some(serial) {
+                continue;
+            }
+            match message.kind {
+                proto::Kind::MethodReturn => {
+                    return (String::new(), message.signature.to_owned(), message.body.rest().to_vec());
+                }
+                _ => {
+                    return (
+                        message.error.unwrap_or("").to_owned(),
+                        message.signature.to_owned(),
+                        message.body.rest().to_vec(),
+                    );
+                }
+            }
+        }
+    }
+
+    /// Sends pre-framed bytes as they are: the giant's way in.
+    fn send_raw(&mut self, bytes: &[u8]) {
+        use std::io::Write;
+        self.stream.write_all(bytes).unwrap();
+    }
+
+    /// Pumps `victim` until the reply to `serial` arrives off the wire:
+    /// the error name (empty for a return) with the reply's signature.
+    /// Bounded: a missing answer fails the test, never hangs it.
+    fn wait_reply_to(&mut self, victim: &mut Conn, serial: u32) -> (String, String) {
+        use rustix::event::{PollFd, PollFlags, Timespec, poll};
+        use std::io::Read;
+        use std::os::fd::AsFd;
+        let start = std::time::Instant::now();
+        let mut staged = Vec::new();
+        let mut chunk = [0u8; 65536];
+        loop {
+            assert!(!victim.dead(), "the victim died of an over-cap call");
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(10),
+                "no answer for serial {serial}"
+            );
+            let _ = victim.pump();
+            let fd = self.stream.as_fd();
+            let mut fds = [PollFd::new(&fd, PollFlags::IN)];
+            let timeout = Timespec {
+                tv_sec: 0,
+                tv_nsec: 50_000_000,
+            };
+            let _ = poll(&mut fds, Some(&timeout));
+            if fds[0].revents().is_empty() {
+                continue;
+            }
+            let n = self.stream.read(&mut chunk).expect("the bus answers");
+            assert!(n > 0, "the bus answers before closing");
+            staged.extend_from_slice(&chunk[..n]);
+            while let Ok(Some(len)) = proto::frame_at(&staged) {
+                let frame: Vec<u8> = staged.drain(..len).collect();
+                let message = proto::Message::parse(&frame).unwrap();
+                if message.reply_serial == Some(serial) {
+                    return (
+                        message.error.unwrap_or("").to_owned(),
+                        message.signature.to_owned(),
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// An over-cap method call is answered `LimitsExceeded`, never silence:
-/// without it the caller waits for its own timeout. The huge frame
-/// reuses the held call's serial, so the answer correlates through the
-/// pending table the way a real client's would (a `queue_raw` frame on
-/// its own has no pending entry, and its answer is rightly dropped as
-/// unmatched — see the server's own giant-call test, which reads the
-/// answer off the wire instead).
+/// without it the caller waits for its own timeout. Read off the wire
+/// by a scripted caller (see [`RawCaller`]): a fresh serial, so the
+/// daemon routes it instead of answering the reuse itself.
 #[test]
 fn an_over_cap_method_call_is_answered_limits_exceeded() {
     let Some(daemon) = Daemon::spawn() else {
         return;
     };
     let mut victim = connect(&daemon);
-    let mut forger = connect(&daemon);
-    // A real (small) call the victim holds unanswered. `Hello` is
-    // serial 1, so this is serial 2, pinned.
-    let serial = forger
-        .call(victim.unique(), "/p", "a.b", "Slow", "", &[], 0, 42)
-        .unwrap();
-    assert_eq!(serial, 2);
-    let _ = forger.pump();
+    let mut caller = RawCaller::connect(&daemon.path());
+    // A real (small) call the victim holds unanswered, proving the
+    // caller is who the answer comes back to.
+    caller.serial = caller.serial.wrapping_add(1).max(1);
+    let held = caller.serial;
+    let mut frame = Writer::new();
+    frame.begin_call(held, victim.unique(), "/p", "a.b", "Slow", "", 0);
+    {
+        use std::io::Write;
+        caller.stream.write_all(&frame.finish().unwrap()).unwrap();
+    }
     until(&mut victim, |event| {
         matches!(event, Event::MethodCall { .. })
     });
-    // The huge call with the same serial, framed by hand (the client's
-    // own `Writer` cap rightly refuses to build one).
-    let big = over_cap_call(victim.unique(), serial, proto::MAX_MESSAGE + 4096);
+    // The huge call with a fresh serial, framed by hand (the client's
+    // own `Writer` cap rightly refuses to build one). A reused serial
+    // never reaches the victim: the daemon answers the reuse itself
+    // with `AccessDenied` (measured 2026-10-18 on dbus-daemon 1.16.2),
+    // so the serial is fresh by design, not by luck.
+    caller.serial = caller.serial.wrapping_add(1).max(1);
+    let huge = caller.serial;
+    let big = over_cap_call(victim.unique(), huge, proto::MAX_MESSAGE + 4096);
     assert!(big.len() > proto::MAX_MESSAGE);
-    flood_then_ping(&mut forger, victim.unique(), &big);
-    // The answer: the error, promptly — never the caller's timeout, and
-    // neither connection dies of it.
     let start = std::time::Instant::now();
-    loop {
-        assert!(
-            !victim.dead() && !forger.dead(),
-            "a connection died of an over-cap call"
-        );
-        assert!(
-            start.elapsed() < std::time::Duration::from_secs(10),
-            "no LimitsExceeded for the over-cap call"
-        );
-        let _ = victim.pump();
-        let (events, _) = forger.pump();
-        for event in events {
-            match event {
-                Event::CallError { token: 42, name } => {
-                    assert_eq!(name, conn::LIMITS_EXCEEDED);
-                    return;
-                }
-                Event::Reply { token, .. } => panic!("a forgery was accepted for {token}"),
-                Event::Dropped { token } => panic!("an over-cap stranger released {token}"),
-                _ => {}
-            }
-        }
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
+    caller.send_raw(&big);
+    // The answer: the error, promptly — never the caller's timeout, and
+    // the victim lives through the giant.
+    let (name, _) = caller.wait_reply_to(&mut victim, huge);
+    assert_eq!(name, conn::LIMITS_EXCEEDED);
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(10),
+        "answered in {:?}, never the caller's timeout",
+        start.elapsed()
+    );
 }
 
 /// A raised cap dispatches what the default answers: the same huge call
