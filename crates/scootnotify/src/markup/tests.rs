@@ -128,12 +128,18 @@ fn control_characters_drop() {
 
 #[test]
 fn past_64_spans_the_tail_is_text_not_lost() {
+    // Alternating styles: every number differs from the last, so each
+    // one wants its own span — 100 spans without the cap.
     let mut input = String::new();
     for index in 0..100 {
-        input.push_str(&format!("<b>{index}</b>"));
+        if index % 2 == 0 {
+            input.push_str(&format!("<b>{index}</b>"));
+        } else {
+            input.push_str(&format!("<i>{index}</i>"));
+        }
     }
     let spans = parse(&input);
-    assert!(spans.len() <= MAX_SPANS, "{}", spans.len());
+    assert_eq!(spans.len(), MAX_SPANS);
     let text: String = (0..100).map(|index| index.to_string()).collect();
     assert_eq!(plain(&spans), text);
 }
