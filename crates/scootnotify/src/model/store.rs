@@ -228,7 +228,7 @@ impl IdFile {
             .and_then(|text| text.trim().parse::<u64>().ok())
             .filter(|base| *base >= 1)
             .unwrap_or(1);
-        let mut file = Self {
+        let file = Self {
             path: Some(path),
             next: base.min(u64::from(u32::MAX)) as u32,
             end: base.saturating_add(ID_BLOCK),
@@ -351,12 +351,13 @@ impl Store {
         {
             let id = incoming.replaces_id;
             let timeout = resolve_timeout(incoming.expire_timeout, incoming.hints.urgency, &self.config);
+            let icon = icon_of(&incoming);
+            let plain = crate::markup::plain(&crate::markup::parse(&incoming.body));
             if let Some(current) = self.live.get_mut(&id) {
                 current.app_name = incoming.app_name;
                 current.sender = incoming.sender;
-                current.icon = icon_of(&incoming);
+                current.icon = icon;
                 current.summary = incoming.summary;
-                let plain = crate::markup::plain(&crate::markup::parse(&incoming.body));
                 current.body = incoming.body;
                 current.plain_body = plain;
                 current.actions = incoming.actions;
@@ -381,6 +382,7 @@ impl Store {
         let id = self.alloc_id();
         let timeout = resolve_timeout(incoming.expire_timeout, incoming.hints.urgency, &self.config);
         self.seq += 1;
+        let icon = icon_of(&incoming);
         let plain = crate::markup::plain(&crate::markup::parse(&incoming.body));
         self.order.push_back(id);
         self.live.insert(
@@ -389,7 +391,7 @@ impl Store {
                 id,
                 app_name: incoming.app_name,
                 sender: incoming.sender,
-                icon: icon_of(&incoming),
+                icon,
                 summary: incoming.summary,
                 body: incoming.body,
                 plain_body: plain,

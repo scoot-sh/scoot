@@ -29,7 +29,7 @@ pub(crate) fn replay_corpus(kind: &str, expect_ok: bool, check: fn(&[u8]) -> boo
     for dir in ["corpus", "regressions"] {
         let dir = root.join(dir).join(kind);
         let entries = std::fs::read_dir(&dir)
-            .unwrap_or_else(|error| panic!("the {kind} {dir} corpus is missing: {error}"));
+            .unwrap_or_else(|error| panic!("the {kind} corpus is missing ({}): {error}", dir.display()));
         for entry in entries {
             let entry = entry.expect("a corpus entry reads");
             if !entry.file_type().expect("a corpus type reads").is_file() {

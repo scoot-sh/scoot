@@ -91,7 +91,11 @@ impl Clock {
         }
         self.paused = true;
         if let Some(deadline) = self.deadline {
-            self.remaining_ms = Some(deadline.saturating_duration_since(now).as_millis().min(u64::from(u32::MAX)) as u32);
+            let ms = deadline
+                .saturating_duration_since(now)
+                .as_millis()
+                .min(u128::from(u32::MAX)) as u32;
+            self.remaining_ms = Some(ms);
             self.deadline = None;
         }
     }

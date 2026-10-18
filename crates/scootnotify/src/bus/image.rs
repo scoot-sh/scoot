@@ -75,7 +75,7 @@ pub fn read<'a>(reader: &mut Reader<'a>) -> Result<RawImage<'a>, ()> {
 /// Checks the design's bounds with checked arithmetic: sides 1 to 2048,
 /// 8 bits, 3 or 4 channels agreeing with `has_alpha`, a rowstride holding
 /// a row, and pixels covering every row. `None` means no image.
-pub fn validate(raw: &RawImage<'_>) -> Option<ValidImage<'_>> {
+pub fn validate<'a>(raw: &'a RawImage<'a>) -> Option<ValidImage<'a>> {
     if raw.width < 1 || raw.width > MAX_IMAGE_SIDE {
         return None;
     }
