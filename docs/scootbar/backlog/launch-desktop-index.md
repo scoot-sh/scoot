@@ -3,7 +3,7 @@ title: "scootlaunch: the desktop entry index, Exec expansion and `--list --json`
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "GO verdict recorded in launch-prototype (a human removes this clause)"
+blocked: null
 milestone: "M7"
 ---
 

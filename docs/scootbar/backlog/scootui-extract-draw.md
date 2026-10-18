@@ -3,7 +3,7 @@ title: "Extract `scootui` and `scoot-rt`: move scootbar's pure drawing, widgets,
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "a GO verdict recorded in one of the three gate tickets named in dev/design/shell-apps.md, How the gates stay closed (a human removes this clause)"
+blocked: null
 milestone: "M7"
 ---
 
