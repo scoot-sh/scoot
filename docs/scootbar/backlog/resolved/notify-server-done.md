@@ -1,10 +1,11 @@
 ---
 title: "scootnotify: the org.freedesktop.Notifications server and its model, headless"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-18"
 ---
 
 # scootnotify: the D-Bus server and the model

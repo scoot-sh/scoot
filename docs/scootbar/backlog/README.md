@@ -162,7 +162,7 @@ Shared foundation ([epic](extract-scootui.md)):
 
 [`scootnotify`: the notification daemon](scootnotify.md) (epic):
 - [Prototype: the go/no-go gate against mako](resolved/notify-prototype-done.md) (medium)
-- [The D-Bus server and model](notify-server.md), [popups](notify-popups.md), [the control interface](notify-control.md), [DND, history, rules](notify-dnd-history-rules.md), [the bar feed](notify-bar-feed.md)
+- [The D-Bus server and model](resolved/notify-server-done.md), [popups](notify-popups.md), [the control interface](notify-control.md), [DND, history, rules](notify-dnd-history-rules.md), [the bar feed](notify-bar-feed.md)
 - [Nix, the look layer and the opt-in switch](notify-nix.md), [packaging and the site](notify-packaging.md), [flip the default](notify-default-flip.md)
 - Experiment: [a fullscreen hold through a `top` surface](notify-fullscreen-hold-spike.md)
 
