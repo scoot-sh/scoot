@@ -1491,14 +1491,14 @@ jobs:
             echo "--- popup and $module"
             cargo clippy -p scootbar --no-default-features --features "popup,$module" --all-targets -- -D warnings
           done
-          # The extracted crates: the drawing half, its leaf, and the
-          # Wayland scaffolding, with the same matrix (default, smallest,
-          # each feature alone) so no feature leans on another crate's
-          # code; and the D-Bus client, which has no features, so one
-          # build covers it.
+          # The extracted crates: the drawing half, its leaf, the Wayland
+          # scaffolding and the control socket, with the same matrix
+          # (default, smallest, each feature alone) so no feature leans on
+          # another crate's code; and the D-Bus client, which has no
+          # features, so one build covers it.
           cargo clippy -p scootui -p scoot-rt --all-targets -- -D warnings
           cargo clippy -p scootui --no-default-features --all-targets -- -D warnings
-          for feature in widgets icons png tray wayland test-support; do
+          for feature in widgets icons png tray wayland control test-support; do
             echo "--- scootui $feature alone"
             cargo clippy -p scootui --no-default-features --features "$feature" --all-targets -- -D warnings
           done
@@ -1545,7 +1545,7 @@ jobs:
           cargo nextest run -p scootui -p scoot-rt --no-fail-fast
           cargo test -p scootui -p scoot-rt
           cargo nextest run -p scootui --no-default-features --no-fail-fast
-          for feature in widgets icons png tray wayland test-support; do
+          for feature in widgets icons png tray wayland control test-support; do
             echo "--- scootui $feature alone"
             cargo nextest run -p scootui --no-default-features --features "$feature" --no-fail-fast
           done

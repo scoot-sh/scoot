@@ -8,9 +8,9 @@ use std::os::unix::net::UnixStream;
 
 use rustix::event::PollFlags;
 
-use super::conn::{Conn, Handler, Kinds, Status};
 use super::protocol::{self, EventKind, Request, RequestError};
 use super::{MAX_CONNECTIONS, MAX_SUBSCRIBERS, Server};
+use scootui::control::conn::{Conn, Handler, Kinds, Status};
 
 fn parse(line: &str) -> Result<Request<'_>, RequestError> {
     protocol::parse(line.as_bytes())
@@ -176,7 +176,7 @@ impl Handler for Subscriber {
                     events: vec!["module"],
                 },
             );
-            self.to = Some(Kinds::of(&[EventKind::Module]));
+            self.to = Some(Kinds::of(&[EventKind::Module as u8]));
         } else {
             protocol::write_reply(out, &protocol::Reply::Ok { scope: None });
         }

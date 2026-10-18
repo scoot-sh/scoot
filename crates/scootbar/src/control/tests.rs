@@ -6,11 +6,12 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use super::claim::Claim;
-use super::conn::{Conn, Handler, STALL_DEADLINE, Status};
 use super::paths::{self, PathError, Paths};
 use super::protocol::{self, PROTOCOL_VERSION, ReloadScope, Request};
 use super::{MAX_CONNECTIONS, Server};
+use scootui::control::claim::Claim;
+use scootui::control::conn::{Conn, Handler, STALL_DEADLINE, Status};
+use scootui::control::MAX_REQUEST_LINE;
 
 /// A scratch directory, removed on drop (as in `config::tests`).
 struct Scratch {
@@ -32,6 +33,7 @@ impl Scratch {
 
     fn paths(&self) -> Paths {
         Paths {
+            app: "scootbar".to_owned(),
             display: "test".to_owned(),
             socket: self.path.join("scootbar-test.sock"),
             lock: self.path.join("scootbar-test.lock"),
@@ -48,7 +50,7 @@ impl Drop for Scratch {
 #[test]
 fn paths_follow_the_display() {
     let dir = std::ffi::OsStr::new("/run/user/1");
-    let paths = paths::resolve(Some(std::ffi::OsStr::new("wayland-0")), Some(dir)).unwrap();
+    let paths = paths::resolve("scootbar", Some(std::ffi::OsStr::new("wayland-0")), Some(dir)).unwrap();
     assert_eq!(paths.display, "wayland-0");
     assert_eq!(
         paths.socket,
@@ -59,30 +61,30 @@ fn paths_follow_the_display() {
         PathBuf::from("/run/user/1/scootbar-wayland-0.lock")
     );
     // An absolute display keeps its final component, sanitised.
-    let paths = paths::resolve(Some(std::ffi::OsStr::new("/tmp/a b/c:d")), Some(dir)).unwrap();
+    let paths = paths::resolve("scootbar", Some(std::ffi::OsStr::new("/tmp/a b/c:d")), Some(dir)).unwrap();
     assert_eq!(paths.display, "c_d");
     // Unset and empty mean the default.
-    let paths = paths::resolve(None, Some(dir)).unwrap();
+    let paths = paths::resolve("scootbar", None, Some(dir)).unwrap();
     assert_eq!(paths.display, "wayland-0");
-    let paths = paths::resolve(Some(std::ffi::OsStr::new("")), Some(dir)).unwrap();
+    let paths = paths::resolve("scootbar", Some(std::ffi::OsStr::new("")), Some(dir)).unwrap();
     assert_eq!(paths.display, "wayland-0");
 }
 
 #[test]
 fn paths_refuse_what_they_cannot_serve() {
     assert_eq!(
-        paths::resolve(Some(std::ffi::OsStr::new("w")), None),
+        paths::resolve("scootbar", Some(std::ffi::OsStr::new("w")), None),
         Err(PathError::NoRuntimeDir)
     );
     assert_eq!(
-        paths::resolve(
+        paths::resolve("scootbar", 
             Some(std::ffi::OsStr::new("w")),
             Some(std::ffi::OsStr::new("relative/dir"))
         ),
         Err(PathError::RelativeRuntimeDir(PathBuf::from("relative/dir")))
     );
     assert!(matches!(
-        paths::resolve(
+        paths::resolve("scootbar", 
             Some(std::ffi::OsStr::new("/tmp/")),
             Some(std::ffi::OsStr::new("/run/user/1"))
         ),
@@ -90,7 +92,7 @@ fn paths_refuse_what_they_cannot_serve() {
     ));
     let long = format!("/run/{}/x", "d".repeat(200));
     assert!(matches!(
-        paths::resolve(
+        paths::resolve("scootbar", 
             Some(std::ffi::OsStr::new("wayland-0")),
             Some(std::ffi::OsStr::new(&long))
         ),
@@ -349,7 +351,7 @@ fn an_overlong_line_is_refused_and_closed() {
         .set_nonblocking(true)
         .and_then(|()| conn.stream().set_nonblocking(true))
         .unwrap();
-    let long = "x".repeat(protocol::MAX_REQUEST_LINE + 2);
+    let long = "x".repeat(MAX_REQUEST_LINE + 2);
     client.write_all(long.as_bytes()).unwrap();
     client.write_all(b"\n").unwrap();
     let mut scratch = [0u8; 65536];

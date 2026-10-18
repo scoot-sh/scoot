@@ -1,13 +1,13 @@
 //! Where the control socket and its lock live.
 //!
-//! One daemon per Wayland display: `$XDG_RUNTIME_DIR/scootbar-NAME.sock`,
+//! One daemon per Wayland display: `$XDG_RUNTIME_DIR/<app>-NAME.sock`,
 //! with `NAME` from `$WAYLAND_DISPLAY`, so a nested session and its host
 //! never share one. `WAYLAND_DISPLAY` may be an absolute path (libwayland
 //! allows it), so `NAME` is its final component, with any byte outside
 //! `[A-Za-z0-9._-]` replaced by `_`. Two displays that differ only in such
 //! bytes would share a socket; the second daemon then refuses loudly.
 //!
-//! Beside the socket sits `scootbar-NAME.lock`, which a daemon holds an
+//! Beside the socket sits `<app>-NAME.lock`, which a daemon holds an
 //! exclusive `flock` on for its whole life. The lock, not the socket, says
 //! whether a daemon is alive: the kernel drops it when the process dies,
 //! however it dies, so a stale socket is recognised by its free lock and
@@ -15,7 +15,7 @@
 //! never removed (removing it would reopen that race), the way
 //! libwayland leaves `wayland-N.lock`.
 //!
-//! (As scootbg's `paths.rs`, with the `scootbar-` prefix.)
+//! (As scootbg's `paths.rs`, with the app prefix in place of `scootbg-`.)
 
 use std::ffi::OsStr;
 use std::fmt;
@@ -30,6 +30,9 @@ const MAX_SOCKET_PATH: usize = 107;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {
+    /// The app's name: prefixes the socket and lock files
+    /// (`scootbar-wayland-0.sock`) and appears in the claim errors.
+    pub app: String,
     /// The display name the paths were derived from, for messages.
     pub display: String,
     pub socket: PathBuf,
@@ -75,25 +78,24 @@ impl std::error::Error for PathError {}
 /// fallback. Unlike [`resolve`]'s directory, unset here falls back
 /// instead of erroring: the pulse socket waits on the fallback rather
 /// than refusing. The D-Bus client and the tray read the same directory
-/// through [`scoot_dbus`](crate::dbus)'s re-export of the same leaf, so
-/// the fallback cannot drift between them.
-#[cfg_attr(
-    not(any(feature = "volume", feature = "microphone")),
-    allow(dead_code, unused_imports)
-)]
+/// through this re-export of the same leaf, so the fallback cannot drift
+/// between them.
 pub use scoot_rt::runtime_dir;
 
-/// The paths for this process's environment.
-pub fn from_env() -> Result<Paths, PathError> {
+/// The paths for this process's environment: `app` is the socket-name
+/// prefix and the name in the claim errors (`scootbar`, `scootnotify`).
+pub fn from_env(app: &str) -> Result<Paths, PathError> {
     resolve(
+        app,
         std::env::var_os("WAYLAND_DISPLAY").as_deref(),
         std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
     )
 }
 
-/// The paths for a given `WAYLAND_DISPLAY` and `XDG_RUNTIME_DIR`; unset
-/// and empty mean the same, as in libwayland.
+/// The paths for `app` with a given `WAYLAND_DISPLAY` and
+/// `XDG_RUNTIME_DIR`; unset and empty mean the same, as in libwayland.
 pub fn resolve(
+    app: &str,
     wayland_display: Option<&OsStr>,
     runtime_dir: Option<&OsStr>,
 ) -> Result<Paths, PathError> {
@@ -105,13 +107,14 @@ pub fn resolve(
         return Err(PathError::RelativeRuntimeDir(dir.to_path_buf()));
     }
     let display = display_name(wayland_display)?;
-    let socket = dir.join(format!("scootbar-{display}.sock"));
-    let lock = dir.join(format!("scootbar-{display}.lock"));
+    let socket = dir.join(format!("{app}-{display}.sock"));
+    let lock = dir.join(format!("{app}-{display}.lock"));
     // The lock path is the same length, so one check covers both.
     if socket.as_os_str().len() > MAX_SOCKET_PATH {
         return Err(PathError::TooLong(socket));
     }
     Ok(Paths {
+        app: app.to_owned(),
         display,
         socket,
         lock,

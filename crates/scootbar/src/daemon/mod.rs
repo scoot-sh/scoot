@@ -202,7 +202,7 @@ pub fn run(
     let (content, mut left_out) = prepare(&config)?;
     // The control socket first, so a second daemon refuses before it
     // touches the compositor.
-    let paths = paths::from_env().map_err(Error::ControlPaths)?;
+    let paths = paths::from_env("scootbar").map_err(Error::ControlPaths)?;
     let mut claim = Claim::acquire(&paths).map_err(Error::Claim)?;
     let mut server = Server::new(claim.listener()).map_err(Error::Control)?;
     let mut listening = Listening::default();

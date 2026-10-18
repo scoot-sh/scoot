@@ -81,7 +81,7 @@ impl std::error::Error for Error {}
 /// once the daemon has closed the connection, which it does after removing
 /// its socket and releasing its lock.
 pub fn send(request: &Request<'_>) -> Result<String, Error> {
-    let paths = paths::from_env().map_err(Error::Paths)?;
+    let paths = paths::from_env("scootbar").map_err(Error::Paths)?;
     send_to(&paths, request)
 }
 
@@ -182,7 +182,7 @@ fn exchange(stream: &mut UnixStream, request: &Request<'_>) -> Result<String, Er
 /// went away**: a daemon that drops a subscriber it cannot write to (a full
 /// socket) closes it with nothing more, which is a clean end too.
 pub fn stream(request: &Request<'_>, each: impl FnMut(&str) -> bool) -> Result<(), Error> {
-    let paths = paths::from_env().map_err(Error::Paths)?;
+    let paths = paths::from_env("scootbar").map_err(Error::Paths)?;
     stream_to(&paths, request, each)
 }
 

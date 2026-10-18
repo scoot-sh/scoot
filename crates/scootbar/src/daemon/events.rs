@@ -165,8 +165,8 @@ impl State {
         }
         events.told.clear();
         events.told.extend(revisions());
-        server.broadcast(EventKind::Module, &events.modules);
-        server.broadcast(EventKind::Output, &events.changes);
+        server.broadcast(EventKind::Module as u8, &events.modules);
+        server.broadcast(EventKind::Output as u8, &events.changes);
     }
 
     /// How long the loop may sleep for a batch held back to its frame:

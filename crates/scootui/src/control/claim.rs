@@ -11,8 +11,8 @@
 //!
 //! [`Claim::release`] (or, failing that, `Drop`) removes the socket file
 //! and then drops the lock, so once a daemon has closed its clients'
-//! connections a new one can start at once: `scootbar kill && scootbar
-//! daemon` never races. A crash leaves the socket file, and the kernel
+//! connections a new one can start at once: `msg kill` followed by a new
+//! daemon never races. A crash leaves the socket file, and the kernel
 //! drops the lock.
 //!
 //! (As scootbg's `control/claim.rs`, which this duplicates: scootbg is a
@@ -34,7 +34,7 @@ use super::paths::Paths;
 #[derive(Debug)]
 pub enum ClaimError {
     /// A daemon already holds the lock for this display.
-    AlreadyRunning { lock: PathBuf },
+    AlreadyRunning { app: String, lock: PathBuf },
     /// Something answers on the socket although the lock was free.
     Answering { socket: PathBuf },
     /// Something other than a socket sits at the socket path.
@@ -49,10 +49,10 @@ pub enum ClaimError {
 impl fmt::Display for ClaimError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::AlreadyRunning { lock } => write!(
+            Self::AlreadyRunning { app, lock } => write!(
                 f,
-                "a scootbar daemon is already running for this display (it holds {}); \
-                 `scootbar msg kill` stops it",
+                "a {app} daemon is already running for this display (it holds {}); \
+                 `{app} msg kill` stops it",
                 lock.display()
             ),
             Self::Answering { socket } => write!(
@@ -86,7 +86,7 @@ pub struct Claim {
 
 impl Claim {
     pub fn acquire(paths: &Paths) -> Result<Self, ClaimError> {
-        let lock = take_lock(&paths.lock)?;
+        let lock = take_lock(&paths.lock, &paths.app)?;
         clear_stale(&paths.socket)?;
         let io_error = |what, error| ClaimError::Io {
             what,
@@ -158,7 +158,7 @@ fn answers(socket: &Path) -> Result<bool, ClaimError> {
     }
 }
 
-fn take_lock(path: &Path) -> Result<File, ClaimError> {
+fn take_lock(path: &Path, app: &str) -> Result<File, ClaimError> {
     let file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -174,6 +174,7 @@ fn take_lock(path: &Path) -> Result<File, ClaimError> {
     match flock(&file, FlockOperation::NonBlockingLockExclusive) {
         Ok(()) => Ok(file),
         Err(Errno::WOULDBLOCK) => Err(ClaimError::AlreadyRunning {
+            app: app.to_owned(),
             lock: path.to_path_buf(),
         }),
         Err(errno) => Err(ClaimError::Io {

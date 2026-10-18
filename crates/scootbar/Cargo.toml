@@ -96,17 +96,19 @@ scoot-look.workspace = true
 # The sealed-memfd `wl_shm` buffer, scootbg's, so scootbar has no `unsafe`
 # of its own (`#![forbid(unsafe_code)]` in `src/main.rs`).
 scootbg-mem.workspace = true
-# The shared drawing, widgets and icons (`paint`, `text`, `theme`, `popup`,
-# `icon`), the shared D-Bus client (`conn`, `proto`, `link`, the `mpris`
-# and `bluez` readers) and the leaf runtime helpers (`print`,
-# `runtime_dir`): extracted from this crate so the shell apps share one
-# copy.
+# The shared drawing, widgets, icons, the Wayland scaffolding and the
+# control socket (`paint`, `text`, `theme`, `popup`, `icon`, per-output
+# model, poll primitives, `control`), the shared D-Bus client (`conn`,
+# `proto`, `link`, the `mpris` and `bluez` readers) and the leaf runtime
+# helpers (`print`, `runtime_dir`): extracted from this crate so the shell
+# apps share one copy.
 # `icons` is always on (the bar measures icons even with no modules, as
 # before); `widgets` rides on `popup`, `png` on `icon-image`, `tray` on
-# `tray`.
+# `tray`; `wayland` and `control` ride on every build (the loop and the
+# socket are not module-gated).
 scoot-dbus.workspace = true
 scoot-rt.workspace = true
-scootui = { path = "../scootui", default-features = false, features = ["icons", "wayland"] }
+scootui = { path = "../scootui", default-features = false, features = ["icons", "wayland", "control"] }
 # The Wayland client, plain, no toolkit, on its pure-Rust backend: nothing
 # links libwayland.
 wayland-client = "0.31"
