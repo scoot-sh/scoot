@@ -35,7 +35,7 @@ All of the following, recorded here:
 
 ## Resolving this gate
 
-The tickets it guards name it in prose ("GO verdict recorded in launch-prototype"), which `scripts/backlog resolve` does not strip ([why](../../../dev/design/shell-apps.md#how-the-gates-stay-closed)). Record the verdict here, then resolve. On **go**, a human deletes that clause from the guarded tickets. On **no**, a human resolves the epic and the guarded tickets as won't-do, citing this evidence.
+The tickets it guards name it in prose ("GO verdict recorded in launch-prototype"), which `scripts/backlog resolve` does not strip ([why](../../../../dev/design/shell-apps.md#how-the-gates-stay-closed)). Record the verdict here, then resolve. On **go**, a human deletes that clause from the guarded tickets. On **no**, a human resolves the epic and the guarded tickets as won't-do, citing this evidence.
 
 ## Evidence the review needs
 

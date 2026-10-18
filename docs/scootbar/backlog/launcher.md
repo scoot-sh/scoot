@@ -20,7 +20,7 @@ The design is [dev/design/scootlaunch.md](../../../dev/design/scootlaunch.md); s
 
 Children, in order:
 
-1. [launch-prototype](launch-prototype.md): the go/no-go gate against fuzzel, out of the
+1. [launch-prototype](resolved/launch-prototype-done.md): the go/no-go gate against fuzzel, out of the
    workspace.
 2. [launch-desktop-index](launch-desktop-index.md), then [launch-match-rank](launch-match-rank.md).
 3. [launch-ui](launch-ui.md), then [launch-spawn](launch-spawn.md) and [launch-icons](launch-icons.md).
