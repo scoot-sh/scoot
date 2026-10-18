@@ -131,8 +131,8 @@ Evidence (dev VM, aarch64, rustc 1.97.1,
 - Ratchet (release builds, `main` at `9a6d4dcd` vs branch at
   `5b8c93a03`, solid bar `--center=` with DejaVu under headless scoot
   from the branch tree, fresh XDG dirs, 14 s settle, 60 s window):
-  stripped size 3019488 vs 3019520 (+32 B); `.text` 2444008 vs 2444744
-  (+736 B, +0.03%); idle RSS 4084/4084 vs 4020/4020, PSS 3198/3121 vs
+  stripped size 3019488 vs 3019520 (+32 B); `.text` 2444520 vs 2446536
+  (+2016 B, +0.08%; corrected in review from the hex 0x254ce8 vs 0x2554c8); idle RSS 4084/4084 vs 4020/4020, PSS 3198/3121 vs
   3062/3066, wakeups Δ0 vs Δ0, fds 7 vs 7. Within one-run noise; no
   waiver needed.
 - `git diff --name-only` has no `scootbg`.
