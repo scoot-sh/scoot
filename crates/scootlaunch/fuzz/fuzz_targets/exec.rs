@@ -29,13 +29,11 @@ mod fuzz {
             // executable holds no `=`.
             assert!(!argv.is_empty());
             assert!(!argv[usize::from(terminal)].contains('='));
-            // Field codes expand once: no `%` sequence survives that
-            // is not a literal `%%` the input wrote... (untestable in
-            // general: `%c` legitimately injects `%f`-looking text.
-            // What is testable is the count: at most the input's
-            // argument count plus the two `%i`/`--icon` arguments and
-            // the terminal prefix.)
-            assert!(argv.len() <= text.split([' ', '\t']).count() + 3);
+            // Field codes expand once: one input argument yields at
+            // most two output arguments (a standalone `%i` becomes
+            // `--icon <Icon>`), plus the terminal prefix. A `%c`
+            // legitimately injects text that looks like a field code.
+            assert!(argv.len() <= 2 * text.split([' ', '\t']).count() + 1);
         }
         Some(())
     }

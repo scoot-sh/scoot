@@ -251,6 +251,16 @@ fn lenient_keeps_field_codes_strict() {
 }
 
 #[test]
+fn multiple_standalone_icon_codes_each_add_an_argument() {
+    // One input argument yields at most two output arguments: the
+    // fuzz target's count bound rests on this.
+    assert_eq!(
+        strict("a %i b %i").unwrap(),
+        vec!["a", "--icon", "foo", "b", "--icon", "foo"]
+    );
+}
+
+#[test]
 fn spec_section_7_examples() {
     // The quoting examples the spec works through (§7).
     assert_eq!(
