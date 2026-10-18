@@ -652,7 +652,7 @@ struct RawCaller {
 
 impl RawCaller {
     fn connect(path: &std::path::Path) -> Self {
-        use std::io::{BufRead, BufReader, Read, Write};
+        use std::io::{BufRead, BufReader, Write};
         let mut stream = std::os::unix::net::UnixStream::connect(path).expect("the bus accepts");
         stream
             .set_read_timeout(Some(std::time::Duration::from_secs(10)))
