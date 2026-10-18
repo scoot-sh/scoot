@@ -1398,19 +1398,23 @@ fn a_raised_cap_takes_a_message_the_default_skips() {
     assert!(frame.len() > MAX_MESSAGE);
     let (mut conn, daemon) = connected();
     let sender = send_later(daemon, frame.clone());
-    // Pump until the socket drains: past the default cap, a signal is
+    // Pump until the skip completes: past the default cap, a signal is
     // silent (no event), and the connection lives. (The sender writes
     // in its own thread because the message is larger than the socket
-    // buffer; joining first would deadlock the write.)
+    // buffer; joining first would deadlock the write — and breaking on
+    // `has_staged_work` alone would strand it mid-discard, since staged
+    // can be empty while bytes are still arriving.)
     let mut silent = true;
-    for _ in 0..50 {
+    for _ in 0..500 {
         let (events, _) = conn.pump();
         silent = silent && events.is_empty();
-        if !conn.has_staged_work() {
+        assert!(!conn.dead(), "the connection died on an over-cap signal");
+        if conn.discard_pending() == 0 && !conn.has_staged_work() {
             break;
         }
-        assert!(!conn.dead(), "the connection died on an over-cap signal");
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
+    assert_eq!(conn.discard_pending(), 0, "the skip never completed");
     sender.join().unwrap();
     assert!(silent, "past the default cap, a signal is silent");
     assert!(!conn.dead());
