@@ -1,9 +1,10 @@
 # scootbar's fuzz targets
 
-Six `cargo fuzz` targets over the parsers of outside input: two the
+Five `cargo fuzz` targets over the parsers of outside input: two the
 clock's, one the update payload of the `exec` and `push` modules, one
-the volume module's PulseAudio-protocol frames, one the network module's
-netlink messages, and one the D-Bus client's messages. Any
+the volume module's PulseAudio-protocol frames and one the network
+module's netlink messages. (The D-Bus client's target moved with it to
+`crates/scoot-dbus/fuzz`, whose README carries its own record.) Any
 panic is a finding: the bar's release profile is `panic = "abort"`, so a
 panic there kills the bar.
 
@@ -32,21 +33,6 @@ compiles `class.rs` and `payload.rs` by `#[path]`, and uses `serde_json`
   server speaks, plus real replies captured from pipewire-pulse (see the
   volume module's entry).
 
-- **`dbus`**: arbitrary bytes as D-Bus messages on a stream (the session
-  bus's socket). Framing must accept, wait or refuse without a panic; every
-  framed message's header must parse or refuse; the body is walked against
-  its declared signature and as each shape the tray, the media and the
-  bluetooth modules read (an item's `GetAll` through `read_item_props`, a
-  player's `GetAll` and `PropertiesChanged` through `read_player_props` and
-  `read_properties_changed`, a managed set, added and removed interfaces
-  and adapter, device and battery dictionaries and changes through
-  `src/dbus/bluez.rs`, the same functions the modules call, pixmap
-  lists, name lists, owner changes); the writer is round-tripped on
-  input-derived values. It compiles `src/dbus/proto.rs`,
-  `src/dbus/mpris.rs` and `src/dbus/bluez.rs` by `#[path]`; the seed corpus is frames in the shapes
-  the tray's fake bus speaks, plus a `GetAll` and a `PropertiesChanged`
-  marshalled by sd-bus (`src/dbus/fixtures/README.md`).
-
 The first two compile scootbar's own `src/modules/clock/tzif.rs` and `format.rs` by
 `#[path]`, unchanged (`fuzz_targets/common.rs`); they use nothing but
 `std`. What each target checks is written once, in scootbar's
@@ -58,7 +44,7 @@ nothing here reaches the shipped binary.
 **In CI**, on every scootbar change, the `scootbar` job builds the targets
 and runs them for a fixed budget: 1,000,000 runs of `format` and
 5,000,000 of `tzif`, 2,000,000 each of `payload`, `volume` and `network`,
-and 1,000,000 of `dbus`, from `-seed=1`, over the seed corpus and
+from `-seed=1`, over the seed corpus and
 `regressions/` (about a minute). Building them is what keeps the `#[path]`
 includes from rotting: a change that compiles in scootbar but not here
 fails there. A finding's input is printed in base64 in the job's log.
@@ -106,7 +92,3 @@ devenv shell -- nix shell --inputs-from . nixpkgs#cargo-fuzz --command bash -c '
 | --- | --- | --- | --- | --- | --- |
 | 2026-09-29 | see the PR | `format` | 11,738,471 | 301 s | none |
 | 2026-09-29 | see the PR | `tzif` | 113,636,649 | 301 s | none |
-| 2026-10-02 | `crates/` tree `6960f3fd6564` | `dbus` (CI budget: `-runs=1000000 -seed=1 -max_len=70000`) | 1,000,000 | 32 s | none |
-| 2026-10-02 | `crates/` tree `6960f3fd6564` | `dbus` (`-max_total_time=600 -max_len=70000`, seed 1, on the corpus the run above grew) | 15,262,874 | 601 s | none |
-| 2026-10-02 | `crates/` tree `7bc1a04525c8` | `dbus` (`-runs=1000000 -seed=1 -max_len=70000`) | 1,000,000 | 8 s | none |
-| 2026-10-02 | `crates/` tree `7bc1a04525c8` | `dbus` (`-max_total_time=600 -max_len=70000`, seed 1) | 34,432,616 | 601 s | none |

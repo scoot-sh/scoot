@@ -1,0 +1,22 @@
+[package]
+name = "scoot-dbus"
+description = "Hand-rolled D-Bus client shared by scootbar, scootnotify, scootlaunch and scootgreet: wire framing, calls, match rules and the reconnect lifecycle, with no drawing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# Panic-free printing and the runtime directory: the leaf both this crate
+# and scootui depend on, so neither carries its own copy.
+scoot-rt.workspace = true
+# poll(2), the inotify watch on the bus socket's directory and the retry
+# timerfd, through raw syscalls, no `libc` crate: the same `rustix`
+# scootbar already pulls in. `net` is for the tests' socket-buffer sizing.
+rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "net", "time"] }
+
+# The allocation counter behind the daemon tests' zero-allocation pin.
+# Test-only: none of it reaches the shipped dependency tree.
+[dev-dependencies]
+scootbg-mem.workspace = true

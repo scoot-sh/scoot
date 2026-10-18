@@ -900,6 +900,15 @@ name = "scoot-core"
 version = "0.3.1"
 
 [[package]]
+name = "scoot-dbus"
+version = "0.3.1"
+dependencies = [
+ "rustix 1.1.4",
+ "scoot-rt",
+ "scootbg-mem",
+]
+
+[[package]]
 name = "scoot-ipc"
 version = "0.3.1"
 dependencies = [
@@ -935,6 +944,7 @@ dependencies = [
  "base64",
  "png",
  "rustix 1.1.4",
+ "scoot-dbus",
  "scoot-ipc",
  "scoot-look",
  "scoot-rt",

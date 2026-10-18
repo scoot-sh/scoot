@@ -1,6 +1,6 @@
 //! BlueZ wire shapes: what the bluetooth module reads of `org.bluez`
 //! objects, over [`super::proto`]'s readers. Like `mpris`, it uses nothing
-//! but `std` and is compiled by the fuzz crate (`crates/scootbar/fuzz`)
+//! but `std` and is compiled by the fuzz crate (`crates/scoot-dbus/fuzz`)
 //! unchanged.
 //!
 //! The same typed walk reads every shape BlueZ sends its state in: the
@@ -26,8 +26,13 @@
 
 use super::proto::{self, Reader, check_path};
 
-#[cfg(test)]
-pub(crate) mod build;
+/// Builders of well-formed answers and signals, for the tests that
+/// speak to a fake bus. Test support for the apps' bluetooth tests, like
+/// [`super::testdaemon`]: compiled in always so the apps' `#[cfg(test)]`
+/// code can reach it, used only by tests. The explicit path keeps the
+/// fuzz crate's `#[path]` include resolving it beside this file.
+#[path = "bluez/build.rs"]
+pub mod build;
 #[cfg(test)]
 mod tests;
 

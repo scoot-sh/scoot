@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 
 use super::{Addr, Link, Session, scan_names};
-use crate::dbus::conn::{self, Conn, Event};
-use crate::dbus::proto::{self, Writer};
-use crate::dbus::testdaemon::{Daemon, serve_setup};
+use crate::conn::{self, Conn, Event};
+use crate::proto::{self, Writer};
+use crate::testdaemon::{Daemon, serve_setup};
 
 /// What a consumer is to the link: a connection that asked for one
 /// interface's signals.

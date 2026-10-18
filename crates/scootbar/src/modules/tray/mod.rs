@@ -292,6 +292,21 @@ fn start_with(addr: Addr, settings: Settings) -> Box<dyn Module> {
     })
 }
 
+/// As [`start_with`], with the link's quick-death retry wait given
+/// explicitly: the latch tests hand over a short wait, so the latched
+/// dial is exercised without waiting out the production delay.
+#[cfg(test)]
+fn start_with_retry(
+    addr: Addr,
+    settings: Settings,
+    retry_after: std::time::Duration,
+) -> Box<dyn Module> {
+    Box::new(Tray {
+        link: Link::start_with_retry("tray", addr, setup, retry_after),
+        settings,
+    })
+}
+
 /// Starts the module on an already-open stream: the fake bus's end.
 /// A stream the tests hand over is the only bus there is (a real session
 /// bus on the machine running them must not be redialled after a drop),

@@ -202,9 +202,10 @@ pub fn system_bus_path() -> PathBuf {
     system_bus_path_for(std::env::var_os("DBUS_SYSTEM_BUS_ADDRESS").as_deref())
 }
 
-/// The runtime directory, homed where every build sees it: [`conn`] is
-/// feature-gated, [`control`](crate::control) is not.
-pub use crate::control::paths::runtime_dir;
+/// The runtime directory, homed where every build sees it: the leaf
+/// [`scoot_rt::runtime_dir`], re-exported here so a consumer of this
+/// crate reads the same directory the link waits on.
+pub use scoot_rt::runtime_dir;
 /// Why the blocking set-up failed: `Refused` is the bus saying no (or
 /// speaking out of turn), with what it said.
 #[derive(Debug)]
@@ -556,8 +557,8 @@ impl Conn {
 
     /// Queues bytes as they are, with no framing or cap of this client's:
     /// the tests' way to send what a hostile or merely different peer
-    /// would (a valid message past [`proto::MAX_MESSAGE`]).
-    #[cfg(test)]
+    /// would (a valid message past [`proto::MAX_MESSAGE`]). Always
+    /// compiled, like the builders that call it from the apps' tests.
     pub fn queue_raw(&mut self, bytes: &[u8]) {
         self.outbox.extend_from_slice(bytes);
     }
@@ -637,8 +638,9 @@ impl Conn {
                 Ok(Some(total)) => total,
                 Ok(None) => break,
                 Err(()) => {
-                    crate::print::warn(format_args!(
-                        "scootbar: dbus: dropping a bus frame that is not a message"
+                    scoot_rt::print::warn(format_args!(
+                        "{}: dbus: dropping a bus frame that is not a message",
+                        crate::prog()
                     ));
                     self.dead = true;
                     return true;
@@ -655,8 +657,9 @@ impl Conn {
                 }
                 if !self.said_oversize {
                     self.said_oversize = true;
-                    crate::print::warn(format_args!(
-                        "scootbar: dbus: skipping a {total}-byte message (more than {} are not read)",
+                    scoot_rt::print::warn(format_args!(
+                        "{}: dbus: skipping a {total}-byte message (more than {} are not read)",
+                        crate::prog(),
                         proto::MAX_MESSAGE
                     ));
                 }
@@ -763,8 +766,9 @@ impl Conn {
     fn refuse_forged(&mut self) {
         if !self.said_forged {
             self.said_forged = true;
-            crate::print::warn(format_args!(
-                "scootbar: dbus: refusing a reply from a peer that was not called"
+            scoot_rt::print::warn(format_args!(
+                "{}: dbus: refusing a reply from a peer that was not called",
+                crate::prog()
             ));
         }
     }
@@ -775,8 +779,9 @@ impl Conn {
         while !self.outbox.is_empty() {
             match self.stream.write(&self.outbox) {
                 Ok(0) => {
-                    crate::print::warn(format_args!(
-                        "scootbar: dbus: the bus closed under a write"
+                    scoot_rt::print::warn(format_args!(
+                        "{}: dbus: the bus closed under a write",
+                        crate::prog()
                     ));
                     self.dead = true;
                     return;
@@ -786,15 +791,19 @@ impl Conn {
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     if self.outbox.len() > MAX_OUTBOX {
-                        crate::print::warn(format_args!(
-                            "scootbar: dbus: the bus stopped reading; dropping the connection"
+                        scoot_rt::print::warn(format_args!(
+                            "{}: dbus: the bus stopped reading; dropping the connection",
+                            crate::prog()
                         ));
                         self.dead = true;
                     }
                     return;
                 }
                 Err(error) => {
-                    crate::print::warn(format_args!("scootbar: dbus: bus write failed: {error}"));
+                    scoot_rt::print::warn(format_args!(
+                        "{}: dbus: bus write failed: {error}",
+                        crate::prog()
+                    ));
                     self.dead = true;
                     return;
                 }
@@ -825,7 +834,10 @@ impl Conn {
             }
             match self.stream.read(&mut chunk) {
                 Ok(0) => {
-                    crate::print::warn(format_args!("scootbar: dbus: the bus went away"));
+                    scoot_rt::print::warn(format_args!(
+                        "{}: dbus: the bus went away",
+                        crate::prog()
+                    ));
                     self.dead = true;
                     return;
                 }
@@ -837,7 +849,10 @@ impl Conn {
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return,
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
                 Err(error) => {
-                    crate::print::warn(format_args!("scootbar: dbus: bus read failed: {error}"));
+                    scoot_rt::print::warn(format_args!(
+                        "{}: dbus: bus read failed: {error}",
+                        crate::prog()
+                    ));
                     self.dead = true;
                     return;
                 }

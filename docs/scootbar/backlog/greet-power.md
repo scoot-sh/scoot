@@ -3,7 +3,7 @@ title: "scootgreet: logind power actions with `Can*` gating and a confirm"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "greet-ui, scoot-dbus-extract"
+blocked: "greet-ui"
 milestone: "M7"
 ---
 

@@ -9,7 +9,7 @@ use std::time::Duration;
 use ab_glyph::{FontArc, FontVec};
 
 use super::fake::{self, Fake};
-use super::{ID, MAX_ITEMS, Settings, start_connected, start_with};
+use super::{ID, MAX_ITEMS, Settings, start_connected, start_with_retry};
 use crate::action::{Action, ModuleAction, Trigger};
 use crate::dbus::link::Addr;
 use crate::density::Scale;
@@ -878,8 +878,8 @@ fn the_watcher_object_answers() {
 
 /// A `GetAll` body marshalled by sd-bus, not by this crate's `Writer`
 /// (`busctl call ... GetAll a{sv} ...`, captured with `dbus-monitor
-/// --binary` on a private `dbus-daemon`; `fixtures/README.md` has the
-/// command). D-Bus alignment is fully specified, so this is not a second
+/// --binary` on a private `dbus-daemon`;
+/// `crates/scoot-dbus/src/fixtures/README.md` has the command). D-Bus alignment is fully specified, so this is not a second
 /// opinion on the padding: it holds shapes this crate's own tests did not
 /// think to write. An unknown property whose variant holds an `a{sv}` of
 /// 8-aligned arrays and structs, none of them starting at a multiple of
@@ -889,7 +889,9 @@ fn the_watcher_object_answers() {
 #[test]
 fn a_getall_marshalled_by_sd_bus_is_read_whole() {
     use crate::dbus::proto::Message;
-    let frame = include_bytes!("../../dbus/fixtures/sdbus-getall-call.bin");
+    // The sd-bus fixture moved with the client (`scoot-dbus`): the one
+    // `include_bytes!` that reaches across crates.
+    let frame = include_bytes!("../../../../scoot-dbus/src/fixtures/sdbus-getall-call.bin");
     let message = Message::parse(frame).unwrap();
     assert_eq!(message.signature, "a{sv}");
     let mut item = super::Item::new(
@@ -1300,7 +1302,11 @@ fn a_bus_that_keeps_dropping_us_is_not_redialled_forever() {
             crate::dbus::testdaemon::serve_setup(&mut stream);
         }
     });
-    let mut harness = Harness::new(start_with_path(path.clone()));
+    let mut harness = Harness::new(start_with_retry(
+        Addr::Path(path.clone()),
+        Settings::default(),
+        QUICK_RETRY,
+    ));
     // Turns until the third dial (a deadline, not a count: a loaded
     // machine is slow, not wrong).
     let start = std::time::Instant::now();
@@ -1332,9 +1338,10 @@ fn a_bus_that_keeps_dropping_us_is_not_redialled_forever() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-fn start_with_path(path: std::path::PathBuf) -> Box<dyn crate::modules::Module> {
-    start_with(Addr::Path(path), Settings::default())
-}
+/// The latch wait the two quick-death tests hand the link over: the
+/// production 30 s would time them out, and the 200 ms floor they assert
+/// needs room below it.
+const QUICK_RETRY: Duration = Duration::from_millis(300);
 
 /// What a watcher announces: the id form (KDE's, and ours), and what a
 /// registration may say; anything else is ignored, not shown.
@@ -1714,7 +1721,11 @@ fn a_bus_that_kept_dropping_us_is_tried_again_later() {
             crate::dbus::testdaemon::serve_setup(&mut stream);
         }
     });
-    let mut harness = Harness::new(start_with_path(path));
+    let mut harness = Harness::new(start_with_retry(
+        Addr::Path(path),
+        Settings::default(),
+        QUICK_RETRY,
+    ));
     let start = std::time::Instant::now();
     // The three quick deaths, then (at the retry) a fourth dial.
     while accepted.load(Ordering::SeqCst) < 4 {
@@ -1725,8 +1736,8 @@ fn a_bus_that_kept_dropping_us_is_tried_again_later() {
         );
         harness.wait(Duration::from_millis(50));
     }
-    // The fourth dial waited out the link's retry (300 ms in tests):
-    // a floor a slow box can only grow, never shrink past.
+    // The fourth dial waited out the link's retry (the 300 ms handed
+    // over above): a floor a slow box can only grow, never shrink past.
     assert!(
         start.elapsed() >= Duration::from_millis(200),
         "the fourth dial came after {:?}: no wait",
