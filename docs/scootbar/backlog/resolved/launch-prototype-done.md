@@ -100,3 +100,6 @@ GO: every acceptance row passes at or under fuzzel on the measured
 box, and the two real risks (keystroke latency, typing correctness)
 are retired. The M2 confirmation and the parse cache stay open work,
 not gate blockers.
+
+Resolution: GO recorded here, ticket resolved, evidence in PR #659
+(docs-only; prototype source added then deleted in the same branch).
