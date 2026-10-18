@@ -24,6 +24,10 @@ path = "src/bin/xkb.rs"
 name = "spike-base"
 path = "src/bin/base.rs"
 
+[[bin]]
+name = "spike-wl"
+path = "src/bin/wl.rs"
+
 [dependencies]
 kbvm = { version = "0.2.0", features = ["compose"] }
 xkbcommon = "0.9.0"
