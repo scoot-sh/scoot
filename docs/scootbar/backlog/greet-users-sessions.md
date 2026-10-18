@@ -3,7 +3,7 @@ title: "scootgreet: the user list, avatars, sessions through a new `scoot-xdg` c
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "greet-ui, launch-desktop-index"
+blocked: "greet-ui"
 milestone: "M7"
 ---
 
