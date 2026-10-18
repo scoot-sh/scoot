@@ -3,7 +3,7 @@ title: "Extract `scootui`: the shared drawing and Wayland scaffolding (epic)"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scootui-keyboard-spike, scootui-text-shaping-spike, scootui-extract-draw, scoot-dbus-extract, scootui-extract-wayland, scootui-extract-control, scootui-surfaces-on-demand, scootui-keyboard, scootui-entry-and-list"
+blocked: "scootui-keyboard-spike, scootui-extract-draw, scoot-dbus-extract, scootui-extract-wayland, scootui-extract-control, scootui-surfaces-on-demand, scootui-keyboard, scootui-entry-and-list"
 milestone: "M7"
 ---
 
@@ -29,7 +29,7 @@ go.**
 Children, in order:
 
 1. [scootui-keyboard-spike](scootui-keyboard-spike.md) and
-   [scootui-text-shaping-spike](scootui-text-shaping-spike.md), now.
+   [scootui-text-shaping-spike](resolved/scootui-text-shaping-spike-done.md) (NO-GO, measured 2026-10-18), now.
 2. [scootui-extract-draw](scootui-extract-draw.md), then the moves in parallel:
    [scoot-dbus-extract](scoot-dbus-extract.md), [scootui-extract-wayland](scootui-extract-wayland.md)
    and [scootui-extract-control](scootui-extract-control.md). These are mechanical, with nothing

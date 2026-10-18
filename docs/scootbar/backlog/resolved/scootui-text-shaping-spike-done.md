@@ -1,10 +1,11 @@
 ---
 title: "Spike: shaping and bidi for notification bodies and app names (rustybuzz), measured"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-17"
 ---
 
 # Spike: shaping and bidi
@@ -42,6 +43,22 @@ the docs list the scripts that draw wrong.
 
 Side-by-side screenshots of the corpus, the size and time rows with the SHA, and the license
 check of every crate added (`deny.toml`).
+
+## Result (measured 2026-10-18)
+
+NO-GO. `rustybuzz` 0.20.1 + `unicode-bidi` 0.3.18 cost **343.4 KiB of
+`.text`** (702,260 B vs 350,608 B baseline, release, dev VM aarch64) against
+the gate's ~250 KiB, plus 168.4 KiB of `.rodata` tables. The 500-byte body
+shapes in ~213 µs mean, well under the 1 ms budget, so time is not the
+problem; size is, and the feature set is already minimal. `ttf-parser`
+resolves to a single 0.25.1 shared with `ab_glyph`, as expected. Full
+record with figures, raw logs, SHAs and the license table:
+`dev/spikes/scootbar/text-shaping.md`.
+
+Shaping does not ship in scootnotify's default build. Without it, Arabic
+(unjoined, logical order), Hebrew (logical order) and Devanagari (no
+conjuncts) draw wrong; Latin, Cyrillic, CJK and monochrome-fallback emoji
+draw acceptably.
 
 ## Not in this ticket
 
