@@ -70,7 +70,10 @@ fn spawn_server(daemon: &Daemon, runtime: &tempfile::TempDir) -> Child {
 /// Pumps `client` until its `Notify` is answered: the daemon serving.
 /// One call outstanding at a time — an error (the name unowned yet)
 /// resends, a reply returns — so at most one probe card ever exists.
-fn wait_serving(client: &mut Conn) {
+/// On timeout the panic names the server's fate (its exit code and
+/// stderr when it died, which is the startup crash; still-running when
+/// it is slow), because a bare deadline cost a debugging round already.
+fn wait_serving(client: &mut Conn, server: &mut Child) {
     let start = Instant::now();
     // A 1 ms card: the reply proves serving, the card itself is gone
     // before any test counts live ones.
@@ -81,10 +84,20 @@ fn wait_serving(client: &mut Conn) {
         )
         .expect("the first call queues");
     loop {
-        assert!(
-            start.elapsed() < Duration::from_secs(10),
-            "the server never owned the name"
-        );
+        if start.elapsed() >= Duration::from_secs(10) {
+            match server.try_wait().expect("the server reaps") {
+                Some(status) => {
+                    let mut err = String::new();
+                    if let Some(mut stderr) = server.stderr.take() {
+                        let _ = stderr.read_to_string(&mut err);
+                    }
+                    panic!("the server died at startup ({status}): {err}");
+                }
+                None => {
+                    panic!("the server still runs but never owned the name in 10 s");
+                }
+            }
+        }
         if client.dead() {
             panic!("the bus died while waiting for the server");
         }
@@ -351,9 +364,9 @@ fn every_method_and_signal_with_the_right_reasons() {
         return;
     };
     let runtime = runtime_dir("methods");
-    let server = spawn_server(&daemon, &runtime);
+    let mut server = spawn_server(&daemon, &runtime);
     let mut client = connect(&daemon);
-    wait_serving(&mut client);
+    wait_serving(&mut client, &mut server);
     watch_signals(&mut client);
 
     // GetCapabilities: the four, never persistence.
@@ -451,9 +464,9 @@ fn expiry_closes_with_reason_1() {
         return;
     };
     let runtime = runtime_dir("expiry");
-    let server = spawn_server(&daemon, &runtime);
+    let mut server = spawn_server(&daemon, &runtime);
     let mut client = connect(&daemon);
-    wait_serving(&mut client);
+    wait_serving(&mut client, &mut server);
     watch_signals(&mut client);
     let id = notify(&mut client, "Mail", 0, 200, 21);
     assert_eq!(wait_closed(&mut client, id), 1);
@@ -510,9 +523,9 @@ fn a_5_mib_call_gets_limits_exceeded_with_no_hang() {
         return;
     };
     let runtime = runtime_dir("limits");
-    let server = spawn_server(&daemon, &runtime);
+    let mut server = spawn_server(&daemon, &runtime);
     let mut prober = connect(&daemon);
-    wait_serving(&mut prober);
+    wait_serving(&mut prober, &mut server);
     drop(prober);
     // A 5 MiB `Notify`, framed by hand (the client's own `Writer` cap
     // rightly refuses to build one), read off the wire by a scripted
@@ -580,17 +593,17 @@ fn ids_are_never_reused_across_a_restart() {
         return;
     };
     let runtime = runtime_dir("ids");
-    let server = spawn_server(&daemon, &runtime);
+    let mut server = spawn_server(&daemon, &runtime);
     let mut client = connect(&daemon);
-    wait_serving(&mut client);
+    wait_serving(&mut client, &mut server);
     let first = notify(&mut client, "Mail", 0, -1, 51);
     drop(client);
     kill(server);
     // The restart reserves the next block: its first id is past every
     // id the dead server may have issued.
-    let server = spawn_server(&daemon, &runtime);
+    let mut server = spawn_server(&daemon, &runtime);
     let mut client = connect(&daemon);
-    wait_serving(&mut client);
+    wait_serving(&mut client, &mut server);
     let second = notify(&mut client, "Mail", 0, -1, 52);
     assert!(second > first, "restart reissued {first} as {second}");
     assert!(second >= 1025, "the block reservation holds: {second}");
@@ -603,10 +616,10 @@ fn replaces_survives_a_new_connection_for_the_same_app() {
         return;
     };
     let runtime = runtime_dir("replace");
-    let server = spawn_server(&daemon, &runtime);
+    let mut server = spawn_server(&daemon, &runtime);
     // `notify-send -r` reconnects every time: one connection per call.
     let mut first = connect(&daemon);
-    wait_serving(&mut first);
+    wait_serving(&mut first, &mut server);
     let id = notify(&mut first, "Volume", 0, -1, 61);
     drop(first);
     let mut second = connect(&daemon);
@@ -631,9 +644,9 @@ fn a_flood_is_answered_and_bounded() {
         return;
     };
     let runtime = runtime_dir("flood");
-    let server = spawn_server(&daemon, &runtime);
+    let mut server = spawn_server(&daemon, &runtime);
     let mut client = connect(&daemon);
-    wait_serving(&mut client);
+    wait_serving(&mut client, &mut server);
     // 500 fresh cards, every call answered: the flood costs bounded
     // memory (at most 128 live, the rest evicted with reason 4) and at
     // most one redraw per frame downstream — here, no hang and no death.
@@ -688,9 +701,9 @@ fn a_client_that_disconnects_mid_call_kills_nothing() {
         return;
     };
     let runtime = runtime_dir("drop");
-    let server = spawn_server(&daemon, &runtime);
+    let mut server = spawn_server(&daemon, &runtime);
     let mut client = connect(&daemon);
-    wait_serving(&mut client);
+    wait_serving(&mut client, &mut server);
     // Sends one call and vanishes without reading its reply.
     let mut rude = connect(&daemon);
     let body = notify_body("Rude", 0, "s", "b", &[], -1);
@@ -785,9 +798,9 @@ fn an_idle_pump_allocates_nothing() {
         return;
     };
     let runtime = runtime_dir("alloc");
-    let server = spawn_server(&daemon, &runtime);
+    let mut server = spawn_server(&daemon, &runtime);
     let mut client = connect(&daemon);
-    wait_serving(&mut client);
+    wait_serving(&mut client, &mut server);
     // Warm: one full round trip first.
     notify(&mut client, "Warm", 0, -1, 95);
     let ((events, _), allocations) = scootbg_mem::count_allocations(|| client.pump());
