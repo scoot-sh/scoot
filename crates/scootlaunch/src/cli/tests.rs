@@ -19,7 +19,54 @@ fn list_alone_parses() {
             json: false,
             help: false,
             version: false,
+            query: None,
         }
+    );
+}
+
+#[test]
+fn query_takes_the_next_argument_as_text() {
+    let args = parse_args(&argv(&["scootlaunch", "--query", "fire"])).unwrap();
+    assert_eq!(args.query, Some("fire".to_string()));
+    assert!(!args.list);
+}
+
+#[test]
+fn query_takes_every_modifier() {
+    let args = parse_args(&argv(&[
+        "scootlaunch",
+        "--query",
+        "fire",
+        "--all",
+        "--lenient",
+        "--json",
+    ]))
+    .unwrap();
+    assert_eq!(args.query, Some("fire".to_string()));
+    assert!(args.all && args.lenient && args.json);
+}
+
+#[test]
+fn query_text_may_look_like_a_flag() {
+    // TEXT is the next argument, whatever it holds.
+    let args = parse_args(&argv(&["scootlaunch", "--query", "--json"])).unwrap();
+    assert_eq!(args.query, Some("--json".to_string()));
+    assert!(!args.json);
+}
+
+#[test]
+fn query_without_text_is_a_loud_error() {
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--query"])),
+        Err(Error::NeedsValue("--query".to_string()))
+    );
+}
+
+#[test]
+fn list_and_query_conflict() {
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--list", "--query", "fire"])),
+        Err(Error::ConflictingCommands)
     );
 }
 
@@ -83,14 +130,16 @@ fn positional_arguments_are_refused() {
 }
 
 #[test]
-fn modifiers_need_list() {
+fn modifiers_need_a_command() {
     for flag in ["--all", "--lenient", "--json"] {
         assert_eq!(
             parse_args(&argv(&["scootlaunch", flag])),
-            Err(Error::NeedsList(flag.to_string())),
-            "{flag} without --list"
+            Err(Error::NeedsCommand(flag.to_string())),
+            "{flag} without --list or --query"
         );
     }
+    // ... but either command satisfies them.
+    assert!(parse_args(&argv(&["scootlaunch", "--query", "x", "--json"])).is_ok());
 }
 
 #[test]

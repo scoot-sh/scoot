@@ -1,6 +1,6 @@
 [package]
 name = "scootlaunch"
-description = "Keyboard-first application launcher for Wayland: the desktop entry index, Exec expansion and --list --json"
+description = "Keyboard-first application launcher for Wayland: the desktop entry index, fuzzy matching with frecency, and --list/--query --json"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -26,6 +26,11 @@ rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 # scootbar's tests carry (same lock entry, MIT OR Apache-2.0).
 [dev-dependencies]
 tempfile = "3"
+# The counting allocator behind the warm-query `count_allocations`
+# test (Linux-only, like the crate itself): the same version
+# scootbar's tests carry.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+scootbg-mem.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

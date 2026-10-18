@@ -1,16 +1,17 @@
 ---
 title: scootlaunch overview
-description: "The keyboard-first application launcher — this page covers the shipped desktop entry index; the panel, ranking and launching arrive in later tickets."
+description: "The keyboard-first application launcher — this page covers the shipped desktop entry index and ranked search; the panel, launching and the dmenu mode arrive in later tickets."
 ---
 
 A keyboard-first application launcher for scoot and any compositor
 with `wlr-layer-shell-v1`. What ships today is the foundation every
-later piece stands on: the desktop entry index and the headless agent
-interface. The panel, fuzzy ranking, launching and the dmenu mode are
-later tickets and are not here yet.
+later piece stands on: the desktop entry index, ranked search, and
+the headless agent interface. The panel, launching and the dmenu mode
+are later tickets and are not here yet.
 
 ```sh
 scootlaunch --list --json                  # every visible entry, as JSON
+scootlaunch --query "fire" --json          # ranked as the UI would rank it
 ```
 
 One binary, linking nothing beyond glibc and libgcc_s, needing no
@@ -26,9 +27,15 @@ and caches the result under `$XDG_CACHE_HOME/scootlaunch/index-v1`.
 - Lists indexed entries, with `NoDisplay` and
   `OnlyShowIn`/`NotShowIn`/`TryExec`-hidden entries reachable through
   `--all` with their reason (`--list --all --json`).
+- Ranks entries for a query (`--query TEXT`): a case-folded fuzzy
+  match over the name, generic name, keywords and Exec basename,
+  plus a frecency bonus from `$XDG_STATE_HOME/scootlaunch/history`.
+  The bonus never outranks a much better text match. An empty query
+  orders by frecency, then name.
 - Prints the agent JSON schema: `id`, `name`, `generic_name`,
   `comment`, `keywords`, `icon`, `exec` (the expanded argv),
   `terminal`, `dbus_activatable`, `actions`, `path` and `hidden`.
+  `--query --json` prints the same schema in ranked order.
 - Expands `Exec` strictly per the spec, or with `--lenient` the way
   GLib reads the real files that break the quoting rule.
 

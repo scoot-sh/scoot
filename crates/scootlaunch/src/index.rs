@@ -49,6 +49,10 @@ pub struct Env {
     /// `None` (no way to name a cache dir) means no cache, never an
     /// error.
     pub xdg_cache_home: Option<PathBuf>,
+    /// `XDG_STATE_HOME`, or `~/.local/state`: the frecency history
+    /// lives under it (`scootlaunch/history`). `None` means no
+    /// history, never an error.
+    pub xdg_state_home: Option<PathBuf>,
     /// The raw locale (`LC_ALL`, then `LC_MESSAGES`, then `LANG`),
     /// kept for the cache key: any change rescans.
     pub locale_raw: String,
@@ -94,6 +98,9 @@ impl Env {
         let xdg_cache_home = std::env::var_os("XDG_CACHE_HOME")
             .and_then(absolute)
             .or_else(|| home.clone().map(|dir| dir.join(".cache")));
+        let xdg_state_home = std::env::var_os("XDG_STATE_HOME")
+            .and_then(absolute)
+            .or_else(|| home.clone().map(|dir| dir.join(".local/state")));
         let locale_raw = ["LC_ALL", "LC_MESSAGES", "LANG"]
             .iter()
             .filter_map(std::env::var_os)
@@ -109,6 +116,7 @@ impl Env {
             xdg_data_dirs,
             xdg_current_desktop,
             xdg_cache_home,
+            xdg_state_home,
             locale_raw,
             locale,
             path_dirs,

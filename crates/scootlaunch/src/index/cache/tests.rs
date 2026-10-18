@@ -10,6 +10,7 @@ fn test_env(root: &Path) -> Env {
         xdg_data_dirs: Vec::new(),
         xdg_current_desktop: Vec::new(),
         xdg_cache_home: Some(root.join("cache")),
+        xdg_state_home: None,
         locale_raw: String::new(),
         locale: None,
         path_dirs: Vec::new(),
