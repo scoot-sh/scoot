@@ -110,6 +110,11 @@ pub struct Link<S: Session> {
     bus: Bus<S>,
     /// Builds the session on a fresh connection.
     start: fn(Conn) -> S,
+    /// How long the one-shot retry waits after [`MAX_QUICK_DEATHS`]
+    /// quick deaths (and, for an abstract bus with no bus yet, the whole
+    /// wait): [`RETRY_AFTER_QUICK_DEATHS`] in production, a short wait
+    /// the apps' tests hand over through [`Link::start_with_retry`].
+    retry_after: Duration,
     /// When the live connection was made: a bus that kills it at once is
     /// told from one that went away.
     since: Option<Instant>,
@@ -133,6 +138,32 @@ impl<S: Session> Link<S> {
         addr: Addr,
         start: fn(Conn) -> S,
     ) -> Self {
+        Self::start_on_with_retry(who, bus_name, addr, start, RETRY_AFTER_QUICK_DEATHS)
+    }
+
+    /// As [`Link::start`], with the wait after [`MAX_QUICK_DEATHS`]
+    /// quick deaths given explicitly: the apps' tests hand over a short
+    /// wait, so the latch is exercised without waiting out the production
+    /// delay. Always compiled, like [`Addr::Stream`].
+    pub fn start_with_retry(
+        who: &'static str,
+        addr: Addr,
+        start: fn(Conn) -> S,
+        retry_after: Duration,
+    ) -> Self {
+        Self::start_on_with_retry(who, "session bus", addr, start, retry_after)
+    }
+
+    /// As [`Link::start_on`], with the wait after [`MAX_QUICK_DEATHS`]
+    /// quick deaths given explicitly (see [`Link::start_with_retry`]).
+    /// Always compiled, like [`Addr::Stream`].
+    pub fn start_on_with_retry(
+        who: &'static str,
+        bus_name: &'static str,
+        addr: Addr,
+        start: fn(Conn) -> S,
+        retry_after: Duration,
+    ) -> Self {
         let (target, stream, dial): (_, Option<UnixStream>, _) = match addr {
             Addr::Path(path) => (Some(Target::Path(path)), None, true),
             Addr::Abstract(name) => (Some(Target::Abstract(name)), None, true),
@@ -151,6 +182,7 @@ impl<S: Session> Link<S> {
             who,
             bus_name,
             target,
+            retry_after,
             bus: Bus::Waiting {
                 notify: None,
                 retry: None,
@@ -291,7 +323,7 @@ impl<S: Session> Link<S> {
         let waiting = match &self.target {
             Some(Target::Abstract(_)) => Bus::Waiting {
                 notify: None,
-                retry: Self::retry_timer(),
+                retry: Self::retry_timer(self.retry_after),
             },
             Some(Target::Path(path)) => {
                 let dir = path
@@ -354,7 +386,7 @@ impl<S: Session> Link<S> {
                      trying again in {} s, or when it is restarted",
                     crate::prog(),
                     self.who,
-                    RETRY_AFTER_QUICK_DEATHS.as_secs().max(1)
+                    self.retry_after.as_secs().max(1)
                 ));
             }
             self.arm_retry();
@@ -408,12 +440,12 @@ impl<S: Session> Link<S> {
         let Bus::Waiting { retry, .. } = &mut self.bus else {
             return;
         };
-        *retry = Self::retry_timer();
+        *retry = Self::retry_timer(self.retry_after);
     }
 
-    /// Makes the one-shot retry timer, firing once after
-    /// [`RETRY_AFTER_QUICK_DEATHS`].
-    fn retry_timer() -> Option<OwnedFd> {
+    /// Makes the one-shot retry timer, firing once after the link's
+    /// wait ([`RETRY_AFTER_QUICK_DEATHS`] in production).
+    fn retry_timer(after: Duration) -> Option<OwnedFd> {
         let Ok(fd) = timerfd_create(
             TimerfdClockId::Monotonic,
             TimerfdFlags::CLOEXEC | TimerfdFlags::NONBLOCK,
@@ -426,8 +458,8 @@ impl<S: Session> Link<S> {
                 tv_nsec: 0,
             },
             it_value: Timespec {
-                tv_sec: RETRY_AFTER_QUICK_DEATHS.as_secs() as i64,
-                tv_nsec: i64::from(RETRY_AFTER_QUICK_DEATHS.subsec_nanos()),
+                tv_sec: after.as_secs() as i64,
+                tv_nsec: i64::from(after.subsec_nanos()),
             },
         };
         if timerfd_settime(&fd, TimerfdTimerFlags::empty(), &spec).is_ok() {

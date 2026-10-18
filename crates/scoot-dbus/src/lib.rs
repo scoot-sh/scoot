@@ -51,6 +51,13 @@ compile_error!(
 use std::path::Path;
 use std::sync::OnceLock;
 
+// Tests pinning allocations count heap allocations through this
+// (scootbg_mem::count), forwarding everything else to the system
+// allocator. Test-only: the shipped crate links the default.
+#[cfg(test)]
+#[global_allocator]
+static COUNTING_ALLOC: scootbg_mem::CountingAlloc = scootbg_mem::CountingAlloc;
+
 pub mod bluez;
 pub mod conn;
 pub mod link;
