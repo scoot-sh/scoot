@@ -693,7 +693,11 @@ impl<O> Outputs<O> {
         self.list.iter_mut()
     }
 
+    // Test-only: how many outputs are bound. No `is_empty` beside it:
+    // the lint wants one for public `len`s, and an `is_empty` no test
+    // reads would be dead code.
     #[cfg(test)]
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.list.len()
     }
