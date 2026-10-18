@@ -1,21 +1,24 @@
-//! The command line: `scootlaunch --list [--all] [--lenient] [--json]`.
+//! The command line: `scootlaunch --list [--all] [--lenient]
+//! [--json]` and `scootlaunch --query TEXT [--all] [--lenient]
+//! [--json]`.
 //!
-//! Later tickets add `--query`, `--run-id`, the panel flags and the
-//! dmenu contract (`dev/design/scootlaunch.md`, Modes). Anything not
-//! listed here is a loud error (exit 2, naming the flag and the
-//! supported list), never silently ignored.
+//! Later tickets add `--run-id`, the panel flags and the dmenu
+//! contract (`dev/design/scootlaunch.md`, Modes). Anything not listed
+//! here is a loud error (exit 2, naming the flag and the supported
+//! list), never silently ignored.
 
 use std::fmt;
 
 #[cfg(test)]
 mod tests;
 
-/// What `--list` takes. `all` shows `NoDisplay` and
+/// What `--list` and `--query` take. `all` shows `NoDisplay` and
 /// `OnlyShowIn`/`NotShowIn`/`TryExec`-hidden entries too, with their
 /// reason; `json` prints the agent JSON schema instead of text lines;
 /// `lenient` accepts what GLib accepts for Exec quoting (single
 /// quotes, unquoted reserved characters) instead of the spec's strict
-/// rule, for real files that break it.
+/// rule, for real files that break it; `query` holds the search text,
+/// ranked as the UI would rank it, frecency included.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Args {
     pub list: bool,
@@ -24,19 +27,24 @@ pub struct Args {
     pub json: bool,
     pub help: bool,
     pub version: bool,
+    pub query: Option<String>,
 }
 
 pub const HELP: &str = "\
 scootlaunch: a keyboard-first application launcher for Wayland
 
 usage: scootlaunch --list [--all] [--lenient] [--json]
+       scootlaunch --query TEXT [--all] [--lenient] [--json]
 
   --list       list indexed desktop entries (no compositor needed)
+  --query TEXT rank entries for TEXT, as the UI would rank them
   --all        include hidden entries, with their reason
   --lenient    Exec quoting: accept what GLib accepts, not just the spec
   --json       print the agent JSON schema (id, name, exec argv, ...) array
   --help       print this text
   --version    print the version
+
+TEXT is the next argument after --query, whatever it holds.
 ";
 
 /// A usage error. Printed by the caller; exit status 2.
@@ -48,30 +56,33 @@ pub enum Error {
     UnknownFlag(String),
     /// A positional argument, which no command takes.
     UnexpectedArg(String),
-    /// `--all`, `--lenient` or `--json` without `--list`.
-    NeedsList(String),
+    /// `--all`, `--lenient` or `--json` without `--list` or `--query`.
+    NeedsCommand(String),
+    /// `--query` with no text after it.
+    NeedsValue(String),
+    /// `--list` and `--query` together: two commands, not modifiers.
+    ConflictingCommands,
 }
+
+const USAGE: &str = "usage is scootlaunch --list [--all] [--lenient] [--json] or scootlaunch --query TEXT [--all] [--lenient] [--json]";
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::NoCommand => write!(
-                f,
-                "no command: usage is scootlaunch --list [--all] [--lenient] [--json]"
-            ),
+            Error::NoCommand => write!(f, "no command: {USAGE}"),
             Error::UnknownFlag(flag) => write!(
                 f,
-                "unknown flag {flag}: supported flags are --list --all --lenient --json --help --version"
+                "unknown flag {flag}: supported flags are --list --query --all --lenient --json --help --version"
             ),
-            Error::UnexpectedArg(arg) => write!(
-                f,
-                "unexpected argument {arg}: usage is scootlaunch --list [--all] [--lenient] [--json]"
-            ),
-            Error::NeedsList(flag) => {
-                write!(
-                    f,
-                    "{flag} needs --list: usage is scootlaunch --list [--all] [--lenient] [--json]"
-                )
+            Error::UnexpectedArg(arg) => write!(f, "unexpected argument {arg}: {USAGE}"),
+            Error::NeedsCommand(flag) => {
+                write!(f, "{flag} needs --list or --query: {USAGE}")
+            }
+            Error::NeedsValue(flag) => {
+                write!(f, "{flag} needs a value: {USAGE}")
+            }
+            Error::ConflictingCommands => {
+                write!(f, "cannot combine --list and --query: {USAGE}")
             }
         }
     }
@@ -79,6 +90,7 @@ impl fmt::Display for Error {
 
 /// Parses `argv` (including `argv[0]`, the program name). Every flag is
 /// a whole argument; `--flag=value` is not a flag but an unknown one.
+/// `--query` takes the next argument as its text, whatever it holds.
 pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
     let mut args = Args {
         list: false,
@@ -87,6 +99,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
         json: false,
         help: false,
         version: false,
+        query: None,
     };
     if argv.len() < 2 {
         return Err(Error::NoCommand);
@@ -104,6 +117,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
                     json: false,
                     help: true,
                     version: false,
+                    query: None,
                 });
             }
             "--version" | "-V" => {
@@ -114,14 +128,23 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
                     json: false,
                     help: false,
                     version: true,
+                    query: None,
                 });
             }
             _ => {}
         }
     }
-    for arg in &argv[1..] {
-        match arg.as_str() {
+    let mut index = 1;
+    while index < argv.len() {
+        match argv[index].as_str() {
             "--list" => args.list = true,
+            "--query" => {
+                index += 1;
+                match argv.get(index) {
+                    Some(text) => args.query = Some(text.clone()),
+                    None => return Err(Error::NeedsValue("--query".to_string())),
+                }
+            }
             "--all" => args.all = true,
             "--lenient" => args.lenient = true,
             "--json" => args.json = true,
@@ -134,6 +157,10 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
             flag if flag.starts_with('-') => return Err(Error::UnknownFlag(flag.to_string())),
             other => return Err(Error::UnexpectedArg(other.to_string())),
         }
+        index += 1;
+    }
+    if args.list && args.query.is_some() {
+        return Err(Error::ConflictingCommands);
     }
     for flag in ["--all", "--lenient", "--json"] {
         let set = match flag {
@@ -141,11 +168,11 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
             "--lenient" => args.lenient,
             _ => args.json,
         };
-        if set && !args.list {
-            return Err(Error::NeedsList(flag.to_string()));
+        if set && !args.list && args.query.is_none() {
+            return Err(Error::NeedsCommand(flag.to_string()));
         }
     }
-    if !args.list {
+    if !args.list && args.query.is_none() {
         return Err(Error::NoCommand);
     }
     Ok(args)

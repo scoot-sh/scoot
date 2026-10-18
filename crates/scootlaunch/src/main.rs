@@ -1,13 +1,14 @@
 //! `scootlaunch`: a keyboard-first application launcher for Wayland.
 //!
-//! This ticket (`docs/scootbar/backlog/launch-desktop-index.md`) builds
-//! only the desktop entry index and the headless agent interface: data
-//! dirs and ids with precedence and `Hidden` masking, the format and its
-//! escapes, localized keys, `OnlyShowIn`/`NotShowIn` and `TryExec`,
-//! actions, the Exec quoting and field codes, and the cache keyed by
-//! canonical path, inode and mtime — plus `scootlaunch --list [--all]
-//! [--lenient] [--json]`. Ranking, the panel, launching and the dmenu
-//! mode are later tickets. The plan is `dev/design/scootlaunch.md`.
+//! The desktop entry index and the headless agent interface: data
+//! dirs and ids with precedence and `Hidden` masking, the format and
+//! its escapes, localized keys, `OnlyShowIn`/`NotShowIn` and
+//! `TryExec`, actions, the Exec quoting and field codes, and the
+//! cache keyed by canonical path, inode and mtime — plus fuzzy
+//! matching with frecency (`--list` and `--query`, each with
+//! `[--all] [--lenient] [--json]`). The panel, launching and the
+//! dmenu mode are later tickets. The plan is
+//! `dev/design/scootlaunch.md`.
 //!
 //! No `unsafe` here. Nothing here links beyond what `std` links.
 
@@ -15,6 +16,15 @@
 
 mod cli;
 mod index;
+mod rank;
+
+// Tests pinning the warm-query path count heap allocations through
+// this (scootbg_mem::count), forwarding everything else to the
+// system allocator. Test-only, Linux-only like the crate it comes
+// from: the shipped binary uses the default.
+#[cfg(all(test, target_os = "linux"))]
+#[global_allocator]
+static COUNTING_ALLOC: scootbg_mem::CountingAlloc = scootbg_mem::CountingAlloc;
 
 use std::io::Write as _;
 
@@ -43,8 +53,73 @@ fn run(argv: &[String]) -> i32 {
             Ok(()) => 0,
             Err(_) => 1,
         }
+    } else if args.query.is_some() {
+        cmd_query(&args)
     } else {
         cmd_list(&args)
+    }
+}
+
+/// `--query TEXT`: entries ranked for TEXT the way the UI ranks
+/// them — fuzzy match plus frecency — each entry once at its best
+/// row's position (an action row still prints its entry). An empty
+/// TEXT orders by frecency, then name. Human-readable lines by
+/// default, the agent JSON schema with `--json`, in ranked order.
+fn cmd_query(args: &cli::Args) -> i32 {
+    let query = args.query.as_deref().unwrap_or("");
+    let env = index::Env::from_env();
+    let opts = index::BuildOpts {
+        use_cache: true,
+        lenient_exec: args.lenient,
+    };
+    let built = index::build(&env, &opts);
+    for note in &built.notes {
+        warn(format_args!("scootlaunch: {note}"));
+    }
+    let history = rank::frecency::load(env.xdg_state_home.as_deref());
+    let rows = rank::build_rows(&built.entries);
+    let mut ranker = rank::Ranker::new();
+    let now = rank::frecency::now_secs();
+    let order = ranker.rank(query, &rows, &history, now).to_vec();
+    let ranked = rank::ranked_entries(&built.entries, &rows, &order, args.all);
+    let mut out = String::new();
+    if args.json {
+        let entries: Vec<index::JsonEntry> = ranked
+            .iter()
+            .map(|entry| index::JsonEntry::from_entry(entry))
+            .collect();
+        match serde_json::to_string(&entries) {
+            Ok(json) => {
+                out.push_str(&json);
+                out.push('\n');
+            }
+            Err(error) => {
+                warn(format_args!("scootlaunch: cannot encode --json: {error}"));
+                return 1;
+            }
+        }
+    } else {
+        for entry in &ranked {
+            out.push_str(&entry.id);
+            out.push('\t');
+            out.push_str(&entry.name);
+            if let Some(reason) = &entry.hidden {
+                out.push_str(" [hidden: ");
+                out.push_str(reason.as_str());
+                out.push(']');
+            }
+            out.push('\n');
+        }
+    }
+    // One write: a reader that went away (`--query x | head -c0`) is
+    // a quiet success, as for any Unix tool.
+    match print(&out) {
+        Ok(()) => 0,
+        Err(error) => {
+            let _ = std::io::stderr()
+                .write_fmt(format_args!("scootlaunch: cannot write output: {error}\n"));
+            1
+        }
     }
 }
 
