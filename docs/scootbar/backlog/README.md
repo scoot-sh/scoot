@@ -167,7 +167,7 @@ Shared foundation ([epic](extract-scootui.md)):
 - Experiment: [a fullscreen hold through a `top` surface](notify-fullscreen-hold-spike.md)
 
 [`scootlaunch`: the launcher](launcher.md) (epic):
-- [Prototype: the go/no-go gate against fuzzel](launch-prototype.md) (medium)
+- [Prototype: the go/no-go gate against fuzzel](resolved/launch-prototype-done.md) (medium): GO, measured 2026-10-18 on the dev VM (no M2 access)
 - [The desktop entry index](launch-desktop-index.md), [matching and ranking](launch-match-rank.md)
 - [The panel](launch-ui.md), [launching](launch-spawn.md), [icons](launch-icons.md)
 - [dmenu and run](launch-dmenu.md), [the agent interface](launch-agent-json.md)

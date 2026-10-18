@@ -3,7 +3,7 @@ title: "`scootlaunch`: the launcher, and a dmenu mode the bar's pickers can use 
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "launch-prototype, launch-desktop-index, launch-match-rank, launch-ui, launch-spawn, launch-icons, launch-dmenu, launch-agent-json, launch-windows-mode, launch-nix, launch-packaging, launch-default-flip"
+blocked: "launch-desktop-index, launch-match-rank, launch-ui, launch-spawn, launch-icons, launch-dmenu, launch-agent-json, launch-windows-mode, launch-nix, launch-packaging, launch-default-flip"
 milestone: "M7"
 ---
 
@@ -20,7 +20,7 @@ The design is [dev/design/scootlaunch.md](../../../dev/design/scootlaunch.md); s
 
 Children, in order:
 
-1. [launch-prototype](launch-prototype.md): the go/no-go gate against fuzzel, out of the
+1. [launch-prototype](resolved/launch-prototype-done.md): the go/no-go gate against fuzzel, out of the
    workspace.
 2. [launch-desktop-index](launch-desktop-index.md), then [launch-match-rank](launch-match-rank.md).
 3. [launch-ui](launch-ui.md), then [launch-spawn](launch-spawn.md) and [launch-icons](launch-icons.md).
