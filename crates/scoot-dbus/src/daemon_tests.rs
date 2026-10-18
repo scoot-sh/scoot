@@ -625,3 +625,123 @@ fn a_signal_costs_six_small_allocations() {
     let (_, idle) = scootbg_mem::count_allocations(|| watcher.pump());
     assert_eq!(idle, 0, "an idle pump allocates nothing");
 }
+
+/// A valid method call of `len` array bytes to `dest`, which `Writer`'s
+/// own cap would refuse: the tests' way to have a peer send what the
+/// over-cap method-call path must answer.
+fn over_cap_call(dest: &str, serial: u32, len: usize) -> Vec<u8> {
+    let mut writer = Writer::with_cap(len + 4096);
+    writer.begin_call(serial, dest, "/p", "a.b", "Big", "ay", 0);
+    let cookie = writer.open_array(1).unwrap();
+    writer.raw(&vec![7u8; len]);
+    writer.close_array(cookie);
+    writer.finish().unwrap()
+}
+
+/// An over-cap method call is answered `LimitsExceeded`, never silence:
+/// without it the caller waits for its own timeout. The huge frame
+/// reuses the held call's serial, so the answer correlates through the
+/// pending table the way a real client's would (a `queue_raw` frame on
+/// its own has no pending entry, and its answer is rightly dropped as
+/// unmatched — see the server's own giant-call test, which reads the
+/// answer off the wire instead).
+#[test]
+fn an_over_cap_method_call_is_answered_limits_exceeded() {
+    let Some(daemon) = Daemon::spawn() else {
+        return;
+    };
+    let mut victim = connect(&daemon);
+    let mut forger = connect(&daemon);
+    // A real (small) call the victim holds unanswered. `Hello` is
+    // serial 1, so this is serial 2, pinned.
+    let serial = forger
+        .call(victim.unique(), "/p", "a.b", "Slow", "", &[], 0, 42)
+        .unwrap();
+    assert_eq!(serial, 2);
+    let _ = forger.pump();
+    until(&mut victim, |event| {
+        matches!(event, Event::MethodCall { .. })
+    });
+    // The huge call with the same serial, framed by hand (the client's
+    // own `Writer` cap rightly refuses to build one).
+    let big = over_cap_call(victim.unique(), serial, proto::MAX_MESSAGE + 4096);
+    assert!(big.len() > proto::MAX_MESSAGE);
+    flood_then_ping(&mut forger, victim.unique(), &big);
+    // The answer: the error, promptly — never the caller's timeout, and
+    // neither connection dies of it.
+    let start = std::time::Instant::now();
+    loop {
+        assert!(
+            !victim.dead() && !forger.dead(),
+            "a connection died of an over-cap call"
+        );
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(10),
+            "no LimitsExceeded for the over-cap call"
+        );
+        let _ = victim.pump();
+        let (events, _) = forger.pump();
+        for event in events {
+            match event {
+                Event::CallError { token: 42, name } => {
+                    assert_eq!(name, conn::LIMITS_EXCEEDED);
+                    return;
+                }
+                Event::Reply { token, .. } => panic!("a forgery was accepted for {token}"),
+                Event::Dropped { token } => panic!("an over-cap stranger released {token}"),
+                _ => {}
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+/// A raised cap dispatches what the default answers: the same huge call
+/// arrives as a `MethodCall` event, whole, with no error queued behind
+/// it.
+#[test]
+fn a_raised_cap_dispatches_what_the_default_answers() {
+    let Some(daemon) = Daemon::spawn() else {
+        return;
+    };
+    let mut victim = connect(&daemon);
+    victim.set_max_message(4 * 1024 * 1024);
+    let mut forger = connect(&daemon);
+    let big = over_cap_call(victim.unique(), 77, proto::MAX_MESSAGE + 4096);
+    assert!(big.len() > proto::MAX_MESSAGE);
+    flood_then_ping(&mut forger, victim.unique(), &big);
+    // The victim dispatches it whole: the member, the sender, the
+    // megabytes.
+    let start = std::time::Instant::now();
+    loop {
+        assert!(!victim.dead(), "the raised connection died");
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(10),
+            "the raised connection never dispatched the huge call"
+        );
+        let (events, _) = victim.pump();
+        for event in events {
+            if let Event::MethodCall {
+                sender,
+                member,
+                serial,
+                body,
+                ..
+            } = event
+            {
+                assert_eq!(member, "Big");
+                assert_eq!(sender, forger.unique());
+                assert_eq!(serial, 77);
+                assert_eq!(body.len(), proto::MAX_MESSAGE + 4096);
+                // And no LimitsExceeded behind it: the forger, whose
+                // nothing is pending, sees nothing at all.
+                for _ in 0..5 {
+                    let (events, _) = forger.pump();
+                    assert!(events.is_empty(), "{events:?}");
+                }
+                return;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
