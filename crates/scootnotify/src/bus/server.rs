@@ -306,17 +306,15 @@ impl Server {
             conn.reply_error(sender, serial, "org.freedesktop.DBus.Error.UnknownObject");
             return;
         }
-        match interface {
-            INTERFACE => self.handle_notify(conn, sender, member, serial, signature, body, now_ms),
-            "org.freedesktop.DBus.Peer" => {
+        match (interface, member, signature) {
+            (INTERFACE, member, signature) => {
+                self.handle_notify(conn, sender, member, serial, signature, body, now_ms)
+            }
+            ("org.freedesktop.DBus.Peer", member, signature) => {
                 self.handle_peer(conn, sender, member, serial, signature);
             }
-            "org.freedesktop.DBus.Introspectable" => {
-                if member == "Introspect" && signature.is_empty() {
-                    self.answer_introspect(conn, sender, serial);
-                } else {
-                    conn.reply_error(sender, serial, "org.freedesktop.DBus.Error.UnknownMethod");
-                }
+            ("org.freedesktop.DBus.Introspectable", "Introspect", "") => {
+                self.answer_introspect(conn, sender, serial);
             }
             _ => {
                 conn.reply_error(sender, serial, "org.freedesktop.DBus.Error.UnknownMethod");
