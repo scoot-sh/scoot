@@ -39,17 +39,18 @@ brightness = []
 battery = []
 # Popups: a module's declarative content (a slider, buttons) drawn in an
 # `xdg_popup` parented to the bar, opened by a click bound to `popup`. Not a
-# module: the code is the bar's own (`src/popup/`, `src/daemon/popup.rs`),
-# and a build without it has none of it, nor `xdg_wm_base`
+# module: the code is the bar's own (`scootui`'s pure half plus
+# `src/daemon/popup.rs`), and a build without it has none of it, nor
+# `xdg_wm_base`
 # (docs/scootbar/backlog/resolved/popups-done.md).
-popup = []
+popup = ["scootui/widgets"]
 # The system tray: StatusNotifierItem watcher and host over the shared
 # hand-rolled D-Bus client, pixmap icons first
 # (docs/scootbar/backlog/tray.md). Themed icon names reuse the `png`
 # decoder the `icon-image` feature carries (same version, same lock
 # entry, MIT OR Apache-2.0): PNG files from the icon theme, no SVG
 # renderer, no new package in the tree.
-tray = ["dep:png"]
+tray = ["dep:png", "scootui/tray", "scootui/png"]
 # What the players on the session bus are playing, and play/pause, next and
 # previous, over MPRIS: a client of the shared D-Bus client, signals only
 # (docs/scootbar/backlog/resolved/media-module-done.md).
@@ -79,7 +80,7 @@ exec = []
 # the default build stays inside the resource ratchet
 # (docs/scootbar/backlog/lightest.md). Built in with `--features
 # icon-image`, or the Nix module's `features` list.
-icon-image = ["dep:png"]
+icon-image = ["dep:png", "scootui/png"]
 
 [dependencies]
 # The typo guesser and the docs URL behind `--help`: the one copy every
@@ -95,6 +96,14 @@ scoot-look.workspace = true
 # The sealed-memfd `wl_shm` buffer, scootbg's, so scootbar has no `unsafe`
 # of its own (`#![forbid(unsafe_code)]` in `src/main.rs`).
 scootbg-mem.workspace = true
+# The shared drawing, widgets and icons (`paint`, `text`, `theme`, `popup`,
+# `icon`), and the leaf runtime helpers (`print`, `runtime_dir`): extracted
+# from this crate so the shell apps share one copy.
+# `icons` is always on (the bar measures icons even with no modules, as
+# before); `widgets` rides on `popup`, `png` on `icon-image`, `tray` on
+# `tray`.
+scoot-rt.workspace = true
+scootui = { path = "../scootui", default-features = false, features = ["icons"] }
 # The Wayland client, plain, no toolkit, on its pure-Rust backend: nothing
 # links libwayland.
 wayland-client = "0.31"

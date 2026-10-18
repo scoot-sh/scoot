@@ -53,6 +53,7 @@
 use ab_glyph::{Font, FontArc, GlyphId, OutlinedGlyph, PxScale, ScaleFont, point};
 
 use crate::color::Color;
+#[cfg(feature = "icons")]
 use crate::icon::{self, Art, Bitmap};
 use crate::paint::{Canvas, Span};
 
@@ -123,6 +124,7 @@ pub struct Text {
     entries: Vec<Cached>,
     arena: Vec<u8>,
     /// Path and image icons at the sizes drawn (`crate::icon`).
+    #[cfg(feature = "icons")]
     icons: icon::Cache,
 }
 
@@ -145,7 +147,9 @@ impl Metrics {
 }
 
 impl Text {
-    #[cfg(test)]
+    /// A text with `font` and no fallbacks: test support (the bar's own
+    /// tests and the apps' integration tests build one from `testfont`),
+    /// kept alongside `with_fallbacks` so those call sites move unchanged.
     pub fn new(font: FontArc) -> Self {
         Self::with_fallbacks(font, Vec::new())
     }
@@ -159,6 +163,7 @@ impl Text {
             fallbacks,
             entries: Vec::new(),
             arena: Vec::new(),
+            #[cfg(feature = "icons")]
             icons: icon::Cache::default(),
         }
     }
@@ -245,8 +250,9 @@ impl Text {
         self.advance(' ', em).round().max(0.0) as u32
     }
 
-    /// Icon bitmaps cached and their bytes, for tests.
-    #[cfg(all(test, feature = "tray"))]
+    /// Icon bitmaps cached and their bytes, for tests (the tray's
+    /// eviction test reads it through the bar).
+    #[cfg(feature = "tray")]
     pub fn icons_cached(&self) -> (usize, usize) {
         self.icons.cached()
     }
@@ -264,6 +270,7 @@ impl Text {
     /// Draws `art`, a square [`Text::art_side`] on a side, its left edge
     /// at `x` and centered vertically in the canvas, clipped to `clip`. A
     /// path icon is tinted `color`; an image is drawn as it is.
+    #[cfg(feature = "icons")]
     pub fn draw_art(
         &mut self,
         canvas: &mut Canvas<'_>,

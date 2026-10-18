@@ -942,8 +942,37 @@ fn all_four_corners_round_even_the_edge_flush_with_the_bar() {
 
 #[test]
 fn the_rounded_border_is_one_frame_wide_at_every_scale() {
-    use crate::density::Scale;
-    use crate::render::device;
+    // Local stand-ins for `density::Scale` and `render::device`, which stay
+    // in scootbar until `scootui-extract-wayland`: the same arithmetic
+    // (integer multiply, fractional `(len*v120+60)/120`), so this test pins
+    // the same border widths without reaching for the Wayland scaffolding.
+    #[derive(Debug, Clone, Copy)]
+    enum Scale {
+        Integer(u32),
+        Fractional(u32),
+    }
+    impl Scale {
+        fn factor(self) -> f64 {
+            match self {
+                Self::Integer(f) => f64::from(f.max(1)),
+                Self::Fractional(v) => f64::from(v.max(1)) / 120.0,
+            }
+        }
+    }
+    fn device(length: u32, scale: Scale) -> u32 {
+        if length == 0 {
+            return 0;
+        }
+        match scale {
+            Scale::Integer(f) => length.saturating_mul(f.max(1)),
+            Scale::Fractional(v) => {
+                let product = u64::from(length) * u64::from(v.max(1));
+                u32::try_from((product + 60) / 120)
+                    .unwrap_or(u32::MAX)
+                    .max(1)
+            }
+        }
+    }
     let mut font = text();
     // One logical pixel of border at each scale the bar draws at.
     for scale in [
@@ -980,7 +1009,7 @@ fn the_rounded_border_is_one_frame_wide_at_every_scale() {
         let border = (0..w)
             .take_while(|&x| rgb(&pixels, w, x, y) == color(Theme::default().dim))
             .count() as u32;
-        assert_eq!(border, frame, "border at {scale}");
+        assert_eq!(border, frame, "border at {scale:?}");
         assert_eq!(alpha(&pixels, w, frame, y), 255);
     }
 }

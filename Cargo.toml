@@ -18,6 +18,8 @@ license = "MIT"
 scoot-core = { path = "crates/scoot-core" }
 scoot-ipc = { path = "crates/scoot-ipc" }
 scoot-look = { path = "crates/scoot-look" }
+scoot-rt = { path = "crates/scoot-rt" }
+scootui = { path = "crates/scootui" }
 scootctl = { path = "crates/scootctl" }
 scootbg-mem = { path = "crates/scootbg-mem" }
 base64 = "0.22"

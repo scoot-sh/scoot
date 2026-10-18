@@ -27,11 +27,11 @@
 //! larger than any bar's text).
 
 pub mod cache;
-#[cfg(feature = "icon-image")]
+#[cfg(feature = "png")]
 pub mod image;
 pub mod path;
 pub mod raster;
-#[cfg(any(feature = "icon-image", feature = "tray"))]
+#[cfg(any(feature = "png", feature = "tray"))]
 pub mod sample;
 #[cfg(feature = "tray")]
 pub mod tray;
@@ -73,7 +73,7 @@ pub enum Icon {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Art {
     Vector(Arc<Vector>),
-    #[cfg(feature = "icon-image")]
+    #[cfg(feature = "png")]
     Image(Arc<image::Image>),
     /// A tray item's pixmap: premultiplied pixels from the bus, drawn
     /// as they are (never tinted).
@@ -86,7 +86,7 @@ impl Art {
     pub fn id(&self) -> u64 {
         match self {
             Self::Vector(vector) => vector.id(),
-            #[cfg(feature = "icon-image")]
+            #[cfg(feature = "png")]
             Self::Image(image) => image.id(),
             #[cfg(feature = "tray")]
             Self::Tray(icon) => icon.id(),

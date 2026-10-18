@@ -3,7 +3,7 @@ title: "Extract `scoot-dbus`: move the hand-rolled D-Bus client into its own cra
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scootui-extract-draw"
+blocked: null
 milestone: "M7"
 ---
 

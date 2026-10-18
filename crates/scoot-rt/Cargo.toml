@@ -1,0 +1,11 @@
+[package]
+name = "scoot-rt"
+description = "The leaf both scootui and scoot-dbus depend on: panic-free printing and the runtime directory"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "process"] }

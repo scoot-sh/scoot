@@ -76,7 +76,7 @@ use rustix::event::{PollFd, PollFlags};
 use serde_json::Value;
 
 use crate::action::{Action, Bindings, ModuleAction, Trigger};
-pub use class::{Class, MAX_TEXT};
+pub use scootui::class::{Class, MAX_TEXT};
 
 use crate::density::Scale;
 use crate::icon::{Art, Icon};
@@ -93,12 +93,11 @@ pub mod bluetooth;
 pub mod brightness;
 #[cfg(feature = "button")]
 pub mod button;
-mod class;
 #[cfg(feature = "clock")]
 pub mod clock;
 pub mod custom;
 #[cfg(any(feature = "window-title", feature = "media"))]
-mod ellipsis;
+pub use scootui::ellipsis;
 #[cfg(feature = "exec")]
 pub mod exec;
 #[cfg(test)]

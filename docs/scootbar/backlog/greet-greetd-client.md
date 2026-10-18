@@ -3,7 +3,7 @@ title: "scootgreet: the supervisor, its wrapper and the agreety fallback, the lo
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "greet-headless-login; GO verdict recorded in greet-prototype (a human removes this clause); scootui-extract-draw"
+blocked: "greet-headless-login; GO verdict recorded in greet-prototype (a human removes this clause)"
 milestone: "M7"
 ---
 

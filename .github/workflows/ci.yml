@@ -298,6 +298,25 @@ jobs:
                   scootbar=true ;;
                 crates/scootbar/*)
                   scootbar=true ;;
+                # The shared drawing crate (crates/scootui): scootbar's
+                # canvas, text, theme, popups and icons, fanning out to
+                # every consumer (today scootbar alone; tomorrow
+                # scootnotify, scootlaunch and scootgreet, per
+                # dev/design/shell-apps.md). Its manifest also runs the
+                # Linux job, as scootbar's does.
+                crates/scootui/Cargo.toml)
+                  scoot=true
+                  scootbar=true ;;
+                crates/scootui/*)
+                  scootbar=true ;;
+                # The leaf both scootui and scoot-dbus depend on
+                # (crates/scoot-rt): `print` and `runtime_dir`, fanning out
+                # to both sets, today scootbar alone.
+                crates/scoot-rt/Cargo.toml)
+                  scoot=true
+                  scootbar=true ;;
+                crates/scoot-rt/*)
+                  scootbar=true ;;
                 # The look format crate (crates/scoot-look): its own job
                 # below. scootbar reads its allowlists and the compositor
                 # reads its look layer, so its files fan out to the
@@ -1065,15 +1084,16 @@ jobs:
 
       # `--all-targets` so the tests and the CLI's own test targets are
       # type-checked too, not just the library and binary. The wallpaper
-      # daemon and the bar never run on a Mac, and do not build there
-      # (scootbg-mem's `compile_error!` says so), so they are left out, with
-      # scootbg-mem: this checks
+      # daemon, the bar and the shared drawing crate never run on a Mac,
+      # and do not build there (scootbg-mem's and scootui's `compile_error!`
+      # say so), so they are left out, with scootbg-mem: this checks
       # scoot (its Linux halves cfg'd out: a Mac `scoot` is the `scoot msg`
-      # client), the client library, scoot-ipc and scoot-core. The same
-      # command on a Mac is in dev/README.md.
+      # client), the client library, scoot-ipc, scoot-core and scoot-rt
+      # (which builds anywhere). The same command on a Mac is in
+      # dev/README.md.
       - name: cargo check
         shell: nix develop --command bash -euo pipefail {0}
-        run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --all-targets
+        run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --all-targets
 
       # The client half has to run, not just compile, on a Mac: `scoot msg
       # --help` needs no display and no compositor.
@@ -1383,7 +1403,7 @@ jobs:
 
       - name: cargo fmt
         shell: nix develop --command bash -euo pipefail {0}
-        run: cargo fmt --check -p scootbar
+        run: cargo fmt --check -p scootbar -p scootui -p scoot-rt
 
       # The Nix modules' check (nix/scootbar-tests.nix) runs this crate's own
       # `daemon --check` over every rendered bar.toml, so a change to the bar
@@ -1435,6 +1455,15 @@ jobs:
             echo "--- popup and $module"
             cargo clippy -p scootbar --no-default-features --features "popup,$module" --all-targets -- -D warnings
           done
+          # The extracted crates: the drawing half and its leaf, with the
+          # same matrix (default, smallest, each feature alone) so no
+          # feature leans on another crate's code.
+          cargo clippy -p scootui -p scoot-rt --all-targets -- -D warnings
+          cargo clippy -p scootui --no-default-features --all-targets -- -D warnings
+          for feature in widgets icons png tray; do
+            echo "--- scootui $feature alone"
+            cargo clippy -p scootui --no-default-features --features "$feature" --all-targets -- -D warnings
+          done
 
       # Both runners on the default build, for the reason the Linux job
       # gives. Then the unit tests of every other feature set: every module
@@ -1468,6 +1497,16 @@ jobs:
           for module in $SCOOTBAR_MODULES; do
             echo "--- $module alone"
             cargo nextest run -p scootbar --bin scootbar --no-default-features --features "$module" --no-fail-fast
+          done
+          # The extracted crates' own unit tests: the drawing half moved
+          # here, so its tests move with it (default, smallest and each
+          # feature alone, mirroring the clippy matrix above).
+          cargo nextest run -p scootui -p scoot-rt --no-fail-fast
+          cargo test -p scootui -p scoot-rt
+          cargo nextest run -p scootui --no-default-features --no-fail-fast
+          for feature in widgets icons png tray; do
+            echo "--- scootui $feature alone"
+            cargo nextest run -p scootui --no-default-features --features "$feature" --no-fail-fast
           done
 
       # No C beyond what std links, as for scootbg: no `libc` crate in the

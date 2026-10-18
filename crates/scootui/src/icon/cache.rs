@@ -74,7 +74,7 @@ impl Cache {
         let out = self.arena.get_mut(offset..offset + len)?;
         match art {
             Art::Vector(vector) => self.raster.fill(vector, side, out),
-            #[cfg(feature = "icon-image")]
+            #[cfg(feature = "png")]
             Art::Image(image) => image.scale_into(side, out),
             #[cfg(feature = "tray")]
             Art::Tray(icon) => icon.scale_into(side, out),
@@ -89,8 +89,9 @@ impl Cache {
         Some(self.entries.len() - 1)
     }
 
-    /// Cached bitmaps and their bytes, for tests.
-    #[cfg(test)]
+    /// Cached bitmaps and their bytes, for tests (read through
+    /// `Text::icons_cached` by the tray's eviction test).
+    #[cfg(any(test, feature = "tray"))]
     pub fn cached(&self) -> (usize, usize) {
         (self.entries.len(), self.arena.len())
     }
