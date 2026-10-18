@@ -170,10 +170,11 @@ impl Ranker {
 
     /// Ranks `rows` for `query`, best row first, as row indices into
     /// `rows`. Entry rows hidden by the caller stay hidden: the
-    /// caller filters them before or after. Ties break by folded
-    /// name, then id, then action order, so the order is
-    /// deterministic. The returned slice borrows the ranker: rank
-    /// again to re-rank.
+    /// caller filters them before or after. Score ties break by row
+    /// index, which is entry id order with each entry's actions after
+    /// it: deterministic, stable across runs, and an integer compare
+    /// (the thousands-tied case in the latency bar). The returned
+    /// slice borrows the ranker: rank again to re-rank.
     pub fn rank(&mut self, query: &str, rows: &[Row], frecency: &Frecency, now: u64) -> &[u32] {
         fuzzy::fold_into(query, &mut self.folded);
         if self.folded.is_empty() {
@@ -209,14 +210,9 @@ impl Ranker {
             self.scores.push((index as u32, best.saturating_add(bonus)));
         }
         self.scores.sort_unstable_by(|a, b| {
-            b.1.cmp(&a.1)
-                .then(
-                    rows[a.0 as usize]
-                        .name_folded
-                        .cmp(&rows[b.0 as usize].name_folded),
-                )
-                .then(rows[a.0 as usize].id.cmp(&rows[b.0 as usize].id))
-                .then(a.0.cmp(&b.0))
+            // Score first, then build order: an integer compare even
+            // when thousands of rows tie (single-char queries).
+            b.1.cmp(&a.1).then(a.0.cmp(&b.0))
         });
         self.order.clear();
         self.order.extend(self.scores.iter().map(|scored| scored.0));

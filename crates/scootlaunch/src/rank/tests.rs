@@ -401,4 +401,9 @@ fn keystroke_latency_report() {
         let elapsed = start.elapsed();
         eprintln!("query {typed:?}: {} rows in {elapsed:?}", order.len());
     }
+    // The empty query: full entry order, frecency then name.
+    let start = std::time::Instant::now();
+    let order = ranker.rank("", &rows, &history, 0).to_vec();
+    let elapsed = start.elapsed();
+    eprintln!("query \"\": {} rows in {elapsed:?}", order.len());
 }
