@@ -16,15 +16,29 @@
 //! `wayland` (the poll loop's Wayland primitives: flush, the gone check,
 //! the read after a poll), `control` (the control socket's server half:
 //! line framing, socket paths, the claim and the connection bounds, with
-//! the socket name a parameter of the app's) and `test-support` (the
-//! headless-compositor harness the apps' integration tests share). The
-//! default is `widgets` and `icons`; the smallest build has none of them
-//! and draws nothing but plain canvas and text.
+//! the socket name a parameter of the app's), `keyboard` (the seat
+//! keyboard: keymap, modifiers, repeat, keysyms and UTF-8 into a
+//! caller-supplied buffer) and `test-support` (the headless-compositor
+//! harness the apps' integration tests share). The default is `widgets`
+//! and `icons`; the smallest build has none of them and draws nothing but
+//! plain canvas and text.
 //!
-//! No `unsafe` here: the two mappings it needs, the font and the shm
-//! buffer, are `scootbg-mem`'s.
+//! No `unsafe` here, except in one place: `keyboard::raw`, the ~60 lines
+//! that write libxkbcommon's UTF-8 into a caller-supplied buffer, carries
+//! the crate's only `#[allow(unsafe_code)]` (see that module for the
+//! invariants). The crate is therefore `#![deny(unsafe_code)]` rather than
+//! `#![forbid(unsafe_code)]`: deny still forbids `unsafe` everywhere the
+//! module-level `allow` does not name. A separate crate for those lines
+//! was rejected: they are no API (two `extern "C"` declarations plus two
+//! wrappers), and a new crate would need its own CI classify arms, its own
+//! scope line and its own deny.toml review for what is one call site.
 
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
+
+// The allocation pins (`count_allocations`) count nothing without this.
+#[cfg(test)]
+#[global_allocator]
+static COUNTING_ALLOC: scootbg_mem::CountingAlloc = scootbg_mem::CountingAlloc;
 
 // Linux only, like scootbar: the font mapping is `scootbg-mem`'s, and the
 // shell apps never run on a Mac.
@@ -53,6 +67,9 @@ pub mod wayland;
 
 #[cfg(feature = "control")]
 pub mod control;
+
+#[cfg(feature = "keyboard")]
+pub mod keyboard;
 
 #[cfg(feature = "test-support")]
 pub mod test_support;

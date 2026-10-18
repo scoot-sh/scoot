@@ -3,7 +3,7 @@ title: "`scootui` widgets: text entry with password mode, virtualized list, focu
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scootui-keyboard"
+blocked: null
 milestone: "M7"
 ---
 

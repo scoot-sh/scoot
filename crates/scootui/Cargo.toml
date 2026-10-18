@@ -27,6 +27,13 @@ wayland = ["dep:wayland-client", "rustix/event"]
 # interface every shell daemon serves. The error lines use the same JSON
 # encoding as the apps' own reply writers.
 control = ["rustix/event", "rustix/net", "dep:serde", "dep:serde_json"]
+# The seat keyboard: the keymap fd with a size cap, modifiers with Caps
+# and Num Lock, key repeat on one timerfd, keysyms and UTF-8 into a
+# caller-supplied buffer, and Compose. Needs `wayland` for the seat
+# binding; links libxkbcommon (see `keyboard`'s docs for the runtime
+# dependency). Implied by no other feature: an app that does not type
+# pays nothing for it, and in particular links no new library.
+keyboard = ["wayland", "dep:xkbcommon", "rustix/time"]
 # The headless-compositor harness the apps' integration tests share (the
 # scoot and sway sessions, the screenshot readers). Test support only:
 # never enabled in a shipped binary.
@@ -51,9 +58,22 @@ png = { version = "0.18", optional = true }
 wayland-client = { version = "0.31", optional = true }
 # The screencopy manager the harness reads sway's pixels through.
 wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
+# libxkbcommon bindings and the XKB state machine, for `keyboard`: the
+# reference XKB implementation every compositor and toolkit uses (see the
+# `keyboard` docs for why it, and the runtime dependency it brings).
+# Default features off: its `wayland` feature is only the memmap-based
+# `new_from_fd`, which this crate does not use (the keymap fd is read with
+# an explicit size cap instead, so hostile sizes fail before mapping).
+xkbcommon = { version = "0.9", default-features = false, optional = true }
 base64 = { workspace = true, optional = true }
 # The control socket's error lines, encoded exactly as the apps' own reply
 # writers (behind `control`), and the harness's session JSON (behind
 # `test-support`): nothing else here touches JSON.
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The headless keyboard test's mapped surface (`xdg_shell`) and its held
+# key (`zwp_virtual_keyboard_v1`). Test-only: never in a shipped binary.
+wayland-protocols = { version = "0.32", features = ["client"] }
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
