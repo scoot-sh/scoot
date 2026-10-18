@@ -1517,14 +1517,14 @@ jobs:
             cargo clippy -p scootbar --no-default-features --features "popup,$module" --all-targets -- -D warnings
           done
           # The extracted crates: the drawing half, its leaf, the Wayland
-          # scaffolding, the control socket and the seat keyboard, with the
-          # same matrix
+          # scaffolding, the on-demand surfaces, the control socket and the
+          # seat keyboard, with the same matrix
           # (default, smallest, each feature alone) so no feature leans on
           # another crate's code; and the D-Bus client, which has no
           # features, so one build covers it.
           cargo clippy -p scootui -p scoot-rt --all-targets -- -D warnings
           cargo clippy -p scootui --no-default-features --all-targets -- -D warnings
-          for feature in widgets icons png tray wayland control test-support keyboard; do
+          for feature in widgets icons png tray wayland control surfaces keyboard test-support; do
             echo "--- scootui $feature alone"
             cargo clippy -p scootui --no-default-features --features "$feature" --all-targets -- -D warnings
           done
@@ -1564,15 +1564,17 @@ jobs:
             cargo nextest run -p scootbar --bin scootbar --no-default-features --features "$module" --no-fail-fast
           done
           # The extracted crates' own unit tests: the drawing half moved
-          # here, so its tests move with it (default, smallest and each
-          # feature alone, mirroring the clippy matrix above); and the
+          # here (plus the on-demand surfaces' own integration tests, in
+          # the scootbar-integration job, against real compositors), so its
+          # tests move with it (default, smallest and each feature alone,
+          # mirroring the clippy matrix above); and the
           # D-Bus client's, which moved the same way (both runners, as
           # above). The seat keyboard's headless test needs its harness
           # too, so that pair runs as one leg.
           cargo nextest run -p scootui -p scoot-rt --no-fail-fast
           cargo test -p scootui -p scoot-rt
           cargo nextest run -p scootui --no-default-features --no-fail-fast
-          for feature in widgets icons png tray wayland control test-support keyboard; do
+          for feature in widgets icons png tray wayland control surfaces keyboard test-support; do
             echo "--- scootui $feature alone"
             cargo nextest run -p scootui --no-default-features --features "$feature" --no-fail-fast
           done
@@ -1754,6 +1756,20 @@ jobs:
           cargo test -p scootbar --no-default-features --features clock $TESTS
           cargo nextest run -p scootbar --no-default-features --features workspaces $TESTS --no-fail-fast
           cargo test -p scootbar --no-default-features --features workspaces $TESTS
+
+      # The on-demand surfaces' own tests: the layer lifecycle over a
+      # thousand create/destroy cycles and the full-screen toplevel, each
+      # against headless scoot and sway, with fds, RSS and the memfd names
+      # flat. `scoot` itself is not rebuilt here either: it sits beside
+      # the test binary from the build above.
+      - name: Integration tests, on-demand surfaces
+        shell: nix develop --command bash -euo pipefail {0}
+        env:
+          SCOOTBAR_REQUIRE_SCOOT: "1"
+          SCOOTBAR_REQUIRE_SWAY: "1"
+        run: |
+          cargo nextest run -p scootui --features surfaces,test-support --test surfaces --no-fail-fast
+          cargo test -p scootui --features surfaces,test-support --test surfaces
 
   # scootlaunch's desktop entry index (crates/scootlaunch/): the parser,
   # the Exec expander, ids and precedence, locale order, show/hide, the

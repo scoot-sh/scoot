@@ -13,15 +13,16 @@
 //!
 //! Features: `widgets` (the popup and the ellipsis cut), `icons` (path
 //! icons and the cache), `png` (PNG image icons), `tray` (tray pixmaps),
-//! `wayland` (the poll loop's Wayland primitives: flush, the gone check,
-//! the read after a poll), `control` (the control socket's server half:
-//! line framing, socket paths, the claim and the connection bounds, with
-//! the socket name a parameter of the app's), `keyboard` (the seat
-//! keyboard: keymap, modifiers, repeat, keysyms and UTF-8 into a
-//! caller-supplied buffer) and `test-support` (the headless-compositor
-//! harness the apps' integration tests share). The default is `widgets`
-//! and `icons`; the smallest build has none of them and draws nothing but
-//! plain canvas and text.
+//! `surfaces` (the on-demand layer and full-screen toplevel surfaces with
+//! their buffer pool), `wayland` (the poll loop's Wayland primitives:
+//! flush, the gone check, the read after a poll), `control` (the control
+//! socket's server half: line framing, socket paths, the claim and the
+//! connection bounds, with the socket name a parameter of the app's),
+//! `keyboard` (the seat keyboard: keymap, modifiers, repeat, keysyms and
+//! UTF-8 into a caller-supplied buffer) and `test-support` (the
+//! headless-compositor harness the apps' integration tests share). The
+//! default is `widgets` and `icons`; the smallest build has none of them
+//! and draws nothing but plain canvas and text.
 //!
 //! No `unsafe` here, except in one place: `keyboard::raw`, the ~60 lines
 //! that write libxkbcommon's UTF-8 into a caller-supplied buffer, carries
@@ -64,6 +65,9 @@ pub mod theme;
 
 #[cfg(feature = "wayland")]
 pub mod wayland;
+
+#[cfg(feature = "surfaces")]
+pub mod surfaces;
 
 #[cfg(feature = "control")]
 pub mod control;

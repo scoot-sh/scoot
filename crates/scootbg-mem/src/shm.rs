@@ -32,7 +32,7 @@
 //! scootbg only writes these pages and never reads them back, the same
 //! practice as SCTK and Smithay's clients: another process maps them too.
 
-use std::ffi::c_void;
+use std::ffi::{CStr, c_void};
 use std::fmt;
 use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
@@ -164,15 +164,24 @@ impl fmt::Debug for ShmBuffer {
 
 impl ShmBuffer {
     /// A zero-filled `XRGB8888` buffer of `width` x `height` pixels, in a
-    /// sealed memfd.
+    /// sealed memfd named `scootbg-wallpaper` (what every buffer was named
+    /// before names were a parameter: scootbg's own buffers keep it, so
+    /// scootbg is unchanged).
     pub fn new(width: u32, height: u32) -> Result<Self, ShmError> {
+        Self::with_name(width, height, c"scootbg-wallpaper")
+    }
+
+    /// A zero-filled `XRGB8888` buffer of `width` x `height` pixels, in a
+    /// sealed memfd named `name`: what `/proc/PID/maps` shows the buffer
+    /// as (`/memfd:<name>`), one name per app, so a leaked buffer says
+    /// whose it is. The name is the caller's (a `c"..."` literal costs
+    /// nothing); keep it short ASCII with no `/`, which maps readers
+    /// treat as a path separator.
+    pub fn with_name(width: u32, height: u32, name: &CStr) -> Result<Self, ShmError> {
         let geometry = Geometry::xrgb8888(width, height)?;
         let len = geometry.len_usize();
 
-        let fd = memfd_create(
-            c"scootbg-wallpaper",
-            MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING,
-        )?;
+        let fd = memfd_create(name, MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING)?;
         ftruncate(&fd, len as u64)?;
         fcntl_add_seals(&fd, SealFlags::SHRINK | SealFlags::GROW | SealFlags::SEAL)?;
 
