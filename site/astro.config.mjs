@@ -193,6 +193,13 @@ export default defineConfig({
           ],
         },
         {
+          label: 'scootlaunch',
+          items: [
+            { label: 'Overview', slug: 'scootlaunch' },
+            { label: 'CLI reference', slug: 'scootlaunch/cli' },
+          ],
+        },
+        {
           label: 'Agents & webtop',
           items: [
             { label: 'Agents', slug: 'agents' },
@@ -281,6 +288,12 @@ export default defineConfig({
               paths: ['scootbg', 'scootbg/**'],
               description:
                 'The wallpaper daemon: images, outputs, links, restore, CLI.',
+            },
+            {
+              label: 'scootlaunch',
+              paths: ['scootlaunch', 'scootlaunch/**'],
+              description:
+                'The application launcher: the desktop entry index, --list --json.',
             },
             {
               label: 'Agents & webtop',

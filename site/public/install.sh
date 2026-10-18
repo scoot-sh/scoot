@@ -989,7 +989,7 @@ if command -v ldd >/dev/null 2>&1; then
 fi
 need_foot=0
 command -v foot >/dev/null 2>&1 || need_foot=1
-# The font files scootbar tries without --font (crates/scootbar/src/font.rs
+# The font files scootbar tries without --font (crates/scootui/src/font.rs
 # WELL_KNOWN), overridable for tests the way the release URLs are.
 font_candidates=${SCOOT_INSTALL_FONTS:-"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
 /usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf
