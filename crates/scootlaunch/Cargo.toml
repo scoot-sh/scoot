@@ -1,0 +1,31 @@
+[package]
+name = "scootlaunch"
+description = "Keyboard-first application launcher for Wayland: the desktop entry index, Exec expansion and --list --json"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+# Panic-free printing behind the binary's own name, shared with the
+# other shell apps instead of a third copy.
+scoot-rt.workspace = true
+# The agent interface (`--list --json`) and the cache's compact binary
+# are the workspace's existing versions, chosen by measurement
+# (dev/spikes/scootbar/config-parser.md, docs/scootbg's dependency
+# record §5); `toml` adds no new package in the tree (`scoot` pins it).
+serde.workspace = true
+serde_json.workspace = true
+# `open` with `O_NONBLOCK` (a FIFO swapped in for a desktop file between
+# the type check and the open must not block the launcher) through raw
+# syscalls, no `libc` crate: the same `rustix` the Wayland crates pull in.
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+
+# Scratch dirs as `TempDir` guards in the index tests: the same version
+# scootbar's tests carry (same lock entry, MIT OR Apache-2.0).
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"

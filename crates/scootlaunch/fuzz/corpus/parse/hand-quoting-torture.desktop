@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=Quoting Torture
+Exec=torture "quoted arg" 'single quoted' unquoted\;semi "nested \"quote\"" back\\slash trailing%

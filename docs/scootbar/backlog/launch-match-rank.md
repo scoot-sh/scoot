@@ -3,7 +3,7 @@ title: "scootlaunch: fuzzy matching and frecency, `--query --json`"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "launch-desktop-index"
+blocked: null
 milestone: "M7"
 ---
 

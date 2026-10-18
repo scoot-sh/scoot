@@ -113,6 +113,13 @@ jobs:
   #   crates/scootbar/, scripts/scootbar-bench/, scripts/scootbar-appearance-hw-test.sh
   #                                        -> scootbar=true (scootbar job, which
   #                                           also builds the Nix module check)
+  #   crates/scootlaunch/                -> scootlaunch=true (scootlaunch
+  #                                           job: fmt, clippy, both test
+  #                                           runners, the fuzz targets for
+  #                                           their budget, and the no-libc
+  #                                           plus release-links gates).
+  #                                           crates/scoot-rt/* fans out to
+  #                                           it too, as it does to scootbar.
   #   resources/scoot-session, resources/systemd/*,
   #   scripts/scoot-session-test.sh        -> session=true (session-harness
   #                                           job: the launcher harness, no
@@ -194,6 +201,7 @@ jobs:
       macos: ${{ steps.classify.outputs.macos }}
       scootbg: ${{ steps.classify.outputs.scootbg }}
       scootbar: ${{ steps.classify.outputs.scootbar }}
+      scootlaunch: ${{ steps.classify.outputs.scootlaunch }}
       look: ${{ steps.classify.outputs.look }}
       backlog: ${{ steps.classify.outputs.backlog }}
       docs-site: ${{ steps.classify.outputs.docs_site }}
@@ -213,6 +221,7 @@ jobs:
           macos=true
           scootbg=true
           scootbar=true
+          scootlaunch=true
           look=true
           backlog=true
           docs_site=true
@@ -223,6 +232,7 @@ jobs:
             macos=false
             scootbg=false
             scootbar=false
+            scootlaunch=false
             look=false
             backlog=false
             docs_site=false
@@ -298,6 +308,13 @@ jobs:
                   scootbar=true ;;
                 crates/scootbar/*)
                   scootbar=true ;;
+                # The launcher index (crates/scootlaunch): its own job
+                # below, gated on this output. It depends on scoot-rt
+                # (above) for panic-free printing; the workspace
+                # manifests catch it through the catch-all, which also
+                # runs this job. Nothing else fans out to it.
+                crates/scootlaunch/*)
+                  scootlaunch=true ;;
                 # The shared drawing crate (crates/scootui): scootbar's
                 # canvas, text, theme, popups and icons, fanning out to
                 # every consumer (today scootbar alone; tomorrow
@@ -311,12 +328,14 @@ jobs:
                   scootbar=true ;;
                 # The leaf both scootui and scoot-dbus depend on
                 # (crates/scoot-rt): `print` and `runtime_dir`, fanning out
-                # to both sets, today scootbar alone.
+                # to both sets, today scootbar and scootlaunch.
                 crates/scoot-rt/Cargo.toml)
                   scoot=true
-                  scootbar=true ;;
+                  scootbar=true
+                  scootlaunch=true ;;
                 crates/scoot-rt/*)
-                  scootbar=true ;;
+                  scootbar=true
+                  scootlaunch=true ;;
                 # The look format crate (crates/scoot-look): its own job
                 # below. scootbar reads its allowlists and the compositor
                 # reads its look layer, so its files fan out to the
@@ -354,6 +373,7 @@ jobs:
                   macos=true
                   scootbg=true
                   scootbar=true
+                  scootlaunch=true
                   look=true
                   backlog=true
                   docs_site=true
@@ -361,12 +381,13 @@ jobs:
               esac
             done <<<"$changed"
           fi
-          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar look=$look backlog=$backlog docs_site=$docs_site session=$session"
+          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar scootlaunch=$scootlaunch look=$look backlog=$backlog docs_site=$docs_site session=$session"
           {
             echo "scoot=$scoot"
             echo "macos=$macos"
             echo "scootbg=$scootbg"
             echo "scootbar=$scootbar"
+            echo "scootlaunch=$scootlaunch"
             echo "look=$look"
             echo "backlog=$backlog"
             echo "docs_site=$docs_site"
@@ -1677,3 +1698,135 @@ jobs:
           cargo test -p scootbar --no-default-features --features clock $TESTS
           cargo nextest run -p scootbar --no-default-features --features workspaces $TESTS --no-fail-fast
           cargo test -p scootbar --no-default-features --features workspaces $TESTS
+
+  # scootlaunch's desktop entry index (crates/scootlaunch/): the parser,
+  # the Exec expander, ids and precedence, locale order, show/hide, the
+  # cache, and `scootlaunch --list [--all] [--json]`. Runs when the
+  # crate changes, when scoot-rt changes (its one workspace
+  # dependency), on the catch-all, and on every push to main; fail open
+  # like the other jobs (only an explicit `false` skips).
+  scootlaunch:
+    name: scootlaunch (launcher index)
+    needs: changes
+    # Fail open, as above.
+    if: ${{ !cancelled() && needs.changes.outputs.scootlaunch != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # Its own cache, for the reason the scootbg job gives: this job
+      # never builds Smithay, so sharing the Linux job's (gigabytes of
+      # it) would cost more to restore than it saves.
+      - name: Restore the cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: scootlaunch-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            scootlaunch-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            scootlaunch-cargo-
+
+      - name: cargo fmt
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo fmt --check -p scootlaunch
+
+      # scootlaunch is `#![forbid(unsafe_code)]`, which rustc enforces;
+      # its one file open with `O_NONBLOCK` is rustix's, checked in the
+      # scootbg job's twin gate below.
+      - name: cargo clippy
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo clippy -p scootlaunch --all-targets -- -D warnings
+
+      # Both runners, for the reason the Linux job gives: nextest isolates
+      # each test in its own process, `cargo test` shares one.
+      - name: cargo nextest and cargo test
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          cargo nextest run -p scootlaunch --no-fail-fast
+          cargo test -p scootlaunch
+
+      # No C beyond what std links, as for scootbg: no `libc` crate in the
+      # normal dependency tree (rustix on its `linux_raw` backend), and no
+      # shared library beyond glibc and libgcc_s. `cargo tree` resolves the
+      # host target, the one this binary ships for.
+      - name: No libc crate, and what the release binary links
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          if cargo tree -p scootlaunch -e normal --prefix none | grep -q '^libc '; then
+            echo "::error title=scootlaunch depends on the libc crate::find the path with: cargo tree -p scootlaunch -e normal -i libc"
+            cargo tree -p scootlaunch -e normal -i libc
+            exit 1
+          fi
+          echo "ok: no libc crate in scootlaunch's normal dependency tree"
+          # Weighed alone, never in a --workspace build (feature unification).
+          RUSTFLAGS="-D warnings" cargo build --release -p scootlaunch
+          echo "release binary: $(stat -c %s target/release/scootlaunch) bytes (stripped)"
+          ldd target/release/scootlaunch
+          extra=$(ldd target/release/scootlaunch | awk '{ print $1 }' | grep -vE '^(linux-vdso|libc\.so|libm\.so|libgcc_s\.so|/)' || true)
+          if [ -n "$extra" ]; then
+            echo "::error title=scootlaunch links a library beyond std's::$(echo "$extra" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "ok: links only what std links"
+
+      # The fuzz targets (crates/scootlaunch/fuzz, its own workspace, which no
+      # step above compiles) for a fixed budget: a fixed number of runs from
+      # a fixed seed, so a run is the same run every time, from the seed
+      # corpus and every past finding (`regressions/`). Compiling them is
+      # half the point: they build the parser and the expander by `#[path]`,
+      # so a refactor that breaks those includes fails here, not on the next
+      # person to fuzz. Stable toolchain, no sanitizer (`-s none`), as the
+      # fuzz README runs it; cargo-fuzz from the pinned nixpkgs. A finding
+      # prints its input in base64, since the runner's disk is gone after
+      # the job.
+      - name: Fuzz targets, a fixed budget
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          fuzz=$(nix build --inputs-from . nixpkgs#cargo-fuzz --no-link --print-out-paths)
+          export PATH="$fuzz/bin:$PATH"
+          scratch="$RUNNER_TEMP/scootlaunch-fuzz"
+          mkdir -p "$scratch/parse" "$scratch/exec" "$scratch/artifacts"
+          cd crates/scootlaunch
+          # cargo-fuzz has no `--locked` to pass on, so the fuzz workspace's
+          # own lock file is held to it here: a stale one fails the step
+          # instead of being quietly rewritten by the build below.
+          cargo fetch --locked --manifest-path fuzz/Cargo.toml
+          run() {
+            local target=$1; shift
+            if ! cargo fuzz run -s none --target-dir "$GITHUB_WORKSPACE/target/scootlaunch-fuzz" "$target" \
+                "$scratch/$target" "fuzz/corpus/$target" "fuzz/regressions/$target" -- \
+                -seed=1 -timeout=10 -artifact_prefix="$scratch/artifacts/" "$@"; then
+              for found in "$scratch"/artifacts/*; do
+                [ -f "$found" ] || continue
+                echo "::error title=scootlaunch fuzz finding ($target)::$(basename "$found")"
+                echo "$(basename "$found"), base64:"
+                base64 -w0 "$found"; echo
+              done
+              return 1
+            fi
+          }
+          run parse -runs=500000 -max_len=65536
+          run exec -runs=1000000 -max_len=4096
+
+      - name: Save the cargo cache
+        # Same condition as the Linux job's save; see the comment there.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}

@@ -1,0 +1,35 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Edge Cases
+Name[de_DE@euro]=Kantenfälle
+Name[de_DE]=Kantenfaelle
+Name[de@euro]=Kanten
+Name[de]=Kantenlos
+Name[fr]=Cas limites
+GenericName[de]=Werkzeug
+Comment=A comment with\sescape\nand\ttab\\backslash
+Keywords=a;b\;c;;d;trailing;
+Icon=org.example.Edge
+Exec=edge --name %c --icon %i --path %k --file %f --url %U --pct %% --old %d%D%n%N%v%m
+TryExec=edge
+Terminal=false
+StartupNotify=true
+DBusActivatable=false
+Categories=Utility;
+Actions=open;missing-name;missing-exec;missing-group;
+
+[Desktop Action open]
+Name=Open Thing
+Name[de]=Ding öffnen
+Exec=edge --open %c
+
+[Desktop Action missing-name]
+Exec=edge --noname
+
+[Desktop Action missing-exec]
+Name=No Exec
+
+[Desktop Action stray]
+Name=Stray
+Exec=stray

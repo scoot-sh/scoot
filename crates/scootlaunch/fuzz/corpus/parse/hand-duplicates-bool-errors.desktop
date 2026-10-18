@@ -1,0 +1,19 @@
+# A comment line
+[Desktop Entry]
+# Another comment
+Type=Application
+Name=Second Edge
+Name=Duplicate Wins
+Exec=second
+Exec=ignored-duplicate
+NoDisplay=maybe
+OnlyShowIn=scoot;GNOME;
+NotShowIn=KDE;
+Hidden=false
+Terminal=yes
+StartupWMClass=SecondEdge
+Path=/tmp
+
+[Desktop Action second]
+Name=Second Action
+Exec=second --action
