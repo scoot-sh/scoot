@@ -1398,9 +1398,10 @@ fn a_raised_cap_takes_a_message_the_default_skips() {
     assert!(frame.len() > MAX_MESSAGE);
     let (mut conn, daemon) = connected();
     let sender = send_later(daemon, frame.clone());
-    sender.join().unwrap();
     // Pump until the socket drains: past the default cap, a signal is
-    // silent (no event), and the connection lives.
+    // silent (no event), and the connection lives. (The sender writes
+    // in its own thread because the message is larger than the socket
+    // buffer; joining first would deadlock the write.)
     let mut silent = true;
     for _ in 0..50 {
         let (events, _) = conn.pump();
@@ -1410,6 +1411,7 @@ fn a_raised_cap_takes_a_message_the_default_skips() {
         }
         assert!(!conn.dead(), "the connection died on an over-cap signal");
     }
+    sender.join().unwrap();
     assert!(silent, "past the default cap, a signal is silent");
     assert!(!conn.dead());
     // Raised past it, the same bytes dispatch.
