@@ -312,7 +312,6 @@ impl RawClient {
             if let Ok(Some(len)) = proto::frame_at(&staged) {
                 return staged.drain(..len).collect();
             }
-            use std::io::Read as _;
             let n = self.stream.read(&mut chunk).expect("the bus answers");
             assert!(n > 0, "the bus answers before closing");
             staged.extend_from_slice(&chunk[..n]);

@@ -132,6 +132,7 @@ fn image_val(
 /// One `Notify` body: all eight arguments, one `Writer`, aligned as a
 /// real sender's. The hints come from `hints`, which writes entries
 /// with the `entry_*` helpers above.
+#[allow(clippy::too_many_arguments)]
 fn notify(
     app: &str,
     replaces: u32,
@@ -240,16 +241,16 @@ fn main() {
     }
 
     // --- image-data: honest shapes the validator sorts ---
-    write("image-data", "rgba-4x4", &image_val(4, 4, 16, true, 8, 4, &vec![3u8; 64]));
-    write("image-data", "rgb-2x1", &image_val(2, 1, 8, false, 8, 3, &vec![9u8; 6]));
-    write("image-data", "padded", &image_val(1, 1, 8, false, 8, 3, &vec![0u8; 8]));
+    write("image-data", "rgba-4x4", &image_val(4, 4, 16, true, 8, 4, &[3u8; 64]));
+    write("image-data", "rgb-2x1", &image_val(2, 1, 8, false, 8, 3, &[9u8; 6]));
+    write("image-data", "padded", &image_val(1, 1, 8, false, 8, 3, &[0u8; 8]));
     write(
         "image-data",
         "big-512",
         &image_val(512, 256, 2048, true, 8, 4, &vec![1u8; 512 * 256 * 4]),
     );
     // Odd shapes: the validator refuses them, the fuzzer mutates them.
-    write("image-data", "zero-width", &image_val(0, 4, 16, true, 8, 4, &vec![1u8; 64]));
-    write("image-data", "short-pixels", &image_val(4, 4, 16, true, 8, 4, &vec![1u8; 15]));
+    write("image-data", "zero-width", &image_val(0, 4, 16, true, 8, 4, &[1u8; 64]));
+    write("image-data", "short-pixels", &image_val(4, 4, 16, true, 8, 4, &[1u8; 15]));
     println!("done");
 }
