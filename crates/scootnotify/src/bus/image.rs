@@ -129,11 +129,11 @@ pub fn downscale(valid: &ValidImage<'_>) -> Image {
         (width, height)
     } else {
         // Ceiled division keeps the aspect without ever exceeding the
-        // bound: `(side * MAX + longest - 1) / longest`, each at least 1.
+        // bound; each side at least 1. `longest` is at least 1 (both
+        // sides validated so), so the divisor is never zero.
         let scaled = |side: u32| {
-            (((side as u64) * (MAX_ICON_SIDE as u64) + (longest as u64) - 1)
-                / (longest as u64))
-                .max(1) as u32
+            ((u64::from(side) * u64::from(MAX_ICON_SIDE)).div_ceil(u64::from(longest))).max(1)
+                as u32
         };
         (scaled(width), scaled(height))
     };

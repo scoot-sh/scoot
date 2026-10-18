@@ -176,9 +176,13 @@ fn critical_never_expires_unless_asked() {
 
 #[test]
 fn the_live_cap_evicts_oldest_non_critical_first() {
-    let mut config = Config::default();
-    config.max_live = 3;
-    let mut store = Store::new(config, IdFile::open(None));
+    let mut store = Store::new(
+        Config {
+            max_live: 3,
+            ..Config::default()
+        },
+        IdFile::open(None),
+    );
     let start = now();
     let a = shown(&mut store, ":1.1", "a");
     let _ = shown(&mut store, ":1.1", "b");
@@ -199,9 +203,13 @@ fn the_live_cap_evicts_oldest_non_critical_first() {
 
 #[test]
 fn an_all_critical_store_still_evicts_the_oldest() {
-    let mut config = Config::default();
-    config.max_live = 2;
-    let mut store = Store::new(config, IdFile::open(None));
+    let mut store = Store::new(
+        Config {
+            max_live: 2,
+            ..Config::default()
+        },
+        IdFile::open(None),
+    );
     let start = now();
     let (arrival, _) = store.notify(urgent(":1.1", "a", Urgency::Critical), start, 0);
     let Arrival::Shown { id: first, .. } = arrival else {
@@ -219,10 +227,14 @@ fn an_all_critical_store_still_evicts_the_oldest() {
 
 #[test]
 fn the_bucket_answers_but_does_not_show() {
-    let mut config = Config::default();
-    config.rate_per_sec = 2;
-    config.rate_burst = 2;
-    let mut store = Store::new(config, IdFile::open(None));
+    let mut store = Store::new(
+        Config {
+            rate_per_sec: 2,
+            rate_burst: 2,
+            ..Config::default()
+        },
+        IdFile::open(None),
+    );
     let start = now();
     for _ in 0..2 {
         let (arrival, _) = store.notify(incoming(":1.7", "Flood"), start, 0);

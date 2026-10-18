@@ -9,6 +9,14 @@
 
 #![forbid(unsafe_code)]
 
+// The parsers' refusal idiom is `Err(())`: a misshapen body, a refused
+// frame, a skipped value. It carries no information by design (a refusal
+// names its reason where a reason exists, and the wire errors carry
+// their own text), so a custom error type would add variants without
+// readers — the same rule `scoot-dbus` documents.
+// Re-typing every reader would be a redesign, not this ticket.
+#![allow(clippy::result_unit_err)]
+
 pub mod bus;
 pub mod cli;
 pub mod config;

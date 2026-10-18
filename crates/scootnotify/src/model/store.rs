@@ -509,9 +509,7 @@ impl Store {
 
     /// Removes `id` with `reason`, invalidating before the signal.
     fn remove(&mut self, id: u32, reason: CloseReason) -> Option<Closure> {
-        if self.live.remove(&id).is_none() {
-            return None;
-        }
+        self.live.remove(&id)?;
         self.order.retain(|queued| *queued != id);
         Some(Closure { id, reason })
     }

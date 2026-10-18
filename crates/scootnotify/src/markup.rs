@@ -235,10 +235,8 @@ impl Parser<'_> {
         }
         self.at = at;
         if name == b"img" {
-            if !closing {
-                if let Some(alt) = alt {
-                    self.text(&alt);
-                }
+            if !closing && let Some(alt) = alt {
+                self.text(&alt);
             }
             return true;
         }

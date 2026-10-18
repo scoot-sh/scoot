@@ -143,13 +143,13 @@ fn wait_reply(conn: &mut Conn, token: u64) -> Result<u32, Denied> {
 fn find_owner(conn: &mut Conn) -> Denied {
     let owner = bus_string(conn, "GetNameOwner", BUS_NAME).unwrap_or_else(|| BUS_NAME.to_owned());
     let pid = bus_uint(conn, "GetConnectionUnixProcessID", &owner).unwrap_or(0);
-    let comm = (pid != 0)
-        .then(|| {
-            std::fs::read_to_string(format!("/proc/{pid}/comm"))
-                .map(|text| text.trim().to_owned())
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
+    let comm = if pid != 0 {
+        std::fs::read_to_string(format!("/proc/{pid}/comm"))
+            .map(|text| text.trim().to_owned())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
     Denied { owner, pid, comm }
 }
 
@@ -286,7 +286,10 @@ impl Server {
 
     /// Routes one method call: replies, and queues the signals its
     /// closes emit. Never panics; a misshapen call is `InvalidArgs`, an
-    /// unknown one `UnknownMethod`/`UnknownObject`.
+    /// unknown one `UnknownMethod`/`UnknownObject`. Nine arguments: a
+    /// call names its sender, object, interface, member, body and time,
+    /// like the protocol's own header.
+    #[allow(clippy::too_many_arguments)]
     pub fn handle(
         &mut self,
         conn: &mut Conn,
@@ -310,13 +313,7 @@ impl Server {
             }
             "org.freedesktop.DBus.Introspectable" => {
                 if member == "Introspect" && signature.is_empty() {
-                    let mut reply = Writer::new();
-                    reply.str(INTROSPECT_XML);
-                    let Some(arg) = reply.take_body() else {
-                        conn.reply_error(sender, serial, "org.freedesktop.DBus.Error.Failed");
-                        return;
-                    };
-                    conn.reply_return(sender, serial, "s", &arg);
+                    self.answer_introspect(conn, sender, serial);
                 } else {
                     conn.reply_error(sender, serial, "org.freedesktop.DBus.Error.UnknownMethod");
                 }
@@ -327,7 +324,19 @@ impl Server {
         }
     }
 
+    /// Answers `Introspect` with the interface XML.
+    fn answer_introspect(&self, conn: &mut Conn, sender: &str, serial: u32) {
+        let mut reply = Writer::new();
+        reply.str(INTROSPECT_XML);
+        let Some(arg) = reply.take_body() else {
+            conn.reply_error(sender, serial, "org.freedesktop.DBus.Error.Failed");
+            return;
+        };
+        conn.reply_return(sender, serial, "s", &arg);
+    }
+
     /// Routes the notification interface's four methods.
+    #[allow(clippy::too_many_arguments)]
     fn handle_notify(
         &mut self,
         conn: &mut Conn,
