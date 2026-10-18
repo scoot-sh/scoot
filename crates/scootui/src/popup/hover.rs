@@ -25,7 +25,7 @@
 
 use std::time::{Duration, Instant};
 
-use crate::outputs::OutputId;
+use crate::output::OutputId;
 
 /// The module under the pointer, on an output: what a tooltip belongs to.
 /// The module is the started module's index (the one `render` calls a

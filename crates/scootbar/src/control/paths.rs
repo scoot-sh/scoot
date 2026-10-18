@@ -84,16 +84,9 @@ impl std::error::Error for PathError {}
         feature = "volume",
         feature = "microphone"
     )),
-    allow(dead_code)
+    allow(dead_code, unused_imports)
 )]
-pub fn runtime_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR")
-        && !dir.is_empty()
-    {
-        return PathBuf::from(dir);
-    }
-    PathBuf::from(format!("/run/user/{}", rustix::process::getuid().as_raw()))
-}
+pub use scoot_rt::runtime_dir;
 
 /// The paths for this process's environment.
 pub fn from_env() -> Result<Paths, PathError> {

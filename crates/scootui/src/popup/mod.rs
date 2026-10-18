@@ -6,9 +6,9 @@
 //!
 //! ## Declarative content
 //!
-//! A module never draws a popup. It fills a [`Content`] ([`Module::popup`],
-//! asked when the popup opens and whenever the module's view changes while
-//! it is open) with three kinds of widget:
+//! A module never draws a popup. It fills a [`Content`] (asked when the
+//! popup opens and whenever the module's view changes while it is open)
+//! with three kinds of widget:
 //!
 //! - **text**, a line, not interactive;
 //! - **a slider**, a value from 0 to a maximum that is set by pressing or
@@ -46,18 +46,6 @@
 //! and none of those has the widget API and nothing that calls it: allowed
 //! to be dead there, which is not a reason to leave `popup` out of such a
 //! build.
-
-#![cfg_attr(
-    not(any(
-        feature = "volume",
-        feature = "microphone",
-        feature = "network",
-        feature = "looks",
-        feature = "power",
-        feature = "tray"
-    )),
-    allow(dead_code)
-)]
 
 use std::fmt::{self, Write};
 use std::ops::Range;

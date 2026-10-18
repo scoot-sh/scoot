@@ -1,5 +1,5 @@
 use super::Theme;
-use crate::modules::Class;
+use crate::class::Class;
 
 #[test]
 fn each_class_maps_to_its_token() {

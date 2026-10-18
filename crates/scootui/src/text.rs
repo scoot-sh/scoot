@@ -145,7 +145,9 @@ impl Metrics {
 }
 
 impl Text {
-    #[cfg(test)]
+    /// A text with `font` and no fallbacks: test support (the bar's own
+    /// tests and the apps' integration tests build one from `testfont`),
+    /// kept alongside `with_fallbacks` so those call sites move unchanged.
     pub fn new(font: FontArc) -> Self {
         Self::with_fallbacks(font, Vec::new())
     }
@@ -245,8 +247,9 @@ impl Text {
         self.advance(' ', em).round().max(0.0) as u32
     }
 
-    /// Icon bitmaps cached and their bytes, for tests.
-    #[cfg(all(test, feature = "tray"))]
+    /// Icon bitmaps cached and their bytes, for tests (the tray's
+    /// eviction test reads it through the bar).
+    #[cfg(feature = "tray")]
     pub fn icons_cached(&self) -> (usize, usize) {
         self.icons.cached()
     }

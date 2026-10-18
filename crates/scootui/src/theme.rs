@@ -7,8 +7,8 @@
 //! the file's alone. The defaults are Catppuccin Mocha's base, text,
 //! yellow, overlay and red.
 
+use crate::class::Class;
 use crate::color::Color;
-use crate::modules::Class;
 
 #[cfg(test)]
 mod tests;

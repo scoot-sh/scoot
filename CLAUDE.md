@@ -381,7 +381,7 @@ backlog changes.
   `BREAKING CHANGE:` footer saying what broke.
 - **Scope is the package name**: `scoot`, `scootctl`, `scootbg`, `scootbar`
   (later `scootnotify`, `scootlaunch`), or the library it lives in (`scoot-core`,
-  `scoot-ipc`, `scootbg-mem`, `scootui`). A change spanning packages lists them,
+  `scoot-ipc`, `scootbg-mem`, `scootui`, `scoot-rt`). A change spanning packages lists them,
   comma-separated, or is split. Non-package work uses `nix`, `ci`, `docs`,
   `backlog`, `deps` or `claude` (`CLAUDE.md` and `.claude/`).
 - **Why**: the repository has one version (`[workspace.package] version`,

@@ -56,9 +56,7 @@ mod tests;
 use crate::bar::Bar;
 use crate::density::{Preferred, Scale};
 
-/// Identifies one bound output for the daemon's whole life; never reused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct OutputId(u64);
+pub use scootui::output::OutputId;
 
 /// A width and height, in whatever unit the context says.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

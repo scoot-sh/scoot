@@ -5,14 +5,13 @@ use std::time::{Duration, Instant};
 
 use super::wrap::MAX_LINES;
 use super::{Content, Hover, Key, Layout, MAX_TEXT, MAX_WIDGETS, Step};
-use crate::outputs::{OutputId, Outputs};
+use crate::output::OutputId;
 
 const DELAY: Duration = Duration::from_millis(500);
 
 fn keys() -> (Key, Key, Key) {
-    let mut outputs: Outputs<()> = Outputs::default();
-    let one = outputs.add(1, |_| ());
-    let two = outputs.add(2, |_| ());
+    let one = OutputId(1);
+    let two = OutputId(2);
     let key = |output: OutputId, module| Key { output, module };
     (key(one, 0), key(one, 1), key(two, 0))
 }

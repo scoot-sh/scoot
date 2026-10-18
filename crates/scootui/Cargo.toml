@@ -1,0 +1,26 @@
+[package]
+name = "scootui"
+description = "Pure drawing, widgets and icons shared by scootbar, scootnotify, scootlaunch and scootgreet: canvas, text, theme, popups and icon rasterization with no Wayland"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[features]
+default = ["widgets", "icons"]
+# The popup's pure half and the ellipsis cut.
+widgets = []
+# Path and cached icons (no PNG decoder, no tray pixmaps).
+icons = []
+# PNG image icons, decoded once and cached.
+png = ["dep:png", "icons"]
+# Tray pixmaps, scaled through the shared resampler.
+tray = ["icons"]
+
+[dependencies]
+scoot-rt.workspace = true
+scootbg-mem.workspace = true
+ab_glyph = "0.2"
+rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+png = { version = "0.18", optional = true }

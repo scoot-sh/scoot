@@ -1,12 +1,12 @@
-// The payload parser, compiled from scootbar's source unchanged: it reaches
-// `Class` and `MAX_TEXT` as `super::{Class, MAX_TEXT}`, which this root
-// re-exports as `modules` does. `fuzz` holds what the target checks, shared
-// with scootbar's stable test that replays the corpus and `regressions/`
-// (`modules/payload/fuzz.rs`).
+// The payload parser, compiled from scootbar's and scootui's sources
+// unchanged: `payload` reaches `Class` and `MAX_TEXT` as
+// `super::{Class, MAX_TEXT}`, which this root re-exports as `modules` does.
+// `fuzz` holds what the target checks, shared with scootbar's stable test
+// that replays the corpus and `regressions/` (`modules/payload/fuzz.rs`).
 
 #[allow(dead_code)]
 #[rustfmt::skip]
-#[path = "../../src/modules/class.rs"]
+#[path = "../../../scootui/src/class.rs"]
 pub mod class;
 
 pub use class::{Class, MAX_TEXT};

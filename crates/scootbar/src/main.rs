@@ -20,7 +20,7 @@
 mod action;
 mod bar;
 mod cli;
-mod color;
+pub use scootui::color;
 mod config;
 mod control;
 mod daemon;
@@ -32,19 +32,19 @@ mod daemon;
 ))]
 mod dbus;
 mod density;
-mod font;
+pub use scootui::font;
 mod help;
-mod icon;
+pub use scootui::icon;
 mod layout;
 mod look;
 mod modules;
 mod outputs;
-mod paint;
+pub use scootui::paint;
 mod pointer;
 mod policy;
+pub use scoot_rt::print;
 #[cfg(feature = "popup")]
-mod popup;
-mod print;
+pub use scootui::popup;
 mod region;
 mod render;
 mod scoot;
@@ -54,9 +54,9 @@ mod spawn;
 #[cfg(test)]
 mod testfds;
 #[cfg(test)]
-mod testfont;
-mod text;
-mod theme;
+pub use scootui::testfont;
+pub use scootui::text;
+pub use scootui::theme;
 
 // Tests pinning the warm tick allocates nothing count heap allocations
 // through this (scootbg_mem::count), forwarding everything else to the

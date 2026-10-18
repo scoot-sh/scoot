@@ -63,8 +63,8 @@ impl Corners {
         self.radius
     }
 
-    /// The coverage at quadrant pixel `(x, y)`, for the region tests.
-    #[cfg(test)]
+    /// The coverage at quadrant pixel `(x, y)`, for the region tests
+    /// (kept alongside `radius` so those call sites move unchanged).
     pub fn coverage_at(&self, x: u32, y: u32) -> u8 {
         self.at(x as usize, y as usize)
     }
@@ -171,7 +171,7 @@ impl<'a> Canvas<'a> {
     /// Clears the canvas to transparent black, for a surface whose corners
     /// are cut (a rounded popup's `ARGB8888` buffer): what the rounded
     /// fills then draw over.
-    #[cfg_attr(not(feature = "popup"), allow(dead_code))] // Only the popup's paint clears.
+    #[cfg_attr(not(feature = "widgets"), allow(dead_code))] // Only the popup's paint clears.
     pub fn clear(&mut self) {
         self.pixels.fill(0);
     }
@@ -184,7 +184,7 @@ impl<'a> Canvas<'a> {
     /// pixels blended over what is there, so an inner fill composites over
     /// an outer one. No allocation. Only for a buffer with an alpha channel:
     /// on an `XRGB8888` buffer the blend would corrupt the pad byte.
-    #[cfg_attr(not(feature = "popup"), allow(dead_code))] // Only the popup's paint rounds.
+    #[cfg_attr(not(feature = "widgets"), allow(dead_code))] // Only the popup's paint rounds.
     pub fn fill_rounded(
         &mut self,
         x0: u32,
@@ -285,7 +285,7 @@ impl<'a> Canvas<'a> {
     /// the inside's; `outer` and `inner` are the frame's own corner tables
     /// (the [`crate::popup::Round`]). No allocation.
     #[allow(clippy::too_many_arguments)] // A paint helper, as the bar's own are.
-    #[cfg_attr(not(feature = "popup"), allow(dead_code))] // Only the popup's paint restores.
+    #[cfg_attr(not(feature = "widgets"), allow(dead_code))] // Only the popup's paint restores.
     pub fn restore_frame_edge(
         &mut self,
         x0: u32,

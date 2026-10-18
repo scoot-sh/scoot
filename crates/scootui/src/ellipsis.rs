@@ -3,7 +3,7 @@
 //! with the media module's (the two lines a bar shows that are arbitrary
 //! text from outside).
 
-use super::MAX_TEXT;
+use crate::class::MAX_TEXT;
 use crate::text::Text;
 
 /// What fitting `full` into a span came to.

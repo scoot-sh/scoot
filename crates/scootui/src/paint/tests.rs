@@ -316,8 +316,28 @@ fn a_pill_of_any_size_or_radius_never_panics_and_stays_in_its_rows() {
 
 #[test]
 fn corner_tables_at_fractional_scales_cover_the_center_and_cut_the_corner() {
-    use crate::density::Scale;
-    use crate::render::device;
+    // Local stand-ins for `density::Scale` and `render::device` (see the
+    // popup tests): the same integer and fractional arithmetic, so this
+    // pins the same radii without the Wayland scaffolding.
+    #[derive(Debug, Clone, Copy)]
+    enum Scale {
+        Integer(u32),
+        Fractional(u32),
+    }
+    fn device(length: u32, scale: Scale) -> u32 {
+        if length == 0 {
+            return 0;
+        }
+        match scale {
+            Scale::Integer(f) => length.saturating_mul(f.max(1)),
+            Scale::Fractional(v) => {
+                let product = u64::from(length) * u64::from(v.max(1));
+                u32::try_from((product + 60) / 120)
+                    .unwrap_or(u32::MAX)
+                    .max(1)
+            }
+        }
+    }
     // A 12 px popup radius at each scale the bar draws at.
     for (scale, radius) in [
         (Scale::Integer(1), 12),
@@ -329,27 +349,27 @@ fn corner_tables_at_fractional_scales_cover_the_center_and_cut_the_corner() {
         (Scale::Fractional(240), 24),
         (Scale::Fractional(300), 30),
     ] {
-        assert_eq!(device(12, scale), radius, "radius at {scale}");
+        assert_eq!(device(12, scale), radius, "radius at {scale:?}");
         let corners = Corners::new(radius);
         let r = radius as usize;
-        assert_eq!(corners.at(0, 0), 0, "the corner pixel is cut at {scale}");
+        assert_eq!(corners.at(0, 0), 0, "the corner pixel is cut at {scale:?}");
         // Coverage never drops moving inward, and the far pixel of the
         // square is all inside.
         for y in 0..r {
             for x in 0..r - 1 {
                 assert!(
                     corners.at(x, y) <= corners.at(x + 1, y),
-                    "row {y} at {x} ({scale})"
+                    "row {y} at {x} ({scale:?})"
                 );
                 assert!(
                     corners.at(y, x) <= corners.at(y, x + 1),
-                    "column {y} at {x} ({scale})"
+                    "column {y} at {x} ({scale:?})"
                 );
             }
         }
         assert!(
             corners.at(r - 1, r - 1) >= 200,
-            "the square's far pixel is inside at {scale}"
+            "the square's far pixel is inside at {scale:?}"
         );
     }
 }

@@ -921,6 +921,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "scoot-rt"
+version = "0.3.1"
+dependencies = [
+ "rustix 1.1.4",
+]
+
+[[package]]
 name = "scootbar"
 version = "0.3.1"
 dependencies = [
@@ -930,7 +937,9 @@ dependencies = [
  "rustix 1.1.4",
  "scoot-ipc",
  "scoot-look",
+ "scoot-rt",
  "scootbg-mem",
+ "scootui",
  "serde",
  "serde_json",
  "tempfile",
@@ -981,6 +990,17 @@ dependencies = [
  "tar",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "scootui"
+version = "0.3.1"
+dependencies = [
+ "ab_glyph",
+ "png",
+ "rustix 1.1.4",
+ "scoot-rt",
+ "scootbg-mem",
 ]
 
 [[package]]
