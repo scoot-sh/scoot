@@ -80,9 +80,9 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             args.check = true;
             at += 1;
         } else if word == "--config" {
-            let path = argv.get(at + 1).ok_or_else(|| {
-                String::from("--config needs a value (the config file to read)")
-            })?;
+            let path = argv
+                .get(at + 1)
+                .ok_or_else(|| String::from("--config needs a value (the config file to read)"))?;
             args.config = Some(path.clone());
             at += 2;
         } else {

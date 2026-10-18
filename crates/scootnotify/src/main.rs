@@ -69,7 +69,10 @@ fn cmd_check(config: Option<&str>) -> i32 {
             0
         }
         Err(error) => {
-            warn(format_args!("scootnotify: cannot read {}: {error}", path.display()));
+            warn(format_args!(
+                "scootnotify: cannot read {}: {error}",
+                path.display()
+            ));
             1
         }
         Ok(bytes) => match config::parse(&bytes) {

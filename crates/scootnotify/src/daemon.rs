@@ -33,7 +33,9 @@ pub fn serve(config_path: Option<&str>) -> i32 {
             // reports the error: an exit would restart-loop with no
             // notification daemon at all. (The popups ticket shows the
             // card saying so; headless, stderr is the report.)
-            warn(format_args!("scootnotify: {error}; running on built-in defaults"));
+            warn(format_args!(
+                "scootnotify: {error}; running on built-in defaults"
+            ));
             Config::default()
         }
     };
@@ -42,14 +44,18 @@ pub fn serve(config_path: Option<&str>) -> i32 {
         Ok(conn::BusAddr::Path(path)) => match conn::connect(&path) {
             Ok(conn) => conn,
             Err(error) => {
-                warn(format_args!("scootnotify: cannot reach the session bus: {error}"));
+                warn(format_args!(
+                    "scootnotify: cannot reach the session bus: {error}"
+                ));
                 return 1;
             }
         },
         Ok(conn::BusAddr::Abstract(name)) => match conn::connect_abstract(&name) {
             Ok(conn) => conn,
             Err(error) => {
-                warn(format_args!("scootnotify: cannot reach the session bus: {error}"));
+                warn(format_args!(
+                    "scootnotify: cannot reach the session bus: {error}"
+                ));
                 return 1;
             }
         },
@@ -165,7 +171,11 @@ fn now_ms() -> u64 {
 /// One timerfd, nonblocking: the expiry arm.
 fn timerfd() -> Option<rustix::fd::OwnedFd> {
     use rustix::time::{TimerfdClockId, TimerfdFlags, timerfd_create};
-    timerfd_create(TimerfdClockId::Monotonic, TimerfdFlags::CLOEXEC | TimerfdFlags::NONBLOCK).ok()
+    timerfd_create(
+        TimerfdClockId::Monotonic,
+        TimerfdFlags::CLOEXEC | TimerfdFlags::NONBLOCK,
+    )
+    .ok()
 }
 
 /// Arms `timer` to `deadline` (disarmed for `None`): one timer for the

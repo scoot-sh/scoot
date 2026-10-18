@@ -19,10 +19,16 @@ fn config() -> Config {
 #[test]
 fn negative_is_the_urgency_default() {
     assert_eq!(resolve_timeout(-1, Urgency::Low, &config()), Some(5_000));
-    assert_eq!(resolve_timeout(-1, Urgency::Normal, &config()), Some(10_000));
+    assert_eq!(
+        resolve_timeout(-1, Urgency::Normal, &config()),
+        Some(10_000)
+    );
     assert_eq!(resolve_timeout(-1, Urgency::Critical, &config()), None);
     // Any other negative reads as -1, not a second protocol.
-    assert_eq!(resolve_timeout(-7, Urgency::Normal, &config()), Some(10_000));
+    assert_eq!(
+        resolve_timeout(-7, Urgency::Normal, &config()),
+        Some(10_000)
+    );
 }
 
 #[test]
@@ -33,7 +39,10 @@ fn zero_is_never() {
 
 #[test]
 fn a_positive_value_is_honored_to_the_clamp() {
-    assert_eq!(resolve_timeout(3000, Urgency::Critical, &config()), Some(3000));
+    assert_eq!(
+        resolve_timeout(3000, Urgency::Critical, &config()),
+        Some(3000)
+    );
     assert_eq!(
         resolve_timeout(i32::MAX, Urgency::Normal, &config()),
         Some(3_600_000)

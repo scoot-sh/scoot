@@ -92,8 +92,7 @@ impl Parser<'_> {
                 b'&' => self.entity(),
                 _ => {
                     let start = self.at;
-                    while self.at < self.chars.len()
-                        && !matches!(self.chars[self.at], b'<' | b'&')
+                    while self.at < self.chars.len() && !matches!(self.chars[self.at], b'<' | b'&')
                     {
                         self.at += 1;
                     }
@@ -118,9 +117,8 @@ impl Parser<'_> {
         let bold = self.bold > 0;
         let italic = self.italic > 0;
         let underline = self.underline > 0;
-        let matches = |span: &Span| {
-            span.bold == bold && span.italic == italic && span.underline == underline
-        };
+        let matches =
+            |span: &Span| span.bold == bold && span.italic == italic && span.underline == underline;
         if !matches(self.spans.last().expect("a span always exists")) {
             if self.spans.len() < MAX_SPANS {
                 self.spans.push(Span {
@@ -139,9 +137,10 @@ impl Parser<'_> {
     fn text(&mut self, piece: &str) {
         // Control characters other than tab and newline never reach the
         // screen: dropped here as at the field caps.
-        if piece.bytes().any(|byte| {
-            byte < 0x20 && !matches!(byte, b'\n' | b'\t') || byte == 0x7f
-        }) {
+        if piece
+            .bytes()
+            .any(|byte| byte < 0x20 && !matches!(byte, b'\n' | b'\t') || byte == 0x7f)
+        {
             let kept: String = piece
                 .chars()
                 .filter(|char| !matches!(*char, '\0'..='\u{8}' | '\u{b}'..='\u{1f}' | '\u{7f}'))
@@ -176,7 +175,8 @@ impl Parser<'_> {
         // `>` is malformed.
         let mut alt: Option<String> = None;
         loop {
-            while at < self.chars.len() && matches!(self.chars[at], b' ' | b'\t' | b'\n' | b'\r' | b'/')
+            while at < self.chars.len()
+                && matches!(self.chars[at], b' ' | b'\t' | b'\n' | b'\r' | b'/')
             {
                 at += 1;
             }
@@ -283,9 +283,7 @@ impl Parser<'_> {
 
     /// Drops trailing empty spans: `<b></b>` is no span at all.
     fn finish(mut self) -> Vec<Span> {
-        while self.spans.len() > 1
-            && self.spans.last().is_some_and(|span| span.text.is_empty())
-        {
+        while self.spans.len() > 1 && self.spans.last().is_some_and(|span| span.text.is_empty()) {
             self.spans.pop();
         }
         self.spans
@@ -337,9 +335,7 @@ fn decode_entities(text: &str) -> String {
     while at < bytes.len() {
         if bytes[at] == b'&' {
             let mut end = at + 1;
-            while end < bytes.len()
-                && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'#')
-            {
+            while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'#') {
                 end += 1;
             }
             if bytes.get(end) == Some(&b';') && end > at + 1 {

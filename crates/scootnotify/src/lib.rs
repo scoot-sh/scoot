@@ -8,7 +8,6 @@
 //! No `unsafe` here. Nothing here links beyond what `std` links.
 
 #![forbid(unsafe_code)]
-
 // The parsers' refusal idiom is `Err(())`: a misshapen body, a refused
 // frame, a skipped value. It carries no information by design (a refusal
 // names its reason where a reason exists, and the wire errors carry
@@ -36,8 +35,9 @@ pub(crate) fn replay_corpus(kind: &str, expect_ok: bool, check: fn(&[u8]) -> boo
     let mut count = 0;
     for dir in ["corpus", "regressions"] {
         let dir = root.join(dir).join(kind);
-        let entries = std::fs::read_dir(&dir)
-            .unwrap_or_else(|error| panic!("the {kind} corpus is missing ({}): {error}", dir.display()));
+        let entries = std::fs::read_dir(&dir).unwrap_or_else(|error| {
+            panic!("the {kind} corpus is missing ({}): {error}", dir.display())
+        });
         for entry in entries {
             let entry = entry.expect("a corpus entry reads");
             if !entry.file_type().expect("a corpus type reads").is_file() {

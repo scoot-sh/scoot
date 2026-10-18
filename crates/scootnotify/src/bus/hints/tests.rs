@@ -117,8 +117,9 @@ fn long_strings_cut_never_refuse() {
 #[test]
 fn past_64_hints_the_tail_skips_unread() {
     // 80 unknown hints: none stored, all walked without complaint.
-    let entries: Vec<(String, Val<'_>)> =
-        (0..80).map(|index| (format!("x-k{index}"), Val::U8(2))).collect();
+    let entries: Vec<(String, Val<'_>)> = (0..80)
+        .map(|index| (format!("x-k{index}"), Val::U8(2)))
+        .collect();
     let refs: Vec<(&str, Val<'_>)> = entries
         .iter()
         .map(|(key, value)| (key.as_str(), *value))

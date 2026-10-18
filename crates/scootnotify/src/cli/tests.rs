@@ -6,7 +6,12 @@ use super::{Args, parse_args};
 /// Parses `words` (with `words[0]` the binary name) the way `main` feeds
 /// `argv`.
 fn parse(words: &[&str]) -> Result<Args, String> {
-    parse_args(&words.iter().map(|word| (*word).to_owned()).collect::<Vec<_>>())
+    parse_args(
+        &words
+            .iter()
+            .map(|word| (*word).to_owned())
+            .collect::<Vec<_>>(),
+    )
 }
 
 #[test]
@@ -53,5 +58,9 @@ fn a_config_value_may_look_like_a_flag() {
 #[test]
 fn help_and_version_win_over_usage_errors() {
     assert!(parse(&["scootnotify", "bogus", "--help"]).unwrap().help);
-    assert!(parse(&["scootnotify", "daemon", "--bogus", "--version"]).unwrap().version);
+    assert!(
+        parse(&["scootnotify", "daemon", "--bogus", "--version"])
+            .unwrap()
+            .version
+    );
 }

@@ -53,7 +53,10 @@ fn spawn_server(daemon: &Daemon, runtime: &tempfile::TempDir) -> Child {
     let binary = env!("CARGO_BIN_EXE_scootnotify");
     Command::new(binary)
         .arg("daemon")
-        .env("DBUS_SESSION_BUS_ADDRESS", format!("unix:path={}", daemon.path().display()))
+        .env(
+            "DBUS_SESSION_BUS_ADDRESS",
+            format!("unix:path={}", daemon.path().display()),
+        )
         .env("XDG_RUNTIME_DIR", runtime.path())
         .env("WAYLAND_DISPLAY", "scootnotify-test")
         .env("XDG_CONFIG_HOME", runtime.path().join("config"))
@@ -73,7 +76,9 @@ fn wait_serving(client: &mut Conn) {
     // before any test counts live ones.
     let body = notify_body("Probe", 0, "p", "p", &[], 1);
     client
-        .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000)
+        .call(
+            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
+        )
         .expect("the first call queues");
     loop {
         assert!(
@@ -100,7 +105,9 @@ fn wait_serving(client: &mut Conn) {
             // The name is unowned yet: the errored call made no card,
             // so resending is safe.
             client
-                .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000)
+                .call(
+                    BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
+                )
                 .expect("a resent call queues");
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -137,11 +144,17 @@ fn notify_body(
 fn notify(client: &mut Conn, app: &str, replaces: u32, expire: i32, token: u64) -> u32 {
     let body = notify_body(app, replaces, "s", "b", &[], expire);
     client
-        .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token)
+        .call(
+            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token,
+        )
         .expect("the call queues");
-    let Event::Reply { signature, body, .. } = until(client, |event| {
-        matches!(event, Event::Reply { token: got, .. } if *got == token)
-    }) else {
+    let Event::Reply {
+        signature, body, ..
+    } = until(
+        client,
+        |event| matches!(event, Event::Reply { token: got, .. } if *got == token),
+    )
+    else {
         unreachable!()
     };
     assert_eq!(signature, "u");
@@ -173,11 +186,24 @@ fn watch_signals(client: &mut Conn) {
 /// One `GetServerInformation` round trip (also the match-rule barrier).
 fn bus_info(client: &mut Conn, token: u64) -> Vec<String> {
     client
-        .call(BUS_NAME, OBJECT, INTERFACE, "GetServerInformation", "", &[], 0, token)
+        .call(
+            BUS_NAME,
+            OBJECT,
+            INTERFACE,
+            "GetServerInformation",
+            "",
+            &[],
+            0,
+            token,
+        )
         .unwrap();
-    let Event::Reply { signature, body, .. } = until(client, |event| {
-        matches!(event, Event::Reply { token: got, .. } if *got == token)
-    }) else {
+    let Event::Reply {
+        signature, body, ..
+    } = until(
+        client,
+        |event| matches!(event, Event::Reply { token: got, .. } if *got == token),
+    )
+    else {
         unreachable!()
     };
     assert_eq!(signature, "ssss");
@@ -332,11 +358,23 @@ fn every_method_and_signal_with_the_right_reasons() {
 
     // GetCapabilities: the four, never persistence.
     client
-        .call(BUS_NAME, OBJECT, INTERFACE, "GetCapabilities", "", &[], 0, 11)
+        .call(
+            BUS_NAME,
+            OBJECT,
+            INTERFACE,
+            "GetCapabilities",
+            "",
+            &[],
+            0,
+            11,
+        )
         .unwrap();
-    let Event::Reply { signature, body, .. } = until(&mut client, |event| {
+    let Event::Reply {
+        signature, body, ..
+    } = until(&mut client, |event| {
         matches!(event, Event::Reply { token: 11, .. })
-    }) else {
+    })
+    else {
         unreachable!()
     };
     assert_eq!(signature, "as");
@@ -346,7 +384,10 @@ fn every_method_and_signal_with_the_right_reasons() {
     while !elements.exhausted() {
         capabilities.push(elements.str().unwrap().to_owned());
     }
-    assert_eq!(capabilities, ["body", "body-markup", "actions", "icon-static"]);
+    assert_eq!(
+        capabilities,
+        ["body", "body-markup", "actions", "icon-static"]
+    );
 
     // GetServerInformation: name, vendor, version, spec.
     let info = bus_info(&mut client, 12);
@@ -447,13 +488,20 @@ fn refusal_names_the_running_owner_and_exits_3() {
     let runtime = runtime_dir("refusal");
     let server = spawn_server(&daemon, &runtime);
     let output = server.wait_with_output().expect("the refused server exits");
-    assert_eq!(output.status.code(), Some(3), "refusal exits 3, never a restart loop");
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "refusal exits 3, never a restart loop"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains(BUS_NAME) && stderr.contains("will not take it over"),
         "the refusal says what and why: {stderr}"
     );
-    assert!(stderr.contains("(pid "), "the refusal names the owner's pid: {stderr}");
+    assert!(
+        stderr.contains("(pid "),
+        "the refusal names the owner's pid: {stderr}"
+    );
 }
 
 #[test]
@@ -496,7 +544,10 @@ fn a_5_mib_call_gets_limits_exceeded_with_no_hang() {
         let frame = giant.read_frame();
         let message = proto::Message::parse(&frame).unwrap();
         if message.reply_serial == Some(500) {
-            break (message_kind(&message), message.error.unwrap_or("").to_owned());
+            break (
+                message_kind(&message),
+                message.error.unwrap_or("").to_owned(),
+            );
         }
     };
     let waited = start.elapsed();
@@ -561,7 +612,9 @@ fn replaces_survives_a_new_connection_for_the_same_app() {
     let mut second = connect(&daemon);
     let body = notify_body("Volume", id, "s", "b", &[], -1);
     second
-        .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 62)
+        .call(
+            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 62,
+        )
         .unwrap();
     let Event::Reply { body, .. } = until(&mut second, |event| {
         matches!(event, Event::Reply { token: 62, .. })
@@ -590,7 +643,9 @@ fn a_flood_is_answered_and_bounded() {
         let token = 7000 + index;
         let body = notify_body("Flood", 0, "s", "b", &[], 60_000);
         client
-            .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token)
+            .call(
+                BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token,
+            )
             .expect("the pending table drains as replies land");
         // Harvests this call's answer before the next (the pending
         // table holds 64; an error here is a failure, not a skip).
@@ -599,7 +654,9 @@ fn a_flood_is_answered_and_bounded() {
             let mut done = false;
             for event in events {
                 match event {
-                    Event::Reply { token: got, body, .. } if got == token => {
+                    Event::Reply {
+                        token: got, body, ..
+                    } if got == token => {
                         ids.push(Reader::le(&body).u32().unwrap());
                         done = true;
                     }
@@ -637,8 +694,10 @@ fn a_client_that_disconnects_mid_call_kills_nothing() {
     // Sends one call and vanishes without reading its reply.
     let mut rude = connect(&daemon);
     let body = notify_body("Rude", 0, "s", "b", &[], -1);
-    rude.call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 81)
-        .unwrap();
+    rude.call(
+        BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 81,
+    )
+    .unwrap();
     let _ = rude.pump();
     drop(rude);
     std::thread::sleep(Duration::from_millis(200));
@@ -731,8 +790,7 @@ fn an_idle_pump_allocates_nothing() {
     wait_serving(&mut client);
     // Warm: one full round trip first.
     notify(&mut client, "Warm", 0, -1, 95);
-    let ((events, _), allocations) =
-        scootbg_mem::count_allocations(|| client.pump());
+    let ((events, _), allocations) = scootbg_mem::count_allocations(|| client.pump());
     assert!(events.is_empty());
     assert_eq!(allocations, 0, "an idle pump allocates nothing");
     kill(server);

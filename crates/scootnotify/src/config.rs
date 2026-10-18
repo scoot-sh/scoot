@@ -20,9 +20,7 @@ pub const MAX_CONFIG_BYTES: u64 = 64 * 1024;
 pub fn default_path() -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"))
-        })
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
         .unwrap_or_else(|| PathBuf::from(".config"));
     base.join("scoot").join("notify.toml")
 }
@@ -68,8 +66,8 @@ impl Default for Config {
 /// the caller deciding nothing was read). Anything past
 /// [`MAX_CONFIG_BYTES`] is refused before parsing.
 pub fn load(path: &std::path::Path) -> Result<Config, String> {
-    let bytes = std::fs::read(path)
-        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let bytes =
+        std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     parse(&bytes)
 }
 
@@ -82,8 +80,7 @@ pub fn parse(bytes: &[u8]) -> Result<Config, String> {
             MAX_CONFIG_BYTES / 1024
         ));
     }
-    let text =
-        core::str::from_utf8(bytes).map_err(|_| String::from("config is not UTF-8"))?;
+    let text = core::str::from_utf8(bytes).map_err(|_| String::from("config is not UTF-8"))?;
     let config: Config =
         toml::from_str(text).map_err(|error| format!("config refused: {error}"))?;
     config.check()

@@ -143,7 +143,10 @@ pub fn fuzz_check(bytes: &[u8]) -> bool {
         assert!(action.key.len() <= MAX_ACTION_KEY, "key");
         assert!(action.label.len() <= MAX_ACTION_LABEL, "label");
     }
-    assert!(incoming.hints.category.len() <= super::hints::MAX_SHORT_HINT, "category");
+    assert!(
+        incoming.hints.category.len() <= super::hints::MAX_SHORT_HINT,
+        "category"
+    );
     assert!(
         incoming.hints.desktop_entry.len() <= super::hints::MAX_SHORT_HINT,
         "desktop-entry"

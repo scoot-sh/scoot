@@ -211,19 +211,31 @@ fn main() {
     write(
         "notify",
         "hostile",
-        &notify(&long, u32::MAX, &long, &long, &long, &actions, i32::MAX, |out| {
-            for index in 0..70 {
-                entry_str(out, &format!("x-k{index}"), "v");
-            }
-            entry_str(out, "urgency", "high");
-            entry_u32(out, "value", u32::MAX);
-        }),
+        &notify(
+            &long,
+            u32::MAX,
+            &long,
+            &long,
+            &long,
+            &actions,
+            i32::MAX,
+            |out| {
+                for index in 0..70 {
+                    entry_str(out, &format!("x-k{index}"), "v");
+                }
+                entry_str(out, "urgency", "high");
+                entry_u32(out, "value", u32::MAX);
+            },
+        ),
     );
 
     // --- markup: one seed per parser row ---
     for (name, text) in [
         ("plain", "a plain body, nothing to parse"),
-        ("tags", "a <b>bold</b>, <i>italic</i>, <u>underlined</u> word"),
+        (
+            "tags",
+            "a <b>bold</b>, <i>italic</i>, <u>underlined</u> word",
+        ),
         (
             "link-img",
             "a <a href=\"http://example.com/x?y=1\">link</a> and <img src=\"i\" alt=\"pic\">",
@@ -232,7 +244,10 @@ fn main() {
             "entities",
             "&amp; &lt; &gt; &quot; &apos; &#65; &#x42; &#xD800; &#; &bogus;",
         ),
-        ("stripped", "a<blink>fast</blink> and<br/>broken <b>nest <i>both</b> tail"),
+        (
+            "stripped",
+            "a<blink>fast</blink> and<br/>broken <b>nest <i>both</b> tail",
+        ),
         ("malformed", "ok <b>bold <i>never closed <3 and < kmh"),
         ("overflow", &"<b>x</b>".repeat(100)),
         ("controls", "bell\x07 kept\ttab\nnewline"),
@@ -241,16 +256,36 @@ fn main() {
     }
 
     // --- image-data: honest shapes the validator sorts ---
-    write("image-data", "rgba-4x4", &image_val(4, 4, 16, true, 8, 4, &[3u8; 64]));
-    write("image-data", "rgb-2x1", &image_val(2, 1, 8, false, 8, 3, &[9u8; 6]));
-    write("image-data", "padded", &image_val(1, 1, 8, false, 8, 3, &[0u8; 8]));
+    write(
+        "image-data",
+        "rgba-4x4",
+        &image_val(4, 4, 16, true, 8, 4, &[3u8; 64]),
+    );
+    write(
+        "image-data",
+        "rgb-2x1",
+        &image_val(2, 1, 8, false, 8, 3, &[9u8; 6]),
+    );
+    write(
+        "image-data",
+        "padded",
+        &image_val(1, 1, 8, false, 8, 3, &[0u8; 8]),
+    );
     write(
         "image-data",
         "big-512",
         &image_val(512, 256, 2048, true, 8, 4, &vec![1u8; 512 * 256 * 4]),
     );
     // Odd shapes: the validator refuses them, the fuzzer mutates them.
-    write("image-data", "zero-width", &image_val(0, 4, 16, true, 8, 4, &[1u8; 64]));
-    write("image-data", "short-pixels", &image_val(4, 4, 16, true, 8, 4, &[1u8; 15]));
+    write(
+        "image-data",
+        "zero-width",
+        &image_val(0, 4, 16, true, 8, 4, &[1u8; 64]),
+    );
+    write(
+        "image-data",
+        "short-pixels",
+        &image_val(4, 4, 16, true, 8, 4, &[1u8; 15]),
+    );
     println!("done");
 }

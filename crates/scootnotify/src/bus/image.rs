@@ -187,8 +187,16 @@ pub fn fuzz_check(bytes: &[u8]) -> bool {
         return false;
     };
     let image = downscale(&valid);
-    assert!(image.width >= 1 && image.width <= MAX_ICON_SIDE, "{}", image.width);
-    assert!(image.height >= 1 && image.height <= MAX_ICON_SIDE, "{}", image.height);
+    assert!(
+        image.width >= 1 && image.width <= MAX_ICON_SIDE,
+        "{}",
+        image.width
+    );
+    assert!(
+        image.height >= 1 && image.height <= MAX_ICON_SIDE,
+        "{}",
+        image.height
+    );
     assert_eq!(
         image.pixels.len(),
         (image.width as usize) * (image.height as usize) * 4,

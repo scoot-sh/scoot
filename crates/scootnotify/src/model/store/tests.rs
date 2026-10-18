@@ -96,7 +96,11 @@ fn a_strangers_replaces_id_is_a_fresh_card() {
     let mut stranger = incoming(":1.2", "Evil");
     stranger.replaces_id = id;
     let (arrival, _) = store.notify(stranger, now(), 0);
-    let Arrival::Shown { id: fresh, replaced } = arrival else {
+    let Arrival::Shown {
+        id: fresh,
+        replaced,
+    } = arrival
+    else {
         panic!("a stranger gets a card");
     };
     assert!(!replaced && fresh != id);
@@ -108,7 +112,13 @@ fn an_unknown_replaces_id_is_a_fresh_card() {
     let mut in_ = incoming(":1.1", "a");
     in_.replaces_id = 999;
     let (arrival, _) = store.notify(in_, now(), 0);
-    assert!(matches!(arrival, Arrival::Shown { replaced: false, .. }));
+    assert!(matches!(
+        arrival,
+        Arrival::Shown {
+            replaced: false,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -145,7 +155,11 @@ fn expiry_fires_from_presentation_with_reason_1() {
     // Not presented: the clock never starts, however long passes.
     assert!(store.expired(start + Duration::from_secs(3600)).is_empty());
     store.presented(id, start, 0);
-    assert!(store.expired(start + Duration::from_millis(9999)).is_empty());
+    assert!(
+        store
+            .expired(start + Duration::from_millis(9999))
+            .is_empty()
+    );
     let fired = store.expired(start + Duration::from_millis(10_000));
     assert_eq!(fired.len(), 1);
     assert_eq!(fired[0].reason, CloseReason::Expired);
@@ -162,7 +176,11 @@ fn critical_never_expires_unless_asked() {
         panic!("shows");
     };
     store.presented(id, start, 0);
-    assert!(store.expired(start + Duration::from_secs(86_400)).is_empty());
+    assert!(
+        store
+            .expired(start + Duration::from_secs(86_400))
+            .is_empty()
+    );
     // Asked with a positive timeout, it is honored.
     let mut asked = urgent(":1.1", "b", Urgency::Critical);
     asked.expire_timeout = 100;
@@ -319,7 +337,10 @@ fn icon_shapes_classify() {
     assert_eq!(classify_icon("file:///x"), Icon::Path("/x".to_owned()));
     assert_eq!(classify_icon("http://x/y.png"), Icon::None);
     assert_eq!(classify_icon("file://host/a.png"), Icon::None);
-    assert_eq!(classify_icon("mail-unread"), Icon::Name("mail-unread".to_owned()));
+    assert_eq!(
+        classify_icon("mail-unread"),
+        Icon::Name("mail-unread".to_owned())
+    );
     assert_eq!(classify_icon(".hidden"), Icon::None);
     assert_eq!(classify_icon("a/b"), Icon::None);
     assert_eq!(classify_icon(&"n".repeat(129)), Icon::None);

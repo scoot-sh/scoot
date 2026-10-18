@@ -48,7 +48,16 @@ fn the_signature_is_the_specs() {
 fn fields_cut_never_refuse() {
     let long = "w".repeat(20_000);
     let actions: Vec<&str> = (0..40).map(|_| "a").collect();
-    let incoming = parse_of(&notify_bytes(&long, 0, &long, &long, &long, &actions, &[], 0));
+    let incoming = parse_of(&notify_bytes(
+        &long,
+        0,
+        &long,
+        &long,
+        &long,
+        &actions,
+        &[],
+        0,
+    ));
     assert_eq!(incoming.app_name.len(), MAX_APP_NAME);
     assert_eq!(incoming.app_icon.len(), MAX_APP_ICON);
     assert_eq!(incoming.summary.len(), MAX_SUMMARY);
@@ -63,7 +72,16 @@ fn fields_cut_never_refuse() {
 
 #[test]
 fn control_characters_drop() {
-    let incoming = parse_of(&notify_bytes("a\x07b", 0, "", "x\x1by", "p\x7fq", &[], &[], 0));
+    let incoming = parse_of(&notify_bytes(
+        "a\x07b",
+        0,
+        "",
+        "x\x1by",
+        "p\x7fq",
+        &[],
+        &[],
+        0,
+    ));
     assert_eq!(incoming.app_name, "ab");
     assert_eq!(incoming.summary, "xy");
     assert_eq!(incoming.body, "pq");

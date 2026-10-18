@@ -16,8 +16,18 @@ fn the_five_tags_style() {
     let spans = parse("<b>bold</b> <i>it</i> <u>un</u> <a href=\"http://x\">link</a>");
     let text = plain(&spans);
     assert_eq!(text, "bold it un link");
-    assert!(spans.iter().find(|span| span.text == "bold").is_some_and(|span| span.bold));
-    assert!(spans.iter().find(|span| span.text == "it").is_some_and(|span| span.italic));
+    assert!(
+        spans
+            .iter()
+            .find(|span| span.text == "bold")
+            .is_some_and(|span| span.bold)
+    );
+    assert!(
+        spans
+            .iter()
+            .find(|span| span.text == "it")
+            .is_some_and(|span| span.italic)
+    );
     assert!(
         spans
             .iter()
@@ -45,7 +55,10 @@ fn img_drops_with_its_alt_kept() {
 
 #[test]
 fn entities_decode() {
-    assert_eq!(plain(&parse("a &amp; b &lt;c&gt; &quot;q&quot; &apos;s&apos;")), "a & b <c> \"q\" 's'");
+    assert_eq!(
+        plain(&parse("a &amp; b &lt;c&gt; &quot;q&quot; &apos;s&apos;")),
+        "a & b <c> \"q\" 's'"
+    );
     assert_eq!(plain(&parse("&#65;&#x42;")), "AB");
 }
 
@@ -66,7 +79,11 @@ fn an_unknown_entity_stays_literal() {
 fn an_unclosed_tag_ends_markup_with_the_rest_plain() {
     assert_eq!(plain(&parse("ok <b>bold <i>tail")), "ok bold tail");
     let spans = parse("ok <b>bold <i>tail");
-    assert!(spans.iter().any(|span| span.text.contains("bold") && span.bold));
+    assert!(
+        spans
+            .iter()
+            .any(|span| span.text.contains("bold") && span.bold)
+    );
 }
 
 #[test]
@@ -93,12 +110,15 @@ fn a_stray_closer_is_ignored() {
 #[test]
 fn empty_tags_leave_no_span() {
     assert_eq!(parse("<b></b>"), parse(""));
-    assert_eq!(parse(""), vec![super::Span {
-        text: String::new(),
-        bold: false,
-        italic: false,
-        underline: false,
-    }]);
+    assert_eq!(
+        parse(""),
+        vec![super::Span {
+            text: String::new(),
+            bold: false,
+            italic: false,
+            underline: false,
+        }]
+    );
 }
 
 #[test]

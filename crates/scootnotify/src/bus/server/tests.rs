@@ -27,7 +27,8 @@ fn connected() -> (Conn, UnixStream) {
     let (client, peer) = UnixStream::pair().unwrap();
     let thread = std::thread::spawn(move || {
         let mut peer = peer;
-        peer.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
         read_until(&mut peer, b"AUTH EXTERNAL\r\n");
         peer.write_all(b"DATA\r\n").unwrap();
         read_until(&mut peer, b"DATA\r\n");
@@ -56,7 +57,8 @@ fn connected() -> (Conn, UnixStream) {
     });
     let conn = scoot_dbus::conn::setup(client).unwrap();
     let peer = thread.join().unwrap();
-    peer.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
     (conn, peer)
 }
 
@@ -199,7 +201,10 @@ fn capabilities_list_the_four_without_persistence() {
     while !elements.exhausted() {
         capabilities.push(elements.str().unwrap().to_owned());
     }
-    assert_eq!(capabilities, ["body", "body-markup", "actions", "icon-static"]);
+    assert_eq!(
+        capabilities,
+        ["body", "body-markup", "actions", "icon-static"]
+    );
 }
 
 #[test]
@@ -210,12 +215,7 @@ fn server_information_names_the_server() {
     assert_eq!(message.signature, "ssss");
     assert_eq!(
         Harness::strings(&frame),
-        [
-            "scootnotify",
-            "scoot",
-            env!("CARGO_PKG_VERSION"),
-            "1.3"
-        ]
+        ["scootnotify", "scoot", env!("CARGO_PKG_VERSION"), "1.3"]
     );
 }
 
@@ -264,13 +264,22 @@ fn misshapen_calls_are_invalid_args_with_a_body() {
     assert!(has_body, "limits and bad arguments tell the user why");
     // `Notify` with the right signature but a short body.
     let frame = harness.call(":1.1", INTERFACE, "Notify", NOTIFY_SIGNATURE, b"short");
-    assert_eq!(reply_error(&frame).0, "org.freedesktop.DBus.Error.InvalidArgs");
+    assert_eq!(
+        reply_error(&frame).0,
+        "org.freedesktop.DBus.Error.InvalidArgs"
+    );
     // `CloseNotification` with a stranger's signature.
     let frame = harness.call(":1.1", INTERFACE, "CloseNotification", "s", &[]);
-    assert_eq!(reply_error(&frame).0, "org.freedesktop.DBus.Error.InvalidArgs");
+    assert_eq!(
+        reply_error(&frame).0,
+        "org.freedesktop.DBus.Error.InvalidArgs"
+    );
     // A stranger's method, and a stranger's object.
     let frame = harness.call(":1.1", INTERFACE, "DeleteAll", "", &[]);
-    assert_eq!(reply_error(&frame).0, "org.freedesktop.DBus.Error.UnknownMethod");
+    assert_eq!(
+        reply_error(&frame).0,
+        "org.freedesktop.DBus.Error.UnknownMethod"
+    );
     harness.server.handle(
         &mut harness.conn,
         ":1.1",
@@ -298,12 +307,27 @@ fn peer_and_introspection_answer() {
     let frame = harness.call(":1.1", "org.freedesktop.DBus.Peer", "GetMachineId", "", &[]);
     let message = Message::parse(&frame).unwrap();
     assert_eq!(message.signature, "s");
-    assert!(!Harness::strings(&frame)[0].is_empty(), "this host has an id");
-    let frame = harness.call(":1.1", "org.freedesktop.DBus.Introspectable", "Introspect", "", &[]);
+    assert!(
+        !Harness::strings(&frame)[0].is_empty(),
+        "this host has an id"
+    );
+    let frame = harness.call(
+        ":1.1",
+        "org.freedesktop.DBus.Introspectable",
+        "Introspect",
+        "",
+        &[],
+    );
     let text = &Harness::strings(&frame)[0];
-    for word in ["Notify", "CloseNotification", "GetCapabilities", "GetServerInformation",
-        "NotificationClosed", "ActionInvoked", "ActivationToken"]
-    {
+    for word in [
+        "Notify",
+        "CloseNotification",
+        "GetCapabilities",
+        "GetServerInformation",
+        "NotificationClosed",
+        "ActionInvoked",
+        "ActivationToken",
+    ] {
         assert!(text.contains(word), "{word} introspected");
     }
 }

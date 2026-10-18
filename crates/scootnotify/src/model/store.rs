@@ -101,11 +101,7 @@ pub fn classify_icon(text: &str) -> Icon {
     if text.contains("://") || text.contains(':') {
         return Icon::None;
     }
-    if text.len() > 128
-        || text.contains('/')
-        || text.contains('\0')
-        || text.starts_with('.')
-    {
+    if text.len() > 128 || text.contains('/') || text.contains('\0') || text.starts_with('.') {
         return Icon::None;
     }
     Icon::Name(text.to_owned())
@@ -342,7 +338,12 @@ impl Store {
     /// One `Notify`: replaced in place, stored fresh, or counted
     /// unshown. Returns the arrival and, when the global cap gave, the
     /// eviction (already invalidated, signal first).
-    pub fn notify(&mut self, incoming: Incoming, now: Instant, now_ms: u64) -> (Arrival, Option<Closure>) {
+    pub fn notify(
+        &mut self,
+        incoming: Incoming,
+        now: Instant,
+        now_ms: u64,
+    ) -> (Arrival, Option<Closure>) {
         // A replace for the same unique sender or the same app:
         // swapped in place, expiry restarted, never a new id.
         if incoming.replaces_id != 0
@@ -350,7 +351,11 @@ impl Store {
             && (current.sender == incoming.sender || current.app_name == incoming.app_name)
         {
             let id = incoming.replaces_id;
-            let timeout = resolve_timeout(incoming.expire_timeout, incoming.hints.urgency, &self.config);
+            let timeout = resolve_timeout(
+                incoming.expire_timeout,
+                incoming.hints.urgency,
+                &self.config,
+            );
             let icon = icon_of(&incoming);
             let plain = crate::markup::plain(&crate::markup::parse(&incoming.body));
             if let Some(current) = self.live.get_mut(&id) {
@@ -380,7 +385,11 @@ impl Store {
         }
         let evicted = self.evict_if_capped();
         let id = self.alloc_id();
-        let timeout = resolve_timeout(incoming.expire_timeout, incoming.hints.urgency, &self.config);
+        let timeout = resolve_timeout(
+            incoming.expire_timeout,
+            incoming.hints.urgency,
+            &self.config,
+        );
         self.seq += 1;
         let icon = icon_of(&incoming);
         let plain = crate::markup::plain(&crate::markup::parse(&incoming.body));
@@ -409,7 +418,13 @@ impl Store {
                 clock: Clock::waiting(),
             },
         );
-        (Arrival::Shown { id, replaced: false }, evicted)
+        (
+            Arrival::Shown {
+                id,
+                replaced: false,
+            },
+            evicted,
+        )
     }
 
     /// First presentation of `id`: the expiry clock starts. The daemon
@@ -454,7 +469,13 @@ impl Store {
     /// invoke nothing. Kept for the control ticket.
     pub fn invoke(&mut self, id: u32, action: &str) -> Option<Invocation> {
         let resident = self.live.get(&id)?.resident;
-        if !self.live.get(&id)?.actions.iter().any(|pair| pair.key == action) {
+        if !self
+            .live
+            .get(&id)?
+            .actions
+            .iter()
+            .any(|pair| pair.key == action)
+        {
             return None;
         }
         let closed = if resident {
@@ -485,7 +506,10 @@ impl Store {
     /// The earliest running deadline: the timerfd arms to this, and
     /// disarms when there is none.
     pub fn earliest_deadline(&self) -> Option<Instant> {
-        self.live.values().filter_map(|current| current.clock.deadline()).min()
+        self.live
+            .values()
+            .filter_map(|current| current.clock.deadline())
+            .min()
     }
 
     /// Pauses every clock (idle began) and resumes them after.
@@ -534,7 +558,9 @@ impl Store {
             .order
             .iter()
             .find(|id| {
-                self.live.get(*id).is_some_and(|current| current.urgency != Urgency::Critical)
+                self.live
+                    .get(*id)
+                    .is_some_and(|current| current.urgency != Urgency::Critical)
             })
             .or_else(|| self.order.front())
             .copied()?;

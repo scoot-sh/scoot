@@ -128,7 +128,11 @@ fn wait_reply(conn: &mut Conn, token: u64) -> Result<u32, Denied> {
         }
         let (events, _) = conn.pump();
         for event in events {
-            if let Event::Reply { token: got, signature, body } = event
+            if let Event::Reply {
+                token: got,
+                signature,
+                body,
+            } = event
                 && got == token
             {
                 return proto::read_request_reply(&signature, &body).map_err(|()| denied());
@@ -178,7 +182,9 @@ fn bus_string(conn: &mut Conn, member: &str, arg: &str) -> Option<String> {
         let (events, _) = conn.pump();
         for event in events {
             match event {
-                Event::Reply { token: got, body, .. } if got == token => {
+                Event::Reply {
+                    token: got, body, ..
+                } if got == token => {
                     return Reader::le(&body).str().ok().map(str::to_owned);
                 }
                 Event::CallError { token: got, .. } if got == token => return None,
@@ -214,7 +220,9 @@ fn bus_uint(conn: &mut Conn, member: &str, arg: &str) -> Option<u32> {
         let (events, _) = conn.pump();
         for event in events {
             match event {
-                Event::Reply { token: got, body, .. } if got == token => {
+                Event::Reply {
+                    token: got, body, ..
+                } if got == token => {
                     return Reader::le(&body).u32().ok();
                 }
                 Event::CallError { token: got, .. } if got == token => return None,
@@ -369,14 +377,16 @@ impl Server {
                     return;
                 };
                 self.remember_app(sender, &incoming.app_name);
-                let (arrival, evicted) =
-                    self.store.notify(incoming, Instant::now(), now_ms);
+                let (arrival, evicted) = self.store.notify(incoming, Instant::now(), now_ms);
                 // Headless arrival is display: the clock starts at once.
                 // The popups ticket moves this to the frame callback.
                 if let crate::model::store::Arrival::Shown { id, .. } = arrival {
                     self.store.presented(id, Instant::now(), now_ms);
                 }
-                for closure in evicted.into_iter().chain(self.store.expired(Instant::now())) {
+                for closure in evicted
+                    .into_iter()
+                    .chain(self.store.expired(Instant::now()))
+                {
                     self.signal_closed(conn, closure);
                 }
                 let id = match arrival {
@@ -425,8 +435,16 @@ impl Server {
                 conn.reply_return(sender, serial, "ssss", &arg);
             }
             _ => {
-                if matches!(member, "GetCapabilities" | "Notify" | "CloseNotification" | "GetServerInformation") {
-                    invalid(conn, sender, serial, "the arguments do not match the method");
+                if matches!(
+                    member,
+                    "GetCapabilities" | "Notify" | "CloseNotification" | "GetServerInformation"
+                ) {
+                    invalid(
+                        conn,
+                        sender,
+                        serial,
+                        "the arguments do not match the method",
+                    );
                 } else {
                     conn.reply_error(sender, serial, "org.freedesktop.DBus.Error.UnknownMethod");
                 }
