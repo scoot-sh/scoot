@@ -1,0 +1,24 @@
+[package]
+name = "launch-proto"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace]
+
+[dependencies]
+scootbg-mem = { path = "../w9-launch/crates/scootbg-mem" }
+wayland-client = "=0.31.15"
+wayland-protocols = { version = "=0.32.13", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "=0.3.12", features = ["client"] }
+xkbcommon = "=0.9.0"
+ab_glyph = "=0.2.32"
+rustix = { version = "=1.1.4", features = ["std", "fs", "mm", "event", "time", "net"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
