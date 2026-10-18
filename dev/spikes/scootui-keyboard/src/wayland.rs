@@ -114,7 +114,7 @@ impl<B: ClientBackend> Dispatch<wl_keyboard::WlKeyboard, ()> for State<B> {
                 // a read()-based client must rewind first. Seek errors are
                 // reported, not fatal: the read below still runs.
                 use std::io::Seek as _;
-                if let Err(e) = file.seek(std::io::SeekFrom::start(0)) {
+                if let Err(e) = file.seek(std::io::SeekFrom::Start(0)) {
                     println!("keymap_rewind=failed {e}");
                 }
                 let mut bytes = Vec::new();
