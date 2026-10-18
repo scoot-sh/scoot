@@ -27,8 +27,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::io::BorrowedFd;
 
 use xkbcommon::xkb::{
-    CONTEXT_NO_FLAGS, KEYMAP_COMPILE_NO_FLAGS, KEYMAP_FORMAT_TEXT_V1, Keycode, MOD_INVALID,
-    Context, Keymap,
+    CONTEXT_NO_FLAGS, Context, KEYMAP_COMPILE_NO_FLAGS, KEYMAP_FORMAT_TEXT_V1, Keycode, Keymap,
+    MOD_INVALID,
 };
 
 /// The largest keymap accepted: a real one is tens of kilobytes (scoot's
@@ -96,8 +96,7 @@ pub fn read_keymap_bytes(fd: BorrowedFd<'_>) -> Result<String, KeymapError> {
     // it, and the same number may be re-delivered), while the duplicate
     // shares the offset -- which is the point, since seeking the duplicate
     // to 0 rewinds the shared description for every reader at once.
-    let owned = rustix::io::dup(fd)
-        .map_err(|error| KeymapError::Io(error.into()))?;
+    let owned = rustix::io::dup(fd).map_err(|error| KeymapError::Io(error.into()))?;
     let mut file = File::from(owned);
     // A failed seek is not fatal (a non-seekable fd still reads from
     // wherever it is); an unseekable empty read reports Empty below.

@@ -23,11 +23,7 @@
 use std::ffi::{c_char, c_int, c_void};
 
 unsafe extern "C" {
-    fn xkb_compose_state_get_utf8(
-        state: *mut c_void,
-        buffer: *mut c_char,
-        size: usize,
-    ) -> c_int;
+    fn xkb_compose_state_get_utf8(state: *mut c_void, buffer: *mut c_char, size: usize) -> c_int;
 }
 
 /// The outcome of one caller-buffer write.
@@ -56,8 +52,9 @@ pub(super) fn compose_utf8_into(state: *mut c_void, buffer: &mut [u8]) -> WriteO
     // pointer and `buffer` is wholly writable. The C function writes at
     // most `buffer.len()` bytes (snprintf semantics) and touches nothing
     // else.
-    let wanted =
-        unsafe { xkb_compose_state_get_utf8(state, buffer.as_mut_ptr().cast::<c_char>(), buffer.len()) };
+    let wanted = unsafe {
+        xkb_compose_state_get_utf8(state, buffer.as_mut_ptr().cast::<c_char>(), buffer.len())
+    };
     // Negative is the C side's unspecified error; `wanted >= room` (with
     // `room == 0` included) means the NUL-terminated write did not fit.
     // `wanted` counts text bytes without the terminator, so `wanted <

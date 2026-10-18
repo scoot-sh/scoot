@@ -98,8 +98,7 @@ impl Keyboard {
     /// here anyway, state first so it drops first.
     pub fn with_compose(keymap: KeymapSet, table: xkb::compose::Table) -> Self {
         let state = State::new(keymap.keymap());
-        let compose_state =
-            xkb::compose::State::new(&table, xkb::compose::STATE_NO_FLAGS);
+        let compose_state = xkb::compose::State::new(&table, xkb::compose::STATE_NO_FLAGS);
         Self {
             keymap,
             state,
@@ -216,17 +215,16 @@ impl Keyboard {
     /// Caps Lock: the layout's `Lock` modifier, locked. A layout without
     /// one reports false.
     pub fn caps_lock(&self) -> bool {
-        self.keymap.caps_index().is_some_and(|index| {
-            self.state
-                .mod_index_is_active(index, STATE_MODS_LOCKED)
-        })
+        self.keymap
+            .caps_index()
+            .is_some_and(|index| self.state.mod_index_is_active(index, STATE_MODS_LOCKED))
     }
 
     /// Num Lock: the layout's `Mod2` modifier, locked. Same absence rule.
     pub fn num_lock(&self) -> bool {
-        self.keymap.num_index().is_some_and(|index| {
-            self.state.mod_index_is_active(index, STATE_MODS_LOCKED)
-        })
+        self.keymap
+            .num_index()
+            .is_some_and(|index| self.state.mod_index_is_active(index, STATE_MODS_LOCKED))
     }
 
     /// Whether this evdev keycode produces repeats.
@@ -251,8 +249,7 @@ impl Keyboard {
             self.compose = None;
             self.set_compose_locale(&locale);
         } else if let Some(compose) = self.compose.as_mut() {
-            compose.state =
-                xkb::compose::State::new(&compose.table, xkb::compose::STATE_NO_FLAGS);
+            compose.state = xkb::compose::State::new(&compose.table, xkb::compose::STATE_NO_FLAGS);
         }
         Ok(())
     }
@@ -305,10 +302,6 @@ pub fn compose_table_from_locale(
     if locale.as_bytes().contains(&0) {
         return Err(super::KeymapError::Compile);
     }
-    xkb::compose::Table::new_from_locale(
-        keymap.context(),
-        locale,
-        xkb::compose::COMPILE_NO_FLAGS,
-    )
-    .map_err(|()| super::KeymapError::Compile)
+    xkb::compose::Table::new_from_locale(keymap.context(), locale, xkb::compose::COMPILE_NO_FLAGS)
+        .map_err(|()| super::KeymapError::Compile)
 }

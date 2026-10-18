@@ -68,8 +68,8 @@ fn version_negotiation_bounds_the_seat() {
 
 #[test]
 fn wire_key_states_map_to_press_release_repeat() {
-    use wayland_client::protocol::wl_keyboard::KeyState as Wire;
     use wayland_client::WEnum;
+    use wayland_client::protocol::wl_keyboard::KeyState as Wire;
     // The generated discriminants are the protocol's: a release must
     // never decode as a press (which would type every key twice).
     assert_eq!(u32::from(WEnum::Value(Wire::Released)), 0);
@@ -138,8 +138,8 @@ fn fr_is_azerty() {
 
 #[test]
 fn dvorak_spot_checks() {
-    let keymap = KeymapSet::from_names("evdev", "pc105", "us", "dvorak", None)
-        .expect("dvorak compiles");
+    let keymap =
+        KeymapSet::from_names("evdev", "pc105", "us", "dvorak", None).expect("dvorak compiles");
     let mut keyboard = Keyboard::new(keymap);
     assert_eq!(text_of(&mut keyboard, KEY_S), b"o");
     assert_eq!(text_of(&mut keyboard, KEY_D), b"e");
@@ -206,7 +206,8 @@ fn num_lock_reports_the_locked_mod() {
 /// Two sequences, nothing else: dead+`e` and a doubled dead key. Enough
 /// to prove the feed/status/reset path without depending on the host's
 /// Compose file.
-const COMPOSE_BUFFER: &str = "<dead_acute> <e> : \"é\" U00E9\n<dead_acute> <dead_acute> : \"´\" U00B4\n";
+const COMPOSE_BUFFER: &str =
+    "<dead_acute> <e> : \"é\" U00E9\n<dead_acute> <dead_acute> : \"´\" U00B4\n";
 
 fn with_embedded_compose(keymap: KeymapSet) -> Keyboard {
     let table = xkb::compose::Table::new_from_buffer(
@@ -222,9 +223,9 @@ fn with_embedded_compose(keymap: KeymapSet) -> Keyboard {
 
 #[test]
 fn compose_dead_key_then_e_is_e_acute() {
-    let mut keyboard = with_embedded_compose(KeymapSet::from_names(
-        "evdev", "pc105", "us", "intl", None,
-    ).expect("us(intl) compiles"));
+    let mut keyboard = with_embedded_compose(
+        KeymapSet::from_names("evdev", "pc105", "us", "intl", None).expect("us(intl) compiles"),
+    );
     let mut buf = [0u8; MIN_TEXT_BYTES];
     // The dead key alone types nothing but carries its keysym.
     assert_eq!(keyboard.keysym(KEY_APOSTROPHE), SYM_DEAD_ACUTE);
@@ -240,9 +241,9 @@ fn compose_dead_key_then_e_is_e_acute() {
 
 #[test]
 fn compose_doubled_dead_key_is_the_lone_accent() {
-    let mut keyboard = with_embedded_compose(KeymapSet::from_names(
-        "evdev", "pc105", "us", "intl", None,
-    ).expect("us(intl) compiles"));
+    let mut keyboard = with_embedded_compose(
+        KeymapSet::from_names("evdev", "pc105", "us", "intl", None).expect("us(intl) compiles"),
+    );
     let mut buf = [0u8; MIN_TEXT_BYTES];
     assert_eq!(keyboard.text_into(KEY_APOSTROPHE, &mut buf), Ok(0));
     let len = keyboard
@@ -327,10 +328,7 @@ fn hostile_keymaps_fail_loud() {
         KeymapSet::from_names("evdev", "pc105", "us", "", Some("a\0b")),
         Err(KeymapError::Compile)
     ));
-    assert!(
-        super::state::compose_table_from_locale(&us(), OsStr::new("C\0"))
-            .is_err()
-    );
+    assert!(super::state::compose_table_from_locale(&us(), OsStr::new("C\0")).is_err());
 }
 
 fn us_text() -> String {
@@ -595,10 +593,7 @@ fn seat_repeated_states_follow_the_rate() {
     // Rate nonzero: the timer owns repetition; `repeated` must not arrive
     // and is ignored if it does.
     seat.repeat_info_event(25, 200);
-    assert_eq!(
-        seat.key_event(KEY_A, KeyState::Repeated, &mut buf),
-        None
-    );
+    assert_eq!(seat.key_event(KEY_A, KeyState::Repeated, &mut buf), None);
     // Rate 0: compositor-driven; the event's own key ticks as itself.
     seat.repeat_info_event(0, 200);
     let out = seat
@@ -675,9 +670,9 @@ fn hot_path_allocates_nothing() {
 
     // The composed path too: feed a dead key plus its partner in one
     // closure, with the embedded table.
-    let mut composed = with_embedded_compose(KeymapSet::from_names(
-        "evdev", "pc105", "us", "intl", None,
-    ).expect("us(intl) compiles"));
+    let mut composed = with_embedded_compose(
+        KeymapSet::from_names("evdev", "pc105", "us", "intl", None).expect("us(intl) compiles"),
+    );
     let _ = composed.text_into(KEY_APOSTROPHE, &mut buf);
     let (_, allocs) = count_allocations(|| {
         let _ = composed.text_into(KEY_APOSTROPHE, &mut buf);

@@ -19,13 +19,9 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use scootui::keyboard::{
-    MIN_TEXT_BYTES, dispatch_keyboard, negotiate_version, KeyboardSeat,
-};
+use scootui::keyboard::{KeyboardSeat, MIN_TEXT_BYTES, dispatch_keyboard, negotiate_version};
 use scootui::test_support::Session;
-use wayland_client::protocol::{
-    wl_compositor, wl_keyboard, wl_registry, wl_seat, wl_surface,
-};
+use wayland_client::protocol::{wl_compositor, wl_keyboard, wl_registry, wl_seat, wl_surface};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum};
 use wayland_protocols::xdg::shell::client::{xdg_surface, xdg_toplevel, xdg_wm_base};
 use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
@@ -47,7 +43,10 @@ struct LayoutCase {
 const LAYOUTS: &[LayoutCase] = &[
     LayoutCase {
         tag: "us",
-        env: &[("XKB_DEFAULT_RULES", "evdev"), ("XKB_DEFAULT_MODEL", "pc105")],
+        env: &[
+            ("XKB_DEFAULT_RULES", "evdev"),
+            ("XKB_DEFAULT_MODEL", "pc105"),
+        ],
         typed: "AbC xyz 123!?",
         expect: "AbC xyz 123!?",
     },
@@ -196,9 +195,7 @@ impl Harness {
             session,
         };
         harness.expect("the registry sweep", PATIENCE, |state| {
-            state.compositor.is_some()
-                && state.seat_proxy.is_some()
-                && state.xdg_base.is_some()
+            state.compositor.is_some() && state.seat_proxy.is_some() && state.xdg_base.is_some()
         });
         // The seat version the ticket pins: 9, or 10 where offered.
         harness.expect("the keyboard object", PATIENCE, |state| {
@@ -298,9 +295,7 @@ impl Harness {
         self.state.xdg_surface = Some(xdg_surface);
         self.state.toplevel = Some(toplevel);
         self.expect("the configure", PATIENCE, |state| state.configured);
-        self.expect("keyboard focus", PATIENCE, |state| {
-            state.seat.has_focus()
-        });
+        self.expect("keyboard focus", PATIENCE, |state| state.seat.has_focus());
     }
 
     fn type_text(&mut self, text: &str) {
@@ -310,10 +305,7 @@ impl Harness {
             serde_json::to_string(text).expect("text quotes")
         );
         let reply = self.session.scoot_ipc(&request);
-        assert_eq!(
-            reply["type"], "ok",
-            "typing {text:?} is accepted: {reply}"
-        );
+        assert_eq!(reply["type"], "ok", "typing {text:?} is accepted: {reply}");
         self.expect("the typed text", PATIENCE, |state| {
             state.text.len() >= before + text.len()
         });
@@ -386,8 +378,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
                     state.xdg_base = Some(registry.bind(name, 1.min(version), qh, ()));
                 }
                 "zwp_virtual_keyboard_manager_v1" => {
-                    state.virt_manager =
-                        Some(registry.bind(name, 1.min(version), qh, ()));
+                    state.virt_manager = Some(registry.bind(name, 1.min(version), qh, ()));
                 }
                 _ => {}
             }
@@ -580,10 +571,7 @@ fn hold_repeats_release_and_focus_loss_stop() {
     virt.key(0, KEY_A, 0);
     harness.queue.flush().expect("the release sends");
     harness.pump(Duration::from_millis(500), |_| false);
-    assert_eq!(
-        harness.state.repeats, held,
-        "no tick after the release"
-    );
+    assert_eq!(harness.state.repeats, held, "no tick after the release");
     assert!(!harness.state.seat.repeat_armed());
     // Hold again, then lose focus mid-hold: a second client maps a
     // window and takes the seat's focus (what the launcher sees when
@@ -596,9 +584,7 @@ fn hold_repeats_release_and_focus_loss_stop() {
         state.repeats > held_at
     });
     let mut thief = Thief::map(&harness.session);
-    harness.expect("the leave", PATIENCE, |state| {
-        !state.seat.has_focus()
-    });
+    harness.expect("the leave", PATIENCE, |state| !state.seat.has_focus());
     let after_leave = harness.state.repeats;
     harness.pump(Duration::from_millis(500), |_| false);
     assert_eq!(
@@ -731,8 +717,10 @@ impl Thief {
                     tv_sec: 5,
                     tv_nsec: 0,
                 };
-                let mut polls =
-                    [rustix::event::PollFd::new(&fd, rustix::event::PollFlags::IN)];
+                let mut polls = [rustix::event::PollFd::new(
+                    &fd,
+                    rustix::event::PollFlags::IN,
+                )];
                 let _ = rustix::event::poll(&mut polls, Some(&timespec));
                 drop(polls);
                 let _ = guard.read();

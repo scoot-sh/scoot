@@ -68,9 +68,11 @@ mod tests;
 
 pub use keymap::{KeymapError, KeymapSet, MAX_KEYMAP_BYTES, read_keymap_bytes};
 pub use repeat::Repeater;
-pub use seat::{KEYMAP_FORMAT_XKB_V1, KeyOutput, KeyState, KeyboardSeat, MAX_SEAT_VERSION,
-    MIN_SEAT_VERSION, negotiate_version};
-pub use state::{EVDEV_OFFSET, MIN_TEXT_BYTES, TextError, compose_table_from_locale, Keyboard};
+pub use seat::{
+    KEYMAP_FORMAT_XKB_V1, KeyOutput, KeyState, KeyboardSeat, MAX_SEAT_VERSION, MIN_SEAT_VERSION,
+    negotiate_version,
+};
+pub use state::{EVDEV_OFFSET, Keyboard, MIN_TEXT_BYTES, TextError, compose_table_from_locale};
 
 use std::os::unix::io::{AsFd, OwnedFd};
 

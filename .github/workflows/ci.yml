@@ -1517,13 +1517,14 @@ jobs:
             cargo clippy -p scootbar --no-default-features --features "popup,$module" --all-targets -- -D warnings
           done
           # The extracted crates: the drawing half, its leaf, the Wayland
-          # scaffolding and the control socket, with the same matrix
+          # scaffolding, the control socket and the seat keyboard, with the
+          # same matrix
           # (default, smallest, each feature alone) so no feature leans on
           # another crate's code; and the D-Bus client, which has no
           # features, so one build covers it.
           cargo clippy -p scootui -p scoot-rt --all-targets -- -D warnings
           cargo clippy -p scootui --no-default-features --all-targets -- -D warnings
-          for feature in widgets icons png tray wayland control test-support; do
+          for feature in widgets icons png tray wayland control test-support keyboard; do
             echo "--- scootui $feature alone"
             cargo clippy -p scootui --no-default-features --features "$feature" --all-targets -- -D warnings
           done
@@ -1566,14 +1567,17 @@ jobs:
           # here, so its tests move with it (default, smallest and each
           # feature alone, mirroring the clippy matrix above); and the
           # D-Bus client's, which moved the same way (both runners, as
-          # above).
+          # above). The seat keyboard's headless test needs its harness
+          # too, so that pair runs as one leg.
           cargo nextest run -p scootui -p scoot-rt --no-fail-fast
           cargo test -p scootui -p scoot-rt
           cargo nextest run -p scootui --no-default-features --no-fail-fast
-          for feature in widgets icons png tray wayland control test-support; do
+          for feature in widgets icons png tray wayland control test-support keyboard; do
             echo "--- scootui $feature alone"
             cargo nextest run -p scootui --no-default-features --features "$feature" --no-fail-fast
           done
+          echo "--- scootui keyboard and its headless harness"
+          cargo nextest run -p scootui --no-default-features --features keyboard,test-support --no-fail-fast
           cargo nextest run -p scoot-dbus --no-fail-fast
           cargo test -p scoot-dbus
 

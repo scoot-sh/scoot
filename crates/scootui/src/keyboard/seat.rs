@@ -165,12 +165,7 @@ impl KeyboardSeat {
     /// Releases and presses of keys with no keysym report `Some` with an
     /// empty text (`text_len` 0): the app still needs the press itself
     /// (editing keys, shortcuts).
-    pub fn key_event(
-        &mut self,
-        evdev: u32,
-        state: KeyState,
-        text: &mut [u8],
-    ) -> Option<KeyOutput> {
+    pub fn key_event(&mut self, evdev: u32, state: KeyState, text: &mut [u8]) -> Option<KeyOutput> {
         if !self.focused {
             return None;
         }
