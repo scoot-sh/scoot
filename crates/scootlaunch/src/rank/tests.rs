@@ -382,9 +382,19 @@ fn keystroke_latency_report() {
     let mut ranker = Ranker::new();
     let _ = ranker.rank("warmed up", &rows, &history, 0);
     // Keystrokes of one typed query: the per-keystroke cost the
-    // design caps at 1 ms for 3,000 entries on the M2.
+    // design caps at 1 ms for 3,000 entries on the M2. The second
+    // loop is the worst case: a query matching nearly everything,
+    // so the full table sorts.
     let mut typed = String::new();
     for key in "firefox".chars() {
+        typed.push(key);
+        let start = std::time::Instant::now();
+        let order = ranker.rank(&typed, &rows, &history, 0).to_vec();
+        let elapsed = start.elapsed();
+        eprintln!("query {typed:?}: {} rows in {elapsed:?}", order.len());
+    }
+    let mut typed = String::new();
+    for key in "application 1".chars() {
         typed.push(key);
         let start = std::time::Instant::now();
         let order = ranker.rank(&typed, &rows, &history, 0).to_vec();
