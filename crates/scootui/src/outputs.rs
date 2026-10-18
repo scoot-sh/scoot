@@ -35,8 +35,8 @@
 //!
 //! The surface is drawn when it is configured and its [`Frame`] (logical
 //! size and scale) differs from the one it was last committed with, or a
-//! module's view changed since (`stale`, which `crate::render` works out),
-//! and only then. A `configure` that changes nothing still needs a commit,
+//! module's view changed since (`stale`, which the bar's render works out
+//! in scootbar), and only then. A `configure` that changes nothing still needs a commit,
 //! so the ack takes effect ([`Plan::Commit`]). Many events in one read (a scale change
 //! arrives as several) are one plan, since the loop asks after dispatching
 //! them all. A draw that failed is tried again on later turns, a few

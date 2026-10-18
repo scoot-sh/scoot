@@ -18,8 +18,8 @@
 use std::io;
 
 use rustix::event::PollFlags;
-use wayland_client::backend::WaylandError as BackendError;
-use wayland_client::{Connection, ReadEventsGuard};
+use wayland_client::Connection;
+use wayland_client::backend::{ReadEventsGuard, WaylandError as BackendError};
 
 /// Send what the loop queued. A full socket (`WouldBlock`) is not an
 /// error: `wants_write` is set, and the next turn polls for `OUT`.

@@ -37,7 +37,7 @@ mod shots;
 
 /// The seven-segment test font, built in code: the bar draws with it here,
 /// and the tests read the time back off screenshots.
-pub use scootui::testfont;
+pub use crate::testfont;
 
 #[allow(unused_imports)] // Only the binaries that check pixels use it.
 pub use shots::{Shot, rgb};
