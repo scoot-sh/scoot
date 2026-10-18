@@ -1,0 +1,37 @@
+[package]
+name = "scootui-keyboard-spike"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+publish = false
+
+[workspace]
+
+[lib]
+name = "spike"
+path = "src/lib.rs"
+
+[[bin]]
+name = "spike-kbvm"
+path = "src/bin/kbvm.rs"
+
+[[bin]]
+name = "spike-xkb"
+path = "src/bin/xkb.rs"
+
+[[bin]]
+name = "spike-base"
+path = "src/bin/base.rs"
+
+[dependencies]
+kbvm = { version = "0.2.0", features = ["compose"] }
+xkbcommon = "0.9.0"
+wayland-client = "0.31"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = 3
