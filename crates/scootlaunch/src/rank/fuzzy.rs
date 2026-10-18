@@ -44,12 +44,12 @@ pub const WEIGHT_KEYWORDS: u32 = 5;
 /// [`WEIGHT_NAME`] for the Exec basename.
 pub const WEIGHT_EXEC: u32 = 4;
 
-/// Characters that start a word: a match right after one takes the
-/// [`WORD`] bonus.
-fn is_separator(char: char) -> bool {
+/// Folded codepoints that start a word: a match right after one
+/// takes the [`WORD`] bonus.
+fn is_separator_code(code: u32) -> bool {
     matches!(
-        char,
-        ' ' | '\t' | '-' | '_' | '/' | '.' | '(' | ':' | '+' | '\''
+        code,
+        0x20 | 0x09 | 0x2D | 0x5F | 0x2F | 0x2E | 0x28 | 0x3A | 0x2B | 0x27
     )
 }
 
@@ -97,6 +97,16 @@ pub fn mask_of(folded: &str) -> u64 {
     mask
 }
 
+/// The mask over folded codepoints: what the ranker reads.
+pub fn mask_of_codes(codes: &[u32]) -> u64 {
+    let mut mask = 0u64;
+    for code in codes.iter().copied() {
+        let bit = code.wrapping_mul(0x9E37_79B1) >> 26;
+        mask |= 1u64 << bit;
+    }
+    mask
+}
+
 /// Answers whether `query_mask` allows a match against `field_mask`.
 #[inline]
 pub fn mask_allows(query_mask: u64, field_mask: u64) -> bool {
@@ -115,24 +125,39 @@ pub fn mask_allows(query_mask: u64, field_mask: u64) -> bool {
 /// cannot match. The total is clamped at zero (a match is a match:
 /// far-apart scatters all score alike). An empty query matches
 /// everything with 0.
+///
+/// This is the string form, for tests and the fuzz target; the
+/// ranker reads [`score_codes`] over pre-folded codepoints.
 pub fn score(field: &str, query: &str, dp: &mut Dp) -> Option<i32> {
+    let field: Vec<u32> = field.chars().map(|char| char as u32).collect();
+    let query: Vec<u32> = query.chars().map(|char| char as u32).collect();
+    score_codes(&field, &query, dp)
+}
+
+/// Scores folded codepoint slices: the [`score`] dynamic program
+/// without the string decoding. A prefix hit answers the prefix
+/// total directly (the optimal alignment: start bonus, then every
+/// step consecutive), so the common typed-ahead case costs one
+/// `starts_with`, not the matrix.
+pub fn score_codes(field: &[u32], query: &[u32], dp: &mut Dp) -> Option<i32> {
     if query.is_empty() {
         return Some(0);
     }
-    let width = field.chars().count();
-    let count = query.chars().count();
-    if count > width {
+    if query.len() > field.len() {
         return None;
     }
-    dp.resize(width);
+    if field.starts_with(query) {
+        return Some(prefix_total(query.len()));
+    }
+    dp.resize(field.len());
     let Dp { prev, cur } = dp;
     let mut first = true;
     let mut best: i32 = NEG;
-    for want in query.chars() {
+    for want in query.iter().copied() {
         let mut running: i32 = NEG;
-        let mut prev_char: Option<char> = None;
+        let mut prev_code: Option<u32> = None;
         best = NEG;
-        for (index, char) in field.chars().enumerate() {
+        for (index, code) in field.iter().copied().enumerate() {
             // Fold the position before this one into the running
             // best: an alignment for the previous query character
             // ends strictly before here.
@@ -142,12 +167,12 @@ pub fn score(field: &str, query: &str, dp: &mut Dp) -> Option<i32> {
                         .saturating_add((index as i32).saturating_sub(1).saturating_mul(GAP)),
                 );
             }
-            if char == want {
+            if code == want {
                 let sub = if first {
                     let mut sub = BASE.saturating_sub((index as i32).saturating_mul(GAP));
                     if index == 0 {
                         sub = sub.saturating_add(START);
-                    } else if prev_char.is_some_and(is_separator) {
+                    } else if prev_code.is_some_and(is_separator_code) {
                         sub = sub.saturating_add(WORD);
                     }
                     sub
@@ -162,7 +187,7 @@ pub fn score(field: &str, query: &str, dp: &mut Dp) -> Option<i32> {
                     running
                         .saturating_sub((index as i32).saturating_sub(1).max(0).saturating_mul(GAP))
                         .saturating_add(BASE)
-                        .saturating_add(if prev_char.is_some_and(is_separator) {
+                        .saturating_add(if prev_code.is_some_and(is_separator_code) {
                             WORD
                         } else {
                             0
@@ -175,7 +200,7 @@ pub fn score(field: &str, query: &str, dp: &mut Dp) -> Option<i32> {
             } else {
                 cur[index] = NEG;
             }
-            prev_char = Some(char);
+            prev_code = Some(code);
         }
         if best == NEG {
             return None;
@@ -184,6 +209,13 @@ pub fn score(field: &str, query: &str, dp: &mut Dp) -> Option<i32> {
         first = false;
     }
     Some(best.max(0))
+}
+
+/// The prefix total for a query of `len` characters: start bonus,
+/// then every step consecutive. The optimal alignment for a prefix
+/// hit, answered without the matrix.
+fn prefix_total(len: usize) -> i32 {
+    perfect(len)
 }
 
 /// The reused alignment rows for [`score`]: two rows of field width.

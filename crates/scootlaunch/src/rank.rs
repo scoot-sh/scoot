@@ -51,10 +51,12 @@ pub struct Row {
     pub fields: [Field; 4],
 }
 
-/// One searched field: folded text, its mask, and its weight.
+/// One searched field: folded codepoints, their mask, and the
+/// weight. Codepoints, not text, so the hot loop never decodes
+/// UTF-8; folding and masking happen once at row build.
 #[derive(Debug, Clone)]
 pub struct Field {
-    pub text: String,
+    pub codes: Vec<u32>,
     pub mask: u64,
     pub weight: u32,
 }
@@ -88,10 +90,11 @@ fn exec_basename(exec: &[String], terminal: bool) -> &str {
     }
 }
 
-fn field_of(folded: String, weight: u32) -> Field {
-    let mask = fuzzy::mask_of(&folded);
+fn field_of(folded: &str, weight: u32) -> Field {
+    let codes: Vec<u32> = folded.chars().map(|char| char as u32).collect();
+    let mask = fuzzy::mask_of_codes(&codes);
     Field {
-        text: folded,
+        codes,
         mask,
         weight,
     }
@@ -114,10 +117,10 @@ fn entry_row(index: usize, entry: &crate::index::Entry) -> Row {
         name_folded: name_folded.clone(),
         id: entry.id.clone(),
         fields: [
-            field_of(name_folded, fuzzy::WEIGHT_NAME),
-            field_of(generic_folded, fuzzy::WEIGHT_GENERIC),
-            field_of(keywords_folded, fuzzy::WEIGHT_KEYWORDS),
-            field_of(exec_folded, fuzzy::WEIGHT_EXEC),
+            field_of(&name_folded, fuzzy::WEIGHT_NAME),
+            field_of(&generic_folded, fuzzy::WEIGHT_GENERIC),
+            field_of(&keywords_folded, fuzzy::WEIGHT_KEYWORDS),
+            field_of(&exec_folded, fuzzy::WEIGHT_EXEC),
         ],
     }
 }
@@ -134,10 +137,10 @@ fn action_row(index: usize, action_index: usize, entry: &crate::index::Entry, ac
         name_folded: name_folded.clone(),
         id: entry.id.clone(),
         fields: [
-            field_of(name_folded, fuzzy::WEIGHT_NAME),
-            field_of(generic_folded, fuzzy::WEIGHT_GENERIC),
-            field_of(keywords_folded, fuzzy::WEIGHT_KEYWORDS),
-            field_of(exec_folded, fuzzy::WEIGHT_EXEC),
+            field_of(&name_folded, fuzzy::WEIGHT_NAME),
+            field_of(&generic_folded, fuzzy::WEIGHT_GENERIC),
+            field_of(&keywords_folded, fuzzy::WEIGHT_KEYWORDS),
+            field_of(&exec_folded, fuzzy::WEIGHT_EXEC),
         ],
     }
 }
@@ -147,6 +150,7 @@ fn action_row(index: usize, action_index: usize, entry: &crate::index::Entry, ac
 #[derive(Debug)]
 pub struct Ranker {
     folded: String,
+    codes: Vec<u32>,
     scores: Vec<(u32, i32)>,
     order: Vec<u32>,
     dp: fuzzy::Dp,
@@ -157,6 +161,7 @@ impl Ranker {
     pub fn new() -> Self {
         Ranker {
             folded: String::new(),
+            codes: Vec::new(),
             scores: Vec::new(),
             order: Vec::new(),
             dp: fuzzy::Dp::new(),
@@ -174,18 +179,20 @@ impl Ranker {
         if self.folded.is_empty() {
             return self.rank_empty(rows, frecency, now);
         }
-        let query_chars = self.folded.chars().count();
-        let query_mask = fuzzy::mask_of(&self.folded);
-        let cap = fuzzy::perfect(query_chars) / 4;
+        self.codes.clear();
+        self.codes
+            .extend(self.folded.chars().map(|char| char as u32));
+        let query_mask = fuzzy::mask_of_codes(&self.codes);
+        let cap = fuzzy::perfect(self.codes.len()) / 4;
         self.scores.clear();
         for (index, row) in rows.iter().enumerate() {
             let mut best = 0;
             let mut matched = false;
             for field in &row.fields {
-                if field.text.is_empty() || !fuzzy::mask_allows(query_mask, field.mask) {
+                if field.codes.is_empty() || !fuzzy::mask_allows(query_mask, field.mask) {
                     continue;
                 }
-                if let Some(raw) = fuzzy::score(&field.text, &self.folded, &mut self.dp) {
+                if let Some(raw) = fuzzy::score_codes(&field.codes, &self.codes, &mut self.dp) {
                     // A far-apart scatter clamps to zero but still
                     // matched: it ranks below every positive, out
                     // only when nothing matched at all.
