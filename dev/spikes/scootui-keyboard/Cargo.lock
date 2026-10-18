@@ -245,6 +245,7 @@ name = "scootui-keyboard-spike"
 version = "0.0.0"
 dependencies = [
  "kbvm",
+ "rustix",
  "wayland-client",
  "wayland-protocols",
  "xkbcommon",

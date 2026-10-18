@@ -31,6 +31,7 @@ path = "src/bin/wl.rs"
 [dependencies]
 kbvm = { version = "0.2.0", features = ["compose"] }
 xkbcommon = "0.9.0"
+rustix = { version = "1", features = ["event"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client"] }
 

@@ -338,9 +338,29 @@ fn drive<B: ClientBackend>(secs: u64, with_surface: bool) {
         queue.roundtrip(&mut state).expect("configure roundtrip");
     }
     let deadline = Instant::now() + Duration::from_secs(if secs == 0 { 2 } else { secs });
+    // `dispatch_pending` only dispatches what was already read: without an
+    // explicit read the loop below would never see anything past the
+    // roundtrips above (which is exactly how an earlier revision silently
+    // heard no keys). Poll the connection fd, read when ready, dispatch.
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
     while Instant::now() < deadline {
-        queue.dispatch_pending(&mut state).expect("dispatch");
-        std::thread::sleep(Duration::from_millis(10));
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let Some(guard) = conn.prepare_read() else {
+            break;
+        };
+        let fd = guard.connection_fd();
+        let mut pollfds = [PollFd::new(&fd, PollFlags::IN)];
+        let wait = remaining.min(Duration::from_millis(500));
+        let timeout = Timespec::try_from(wait).unwrap_or(Timespec { tv_sec: 0, tv_nsec: 0 });
+        match poll(&mut pollfds, Some(&timeout)) {
+            Ok(_) => {
+                if guard.read().is_err() {
+                    break;
+                }
+                queue.dispatch_pending(&mut state).expect("dispatch");
+            }
+            Err(_) => break,
+        }
     }
     println!(
         "summary keys_seen={} keymap_bytes={} seat_version={}",
