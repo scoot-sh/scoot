@@ -23,7 +23,7 @@ unexpired.
 
 Children, in order (each `blocked` names its predecessors):
 
-1. [notify-prototype](notify-prototype.md): the go/no-go gate against mako, out of the workspace,
+1. [notify-prototype](resolved/notify-prototype-done.md): the go/no-go gate against mako, out of the workspace,
    before any extraction.
 2. [notify-server](notify-server.md): the D-Bus server and model.
 3. [notify-popups](notify-popups.md): cards, stack, lock and idle rules, the look layer.

@@ -102,7 +102,10 @@ shaping NO-GO verdict requires v1 to state); every small call answered.
 A 5 MiB `Notify` hangs on the unmodified 1 MiB cap (skipped silently) and
 is answered in under a millisecond by the `LimitsExceeded` reply this
 plan already prescribes — validated in the spike, required in
-`notify-server`.
+`notify-server`. Not run: Firefox, Thunderbird, an Electron app and a
+GTK4 portal app (no GUI apps launch on the headless VM), the M2, a
+flood, startup-to-owned timing. The memory row is engine-only on
+DejaVu footing; the cost of a mapped CJK fallback is unmeasured.
 
 ## Spec conformance
 
@@ -586,7 +589,7 @@ entries.
 | Slug | Serves | Blocked by |
 |---|---|---|
 | [`scootnotify`](../../docs/scootbar/backlog/scootnotify.md) (epic) | daily-drive, computer use | its children |
-| [`notify-prototype`](../../docs/scootbar/backlog/notify-prototype.md): the go/no-go gate, out of the workspace | daily-drive | the go-ahead |
+| [`notify-prototype`](../../docs/scootbar/backlog/resolved/notify-prototype-done.md): the go/no-go gate, out of the workspace | daily-drive | the go-ahead |
 | [`notify-server`](../../docs/scootbar/backlog/notify-server.md): the D-Bus server and model, headless | both | the GO verdict in `notify-prototype`, `scoot-dbus-extract` |
 | [`notify-popups`](../../docs/scootbar/backlog/notify-popups.md): cards, stack, lock and idle rules, outputs, the look layer | daily-drive | `notify-server`, `scootui-surfaces-on-demand`, `look-format` |
 | [`notify-control`](../../docs/scootbar/backlog/notify-control.md): the control socket, `msg`, JSON, `subscribe`, `wait`, scoped `reload` | computer use | `notify-popups`, `scootui-extract-control` |

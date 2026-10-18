@@ -1,7 +1,7 @@
 # notify-prototype: go/no-go measurement record
 
 Measured 2026-10-18 for ticket `notify-prototype`
-([docs](../../../../docs/scootbar/backlog/resolved/notify-prototype-done.md)),
+([docs](../../../docs/scootbar/backlog/resolved/notify-prototype-done.md)),
 from [scootnotify.md](../../design/scootnotify.md#goals-non-goals-and-the-case-for-it).
 A throwaway binary **outside the workspace** that `#[path]`-includes
 scootbar's drawing, text and D-Bus sources (the pattern
@@ -13,7 +13,7 @@ plus `notify-prototype/` (screenshots) is the record.
 **Outcome: GO, on one condition.** Memory and text pass outright. The hang
 row fails on unmodified scootbar D-Bus code and passes with the small
 `LimitsExceeded` reply the design already prescribes for scootnotify
-([shell-apps.md](../design/shell-apps.md#scoot-dbus-library-cratesscoot-dbus),
+([shell-apps.md](../../design/shell-apps.md#scoot-dbus-library-cratesscoot-dbus),
 "a small addition"). `notify-server` must include that reply. Humans keep
 the guarded tickets' prose clauses.
 
@@ -69,17 +69,25 @@ real server memory-maps them exactly the way
 [`font.rs`](../../../crates/scootbar/src/font.rs) already does
 (`map_if_read_only`), so the bytes stay clean file pages shared with
 every other process. Noto Sans SC alone is 17.7 MB of the 18.4 MB of
-anonymous font pages. The fair row for the gate is the DejaVu one (same
-stack, same harness, fonts equal); the full-font legibility runs still
-prove the fallback chain works.
+anonymous font pages. The DejaVu row measures the engine on equal footing with mako, which had
+no CJK fonts in this harness. It is not the deployed cost: a real server
+must map Noto Sans SC for CJK, and the first CJK card faults its glyph
+pages into RSS (clean, reclaimable file pages). That figure was not
+measured here and the prototype source is deleted, so it stays open for
+`notify-server`.
 
 ### Corpus
 
 `notify-send` plain, markup, `-i` name, `-i` path, `-h int:value:`,
 `image-data` (red 64x64 square, via the test sender), CJK, Cyrillic and
-Arabic bodies, two action buttons, critical and low urgencies, a 3-card
-stack, and `replaces_id` update — each beside mako in the same harness
-(`notify-prototype/01-*.png` vs `m-*.png`). Not run: Firefox,
+Arabic bodies, action buttons, critical and low urgencies, a 3-card
+stack, and `replaces_id` update. Side by side with mako in the same
+harness: plain, markup, value, CJK and Arabic (`m-*.png`). The action
+button is visible in `06-imagedata.png`; `10-actions.png` shows no
+buttons, `13-stack.png` shows one card and `14-replace.png` is a single
+frame, so those three shots do not evidence what their names say. The
+stack and the in-place swap were observed live and are not backed by a
+committed screenshot. Not run: Firefox,
 Thunderbird, an Electron app and a GTK4 portal app (no GUI apps launch
 on the headless VM); theme-name icons (no hicolor theme resolution in
 the prototype — a recorded limitation, not a gate row).
@@ -91,9 +99,9 @@ the prototype — a recorded limitation, not a gate row).
   advertises `body-markup` but does not render bold/italic; stated).
 - PNG file icons and `image-data` render (triangle-downscaled through
   the real `icon/image.rs` + `sample.rs`); action buttons and the value
-  bar render; `replaces_id` from a new connection swaps in place.
+  bar render; `replaces_id` from a new connection swaps in place (observed live; no screenshot).
 - **Arabic draws wrong** (logical order, isolated forms), exactly as the
-  [text-shaping spike](scootbar/text-shaping.md) (NO-GO on size) said it
+  [text-shaping spike](text-shaping.md) (NO-GO on size) said it
   would. Hebrew and Devanagari are the same by construction. v1 scoping
   per that verdict; the docs must say so.
 
@@ -152,8 +160,10 @@ nobody re-runs it blind).
 - `notify-prototype/01-plain.png` … `14-replace.png`: the corpus.
 - `notify-prototype/m-plain.png`, `m-markup.png`, `m-value.png`,
   `m-cjk.png`, `m-arabic.png`: mako in the same harness.
-- `notify-prototype/proto-onecard.png`, `proto-expiry-t2.png`,
-  `proto-expiry-t18.png`: one card up; expiry before/after.
+- `notify-prototype/proto-onecard.png`: one card up. The expiry
+  before/after pair committed with the first version of this record was
+  two identical files and has been removed; expiry firing on time was
+  observed live after the bug 1 fix and has no screenshot evidence.
 - Raw rows: the tables above are copied from `/proc` samples taken per
   the M6 method (14 s settle, 60 s window, one run per row); the 5 MiB
   transcripts (`NO_REPLY after 10s`, `LimitsExceeded`) are quoted above.

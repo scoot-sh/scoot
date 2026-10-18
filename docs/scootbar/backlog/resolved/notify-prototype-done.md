@@ -10,7 +10,7 @@ resolved: "2026-10-17"
 
 # scootnotify prototype: the go/no-go gate
 
-Filed 2026-10-12 from the [scootnotify design](../../../dev/design/scootnotify.md#goals-non-goals-and-the-case-for-it).
+Filed 2026-10-12 from the [scootnotify design](../../../../dev/design/scootnotify.md#goals-non-goals-and-the-case-for-it).
 Serves **daily-drive**. It decides whether scootnotify is built or mako stays, **before** any
 extraction is spent on it.
 
@@ -50,7 +50,9 @@ is `dev/spikes/scootbar/notify-prototype.md` with screenshots in
   gate: at most half), 0 wakeups in 60 s both sides. One card up: +76 kB
   RSS, ≤1 wakeup in 60 s. (DejaVu-only font loading; five full fonts
   read into heap cost 21.6 MB — a prototype artifact, since the real
-  server memory-maps fonts the way `font.rs` already does. See record.)
+  server memory-maps fonts the way `font.rs` already does. The row is
+  engine-only: mako had no CJK fonts here, and a mapped CJK fallback is
+  unmeasured. See record.)
 - Corpus (notify-send suite, `image-data`, CJK, Cyrillic, Arabic, value,
   actions, replace, stack): legible throughout; Arabic draws wrong in
   the way the text-shaping NO-GO predicted. Firefox, Thunderbird, an
@@ -66,7 +68,7 @@ is `dev/spikes/scootbar/notify-prototype.md` with screenshots in
 
 ## Resolving this gate
 
-The tickets it guards name it in prose ("GO verdict recorded in notify-prototype"), which `scripts/backlog resolve` does not strip ([why](../../../dev/design/shell-apps.md#how-the-gates-stay-closed)). Record the verdict here, then resolve. On **go**, a human deletes that clause from the guarded tickets. On **no**, a human resolves the epic and the guarded tickets as won't-do, citing this evidence.
+The tickets it guards name it in prose ("GO verdict recorded in notify-prototype"), which `scripts/backlog resolve` does not strip ([why](../../../../dev/design/shell-apps.md#how-the-gates-stay-closed)). Record the verdict here, then resolve. On **go**, a human deletes that clause from the guarded tickets. On **no**, a human resolves the epic and the guarded tickets as won't-do, citing this evidence.
 
 ## Evidence the review needs
 

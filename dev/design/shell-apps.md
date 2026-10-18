@@ -664,7 +664,7 @@ Ordered by what unblocks what, and by risk. **Nothing is extracted until a gate 
 2. **The gates, out of the workspace, on the go-ahead.** Each is a prototype that `#[path]`-includes scootbar's
    sources (`crates/scootbar/fuzz/Cargo.toml:28-65` already does this), so a no costs no
    refactor:
-   - [`notify-prototype`](../../docs/scootbar/backlog/notify-prototype.md) can start at once;
+   - [`notify-prototype`](../../docs/scootbar/backlog/resolved/notify-prototype-done.md) can start at once;
    - [`launch-prototype`](../../docs/scootbar/backlog/resolved/launch-prototype-done.md) (GO, measured 2026-10-18) and
      [`greet-prototype`](../../docs/scootbar/backlog/greet-prototype.md) follow the keyboard
      spike.
