@@ -993,6 +993,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "scootlaunch"
+version = "0.3.1"
+dependencies = [
+ "rustix 1.1.4",
+ "scoot-rt",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "scootui"
 version = "0.3.1"
 dependencies = [
