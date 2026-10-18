@@ -207,19 +207,19 @@ fn arm_timer(timer: &rustix::fd::OwnedFd, deadline: Option<Instant>) {
     let _ = timerfd_settime(timer, TimerfdTimerFlags::empty(), &spec);
 }
 
-/// Polls the bus fd and the timerfd: woken by traffic or the next
-/// expiry, never by time otherwise.
+/// Polls the bus fd and the timerfd with no timeout: woken by traffic
+/// or the next expiry, never by time otherwise. A bounded poll here
+/// would be a wakeup every bound at idle; the loop only reaches this
+/// wait with nothing staged, nothing queued and the timer armed, so
+/// nothing is missed by sleeping until the fds speak (both poll
+/// level-triggered).
 fn wait(bus: BorrowedFd<'_>, timer: BorrowedFd<'_>) {
-    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+    use rustix::event::{PollFd, PollFlags, poll};
     let mut fds = [
         PollFd::new(&bus, PollFlags::IN),
         PollFd::new(&timer, PollFlags::IN),
     ];
-    let timeout = Timespec {
-        tv_sec: 5,
-        tv_nsec: 0,
-    };
-    let _ = poll(&mut fds, Some(&timeout));
+    let _ = poll(&mut fds, None);
 }
 
 /// Reads a fired timerfd back to disarmed: edge-triggered peace.
