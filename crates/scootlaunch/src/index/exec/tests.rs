@@ -93,6 +93,14 @@ fn executable_may_not_contain_equals() {
 }
 
 #[test]
+fn removed_codes_cannot_promote_an_equals_executable() {
+    // `%f` drops the whole first argument; the promoted `=foo` is
+    // still the executable, and still invalid.
+    assert_eq!(strict("%f =foo"), Err(Error::EqualsInExecutable));
+    assert_eq!(strict("%u a=b"), Err(Error::EqualsInExecutable));
+}
+
+#[test]
 fn empty_exec_is_invalid() {
     assert_eq!(strict(""), Err(Error::Empty));
     assert_eq!(strict("   "), Err(Error::Empty));

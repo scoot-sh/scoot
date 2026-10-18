@@ -8,9 +8,7 @@
 //!    unquoted reserved character makes the entry invalid); a lenient
 //!    mode accepts what GLib accepts, because real files break this
 //!    rule.
-//! 2. The executable may not contain `=` (§7). If it does, the entry
-//!    is invalid.
-//! 3. Field codes, outside quotes only: `%f %F %u %U` are removed;
+//! 2. Field codes, outside quotes only: `%f %F %u %U` are removed;
 //!    `%i` becomes `--icon <Icon>` as two arguments, or nothing when
 //!    `Icon` is empty; `%c` becomes the translated `Name`; `%k`
 //!    becomes the desktop file's path; `%%` becomes `%`; the
@@ -18,8 +16,12 @@
 //!    the entry invalid. A field code inside a quoted argument is
 //!    "undefined" by the spec: only `%%` is expanded there, and
 //!    anything else makes the entry invalid.
-//! 4. Field codes expand once: an expansion is one argument whatever
-//!    it contains, and is never re-split or re-scanned.
+//! 3. Field codes expand once: an expansion is one argument whatever
+//!    it contains, and is never re-split or re-scanned. The
+//!    executable (the first expanded argument) may not contain `=`
+//!    (§7): checked after removal, so removed codes cannot promote a
+//!    later `=` argument into the executable. If it does, the entry
+//!    is invalid.
 //!
 //! `Terminal=true` prefixes the configured terminal argv (default
 //! `["foot"]`); the caller passes `terminal`. `DBusActivatable` is
@@ -151,17 +153,6 @@ pub fn expand(
     if args.is_empty() {
         return Err(Error::Empty);
     }
-    // Phase 3: the executable may not contain `=`.
-    let executable: String = args[0]
-        .iter()
-        .map(|segment| segment.text.as_str())
-        .collect();
-    if executable.contains('=') {
-        return Err(Error::EqualsInExecutable);
-    }
-    if executable.is_empty() {
-        return Err(Error::Empty);
-    }
     // Phase 4: field codes, once, never re-split or re-scanned.
     let mut argv = Vec::with_capacity(args.len());
     if terminal {
@@ -172,6 +163,14 @@ pub fn expand(
     }
     if argv.is_empty() || (terminal && argv.len() == 1) {
         return Err(Error::Empty);
+    }
+    // The executable may not contain `=` (§7): checked on the
+    // expanded argv, because field-code removal can drop the whole
+    // first argument and promote a later one (`%f =foo` executes
+    // `=foo`). A `%c`/`%k` expansion injecting `=` refuses the same
+    // way: a strange name must not mint a strange executable.
+    if argv[usize::from(terminal)].contains('=') {
+        return Err(Error::EqualsInExecutable);
     }
     Ok(argv)
 }
