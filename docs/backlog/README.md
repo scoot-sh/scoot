@@ -302,6 +302,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [Run the scoot-session launcher harness in CI](./resolved/scoot-session-harness-in-ci-done.md) — RESOLVED 2026-10-05 (PR #453): `session-harness` CI job (sh + python3, ~20 s) with true activation semantics and the carried stale-graphical-target limitation pinned; the heal deliberately does not restart graphical-bound units
 
 ### Input
+- [Second read()-based keyboard client gets an empty keymap](./core/keymap-fd-shared-offset.md) (medium)
 - [`msg key` hard-codes `_L` modifier keysyms](./resolved/msg-key-modifier-resolution-done.md) — RESOLVED 2026-09-17 (PR #83): modifiers resolve through the keymap probe like `type_text` (either hand's key; toggle-option layouts work); `msg key A` still refuses
 - [`msg type`: dead keys, compose, inactive layouts](./resolved/msg-type-dead-keys-compose-done.md) — RESOLVED 2026-09-18 (PR #121): two-key dead-led sequences from the session-locale compose table (é on `de`, dead-ASCII gaps closed — all 95 ASCII on all fourteen swept Latin layouts); inactive groups, lock/latch levels and `Multi_key` 3-key sequences stay refused
 - [`zwp_tablet_manager_v2` (drawing-tablet input)](./resolved/tablet-v2-done.md)
