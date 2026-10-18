@@ -1,0 +1,1 @@
+kde-geo-uri-handler --coordinate-template "https://cartes.app/?geo=<URI>" --query-template "https://cartes.app/?geo=<URI>" --fallback "https://cartes.app" %u

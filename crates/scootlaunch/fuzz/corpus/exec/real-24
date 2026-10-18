@@ -1,0 +1,1 @@
+torture "quoted arg" 'single quoted' unquoted\;semi "nested \"quote\"" back\\slash trailing%

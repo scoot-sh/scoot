@@ -1,0 +1,1 @@
+edge --name %c --icon %i --path %k --file %f --url %U --pct %% --old %d%D%n%N%v%m
