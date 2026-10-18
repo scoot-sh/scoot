@@ -346,6 +346,18 @@ fn password_refuses_copy_paste_and_ime() {
 }
 
 #[test]
+fn password_debug_does_not_print_the_secret() {
+    let mut backing = [0u8; 32];
+    let mut password = PasswordEntry::new(&mut backing);
+    assert_eq!(password.insert_text("hunter2"), InsertOutcome::Inserted);
+    let shown = format!("{password:?}");
+    assert!(!shown.contains("hunter2"), "{shown}");
+    // The derived impl printed the bytes as decimals: 104, 117, 110...
+    assert!(!shown.contains("104"), "{shown}");
+    assert!(shown.contains("<redacted>"), "{shown}");
+}
+
+#[test]
 fn password_edits_multibyte_and_keys_like_the_entry() {
     let mut backing = [0u8; 64];
     let mut password = PasswordEntry::new(&mut backing);

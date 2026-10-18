@@ -49,7 +49,7 @@ caller's canvas, no Wayland, no I/O, no new dependency. `scootbar`
 pins `scootui` at `default-features = false` plus `icons, wayland,
 control`, so it never enables `entry`: `cargo tree -p scootbar` shows
 no new edge and the release binary is byte-identical to main's
-(`b757a784…`, 3019520 bytes stripped, identical `NEEDED`
+(`a2f754fe…`, 3085056 bytes stripped, identical `NEEDED`
 `libgcc_s/libm/libc/ld-linux`, `cmp` clean). The popup's `Activate`
 keeps its `&'static str` (the bar's modules are compiled in); these
 widgets carry their own `entry::Activate` with an owned `String` id,

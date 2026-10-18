@@ -363,12 +363,32 @@ impl Entry {
 ///
 /// [`PasswordEntry::clear`] and `Drop` zero the whole slice, so a test
 /// reading the caller's buffer after clear finds zeros.
-#[derive(Debug)]
 pub struct PasswordEntry<'a> {
     buf: &'a mut [u8],
     len: usize,
     caret: usize,
     selected_all: bool,
+}
+
+// A derived `Debug` would print the caller's whole slice, secret included,
+// into any log or panic message that formats the widget.
+impl core::fmt::Debug for PasswordEntry<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PasswordEntry")
+            .field("buf", &"<redacted>")
+            .field("len", &self.len)
+            .field("caret", &self.caret)
+            .field("selected_all", &self.selected_all)
+            .finish()
+    }
+}
+
+/// Zero `bytes` and tell the optimizer the zeros are read, so the stores
+/// survive a release build (the caller keeps the slice, so they are
+/// observable anyway; this is the cheap safe belt).
+fn wipe(bytes: &mut [u8]) {
+    bytes.fill(0);
+    core::hint::black_box(&*bytes);
 }
 
 impl<'a> PasswordEntry<'a> {
@@ -643,7 +663,7 @@ impl<'a> PasswordEntry<'a> {
     /// Zero the whole slice and empty the entry: a test reading the
     /// caller's buffer after this finds zeros.
     pub fn clear(&mut self) {
-        self.buf.fill(0);
+        wipe(self.buf);
         self.len = 0;
         self.caret = 0;
         self.selected_all = false;
@@ -669,7 +689,7 @@ impl<'a> PasswordEntry<'a> {
         self.buf.copy_within(end..end + tail, start);
         self.len = start + tail;
         if let Some(freed) = self.buf.get_mut(self.len..end + tail) {
-            freed.fill(0);
+            wipe(freed);
         }
     }
 
@@ -677,7 +697,7 @@ impl<'a> PasswordEntry<'a> {
     /// the bytes stop existing here, not at the next clear.
     fn zero_used(&mut self) {
         if let Some(used) = self.buf.get_mut(..self.len) {
-            used.fill(0);
+            wipe(used);
         }
         self.len = 0;
         self.caret = 0;
@@ -688,7 +708,7 @@ impl Drop for PasswordEntry<'_> {
     /// Zero the whole slice: dropping without clearing (panic unwinding
     /// past the login screen, an early return) leaves nothing either.
     fn drop(&mut self) {
-        self.buf.fill(0);
+        wipe(self.buf);
     }
 }
 
