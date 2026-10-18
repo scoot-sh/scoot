@@ -35,6 +35,11 @@
 
 #![deny(unsafe_code)]
 
+// The allocation pins (`count_allocations`) count nothing without this.
+#[cfg(test)]
+#[global_allocator]
+static COUNTING_ALLOC: scootbg_mem::CountingAlloc = scootbg_mem::CountingAlloc;
+
 // Linux only, like scootbar: the font mapping is `scootbg-mem`'s, and the
 // shell apps never run on a Mac.
 #[cfg(not(target_os = "linux"))]

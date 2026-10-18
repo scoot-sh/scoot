@@ -104,11 +104,11 @@ pub fn dispatch_keyboard(
             seat.leave();
             Ok(None)
         }
-        Kb::Key { key, state, .. } => Ok(seat.key_event(
-            key,
-            KeyState::from_wire(state.into()).unwrap_or(KeyState::Released),
-            text,
-        )),
+        // An unknown state is dropped, not read as a release: a release
+        // would disarm a live repeat.
+        Kb::Key { key, state, .. } => Ok(
+            KeyState::from_wire(state.into()).and_then(|state| seat.key_event(key, state, text))
+        ),
         Kb::Modifiers {
             mods_depressed,
             mods_latched,
