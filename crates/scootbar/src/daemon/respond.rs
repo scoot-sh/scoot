@@ -159,8 +159,8 @@ impl Handler for Responder<'_> {
                         },
                     );
                     self.subscription = Some(Kinds::of(
-                    &events.iter().map(|kind| *kind as u8).collect::<Vec<_>>(),
-                ));
+                        &events.iter().map(|kind| *kind as u8).collect::<Vec<_>>(),
+                    ));
                     self.subscribers += 1;
                 }
             }

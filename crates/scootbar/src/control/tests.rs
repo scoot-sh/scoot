@@ -6,12 +6,13 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use scootui::control::MAX_REQUEST_LINE;
+use scootui::control::claim::Claim;
+use scootui::control::conn::{Conn, Handler, STALL_DEADLINE, Status};
+
 use super::paths::{self, PathError, Paths};
 use super::protocol::{self, PROTOCOL_VERSION, ReloadScope, Request};
 use super::{MAX_CONNECTIONS, Server};
-use scootui::control::claim::Claim;
-use scootui::control::conn::{Conn, Handler, STALL_DEADLINE, Status};
-use scootui::control::MAX_REQUEST_LINE;
 
 /// A scratch directory, removed on drop (as in `config::tests`).
 struct Scratch {

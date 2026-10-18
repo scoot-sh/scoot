@@ -8,9 +8,10 @@ use std::os::unix::net::UnixStream;
 
 use rustix::event::PollFlags;
 
+use scootui::control::conn::{Conn, Handler, Kinds, Status};
+
 use super::protocol::{self, EventKind, Request, RequestError};
 use super::{MAX_CONNECTIONS, MAX_SUBSCRIBERS, Server};
-use scootui::control::conn::{Conn, Handler, Kinds, Status};
 
 fn parse(line: &str) -> Result<Request<'_>, RequestError> {
     protocol::parse(line.as_bytes())
