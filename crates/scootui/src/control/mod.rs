@@ -148,7 +148,8 @@ impl Server {
         self.recount();
     }
 
-    #[cfg(test)]
+    /// Whether the spare fd is currently held: the tests' way to watch the
+    /// out-of-fds degradation (taken and retaken).
     pub fn has_spare(&self) -> bool {
         self.spare.is_some()
     }
@@ -193,7 +194,10 @@ impl Server {
         Ok(())
     }
 
-    fn admit(&mut self, stream: std::os::unix::net::UnixStream) {
+    /// Admits an accepted stream as a client. The loop's [`Server::accept`]
+    /// is the usual way in; the tests admit accepted sockets directly to
+    /// fill a server past its cap without a listener.
+    pub fn admit(&mut self, stream: std::os::unix::net::UnixStream) {
         if stream.set_nonblocking(true).is_err() {
             return;
         }
@@ -228,8 +232,9 @@ impl Server {
     }
 
     /// Closes a client (see [`Server::evict`]), else the spare. `false`
-    /// when there is nothing left to close.
-    fn free_an_fd(&mut self) -> bool {
+    /// when there is nothing left to close. The out-of-fds path's unit;
+    /// the tests drive it directly.
+    pub fn free_an_fd(&mut self) -> bool {
         self.evict() || self.spare.take().is_some()
     }
 
