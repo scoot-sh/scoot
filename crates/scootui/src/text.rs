@@ -53,6 +53,7 @@
 use ab_glyph::{Font, FontArc, GlyphId, OutlinedGlyph, PxScale, ScaleFont, point};
 
 use crate::color::Color;
+#[cfg(feature = "icons")]
 use crate::icon::{self, Art, Bitmap};
 use crate::paint::{Canvas, Span};
 
@@ -123,6 +124,7 @@ pub struct Text {
     entries: Vec<Cached>,
     arena: Vec<u8>,
     /// Path and image icons at the sizes drawn (`crate::icon`).
+    #[cfg(feature = "icons")]
     icons: icon::Cache,
 }
 
@@ -161,6 +163,7 @@ impl Text {
             fallbacks,
             entries: Vec::new(),
             arena: Vec::new(),
+            #[cfg(feature = "icons")]
             icons: icon::Cache::default(),
         }
     }
@@ -267,6 +270,7 @@ impl Text {
     /// Draws `art`, a square [`Text::art_side`] on a side, its left edge
     /// at `x` and centered vertically in the canvas, clipped to `clip`. A
     /// path icon is tinted `color`; an image is drawn as it is.
+    #[cfg(feature = "icons")]
     pub fn draw_art(
         &mut self,
         canvas: &mut Canvas<'_>,
