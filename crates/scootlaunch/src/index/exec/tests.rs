@@ -269,6 +269,14 @@ fn multiple_standalone_icon_codes_each_add_an_argument() {
 }
 
 #[test]
+fn escapes_can_create_separators_before_quoting() {
+    // `\s` is the general escape for a space: phase 1 yields two
+    // arguments from one raw one. The fuzz target's count bound
+    // counts bytes for exactly this reason.
+    assert_eq!(strict(r"a\sb %i").unwrap(), vec!["a", "b", "--icon", "foo"]);
+}
+
+#[test]
 fn spec_section_7_examples() {
     // The quoting examples the spec works through (§7).
     assert_eq!(

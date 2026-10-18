@@ -31,9 +31,13 @@ mod fuzz {
             assert!(!argv[usize::from(terminal)].contains('='));
             // Field codes expand once: one input argument yields at
             // most two output arguments (a standalone `%i` becomes
-            // `--icon <Icon>`), plus the terminal prefix. A `%c`
-            // legitimately injects text that looks like a field code.
-            assert!(argv.len() <= 2 * text.split([' ', '\t']).count() + 1);
+            // `--icon <Icon>`), plus the terminal prefix. The bound
+            // counts bytes, not raw arguments: phase 1's `\s` and
+            // `\t` escapes create separators, so the raw text holds
+            // fewer arguments than the split sees. Every output
+            // argument still traces to at least one input byte, which
+            // keeps this sound while catching a blowup.
+            assert!(argv.len() <= 2 * text.len() + 1);
         }
         Some(())
     }
