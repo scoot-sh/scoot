@@ -4,7 +4,7 @@ use super::build::{self, entry};
 use super::{ADAPTER, BATTERY, DEVICE, Iface, read_interfaces_added, read_interfaces_removed};
 use super::{MAX_INTERFACES, read_properties_changed};
 use super::{read_adapter_all, read_battery_all, read_device_all, read_managed_objects};
-use crate::dbus::proto::Writer;
+use crate::proto::Writer;
 
 #[test]
 fn a_small_world_reads_whole() {

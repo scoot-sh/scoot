@@ -878,8 +878,8 @@ fn the_watcher_object_answers() {
 
 /// A `GetAll` body marshalled by sd-bus, not by this crate's `Writer`
 /// (`busctl call ... GetAll a{sv} ...`, captured with `dbus-monitor
-/// --binary` on a private `dbus-daemon`; `fixtures/README.md` has the
-/// command). D-Bus alignment is fully specified, so this is not a second
+/// --binary` on a private `dbus-daemon`;
+/// `crates/scoot-dbus/src/fixtures/README.md` has the command). D-Bus alignment is fully specified, so this is not a second
 /// opinion on the padding: it holds shapes this crate's own tests did not
 /// think to write. An unknown property whose variant holds an `a{sv}` of
 /// 8-aligned arrays and structs, none of them starting at a multiple of
@@ -889,7 +889,9 @@ fn the_watcher_object_answers() {
 #[test]
 fn a_getall_marshalled_by_sd_bus_is_read_whole() {
     use crate::dbus::proto::Message;
-    let frame = include_bytes!("../../dbus/fixtures/sdbus-getall-call.bin");
+    // The sd-bus fixture moved with the client (`scoot-dbus`): the one
+    // `include_bytes!` that reaches across crates.
+    let frame = include_bytes!("../../../../scoot-dbus/src/fixtures/sdbus-getall-call.bin");
     let message = Message::parse(frame).unwrap();
     assert_eq!(message.signature, "a{sv}");
     let mut item = super::Item::new(

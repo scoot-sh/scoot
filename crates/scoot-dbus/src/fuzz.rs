@@ -1,4 +1,4 @@
-//! What the fuzz target checks, written once: `crates/scootbar/fuzz`
+//! What the fuzz target checks, written once: `crates/scoot-dbus/fuzz`
 //! compiles this file by `#[path]` (so it uses nothing but
 //! [`super::proto`], as that uses nothing but `std`), and the stable test
 //! beside it replays the committed seed corpus and every past finding
@@ -8,7 +8,7 @@
 //!
 //! The `Conn` skip and discard state machine (`conn.rs`) is deliberately
 //! not driven here: it needs the connection's crate dependencies
-//! (`crate::print`, `rustix`), which the fuzz crate does not have, and
+//! (`scoot-rt`, `rustix`), which the fuzz crate does not have, and
 //! compiling it against stubs would fuzz adapted code, not the shipped
 //! code (the failure the client review fixed in the property walk). That
 //! machine is covered by the `conn` tests instead (over-cap replies and

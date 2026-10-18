@@ -1,7 +1,7 @@
 //! Any bytes as D-Bus messages on a stream: framing accepts, waits or
 //! refuses without a panic, and every header and body parser accepts or
-//! refuses without one. The check is `fuzz::dbus` (scootbar's
-//! `src/dbus/fuzz.rs`).
+//! refuses without one. The check is `fuzz::dbus` (scoot-dbus's
+//! `src/fuzz.rs`).
 
 #![no_main]
 

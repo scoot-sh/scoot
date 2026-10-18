@@ -1,7 +1,7 @@
 //! MPRIS wire shapes: what the media module reads of a player's
 //! `org.mpris.MediaPlayer2.Player` interface, over [`super::proto`]'s
 //! readers. Like `proto`, it uses nothing but `std` and is compiled by the
-//! fuzz crate (`crates/scootbar/fuzz`) unchanged.
+//! fuzz crate (`crates/scoot-dbus/fuzz`) unchanged.
 //!
 //! The same typed walk reads both shapes a player sends its state in: the
 //! `a{sv}` a `GetAll` answers with, and the `sa{sv}as` body of a
@@ -26,8 +26,11 @@
 
 use super::proto::{self, Reader};
 
-#[cfg(test)]
-pub(crate) mod build;
+/// Builders of well-formed answers and signals, for the tests that
+/// speak to a fake bus. Test support for the apps' media tests, like
+/// [`super::testdaemon`]: compiled in always so the apps' `#[cfg(test)]`
+/// code can reach it, used only by tests.
+pub mod build;
 #[cfg(test)]
 mod tests;
 

@@ -97,11 +97,14 @@ scoot-look.workspace = true
 # of its own (`#![forbid(unsafe_code)]` in `src/main.rs`).
 scootbg-mem.workspace = true
 # The shared drawing, widgets and icons (`paint`, `text`, `theme`, `popup`,
-# `icon`), and the leaf runtime helpers (`print`, `runtime_dir`): extracted
-# from this crate so the shell apps share one copy.
+# `icon`), the shared D-Bus client (`conn`, `proto`, `link`, the `mpris`
+# and `bluez` readers) and the leaf runtime helpers (`print`,
+# `runtime_dir`): extracted from this crate so the shell apps share one
+# copy.
 # `icons` is always on (the bar measures icons even with no modules, as
 # before); `widgets` rides on `popup`, `png` on `icon-image`, `tray` on
 # `tray`.
+scoot-dbus.workspace = true
 scoot-rt.workspace = true
 scootui = { path = "../scootui", default-features = false, features = ["icons"] }
 # The Wayland client, plain, no toolkit, on its pure-Rust backend: nothing

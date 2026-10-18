@@ -113,6 +113,10 @@ jobs:
   #   crates/scootbar/, scripts/scootbar-bench/, scripts/scootbar-appearance-hw-test.sh
   #                                        -> scootbar=true (scootbar job, which
   #                                           also builds the Nix module check)
+  #   crates/scoot-dbus/                 -> scootbar=true as well (the
+  #                                           client lives in the scootbar
+  #                                           job until a second consumer
+  #                                           exists; no always-run job)
   #   crates/scootlaunch/                -> scootlaunch=true (scootlaunch
   #                                           job: fmt, clippy, both test
   #                                           runners, the fuzz targets for
@@ -336,6 +340,17 @@ jobs:
                 crates/scoot-rt/*)
                   scootbar=true
                   scootlaunch=true ;;
+                # The shared D-Bus client (crates/scoot-dbus): scootbar's
+                # `conn`, `proto` and `link` plus the `mpris` and `bluez`
+                # readers, fanning out to every consumer (today scootbar
+                # alone; tomorrow scootnotify, scootlaunch and scootgreet,
+                # per dev/design/shell-apps.md). Its manifest also runs
+                # the Linux job, as scootbar's does.
+                crates/scoot-dbus/Cargo.toml)
+                  scoot=true
+                  scootbar=true ;;
+                crates/scoot-dbus/*)
+                  scootbar=true ;;
                 # The look format crate (crates/scoot-look): its own job
                 # below. scootbar reads its allowlists and the compositor
                 # reads its look layer, so its files fan out to the
@@ -1105,16 +1120,16 @@ jobs:
 
       # `--all-targets` so the tests and the CLI's own test targets are
       # type-checked too, not just the library and binary. The wallpaper
-      # daemon, the bar and the shared drawing crate never run on a Mac,
-      # and do not build there (scootbg-mem's and scootui's `compile_error!`
-      # say so), so they are left out, with scootbg-mem: this checks
-      # scoot (its Linux halves cfg'd out: a Mac `scoot` is the `scoot msg`
-      # client), the client library, scoot-ipc, scoot-core and scoot-rt
-      # (which builds anywhere). The same command on a Mac is in
-      # dev/README.md.
+      # daemon, the bar and the shared drawing and D-Bus crates never run
+      # on a Mac, and do not build there (scootbg-mem's, scootui's and
+      # scoot-dbus's `compile_error!` say so), so they are left out, with
+      # scootbg-mem: this checks scoot (its Linux halves cfg'd out: a Mac
+      # `scoot` is the `scoot msg` client), the client library, scoot-ipc,
+      # scoot-core and scoot-rt (which builds anywhere). The same command
+      # on a Mac is in dev/README.md.
       - name: cargo check
         shell: nix develop --command bash -euo pipefail {0}
-        run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --all-targets
+        run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --exclude scoot-dbus --all-targets
 
       # The client half has to run, not just compile, on a Mac: `scoot msg
       # --help` needs no display and no compositor.
@@ -1424,7 +1439,7 @@ jobs:
 
       - name: cargo fmt
         shell: nix develop --command bash -euo pipefail {0}
-        run: cargo fmt --check -p scootbar -p scootui -p scoot-rt
+        run: cargo fmt --check -p scootbar -p scootui -p scoot-rt -p scoot-dbus
 
       # The Nix modules' check (nix/scootbar-tests.nix) runs this crate's own
       # `daemon --check` over every rendered bar.toml, so a change to the bar
@@ -1478,13 +1493,15 @@ jobs:
           done
           # The extracted crates: the drawing half and its leaf, with the
           # same matrix (default, smallest, each feature alone) so no
-          # feature leans on another crate's code.
+          # feature leans on another crate's code; and the D-Bus client,
+          # which has no features, so one build covers it.
           cargo clippy -p scootui -p scoot-rt --all-targets -- -D warnings
           cargo clippy -p scootui --no-default-features --all-targets -- -D warnings
           for feature in widgets icons png tray; do
             echo "--- scootui $feature alone"
             cargo clippy -p scootui --no-default-features --features "$feature" --all-targets -- -D warnings
           done
+          cargo clippy -p scoot-dbus --all-targets -- -D warnings
 
       # Both runners on the default build, for the reason the Linux job
       # gives. Then the unit tests of every other feature set: every module
@@ -1521,7 +1538,9 @@ jobs:
           done
           # The extracted crates' own unit tests: the drawing half moved
           # here, so its tests move with it (default, smallest and each
-          # feature alone, mirroring the clippy matrix above).
+          # feature alone, mirroring the clippy matrix above); and the
+          # D-Bus client's, which moved the same way (both runners, as
+          # above).
           cargo nextest run -p scootui -p scoot-rt --no-fail-fast
           cargo test -p scootui -p scoot-rt
           cargo nextest run -p scootui --no-default-features --no-fail-fast
@@ -1529,6 +1548,8 @@ jobs:
             echo "--- scootui $feature alone"
             cargo nextest run -p scootui --no-default-features --features "$feature" --no-fail-fast
           done
+          cargo nextest run -p scoot-dbus --no-fail-fast
+          cargo test -p scoot-dbus
 
       # No C beyond what std links, as for scootbg: no `libc` crate in the
       # normal dependency tree, and no shared library beyond glibc and
@@ -1553,17 +1574,18 @@ jobs:
           fi
           echo "ok: links only what std links"
 
-      # The fuzz targets (crates/scootbar/fuzz, its own workspace, which no
-      # step above compiles) for a fixed budget: a fixed number of runs from
-      # a fixed seed, so a run is the same run every time, from the seed
-      # corpus and every past finding (`regressions/`). Compiling them is
-      # half the point: they build scootbar's parsers by `#[path]`, so a
-      # refactor that breaks those includes fails here, not on the next
-      # person to fuzz. The stable tests replay the same files through the
-      # same checks in every run above; this is what mutates them. Stable
-      # toolchain, no sanitizer (`-s none`), as the fuzz README runs it;
-      # cargo-fuzz from the pinned nixpkgs. A finding prints its input in
-      # base64, since the runner's disk is gone after the job.
+      # The fuzz targets (crates/scootbar/fuzz and crates/scoot-dbus/fuzz,
+      # each its own workspace, which no step above compiles) for a fixed
+      # budget: a fixed number of runs from a fixed seed, so a run is the
+      # same run every time, from the seed corpus and every past finding
+      # (`regressions/`). Compiling them is half the point: they build the
+      # crates' parsers by `#[path]`, so a refactor that breaks those
+      # includes fails here, not on the next person to fuzz. The stable
+      # tests replay the same files through the same checks in every run
+      # above; this is what mutates them. Stable toolchain, no sanitizer
+      # (`-s none`), as the fuzz READMEs run it; cargo-fuzz from the pinned
+      # nixpkgs. A finding prints its input in base64, since the runner's
+      # disk is gone after the job.
       - name: Fuzz targets, a fixed budget
         shell: nix develop --command bash -euo pipefail {0}
         run: |
@@ -1583,7 +1605,7 @@ jobs:
                 -seed=1 -timeout=10 -artifact_prefix="$scratch/artifacts/" "$@"; then
               for found in "$scratch"/artifacts/*; do
                 [ -f "$found" ] || continue
-                echo "::error title=scootbar fuzz finding ($target)::$(basename "$found")"
+                echo "::error title=${FUZZ_CRATE:-scootbar} fuzz finding ($target)::$(basename "$found")"
                 echo "$(basename "$found"), base64:"
                 base64 -w0 "$found"; echo
               done
@@ -1595,7 +1617,11 @@ jobs:
           run payload -runs=2000000 -max_len=5000
           run volume -runs=2000000 -max_len=70000
           run network -runs=2000000 -max_len=70000
-          run dbus -runs=1000000 -max_len=70000
+          # The D-Bus client's target, moved with it to its own fuzz
+          # workspace: the same budget it had in scootbar.
+          cd ../scoot-dbus
+          cargo fetch --locked --manifest-path fuzz/Cargo.toml
+          FUZZ_CRATE=scoot-dbus run dbus -runs=1000000 -max_len=70000
 
       - name: Save the cargo cache
         # Same condition as the Linux job's save; see the comment there.

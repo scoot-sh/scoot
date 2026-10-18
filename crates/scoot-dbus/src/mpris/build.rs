@@ -4,7 +4,7 @@
 //! it agrees with.)
 
 use super::PLAYER;
-use crate::dbus::proto::Writer;
+use crate::proto::Writer;
 
 /// One `a{sv}` entry: the key, the variant's signature, then the value
 /// `write` makes.

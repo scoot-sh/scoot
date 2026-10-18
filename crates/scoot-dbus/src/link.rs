@@ -72,8 +72,9 @@ pub enum Addr {
     /// The bus's address names nothing this client dials: never
     /// connects, shows nothing, holds no descriptor.
     Unusable,
-    /// An already-open stream (the tests' socketpair end).
-    #[cfg(test)]
+    /// An already-open stream: the apps' tests hand over a socketpair
+    /// end, so a test bus is the only bus there is (a real session bus on
+    /// the machine running them must not be mistaken for it).
     Stream(UnixStream),
 }
 
@@ -136,10 +137,8 @@ impl<S: Session> Link<S> {
             Addr::Path(path) => (Some(Target::Path(path)), None, true),
             Addr::Abstract(name) => (Some(Target::Abstract(name)), None, true),
             Addr::Unusable => (None, None, false),
-            #[cfg(test)]
-            // No path to redial: a stream the tests hand over is the only
-            // bus there is, and a real session bus on the machine running
-            // them must not be mistaken for it.
+            // No path to redial: a stream handed over is the only bus
+            // there is (see [`Addr::Stream`]).
             Addr::Stream(stream) => (
                 Some(Target::Path(PathBuf::from(
                     "/nonexistent/scootbar-test-bus",
@@ -299,7 +298,7 @@ impl<S: Session> Link<S> {
                     .parent()
                     .filter(|parent| parent.is_dir())
                     .map(Path::to_path_buf)
-                    .unwrap_or_else(crate::control::paths::runtime_dir);
+                    .unwrap_or_else(scoot_rt::runtime_dir);
                 let notify =
                     rustix::fs::inotify::init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK)
                         .ok()
@@ -350,9 +349,10 @@ impl<S: Session> Link<S> {
             // dialling forever would spin the bar. Try once more later.
             if self.quick_deaths == MAX_QUICK_DEATHS {
                 self.quick_deaths = self.quick_deaths.saturating_add(1);
-                crate::print::warn(format_args!(
-                    "scootbar: {}: the bus keeps dropping the connection; \
+                scoot_rt::print::warn(format_args!(
+                    "{}: {}: the bus keeps dropping the connection; \
                      trying again in {} s, or when it is restarted",
+                    crate::prog(),
                     self.who,
                     RETRY_AFTER_QUICK_DEATHS.as_secs().max(1)
                 ));
@@ -385,9 +385,11 @@ impl<S: Session> Link<S> {
         match result {
             Ok(conn) => self.adopt(conn),
             Err(error) => {
-                crate::print::warn(format_args!(
-                    "scootbar: {}: no {} ({error}); waiting for one",
-                    self.who, self.bus_name
+                scoot_rt::print::warn(format_args!(
+                    "{}: {}: no {} ({error}); waiting for one",
+                    crate::prog(),
+                    self.who,
+                    self.bus_name
                 ));
                 self.wait();
             }

@@ -8,7 +8,7 @@
 //! every basic type, plus `ARRAY`, `STRUCT`, `VARIANT` and `DICT_ENTRY`.
 //!
 //! This file is `std` only, on purpose: the fuzz crate compiles it by
-//! `#[path]` (`crates/scootbar/fuzz`), as the volume module's `proto.rs`
+//! `#[path]` (`crates/scoot-dbus/fuzz`), as the volume module's `proto.rs`
 //! is, so nothing here may use anything but `std`.
 //!
 //! ## Bounds
@@ -1414,7 +1414,8 @@ impl Writer {
 
     /// A writer capped at `cap` bytes instead of [`MAX_MESSAGE`]: the
     /// tests' way to make a valid message this client would skip.
-    #[cfg(test)]
+    /// Always compiled, like the [`crate::bluez::build`] and
+    /// [`crate::mpris::build`] helpers that call it from the apps' tests.
     pub fn with_cap(cap: usize) -> Self {
         Self {
             cap,
@@ -1719,8 +1720,8 @@ impl Writer {
     }
 
     /// Starts a signal addressed to `dest`: what a peer sends to forge
-    /// one at a single listener (tests).
-    #[cfg(test)]
+    /// one at a single listener. Always compiled, for the apps' tests
+    /// that speak to a fake bus.
     pub fn begin_signal_to(
         &mut self,
         serial: u32,

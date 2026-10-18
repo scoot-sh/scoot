@@ -4,7 +4,7 @@
 
 use super::build::{changed, entry, get_all, get_all_with, metadata, state, status_changed};
 use super::*;
-use crate::dbus::proto::Writer;
+use crate::proto::Writer;
 
 #[test]
 fn a_real_get_all_is_read_and_what_the_bar_does_not_show_is_skipped() {
@@ -315,7 +315,7 @@ fn the_status_signal_builder_reads_back() {
 /// against this crate's own writer agrees with it, right or wrong.
 #[test]
 fn what_sd_bus_marshalled_is_read_right() {
-    use crate::dbus::proto::Message;
+    use crate::proto::Message;
     let call = include_bytes!("../fixtures/sdbus-mpris-getall-call.bin");
     let message = Message::parse(call).unwrap();
     assert_eq!(message.signature, "a{sv}");

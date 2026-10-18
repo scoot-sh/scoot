@@ -1,0 +1,35 @@
+# `cargo fuzz` targets over the D-Bus client's wire parsers: framing
+# accepts, waits or refuses without a panic, and every header and body
+# parser accepts or refuses without one. Test tooling only: never part of
+# any shipped binary, and never a member of the repository's workspace
+# (the `[workspace]` table below makes this its own), so
+# `cargo build --workspace`, nextest, clippy and the flake's builds never
+# compile it. How to run it: README.md here.
+[package]
+name = "scoot-dbus-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+# The four files are compiled by `#[path]` from scoot-dbus's own source,
+# and use nothing but `std`.
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "dbus"
+path = "fuzz_targets/dbus.rs"
+test = false
+doc = false
+bench = false
+
+# Only symbols, for readable crash stacks.
+[profile.release]
+debug = 1

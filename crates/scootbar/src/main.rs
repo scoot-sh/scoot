@@ -24,13 +24,7 @@ pub use scootui::color;
 mod config;
 mod control;
 mod daemon;
-#[cfg(any(
-    feature = "tray",
-    feature = "media",
-    feature = "bluetooth",
-    feature = "power"
-))]
-mod dbus;
+pub use scoot_dbus as dbus;
 mod density;
 pub use scootui::font;
 mod help;
