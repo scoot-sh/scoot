@@ -43,7 +43,7 @@ On-demand surfaces, the `xdg_toplevel` kind, the memfd name parameter.
 
 ## Resolution
 
-Shipped by `refactor/scootui-extract-wayland` (PR #TBD). A mechanical move
+Shipped by `refactor/scootui-extract-wayland` (PR #666). A mechanical move
 with no logic edits, verified by unchanged snapshots, unchanged
 `count_allocations == 0` tests, and ratchet rows within noise (below).
 
