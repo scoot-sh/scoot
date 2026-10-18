@@ -196,6 +196,21 @@ impl Session {
     /// binary and it is not required. `app` is the app binary under test
     /// (see [`Session::app`]).
     pub fn scoot(app: &Path, tag: &str, outputs: u32, config: &str) -> Option<Self> {
+        Self::scoot_with_env(app, tag, outputs, config, &[])
+    }
+
+    /// [`Session::scoot`] with extra environment for the compositor: a
+    /// keyboard test sets `XKB_DEFAULT_LAYOUT` (and friends) per session,
+    /// a greeter test its session variables. Applied after the sandbox,
+    /// so the caller wins over nothing the harness sets (the sandbox
+    /// only pins the XDG base directories).
+    pub fn scoot_with_env(
+        app: &Path,
+        tag: &str,
+        outputs: u32,
+        config: &str,
+        env: &[(&str, &str)],
+    ) -> Option<Self> {
         let Some(scoot) = scoot_bin(app) else {
             skip(
                 "SCOOTBAR_REQUIRE_SCOOT",
@@ -228,6 +243,9 @@ impl Session {
         // Its config is explicit, but sandbox it anyway: nothing the
         // compositor or a client it spawns reads may come from the real home.
         scratch.sandbox(&mut compositor);
+        for (key, value) in env {
+            compositor.env(key, value);
+        }
         let compositor = compositor
             .spawn()
             .unwrap_or_else(|e| panic!("cannot start {}: {e}", scoot.display()));

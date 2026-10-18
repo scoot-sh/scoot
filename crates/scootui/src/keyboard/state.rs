@@ -68,6 +68,7 @@ pub struct Keyboard {
     keymap: KeymapSet,
     state: State,
     compose: Option<Compose>,
+    compose_locale: Option<std::ffi::OsString>,
 }
 
 struct Compose {
@@ -76,16 +77,18 @@ struct Compose {
 }
 
 impl Keyboard {
-    /// Decode with `keymap` and no Compose: dead keys report [`TextError::NoSymbol`]
-    /// until their partner arrives... -- no: without a table every key
+    /// Decode with `keymap` and no Compose: without a table every key
     /// decodes to its own keysym's text, and dead keys decode to nothing.
-    /// For Compose, see [`Keyboard::with_compose`].
+    /// For Compose, see [`Keyboard::with_compose`] (an explicit table,
+    /// for tests) or [`Keyboard::set_compose_locale`] (the session
+    /// locale, for apps).
     pub fn new(keymap: KeymapSet) -> Self {
         let state = State::new(keymap.keymap());
         Self {
             keymap,
             state,
             compose: None,
+            compose_locale: None,
         }
     }
 
@@ -104,7 +107,35 @@ impl Keyboard {
                 state: compose_state,
                 table,
             }),
+            compose_locale: None,
         }
+    }
+
+    /// Decode dead keys through a Compose table built for `locale`
+    /// (explicit, never from the environment). Built on the keymap's own
+    /// context and rebuilt on every keymap swap; a table that will not
+    /// build (an interior NUL, a host without the data) degrades to
+    /// direct decoding rather than failing the decode.
+    pub fn set_compose_locale(&mut self, locale: &OsStr) {
+        use std::os::unix::ffi::OsStrExt;
+        // The locale is stored, not the table: the table belongs to a
+        // keymap context, and a swap drops that context with the old map.
+        if locale.as_bytes().contains(&0) {
+            self.compose = None;
+            self.compose_locale = None;
+            return;
+        }
+        self.compose_locale = Some(locale.to_owned());
+        self.compose = xkb::compose::Table::new_from_locale(
+            self.keymap.context(),
+            locale,
+            xkb::compose::COMPILE_NO_FLAGS,
+        )
+        .ok()
+        .map(|table| {
+            let state = xkb::compose::State::new(&table, xkb::compose::STATE_NO_FLAGS);
+            Compose { state, table }
+        });
     }
 
     /// Apply a `wl_keyboard.modifiers` event: depressed, latched, locked,
@@ -211,14 +242,18 @@ impl Keyboard {
     pub fn replace_keymap(&mut self, text: String) -> Result<(), super::KeymapError> {
         let keymap = KeymapSet::compile(text)?;
         self.state = State::new(keymap.keymap());
-        if let Some(compose) = self.compose.as_mut() {
-            // Rebuild against the same table (its locale did not change):
-            // the borrow is C-side only, so a fresh state on the same
-            // table is exact.
+        self.keymap = keymap;
+        // A swap drops the old context with the old map, so a stored
+        // locale rebuilds on the new one (degrading to direct decoding
+        // when the table will not build); an explicit table stays, the
+        // borrow being C-side only.
+        if let Some(locale) = self.compose_locale.clone() {
+            self.compose = None;
+            self.set_compose_locale(&locale);
+        } else if let Some(compose) = self.compose.as_mut() {
             compose.state =
                 xkb::compose::State::new(&compose.table, xkb::compose::STATE_NO_FLAGS);
         }
-        self.keymap = keymap;
         Ok(())
     }
 
@@ -234,10 +269,15 @@ impl Keyboard {
 /// exactly one codepoint (modifiers, multi-keysym keys, dead keys), and
 /// `char::encode_utf8` into the caller's buffer allocates nothing. A
 /// buffer too small for the character reports [`TextError::Truncated`],
-/// never a partial character.
+/// never a partial character. Codepoint 0 is not text (it is what the C
+/// side reports for "no codepoint", and `char::from_u32` would happily
+/// make it U+0000): [`TextError::NoSymbol`.
 fn direct_utf8(state: &State, key: xkb::Keycode, buf: &mut [u8]) -> Result<usize, TextError> {
     let codepoint = state.key_get_utf32(key);
     let ch = char::from_u32(codepoint).ok_or(TextError::NoSymbol)?;
+    if ch == '\0' {
+        return Err(TextError::NoSymbol);
+    }
     let mut scratch = [0u8; 4];
     let text = ch.encode_utf8(&mut scratch);
     if text.len() > buf.len() {

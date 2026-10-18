@@ -67,6 +67,21 @@ fn version_negotiation_bounds_the_seat() {
 }
 
 #[test]
+fn wire_key_states_map_to_press_release_repeat() {
+    use wayland_client::protocol::wl_keyboard::KeyState as Wire;
+    use wayland_client::WEnum;
+    // The generated discriminants are the protocol's: a release must
+    // never decode as a press (which would type every key twice).
+    assert_eq!(u32::from(WEnum::Value(Wire::Released)), 0);
+    assert_eq!(u32::from(WEnum::Value(Wire::Pressed)), 1);
+    assert_eq!(u32::from(WEnum::Value(Wire::Repeated)), 2);
+    assert_eq!(KeyState::from_wire(0), Some(KeyState::Released));
+    assert_eq!(KeyState::from_wire(1), Some(KeyState::Pressed));
+    assert_eq!(KeyState::from_wire(2), Some(KeyState::Repeated));
+    assert_eq!(KeyState::from_wire(3), None);
+}
+
+#[test]
 fn us_letters_shift_levels_and_the_evdev_offset() {
     let keymap = us();
     let shift = shift_mask(&keymap);
@@ -512,7 +527,7 @@ fn seat_drops_keys_without_focus_or_keymap() {
     let mut buf = [0u8; MIN_TEXT_BYTES];
     // No keymap and no focus: nothing decodes.
     assert_eq!(seat.key_event(KEY_A, KeyState::Pressed, &mut buf), None);
-    seat.set_keymap_set(us(), false);
+    seat.set_keymap_set(us());
     assert_eq!(seat.key_event(KEY_A, KeyState::Pressed, &mut buf), None);
     seat.enter();
     let out = seat
@@ -529,7 +544,7 @@ fn seat_drops_keys_without_focus_or_keymap() {
 #[test]
 fn seat_repeat_holds_and_cancels() {
     let mut seat = KeyboardSeat::new();
-    seat.set_keymap_set(us(), false);
+    seat.set_keymap_set(us());
     seat.repeat_info_event(25, 200);
     seat.enter();
     let mut buf = [0u8; MIN_TEXT_BYTES];
@@ -554,7 +569,7 @@ fn seat_repeat_holds_and_cancels() {
 #[test]
 fn seat_keymap_change_cancels_repeat_and_bad_text_keeps_the_old() {
     let mut seat = KeyboardSeat::new();
-    seat.set_keymap_set(us(), false);
+    seat.set_keymap_set(us());
     seat.repeat_info_event(25, 200);
     seat.enter();
     let mut buf = [0u8; MIN_TEXT_BYTES];
@@ -574,7 +589,7 @@ fn seat_keymap_change_cancels_repeat_and_bad_text_keeps_the_old() {
 #[test]
 fn seat_repeated_states_follow_the_rate() {
     let mut seat = KeyboardSeat::new();
-    seat.set_keymap_set(us(), false);
+    seat.set_keymap_set(us());
     seat.enter();
     let mut buf = [0u8; MIN_TEXT_BYTES];
     // Rate nonzero: the timer owns repetition; `repeated` must not arrive
@@ -675,7 +690,7 @@ fn hot_path_allocates_nothing() {
 fn seat_event_path_allocates_nothing() {
     use scootbg_mem::count_allocations;
     let mut seat = KeyboardSeat::new();
-    seat.set_keymap_set(us(), false);
+    seat.set_keymap_set(us());
     seat.repeat_info_event(25, 200);
     seat.enter();
     let mut buf = [0u8; MIN_TEXT_BYTES];

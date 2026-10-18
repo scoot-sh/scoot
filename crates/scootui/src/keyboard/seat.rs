@@ -97,26 +97,27 @@ impl KeyboardSeat {
         }
     }
 
-    /// Test and bootstrap seam: decode without a compositor. The headless
-    /// test uses the real `keymap_event` path instead; this exists for
-    /// RMLVO-compiled unit layouts.
-    pub fn set_keymap_set(&mut self, keymap: KeymapSet, compose: bool) {
-        let keyboard = if compose {
-            match super::state::compose_table_from_locale(
-                &keymap,
-                std::ffi::OsStr::new("C"),
-            ) {
-                // A table that will not build (a host without Compose
-                // data) degrades to direct decoding, never to a different
-                // layout: typing plain keys must survive.
-                Ok(table) => Keyboard::with_compose(keymap, table),
-                Err(_) => Keyboard::new(keymap),
-            }
-        } else {
-            Keyboard::new(keymap)
-        };
-        self.decode = Some(keyboard);
+    /// Decode dead keys through a Compose table built for `locale`
+    /// (explicit, never from the environment: the launcher passes the
+    /// session locale, tests pin `"C"`). A table that will not build
+    /// degrades to direct decoding rather than failing the seat.
+    pub fn set_compose_locale(&mut self, locale: &std::ffi::OsStr) {
+        if let Some(decode) = self.decode.as_mut() {
+            decode.set_compose_locale(locale);
+        }
+    }
+
+    /// Test seam: decode without a compositor. The headless test uses the
+    /// real `keymap_event` path instead; this exists for RMLVO-compiled
+    /// unit layouts.
+    pub fn set_keymap_set(&mut self, keymap: KeymapSet) {
+        self.decode = Some(Keyboard::new(keymap));
         self.repeat.keymap_changed();
+    }
+
+    /// Whether a keymap has arrived. Until it has, no key decodes.
+    pub fn has_keymap(&self) -> bool {
+        self.decode.is_some()
     }
 
     /// A `wl_keyboard.keymap` event: compile the fd (seek, cap, refuse
