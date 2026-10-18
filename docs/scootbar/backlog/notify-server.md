@@ -3,7 +3,7 @@ title: "scootnotify: the org.freedesktop.Notifications server and its model, hea
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "GO verdict recorded in notify-prototype (a human removes this clause); scoot-dbus-extract"
+blocked: "scoot-dbus-extract"
 milestone: "M7"
 ---
 
