@@ -276,7 +276,7 @@ Options, to be decided by a spike (`scootui-keyboard-spike`):
 | **libxkbcommon** via the `xkbcommon` crate (0.9.0, MIT; already in `Cargo.lock` because scoot links it through Smithay) | The reference implementation, which every compositor and toolkit uses; compose tables; zero marginal closure on a scoot desktop | A C shared library in a binary family that has none; the spike proves the consumer stays `forbid(unsafe_code)` (decided: no wrapper crate) |
 | Hand-rolled | Smallest | Wrong for any non-trivial layout; rejected |
 
-**Decided by the spike ([record](../spikes/scootui-keyboard.md)): `xkbcommon`.**
+**Spike result ([record](../spikes/scootui-keyboard.md)): `xkbcommon`, accepted by the maintainer on 2026-10-17 (Decisions needed 3).**
 `kbvm` 0.2.0 passes the whole layout set including dead keys, but costs
 918 KB of stripped binary on the dev VM (+630 KB `.text`) against this
 plan's 300 KB bar, pulls 22 extra crates, and needs `XKB_CONFIG_ROOT`
@@ -654,7 +654,7 @@ Ordered by what unblocks what, and by risk. **Nothing is extracted until a gate 
 1. **Start now, all independent:**
    - (candidate) [`greet-headless-login`](../../docs/scootbar/backlog/greet-headless-login.md),
      the Wayland-free greetd login for agents and VM tests, on the go-ahead;
-   - the two spikes, [`scootui-keyboard-spike`](../../docs/scootbar/backlog/scootui-keyboard-spike.md)
+   - the two spikes, [`scootui-keyboard-spike`](../../docs/scootbar/backlog/resolved/scootui-keyboard-spike-done.md)
      and [`scootui-text-shaping-spike`](../../docs/scootbar/backlog/resolved/scootui-text-shaping-spike-done.md)
      (NO-GO, measured 2026-10-18),
      which decide the two choices that are expensive to reverse;
@@ -775,11 +775,13 @@ Only the items that are the maintainer's call are asked. The rest are recorded a
      launcher's and greeter's after the keyboard spike;
    - hold `scootui-extract-draw` until a gate says go.
 2. **The greeter's name.** *Recommend:* `scootgreet` ([Names](#names)).
-3. **A C library in the shell family**, if the keyboard spike lands on libxkbcommon.
-   *Recommend:* accept it, confined to one small wrapper crate, if `kbvm` fails the layout set.
-   A greeter that types the wrong character is worse than a dynamic library that every Wayland
-   session already has. Mostly an engineering call, but it changes a family property, so it
-   is asked.
+3. **A C library in the shell family**: `libxkbcommon`. **Decided 2026-10-17: accepted.** The
+   maintainer confirmed it is linked dynamically (`libxkbcommon.so.0`), not compiled in. The
+   spike chose it because `kbvm` passes the layout set but costs 918 KB of stripped binary
+   against the 300 KB bar, and needs `XKB_CONFIG_ROOT`, `XLOCALEDIR` and `XCOMPOSEFILE` set or
+   it fails silently on NixOS. No wrapper crate is needed: the consumer keeps
+   `forbid(unsafe_code)`. The scoot compositor already links the library, so a scoot desktop
+   gains nothing; the shell apps lose their libc-only property.
 4. **The `resvg` size waiver** for SVG app icons in scootlaunch. *Recommend:* default-on `svg`,
    PNG preferred when the theme has one, waiver ruled on the measured row (as the tray's were).
 5. **The greeter host.** *Recommend:* cage. A scoot kiosk host only if cage fails the GPU-free

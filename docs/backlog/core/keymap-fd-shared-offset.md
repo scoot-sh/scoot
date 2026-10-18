@@ -8,7 +8,7 @@ blocked: null
 
 # Second read()-based keyboard client gets an empty keymap
 
-Filed 2026-10-17 from the [keyboard-stack spike](../../dev/spikes/scootui-keyboard.md#a-second-reader-gets-an-empty-keymap).
+Filed 2026-10-17 from the [keyboard-stack spike](../../../dev/spikes/scootui-keyboard.md#a-second-reader-gets-an-empty-keymap).
 Serves **daily-drive**: scootlaunch and scootgreet read the keymap as ordinary
 Wayland clients, and whichever maps second decodes every key as nothing.
 

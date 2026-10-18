@@ -1,6 +1,6 @@
 # Keyboard-stack spike: `kbvm` vs `xkbcommon`, measured
 
-Measured 2026-10-17/18 for [scootui-keyboard-spike](../../../docs/scootbar/backlog/scootui-keyboard-spike.md).
+Measured 2026-10-17/18 for [scootui-keyboard-spike](../../docs/scootbar/backlog/resolved/scootui-keyboard-spike-done.md).
 Two throwaway binaries doing the ticket's own job — bind `wl_seat` v9+,
 read the keymap scoot sends, turn key events into text and keysyms — one per
 option, timed and sized on the dev VM and the Mac. The spike crates are
@@ -188,10 +188,12 @@ wrapper at all here, but that does not outweigh the size verdict.
 
 ### `memfd_secret` (scootgreet's locked page)
 
-Dev VM kernel 6.18.50: available. Raw `memfd_create("spike",
-MFD_SECRET)` returns a fd; `CONFIG_SECRETMEM=y`. (A first probe OR-ing
-`MFD_EXEC` failed with `EINVAL`; without it, OK.) Not run: the M2 Asahi
-kernel (no access from this session); macOS has no such API at all.
+Dev VM kernel 6.18.50: available, `CONFIG_SECRETMEM=y`. The call is
+`memfd_secret(2)` with flags 0, which returns a fd. `memfd_create` with
+`MFD_SECRET` (alone or with `MFD_EXEC`) fails with `EINVAL`: there is no
+such `memfd_create` flag, and an earlier probe that appeared to work was
+passing a constant that is 0. Not run: the M2 Asahi kernel (no access from
+this session); macOS has no such API at all.
 
 ## Findings for the implementer
 
