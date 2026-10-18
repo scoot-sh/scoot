@@ -45,8 +45,8 @@
 //! `panic!`, no indexing past what a length check allowed. Every fallible
 //! operation reports through `Option` or a small outcome enum.
 
-mod line;
 mod focus;
+mod line;
 mod list;
 mod paint;
 
@@ -55,11 +55,11 @@ mod goldens;
 #[cfg(test)]
 mod tests;
 
+pub use focus::FocusChain;
 pub use line::{
     Entry, InsertOutcome, KEY_BACKSPACE, KEY_DELETE, KEY_DOWN, KEY_END, KEY_HOME, KEY_LEFT,
     KEY_PAGE_DOWN, KEY_PAGE_UP, KEY_RIGHT, KEY_TAB, KEY_UP, MASK_CHAR, MAX_ENTRY_BYTES,
     PasswordEntry,
 };
-pub use focus::FocusChain;
 pub use list::{Activate, Highlight, List, MAX_HIGHLIGHT_ROWS, MAX_SPANS_PER_ROW, Selector};
 pub use paint::{Geometry, paint_entry, paint_list, paint_password, paint_selector};

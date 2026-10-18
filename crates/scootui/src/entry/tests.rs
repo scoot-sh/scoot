@@ -3,8 +3,8 @@
 
 use scootbg_mem::count_allocations;
 
-use super::line::{Entry, InsertOutcome, MAX_ENTRY_BYTES, PasswordEntry};
 use super::focus::FocusChain;
+use super::line::{Entry, InsertOutcome, MAX_ENTRY_BYTES, PasswordEntry};
 use super::list::{Activate, List, MAX_HIGHLIGHT_ROWS, MAX_SPANS_PER_ROW, Selector};
 
 fn typed(cap: usize, s: &str) -> Entry {
@@ -537,8 +537,7 @@ fn a_65536_row_frame_costs_what_a_small_one_costs() {
     // The same ten-highlight working set on both lists, so the only
     // difference the measurement can see is the row count: the scan
     // below walks highlights, never rows.
-    let hi_small: [(usize, &[(u32, u32)]); 10] =
-        core::array::from_fn(|i| (i * 6 % 64, &spans[..]));
+    let hi_small: [(usize, &[(u32, u32)]); 10] = core::array::from_fn(|i| (i * 6 % 64, &spans[..]));
     small.set_highlights(&hi_small);
     let hi: [(usize, &[(u32, u32)]); 10] = core::array::from_fn(|i| (i * 6000, &spans[..]));
     big.set_highlights(&hi);
