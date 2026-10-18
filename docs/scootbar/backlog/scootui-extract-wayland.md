@@ -3,7 +3,7 @@ title: "Extract `scootui`'s Wayland half: outputs, layer surfaces, shm, the poll
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scootui-extract-draw"
+blocked: null
 milestone: "M7"
 ---
 

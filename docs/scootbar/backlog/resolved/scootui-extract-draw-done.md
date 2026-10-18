@@ -1,10 +1,11 @@
 ---
 title: "Extract `scootui` and `scoot-rt`: move scootbar's pure drawing, widgets, icons and print/runtime-dir helpers"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-18"
 ---
 
 # Extract `scootui` and `scoot-rt`: the drawing half

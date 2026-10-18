@@ -3,7 +3,7 @@ title: "Extract `scootui`'s control socket: framing, paths, claim and connection
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scootui-extract-draw"
+blocked: null
 milestone: "M7"
 ---
 
