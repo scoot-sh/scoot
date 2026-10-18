@@ -406,6 +406,11 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [User and community look targets: render any app from a template](./core/look-user-targets.md) (medium)
 - [Later: opt-in automatic look switching](./core/look-auto-switch.md) (low, later)
 
+### Found reviewing the shell-app extractions (2026-10-18)
+
+- [Keyboard `leave` when a client destroys its only surface](./core/keyboard-leave-on-last-surface-destroy-probe.md): a headless probe before anyone asserts a compositor bug.
+- [scootctl look wiring tests race on `STARSHIP_CONFIG`](./testing/scootctl-starship-env-race.md): flaked CI's one-process `cargo test` on an unrelated PR.
+
 ### Core / config / rendering
 - [Idle lock shows a blank white screen with no prompt](./core/lock-screen-blank-no-prompt.md) — medium, filed 2026-10-17 from the scoot-iso aarch64/HVF install walkthrough: idle lock past 4m shows plain white fullscreen (config says navy `2B3648`), no prompt; typing the password blind unlocks
 - [`scoot look list` prints every look twice (shadowed duplicates)](./core/look-list-shadowed-duplicates.md) — low, filed 2026-10-17 from the same walkthrough: system + home halves both register the catalog; applies work

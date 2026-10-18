@@ -213,3 +213,5 @@ hits the wall:
 [a real maximize](../../backlog/resolved/maximize-done.md),
 [persistent workspaces (a decision)](../../backlog/core/persistent-workspaces.md),
 [keyboard layout event](../../backlog/ipc/keyboard-layout-event.md).
+
+- [Audit the popup and icon zero-allocation pins](scootui-popup-alloc-pins-audit.md): they ran without a counting allocator until #670.
