@@ -353,12 +353,14 @@ fn drive<B: ClientBackend>(secs: u64, with_surface: bool) {
         let wait = remaining.min(Duration::from_millis(500));
         let timeout = Timespec::try_from(wait).unwrap_or(Timespec { tv_sec: 0, tv_nsec: 0 });
         match poll(&mut pollfds, Some(&timeout)) {
-            Ok(_) => {
+            Ok(_) if pollfds[0].revents().contains(PollFlags::IN) => {
                 if guard.read().is_err() {
                     break;
                 }
                 queue.dispatch_pending(&mut state).expect("dispatch");
             }
+            // Timeout with no events: loop back and re-check the deadline.
+            Ok(_) => {}
             Err(_) => break,
         }
     }
