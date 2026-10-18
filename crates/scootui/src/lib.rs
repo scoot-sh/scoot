@@ -1,16 +1,23 @@
-//! `scootui`: pure drawing, widgets and icons shared by the shell apps.
+//! `scootui`: pure drawing, widgets and icons shared by the shell apps,
+//! plus the Wayland scaffolding they all stand on.
 //!
 //! A canvas, color tokens, text with a bounded glyph cache, the popup's
 //! pure half and icon rasterization, with no Wayland and no I/O. Extracted
 //! from `scootbar` so `scootnotify`, `scootlaunch` and `scootgreet` draw the
-//! same way without duplicating it. What stays in `scootbar` is bar-shaped:
-//! modules, layout, render and the Wayland scaffolding (which moves in
-//! `scootui-extract-wayland`).
+//! same way without duplicating it. The per-output model (`outputs`), the
+//! scale arithmetic (`density`), the input regions (`region`) and the bar
+//! geometry (`bar`) moved with `scootui-extract-wayland`, still with no
+//! Wayland types in them; what stays in `scootbar` is bar-shaped: modules,
+//! layout, render and the layer-surface glue (which moves when
+//! `scootui-surfaces-on-demand` generalizes it).
 //!
 //! Features: `widgets` (the popup and the ellipsis cut), `icons` (path
-//! icons and the cache), `png` (PNG image icons) and `tray` (tray pixmaps).
-//! The default is `widgets` and `icons`; the smallest build has none of
-//! them and draws nothing but plain canvas and text.
+//! icons and the cache), `png` (PNG image icons), `tray` (tray pixmaps),
+//! `wayland` (the poll loop's Wayland primitives: flush, the gone check,
+//! the read after a poll) and `test-support` (the headless-compositor
+//! harness the apps' integration tests share). The default is `widgets`
+//! and `icons`; the smallest build has none of them and draws nothing but
+//! plain canvas and text.
 //!
 //! No `unsafe` here: the two mappings it needs, the font and the shm
 //! buffer, are `scootbg-mem`'s.
@@ -26,14 +33,24 @@ compile_error!(
      (dev/README.md)"
 );
 
+pub mod bar;
 pub mod class;
 pub mod color;
+pub mod density;
 pub mod ellipsis;
 pub mod font;
 pub mod output;
+pub mod outputs;
 pub mod paint;
+pub mod region;
 pub mod text;
 pub mod theme;
+
+#[cfg(feature = "wayland")]
+pub mod wayland;
+
+#[cfg(feature = "test-support")]
+pub mod test_support;
 
 #[cfg(feature = "widgets")]
 pub mod popup;

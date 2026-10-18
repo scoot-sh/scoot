@@ -55,7 +55,7 @@ struct Rig {
 
 impl Rig {
     fn start(tag: &str) -> Option<Self> {
-        let session = Session::scoot(tag, 1, "")?;
+        let session = Session::scoot(&common::scootbar_bin(), tag, 1, "")?;
         let dir = session.runtime_dir().join("out");
         fs::create_dir_all(&dir).unwrap();
         let file = session.runtime_dir().join("bar.toml");
@@ -235,7 +235,7 @@ fn a_reload_retries_a_module_left_out_as_unavailable() {
         eprintln!("skipped -- no unshare/ip for the namespace retry test");
         return;
     }
-    let Some(session) = Session::scoot("style-retry", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "style-retry", 1, "") else {
         return;
     };
     let dir = session.runtime_dir().join("out");

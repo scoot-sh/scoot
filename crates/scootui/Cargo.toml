@@ -1,6 +1,6 @@
 [package]
 name = "scootui"
-description = "Pure drawing, widgets and icons shared by scootbar, scootnotify, scootlaunch and scootgreet: canvas, text, theme, popups and icon rasterization with no Wayland"
+description = "Shared drawing, widgets, icons and Wayland scaffolding for scootbar, scootnotify, scootlaunch and scootgreet: canvas, text, theme, popups, icon rasterization, the per-output model and the poll loop's Wayland primitives"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -17,6 +17,21 @@ icons = []
 png = ["dep:png", "icons"]
 # Tray pixmaps, scaled through the shared resampler.
 tray = ["icons"]
+# The poll loop's Wayland primitives (flush, the gone check, the read
+# after a poll): the Wayland half of the daemon loop, which every shell
+# app's loop runs.
+wayland = ["dep:wayland-client", "rustix/event"]
+# The headless-compositor harness the apps' integration tests share (the
+# scoot and sway sessions, the screenshot readers). Test support only:
+# never enabled in a shipped binary.
+test-support = [
+  "wayland",
+  "dep:wayland-protocols-wlr",
+  "dep:base64",
+  "dep:serde_json",
+  "dep:png",
+  "rustix/process",
+]
 
 [dependencies]
 scoot-rt.workspace = true
@@ -24,3 +39,11 @@ scootbg-mem.workspace = true
 ab_glyph = "0.2"
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 png = { version = "0.18", optional = true }
+# The Wayland connection and its errors, for `wayland` (and through it
+# `test-support`): plain `wayland-client` on its pure-Rust backend, as
+# scootbar, so nothing links libwayland.
+wayland-client = { version = "0.31", optional = true }
+# The screencopy manager the harness reads sway's pixels through.
+wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
+base64 = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }

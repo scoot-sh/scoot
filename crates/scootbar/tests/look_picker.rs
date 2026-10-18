@@ -100,7 +100,7 @@ struct Rig {
 
 impl Rig {
     fn start(tag: &str) -> Option<Self> {
-        let session = Session::scoot(tag, 1, "")?;
+        let session = Session::scoot(&common::scootbar_bin(), tag, 1, "")?;
         let scoot = scoot_bin();
         let bin_dir = scoot.parent().unwrap().to_owned();
         // Two source looks, cataloged through `SCOOT_LOOKS_DIR`.

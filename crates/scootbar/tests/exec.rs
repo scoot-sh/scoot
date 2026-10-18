@@ -66,7 +66,7 @@ impl Rig {
     }
 
     fn start_with(tag: &str, lists: &str, tables: &str, env: &[(&str, &str)]) -> Option<Self> {
-        let session = Session::scoot(tag, 1, "")?;
+        let session = Session::scoot(&common::scootbar_bin(), tag, 1, "")?;
         let dir = session.runtime_dir().join("out");
         fs::create_dir_all(&dir).unwrap();
         let file = session.runtime_dir().join("bar.toml");
@@ -669,7 +669,7 @@ fn a_burst_of_pushes_in_one_turn_is_a_few_redraws() {
 #[cfg(feature = "exec")]
 #[test]
 fn too_many_exec_modules_are_refused_by_name() {
-    let Some(session) = Session::scoot("exec-many", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "exec-many", 1, "") else {
         return;
     };
     let mut tables = String::new();

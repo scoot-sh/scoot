@@ -278,7 +278,7 @@ fn refused(session: &Session, args: &[&str]) -> String {
 
 /// Starts scoot with two outputs and a window-title bar on the left.
 fn two_outputs(tag: &str, tables: &str) -> Option<(Session, Reaper)> {
-    let session = Session::scoot(tag, 2, "")?;
+    let session = Session::scoot(&common::scootbar_bin(), tag, 2, "")?;
     let file = session.runtime_dir().join("bar.toml");
     std::fs::write(
         &file,

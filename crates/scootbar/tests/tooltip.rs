@@ -82,7 +82,7 @@ impl Rig {
         placement: &[&str],
         env: &[(&str, &str)],
     ) -> Option<Self> {
-        let session = Session::scoot(tag, 1, "")?;
+        let session = Session::scoot(&common::scootbar_bin(), tag, 1, "")?;
         let file = session.runtime_dir().join("bar.toml");
         fs::write(&file, config(tables, bar)).unwrap();
         Self::launch(session, file, placement, env, bar.contains("bottom"))
@@ -447,7 +447,7 @@ fn a_module_with_no_tooltip_shows_none() {
 
 #[test]
 fn a_click_closes_it_and_acts_and_it_stays_away_until_the_pointer_leaves() {
-    let Some(session) = Session::scoot("tip-click", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "tip-click", 1, "") else {
         return;
     };
     let out = session.runtime_dir().join("out");
@@ -744,7 +744,7 @@ fn hiding_the_bar_or_a_bad_reload_takes_it_down_without_harm() {
 #[cfg(feature = "volume")]
 #[test]
 fn under_a_click_popup_there_is_no_tooltip_and_after_it_there_is() {
-    let Some(session) = Session::scoot("tip-popup", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "tip-popup", 1, "") else {
         return;
     };
     let server = pulse::Server::start(&session.runtime_dir().join("pulse"));
@@ -902,7 +902,7 @@ fn sway_tip_x(session: &Session, name: &str) -> Option<u32> {
 
 #[test]
 fn on_sway_it_shows_and_goes_with_its_output() {
-    let Some(session) = Session::sway("tip-sway", 2) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "tip-sway", 2) else {
         return;
     };
     let file = session.runtime_dir().join("bar.toml");
@@ -976,7 +976,7 @@ fn on_sway_it_shows_and_goes_with_its_output() {
 
 #[test]
 fn a_scale_change_with_it_shown_leaves_one_at_the_new_scale() {
-    let Some(session) = Session::scoot("tip-scale", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "tip-scale", 1, "") else {
         return;
     };
     let file = session.runtime_dir().join("bar.toml");

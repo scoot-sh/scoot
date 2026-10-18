@@ -18,28 +18,28 @@
 #![cfg_attr(not(feature = "clock"), allow(dead_code))]
 
 mod action;
-mod bar;
+pub use scootui::bar;
 mod cli;
 pub use scootui::color;
 mod config;
 mod control;
 mod daemon;
 pub use scoot_dbus as dbus;
-mod density;
+pub use scootui::density;
 pub use scootui::font;
 mod help;
 pub use scootui::icon;
 mod layout;
 mod look;
 mod modules;
-mod outputs;
+pub use scootui::outputs;
 pub use scootui::paint;
 mod pointer;
 mod policy;
 pub use scoot_rt::print;
 #[cfg(feature = "popup")]
 pub use scootui::popup;
-mod region;
+pub use scootui::region;
 mod render;
 mod scoot;
 #[cfg(test)]

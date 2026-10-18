@@ -1,5 +1,5 @@
 use super::{DENOMINATOR, Preferred, Scale, scaled_length};
-use crate::outputs::Size;
+use crate::output::Size;
 
 fn size(width: u32, height: u32) -> Size {
     Size { width, height }

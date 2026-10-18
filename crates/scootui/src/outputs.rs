@@ -35,8 +35,8 @@
 //!
 //! The surface is drawn when it is configured and its [`Frame`] (logical
 //! size and scale) differs from the one it was last committed with, or a
-//! module's view changed since (`stale`, which `crate::render` works out),
-//! and only then. A `configure` that changes nothing still needs a commit,
+//! module's view changed since (`stale`, which the bar's render works out
+//! in scootbar), and only then. A `configure` that changes nothing still needs a commit,
 //! so the ack takes effect ([`Plan::Commit`]). Many events in one read (a scale change
 //! arrives as several) are one plan, since the loop asks after dispatching
 //! them all. A draw that failed is tried again on later turns, a few
@@ -56,14 +56,13 @@ mod tests;
 use crate::bar::Bar;
 use crate::density::{Preferred, Scale};
 
-pub use scootui::output::OutputId;
+pub use crate::output::{OutputId, Size};
 
-/// A width and height, in whatever unit the context says.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Size {
-    pub width: u32,
-    pub height: u32,
-}
+/// An output name is at most this many bytes: what is kept sizes `query`
+/// replies and policy matches, so it never grows on a name. Longer names
+/// are ignored at staging. (Moved here with the model from `policy`, which
+/// re-exports it.)
+pub const MAX_NAME: usize = 128;
 
 /// Whether `wl_output.transform` swaps the output's axes: its logical
 /// width is then its mode's height. The only part of the transform a bar
@@ -79,7 +78,7 @@ pub enum Rotation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Info {
     /// `wl_output.name` (v4), for messages: at most
-    /// [`crate::policy::MAX_NAME`] bytes, longer ones ignored at staging.
+    /// [`MAX_NAME`] bytes, longer ones ignored at staging.
     pub name: Option<String>,
     /// The current mode, in device pixels.
     pub mode: Option<Size>,
@@ -300,12 +299,12 @@ impl Output {
         Label(self.info.name.as_deref())
     }
 
-    /// A `wl_output.name` event. A name past [`crate::policy::MAX_NAME`]
+    /// A `wl_output.name` event. A name past [`MAX_NAME`]
     /// bytes is a broken compositor, and ignored like a non-positive mode
     /// or a sub-1 scale: what is kept sizes `query` replies and policy
     /// matches, so it never grows on a name.
     pub fn stage_name(&mut self, name: String) {
-        if name.len() > crate::policy::MAX_NAME {
+        if name.len() > MAX_NAME {
             return;
         }
         self.staged.name = Some(name);
@@ -694,7 +693,11 @@ impl<O> Outputs<O> {
         self.list.iter_mut()
     }
 
+    // Test-only: how many outputs are bound. No `is_empty` beside it:
+    // the lint wants one for public `len`s, and an `is_empty` no test
+    // reads would be dead code.
     #[cfg(test)]
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
         self.list.len()
     }

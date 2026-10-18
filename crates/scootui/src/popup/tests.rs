@@ -6,6 +6,7 @@ use ab_glyph::{FontArc, FontVec};
 use super::{
     Activate, Content, Interaction, Kind, Layout, MAX_TEXT, MAX_WIDGETS, Round, Wheel, paint,
 };
+use crate::density::Scale;
 use crate::paint::Canvas;
 use crate::testfont;
 use crate::text::Text;
@@ -942,35 +943,16 @@ fn all_four_corners_round_even_the_edge_flush_with_the_bar() {
 
 #[test]
 fn the_rounded_border_is_one_frame_wide_at_every_scale() {
-    // Local stand-ins for `density::Scale` and `render::device`, which stay
-    // in scootbar until `scootui-extract-wayland`: the same arithmetic
-    // (integer multiply, fractional `(len*v120+60)/120`), so this test pins
-    // the same border widths without reaching for the Wayland scaffolding.
-    #[derive(Debug, Clone, Copy)]
-    enum Scale {
-        Integer(u32),
-        Fractional(u32),
-    }
-    impl Scale {
-        fn factor(self) -> f64 {
-            match self {
-                Self::Integer(f) => f64::from(f.max(1)),
-                Self::Fractional(v) => f64::from(v.max(1)) / 120.0,
-            }
-        }
-    }
+    // `density::Scale` moved here with `scootui-extract-wayland`, so this
+    // pins the real scale arithmetic; `device` stays local, standing in
+    // for `render::device`, which stays in scootbar.
     fn device(length: u32, scale: Scale) -> u32 {
         if length == 0 {
             return 0;
         }
         match scale {
             Scale::Integer(f) => length.saturating_mul(f.max(1)),
-            Scale::Fractional(v) => {
-                let product = u64::from(length) * u64::from(v.max(1));
-                u32::try_from((product + 60) / 120)
-                    .unwrap_or(u32::MAX)
-                    .max(1)
-            }
+            Scale::Fractional(v) => crate::density::scaled_length(length, v).unwrap_or(u32::MAX),
         }
     }
     let mut font = text();

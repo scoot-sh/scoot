@@ -106,7 +106,7 @@ scootbg-mem.workspace = true
 # `tray`.
 scoot-dbus.workspace = true
 scoot-rt.workspace = true
-scootui = { path = "../scootui", default-features = false, features = ["icons"] }
+scootui = { path = "../scootui", default-features = false, features = ["icons", "wayland"] }
 # The Wayland client, plain, no toolkit, on its pure-Rust backend: nothing
 # links libwayland.
 wayland-client = "0.31"
@@ -142,6 +142,12 @@ rustix = { version = "1", default-features = false, features = ["std", "process"
 base64.workspace = true
 png = "0.18"
 serde_json.workspace = true
+# The headless-compositor harness the integration tests share: moved to
+# `scootui` (`test-support`), so the shell apps' tests drive the real
+# binary the same way. Enabled here only for tests, never in the binary:
+# each test binary passes its own `CARGO_BIN_EXE_scootbar` when it builds
+# a session (see `tests/common.rs`).
+scootui = { path = "../scootui", features = ["test-support"] }
 # Scratch dirs as `TempDir` guards in the looks module's tests: the same
 # version the look crates carry (same lock entry, MIT OR Apache-2.0).
 tempfile = "3"

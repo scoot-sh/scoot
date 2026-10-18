@@ -54,7 +54,7 @@ fn wait_shot(session: &Session, bar: &mut Reaper, what: &str, ok: impl Fn(&Shot)
 /// edge, and reserving its height (or nothing) there.
 #[test]
 fn every_layer_and_edge_is_drawn_and_reserves_or_floats() {
-    let Some(session) = Session::scoot("layers", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "layers", 1, "") else {
         return;
     };
     let height = BAR_HEIGHT.to_string();
@@ -111,7 +111,7 @@ fn every_layer_and_edge_is_drawn_and_reserves_or_floats() {
 
 #[test]
 fn a_hidden_bar_holds_no_buffer_and_no_zone() {
-    let Some(session) = Session::scoot("hidden", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "hidden", 1, "") else {
         return;
     };
     let mut bar = Reaper(session.bar(&["--background", BAR]));
@@ -151,7 +151,7 @@ fn a_hidden_bar_holds_no_buffer_and_no_zone() {
 /// half state: an even burst ends shown, an odd one hidden.
 #[test]
 fn a_burst_of_toggles_settles_on_the_net_result() {
-    let Some(session) = Session::scoot("burst", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "burst", 1, "") else {
         return;
     };
     let mut bar = Reaper(session.bar(&["--background", BAR]));
@@ -184,7 +184,7 @@ fn a_burst_of_toggles_settles_on_the_net_result() {
 /// shown.
 #[test]
 fn a_reload_keeps_the_bar_hidden() {
-    let Some(session) = Session::scoot("reload", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "reload", 1, "") else {
         return;
     };
     let path = session.runtime_dir().join("bar.toml");
@@ -244,7 +244,7 @@ fn a_round_trip_does_not_make_windows_jump() {
         eprintln!("skipped -- no foot on PATH");
         return;
     }
-    let Some(session) = Session::scoot("jump", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "jump", 1, "") else {
         return;
     };
     let mut bar = Reaper(session.bar(&["--background", BAR]));
@@ -310,7 +310,7 @@ fn a_round_trip_does_not_make_windows_jump() {
 
 #[test]
 fn a_bad_layer_or_exclusive_flag_starts_nothing() {
-    let Some(session) = Session::scoot("badflag", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "badflag", 1, "") else {
         return;
     };
     for args in [
@@ -332,7 +332,7 @@ fn a_bad_layer_or_exclusive_flag_starts_nothing() {
 /// alone cannot tell `bottom` from `top` on an empty desktop.
 #[test]
 fn the_requests_carry_the_layer_and_the_zone() {
-    let Some(session) = Session::scoot("trace", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "trace", 1, "") else {
         return;
     };
     // wlr-layer-shell's `layer` enum: 1 bottom, 2 top, 3 overlay.

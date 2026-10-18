@@ -3,7 +3,7 @@ title: "`scootui` surfaces: on-demand layer surfaces, a full-screen `xdg_topleve
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scootui-extract-wayland"
+blocked: null
 milestone: "M7"
 ---
 

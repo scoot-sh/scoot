@@ -115,7 +115,7 @@ impl Rig {
 
 #[test]
 fn a_look_swap_of_colors_only_keeps_modules_and_repaints() {
-    let Some(session) = Session::scoot("look-style-colors", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "look-style-colors", 1, "") else {
         return;
     };
     let dir = session.runtime_dir().join("out");
@@ -167,7 +167,8 @@ fn a_look_swap_of_colors_only_keeps_modules_and_repaints() {
 #[test]
 #[cfg(feature = "clock")]
 fn a_look_swap_with_a_module_key_takes_the_full_path() {
-    let Some(session) = Session::scoot("look-style-module-key", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "look-style-module-key", 1, "")
+    else {
         return;
     };
     let dir = session.runtime_dir().join("out");
@@ -238,7 +239,7 @@ fn a_look_swap_with_a_module_key_takes_the_full_path() {
 /// extra module starts on the full path, not the fast one).
 #[test]
 fn a_refused_plain_reload_leaves_snapshot_active_and_last_untouched() {
-    let Some(session) = Session::scoot("look-style-refused", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "look-style-refused", 1, "") else {
         return;
     };
     let dir = session.runtime_dir().join("out");
@@ -352,7 +353,7 @@ fn a_style_reload_with_a_popup_open_under_a_look_layer() {
     const FG: &str = "#f0f0f0";
     const POP_HEIGHT: u32 = 40;
     const MODULE: (u32, u32) = (800, 20);
-    let Some(session) = Session::scoot("look-style-popup", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "look-style-popup", 1, "") else {
         return;
     };
     let server = pulse::Server::start(&session.runtime_dir().join("pulse"));

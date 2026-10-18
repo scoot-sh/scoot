@@ -1,8 +1,13 @@
-//! A headless compositor for scootbar to run against, one per test:
-//! scootbg's harness (`crates/scootbg/tests/common`), trimmed to what a bar
-//! with no control socket needs. What the bar did is read from the
-//! compositor: scoot's `outputs` (the usable area its zone leaves), sway's
-//! workspaces, and screenshots of both.
+//! A headless compositor for a shell app to run against, one per test:
+//! moved from scootbar's `tests/common`, which trimmed scootbg's harness
+//! (`crates/scootbg/tests/common`) to what a bar with no control socket
+//! needs. What the app did is read from the compositor: scoot's `outputs`
+//! (the usable area its zone leaves), sway's workspaces, and screenshots
+//! of both. The app binary is a parameter ([`Session::app`]): each test
+//! binary passes its own, so this never names one itself. The `scootbar`
+//! method names, the `sbart-` scratch prefix and the `SCOOTBAR_*`
+//! environment variables stay as they were; a consumer renames them when
+//! it adopts this.
 //!
 //! Each [`Session`] gets its own scratch directory as `XDG_RUNTIME_DIR`, so
 //! no two tests' sockets meet (nextest runs each test in its own process;
@@ -19,11 +24,12 @@
 //! it with a conflicting file where the default lookup would find it.
 //!
 //! The compositor binary is `$SCOOTBAR_TEST_SCOOT` if set, else the `scoot`
-//! beside this test's `scootbar` in the same target directory (a workspace
-//! build puts it there); sway is `$SCOOTBAR_TEST_SWAY`, else `sway` on
-//! `PATH`. Without one the test prints why and passes as skipped, unless
-//! `SCOOTBAR_REQUIRE_SCOOT` (or `SCOOTBAR_REQUIRE_SWAY`) is set, which turns
-//! the skip into a failure so CI cannot go green by skipping.
+//! beside the app binary the test passed in (see [`Session::app`]; a
+//! workspace build puts it there); sway is `$SCOOTBAR_TEST_SWAY`, else
+//! `sway` on `PATH`. Without one the test prints why and passes as
+//! skipped, unless `SCOOTBAR_REQUIRE_SCOOT` (or `SCOOTBAR_REQUIRE_SWAY`)
+//! is set, which turns the skip into a failure so CI cannot go green by
+//! skipping.
 
 #![allow(dead_code)] // Each test binary uses a different subset.
 
@@ -31,7 +37,7 @@ mod shots;
 
 /// The seven-segment test font, built in code: the bar draws with it here,
 /// and the tests read the time back off screenshots.
-pub use scootui::testfont;
+pub use crate::testfont;
 
 #[allow(unused_imports)] // Only the binaries that check pixels use it.
 pub use shots::{Shot, rgb};
@@ -51,10 +57,6 @@ use serde_json::Value;
 /// second, so this only bounds a wedge.
 pub const PATIENCE: Duration = Duration::from_secs(20);
 
-pub fn scootbar_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_scootbar"))
-}
-
 fn env_path(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
         .filter(|v| !v.is_empty())
@@ -67,9 +69,9 @@ fn on_path(program: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-fn scoot_bin() -> Option<PathBuf> {
+fn scoot_bin(app: &Path) -> Option<PathBuf> {
     env_path("SCOOTBAR_TEST_SCOOT").or_else(|| {
-        let sibling = scootbar_bin().with_file_name("scoot");
+        let sibling = app.with_file_name("scoot");
         sibling.is_file().then_some(sibling)
     })
 }
@@ -155,8 +157,10 @@ impl Scratch {
     /// directories, and none of the Wayland variables of the one the tests
     /// run in. For `daemon` runs a test starts directly (no [`Session`]);
     /// [`Session::scootbar`] is the same plus the session's display.
-    pub fn command(&self) -> Command {
-        let mut command = Command::new(scootbar_bin());
+    /// `app` is the app binary under test (each test binary passes its
+    /// own `CARGO_BIN_EXE_<app>`): the harness never names one itself.
+    pub fn command(&self, app: &Path) -> Command {
+        let mut command = Command::new(app);
         command
             .env("XDG_RUNTIME_DIR", &self.0)
             .env_remove("WAYLAND_DISPLAY")
@@ -176,6 +180,10 @@ impl Drop for Scratch {
 
 pub struct Session {
     pub scratch: Scratch,
+    /// The app binary under test: every bar the session starts is this.
+    /// Each test binary passes its own `CARGO_BIN_EXE_<app>` when it
+    /// builds the session, so the harness never names one itself.
+    pub app: PathBuf,
     compositor: Option<Child>,
     pub wayland_display: String,
     /// For a sway session: `swaymsg`'s expected path and sway's IPC socket.
@@ -185,15 +193,16 @@ pub struct Session {
 impl Session {
     /// Starts `scoot --headless --outputs N` with `config` as its config
     /// file, or returns `None` (after saying why) when there is no `scoot`
-    /// binary and it is not required.
-    pub fn scoot(tag: &str, outputs: u32, config: &str) -> Option<Self> {
-        let Some(scoot) = scoot_bin() else {
+    /// binary and it is not required. `app` is the app binary under test
+    /// (see [`Session::app`]).
+    pub fn scoot(app: &Path, tag: &str, outputs: u32, config: &str) -> Option<Self> {
+        let Some(scoot) = scoot_bin(app) else {
             skip(
                 "SCOOTBAR_REQUIRE_SCOOT",
                 &format!(
                     "there is no scoot binary beside {} (build `-p scoot`, or set \
                      SCOOTBAR_TEST_SCOOT)",
-                    scootbar_bin().display()
+                    app.display()
                 ),
             );
             return None;
@@ -224,6 +233,7 @@ impl Session {
             .unwrap_or_else(|e| panic!("cannot start {}: {e}", scoot.display()));
         let mut session = Self {
             scratch,
+            app: app.into(),
             compositor: Some(compositor),
             wayland_display: String::new(),
             sway_ipc: None,
@@ -237,8 +247,9 @@ impl Session {
 
     /// Starts a headless sway (pixman, no GPU, no input devices) with
     /// `outputs` outputs (0 is allowed: outputs come later), or `None` as
-    /// for [`Session::scoot`].
-    pub fn sway(tag: &str, outputs: u32) -> Option<Self> {
+    /// for [`Session::scoot`]. `app` is the app binary under test (see
+    /// [`Session::app`]).
+    pub fn sway(app: &Path, tag: &str, outputs: u32) -> Option<Self> {
         let Some(sway) = sway_bin() else {
             skip(
                 "SCOOTBAR_REQUIRE_SWAY",
@@ -284,6 +295,7 @@ impl Session {
             .unwrap_or_else(|e| panic!("cannot start {}: {e}", sway.display()));
         let mut session = Self {
             scratch,
+            app: app.into(),
             compositor: Some(compositor),
             wayland_display: String::new(),
             sway_ipc: None,
@@ -401,7 +413,7 @@ impl Session {
     /// and XDG home directories, the session's display), and none of the
     /// Wayland variables of the one the tests run in.
     pub fn scootbar(&self) -> Command {
-        let mut command = self.scratch.command();
+        let mut command = self.scratch.command(&self.app);
         command.env("WAYLAND_DISPLAY", &self.wayland_display);
         command
     }

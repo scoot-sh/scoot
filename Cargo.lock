@@ -1019,10 +1019,14 @@ name = "scootui"
 version = "0.3.1"
 dependencies = [
  "ab_glyph",
+ "base64",
  "png",
  "rustix 1.1.4",
  "scoot-rt",
  "scootbg-mem",
+ "serde_json",
+ "wayland-client",
+ "wayland-protocols-wlr",
 ]
 
 [[package]]

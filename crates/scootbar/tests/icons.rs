@@ -48,7 +48,7 @@ fn hour() -> i64 {
 
 #[test]
 fn a_clock_icon_comes_from_the_fallback_font_and_a_bad_fallback_is_refused() {
-    let Some(session) = Session::scoot("icons", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "icons", 1, "") else {
         return;
     };
     let symbols = session.runtime_dir().join("symbols.ttf");
@@ -191,7 +191,7 @@ fn check_square(session: &Session, scale: f64, ink_color: [u8; 3]) -> Option<()>
 }
 
 fn run_art(tag: &str, output: &str, scale: f64, keys: &str, color: [u8; 3]) {
-    let Some(session) = Session::scoot(tag, 1, output) else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), tag, 1, output) else {
         return;
     };
     let path = art_config(&session, keys);

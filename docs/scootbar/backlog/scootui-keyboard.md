@@ -3,7 +3,7 @@ title: "`scootui` keyboard: keymap, modifiers, repeat, keysym to a caller's buff
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scootui-extract-wayland"
+blocked: null
 milestone: "M7"
 ---
 

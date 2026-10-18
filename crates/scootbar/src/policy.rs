@@ -32,8 +32,10 @@ mod tests;
 /// The most outputs an `outputs` list names, and the most `[output]`
 /// tables: more is not a setup, and it bounds what a hostile file costs.
 pub const MAX_OUTPUTS: usize = 32;
-/// The longest output name taken, in bytes (connector names are a dozen).
-pub const MAX_NAME: usize = 128;
+// The longest output name taken, in bytes (connector names are a dozen):
+// the per-output model's bound, re-exported so policy matches and the
+// model's staging read the same number.
+pub use scootui::outputs::MAX_NAME;
 
 /// Which outputs have a bar.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

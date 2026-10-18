@@ -25,7 +25,7 @@ const BAR: &str = "#c03020";
 /// the default lookup never reaches the home.
 #[test]
 fn a_conflicting_bar_toml_in_the_home_is_ignored() {
-    let Some(session) = Session::scoot("hermetic", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "hermetic", 1, "") else {
         return;
     };
     // Deterministic whatever the ambient environment sets: without the

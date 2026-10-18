@@ -412,7 +412,7 @@ fn toy_main(socket: &PathBuf, stop: &AtomicBool) {
 /// its own single workspace, active, in a pill.
 #[cfg(feature = "workspaces")]
 fn two_outputs(tag: &str) -> Option<(Session, Reaper)> {
-    let session = Session::scoot(tag, 2, "")?;
+    let session = Session::scoot(&common::scootbar_bin(), tag, 2, "")?;
     let mut bar = Reaper(session.bar(&workspaces_args()));
     for id in [1, 2] {
         session.wait_for(&mut bar.0, "the workspace shown", |session| {
@@ -536,7 +536,7 @@ fn appearing_and_disappearing_redraw() {
 #[cfg(feature = "workspaces")]
 #[test]
 fn workspaces_follow_a_hotplugged_output_on_sway() {
-    let Some(session) = Session::sway("swayws", 1) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "swayws", 1) else {
         return;
     };
     let mut bar = Reaper(session.bar(&workspaces_args()));
@@ -588,7 +588,7 @@ fn text_cols(shot: &Shot) -> Vec<u32> {
 #[cfg(feature = "workspaces")]
 #[test]
 fn a_circle_pill_is_round_and_a_click_still_switches() {
-    let Some(session) = Session::scoot("ws-circle", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "ws-circle", 1, "") else {
         return;
     };
     let path = session.runtime_dir().join("circle.toml");
@@ -762,7 +762,7 @@ fn churn(session: &Session, bar: &mut Reaper) {
 #[cfg(feature = "clock")]
 #[test]
 fn a_bar_without_the_module_binds_no_workspace_protocol_and_hears_nothing() {
-    let Some(session) = Session::scoot("ws-unplaced", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "ws-unplaced", 1, "") else {
         return;
     };
     let path = placing(&session, "");
@@ -782,7 +782,7 @@ fn a_bar_without_the_module_binds_no_workspace_protocol_and_hears_nothing() {
 #[cfg(all(feature = "clock", feature = "workspaces"))]
 #[test]
 fn a_bar_with_the_module_binds_the_protocol_once_and_hears_the_changes() {
-    let Some(session) = Session::scoot("ws-placed", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "ws-placed", 1, "") else {
         return;
     };
     let path = placing(&session, "\"workspaces\"");
@@ -800,7 +800,7 @@ fn a_bar_with_the_module_binds_the_protocol_once_and_hears_the_changes() {
 #[cfg(all(feature = "clock", feature = "workspaces"))]
 #[test]
 fn a_reload_binds_and_releases_the_protocol_with_the_module() {
-    let Some(session) = Session::scoot("ws-reload", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "ws-reload", 1, "") else {
         return;
     };
     let mut bar = traced_daemon(&session, &placing(&session, ""));

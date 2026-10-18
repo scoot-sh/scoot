@@ -299,7 +299,7 @@ pub fn run(
         wayland.state.pump_tooltip(&wayland.qh, &mut now);
         // What changed, to the subscribers (one branch with none).
         wayland.state.pump_events(&mut server, &mut now);
-        flush(&wayland, &mut wants_write)?;
+        scootui::wayland::flush(&wayland.conn, &mut wants_write).map_err(Error::Disconnected)?;
         let Some(guard) = wayland.queue.prepare_read() else {
             // Events arrived for our queue meanwhile: dispatch them.
             continue;
@@ -368,9 +368,7 @@ pub fn run(
         if revents.intersects(PollFlags::OUT) {
             wants_write = false;
         }
-        if revents.intersects(PollFlags::HUP | PollFlags::ERR)
-            && rustix::io::ioctl_fionread(guard.connection_fd()).unwrap_or(0) == 0
-        {
+        if scootui::wayland::connection_gone(&guard, revents) {
             // The compositor is gone and sent nothing more. Stop here
             // rather than let the backend read the EOF, which without its
             // `log` feature it reports with `eprintln!` (scootbg's loop
@@ -432,15 +430,7 @@ pub fn run(
         // Whatever the clients asked of the bars' visibility: once, with
         // the net result of the whole batch.
         wayland.state.apply_visibility(&wayland.conn, &wayland.qh);
-        if revents.intersects(PollFlags::IN | PollFlags::HUP | PollFlags::ERR) {
-            match guard.read() {
-                Ok(_) => {}
-                Err(BackendError::Io(e)) if e.kind() == io::ErrorKind::WouldBlock => {}
-                Err(error) => return Err(Error::Disconnected(error)),
-            }
-        } else {
-            drop(guard);
-        }
+        scootui::wayland::read_after_poll(guard, revents).map_err(Error::Disconnected)?;
         // Then the modules, each ready source once; a changed view is
         // drawn at the top of the next turn.
         let modules = &mut wayland.state.content.modules;
@@ -559,17 +549,6 @@ fn draw(state: &mut State, qh: &wayland_client::QueueHandle<State>) {
                 }
             }
         }
-    }
-}
-
-fn flush(wayland: &Wayland, wants_write: &mut bool) -> Result<(), Error> {
-    match wayland.conn.flush() {
-        Ok(()) => Ok(()),
-        Err(BackendError::Io(e)) if e.kind() == io::ErrorKind::WouldBlock => {
-            *wants_write = true;
-            Ok(())
-        }
-        Err(error) => Err(Error::Disconnected(error)),
     }
 }
 

@@ -1,5 +1,6 @@
 use super::{Canvas, Corners, Span};
 use crate::color::Color;
+use crate::density::Scale;
 
 const COLOR: Color = Color {
     r: 0x12,
@@ -316,26 +317,16 @@ fn a_pill_of_any_size_or_radius_never_panics_and_stays_in_its_rows() {
 
 #[test]
 fn corner_tables_at_fractional_scales_cover_the_center_and_cut_the_corner() {
-    // Local stand-ins for `density::Scale` and `render::device` (see the
-    // popup tests): the same integer and fractional arithmetic, so this
-    // pins the same radii without the Wayland scaffolding.
-    #[derive(Debug, Clone, Copy)]
-    enum Scale {
-        Integer(u32),
-        Fractional(u32),
-    }
+    // `density::Scale` moved here with `scootui-extract-wayland`, so this
+    // pins the real scale arithmetic; `device` stays local, standing in
+    // for `render::device`, which stays in scootbar.
     fn device(length: u32, scale: Scale) -> u32 {
         if length == 0 {
             return 0;
         }
         match scale {
             Scale::Integer(f) => length.saturating_mul(f.max(1)),
-            Scale::Fractional(v) => {
-                let product = u64::from(length) * u64::from(v.max(1));
-                u32::try_from((product + 60) / 120)
-                    .unwrap_or(u32::MAX)
-                    .max(1)
-            }
+            Scale::Fractional(v) => crate::density::scaled_length(length, v).unwrap_or(u32::MAX),
         }
     }
     // A 12 px popup radius at each scale the bar draws at.
