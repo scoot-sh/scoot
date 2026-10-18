@@ -251,6 +251,8 @@ fn every_method_and_signal_with_the_right_reasons() {
     assert_eq!(info[3], "1.3");
 
     // Notify, then CloseNotification: reason 3, id first invalidated.
+    // The reply and the signal flush together, and `until` would eat
+    // the signal with the reply — so one loop waits for both.
     let id = notify(&mut client, "Mail", 0, -1, 13);
     let mut close = Writer::new();
     close.u32(id);
@@ -266,12 +268,31 @@ fn every_method_and_signal_with_the_right_reasons() {
             14,
         )
         .unwrap();
-    until(&mut client, |event| {
-        matches!(event, Event::Reply { token: 14, .. })
-    });
-    assert_eq!(wait_closed(&mut client, id), 3);
-
-    kill(server);
+    let start = Instant::now();
+    let mut replied = false;
+    loop {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no close reply and NotificationClosed for {id} (replied={replied})"
+        );
+        let (events, _) = client.pump();
+        for event in events {
+            match event {
+                Event::Reply { token: 14, .. } => replied = true,
+                Event::Signal { member, body, .. } if member == "NotificationClosed" => {
+                    let mut reader = Reader::le(&body);
+                    if reader.u32().unwrap() == id {
+                        assert!(replied, "the reply precedes the signal on the wire");
+                        assert_eq!(reader.u32().unwrap(), 3);
+                        kill(server);
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 #[test]
