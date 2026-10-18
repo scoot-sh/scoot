@@ -78,10 +78,6 @@ const MAX_OVERSIZE_FIELDS: usize = 64 * 1024;
 /// never a reply at a time.
 const SETUP_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Queued output past twice the connection's cap is a dead connection: a
-/// bus that stopped reading while we owe it replies (a peer flooding us
-/// with calls) must not grow the outbox without bound.
-
 /// The bus's well-known name, object and interface.
 pub const BUS_NAME: &str = "org.freedesktop.DBus";
 pub const BUS_PATH: &str = "/org/freedesktop/DBus";
@@ -440,7 +436,10 @@ impl Conn {
         self.max_message.saturating_add(READ_WATERMARK_EXTRA)
     }
 
-    /// Queued output past this is a dead connection (see above).
+    /// Queued output past this is a dead connection: a bus that
+    /// stopped reading while we owe it replies (a peer flooding us with
+    /// calls) must not grow the outbox without bound. Twice the
+    /// connection's cap, moving with [`Conn::set_max_message`].
     fn max_outbox(&self) -> usize {
         self.max_message.saturating_mul(2)
     }
