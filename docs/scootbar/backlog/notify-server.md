@@ -3,7 +3,7 @@ title: "scootnotify: the org.freedesktop.Notifications server and its model, hea
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scoot-dbus-extract"
+blocked: null
 milestone: "M7"
 ---
 
