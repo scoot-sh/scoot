@@ -194,6 +194,10 @@ pub fn run<B: ClientBackend>(secs: u64) {
     };
     queue.roundtrip(&mut state).expect("registry roundtrip");
     queue.roundtrip(&mut state).expect("seat roundtrip");
+    // A third trip: `get_keyboard` is queued while the second trip
+    // dispatches capabilities, and nothing else here would flush it out.
+    // Without this the server never sees the request and no keymap arrives.
+    queue.roundtrip(&mut state).expect("keyboard roundtrip");
     let deadline = Instant::now() + Duration::from_secs(if secs == 0 { 2 } else { secs });
     while Instant::now() < deadline {
         queue.dispatch_pending(&mut state).expect("dispatch");
