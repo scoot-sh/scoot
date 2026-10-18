@@ -84,7 +84,10 @@ fn wait_serving(client: &mut Conn, server: &mut Child) {
         )
         .expect("the first call queues");
     loop {
-        if start.elapsed() >= Duration::from_secs(10) {
+        // Thirty seconds, not ten: the suite runs eleven servers in
+        // parallel on a shared six-core box, and a contended spawn plus
+        // exec can take seconds. Unloaded it answers in a third of one.
+        if start.elapsed() >= Duration::from_secs(30) {
             match server.try_wait().expect("the server reaps") {
                 Some(status) => {
                     let mut err = String::new();
