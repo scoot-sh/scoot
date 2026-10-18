@@ -248,13 +248,14 @@ impl Harness {
             // guard does not touch: the two borrows coexist.
             let repeat = self.state.seat.repeat_fd();
             let repeat_fd = repeat.unwrap_or(wayland);
-            let mut polls = [
-                rustix::event::PollFd::new(&wayland, rustix::event::PollFlags::IN),
-                rustix::event::PollFd::new(&repeat_fd, rustix::event::PollFlags::IN),
-            ];
-            let _ = rustix::event::poll(&mut polls, Some(&timespec));
-            let wayland_ready = !polls[0].revents().is_empty();
-            drop(polls);
+            let wayland_ready = {
+                let mut polls = [
+                    rustix::event::PollFd::new(&wayland, rustix::event::PollFlags::IN),
+                    rustix::event::PollFd::new(&repeat_fd, rustix::event::PollFlags::IN),
+                ];
+                let _ = rustix::event::poll(&mut polls, Some(&timespec));
+                !polls[0].revents().is_empty()
+            };
             if wayland_ready {
                 let _ = guard.read();
             }
@@ -583,7 +584,7 @@ fn hold_repeats_release_and_focus_loss_stop() {
     harness.expect("repeating again", Duration::from_secs(5), |state| {
         state.repeats > held_at
     });
-    let mut thief = Thief::map(&harness.session);
+    let thief = Thief::map(&harness.session);
     harness.expect("the leave", PATIENCE, |state| !state.seat.has_focus());
     let after_leave = harness.state.repeats;
     harness.pump(Duration::from_millis(500), |_| false);
@@ -612,10 +613,16 @@ fn memfd_with_bytes(contents: &[u8]) -> std::fs::File {
 /// seat's focus, so the first client's `leave` path runs. No keyboard
 /// handling of its own.
 struct Thief {
+    // Held so the window stays mapped until the test ends: dropping the
+    // queue would close the connection and take the window (and the
+    // seat's focus with it) down early.
+    #[allow(dead_code)]
     queue: wayland_client::EventQueue<ThiefState>,
+    #[allow(dead_code)]
     qh: QueueHandle<ThiefState>,
+    #[allow(dead_code)]
     state: ThiefState,
-    // Held so the window stays mapped until the test ends.
+    // The window itself, held for the same reason.
     _surface: wl_surface::WlSurface,
     _xdg_surface: xdg_surface::XdgSurface,
     _toplevel: xdg_toplevel::XdgToplevel,
@@ -717,12 +724,13 @@ impl Thief {
                     tv_sec: 5,
                     tv_nsec: 0,
                 };
-                let mut polls = [rustix::event::PollFd::new(
-                    &fd,
-                    rustix::event::PollFlags::IN,
-                )];
-                let _ = rustix::event::poll(&mut polls, Some(&timespec));
-                drop(polls);
+                {
+                    let mut polls = [rustix::event::PollFd::new(
+                        &fd,
+                        rustix::event::PollFlags::IN,
+                    )];
+                    let _ = rustix::event::poll(&mut polls, Some(&timespec));
+                }
                 let _ = guard.read();
             }
         }
