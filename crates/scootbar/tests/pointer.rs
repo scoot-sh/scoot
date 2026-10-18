@@ -60,7 +60,7 @@ impl Rig {
     }
 
     fn start_with(tag: &str, bindings: &str, env: &[(&str, &str)]) -> Option<Self> {
-        let session = Session::scoot(tag, 1, "")?;
+        let session = Session::scoot(&common::scootbar_bin(), tag, 1, "")?;
         let dir = session.runtime_dir().join("out");
         fs::create_dir_all(&dir).unwrap();
         let file = session.runtime_dir().join("bar.toml");

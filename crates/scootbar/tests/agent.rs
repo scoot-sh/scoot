@@ -47,7 +47,7 @@ struct Rig {
 
 impl Rig {
     fn start(tag: &str, scoot: &str, outputs: u32, tables: &str, lists: &str) -> Option<Self> {
-        let session = Session::scoot(tag, outputs, scoot)?;
+        let session = Session::scoot(&common::scootbar_bin(), tag, outputs, scoot)?;
         let dir = session.runtime_dir().join("out");
         fs::create_dir_all(&dir).unwrap();
         let file = session.runtime_dir().join("bar.toml");

@@ -83,7 +83,7 @@ fn assert_not(shot: &Shot, x: u32, y: u32, what: &str) {
 
 #[test]
 fn every_output_gets_a_bar_that_reserves_its_height() {
-    let Some(session) = Session::scoot("every", 2, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "every", 2, "") else {
         return;
     };
     let mut bar = Reaper(session.bar(&["--background", BAR]));
@@ -102,7 +102,7 @@ fn every_output_gets_a_bar_that_reserves_its_height() {
 
 #[test]
 fn a_margin_is_reserved_on_the_anchored_edge_and_the_surface_is_the_bar() {
-    let Some(session) = Session::scoot("margin", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "margin", 1, "") else {
         return;
     };
     let mut bar = Reaper(session.bar(&["--background", BAR, "--height", "20", "--margin", "8,4"]));
@@ -163,7 +163,7 @@ fn bar_config(session: &Session, bar: &str) -> [String; 2] {
 
 #[test]
 fn a_floating_rounded_bar_shows_the_desktop_in_its_corners() {
-    let Some(session) = Session::scoot("rounded", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "rounded", 1, "") else {
         return;
     };
     let config = bar_config(&session, "height = 40\nmargin = \"10,20\"\nradius = 20\n");
@@ -190,7 +190,7 @@ fn a_floating_rounded_bar_shows_the_desktop_in_its_corners() {
 
 #[test]
 fn a_translucent_bar_is_blended_over_the_desktop() {
-    let Some(session) = Session::scoot("opacity", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "opacity", 1, "") else {
         return;
     };
     let config = bar_config(&session, "opacity = 0.5\n");
@@ -215,7 +215,7 @@ fn a_translucent_bar_is_blended_over_the_desktop() {
 
 #[test]
 fn a_bottom_bar_reserves_the_bottom() {
-    let Some(session) = Session::scoot("bottom", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "bottom", 1, "") else {
         return;
     };
     let mut bar = Reaper(session.bar(&["--background", BAR, "--edge", "bottom", "--height", "30"]));
@@ -239,7 +239,7 @@ fn device_height(shot: &Shot) -> u32 {
 
 #[test]
 fn a_fractional_scale_is_drawn_at_device_pixels_and_follows_a_change() {
-    let Some(session) = Session::scoot("scale", 1, "[output]\nscale = 1.5\n") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "scale", 1, "[output]\nscale = 1.5\n") else {
         return;
     };
     let mut bar = Reaper(session.bar_with_env(&["--background", BAR], &[("WAYLAND_DEBUG", "1")]));
@@ -292,7 +292,7 @@ fn without_a_viewporter_it_draws_at_the_integer_scale() {
         eprintln!("skipped -- SCOOTBAR_DEBUG_NO_VIEWPORTER needs a debug build");
         return;
     }
-    let Some(session) = Session::scoot("noviewport", 1, "[output]\nscale = 1.5\n") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "noviewport", 1, "[output]\nscale = 1.5\n") else {
         return;
     };
     let mut bar = Reaper(session.bar_with_env(
@@ -327,7 +327,7 @@ fn without_a_viewporter_it_draws_at_the_integer_scale() {
 
 #[test]
 fn idle_it_makes_no_wakeups() {
-    let Some(session) = Session::scoot("idle", 2, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "idle", 2, "") else {
         return;
     };
     let mut bar = Reaper(session.bar(&["--background", BAR]));
@@ -352,7 +352,7 @@ fn idle_it_makes_no_wakeups() {
 
 #[test]
 fn it_exits_with_an_error_when_the_compositor_goes() {
-    let Some(mut session) = Session::scoot("gone", 1, "") else {
+    let Some(mut session) = Session::scoot(&common::scootbar_bin(), "gone", 1, "") else {
         return;
     };
     let mut bar = Reaper(session.bar(&["--background", BAR]));
@@ -375,7 +375,7 @@ fn no_compositor_is_an_error_not_a_hang() {
     // before it ever reached the connection it is here to test.
     let scratch = common::Scratch::new("none");
     let output = scratch
-        .command()
+        .command(&common::scootbar_bin())
         .arg("daemon")
         .arg("--font")
         .arg(scratch.font())
@@ -394,7 +394,7 @@ fn no_compositor_is_an_error_not_a_hang() {
 fn a_usage_error_is_status_2_and_starts_nothing() {
     let scratch = common::Scratch::new("usage");
     let output = scratch
-        .command()
+        .command(&common::scootbar_bin())
         .args(["daemon", "--height", "0"])
         .env_remove("WAYLAND_DISPLAY")
         .output()

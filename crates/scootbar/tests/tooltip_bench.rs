@@ -67,7 +67,7 @@ fn threads(pid: u32) -> usize {
 /// the `popup` feature: for a build without it, `SCOOTBAR_BENCH_NO_TOOLTIP`
 /// leaves the key out of the config, which such a build would refuse.
 fn rig(tag: &str, module: &str) -> Option<(Session, Reaper, u32)> {
-    let session = Session::scoot(tag, 1, "")?;
+    let session = Session::scoot(&common::scootbar_bin(), tag, 1, "")?;
     let file = session.runtime_dir().join("bar.toml");
     let delay = if std::env::var_os("SCOOTBAR_BENCH_NO_TOOLTIP").is_some() {
         String::new()

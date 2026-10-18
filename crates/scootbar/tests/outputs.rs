@@ -99,7 +99,7 @@ fn pair(id: &str, section: &str) -> (String, String) {
 #[cfg(all(feature = "clock", feature = "workspaces"))]
 #[test]
 fn two_outputs_show_different_module_sets_heights_and_edges_from_one_config() {
-    let Some(session) = Session::scoot("multi", 2, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "multi", 2, "") else {
         return;
     };
     let names = names(&session);
@@ -127,7 +127,7 @@ fn two_outputs_show_different_module_sets_heights_and_edges_from_one_config() {
 
 #[test]
 fn the_list_leaves_an_output_without_a_bar_and_a_reload_moves_it() {
-    let Some(session) = Session::scoot("list", 2, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "list", 2, "") else {
         return;
     };
     let names = names(&session);
@@ -177,7 +177,7 @@ fn the_list_leaves_an_output_without_a_bar_and_a_reload_moves_it() {
 /// effect at the show.
 #[test]
 fn hide_and_show_keep_to_the_list() {
-    let Some(session) = Session::scoot("vis", 2, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "vis", 2, "") else {
         return;
     };
     let names = names(&session);
@@ -219,7 +219,7 @@ fn hide_and_show_keep_to_the_list() {
 #[test]
 fn a_second_output_adds_no_fds() {
     let fds = |outputs: u32| {
-        let session = Session::scoot(&format!("fds{outputs}"), outputs, "")?;
+        let session = Session::scoot(&common::scootbar_bin(), &format!("fds{outputs}"), outputs, "")?;
         let path = config(&session, "left = [\"workspaces\"]\nright = [\"clock\"]", "");
         let mut bar = daemon(&session, &path);
         session.wait_for(&mut bar.0, "every output's bar", |session| {
@@ -258,7 +258,7 @@ fn module_width(session: &Session, output: &str) -> u64 {
 /// that output's modules (the surfaces stay, nothing leaks).
 #[test]
 fn two_outputs_draw_at_their_own_font_size() {
-    let Some(session) = Session::scoot("fontsize", 2, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "fontsize", 2, "") else {
         return;
     };
     let names = names(&session);

@@ -68,7 +68,7 @@ impl Rig {
         env: &[(&str, &str)],
         placement: &[&str],
     ) -> Option<Self> {
-        let session = Session::scoot(tag, 1, "")?;
+        let session = Session::scoot(&common::scootbar_bin(), tag, 1, "")?;
         let server = pulse::Server::start(&session.runtime_dir().join("pulse"));
         let file = session.runtime_dir().join("bar.toml");
         fs::write(&file, config(extra)).unwrap();
@@ -714,7 +714,7 @@ fn a_click_on_the_bar_beside_the_module_closes_it_without_acting() {
 /// too, and that it goes with its output without a protocol error.
 #[test]
 fn on_sway_it_opens_and_goes_with_its_output() {
-    let Some(session) = Session::sway("popup-sway", 2) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "popup-sway", 2) else {
         return;
     };
     let server = pulse::Server::start(&session.runtime_dir().join("pulse"));
@@ -858,7 +858,7 @@ fn a_bottom_bar_opens_it_above() {
 /// checked here for the grab and the dismissal, not for the serial.
 #[test]
 fn on_sway_a_click_opens_it_with_a_grab_and_outside_closes_it() {
-    let Some(session) = Session::sway("popup-sway-click", 1) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "popup-sway-click", 1) else {
         return;
     };
     let server = pulse::Server::start(&session.runtime_dir().join("pulse"));

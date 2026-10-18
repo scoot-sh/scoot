@@ -112,7 +112,7 @@ fn wait_time(
 
 #[test]
 fn the_default_clock_shows_the_local_time_on_every_output() {
-    let Some(session) = Session::scoot("clock", 2, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "clock", 2, "") else {
         return;
     };
     let mut bar = Reaper(session.bar_with_env(&clock_args(None, "--center"), &[("TZ", TZ)]));
@@ -133,7 +133,7 @@ fn the_default_clock_shows_the_local_time_on_every_output() {
 
 #[test]
 fn twenty_four_hours_is_one_flag_away() {
-    let Some(session) = Session::scoot("clock24", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "clock24", 1, "") else {
         return;
     };
     let mut bar =
@@ -145,7 +145,7 @@ fn twenty_four_hours_is_one_flag_away() {
 /// each change damages only the clock's span, not the whole bar.
 #[test]
 fn a_seconds_clock_ticks_and_damages_only_its_span() {
-    let Some(session) = Session::scoot("tick", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "tick", 1, "") else {
         return;
     };
     let mut bar = Reaper(session.bar_with_env(
@@ -201,7 +201,7 @@ fn a_seconds_clock_ticks_and_damages_only_its_span() {
 /// the rate over five minutes).
 #[test]
 fn a_minute_clock_is_idle_between_minutes() {
-    let Some(session) = Session::scoot("idle", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "idle", 1, "") else {
         return;
     };
     let mut bar =
@@ -233,7 +233,7 @@ fn a_minute_clock_is_idle_between_minutes() {
 /// the window (a real `foot`) is closed and gone at the end, not leaked.
 #[test]
 fn a_window_beside_the_clock_is_placed_and_cleaned_up() {
-    let Some(session) = Session::scoot("window", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "window", 1, "") else {
         return;
     };
     let foot = std::env::var_os("PATH")
@@ -292,7 +292,7 @@ fn foot_running_in(dir: &std::path::Path) -> bool {
 
 #[test]
 fn an_unusable_font_is_a_refusal_that_names_it() {
-    let Some(session) = Session::scoot("nofont", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "nofont", 1, "") else {
         return;
     };
     for (font, says) in [
@@ -326,7 +326,7 @@ fn an_unusable_font_is_a_refusal_that_names_it() {
 /// On sway: the clock on an output plugged in while it runs.
 #[test]
 fn the_clock_follows_a_hotplugged_output_on_sway() {
-    let Some(session) = Session::sway("swayclock", 1) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "swayclock", 1) else {
         return;
     };
     let mut bar =
@@ -423,7 +423,7 @@ fn clock_steps_and_summer_time_show_on_time() {
         eprintln!("skipped -- sets the system clock; SCOOTBAR_TEST_SET_CLOCK=1 runs it");
         return;
     }
-    let Some(session) = Session::scoot("step", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "step", 1, "") else {
         return;
     };
     let zone = concat!(

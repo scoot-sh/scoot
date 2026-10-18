@@ -49,7 +49,7 @@ fn a_click_in_a_cut_corner_reaches_the_window_behind() {
         return;
     }
     for (radius, reaches) in [(60, true), (0, false)] {
-        let Some(session) = Session::scoot(&format!("input-{radius}"), 1, "") else {
+        let Some(session) = Session::scoot(&common::scootbar_bin(), &format!("input-{radius}"), 1, "") else {
             return;
         };
         // A tall bar over the windows (`exclusive = false`, on the `top`
@@ -125,7 +125,7 @@ fn leftmost_ink(shot: &common::Shot, rows: u32) -> Option<u32> {
 /// leftmost ink column once the clock is up, or `None` where there is no
 /// scoot to run it on (the test is then skipped, as `Session::scoot` says).
 fn clock_ink(tag: &str, toml: &str) -> Option<u32> {
-    let session = Session::scoot(tag, 1, "")?;
+    let session = Session::scoot(&common::scootbar_bin(), tag, 1, "")?;
     let flags = config(&session, toml);
     let mut bar = Reaper(session.bar(&[
         "--background",

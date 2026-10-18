@@ -88,7 +88,7 @@ fn write_empty_config(session: &Session, height: u32, background: &str) {
 
 #[test]
 fn query_reload_and_kill() {
-    let Some(session) = Session::scoot("msg", 1, "") else {
+    let Some(session) = Session::scoot(&common::scootbar_bin(), "msg", 1, "") else {
         return;
     };
     write_config(&session, "left", 28);

@@ -65,7 +65,7 @@ fn threads(pid: u32) -> usize {
 }
 
 fn rig(tag: &str) -> Option<(Session, Reaper, pulse::Server)> {
-    let session = Session::scoot(tag, 1, "")?;
+    let session = Session::scoot(&common::scootbar_bin(), tag, 1, "")?;
     let server = pulse::Server::start(&session.runtime_dir().join("pulse"));
     let click = if std::env::var_os("SCOOTBAR_BENCH_NO_POPUP").is_some() {
         ""

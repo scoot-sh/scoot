@@ -69,7 +69,7 @@ fn unplug(session: &Session, name: &str) {
 
 #[test]
 fn a_bar_comes_and_goes_with_its_output() {
-    let Some(session) = Session::sway("plug", 1) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "plug", 1) else {
         return;
     };
     let mut bar = Reaper(session.bar(&["--background", BAR]));
@@ -117,7 +117,7 @@ fn a_bar_comes_and_goes_with_its_output() {
 
 #[test]
 fn zero_outputs_at_start_waits_without_waking() {
-    let Some(session) = Session::sway("zero", 0) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "zero", 0) else {
         return;
     };
     assert!(names(&session).is_empty());
@@ -139,7 +139,7 @@ fn zero_outputs_at_start_waits_without_waking() {
 
 #[test]
 fn a_hotplug_storm_leaves_one_bar_per_output_and_no_leak() {
-    let Some(session) = Session::sway("storm", 1) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "storm", 1) else {
         return;
     };
     let mut bar = Reaper(session.bar(&["--background", BAR]));
@@ -169,7 +169,7 @@ fn a_hotplug_storm_leaves_one_bar_per_output_and_no_leak() {
 
 #[test]
 fn sway_reserves_the_margin_on_the_bars_edge_too() {
-    let Some(session) = Session::sway("margin", 1) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "margin", 1) else {
         return;
     };
     let mut bar = Reaper(session.bar(&["--background", BAR, "--height", "20", "--margin", "8,4"]));
@@ -194,7 +194,7 @@ fn sway_reserves_the_margin_on_the_bars_edge_too() {
 
 #[test]
 fn side_margins_wider_than_the_output_still_give_a_bar() {
-    let Some(session) = Session::sway("wide", 1) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "wide", 1) else {
         return;
     };
     // sway's headless output is 1280 wide: 2048 of side margins leave it
@@ -259,7 +259,7 @@ fn has_no_bar(session: &Session, name: &str) -> bool {
 
 #[test]
 fn the_list_decides_which_plugged_output_gets_a_bar() {
-    let Some(session) = Session::sway("list", 1) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "list", 1) else {
         return;
     };
     // sway names its headless outputs HEADLESS-1, -2, ... in the order
@@ -322,7 +322,7 @@ fn wait_all_bars_on(session: &Session, bar: &mut Reaper, want: &[&str]) -> Vec<S
 #[cfg(feature = "clock")]
 #[test]
 fn modules_still_update_after_a_hotplug_storm() {
-    let Some(session) = Session::sway("storm-modules", 2) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "storm-modules", 2) else {
         return;
     };
     let mut bar = Reaper(session.bar(&[
@@ -367,7 +367,7 @@ fn modules_still_update_after_a_hotplug_storm() {
 fn a_subscriber_is_told_an_output_came_and_went() {
     use std::io::{BufRead, BufReader};
     use std::process::Stdio;
-    let Some(session) = Session::sway("subscribe-outputs", 1) else {
+    let Some(session) = Session::sway(&common::scootbar_bin(), "subscribe-outputs", 1) else {
         return;
     };
     let mut bar = Reaper(session.bar(&["--background", BAR]));

@@ -1,6 +1,7 @@
-use super::{Effect, Frame, Output, OutputId, Outputs, Plan, Rotation, Size, Surface};
+use super::{Effect, Frame, Output, OutputId, Outputs, Plan, Rotation, Surface};
 use crate::bar::{Bar, Margin};
 use crate::density::Scale;
+use crate::output::Size;
 
 fn size(width: u32, height: u32) -> Size {
     Size { width, height }
@@ -85,7 +86,7 @@ fn broken_properties_are_ignored() {
 
 #[test]
 fn an_overlong_output_name_is_ignored() {
-    use crate::policy::MAX_NAME;
+    use super::MAX_NAME;
     let (mut outputs, id) = bound();
     let output = output(&mut outputs, id);
     // A megabyte of connector name: a broken compositor cannot grow the

@@ -32,7 +32,7 @@ mod tests;
 
 use std::fmt;
 
-use crate::outputs::Size;
+use crate::output::Size;
 
 /// `wp_fractional_scale_v1` scales are in 120ths.
 pub const DENOMINATOR: u32 = 120;
