@@ -247,7 +247,6 @@ static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// One on-demand layer cycle: content arrives, the surface maps, a named
 /// buffer shows it, the content clears and everything is destroyed.
-#[allow(clippy::too_many_arguments)]
 fn cycle_layer(
     queue: &mut EventQueue<Client>,
     qh: &QueueHandle<Client>,
