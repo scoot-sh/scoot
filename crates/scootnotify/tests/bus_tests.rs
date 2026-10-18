@@ -375,6 +375,7 @@ fn every_method_and_signal_with_the_right_reasons() {
         .unwrap();
     let start = Instant::now();
     let mut replied = false;
+    let mut reason = 0;
     loop {
         assert!(
             start.elapsed() < Duration::from_secs(10),
@@ -388,16 +389,19 @@ fn every_method_and_signal_with_the_right_reasons() {
                     let mut reader = Reader::le(&body);
                     if reader.u32().unwrap() == id {
                         assert!(replied, "the reply precedes the signal on the wire");
-                        assert_eq!(reader.u32().unwrap(), 3);
-                        kill(server);
-                        return;
+                        reason = reader.u32().unwrap();
                     }
                 }
                 _ => {}
             }
         }
+        if reason != 0 {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(5));
     }
+    assert_eq!(reason, 3);
+    kill(server);
 }
 
 #[test]
