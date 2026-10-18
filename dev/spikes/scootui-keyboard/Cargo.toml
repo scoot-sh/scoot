@@ -32,6 +32,7 @@ path = "src/bin/wl.rs"
 kbvm = { version = "0.2.0", features = ["compose"] }
 xkbcommon = "0.9.0"
 wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
 
 [profile.release]
 lto = "fat"

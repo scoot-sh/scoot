@@ -209,7 +209,7 @@ impl spike::wayland::ClientBackend for XkbClient {
 }
 
 fn usage() -> ! {
-    eprintln!("usage: spike-xkb <vectors|compile [N]|keymap-file PATH|compose|sleep SECS|wayland [SECS]>");
+    eprintln!("usage: spike-xkb <vectors|compile [N]|keymap-file PATH|compose|sleep SECS|wayland [SECS]|focused SECS]>");
     std::process::exit(2);
 }
 
@@ -229,6 +229,7 @@ fn main() {
         }
         "compose" => cmd_compose(),
         "sleep" => cmd_sleep(args.get(2).and_then(|s| s.parse().ok()).unwrap_or(60)),
+        "focused" => spike::wayland::run_focused::<XkbClient>(args.get(2).and_then(|s| s.parse().ok()).unwrap_or(30)),
         "wayland" => {
             spike::wayland::run::<XkbClient>(args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0))
         }
