@@ -1,0 +1,134 @@
+//! `notify.toml`: the daemon's own file, beside the bar's.
+//!
+//! Every key is optional; a missing file is the built-in defaults. A bad
+//! file at daemon start runs on those defaults and reports the error (an
+//! exit would restart-loop with no notification daemon at all); `--check`
+//! and a later `msg reload` refuse loudly instead. Unknown keys are
+//! refused: a typo that silently did nothing would be worse than an
+//! error. The file is capped at 64 KiB (the bar's config discipline).
+
+use std::path::PathBuf;
+
+use serde::Deserialize;
+
+/// A config file past this is refused, not read: it is hand-edited text,
+/// and anything larger is a mistake, not a config.
+pub const MAX_CONFIG_BYTES: u64 = 64 * 1024;
+
+/// The daemon's own file: `$XDG_CONFIG_HOME/scoot/notify.toml` beside the
+/// bar's, or `~/.config/scoot/notify.toml` without `XDG_CONFIG_HOME`.
+pub fn default_path() -> PathBuf {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+        .unwrap_or_else(|| PathBuf::from(".config"));
+    base.join("scoot").join("notify.toml")
+}
+
+/// The built-in defaults every row below documents: low 5 s, normal 10 s,
+/// critical never (the spec's urgency rule), at most 128 live, a
+/// per-sender bucket of 20 per second bursting to 40.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Config {
+    /// Low-urgency expiry for `expire_timeout = -1`, in milliseconds.
+    pub timeout_low_ms: u32,
+    /// Normal-urgency expiry for `expire_timeout = -1`, in milliseconds.
+    pub timeout_normal_ms: u32,
+    /// A positive `expire_timeout` is honored up to this, in
+    /// milliseconds (1 h: the design's clamp).
+    pub timeout_max_ms: u32,
+    /// At most this many live notifications; past it the oldest
+    /// non-critical one closes with reason 4.
+    pub max_live: u32,
+    /// Per-sender token-bucket refill, notifications per second.
+    pub rate_per_sec: u32,
+    /// Per-sender burst: past it a `Notify` still gets its id, but the
+    /// card goes to history unshown.
+    pub rate_burst: u32,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            timeout_low_ms: 5_000,
+            timeout_normal_ms: 10_000,
+            timeout_max_ms: 3_600_000,
+            max_live: 128,
+            rate_per_sec: 20,
+            rate_burst: 40,
+        }
+    }
+}
+
+/// Loads `path`: `Ok` the file's values over the defaults, `Err` why it
+/// was refused (missing is not refused — it is the defaults, said so by
+/// the caller deciding nothing was read). Anything past
+/// [`MAX_CONFIG_BYTES`] is refused before parsing.
+pub fn load(path: &std::path::Path) -> Result<Config, String> {
+    let bytes =
+        std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    parse(&bytes)
+}
+
+/// Parses `bytes` as a config file: the fuzz target's check and the
+/// corpus replay call this, so no I/O hides behind it.
+pub fn parse(bytes: &[u8]) -> Result<Config, String> {
+    if bytes.len() as u64 > MAX_CONFIG_BYTES {
+        return Err(format!(
+            "config larger than {} KiB is refused",
+            MAX_CONFIG_BYTES / 1024
+        ));
+    }
+    let text = core::str::from_utf8(bytes).map_err(|_| String::from("config is not UTF-8"))?;
+    let config: Config =
+        toml::from_str(text).map_err(|error| format!("config refused: {error}"))?;
+    config.check()
+}
+
+impl Config {
+    /// Range-checks the parsed values: out-of-range numbers are refused
+    /// with the key named, never clamped silently.
+    fn check(self) -> Result<Self, String> {
+        if self.max_live == 0 || self.max_live > 1024 {
+            return Err(format!(
+                "config refused: max_live is {} (1 to 1024)",
+                self.max_live
+            ));
+        }
+        if self.rate_per_sec == 0 || self.rate_per_sec > 1000 {
+            return Err(format!(
+                "config refused: rate_per_sec is {} (1 to 1000)",
+                self.rate_per_sec
+            ));
+        }
+        if self.rate_burst == 0 || self.rate_burst > 1000 {
+            return Err(format!(
+                "config refused: rate_burst is {} (1 to 1000)",
+                self.rate_burst
+            ));
+        }
+        if self.timeout_max_ms == 0 || self.timeout_max_ms > 86_400_000 {
+            return Err(format!(
+                "config refused: timeout_max_ms is {} (1 to 86400000)",
+                self.timeout_max_ms
+            ));
+        }
+        if self.timeout_low_ms > self.timeout_max_ms {
+            return Err(format!(
+                "config refused: timeout_low_ms is {} (past timeout_max_ms {})",
+                self.timeout_low_ms, self.timeout_max_ms
+            ));
+        }
+        if self.timeout_normal_ms > self.timeout_max_ms {
+            return Err(format!(
+                "config refused: timeout_normal_ms is {} (past timeout_max_ms {})",
+                self.timeout_normal_ms, self.timeout_max_ms
+            ));
+        }
+        Ok(self)
+    }
+}
+
+#[cfg(test)]
+mod tests;

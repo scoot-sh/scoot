@@ -200,6 +200,13 @@ export default defineConfig({
           ],
         },
         {
+          label: 'scootnotify',
+          items: [
+            { label: 'Overview', slug: 'scootnotify' },
+            { label: 'CLI reference', slug: 'scootnotify/cli' },
+          ],
+        },
+        {
           label: 'Agents & webtop',
           items: [
             { label: 'Agents', slug: 'agents' },
@@ -294,6 +301,12 @@ export default defineConfig({
               paths: ['scootlaunch', 'scootlaunch/**'],
               description:
                 'The application launcher: the desktop entry index, --list --json.',
+            },
+            {
+              label: 'scootnotify',
+              paths: ['scootnotify', 'scootnotify/**'],
+              description:
+                'The notification daemon: the server, the model, daemon --check.',
             },
             {
               label: 'Agents & webtop',

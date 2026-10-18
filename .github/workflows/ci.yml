@@ -94,9 +94,10 @@ jobs:
   #     except crates/scootbg/Cargo.toml    -> scoot too: flake.nix reads
   #     its description, which the Linux job's `nix flake check` evaluates
   #
-  # scootbg, scootbg-mem and scootbar never run on a Mac: the macOS job
-  # leaves them out of its `cargo check`, and the Darwin outputs of the
-  # flake have none of them, so no change to them alone sets `macos`.
+  # scootbg, scootbg-mem, scootbar and scootnotify never run on a Mac:
+  # the macOS job leaves them out of its `cargo check`, and the Darwin
+  # outputs of the flake have none of them, so no change to them alone
+  # sets `macos`.
   #   anything else that is not docs (Cargo.toml, Cargo.lock, flake.*,
   #   nix/, .github/, .config/, resources/ outside the session paths
   #   above, devenv.*, other scripts/ and
@@ -114,9 +115,9 @@ jobs:
   #                                        -> scootbar=true (scootbar job, which
   #                                           also builds the Nix module check)
   #   crates/scoot-dbus/                 -> scootbar=true as well (the
-  #                                           client lives in the scootbar
-  #                                           job until a second consumer
-  #                                           exists; no always-run job)
+  #                                           client's first consumer) and
+  #                                           scootnotify=true (the server,
+  #                                           below); no always-run job)
   #   crates/scootlaunch/                -> scootlaunch=true (scootlaunch
   #                                           job: fmt, clippy, both test
   #                                           runners, the fuzz targets for
@@ -124,6 +125,14 @@ jobs:
   #                                           plus release-links gates).
   #                                           crates/scoot-rt/* fans out to
   #                                           it too, as it does to scootbar.
+  #   crates/scootnotify/                -> scootnotify=true (scootnotify
+  #                                           job: fmt, clippy, both test
+  #                                           runners, the fuzz targets for
+  #                                           their budget, and the no-libc
+  #                                           plus release-links gates).
+  #                                           crates/scoot-dbus/* and
+  #                                           crates/scoot-rt/* fan out to
+  #                                           it too. No always-run job.
   #   resources/scoot-session, resources/systemd/*,
   #   scripts/scoot-session-test.sh        -> session=true (session-harness
   #                                           job: the launcher harness, no
@@ -206,6 +215,7 @@ jobs:
       scootbg: ${{ steps.classify.outputs.scootbg }}
       scootbar: ${{ steps.classify.outputs.scootbar }}
       scootlaunch: ${{ steps.classify.outputs.scootlaunch }}
+      scootnotify: ${{ steps.classify.outputs.scootnotify }}
       look: ${{ steps.classify.outputs.look }}
       backlog: ${{ steps.classify.outputs.backlog }}
       docs-site: ${{ steps.classify.outputs.docs_site }}
@@ -226,6 +236,7 @@ jobs:
           scootbg=true
           scootbar=true
           scootlaunch=true
+          scootnotify=true
           look=true
           backlog=true
           docs_site=true
@@ -237,6 +248,7 @@ jobs:
             scootbg=false
             scootbar=false
             scootlaunch=false
+            scootnotify=false
             look=false
             backlog=false
             docs_site=false
@@ -319,6 +331,13 @@ jobs:
                 # runs this job. Nothing else fans out to it.
                 crates/scootlaunch/*)
                   scootlaunch=true ;;
+                # The notification server (crates/scootnotify): its own
+                # job below, gated on this output. It serves over
+                # scoot-dbus and prints through scoot-rt (above); the
+                # workspace manifests catch it through the catch-all,
+                # which also runs this job. Nothing else fans out to it.
+                crates/scootnotify/*)
+                  scootnotify=true ;;
                 # The shared drawing crate (crates/scootui): scootbar's
                 # canvas, text, theme, popups and icons, fanning out to
                 # every consumer (today scootbar alone; tomorrow
@@ -332,25 +351,28 @@ jobs:
                   scootbar=true ;;
                 # The leaf both scootui and scoot-dbus depend on
                 # (crates/scoot-rt): `print` and `runtime_dir`, fanning out
-                # to both sets, today scootbar and scootlaunch.
+                # to both sets, today scootbar, scootlaunch and scootnotify.
                 crates/scoot-rt/Cargo.toml)
                   scoot=true
                   scootbar=true
-                  scootlaunch=true ;;
+                  scootlaunch=true
+                  scootnotify=true ;;
                 crates/scoot-rt/*)
                   scootbar=true
-                  scootlaunch=true ;;
+                  scootlaunch=true
+                  scootnotify=true ;;
                 # The shared D-Bus client (crates/scoot-dbus): scootbar's
                 # `conn`, `proto` and `link` plus the `mpris` and `bluez`
-                # readers, fanning out to every consumer (today scootbar
-                # alone; tomorrow scootnotify, scootlaunch and scootgreet,
-                # per dev/design/shell-apps.md). Its manifest also runs
-                # the Linux job, as scootbar's does.
+                # readers, fanning out to every consumer (scootbar and
+                # scootnotify, per dev/design/shell-apps.md). Its manifest
+                # also runs the Linux job, as scootbar's does.
                 crates/scoot-dbus/Cargo.toml)
                   scoot=true
-                  scootbar=true ;;
+                  scootbar=true
+                  scootnotify=true ;;
                 crates/scoot-dbus/*)
-                  scootbar=true ;;
+                  scootbar=true
+                  scootnotify=true ;;
                 # The look format crate (crates/scoot-look): its own job
                 # below. scootbar reads its allowlists and the compositor
                 # reads its look layer, so its files fan out to the
@@ -389,6 +411,7 @@ jobs:
                   scootbg=true
                   scootbar=true
                   scootlaunch=true
+                  scootnotify=true
                   look=true
                   backlog=true
                   docs_site=true
@@ -396,13 +419,14 @@ jobs:
               esac
             done <<<"$changed"
           fi
-          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar scootlaunch=$scootlaunch look=$look backlog=$backlog docs_site=$docs_site session=$session"
+          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar scootlaunch=$scootlaunch scootnotify=$scootnotify look=$look backlog=$backlog docs_site=$docs_site session=$session"
           {
             echo "scoot=$scoot"
             echo "macos=$macos"
             echo "scootbg=$scootbg"
             echo "scootbar=$scootbar"
             echo "scootlaunch=$scootlaunch"
+            echo "scootnotify=$scootnotify"
             echo "look=$look"
             echo "backlog=$backlog"
             echo "docs_site=$docs_site"
@@ -1120,16 +1144,17 @@ jobs:
 
       # `--all-targets` so the tests and the CLI's own test targets are
       # type-checked too, not just the library and binary. The wallpaper
-      # daemon, the bar and the shared drawing and D-Bus crates never run
-      # on a Mac, and do not build there (scootbg-mem's, scootui's and
-      # scoot-dbus's `compile_error!` say so), so they are left out, with
-      # scootbg-mem: this checks scoot (its Linux halves cfg'd out: a Mac
-      # `scoot` is the `scoot msg` client), the client library, scoot-ipc,
-      # scoot-core and scoot-rt (which builds anywhere). The same command
-      # on a Mac is in dev/README.md.
+      # daemon, the bar, the notification daemon and the shared drawing
+      # and D-Bus crates never run on a Mac, and do not build there
+      # (scootbg-mem's, scootui's and scoot-dbus's `compile_error!` say
+      # so), so they are left out, with scootbg-mem: this checks scoot
+      # (its Linux halves cfg'd out: a Mac `scoot` is the `scoot msg`
+      # client), the client library, scoot-ipc, scoot-core and scoot-rt
+      # (which builds anywhere). The same command on a Mac is in
+      # dev/README.md.
       - name: cargo check
         shell: nix develop --command bash -euo pipefail {0}
-        run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --exclude scoot-dbus --all-targets
+        run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --exclude scoot-dbus --exclude scootnotify --all-targets
 
       # The client half has to run, not just compile, on a Mac: `scoot msg
       # --help` needs no display and no compositor.
@@ -1847,6 +1872,151 @@ jobs:
           run exec -runs=1000000 -max_len=4096
           run fuzzy -runs=500000 -max_len=1024
           run history -runs=250000 -max_len=65536
+
+      - name: Save the cargo cache
+        # Same condition as the Linux job's save; see the comment there.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  # scootnotify's D-Bus server and model (crates/scootnotify/): the name
+  # ownership, the four methods and the signals, ids, replace and close,
+  # expiry, caps and rate limits, markup, image-data and hints, plus
+  # `daemon --check`. Runs when the crate changes, when scoot-dbus or
+  # scoot-rt changes (its two workspace dependencies), on the catch-all,
+  # and on every push to main; fail open like the other jobs (only an
+  # explicit `false` skips).
+  scootnotify:
+    name: scootnotify (notification server)
+    needs: changes
+    # Fail open, as above.
+    if: ${{ !cancelled() && needs.changes.outputs.scootnotify != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # Its own cache, for the reason the scootbg job gives: this job
+      # never builds Smithay, so sharing the Linux job's (gigabytes of
+      # it) would cost more to restore than it saves.
+      - name: Restore the cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: scootnotify-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            scootnotify-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            scootnotify-cargo-
+
+      - name: cargo fmt
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo fmt --check -p scootnotify
+
+      # scootnotify is `#![forbid(unsafe_code)]`, which rustc enforces.
+      - name: cargo clippy
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo clippy -p scootnotify --all-targets -- -D warnings
+
+      # Both runners, for the reason the Linux job gives: nextest isolates
+      # each test in its own process, `cargo test` shares one.
+      - name: cargo nextest and cargo test
+        shell: nix develop --command bash -euo pipefail {0}
+        env:
+          # The bus tests start a private `dbus-daemon` and drive the
+          # real server binary; without this a missing one would skip
+          # them quietly.
+          SCOOTNOTIFY_REQUIRE_DBUS_DAEMON: "1"
+        run: |
+          # `dbus-daemon` from the pinned nixpkgs for this step only, as
+          # in the scootbar job: the dev shell is every job's, and a tool
+          # one job's tests start does not belong in all of them.
+          dbus=$(nix build --inputs-from . 'nixpkgs#dbus^out' --no-link --print-out-paths)
+          test -x "$dbus/bin/dbus-daemon"
+          export PATH="$dbus/bin:$PATH"
+          export TMPDIR="$RUNNER_TEMP/scootnotify-tmp"
+          mkdir -p "$TMPDIR"
+          cargo nextest run -p scootnotify --no-fail-fast
+          cargo test -p scootnotify
+
+      # No C beyond what std links, as for scootbg: no `libc` crate in the
+      # normal dependency tree (rustix on its `linux_raw` backend), and no
+      # shared library beyond glibc and libgcc_s. `cargo tree` resolves the
+      # host target, the one this binary ships for.
+      - name: No libc crate, and what the release binary links
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          if cargo tree -p scootnotify -e normal --prefix none | grep -q '^libc '; then
+            echo "::error title=scootnotify depends on the libc crate::find the path with: cargo tree -p scootnotify -e normal -i libc"
+            cargo tree -p scootnotify -e normal -i libc
+            exit 1
+          fi
+          echo "ok: no libc crate in scootnotify's normal dependency tree"
+          # Weighed alone, never in a --workspace build (feature unification).
+          RUSTFLAGS="-D warnings" cargo build --release -p scootnotify
+          echo "release binary: $(stat -c %s target/release/scootnotify) bytes (stripped)"
+          ldd target/release/scootnotify
+          extra=$(ldd target/release/scootnotify | awk '{ print $1 }' | grep -vE '^(linux-vdso|libc\.so|libm\.so|libgcc_s\.so|/)' || true)
+          if [ -n "$extra" ]; then
+            echo "::error title=scootnotify links a library beyond std's::$(echo "$extra" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "ok: links only what std links"
+
+      # The fuzz targets (crates/scootnotify/fuzz, its own workspace, which no
+      # step above compiles) for a fixed budget: a fixed number of runs from
+      # a fixed seed, so a run is the same run every time, from the seed
+      # corpus and every past finding (`regressions/`). Compiling them is
+      # half the point: they call the crate's own `fuzz_check` functions,
+      # so a refactor that moves a parser fails here, not on the next
+      # person to fuzz. Stable toolchain, no sanitizer (`-s none`), as the
+      # fuzz README runs it; cargo-fuzz from the pinned nixpkgs. A finding
+      # prints its input in base64, since the runner's disk is gone after
+      # the job.
+      - name: Fuzz targets, a fixed budget
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          fuzz=$(nix build --inputs-from . nixpkgs#cargo-fuzz --no-link --print-out-paths)
+          export PATH="$fuzz/bin:$PATH"
+          scratch="$RUNNER_TEMP/scootnotify-fuzz"
+          mkdir -p "$scratch/notify" "$scratch/markup" "$scratch/image-data" "$scratch/artifacts"
+          cd crates/scootnotify
+          # cargo-fuzz has no `--locked` to pass on, so the fuzz workspace's
+          # own lock file is held to it here: a stale one fails the step
+          # instead of being quietly rewritten by the build below.
+          cargo fetch --locked --manifest-path fuzz/Cargo.toml
+          run() {
+            local target=$1; shift
+            if ! cargo fuzz run -s none --target-dir "$GITHUB_WORKSPACE/target/scootnotify-fuzz" "$target" \
+                "$scratch/$target" "fuzz/corpus/$target" "fuzz/regressions/$target" -- \
+                -seed=1 -timeout=10 -artifact_prefix="$scratch/artifacts/" "$@"; then
+              for found in "$scratch"/artifacts/*; do
+                [ -f "$found" ] || continue
+                echo "::error title=scootnotify fuzz finding ($target)::$(basename "$found")"
+                echo "$(basename "$found"), base64:"
+                base64 -w0 "$found"; echo
+              done
+              return 1
+            fi
+          }
+          run notify -runs=250000 -max_len=100000
+          run markup -runs=500000 -max_len=4096
+          run image-data -runs=500000 -max_len=300000
 
       - name: Save the cargo cache
         # Same condition as the Linux job's save; see the comment there.

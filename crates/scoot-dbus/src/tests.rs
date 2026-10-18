@@ -945,7 +945,7 @@ fn an_over_cap_reply_is_skipped_and_the_connection_lives() {
         events[1]
     );
     // It never sat in staging whole.
-    assert!(peak <= conn::Conn::WATERMARK + 8192, "{peak}");
+    assert!(peak <= conn.watermark() + 8192, "{peak}");
     assert!(!conn.dead());
 }
 
@@ -1195,7 +1195,7 @@ fn a_flood_is_worked_a_turn_at_a_time_and_never_kills_the_connection() {
     let (events, peak) = pump_events(&mut conn, 40_000);
     sender.join().unwrap();
     assert_eq!(events.len(), 40_000);
-    assert!(peak <= conn::Conn::WATERMARK + 8192, "{peak}");
+    assert!(peak <= conn.watermark() + 8192, "{peak}");
     assert!(!conn.dead());
 }
 
@@ -1314,4 +1314,146 @@ fn the_header_frames_a_long_message_and_refuses_a_false_one() {
     let mut bad = header(1, 0);
     bad[3] = 2;
     assert_eq!(frame_header(&bad), Err(()));
+}
+
+/// An error reply carries its body on the wire: the name and the text a
+/// `Failed` or `InvalidArgs` tells the caller's user. Read off the fake
+/// peer (the client's own `CallError` event names the error; the body is
+/// for the human, not the table).
+#[test]
+fn an_error_reply_with_a_body_names_and_tells() {
+    use super::proto::Reader;
+    let (mut conn, mut daemon) = connected();
+    let mut text = Writer::new();
+    text.str("the file is not a PNG");
+    let text = text.take_body().unwrap();
+    conn.reply_error_body(
+        ":1.9",
+        41,
+        "org.freedesktop.DBus.Error.InvalidArgs",
+        "s",
+        &text,
+    );
+    let _ = conn.pump();
+    daemon
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let mut staged = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let len = loop {
+        if let Ok(Some(len)) = frame_at(&staged) {
+            break len;
+        }
+        let n = daemon.read(&mut chunk).unwrap();
+        staged.extend_from_slice(&chunk[..n]);
+    };
+    let message = Message::parse(&staged[..len]).unwrap();
+    assert_eq!(message.kind, Kind::Error);
+    assert_eq!(
+        message.error,
+        Some("org.freedesktop.DBus.Error.InvalidArgs")
+    );
+    assert_eq!(message.reply_serial, Some(41));
+    assert_eq!(message.signature, "s");
+    assert_eq!(
+        Reader::le(message.body.rest()).str(),
+        Ok("the file is not a PNG")
+    );
+    // The body-less form is the spec's empty error: a name, no body.
+    conn.reply_error(":1.9", 42, "org.freedesktop.DBus.Error.Failed");
+    let _ = conn.pump();
+    let mut staged = Vec::new();
+    let len = loop {
+        if let Ok(Some(len)) = frame_at(&staged) {
+            break len;
+        }
+        let n = daemon.read(&mut chunk).unwrap();
+        staged.extend_from_slice(&chunk[..n]);
+    };
+    let message = Message::parse(&staged[..len]).unwrap();
+    assert_eq!(message.kind, Kind::Error);
+    assert_eq!(message.signature, "");
+    assert!(message.body.rest().is_empty());
+}
+
+/// The cap is per connection: 1 MiB unless raised, clamped to 64 KiB at
+/// the bottom and the spec's 128 MiB at the top. The watermark (a capped
+/// message plus a read's worth) moves with it.
+#[test]
+fn the_message_cap_is_per_connection() {
+    use super::proto::{MAX_MESSAGE, MAX_WIRE};
+    let (mut conn, _daemon) = connected();
+    assert_eq!(conn.max_message(), MAX_MESSAGE);
+    assert_eq!(conn.watermark(), MAX_MESSAGE + 64 * 1024);
+    conn.set_max_message(4 * 1024 * 1024);
+    assert_eq!(conn.max_message(), 4 * 1024 * 1024);
+    assert_eq!(conn.watermark(), 4 * 1024 * 1024 + 64 * 1024);
+    conn.set_max_message(1);
+    assert_eq!(conn.max_message(), 64 * 1024);
+    conn.set_max_message(1024 * 1024 * 1024);
+    assert_eq!(conn.max_message(), MAX_WIRE);
+}
+
+/// Reverting the clamp's lower bound to take any value leaves the small
+/// assertion failing: the floor (a header must stage) is load-bearing.
+#[test]
+fn a_raised_cap_takes_a_message_the_default_skips() {
+    use super::proto::MAX_MESSAGE;
+    // A 2 MiB signal: skipped past the default cap, dispatched raised.
+    let payload = vec![7u8; 2 * 1024 * 1024];
+    let mut frame = Writer::with_cap(3 * 1024 * 1024);
+    frame.begin_signal(9, "/p", "a.b", "Big", "ay");
+    let cookie = frame.open_array(1).unwrap();
+    frame.raw(&payload);
+    frame.close_array(cookie);
+    let frame = frame.finish().unwrap();
+    assert!(frame.len() > MAX_MESSAGE);
+    let (mut conn, daemon) = connected();
+    // The sender writes in its own thread because the message is
+    // larger than the socket buffer; the main thread pumps until the
+    // write lands and the skip completes. (Joining first would deadlock
+    // the write, and breaking on `has_staged_work` alone would strand
+    // it mid-discard — staged can be empty both before the first bytes
+    // arrive and while the rest is still in the socket.)
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let written = std::sync::Arc::new(AtomicBool::new(false));
+    let flag = written.clone();
+    let first = frame.clone();
+    let sender = std::thread::spawn(move || {
+        use std::io::Write;
+        let mut daemon = daemon;
+        daemon.write_all(&first).unwrap();
+        flag.store(true, Ordering::SeqCst);
+        daemon
+    });
+    let start = std::time::Instant::now();
+    let mut silent = true;
+    loop {
+        let (events, _) = conn.pump();
+        silent = silent && events.is_empty();
+        assert!(!conn.dead(), "the connection died on an over-cap signal");
+        if written.load(Ordering::SeqCst) && conn.discard_pending() == 0 && !conn.has_staged_work()
+        {
+            break;
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(20),
+            "the over-cap skip never completed"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    sender.join().unwrap();
+    assert!(silent, "past the default cap, a signal is silent");
+    assert!(!conn.dead());
+    // Raised past it, the same bytes dispatch.
+    let (mut conn, daemon) = connected();
+    conn.set_max_message(4 * 1024 * 1024);
+    let sender = send_later(daemon, frame);
+    let (events, _) = pump_events(&mut conn, 1);
+    assert!(
+        matches!(&events[0], super::conn::Event::Signal { member, .. } if member == "Big"),
+        "{:?}",
+        events[0]
+    );
+    sender.join().unwrap();
 }

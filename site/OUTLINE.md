@@ -106,7 +106,7 @@ Hotplug, VT switching; `docs/configuration.md` Failure semantics;
 
 ### Coming apps (sections only once they ship; named here so the structure never changes shape)
 
-- `scootnotify` (notification daemon; pointer ticket `docs/scootbar/backlog/scootnotify.md`) → `/scootnotify/` section: overview, configure, CLI reference.
+- `scootnotify` (notification daemon; pointer ticket `docs/scootbar/backlog/scootnotify.md`) → `/scootnotify/` section: overview (with the conformance table) and CLI reference land with the server ticket (`notify-server`); configure keys live in the CLI reference until the popups ticket earns a configure page; `msg`, rules, history and theming join it as their tickets land.
 - `scootlaunch` (launcher; `docs/scootbar/backlog/launcher.md`, `docs/backlog/packaging/desktop-launcher.md`) → `/scootlaunch/` section: overview and CLI reference land with the index ticket (`launch-desktop-index`); configure, modes, the dmenu table, the full agent schema and theming join it as their tickets land.
 - `scootgreet` (login greeter, planned 2026-10-12; design `dev/design/scootgreet.md`, epic `docs/scootbar/backlog/scootgreet.md`) → its section once it ships; until then the greeter stays in `/desktop` "The greeter".
 - `scootlock` (future; `docs/backlog/packaging/desktop-idle-lock.md:47` names the swap) → `/scootlock/` section when the design lands.

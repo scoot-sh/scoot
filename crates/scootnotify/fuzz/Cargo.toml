@@ -1,0 +1,50 @@
+# `cargo fuzz` targets over the parsers of outside input: the
+# `Notify` body, the markup parser, and the `image-data` validator.
+# Test tooling only: never part of the shipped binary, and never a
+# member of the repository's workspace (the `[workspace]` table below
+# makes this its own), so `cargo build --workspace`, nextest, clippy and
+# the flake's builds never compile it. How to run it: README.md here.
+[package]
+name = "scootnotify-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+# The targets call the crate's own `fuzz_check` functions, so a refactor
+# that moves the parsers breaks the build here, not on the next person
+# to fuzz. `scootnotify` is Linux-only, as the fuzz job is.
+[dependencies]
+scootnotify = { path = ".." }
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "notify"
+path = "fuzz_targets/notify.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "markup"
+path = "fuzz_targets/markup.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "image-data"
+path = "fuzz_targets/image-data.rs"
+test = false
+doc = false
+bench = false
+
+# Only symbols, for readable crash stacks.
+[profile.release]
+debug = 1

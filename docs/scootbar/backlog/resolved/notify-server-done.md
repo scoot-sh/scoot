@@ -1,10 +1,11 @@
 ---
 title: "scootnotify: the org.freedesktop.Notifications server and its model, headless"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-18"
 ---
 
 # scootnotify: the D-Bus server and the model
@@ -56,3 +57,9 @@ Fuzz targets for the Notify body, markup and image-data, with committed corpora 
 ## Not in this ticket
 
 Popups, the control socket, Nix.
+
+## Resolution
+
+Shipped 2026-10-18 in PR #668 (`feat(scootnotify,scoot-dbus)`, 36 commits): `crates/scootnotify` (the server and the model, headless — name ownership with `DO_NOT_QUEUE` and exit-3 refusal naming the owner, the four methods with Peer/Introspectable, `NotificationClosed` reasons 1/3/4, block-reserved u32 ids, replaces/close policy, expiry from presentation, caps and rate limits, markup, image-data validation and downscale, hints, bad-config defaults, `daemon --check`), the three `scoot-dbus` additions (error body, `LimitsExceeded` for over-cap method calls, per-connection cap), the `scootnotify` CI job with classify fan-out from `scoot-dbus` and `scoot-rt`, three fuzz targets with 19 committed seeds replayed on stable, and the `/scootnotify/` site section (overview with the conformance table, CLI reference).
+
+Evidence (dev VM, aarch64, release binary unless said): 90 + 83 unit tests and 11 daemon tests green; idle RSS 2,080 kB, 0 wakeups in 60 s; 5 MiB call answered `LimitsExceeded` in ~24 ms end-to-end with no hang (before: silent skip, sender waiting past 10 s — the prototype record); refusal exit 3 naming a `mako`-named holder; ids 1 then 1025 across a restart; 500/500 flood answered at +40 kB RSS. `notify-send` itself was unavailable (no Nix store access — the VM's disk is full), so a scripted peer sent the identically-framed giant; `mako` the package was likewise unavailable, so a `mako`-named process held the name. Review re-runs the standard set on the head commit plus the fuzz budgets in CI.

@@ -17,13 +17,16 @@
 //!
 //! A header that is not a message, or an I/O error, kills the connection
 //! ([`Conn::dead`]); recovery (reconnect, re-acquire, re-match) belongs to
-//! the consumer, which owns the retry policy. A valid message this client
-//! does not take (past [`proto::MAX_MESSAGE`], up to the spec's 128 MiB)
-//! is skipped whole, and a flood is read only as far as
-//! [`READ_WATERMARK`], the rest waiting in the socket: neither costs the
-//! connection, since a peer, not the bus, decides what is sent. While such
-//! a message is being discarded, one turn reads a bounded amount (a sender
-//! that outruns the reader holds one turn, not the bar).
+//! the consumer, which owns the retry policy. A valid message past the
+//! connection's cap ([`Conn::set_max_message`], [`proto::MAX_MESSAGE`] by
+//! default, up to the spec's 128 MiB) is skipped whole, and a flood is read
+//! only as far as the watermark, the rest waiting in the socket: neither
+//! costs the connection, since a peer, not the bus, decides what is sent.
+//! While such a message is being discarded, one turn reads a bounded amount
+//! (a sender that outruns the reader holds one turn, not the bar). A
+//! skipped method call is answered
+//! `org.freedesktop.DBus.Error.LimitsExceeded`, so its caller never hangs
+//! on a reply that will not come.
 
 use std::io::{Read, Write};
 use std::os::fd::{AsFd, BorrowedFd};
@@ -36,7 +39,7 @@ use super::proto::{self, Kind, Message, Writer, check_name, frame_at, frame_head
 /// The most messages one [`Conn::pump`] reports: a storm is bounded
 /// reads and bounded work per call. The consumer re-pumps while capped,
 /// so a legitimate burst (thirty items answering at once) still drains
-/// in its turn; a sustained flood backs up in the socket ([`READ_WATERMARK`])
+/// in its turn; a sustained flood backs up in the socket (the watermark),
 /// and is worked a turn at a time, never a lost connection.
 pub const MAX_EVENTS_PER_TURN: usize = 64;
 
@@ -50,17 +53,18 @@ pub const MAX_PENDING: usize = 64;
 /// unknown.
 pub const DROPPED_UNKNOWN: u64 = u64::MAX;
 
-/// Reads stop once this much is staged, leaving the rest in the kernel's
-/// socket buffer (the sender backs up, not the bar): one whole capped
-/// message and a read's worth, so the largest message still completes.
-/// A flood is worked a turn at a time, never a lost connection.
-const READ_WATERMARK: usize = proto::MAX_MESSAGE + 64 * 1024;
+/// Reads stop once this much past the connection's cap is staged,
+/// leaving the rest in the kernel's socket buffer (the sender backs up,
+/// not the bar): one whole capped message and a read's worth, so the
+/// largest message still completes. A flood is worked a turn at a time,
+/// never a lost connection.
+const READ_WATERMARK_EXTRA: usize = 64 * 1024;
 
-/// The most one [`Conn::pump`] reads while discarding a message past
-/// [`proto::MAX_MESSAGE`]: a sender that outruns the reader holds one
-/// turn this long, and the rest waits in the socket (the poll is woken
-/// for it, see [`Conn::has_staged_work`]). Reads of ordinary messages
-/// are still bounded by [`READ_WATERMARK`] alone.
+/// The most one [`Conn::pump`] reads while discarding a message past the
+/// connection's cap: a sender that outruns the reader holds one turn this
+/// long, and the rest waits in the socket (the poll is woken for it, see
+/// [`Conn::has_staged_work`]). Reads of ordinary messages are still
+/// bounded by the watermark alone.
 const DISCARD_BUDGET_PER_PUMP: usize = 256 * 1024;
 
 /// A message past [`proto::MAX_MESSAGE`] has its header fields read, to
@@ -73,11 +77,6 @@ const MAX_OVERSIZE_FIELDS: usize = 64 * 1024;
 /// accepts and never answers, costs the bar this once per attempt and
 /// never a reply at a time.
 const SETUP_TIMEOUT: Duration = Duration::from_secs(2);
-
-/// Queued output past this is a dead connection: a bus that stopped
-/// reading while we owe it replies (a peer flooding us with calls) must
-/// not grow the outbox without bound.
-const MAX_OUTBOX: usize = 2 * proto::MAX_MESSAGE;
 
 /// The bus's well-known name, object and interface.
 pub const BUS_NAME: &str = "org.freedesktop.DBus";
@@ -313,7 +312,7 @@ struct Pending {
     sent: Instant,
 }
 
-/// What an over-cap reply (header only) answers: the unknown case is
+/// What an over-cap message (header only) is: the unknown case is
 /// silent where the unreadable-fields case still drops unknown (see
 /// [`Conn::unknown_reply`]) — there the serial cannot even be read,
 /// while here it was read and matches nothing waiting.
@@ -325,10 +324,17 @@ enum Oversize {
     /// callee: refused like a normal-size forgery (warned once, flight
     /// kept), never a mass release of everything waiting.
     Refused,
+    /// An over-cap method call: answered [`LIMITS_EXCEEDED`] below, so no
+    /// `Dropped` event (the caller gets its error, not our loss report).
+    CallAnswered,
     /// It answers nothing waiting (not a reply, no serial, or a serial
     /// matching no pending call): silent.
     Unknown,
 }
+
+/// An over-cap method call is answered this, never silence: without it
+/// the caller waits for its own timeout (libnotify's default is 25 s).
+pub const LIMITS_EXCEEDED: &str = "org.freedesktop.DBus.Error.LimitsExceeded";
 
 /// Whether a reply from `sender` may answer the call made of `callee`:
 /// the bus answers its own calls, a unique name answers calls made of
@@ -381,13 +387,17 @@ pub struct Conn {
     outbox: Vec<u8>,
     pending: Vec<Pending>,
     dead: bool,
+    /// A message past this many bytes is skipped whole (and answered
+    /// [`LIMITS_EXCEEDED`] when it is a method call): [`proto::MAX_MESSAGE`]
+    /// unless the consumer raised it with [`Conn::set_max_message`].
+    max_message: usize,
     /// Set while the blocking set-up runs: every read and write is
     /// bounded by what is left of it.
     deadline: Option<Instant>,
     /// Bytes of a message past [`proto::MAX_MESSAGE`] still to be
     /// discarded as they arrive.
     discard: usize,
-    /// Reads stopped at [`READ_WATERMARK`] with more waiting in the
+    /// Reads stopped at the watermark with more waiting in the
     /// socket: the consumer pumps again at once.
     backlog: bool,
     /// An over-cap message was said once, not per message.
@@ -403,6 +413,35 @@ impl Conn {
     /// The daemon's unique name for us (`:1.42`).
     pub fn unique(&self) -> &str {
         &self.unique
+    }
+
+    /// Raises (or lowers) the message cap past which a message is skipped
+    /// whole: scootnotify fits a 1000x1000 RGBA `image-data` under 4 MiB,
+    /// while scootbar stays at the 1 MiB default. Clamped to 64 KiB at the
+    /// bottom (a smaller cap could not stage one header) and the spec's
+    /// 128 MiB at the top. The watermark and the outbox bound move with
+    /// it (one capped message plus a read's worth staged; twice the cap
+    /// queued).
+    pub fn set_max_message(&mut self, cap: usize) {
+        self.max_message = cap.clamp(64 * 1024, proto::MAX_WIRE);
+    }
+
+    /// The cap [`Conn::set_max_message`] set, or [`proto::MAX_MESSAGE`].
+    pub fn max_message(&self) -> usize {
+        self.max_message
+    }
+
+    /// Reads stop once this much is staged (see `READ_WATERMARK_EXTRA`).
+    fn read_watermark(&self) -> usize {
+        self.max_message.saturating_add(READ_WATERMARK_EXTRA)
+    }
+
+    /// Queued output past this is a dead connection: a bus that
+    /// stopped reading while we owe it replies (a peer flooding us with
+    /// calls) must not grow the outbox without bound. Twice the
+    /// connection's cap, moving with [`Conn::set_max_message`].
+    fn max_outbox(&self) -> usize {
+        self.max_message.saturating_mul(2)
     }
 
     /// Whether a refusal or an I/O error killed the connection: the
@@ -519,18 +558,35 @@ impl Conn {
     }
 
     /// Queues an error reply for `to_serial`, addressed to `dest` (see
-    /// [`Conn::reply_return`]).
-    pub fn reply_error(&mut self, dest: &str, to_serial: u32, name: &str) {
+    /// [`Conn::reply_return`]), with a pre-marshalled body of signature
+    /// `body_sig`: what a limit or a bad argument tells the caller's user.
+    /// An empty signature and body is the spec's empty D-Bus Error message
+    /// (`CloseNotification` on an unknown id).
+    pub fn reply_error_body(
+        &mut self,
+        dest: &str,
+        to_serial: u32,
+        name: &str,
+        body_sig: &str,
+        body: &[u8],
+    ) {
         let serial = self.next_serial();
         let mut writer = Writer::new();
         if dest.is_empty() {
-            writer.begin_error(serial, to_serial, name, "");
+            writer.begin_error(serial, to_serial, name, body_sig);
         } else {
-            writer.begin_error_to(serial, dest, to_serial, name, "");
+            writer.begin_error_to(serial, dest, to_serial, name, body_sig);
         }
+        writer.raw(body);
         if let Some(message) = writer.finish() {
             self.outbox.extend_from_slice(&message);
         }
+    }
+
+    /// Queues an error reply for `to_serial`, addressed to `dest` (see
+    /// [`Conn::reply_return`]).
+    pub fn reply_error(&mut self, dest: &str, to_serial: u32, name: &str) {
+        self.reply_error_body(dest, to_serial, name, "", &[]);
     }
 
     /// Bytes staged, unprocessed: a flood must never grow it past the
@@ -553,7 +609,9 @@ impl Conn {
 
     /// The watermark reads stop at.
     #[cfg(test)]
-    pub const WATERMARK: usize = READ_WATERMARK;
+    pub fn watermark(&self) -> usize {
+        self.read_watermark()
+    }
 
     /// Queues bytes as they are, with no framing or cap of this client's:
     /// the tests' way to send what a hostile or merely different peer
@@ -646,9 +704,11 @@ impl Conn {
                     return true;
                 }
             };
-            if total > proto::MAX_MESSAGE {
-                // Valid, and more than this client takes: skipped whole as
-                // its bytes arrive. A reply says which call lost its answer.
+            if total > self.max_message {
+                // Valid, and more than this connection takes: skipped whole as
+                // its bytes arrive. A reply says which call lost its answer;
+                // a method call is answered LimitsExceeded, so its caller
+                // never hangs on a reply that will not come.
                 let fields = fields_len(rest) as usize;
                 let prefix = 16 + fields + (8 - (16 + fields) % 8) % 8;
                 let known = fields <= MAX_OVERSIZE_FIELDS;
@@ -660,11 +720,11 @@ impl Conn {
                     scoot_rt::print::warn(format_args!(
                         "{}: dbus: skipping a {total}-byte message (more than {} are not read)",
                         crate::prog(),
-                        proto::MAX_MESSAGE
+                        self.max_message
                     ));
                 }
                 let dropped = if known {
-                    match Self::oversize_reply(&mut self.pending, &rest[..prefix]) {
+                    match Self::oversize_message(&mut self.pending, &rest[..prefix]) {
                         Oversize::Matched(token) => Some(token),
                         // A forged over-cap reply is refused like a
                         // normal-size one (warned once, flight kept), never
@@ -673,12 +733,16 @@ impl Conn {
                             self.refuse_forged();
                             None
                         }
-                        // It answers nothing waiting: silent.
-                        Oversize::Unknown => None,
+                        // It answers nothing waiting, or it is a method
+                        // call answered below: silent here.
+                        Oversize::Unknown | Oversize::CallAnswered => None,
                     }
                 } else {
                     Self::unknown_reply(&self.pending, rest[1])
                 };
+                if known {
+                    self.answer_oversize_call(&rest[..prefix]);
+                }
                 self.discard = total;
                 if let Some(token) = dropped {
                     events.push(Event::Dropped { token });
@@ -706,7 +770,7 @@ impl Conn {
             return true;
         }
         match frame_header(&self.staged) {
-            Ok(Some(total)) => total > proto::MAX_MESSAGE || self.staged.len() >= total,
+            Ok(Some(total)) => total > self.max_message || self.staged.len() >= total,
             _ => false,
         }
     }
@@ -732,16 +796,20 @@ impl Conn {
         }
     }
 
-    /// What an over-cap reply (header only) answers: the call's token,
-    /// leaving the pending table, when its serial matches a pending call
-    /// from its sender; [`Oversize::Refused`] when the serial matches but
-    /// the sender is not the callee; [`Oversize::Unknown`] when it answers
-    /// nothing waiting.
-    fn oversize_reply(pending: &mut Vec<Pending>, prefix: &[u8]) -> Oversize {
+    /// What an over-cap message (header only) is: the token of the call
+    /// a reply answers, leaving the pending table, when its serial matches
+    /// a pending call from its sender; [`Oversize::Refused`] when the
+    /// serial matches but the sender is not the callee; [`Oversize::CallAnswered`]
+    /// when it is a method call (answered [`LIMITS_EXCEEDED`] by the
+    /// caller); [`Oversize::Unknown`] when it answers nothing waiting.
+    fn oversize_message(pending: &mut Vec<Pending>, prefix: &[u8]) -> Oversize {
         let message = match Message::parse_header(prefix) {
             Ok(message) => message,
             Err(_) => return Oversize::Unknown,
         };
+        if message.kind == Kind::MethodCall {
+            return Oversize::CallAnswered;
+        }
         if !matches!(message.kind, Kind::MethodReturn | Kind::Error) {
             return Oversize::Unknown;
         }
@@ -758,6 +826,28 @@ impl Conn {
             return Oversize::Refused;
         }
         Oversize::Matched(pending.remove(at).token)
+    }
+
+    /// Answers an over-cap method call [`LIMITS_EXCEEDED`], addressed to
+    /// its sender: the daemon only delivers what is ours, so a method
+    /// call in our socket is ours to answer. A call with no sender (a
+    /// scripted peer, never a daemon) names nobody to answer, and stays
+    /// silent. Queued for the next flush, like any reply.
+    fn answer_oversize_call(&mut self, prefix: &[u8]) {
+        let message = match Message::parse_header(prefix) {
+            Ok(message) => message,
+            Err(_) => return,
+        };
+        if message.kind != Kind::MethodCall {
+            return;
+        }
+        let (Some(sender), serial) = (message.sender, message.serial) else {
+            return;
+        };
+        if sender.is_empty() || serial == 0 {
+            return;
+        }
+        self.reply_error(sender, serial, LIMITS_EXCEEDED);
     }
 
     /// Refuses a reply from anyone but the callee (dbus-daemon delivers an
@@ -790,7 +880,7 @@ impl Conn {
                     self.outbox.drain(..n);
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    if self.outbox.len() > MAX_OUTBOX {
+                    if self.outbox.len() > self.max_outbox() {
                         scoot_rt::print::warn(format_args!(
                             "{}: dbus: the bus stopped reading; dropping the connection",
                             crate::prog()
@@ -811,9 +901,9 @@ impl Conn {
         }
     }
 
-    /// Reads what is ready into staging, up to [`READ_WATERMARK`], killing
-    /// the connection only on a real I/O error. While a message past
-    /// [`proto::MAX_MESSAGE`] is being discarded, one pump reads at most
+    /// Reads what is ready into staging, up to the watermark, killing
+    /// the connection only on a real I/O error. While a message past the
+    /// cap is being discarded, one pump reads at most
     /// [`DISCARD_BUDGET_PER_PUMP`] more (a sender that outruns the reader
     /// holds one turn this long); the rest waits in the socket with
     /// `backlog` set, so the poll returns at once for it.
@@ -821,8 +911,9 @@ impl Conn {
         let mut chunk = [0u8; 8192];
         self.backlog = false;
         let mut read = 0;
+        let watermark = self.read_watermark();
         loop {
-            if self.staged.len() >= READ_WATERMARK {
+            if self.staged.len() >= watermark {
                 // Enough for this turn: the rest waits in the socket.
                 self.backlog = true;
                 return;
@@ -1014,7 +1105,7 @@ impl Conn {
                 Ok(0) => return Err(SetupError::Refused("the bus closed the set-up")),
                 Ok(n) => {
                     self.staged.extend_from_slice(&chunk[..n]);
-                    if self.staged.len() > READ_WATERMARK {
+                    if self.staged.len() > self.read_watermark() {
                         return Err(SetupError::Refused("the set-up never framed"));
                     }
                 }
@@ -1071,6 +1162,7 @@ pub fn setup(stream: UnixStream) -> Result<Conn, SetupError> {
         outbox: Vec::new(),
         pending: Vec::new(),
         dead: false,
+        max_message: proto::MAX_MESSAGE,
         deadline: Some(deadline),
         discard: 0,
         backlog: false,
