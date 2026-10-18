@@ -1,6 +1,6 @@
 [package]
 name = "scootui"
-description = "Shared drawing, widgets, icons and Wayland scaffolding for scootbar, scootnotify, scootlaunch and scootgreet: canvas, text, theme, popups, icon rasterization, the per-output model and the poll loop's Wayland primitives"
+description = "Shared drawing, widgets, icons, Wayland scaffolding and the control socket for scootbar, scootnotify, scootlaunch and scootgreet: canvas, text, theme, popups, icon rasterization, the per-output model, the poll loop's Wayland primitives and the msg server half"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -21,6 +21,12 @@ tray = ["icons"]
 # after a poll): the Wayland half of the daemon loop, which every shell
 # app's loop runs.
 wayland = ["dep:wayland-client", "rustix/event"]
+# The control socket's server half (accepting, bounding and servicing
+# connections), the claim, line framing and socket paths, with the socket
+# name a parameter of the app's (`scootbar`, `scootnotify`): the `msg`
+# interface every shell daemon serves. The error lines use the same JSON
+# encoding as the apps' own reply writers.
+control = ["rustix/event", "rustix/net", "dep:serde", "dep:serde_json"]
 # The headless-compositor harness the apps' integration tests share (the
 # scoot and sway sessions, the screenshot readers). Test support only:
 # never enabled in a shipped binary.
@@ -46,4 +52,8 @@ wayland-client = { version = "0.31", optional = true }
 # The screencopy manager the harness reads sway's pixels through.
 wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
 base64 = { workspace = true, optional = true }
+# The control socket's error lines, encoded exactly as the apps' own reply
+# writers (behind `control`), and the harness's session JSON (behind
+# `test-support`): nothing else here touches JSON.
+serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }

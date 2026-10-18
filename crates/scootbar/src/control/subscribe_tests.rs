@@ -8,7 +8,8 @@ use std::os::unix::net::UnixStream;
 
 use rustix::event::PollFlags;
 
-use super::conn::{Conn, Handler, Kinds, Status};
+use scootui::control::conn::{Conn, Handler, Kinds, Status};
+
 use super::protocol::{self, EventKind, Request, RequestError};
 use super::{MAX_CONNECTIONS, MAX_SUBSCRIBERS, Server};
 
@@ -176,7 +177,7 @@ impl Handler for Subscriber {
                     events: vec!["module"],
                 },
             );
-            self.to = Some(Kinds::of(&[EventKind::Module]));
+            self.to = Some(Kinds::of(&[EventKind::Module as u8]));
         } else {
             protocol::write_reply(out, &protocol::Reply::Ok { scope: None });
         }
@@ -226,8 +227,8 @@ fn subscribing_answers_once_and_dedicates_the_connection() {
     assert!(conn.subscription().is_none());
     subscribe(&mut client, &mut conn, &mut handler);
     let kinds = conn.subscription().unwrap();
-    assert!(kinds.wants(EventKind::Module));
-    assert!(!kinds.wants(EventKind::Output));
+    assert!(kinds.wants(EventKind::Module as u8));
+    assert!(!kinds.wants(EventKind::Output as u8));
     // It waits for the client to speak, never to write.
     assert_eq!(conn.interest(), PollFlags::IN);
 }
@@ -332,8 +333,8 @@ fn a_broadcast_reaches_only_the_subscribers_of_that_kind() {
     assert!(server.service(0, PollFlags::IN, &mut handler));
     assert_eq!(server.subscribers(), 1);
     read_all(&mut clients[0]);
-    server.broadcast(EventKind::Module, b"{\"type\":\"module\"}\n");
-    server.broadcast(EventKind::Output, b"{\"type\":\"output\"}\n");
+    server.broadcast(EventKind::Module as u8, b"{\"type\":\"module\"}\n");
+    server.broadcast(EventKind::Output as u8, b"{\"type\":\"output\"}\n");
     assert_eq!(read_all(&mut clients[0]), "{\"type\":\"module\"}\n");
     assert_eq!(read_all(&mut clients[1]), "");
     assert_eq!(read_all(&mut clients[2]), "");
@@ -355,7 +356,7 @@ fn a_slow_subscriber_is_dropped_and_the_others_keep_theirs() {
     line.push(b'\n');
     let mut got = 0usize;
     for _ in 0..4096 {
-        server.broadcast(EventKind::Module, &line);
+        server.broadcast(EventKind::Module as u8, &line);
         got += read_all(&mut clients[1]).len();
         if server.subscribers() == 1 {
             break;
@@ -365,14 +366,14 @@ fn a_slow_subscriber_is_dropped_and_the_others_keep_theirs() {
     assert_eq!(server.conns().len(), 1);
     assert!(got > 0);
     // The one that kept up still gets what comes.
-    server.broadcast(EventKind::Module, b"{\"type\":\"module\"}\n");
+    server.broadcast(EventKind::Module as u8, b"{\"type\":\"module\"}\n");
     assert!(read_all(&mut clients[1]).ends_with("{\"type\":\"module\"}\n"));
 }
 
 #[test]
 fn with_no_subscriber_a_broadcast_does_nothing() {
     let (mut server, mut clients) = server_with(1);
-    server.broadcast(EventKind::Module, b"x\n");
+    server.broadcast(EventKind::Module as u8, b"x\n");
     assert_eq!(read_all(&mut clients[0]), "");
     assert_eq!(server.subscribers(), 0);
 }
@@ -424,7 +425,7 @@ fn a_flood_of_connections_closes_the_idle_ones_and_not_the_subscribers() {
         assert_eq!(server.subscribers(), 2, "round {round}");
     }
     // They still carry events.
-    server.broadcast(EventKind::Module, b"{\"type\":\"module\"}\n");
+    server.broadcast(EventKind::Module as u8, b"{\"type\":\"module\"}\n");
     for subscriber in &mut clients[..2] {
         assert_eq!(read_all(subscriber), "{\"type\":\"module\"}\n");
         assert!(!closed(subscriber));

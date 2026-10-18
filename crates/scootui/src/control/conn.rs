@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 use rustix::event::PollFlags;
 
 use super::framing::{Line, LineBuffer};
-use super::protocol::{DROPPED, EventKind, MAX_REQUEST_LINE, Reply, write_reply};
+use super::{DROPPED, MAX_REQUEST_LINE};
 
 /// Stop handling requests once this much output is queued; resume when the
 /// client has read it.
@@ -59,21 +59,19 @@ enum Phase {
     Subscribed(Kinds),
 }
 
-/// The event kinds a subscribed connection carries.
+/// The event kinds a subscribed connection carries, as a bitset over the
+/// app's own kind indices: each app passes its kinds' discriminants (`*kind
+/// as u8`), so the layout is the app's to define.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Kinds(u8);
 
 impl Kinds {
-    pub fn of(kinds: &[EventKind]) -> Self {
-        Self(
-            kinds
-                .iter()
-                .fold(0, |bits, kind| bits | (1 << (*kind as u8))),
-        )
+    pub fn of(kinds: &[u8]) -> Self {
+        Self(kinds.iter().fold(0, |bits, kind| bits | (1 << kind)))
     }
 
-    pub fn wants(self, kind: EventKind) -> bool {
-        self.0 & (1 << (kind as u8)) != 0
+    pub fn wants(self, kind: u8) -> bool {
+        self.0 & (1 << kind) != 0
     }
 }
 
@@ -223,12 +221,10 @@ impl Conn {
             }
         }
         if asked {
-            write_reply(
+            write_error(
                 out,
-                &Reply::Error {
-                    message: &"a subscribed connection serves no further requests: it \
-                               carries events only (open another connection for requests)",
-                },
+                &"a subscribed connection serves no further requests: it \
+                   carries events only (open another connection for requests)",
             );
         }
         asked
@@ -380,11 +376,9 @@ impl Conn {
 
     /// Framing is lost past an overlong line, so answer and close.
     fn refuse_too_long(&mut self) {
-        write_reply(
+        write_error(
             &mut self.out,
-            &Reply::Error {
-                message: &format_args!("request line longer than {MAX_REQUEST_LINE} bytes"),
-            },
+            &format_args!("request line longer than {MAX_REQUEST_LINE} bytes"),
         );
         self.phase = Phase::Closing;
     }
@@ -392,5 +386,43 @@ impl Conn {
     /// One non-blocking attempt to send what is queued, for shutdown.
     pub fn flush_once(&mut self) {
         let _ = self.flush();
+    }
+}
+
+/// Appends an error line to `out`: `{"type":"error","message":"..."}` with
+/// the message's JSON escaping, byte-identical to the app's own reply
+/// writer (the same serializer over the same shape).
+fn write_error(out: &mut Vec<u8>, message: &dyn std::fmt::Display) {
+    let start = out.len();
+    if serde_json::to_writer(&mut *out, &ErrorLine { message }).is_err() {
+        // Writing into a `Vec` cannot fail and every field serializes, so
+        // this is unreachable; if it ever happened, a fixed line beats a
+        // half-written one.
+        out.truncate(start);
+        out.extend_from_slice(br#"{"type":"error","message":"internal: reply failed to encode"}"#);
+    }
+    out.push(b'\n');
+}
+
+struct ErrorLine<'a> {
+    message: &'a dyn std::fmt::Display,
+}
+
+impl serde::Serialize for ErrorLine<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut line = serializer.serialize_struct("ErrorLine", 2)?;
+        line.serialize_field("type", "error")?;
+        line.serialize_field("message", &ViaDisplay(self.message))?;
+        line.end()
+    }
+}
+
+/// Serializes through `Display` without an intermediate `String`.
+struct ViaDisplay<'a>(&'a dyn std::fmt::Display);
+
+impl serde::Serialize for ViaDisplay<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self.0)
     }
 }

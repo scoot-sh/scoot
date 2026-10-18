@@ -46,12 +46,6 @@ use serde_json::Value;
 /// misread a new one.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// The longest request line accepted, newline excluded. Requests are small
-/// (the largest, `set`, carries one JSON value); anything longer is
-/// refused and the connection closed, so a client cannot make the daemon
-/// buffer without bound.
-pub const MAX_REQUEST_LINE: usize = 64 * 1024;
-
 /// What a client can ask for.
 ///
 /// ```text
@@ -515,15 +509,10 @@ pub enum Event<'a> {
     },
 }
 
-/// The last line a subscriber the daemon is about to drop can be sent, when
-/// the daemon can still write it (a subscriber evicted to admit another
-/// client is at a line boundary with room in its socket). **Best effort, and
-/// absent for the common drop**: a subscriber that stopped reading has a full
-/// socket, and the daemon never blocks or buffers for it, so it gets nothing
-/// and its stream just ends. A line that is here means "dropped"; the end of
-/// a stream with none means the daemon went away or dropped it, and the
-/// subscriber must resubscribe and `query` either way.
-pub const DROPPED: &[u8] = b"{\"type\":\"dropped\"}\n";
+/// The last line a subscriber the daemon is about to drop can be sent:
+/// the shared connection's, re-exported so the bar's client and tests
+/// name the same line the daemon writes.
+pub use scootui::control::DROPPED;
 
 /// Appends `event` and its newline to `out`.
 pub fn write_event(out: &mut Vec<u8>, event: &Event<'_>) {

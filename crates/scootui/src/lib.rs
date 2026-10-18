@@ -14,10 +14,12 @@
 //! Features: `widgets` (the popup and the ellipsis cut), `icons` (path
 //! icons and the cache), `png` (PNG image icons), `tray` (tray pixmaps),
 //! `wayland` (the poll loop's Wayland primitives: flush, the gone check,
-//! the read after a poll) and `test-support` (the headless-compositor
-//! harness the apps' integration tests share). The default is `widgets`
-//! and `icons`; the smallest build has none of them and draws nothing but
-//! plain canvas and text.
+//! the read after a poll), `control` (the control socket's server half:
+//! line framing, socket paths, the claim and the connection bounds, with
+//! the socket name a parameter of the app's) and `test-support` (the
+//! headless-compositor harness the apps' integration tests share). The
+//! default is `widgets` and `icons`; the smallest build has none of them
+//! and draws nothing but plain canvas and text.
 //!
 //! No `unsafe` here: the two mappings it needs, the font and the shm
 //! buffer, are `scootbg-mem`'s.
@@ -48,6 +50,9 @@ pub mod theme;
 
 #[cfg(feature = "wayland")]
 pub mod wayland;
+
+#[cfg(feature = "control")]
+pub mod control;
 
 #[cfg(feature = "test-support")]
 pub mod test_support;

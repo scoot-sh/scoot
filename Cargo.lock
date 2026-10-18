@@ -1037,6 +1037,7 @@ dependencies = [
  "rustix 1.1.4",
  "scoot-rt",
  "scootbg-mem",
+ "serde",
  "serde_json",
  "wayland-client",
  "wayland-protocols-wlr",
