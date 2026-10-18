@@ -1,10 +1,11 @@
 ---
 title: "scootlaunch: fuzzy matching and frecency, `--query --json`"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-18"
 ---
 
 # scootlaunch: matching and ranking

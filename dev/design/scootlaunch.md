@@ -581,7 +581,7 @@ TOML only, into `scoot/launch.toml`). There is no `stylix.enable` and no unit.
 | [`launcher`](../../docs/scootbar/backlog/launcher.md) (epic) | daily-drive, computer use | its children |
 | [`launch-prototype`](../../docs/scootbar/backlog/resolved/launch-prototype-done.md): the go/no-go gate, out of the workspace | daily-drive | `scootui-keyboard-spike`, the go-ahead |
 | [`launch-desktop-index`](../../docs/scootbar/backlog/launch-desktop-index.md): parser, ids, locale, Exec, cache; `--list --json` | computer use, daily-drive | the GO verdict in `launch-prototype` |
-| [`launch-match-rank`](../../docs/scootbar/backlog/launch-match-rank.md): fuzzy, frecency; `--query --json` | both | `launch-desktop-index` |
+| [`launch-match-rank`](../../docs/scootbar/backlog/resolved/launch-match-rank-done.md): fuzzy, frecency; `--query --json` | both | `launch-desktop-index` |
 | [`launch-ui`](../../docs/scootbar/backlog/launch-ui.md): the panel, keys, list, the look layer | daily-drive | `launch-match-rank`, `scootui-entry-and-list`, `scootui-surfaces-on-demand`, `look-format` |
 | [`launch-spawn`](../../docs/scootbar/backlog/launch-spawn.md): the activation token, the environment, the systemd scope, the fallback fork, `DBusActivatable` | daily-drive | `launch-ui`, `scoot-dbus-extract` |
 | [`launch-icons`](../../docs/scootbar/backlog/launch-icons.md): theme inheritance, PNG first, `resvg` behind `svg` with its size row | daily-drive | `launch-ui` |
