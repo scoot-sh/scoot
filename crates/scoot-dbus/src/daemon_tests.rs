@@ -865,7 +865,11 @@ fn a_raised_cap_dispatches_what_the_default_answers() {
                 assert_eq!(member, "Big");
                 assert_eq!(sender, forger.unique());
                 assert_eq!(serial, 77);
-                assert_eq!(body.len(), proto::MAX_MESSAGE + 4096);
+                // The whole array body: the length word plus every
+                // megabyte of payload.
+                let mut reader = Reader::le(&body);
+                let payload = reader.array_raw(1).unwrap();
+                assert_eq!(payload.len(), proto::MAX_MESSAGE + 4096);
                 // And no LimitsExceeded behind it: the forger, whose
                 // nothing is pending, sees nothing at all.
                 for _ in 0..5 {
