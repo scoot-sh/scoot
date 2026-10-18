@@ -564,6 +564,7 @@ fn a_5_mib_call_gets_limits_exceeded_with_no_hang() {
         }
     };
     let waited = start.elapsed();
+    eprintln!("giant LimitsExceeded answered in {waited:?}");
     assert_eq!(kind, "Error");
     assert_eq!(name, "org.freedesktop.DBus.Error.LimitsExceeded");
     assert!(
