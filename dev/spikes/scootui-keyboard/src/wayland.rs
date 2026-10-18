@@ -106,6 +106,17 @@ impl<B: ClientBackend> Dispatch<wl_keyboard::WlKeyboard, ()> for State<B> {
                     return;
                 }
                 let mut file = std::fs::File::from(fd);
+                // Robustness the spike itself discovered (see the record):
+                // the compositor sends every client an fd to one shared
+                // description whose offset the first read()-based client
+                // leaves at the end, so a second client reads zero bytes.
+                // Real toolkits mmap (offset-independent) and never notice;
+                // a read()-based client must rewind first. Seek errors are
+                // reported, not fatal: the read below still runs.
+                use std::io::Seek as _;
+                if let Err(e) = file.seek(std::io::SeekFrom::start(0)) {
+                    println!("keymap_rewind=failed {e}");
+                }
                 let mut bytes = Vec::new();
                 match file.read_to_end(&mut bytes) {
                     Ok(_) => {
