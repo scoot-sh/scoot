@@ -373,6 +373,7 @@ jobs:
                   macos=true
                   scootbg=true
                   scootbar=true
+                  scootlaunch=true
                   look=true
                   backlog=true
                   docs_site=true

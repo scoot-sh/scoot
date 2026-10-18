@@ -13,6 +13,10 @@ nix shell --inputs-from . nixpkgs#cargo-fuzz --command \
   cargo fuzz run -s none parse fuzz/corpus/parse fuzz/regressions/parse
 ```
 
+The seeds in `corpus/` are verbatim `.desktop` files from NixOS, Fedora
+and Debian packages. They stay under their packages' licenses, ship as
+test inputs only, and are never built into the binary.
+
 ## What each target checks
 
 - **`parse`**: arbitrary bytes as a desktop file. Parsing refuses

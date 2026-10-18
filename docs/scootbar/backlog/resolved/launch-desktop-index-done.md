@@ -47,7 +47,7 @@ Ranking, UI, launching.
 ## Resolution
 
 Landed 2026-10-18 in PR #663 (`feat(scootlaunch): desktop entry index,
-Exec expansion and --list --json`), six commits on
+Exec expansion and --list --json`), eight commits on
 `feat/scootlaunch-index`.
 
 What shipped: `crates/scootlaunch` (binary, `#![forbid(unsafe_code)]`,

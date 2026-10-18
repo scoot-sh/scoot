@@ -205,3 +205,24 @@ fn canon_and_key_carry_identity() {
             .any(|entry| matches!(entry, KeyEntry::File { .. }))
     );
 }
+
+#[test]
+fn the_canonical_path_resolves_a_symlinked_applications_dir() {
+    // A NixOS profile switch changes where this symlink points and
+    // leaves every mtime alone, so the key must carry the target.
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let store = root.path().join("store/profile-a");
+    write(&store.join("a.desktop"), APP);
+    std::fs::create_dir_all(&home).unwrap();
+    std::os::unix::fs::symlink(&store, home.join("applications")).unwrap();
+    let dirs = resolve_app_dirs(&env_with(&home, &[]));
+    assert_eq!(dirs.len(), 1);
+    assert_eq!(dirs[0].canonical, std::fs::canonicalize(&store).unwrap());
+    assert_ne!(dirs[0].canonical, dirs[0].dir);
+    let (_, key, _) = walk(&dirs[0]);
+    assert!(key.iter().any(|entry| matches!(
+        entry,
+        KeyEntry::Dir { path, .. } if *path == std::fs::canonicalize(&store).unwrap()
+    )));
+}
