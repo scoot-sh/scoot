@@ -697,9 +697,7 @@ impl RawCaller {
         let mut frame = Writer::new();
         frame.begin_call(serial, destination, path, interface, member, body_sig, 0);
         frame.raw(body);
-        self.stream
-            .write_all(&frame.finish().unwrap())
-            .unwrap();
+        self.stream.write_all(&frame.finish().unwrap()).unwrap();
         // The set-up answers at once; the socket's own timeout bounds
         // the read, so a silent bus fails instead of hanging.
         let mut staged = Vec::new();
@@ -713,7 +711,11 @@ impl RawCaller {
                 }
                 match message.kind {
                     proto::Kind::MethodReturn => {
-                        return (String::new(), message.signature.to_owned(), message.body.rest().to_vec());
+                        return (
+                            String::new(),
+                            message.signature.to_owned(),
+                            message.body.rest().to_vec(),
+                        );
                     }
                     _ => {
                         return (

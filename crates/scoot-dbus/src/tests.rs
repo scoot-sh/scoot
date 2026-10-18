@@ -1327,7 +1327,13 @@ fn an_error_reply_with_a_body_names_and_tells() {
     let mut text = Writer::new();
     text.str("the file is not a PNG");
     let text = text.take_body().unwrap();
-    conn.reply_error_body(":1.9", 41, "org.freedesktop.DBus.Error.InvalidArgs", "s", &text);
+    conn.reply_error_body(
+        ":1.9",
+        41,
+        "org.freedesktop.DBus.Error.InvalidArgs",
+        "s",
+        &text,
+    );
     let _ = conn.pump();
     daemon
         .set_read_timeout(Some(Duration::from_secs(10)))
@@ -1343,10 +1349,16 @@ fn an_error_reply_with_a_body_names_and_tells() {
     };
     let message = Message::parse(&staged[..len]).unwrap();
     assert_eq!(message.kind, Kind::Error);
-    assert_eq!(message.error, Some("org.freedesktop.DBus.Error.InvalidArgs"));
+    assert_eq!(
+        message.error,
+        Some("org.freedesktop.DBus.Error.InvalidArgs")
+    );
     assert_eq!(message.reply_serial, Some(41));
     assert_eq!(message.signature, "s");
-    assert_eq!(Reader::le(message.body.rest()).str(), Ok("the file is not a PNG"));
+    assert_eq!(
+        Reader::le(message.body.rest()).str(),
+        Ok("the file is not a PNG")
+    );
     // The body-less form is the spec's empty error: a name, no body.
     conn.reply_error(":1.9", 42, "org.freedesktop.DBus.Error.Failed");
     let _ = conn.pump();
@@ -1420,9 +1432,7 @@ fn a_raised_cap_takes_a_message_the_default_skips() {
         let (events, _) = conn.pump();
         silent = silent && events.is_empty();
         assert!(!conn.dead(), "the connection died on an over-cap signal");
-        if written.load(Ordering::SeqCst)
-            && conn.discard_pending() == 0
-            && !conn.has_staged_work()
+        if written.load(Ordering::SeqCst) && conn.discard_pending() == 0 && !conn.has_staged_work()
         {
             break;
         }
