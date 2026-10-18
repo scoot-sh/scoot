@@ -74,12 +74,14 @@ impl<B: ClientBackend> Dispatch<wl_seat::WlSeat, ()> for State<B> {
         _: &Connection,
         qh: &QueueHandle<State<B>>,
     ) {
-        if let wl_seat::Event::Capabilities {
-            capabilities: WEnum::Value(caps),
-        } = event
-            && caps.contains(wl_seat::Capability::Keyboard)
-        {
-            seat.get_keyboard(qh, ());
+        if let wl_seat::Event::Capabilities { capabilities } = event {
+            eprintln!("seat caps={capabilities:?}");
+            if let WEnum::Value(caps) = capabilities
+                && caps.contains(wl_seat::Capability::Keyboard)
+            {
+                eprintln!("keyboard cap present, getting keyboard");
+                seat.get_keyboard(qh, ());
+            }
         }
     }
 }
