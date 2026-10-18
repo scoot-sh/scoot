@@ -700,23 +700,35 @@ impl RawCaller {
         self.stream
             .write_all(&frame.finish().unwrap())
             .unwrap();
+        // The set-up answers at once; the socket's own timeout bounds
+        // the read, so a silent bus fails instead of hanging.
+        let mut staged = Vec::new();
+        let mut chunk = [0u8; 65536];
         loop {
-            let frame = self.read_frame();
-            let message = proto::Message::parse(&frame).unwrap();
-            if message.reply_serial != Some(serial) {
-                continue;
+            if let Ok(Some(len)) = proto::frame_at(&staged) {
+                let frame: Vec<u8> = staged.drain(..len).collect();
+                let message = proto::Message::parse(&frame).unwrap();
+                if message.reply_serial != Some(serial) {
+                    continue;
+                }
+                match message.kind {
+                    proto::Kind::MethodReturn => {
+                        return (String::new(), message.signature.to_owned(), message.body.rest().to_vec());
+                    }
+                    _ => {
+                        return (
+                            message.error.unwrap_or("").to_owned(),
+                            message.signature.to_owned(),
+                            message.body.rest().to_vec(),
+                        );
+                    }
+                }
             }
-            match message.kind {
-                proto::Kind::MethodReturn => {
-                    return (String::new(), message.signature.to_owned(), message.body.rest().to_vec());
-                }
-                _ => {
-                    return (
-                        message.error.unwrap_or("").to_owned(),
-                        message.signature.to_owned(),
-                        message.body.rest().to_vec(),
-                    );
-                }
+            {
+                use std::io::Read;
+                let n = self.stream.read(&mut chunk).expect("the bus answers");
+                assert!(n > 0, "the bus answers before closing");
+                staged.extend_from_slice(&chunk[..n]);
             }
         }
     }
