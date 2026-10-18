@@ -1,10 +1,11 @@
 ---
 title: "Extract `scootui`'s Wayland half: outputs, layer surfaces, shm, the poll loop (move only)"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-18"
 ---
 
 # Extract `scootui`: the Wayland half (move only)

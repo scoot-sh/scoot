@@ -3,7 +3,7 @@ title: "Extract `scootui`: the shared drawing and Wayland scaffolding (epic)"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scootui-extract-wayland, scootui-extract-control, scootui-surfaces-on-demand, scootui-keyboard, scootui-entry-and-list"
+blocked: "scootui-extract-control, scootui-surfaces-on-demand, scootui-keyboard, scootui-entry-and-list"
 milestone: "M7"
 ---
 
