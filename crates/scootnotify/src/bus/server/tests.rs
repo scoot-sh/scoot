@@ -33,8 +33,17 @@ fn connected() -> (Conn, UnixStream) {
         read_until(&mut peer, b"DATA\r\n");
         peer.write_all(b"OK 0123456789abcdef\r\n").unwrap();
         read_until(&mut peer, b"BEGIN\r\n");
-        let hello = read_frame(&mut peer);
-        let call = Message::parse(&hello).unwrap();
+        // Hello call.
+        let mut staged = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let len = loop {
+            if let Ok(Some(len)) = frame_at(&staged) {
+                break len;
+            }
+            let n = peer.read(&mut chunk).unwrap();
+            staged.extend_from_slice(&chunk[..n]);
+        };
+        let call = Message::parse(&staged[..len]).unwrap();
         assert_eq!(call.member, Some("Hello"));
         let mut body = Writer::new();
         body.str(":9.9");
@@ -61,11 +70,13 @@ fn read_until(stream: &mut UnixStream, want: &[u8]) {
 }
 
 /// Reads one whole frame from the peer: what the server flushed.
-fn read_frame(peer: &mut UnixStream) -> Vec<u8> {
-    let mut staged = Vec::new();
+/// Leftover bytes stay staged: a reply and its signal often arrive in
+/// one read, and dropping the second would hang the test exactly the
+/// way a real client that did so would hang itself.
+fn read_frame(peer: &mut UnixStream, staged: &mut Vec<u8>) -> Vec<u8> {
     let mut chunk = [0u8; 4096];
     loop {
-        if let Ok(Some(len)) = frame_at(&staged) {
+        if let Ok(Some(len)) = frame_at(staged) {
             return staged.drain(..len).collect();
         }
         let n = peer.read(&mut chunk).expect("the server answers");
@@ -78,6 +89,7 @@ struct Harness {
     server: Server,
     conn: Conn,
     peer: UnixStream,
+    staged: Vec<u8>,
 }
 
 impl Harness {
@@ -87,6 +99,7 @@ impl Harness {
             server: Server::new(Config::default(), IdFile::open(None)),
             conn,
             peer,
+            staged: Vec::new(),
         }
     }
 
@@ -112,7 +125,9 @@ impl Harness {
             0,
         );
         let (_, _) = self.conn.pump();
-        read_frame(&mut self.peer)
+        let peer = &mut self.peer;
+        let staged = &mut self.staged;
+        read_frame(peer, staged)
     }
 
     /// The reply's body strings: what most assertions read.
@@ -219,7 +234,7 @@ fn notify_answers_an_id_and_close_takes_it_with_reason_3() {
     let message = Message::parse(&frame).unwrap();
     assert_eq!((message.kind, message.signature), (Kind::MethodReturn, ""));
     let (_, _) = harness.conn.pump();
-    let signal = read_frame(&mut harness.peer);
+    let signal = read_frame(&mut harness.peer, &mut harness.staged);
     let message = Message::parse(&signal).unwrap();
     assert_eq!(message.kind, Kind::Signal);
     assert_eq!(message.member, Some("NotificationClosed"));
@@ -269,7 +284,7 @@ fn misshapen_calls_are_invalid_args_with_a_body() {
     );
     let (_, _) = harness.conn.pump();
     assert_eq!(
-        reply_error(&read_frame(&mut harness.peer)).0,
+        reply_error(&read_frame(&mut harness.peer, &mut harness.staged)).0,
         "org.freedesktop.DBus.Error.UnknownObject"
     );
 }
@@ -302,7 +317,7 @@ fn expiry_emits_reason_1() {
     std::thread::sleep(std::time::Duration::from_millis(120));
     harness.server.fire_expiries(&mut harness.conn);
     let (_, _) = harness.conn.pump();
-    let signal = read_frame(&mut harness.peer);
+    let signal = read_frame(&mut harness.peer, &mut harness.staged);
     let message = Message::parse(&signal).unwrap();
     assert_eq!(message.member, Some("NotificationClosed"));
     let mut reader = Reader::le(message.body.rest());

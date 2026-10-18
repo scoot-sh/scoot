@@ -83,8 +83,8 @@ impl Parser<'_> {
             match self.chars[self.at] {
                 b'<' => {
                     if !self.tag() {
-                        // Malformed or unclosed: the rest is plain text.
-                        self.text("<");
+                        // Malformed or unclosed: the rest (the `<`
+                        // included) is plain text.
                         self.rest_plain();
                         return;
                     }

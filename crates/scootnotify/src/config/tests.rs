@@ -52,9 +52,9 @@ fn out_of_range_numbers_name_their_key() {
         ("rate_per_sec = 0\n", "rate_per_sec"),
         ("rate_burst = 1001\n", "rate_burst"),
         ("timeout_max_ms = 0\n", "timeout_max_ms"),
-        ("timeout_low_ms = 999999\ntimeout_max_ms = 3\n", "timeout_low_ms"),
+        ("timeout_low_ms = 11\ntimeout_max_ms = 10\n", "timeout_low_ms"),
         (
-            "timeout_normal_ms = 999999\ntimeout_max_ms = 3\n",
+            "timeout_low_ms = 1\ntimeout_normal_ms = 11\ntimeout_max_ms = 10\n",
             "timeout_normal_ms",
         ),
     ] {

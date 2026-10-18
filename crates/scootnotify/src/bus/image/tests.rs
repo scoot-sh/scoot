@@ -4,7 +4,9 @@ use scoot_dbus::proto::{Reader, Writer};
 
 use super::{MAX_ICON_SIDE, MAX_IMAGE_SIDE, downscale, fuzz_check, read, validate};
 
-/// Marshals one struct value's bytes: what the hint carries.
+/// Marshals one struct value's bytes: what the hint carries. The
+/// writer is capped past the biggest seed (the downscale test's image
+/// is 2 MB of pixels); the cap is the tests', not the protocol's.
 fn struct_bytes(
     width: i32,
     height: i32,
@@ -14,7 +16,7 @@ fn struct_bytes(
     channels: i32,
     pixels: &[u8],
 ) -> Vec<u8> {
-    let mut body = Writer::new();
+    let mut body = Writer::with_cap(8 * 1024 * 1024);
     assert!(body.open_struct());
     body.i32(width);
     body.i32(height);

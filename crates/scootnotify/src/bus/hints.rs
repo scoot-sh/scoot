@@ -83,7 +83,15 @@ pub fn read(reader: &mut Reader<'_>) -> Result<Hints, ()> {
         if known {
             read += 1;
             elements.variant(|sig, value| {
+                let before = value.remaining();
                 apply(&mut hints, &key, sig, value);
+                if value.remaining() == before {
+                    // Ignored (`suppress-sound`, sound keys, `x`, `y`,
+                    // `action-icons`) or type-confused: the value is
+                    // skipped unread, but it is still skipped — leaving
+                    // it would desync every entry after it.
+                    value.skip(sig)?;
+                }
                 Ok(())
             })?;
         } else {
