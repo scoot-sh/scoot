@@ -1397,24 +1397,41 @@ fn a_raised_cap_takes_a_message_the_default_skips() {
     let frame = frame.finish().unwrap();
     assert!(frame.len() > MAX_MESSAGE);
     let (mut conn, daemon) = connected();
-    let sender = send_later(daemon, frame.clone());
-    // Pump until the skip completes: past the default cap, a signal is
-    // silent (no event), and the connection lives. (The sender writes
-    // in its own thread because the message is larger than the socket
-    // buffer; joining first would deadlock the write — and breaking on
-    // `has_staged_work` alone would strand it mid-discard, since staged
-    // can be empty while bytes are still arriving.)
+    // The sender writes in its own thread because the message is
+    // larger than the socket buffer; the main thread pumps until the
+    // write lands and the skip completes. (Joining first would deadlock
+    // the write, and breaking on `has_staged_work` alone would strand
+    // it mid-discard — staged can be empty both before the first bytes
+    // arrive and while the rest is still in the socket.)
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let written = std::sync::Arc::new(AtomicBool::new(false));
+    let flag = written.clone();
+    let first = frame.clone();
+    let sender = std::thread::spawn(move || {
+        use std::io::Write;
+        let mut daemon = daemon;
+        daemon.write_all(&first).unwrap();
+        flag.store(true, Ordering::SeqCst);
+        daemon
+    });
+    let start = std::time::Instant::now();
     let mut silent = true;
-    for _ in 0..500 {
+    loop {
         let (events, _) = conn.pump();
         silent = silent && events.is_empty();
         assert!(!conn.dead(), "the connection died on an over-cap signal");
-        if conn.discard_pending() == 0 && !conn.has_staged_work() {
+        if written.load(Ordering::SeqCst)
+            && conn.discard_pending() == 0
+            && !conn.has_staged_work()
+        {
             break;
         }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(20),
+            "the over-cap skip never completed"
+        );
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
-    assert_eq!(conn.discard_pending(), 0, "the skip never completed");
     sender.join().unwrap();
     assert!(silent, "past the default cap, a signal is silent");
     assert!(!conn.dead());
