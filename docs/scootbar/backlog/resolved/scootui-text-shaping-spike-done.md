@@ -60,6 +60,8 @@ Shaping does not ship in scootnotify's default build. Without it, Arabic
 conjuncts) draw wrong; Latin, Cyrillic, CJK and monochrome-fallback emoji
 draw acceptably.
 
+Landed as PR #656 (docs-only).
+
 ## Not in this ticket
 
 Color emoji (CBDT/COLR), a v1 non-goal. Line breaking beyond spaces and CJK.
