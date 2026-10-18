@@ -39,7 +39,7 @@ scootnotify's verbs.
 
 ## Resolution
 
-Shipped by `refactor/scootui-extract-control` (PR #NNN). A mechanical move
+Shipped by `refactor/scootui-extract-control` (PR #669). A mechanical move
 with no logic edits, verified by unchanged snapshots, unchanged
 `count_allocations == 0` tests, and the ratchet rows below.
 
