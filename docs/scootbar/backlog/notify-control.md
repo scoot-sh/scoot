@@ -3,7 +3,7 @@ title: "scootnotify: the control socket, `msg`, JSON, `subscribe` and `wait`, sc
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "notify-popups, scootui-extract-control"
+blocked: "notify-popups"
 milestone: "M7"
 ---
 

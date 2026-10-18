@@ -1,10 +1,11 @@
 ---
 title: "Extract `scootui`'s control socket: framing, paths, claim and connection bounds (move only)"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-18"
 ---
 
 # Extract `scootui`: the control socket (move only)
