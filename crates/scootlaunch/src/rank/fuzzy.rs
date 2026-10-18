@@ -88,6 +88,10 @@ pub fn fold_into(text: &str, out: &mut String) {
 /// of a field's mask cannot match it as a subsequence, so the field
 /// is skipped with one AND. Collisions only cost a wasted scoring
 /// pass, never a missed match.
+///
+/// The unit tests and the fuzz target read this; the ranker reads
+/// [`mask_of_codes`] over its stored codepoints.
+#[allow(dead_code)]
 pub fn mask_of(folded: &str) -> u64 {
     let mut mask = 0u64;
     for char in folded.chars() {
@@ -128,6 +132,7 @@ pub fn mask_allows(query_mask: u64, field_mask: u64) -> bool {
 ///
 /// This is the string form, for tests and the fuzz target; the
 /// ranker reads [`score_codes`] over pre-folded codepoints.
+#[allow(dead_code)]
 pub fn score(field: &str, query: &str, dp: &mut Dp) -> Option<i32> {
     let field: Vec<u32> = field.chars().map(|char| char as u32).collect();
     let query: Vec<u32> = query.chars().map(|char| char as u32).collect();
