@@ -3,7 +3,7 @@ title: "scootgreet go/no-go prototype, out of the workspace: real greetd, the ca
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "greet-baseline, scootui-keyboard-spike; maintainer go-ahead on the shell-apps design (dev/design/shell-apps.md, Decisions needed 1)"
+blocked: "greet-baseline; maintainer go-ahead on the shell-apps design (dev/design/shell-apps.md, Decisions needed 1)"
 milestone: "M7"
 ---
 

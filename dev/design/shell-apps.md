@@ -272,25 +272,34 @@ Options, to be decided by a spike (`scootui-keyboard-spike`):
 
 | Option | For | Against |
 |---|---|---|
-| **`kbvm`** (pure Rust XKB implementation; 0.2.0, MIT OR Apache-2.0, crates.io, checked 2026-10-12) | No C library. Keeps the family's "links only libc, libm, libgcc_s" property (scootbar's measurement, `lightest.md` M5/M6) | Young (0.2.0, about 22k downloads); compose and dead-key coverage unknown; one maintainer |
-| **libxkbcommon** via the `xkbcommon` crate (0.9.0, MIT; already in `Cargo.lock` because scoot links it through Smithay) | The reference implementation, which every compositor and toolkit uses; compose tables; zero marginal closure on a scoot desktop | A C shared library in a binary family that has none; FFI means `unsafe` (it lives in the crate, not in `scootui`, but it ends `forbid(unsafe_code)` for the consumer or forces a wrapper crate) |
+| **`kbvm`** (pure Rust XKB implementation; 0.2.0, MIT OR Apache-2.0, crates.io, checked 2026-10-12) | No C library. Keeps the family's "links only libc, libm, libgcc_s" property (scootbar's measurement, `lightest.md` M5/M6) | Young (0.2.0, about 22k downloads); dead keys and compose verified by the spike, but 918 KB stripped on the dev VM and two env vars to find anything on NixOS; one maintainer |
+| **libxkbcommon** via the `xkbcommon` crate (0.9.0, MIT; already in `Cargo.lock` because scoot links it through Smithay) | The reference implementation, which every compositor and toolkit uses; compose tables; zero marginal closure on a scoot desktop | A C shared library in a binary family that has none; the spike proves the consumer stays `forbid(unsafe_code)` (decided: no wrapper crate) |
 | Hand-rolled | Smallest | Wrong for any non-trivial layout; rejected |
 
-**The spike measures**, against the keymap scoot actually sends (scoot builds
-it from `XKB_DEFAULT_*`, `crates/scoot/src/compositor/state.rs:1282-1287`):
-correctness on `us`, `us(intl)` dead keys, `de`, `fr` (AZERTY, shifted digits),
-`dvorak`, a two-group `us,ru` with `grp:alt_shift_toggle`, and Compose
-sequences; keymap compile time; stripped size and RSS added. **Prior,
-for the spike to confirm or overturn:** `kbvm` if it passes the layout set
-including dead keys and costs under 300 KB; otherwise `xkbcommon`, wrapped in
-a small `scootui-xkb` crate that holds the `unsafe` code. Compose (the
-`XCompose` file) is required for scootgreet only if a password can contain a
-composed character. The spike reports whether either option handles it, and whether Compose
-depends on the greeter's locale. It also records **how each option turns a keysym into
-UTF-8**. The widget needs a call that writes into a caller-supplied buffer (libxkbcommon's
-C `xkb_state_key_get_utf8(state, key, buf, size)`, or a `char` from `kbvm`). The `xkbcommon`
-crate's `key_get_utf8` returns a `String`, which would leave copies of typed password
-characters in freed heap.
+**Decided by the spike ([record](../spikes/scootui-keyboard.md)): `xkbcommon`.**
+`kbvm` 0.2.0 passes the whole layout set including dead keys, but costs
+918 KB of stripped binary on the dev VM (+630 KB `.text`) against this
+plan's 300 KB bar, pulls 22 extra crates, and needs `XKB_CONFIG_ROOT`
+(RMLVO) plus `XLOCALEDIR`/`XCOMPOSEFILE` (compose) set before it finds
+anything on NixOS — where neither default path exists — failing silently
+to an empty keymap when they are missing. `xkbcommon` 0.9.0 over
+libxkbcommon 1.13.2 decodes every probe identically (27/27 across `us`,
+`us(intl)`, `de`, `fr`, `dvorak`, two-group `us,ru`; the same strings
+typed live through `scoot msg type` on all six sessions), costs 328 KB
+stripped (+173 KB `.text`, the `.so` already resident in scoot), needs no
+environment on NixOS, fails loudly, and is already in `Cargo.lock`
+through Smithay. No wrapper crate: both spike bins carry
+`#![forbid(unsafe_code)]` over the full client pattern including compose,
+so the consumer is `unsafe`-free as written. Compose (the `XCompose` file)
+is required for scootgreet only if a password can contain a composed
+character. Both stacks compose it, and neither depends on the greeter's
+locale (`C` works); what matters is finding the file, which libxkbcommon
+does with zero configuration on NixOS. Secret fields take `key_get_utf32`
+(no allocation, safe) into the caller's buffer; composed text comes back
+as a `String` in 0.9.0, so a caller-buffer compose call around C
+`xkb_state_key_get_utf8` via `State::get_raw_ptr` is a follow-up only if
+the greeter's threat model demands composed-char passwords with no heap
+copies.
 
 **IME.** scoot implements `text-input-v3` and `input-method-v2`
 (`site/src/content/docs/scoot/protocols.md`, "text-input"), and focus follows the

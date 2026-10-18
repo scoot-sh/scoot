@@ -1,10 +1,11 @@
 ---
 title: "Spike: the keyboard stack for typed text (kbvm vs libxkbcommon), measured"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-17"
 ---
 
 # Spike: the keyboard stack for typed text
@@ -57,3 +58,14 @@ A decision recorded in `dev/spikes/scootui-keyboard.md` with the table, and the
 ## Not in this ticket
 
 The widget (`scootui-entry-and-list`); IME (`text-input-v3`, a later follow-up).
+
+## Resolution
+
+Resolved 2026-10-17. Decision: `xkbcommon`, no wrapper crate. Record with
+the tables: [dev/spikes/scootui-keyboard.md](../../../dev/spikes/scootui-keyboard.md);
+the [design](../../../dev/design/shell-apps.md#keyboard-and-text-entry)
+updated to the pick in the same branch. Spike source measured at
+`c96e7e341`, deleted before merge. What did not run: real keys on M2
+hardware, the M2 Asahi kernel's `memfd_secret` (dev VM has it). Found on
+the way: the shared keymap-fd offset bug, filed as
+[core/keymap-fd-shared-offset](../../backlog/core/keymap-fd-shared-offset.md).

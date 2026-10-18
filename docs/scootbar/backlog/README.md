@@ -156,7 +156,7 @@ What starts when:
   `resolve` cannot strip ([how](../../../dev/design/shell-apps.md#how-the-gates-stay-closed)).
 
 Shared foundation ([epic](extract-scootui.md)):
-- [Spike: the keyboard stack](scootui-keyboard-spike.md) (medium) and [Spike: shaping and bidi](resolved/scootui-text-shaping-spike-done.md) (medium): the two choices that are expensive to reverse — shaping RESOLVED 2026-10-18: NO-GO (343.4 KiB `.text` over the ~250 KiB gate)
+- [Spike: the keyboard stack](resolved/scootui-keyboard-spike-done.md) (medium) — RESOLVED 2026-10-17: `xkbcommon`, no wrapper crate; record: [scootui-keyboard](../../../dev/spikes/scootui-keyboard.md) — and [Spike: shaping and bidi](resolved/scootui-text-shaping-spike-done.md) (medium) — RESOLVED 2026-10-18: NO-GO (343.4 KiB `.text` over the ~250 KiB gate): the two choices that are expensive to reverse
 - [Extract the drawing half and `scoot-rt`](scootui-extract-draw.md), then the mechanical moves: [`scoot-dbus`](scoot-dbus-extract.md), [the Wayland half](scootui-extract-wayland.md), [the control socket](scootui-extract-control.md)
 - New code: [on-demand surfaces](scootui-surfaces-on-demand.md), [keyboard](scootui-keyboard.md), then [entry, list and focus](scootui-entry-and-list.md)
 
