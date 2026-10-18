@@ -945,7 +945,7 @@ fn an_over_cap_reply_is_skipped_and_the_connection_lives() {
         events[1]
     );
     // It never sat in staging whole.
-    assert!(peak <= conn::Conn::WATERMARK + 8192, "{peak}");
+    assert!(peak <= conn.watermark() + 8192, "{peak}");
     assert!(!conn.dead());
 }
 
@@ -1195,7 +1195,7 @@ fn a_flood_is_worked_a_turn_at_a_time_and_never_kills_the_connection() {
     let (events, peak) = pump_events(&mut conn, 40_000);
     sender.join().unwrap();
     assert_eq!(events.len(), 40_000);
-    assert!(peak <= conn::Conn::WATERMARK + 8192, "{peak}");
+    assert!(peak <= conn.watermark() + 8192, "{peak}");
     assert!(!conn.dead());
 }
 

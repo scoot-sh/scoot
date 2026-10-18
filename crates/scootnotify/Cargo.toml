@@ -1,0 +1,43 @@
+[package]
+name = "scootnotify"
+description = "Notification daemon for Wayland: the org.freedesktop.Notifications server and its model, headless"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Linux only, like scootbar and scoot-dbus: it serves a session-bus name
+# and never runs on a Mac (`scoot-dbus` says so; the macOS CI job leaves
+# it out with the other Linux-only crates).
+#
+# No drawing in this ticket (notify-server): the D-Bus server and the
+# model only. Popups, the control socket and Nix arrive in later tickets
+# (dev/design/scootnotify.md, Tickets).
+
+[dependencies]
+# The shared D-Bus client: the wire, the connection with its per-message
+# cap and the LimitsExceeded reply, and the reconnect lifecycle.
+scoot-dbus.workspace = true
+# Panic-free printing behind the binary's own name, shared with the
+# other shell apps instead of another copy.
+scoot-rt.workspace = true
+# The config file (`notify.toml`): the same version `scoot` pins, so no
+# new package enters the tree.
+toml = "1"
+serde.workspace = true
+# Waiting on the bus fd and the expiry timerfd through raw syscalls, no
+# `libc` crate: the same `rustix` the D-Bus client pulls in.
+rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "time"] }
+
+# Scratch dirs as `TempDir` guards in the bus tests: the same version
+# scootbar's tests carry (same lock entry, MIT OR Apache-2.0).
+[dev-dependencies]
+tempfile = "3"
+# The counting allocator behind the zero-allocation pin (Linux-only, like
+# the crate itself): the same version scootbar's tests carry.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+scootbg-mem.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"

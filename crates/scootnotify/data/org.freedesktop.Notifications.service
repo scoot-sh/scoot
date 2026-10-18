@@ -1,0 +1,8 @@
+[D-BUS Service]
+Name=org.freedesktop.Notifications
+# Packages rewrite this to the installed binary. The desktop profile
+# never installs this file beside mako's or dunst's: with two on the
+# bus's search path the bus activates one of them, and which one is not
+# something to rely on.
+Exec=/usr/bin/scootnotify daemon
+SystemdService=scootnotify.service

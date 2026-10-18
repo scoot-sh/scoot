@@ -24,10 +24,12 @@
 //! Extracted from `scootbar` (`src/dbus/`) so `scootnotify` (which serves
 //! `org.freedesktop.Notifications`), `scootlaunch` (which calls
 //! `systemd1`) and `scootgreet` (which calls `login1`) share the one
-//! client. What it needs that it lacks (an error body, a reply to an
-//! over-cap call, a per-connection cap) lands with its consumer, not
-//! here (`docs/scootbar/backlog/scoot-dbus-extract.md`, Not in this
-//! ticket).
+//! client. What it needed that it lacked (an error body, a reply to an
+//! over-cap call, a per-connection cap) landed with its first server
+//! consumer, `scootnotify` (`docs/scootbar/backlog/notify-server.md`):
+//! [`conn::Conn::reply_error_body`], [`conn::LIMITS_EXCEEDED`] (answered
+//! to an over-cap method call, so its caller never hangs), and
+//! [`conn::Conn::set_max_message`].
 //!
 //! No `unsafe` here.
 
@@ -44,7 +46,7 @@
 #[cfg(not(target_os = "linux"))]
 compile_error!(
     "scoot-dbus runs on Linux only, like scootbar; on a Mac, \
-     cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --exclude scoot-dbus \
+     cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --exclude scoot-dbus --exclude scootnotify \
      (dev/README.md)"
 );
 
