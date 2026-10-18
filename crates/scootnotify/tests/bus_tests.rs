@@ -485,7 +485,7 @@ fn a_5_mib_call_gets_limits_exceeded_with_no_hang() {
     let mut giant = RawClient::connect(&daemon.path());
     let start = Instant::now();
     giant.send_raw(&frame);
-    let error = loop {
+    let (kind, name) = loop {
         assert!(
             start.elapsed() < Duration::from_secs(10),
             "no answer to the giant call"
@@ -493,15 +493,12 @@ fn a_5_mib_call_gets_limits_exceeded_with_no_hang() {
         let frame = giant.read_frame();
         let message = proto::Message::parse(&frame).unwrap();
         if message.reply_serial == Some(500) {
-            break message;
+            break (message_kind(&message), message.error.unwrap_or("").to_owned());
         }
     };
     let waited = start.elapsed();
-    assert_eq!(message_kind(&error), "Error");
-    assert_eq!(
-        error.error.unwrap_or(""),
-        "org.freedesktop.DBus.Error.LimitsExceeded"
-    );
+    assert_eq!(kind, "Error");
+    assert_eq!(name, "org.freedesktop.DBus.Error.LimitsExceeded");
     assert!(
         waited < Duration::from_secs(10),
         "answered in {waited:?}, never the client's timeout"
