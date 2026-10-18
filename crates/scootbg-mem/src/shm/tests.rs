@@ -148,3 +148,38 @@ fn buffers_can_move_between_threads() {
     .unwrap();
     assert_eq!(back.pixels_mut()[..2], [2, 1]);
 }
+
+#[test]
+fn the_memfd_name_is_a_parameter_and_the_default_is_unchanged() {
+    // The default keeps scootbg's own name, so scootbg is unchanged.
+    let default = ShmBuffer::new(2, 2).unwrap();
+    assert!(memfd_name_of(&default).contains("scootbg-wallpaper"));
+    // A caller-supplied name shows in this process's maps instead.
+    let named = ShmBuffer::with_name(2, 2, c"scootui-test").unwrap();
+    let name = memfd_name_of(&named);
+    assert!(
+        name.contains("scootui-test"),
+        "maps line names the buffer: {name}"
+    );
+    assert!(
+        !name.contains("scootbg-wallpaper"),
+        "no default name leaks in: {name}"
+    );
+}
+
+/// The `/proc/self/maps` line for `buffer`'s mapping.
+fn memfd_name_of(buffer: &ShmBuffer) -> String {
+    let addr = buffer.pixels().as_ptr() as usize;
+    std::fs::read_to_string("/proc/self/maps")
+        .unwrap()
+        .lines()
+        .find(|line| {
+            let range = line.split_whitespace().next().unwrap_or("");
+            let (start, end) = range.split_once('-').unwrap_or(("0", "0"));
+            let start = usize::from_str_radix(start, 16).unwrap_or(0);
+            let end = usize::from_str_radix(end, 16).unwrap_or(0);
+            (start..end).contains(&addr)
+        })
+        .unwrap_or_default()
+        .to_owned()
+}

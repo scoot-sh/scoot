@@ -662,14 +662,24 @@ pub fn wakeups(pid: u32) -> u64 {
     total
 }
 
-/// The `wl_shm` buffers `pid` has mapped: `scootbg_mem`'s memfds (named
-/// for scootbg, whose crate they come from). Their fds are closed once the
-/// pool exists, so a leaked buffer shows here and not in [`open_fds`].
+/// The `wl_shm` buffers `pid` has mapped: `scootbg_mem`'s memfds.
+/// Their fds are closed once the pool exists, so a leaked buffer shows
+/// here and not in [`open_fds`].
 pub fn shm_mappings(pid: u32) -> usize {
+    shm_mappings_named(pid, "scootbg-wallpaper")
+}
+
+/// The `wl_shm` buffers `pid` has mapped under one memfd name: what
+/// `scootbg_mem`'s `with_name` shows in `/proc/PID/maps`
+/// (`/memfd:<name>`), one name per app, so a leaked buffer says whose it
+/// is. The shell apps' on-demand buffers are gone with their surface, so
+/// this is 0 at idle.
+pub fn shm_mappings_named(pid: u32, name: &str) -> usize {
+    let needle = format!("/memfd:{name}");
     fs::read_to_string(format!("/proc/{pid}/maps"))
         .unwrap()
         .lines()
-        .filter(|line| line.contains("/memfd:scootbg-wallpaper"))
+        .filter(|line| line.contains(&needle))
         .count()
 }
 

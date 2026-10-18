@@ -3,7 +3,7 @@ title: "Extract `scootui`: the shared drawing and Wayland scaffolding (epic)"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scootui-surfaces-on-demand, scootui-entry-and-list"
+blocked: "scootui-entry-and-list"
 milestone: "M7"
 ---
 
@@ -34,7 +34,7 @@ Children, in order:
    [scoot-dbus-extract](scoot-dbus-extract.md), [scootui-extract-wayland](scootui-extract-wayland.md)
    and [scootui-extract-control](scootui-extract-control.md). These are mechanical, with nothing
    new.
-3. New code: [scootui-surfaces-on-demand](scootui-surfaces-on-demand.md),
+3. New code: [scootui-surfaces-on-demand](resolved/scootui-surfaces-on-demand-done.md),
    [scootui-keyboard](scootui-keyboard.md), then [scootui-entry-and-list](scootui-entry-and-list.md).
 
 Write the drawing and scaffolding as modules inside `scootbar` first. Extract

@@ -17,6 +17,13 @@ icons = []
 png = ["dep:png", "icons"]
 # Tray pixmaps, scaled through the shared resampler.
 tray = ["icons"]
+# The on-demand surfaces the shell apps show content on: one overlay
+# layer surface created when there is content and destroyed with its
+# buffers unmapped when empty (scootnotify's stack, scootlaunch's panel),
+# and a full-screen xdg_toplevel kind (scootgreet, where the host has no
+# layer-shell). The Wayland glue plus the pure lifecycle and the
+# named-memfd buffer pool.
+surfaces = ["dep:wayland-client", "dep:wayland-protocols", "dep:wayland-protocols-wlr"]
 # The poll loop's Wayland primitives (flush, the gone check, the read
 # after a poll): the Wayland half of the daemon loop, which every shell
 # app's loop runs.
@@ -53,10 +60,16 @@ ab_glyph = "0.2"
 rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 png = { version = "0.18", optional = true }
 # The Wayland connection and its errors, for `wayland` (and through it
-# `test-support`): plain `wayland-client` on its pure-Rust backend, as
-# scootbar, so nothing links libwayland.
+# `test-support`), and for the `surfaces` glue: plain `wayland-client` on
+# its pure-Rust backend, as scootbar, so nothing links libwayland.
 wayland-client = { version = "0.31", optional = true }
-# The screencopy manager the harness reads sway's pixels through.
+# `xdg_shell` for the `surfaces` feature's full-screen toplevel kind (plus
+# the staging viewporter and fractional scale its draws are sized
+# through): plain protocols, as scootbar binds them.
+wayland-protocols = { version = "0.32", features = ["client", "staging"], optional = true }
+# `zwlr_layer_shell_v1` for the `surfaces` feature's layer kind, and
+# the screencopy manager the `test-support` harness reads sway's pixels
+# through: one crate for both, as scootbar's.
 wayland-protocols-wlr = { version = "0.3", features = ["client"], optional = true }
 # libxkbcommon bindings and the XKB state machine, for `keyboard`: the
 # reference XKB implementation every compositor and toolkit uses (see the
@@ -77,3 +90,7 @@ serde_json = { workspace = true, optional = true }
 # key (`zwp_virtual_keyboard_v1`). Test-only: never in a shipped binary.
 wayland-protocols = { version = "0.32", features = ["client"] }
 wayland-protocols-misc = { version = "0.3", features = ["client"] }
+
+[[test]]
+name = "surfaces"
+required-features = ["surfaces", "test-support"]
