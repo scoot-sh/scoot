@@ -359,8 +359,13 @@ fn a_warm_query_allocates_nothing() {
     let rows = build_rows(&entries);
     let history = Frecency::empty();
     let mut ranker = Ranker::new();
-    // Warm-up: size every buffer past the longest query below.
+    // Warm-up: size every buffer past the longest query below. The
+    // long query alone is not enough: it matches nothing, so the
+    // score table and the alignment rows never grow. The one-char
+    // query matches nearly everything and sizes them.
     let _ = ranker.rank("a much longer warmed-up query string", &rows, &history, 0);
+    let _ = ranker.rank("a", &rows, &history, 0);
+    let _ = ranker.rank("", &rows, &history, 0);
     for query in ["fire", "f", "", "terminal emulator", "zzzqqq"] {
         let (_, allocations) = scootbg_mem::count_allocations(|| {
             ranker.rank(query, &rows, &history, 0);
