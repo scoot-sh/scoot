@@ -1524,7 +1524,7 @@ jobs:
           # features, so one build covers it.
           cargo clippy -p scootui -p scoot-rt --all-targets -- -D warnings
           cargo clippy -p scootui --no-default-features --all-targets -- -D warnings
-          for feature in widgets icons png tray wayland control surfaces keyboard test-support; do
+          for feature in widgets entry icons png tray wayland control surfaces keyboard test-support; do
             echo "--- scootui $feature alone"
             cargo clippy -p scootui --no-default-features --features "$feature" --all-targets -- -D warnings
           done
@@ -1574,7 +1574,7 @@ jobs:
           cargo nextest run -p scootui -p scoot-rt --no-fail-fast
           cargo test -p scootui -p scoot-rt
           cargo nextest run -p scootui --no-default-features --no-fail-fast
-          for feature in widgets icons png tray wayland control surfaces keyboard test-support; do
+          for feature in widgets entry icons png tray wayland control surfaces keyboard test-support; do
             echo "--- scootui $feature alone"
             cargo nextest run -p scootui --no-default-features --features "$feature" --no-fail-fast
           done
