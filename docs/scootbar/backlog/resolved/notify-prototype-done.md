@@ -1,10 +1,11 @@
 ---
 title: "scootnotify go/no-go prototype, out of the workspace: own the name, draw a card, compare with mako"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-17"
 ---
 
 # scootnotify prototype: the go/no-go gate
@@ -37,6 +38,31 @@ The design's gate, recorded here with the numbers:
 - idle RSS at most half of mako's, and 0 wakeups;
 - a legible corpus, judged by the maintainer from the screenshots;
 - every call answered.
+
+## Verdict: GO, on one condition (measured 2026-10-18)
+
+`notify-server` is built, including the small `LimitsExceeded` reply for
+over-cap method calls that the design already prescribes. The full record
+is `dev/spikes/scootbar/notify-prototype.md` with screenshots in
+`dev/spikes/scootbar/notify-prototype/`; the throwaway source is deleted.
+
+- Idle RSS 3,140 kB against mako's 8,432 kB in the same harness (37%,
+  gate: at most half), 0 wakeups in 60 s both sides. One card up: +76 kB
+  RSS, ≤1 wakeup in 60 s. (DejaVu-only font loading; five full fonts
+  read into heap cost 21.6 MB — a prototype artifact, since the real
+  server memory-maps fonts the way `font.rs` already does. See record.)
+- Corpus (notify-send suite, `image-data`, CJK, Cyrillic, Arabic, value,
+  actions, replace, stack): legible throughout; Arabic draws wrong in
+  the way the text-shaping NO-GO predicted. Firefox, Thunderbird, an
+  Electron app and a portal app did not run (no GUI apps on the headless
+  VM). Maintainer judges legibility from the side-by-sides.
+- Small calls are all answered (ids, capabilities, racy close of an
+  unknown id gets the spec's empty Error). A 5 MiB `Notify` hangs on
+  unmodified scootbar D-Bus code (skipped silently, sender waits out its
+  timeout; mako answers promptly) and is answered in under a millisecond
+  with the prescribed `LimitsExceeded` reply, validated in this spike.
+  That reply rides with `notify-server` or the gate's third row fails in
+  the real thing too.
 
 ## Resolving this gate
 

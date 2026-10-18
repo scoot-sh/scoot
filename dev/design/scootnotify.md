@@ -94,6 +94,16 @@ the hang row. Build if the prototype shows all of:
 
 Keep mako, as the paved-path contract allows at no cost, if any of these fails.
 
+**Measured 2026-10-18 ([record](../spikes/scootbar/notify-prototype.md),
+ticket `notify-prototype`): GO, on one condition.** Idle RSS 3,140 kB
+against stock mako 1.11.0's 8,432 kB in the same headless harness (37%),
+0 wakeups either side; the corpus draws legibly (Arabic wrong as the
+shaping NO-GO verdict requires v1 to state); every small call answered.
+A 5 MiB `Notify` hangs on the unmodified 1 MiB cap (skipped silently) and
+is answered in under a millisecond by the `LimitsExceeded` reply this
+plan already prescribes — validated in the spike, required in
+`notify-server`.
+
 ## Spec conformance
 
 | Item | Spec | v1 | Detail |
