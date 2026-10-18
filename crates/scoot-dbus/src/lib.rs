@@ -32,6 +32,12 @@
 //! No `unsafe` here.
 
 #![forbid(unsafe_code)]
+// The client's refusal idiom is `Err(())`: an address that names no
+// dialable transport, a misshapen body, a refused frame. It carries no
+// information by design (a refusal names its reason on stderr where a
+// reason exists), so a custom error type would add variants without
+// readers. Re-typing every reader would be a redesign, not this move.
+#![allow(clippy::result_unit_err)]
 
 // Linux only, like scootbar: the inotify watch and the timerfd are
 // Linux-only, and the shell apps never run on a Mac.

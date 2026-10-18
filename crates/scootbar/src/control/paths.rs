@@ -73,17 +73,12 @@ impl std::error::Error for PathError {}
 
 /// The runtime directory: `$XDG_RUNTIME_DIR`, or its conventional
 /// fallback. Unlike [`resolve`]'s directory, unset here falls back
-/// instead of erroring: the session bus, the pulse socket and a
-/// directory watch all wait on the fallback rather than refuse. One
-/// helper for all three (the D-Bus client, the tray and the volume
-/// module), so the fallback cannot drift between them.
+/// instead of erroring: the pulse socket waits on the fallback rather
+/// than refusing. The D-Bus client and the tray read the same directory
+/// through [`scoot_dbus`](crate::dbus)'s re-export of the same leaf, so
+/// the fallback cannot drift between them.
 #[cfg_attr(
-    not(any(
-        feature = "tray",
-        feature = "media",
-        feature = "volume",
-        feature = "microphone"
-    )),
+    not(any(feature = "volume", feature = "microphone")),
     allow(dead_code, unused_imports)
 )]
 pub use scoot_rt::runtime_dir;
