@@ -3,7 +3,7 @@ title: "scootnotify go/no-go prototype, out of the workspace: own the name, draw
 status: "open"
 area: "scootbar"
 priority: "medium"
-blocked: "maintainer go-ahead on the shell-apps design (dev/design/shell-apps.md, Decisions needed 1)"
+blocked: null
 milestone: "M7"
 ---
 

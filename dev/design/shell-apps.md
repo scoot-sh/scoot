@@ -768,6 +768,8 @@ Only the items that are the maintainer's call are asked. The rest are recorded a
 **The maintainer's call:**
 
 1. **Go-ahead and queue.** The gated work is blocked on it.
+   **Given 2026-10-17 for `scootlaunch` and `scootnotify`** (the maintainer asked for both, launcher
+   first); the `scootgreet` tickets stay gated.
    *Recommend:*
    - start now: the two spikes, `greet-baseline`, and `layer-shell-default-output`. The last is
      unblocked in this PR because it helps mako and fuzzel today;
