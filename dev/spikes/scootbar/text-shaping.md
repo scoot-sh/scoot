@@ -1,8 +1,8 @@
 # Text shaping spike: `rustybuzz` + `unicode-bidi`, measured
 
 Measured 2026-10-18 for
-[ticket](../../../docs/scootbar/backlog/scootui-text-shaping-spike.md), from
-[shell-apps.md §Text](../design/shell-apps.md#text-shaping-wrapping-emoji).
+[ticket](../../../docs/scootbar/backlog/resolved/scootui-text-shaping-spike-done.md), from
+[shell-apps.md §Text](../../design/shell-apps.md#text-shaping-wrapping-emoji).
 Three throwaway binaries sharing one harness, none of them in the
 workspace: `baseline` (`ab_glyph` only, today's `text.rs` path), `bidionly`
 (`unicode-bidi` visual runs, one glyph per char), `shaped` (`unicode-bidi`
@@ -17,7 +17,7 @@ The per-body time passes the gate with margin, but the `.text` cost is
 already minimal (`rustybuzz` default features are `std` only). v1 ships
 without shaping, and the scripts that draw wrong are listed below. A
 `unicode-bidi`-only build (+23.0 KiB) fixes line order but not letterforms;
-adopting it is a separate ticket, not this gate.
+adopting it would be a separate ticket, not this gate.
 
 ## What was run
 

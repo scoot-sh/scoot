@@ -10,7 +10,7 @@ resolved: "2026-10-17"
 
 # Spike: shaping and bidi
 
-Filed 2026-10-12 from the [shell-apps design](../../../dev/design/shell-apps.md#text-shaping-wrapping-emoji).
+Filed 2026-10-12 from the [shell-apps design](../../../../dev/design/shell-apps.md#text-shaping-wrapping-emoji).
 Serves **daily-drive**: notification bodies are arbitrary text in any language. Unblocked
 (research).
 
