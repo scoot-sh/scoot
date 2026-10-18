@@ -29,7 +29,9 @@ use super::proto::{self, Reader, check_path};
 /// Builders of well-formed answers and signals, for the tests that
 /// speak to a fake bus. Test support for the apps' bluetooth tests, like
 /// [`super::testdaemon`]: compiled in always so the apps' `#[cfg(test)]`
-/// code can reach it, used only by tests.
+/// code can reach it, used only by tests. The explicit path keeps the
+/// fuzz crate's `#[path]` include resolving it beside this file.
+#[path = "bluez/build.rs"]
 pub mod build;
 #[cfg(test)]
 mod tests;
