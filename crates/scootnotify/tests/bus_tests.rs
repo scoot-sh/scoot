@@ -62,8 +62,16 @@ fn spawn_server(daemon: &Daemon, runtime: &tempfile::TempDir) -> Child {
 }
 
 /// Pumps `client` until its `Notify` is answered: the daemon serving.
+/// One call outstanding at a time — an error (the name unowned yet)
+/// resends, a reply returns — so at most one probe card ever exists.
 fn wait_serving(client: &mut Conn) {
     let start = Instant::now();
+    // A 1 ms card: the reply proves serving, the card itself is gone
+    // before any test counts live ones.
+    let body = notify_body("Probe", 0, "p", "p", &[], 1);
+    client
+        .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000)
+        .expect("the first call queues");
     loop {
         assert!(
             start.elapsed() < Duration::from_secs(10),
@@ -72,22 +80,25 @@ fn wait_serving(client: &mut Conn) {
         if client.dead() {
             panic!("the bus died while waiting for the server");
         }
-        let token = 9000;
-        // A 1 ms card: the reply proves serving, the card itself is
-        // gone before any test counts live ones.
-        let body = notify_body("Probe", 0, "p", "p", &[], 1);
-        if client
-            .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token)
-            .is_err()
-        {
-            std::thread::sleep(Duration::from_millis(5));
-            continue;
-        }
         let (events, _) = client.pump();
-        if events.iter().any(|event| matches!(event, Event::Reply { token: 9000, .. })) {
-            // Leave the probe card: the tests that count live cards
-            // start their own server instead.
+        let mut answered = false;
+        let mut errored = false;
+        for event in events {
+            match event {
+                Event::Reply { token: 9000, .. } => answered = true,
+                Event::CallError { token: 9000, .. } => errored = true,
+                _ => {}
+            }
+        }
+        if answered {
             return;
+        }
+        if errored {
+            // The name is unowned yet: the errored call made no card,
+            // so resending is safe.
+            client
+                .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000)
+                .expect("a resent call queues");
         }
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -323,6 +334,9 @@ fn a_5_mib_call_gets_limits_exceeded_with_no_hang() {
     let runtime = runtime_dir("limits");
     let server = spawn_server(&daemon, &runtime);
     let mut client = connect(&daemon);
+    // The test sends giants: the client's own outbox bound moves with
+    // its cap (receiving still refuses past it — nothing here does).
+    client.set_max_message(6 * 1024 * 1024);
     wait_serving(&mut client);
     // A 5 MiB `Notify`, framed by hand (the client's own `Writer` cap
     // rightly refuses to build one).
