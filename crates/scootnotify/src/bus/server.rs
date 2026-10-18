@@ -69,8 +69,8 @@ impl Denied {
         };
         format!(
             "{BUS_NAME} is owned by {who}; scootnotify will not take it over. \
-             Stop that daemon first (systemctl --user stop mako) and remove its \
-             D-Bus activation file, or it will come back on the next notification."
+             Stop that daemon first and remove its D-Bus activation file, or it \
+             will come back on the next notification."
         )
     }
 }

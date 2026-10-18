@@ -29,9 +29,9 @@ A taken name refuses with the owner named:
 ```sh
 scootnotify daemon
 # org.freedesktop.Notifications is owned by mako (pid 1234);
-# scootnotify will not take it over. Stop that daemon first
-# (systemctl --user stop mako) and remove its D-Bus activation
-# file, or it will come back on the next notification.
+# scootnotify will not take it over. Stop that daemon first and
+# remove its D-Bus activation file, or it will come back on the
+# next notification.
 # exit 3
 ```
 

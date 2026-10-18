@@ -48,7 +48,7 @@ ones: a call past the 4 MiB cap gets `LimitsExceeded`, never silence.
 - Rate-limits each sender (20 per second, burst 40): past it a
   `Notify` still gets its id, but the card is counted unshown. At
   most 128 cards are live; past that the oldest non-critical one
-  closes with reason 4.
+  closes with reason 4 (the oldest card if all are critical).
 - Reads `$XDG_CONFIG_HOME/scoot/notify.toml` (every key optional). A
   bad file at start runs on built-in defaults and reports the error;
   `--check` refuses loudly instead.
@@ -62,7 +62,7 @@ Against version 1.3 of the Desktop Notifications Specification:
 | Item | Status |
 |---|---|
 | Bus name, object, interface (§2) | Yes, with `DO_NOT_QUEUE` ownership |
-| D-Bus activation | A service file ships; the bus activates the unit |
+| D-Bus activation | A service file ships in the tree; the unit and its install arrive with the Nix module |
 | `GetCapabilities` (§9.1.1) | `body`, `body-markup`, `actions`, `icon-static` (not `persistence`) |
 | `Notify` (§9.1.2) | All eight arguments, bounded |
 | `CloseNotification` (§9.1.3) | Closes with reason 3; unknown ids get the empty error |
@@ -74,16 +74,17 @@ Against version 1.3 of the Desktop Notifications Specification:
 | Ids (§9.1.2) | u32, 0 skipped, live skipped, reserved across restarts |
 | `expire_timeout` (§9.1.2) | -1 the urgency default, 0 never, positive clamped to 1 h, counted from presentation |
 | Urgency (§7) | Low 5 s, normal 10 s, critical never (an explicit timeout is honored) |
-| Actions (§2) | 16 pairs read; `default` invokes from the body |
+| Actions (§2) | 16 pairs read and kept; invoking them (including `default` from the body) arrives with `msg invoke` |
 | Body markup (§4) | `b i u a img`; the rest stripped with text kept; entities decoded |
 | Icons and images (§5.1) | `image-data` over `image-path` over `app_icon`, plus the 1.1 spellings |
 | `image-data` (§5.2) | Validated, downscaled to 128 px at arrival |
-| Hints (§8) | The documented nine read; sound, position and `action-icons` ignored; `x-` skipped unread |
+| Hints (§8) | Urgency, category, `desktop-entry`, `image-data`/`image_data`, `image-path`/`image_path`, `transient`, `resident` and `value` read, `suppress-sound` accepted and ignored; sound, position and `action-icons` ignored; `x-` skipped unread |
 | `transient` (§8) | Kept for history (never enters it) |
-| Categories (§6) | Passed through to rules and JSON |
-| `desktop-entry` (§8) | Passed through to rules and JSON |
+| Categories (§6) | Stored; rules and JSON consume them in the control ticket |
+| `desktop-entry` (§8) | Stored; rules and JSON consume it in the control ticket |
 
-Arabic, Hebrew and Devanagari draw wrong until shaping lands (as
-measured); Latin, Cyrillic, CJK and monochrome-fallback emoji are
-acceptable. There is no sound: the `sound` capability is not
-advertised, and a rule's `exec` hook plays one instead.
+This server draws nothing yet. Popups arrive in a later ticket; the
+prototype found that Arabic, Hebrew and Devanagari draw wrong until
+shaping lands, and that Latin, Cyrillic, CJK and monochrome-fallback
+emoji are acceptable. There is no sound: the `sound` capability is not
+advertised.
