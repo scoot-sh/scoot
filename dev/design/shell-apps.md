@@ -348,6 +348,12 @@ default build. Otherwise v1 ships without it and the docs say which scripts
 draw wrong. scootlaunch has the same need for app names (localized `Name[ar]`).
 scootgreet shows user names and session names, where it matters least.
 
+Measured 2026-10-18 ([record](../spikes/scootbar/text-shaping.md)): NO-GO.
+343.4 KiB of `.text` against the ~250 KiB gate; ~0.2 ms per 500-byte body,
+inside the time budget, so size alone decides. v1 ships without shaping:
+Arabic, Hebrew and Devanagari draw wrong; Latin, Cyrillic, CJK and
+monochrome-fallback emoji are acceptable.
+
 Line breaking for bodies: break at spaces and after CJK characters, with a hard break for
 over-long words (what `popup/wrap.rs` does, minus its 6-line cap). The
 `unicode-linebreak` crate is Apache-2.0, which is allowed by `deny.toml`, but at about
@@ -640,7 +646,8 @@ Ordered by what unblocks what, and by risk. **Nothing is extracted until a gate 
    - (candidate) [`greet-headless-login`](../../docs/scootbar/backlog/greet-headless-login.md),
      the Wayland-free greetd login for agents and VM tests, on the go-ahead;
    - the two spikes, [`scootui-keyboard-spike`](../../docs/scootbar/backlog/scootui-keyboard-spike.md)
-     and [`scootui-text-shaping-spike`](../../docs/scootbar/backlog/scootui-text-shaping-spike.md),
+     and [`scootui-text-shaping-spike`](../../docs/scootbar/backlog/resolved/scootui-text-shaping-spike-done.md)
+     (NO-GO, measured 2026-10-18),
      which decide the two choices that are expensive to reverse;
    - [`greet-baseline`](../../docs/scootbar/backlog/greet-baseline.md), measurement only;
    - the core ticket [`layer-shell-default-output`](../../docs/backlog/core/layer-shell-default-output.md),
