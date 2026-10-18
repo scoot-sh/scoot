@@ -43,6 +43,10 @@ pub(crate) fn replay_corpus(kind: &str, expect_ok: bool, check: fn(&[u8]) -> boo
             if !entry.file_type().expect("a corpus type reads").is_file() {
                 continue;
             }
+            // Tracking placeholders (`.gitkeep`), not seeds.
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
             let bytes = std::fs::read(entry.path()).expect("a seed reads");
             let ok = check(&bytes);
             if expect_ok {
