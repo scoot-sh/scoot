@@ -142,13 +142,23 @@ fn the_environment_carries_the_notification() {
     hook.urgency = "critical";
     let mut spawner = Spawner::default();
     spawner.spawn(&hook).expect("sh runs");
-    // The hook exits at once; wait for the file, briefly.
+    // The hook exits at once: wait for its content, briefly. The
+    // shell creates the redirect before `env` writes a byte, so
+    // readiness is the marker line, not the file's existence.
     let start = std::time::Instant::now();
-    while out.metadata().is_err() && start.elapsed() < std::time::Duration::from_secs(5) {
+    let text = loop {
+        if let Ok(text) = std::fs::read_to_string(&out)
+            && text.contains("SCOOTNOTIFY_APP=")
+        {
+            break text;
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "the hook never wrote its env"
+        );
         std::thread::sleep(std::time::Duration::from_millis(10));
         spawner.reap();
-    }
-    let text = std::fs::read_to_string(&out).expect("the hook wrote its env");
+    };
     for want in [
         "SCOOTNOTIFY_APP=Mail",
         "SCOOTNOTIFY_SUMMARY=New mail",
