@@ -149,6 +149,8 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
         None => return LoopEnd::BusGone,
     };
     let mut hovered: Option<u32> = None;
+    let spin_debug = std::env::var_os("SCOOTNOTIFY_SPIN_DEBUG").is_some();
+    let mut spins: u64 = 0;
     loop {
         let (events, capped) = conn.pump();
         if conn.dead() {
@@ -195,8 +197,19 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
             return LoopEnd::CompositorGone;
         }
         if capped || conn.has_staged_work() || conn.want_write() {
+            if spin_debug {
+                spins += 1;
+                if spins == 200_000 {
+                    eprintln!(
+                        "SPIN?: 200k no-poll turns (capped={capped} staged={} write={})",
+                        conn.has_staged_work(),
+                        conn.want_write()
+                    );
+                }
+            }
             continue;
         }
+        spins = 0;
         // The Wayland read guard: prepared before the poll, read when
         // the fd speaks, dropped unread otherwise (the documented
         // read-after-poll shape: the next turn collects it).
