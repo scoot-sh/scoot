@@ -532,12 +532,51 @@ fn spawn_detached(
         Some(mut stdin) => stdin.write_all(json.as_bytes()).is_ok(),
         None => false,
     };
-    // Never waited on: the helper exits on its own once the app
-    // starts, and init reaps it; the panel must not linger on it.
     if !wrote {
         return Err("cannot detach: the helper went away".to_string());
     }
-    Ok(())
+    // The helper fails fast when there is nothing to start (a missing
+    // target fails its `exec` in milliseconds): wait up to 200 ms for
+    // that verdict, so a vanished target still draws its error instead
+    // of exiting 0. Past the bound the helper is assumed launched —
+    // the panel must not linger on it — and init reaps it whenever it
+    // exits.
+    match wait_helper(&mut child, Duration::from_millis(200)) {
+        HelperDone::Launched => Ok(()),
+        HelperDone::Failed => Err(format!(
+            "cannot start {}: the detached launch failed (see stderr)",
+            short(argv.first().map(String::as_str).unwrap_or(""))
+        )),
+    }
+}
+
+/// What the helper wait ended with.
+enum HelperDone {
+    Launched,
+    Failed,
+}
+
+/// Waits up to `bound` for the helper to exit: `Failed` for a nonzero
+/// status, `Launched` for zero or for still running past the bound.
+fn wait_helper(child: &mut std::process::Child, bound: Duration) -> HelperDone {
+    let deadline = Instant::now() + bound;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return if status.success() {
+                    HelperDone::Launched
+                } else {
+                    HelperDone::Failed
+                };
+            }
+            Ok(None) => {}
+            Err(_) => return HelperDone::Launched,
+        }
+        if Instant::now() >= deadline {
+            return HelperDone::Launched;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 /// The helper half of [`spawn_detached`]: reads the spec, leaves the
