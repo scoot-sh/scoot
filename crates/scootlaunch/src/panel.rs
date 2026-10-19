@@ -2151,7 +2151,6 @@ mod tests {
 
     use super::*;
     use crate::rank::frecency::Frecency;
-    use std::io::Write as _;
 
     fn test_text(dir: &std::path::Path) -> Text {
         let path = dir.join("test.ttf");
