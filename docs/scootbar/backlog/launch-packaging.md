@@ -3,7 +3,7 @@ title: "scootlaunch: deb, rpm and Arch packages, install.sh, site section"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "launch-nix"
+blocked: null
 milestone: "M7"
 ---
 

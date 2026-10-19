@@ -173,7 +173,7 @@ Shared foundation ([epic](extract-scootui.md)):
 - [dmenu and run](launch-dmenu.md), [the agent interface](resolved/launch-agent-json-done.md)
 - [The panel](resolved/launch-ui-done.md), [launching](launch-spawn.md), [icons](resolved/launch-icons-done.md)
 - [dmenu and run](launch-dmenu.md), [the agent interface](resolved/launch-agent-json-done.md)
-- [Nix, the look layer and the opt-in switch](launch-nix.md), [packaging and the site](launch-packaging.md), [flip the default](launch-default-flip.md); later, [windows mode](launch-windows-mode.md)
+- [Nix, the look layer and the opt-in switch](resolved/launch-nix-done.md), [packaging and the site](launch-packaging.md), [flip the default](launch-default-flip.md); later, [windows mode](launch-windows-mode.md)
 
 [`scootgreet`: the login greeter](scootgreet.md) (epic):
 - [Baseline: measure ReGreet + cage](greet-baseline.md) (medium), then [the prototype: the go/no-go gate against a real greetd](greet-prototype.md) (medium)
