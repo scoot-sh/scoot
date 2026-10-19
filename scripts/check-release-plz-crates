@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Fail when a workspace crate would break release-plz's release PR job.
+
+All packages share one tag (`v{{ version }}`). release-plz (git_only) looks
+each crate up in the checkout of the last tag, and stops with `cannot find
+package "<crate>" in workspace` for a crate that did not exist then. That
+failed every push to main for 15 hours after scootui was extracted. A crate
+absent from the last `v*` tag therefore needs a `[[package]]` entry in
+release-plz.toml with its own `git_tag_name` (no such tag exists, so
+release-plz treats the crate as an initial release). Once a release that
+contains the crate is tagged, the entry is dead weight: this script says so
+as a warning, and the next release PR should drop it.
+
+Usage: scripts/check-release-plz-crates [repo-root]
+Needs the tags (checkout with fetch-depth 0). Exit 1 on an error.
+"""
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").resolve()
+
+
+def git(*args):
+    return subprocess.run(
+        ["git", "-C", str(root), *args], check=True, capture_output=True, text=True
+    ).stdout
+
+
+def crate_name(manifest_text):
+    return tomllib.loads(manifest_text).get("package", {}).get("name")
+
+
+members = {}
+for manifest in sorted(root.glob("crates/*/Cargo.toml")):
+    name = crate_name(manifest.read_text())
+    if name:
+        members[name] = manifest.relative_to(root).as_posix()
+
+tags = git("tag", "--list", "v[0-9]*", "--sort=-v:refname").split()
+if not tags:
+    print("no v* tag yet: nothing to compare against")
+    sys.exit(0)
+last = tags[0]
+
+at_tag = set()
+for path in git("ls-tree", "-r", "--name-only", last, "--", "crates").split():
+    if re.fullmatch(r"crates/[^/]+/Cargo\.toml", path):
+        name = crate_name(git("show", f"{last}:{path}"))
+        if name:
+            at_tag.add(name)
+
+config = tomllib.loads((root / "release-plz.toml").read_text())
+default_tag = config.get("workspace", {}).get("git_tag_name", "")
+overrides = {
+    p["name"]: p["git_tag_name"]
+    for p in config.get("package", [])
+    if p.get("git_tag_name") and p["git_tag_name"] != default_tag
+}
+
+errors = []
+for name in sorted(set(members) - at_tag):
+    if name not in overrides:
+        errors.append(
+            f'{members[name]}: crate "{name}" is not in {last}, so release-plz '
+            "fails on it. Add to release-plz.toml:\n\n"
+            f'    [[package]]\n    name = "{name}"\n'
+            f'    git_tag_name = "{name}-v{{{{ version }}}}"\n'
+        )
+for name in sorted(set(overrides) - set(members)):
+    errors.append(f'release-plz.toml: [[package]] "{name}" names no crate under crates/')
+for name in sorted(set(overrides) & at_tag):
+    print(
+        f'::warning title=Stale release-plz override::"{name}" is in {last}; '
+        "drop its [[package]] git_tag_name entry from release-plz.toml"
+    )
+
+for message in errors:
+    print(f"::error title=release-plz would fail::{message}")
+if errors:
+    sys.exit(1)
+print(f"ok: {len(members)} crates, {len(set(members) - at_tag)} newer than {last}, all covered")

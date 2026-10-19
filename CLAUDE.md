@@ -397,6 +397,14 @@ backlog changes.
 - **PR titles follow the same form**, since a squash-merge makes the title the
   commit. History before this rule is not rewritten.
 
+**A new crate under `crates/` needs a `[[package]]` entry in
+`release-plz.toml`** with its own `git_tag_name`, in the PR that adds it, or
+release-plz's release PR job goes red on every push to main (it did for 15
+hours after scootui, scoot-rt and scoot-dbus landed; docs/versioning.md has
+the why). The `release-plz covers every crate` CI job checks it. After merging
+a PR, also look at main's own workflow runs (`gh run list --branch main`), not
+only the PR's checks: some jobs run only on main.
+
 **CI runs only what changed.** Every new package or component adds its path
 filter to the classify job in `.github/workflows/ci.yml` in the same PR that adds
 it, the way scootbg's is, and its jobs run only when its files (or something it
