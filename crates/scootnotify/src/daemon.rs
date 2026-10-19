@@ -502,6 +502,7 @@ fn arm_timer(timer: &rustix::fd::OwnedFd, deadline: Option<Instant>) {
 /// only reaches this wait with nothing staged, nothing queued and the
 /// timer armed, so nothing is missed by sleeping until the fds speak (all
 /// poll level-triggered).
+#[allow(clippy::too_many_arguments)] // The loop's one poll wiring: every fd and timeout in one place.
 fn poll_turn(
     bus: BorrowedFd<'_>,
     timer: BorrowedFd<'_>,
