@@ -308,10 +308,13 @@ fn wait_shown(server: &mut Child, what: &str, mut check: impl FnMut() -> bool) {
             }
             panic!("{what}: the daemon died ({status}): {err}");
         }
-        assert!(
-            start.elapsed() < Duration::from_secs(15),
-            "never {what}"
-        );
+        if start.elapsed() >= Duration::from_secs(15) {
+            let mut err = String::new();
+            if let Some(mut stderr) = server.stderr.take() {
+                let _ = stderr.read_to_string(&mut err);
+            }
+            panic!("never {what}; the daemon said: {err}");
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
 }
