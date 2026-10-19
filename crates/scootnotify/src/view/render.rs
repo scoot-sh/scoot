@@ -211,6 +211,7 @@ fn rounded_coverage(x: u32, y: u32, rect: Rect, radius: u32) -> u8 {
 /// file, a refused image: v1 never leaves the slot blank). The tile is a
 /// dim plate with the background's letter; image pixels cover its middle
 /// (their fit leaves transparent corners over the plate).
+#[allow(clippy::too_many_arguments)] // A paint helper, as the bar's own are.
 fn paint_icon(
     canvas: &mut Canvas<'_>,
     text: &mut Text,
