@@ -36,7 +36,8 @@ use scoot_look::state::{
 use scoot_look::{
     Origin, RawLook, RenderInputs, check_contrast, parse_kv_config, render_bar, render_foot,
     render_fuzzel, render_greet, render_gtk3_css, render_gtk4_css, render_json, render_launch,
-    render_leaf_files, render_qt_scheme, render_scoot, render_swaylock, resolve, source_hash,
+    render_leaf_files, render_notify, render_qt_scheme, render_scoot, render_swaylock, resolve,
+    source_hash,
 };
 
 use super::cycle::{Preview, PreviewRead, clear_preview, read_preview, write_preview};
@@ -870,6 +871,7 @@ fn check_leaf_fragments(
     for (file, fragment) in [
         ("greet.toml", render_greet(merged)),
         ("launch.toml", render_launch(merged)),
+        ("notify.toml", render_notify(merged)),
     ] {
         let fragment = match fragment {
             Ok(fragment) => fragment,
@@ -1494,8 +1496,10 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 /// only, never live); 10 adds the terminal static leaves
 /// (`apps/helix.toml`, `apps/btop.theme`, `apps/starship.toml`, dropped
 /// from installed looks without `--trust`); 11 adds the launcher
-/// fragment (`launch.toml`, read at every panel open).
-pub const RENDER_VERSION: u32 = 11;
+/// fragment (`launch.toml`, read at every panel open); 12 adds the
+/// notification fragment (`notify.toml`, read at daemon start and on
+/// re-theme).
+pub const RENDER_VERSION: u32 = 12;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
@@ -1586,6 +1590,7 @@ struct RenderedFragments {
     swaylock: String,
     greet: String,
     launch: String,
+    notify: String,
     rendered_json: String,
     leaves: Vec<(String, String)>,
     static_files: Vec<(String, Vec<u8>)>,
@@ -1618,6 +1623,7 @@ fn render_all_fragments(
         render_swaylock(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     let greet = render_greet(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     let launch = render_launch(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let notify = render_notify(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     let leaves =
         render_leaf_files(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     for (file, text) in [
@@ -1625,6 +1631,7 @@ fn render_all_fragments(
         ("bar.toml", &bar),
         ("greet.toml", &greet),
         ("launch.toml", &launch),
+        ("notify.toml", &notify),
     ] {
         text.parse::<toml::Table>()
             .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
@@ -1649,6 +1656,7 @@ fn render_all_fragments(
         swaylock,
         greet,
         launch,
+        notify,
         rendered_json,
         leaves,
         static_files,
@@ -1670,6 +1678,7 @@ fn write_render_dir(tmp: &Path, fragments: &RenderedFragments) -> Result<(), std
         ("swaylock", fragments.swaylock.as_str()),
         ("greet.toml", fragments.greet.as_str()),
         ("launch.toml", fragments.launch.as_str()),
+        ("notify.toml", fragments.notify.as_str()),
     ];
     if let Some(foot) = &fragments.foot {
         files.push(("foot.ini", foot.as_str()));
@@ -1722,7 +1731,7 @@ fn render_tmp_dir(cache: &Path, name: &str) -> PathBuf {
 
 /// Whether the cached directory holds a complete render of `name`: its
 /// `render.json` names this look and every expected file is present,
-/// including the greeter and launcher fragments and the expected
+/// including the greeter, launcher and notification fragments and the expected
 /// terminal static leaves (recomputed with `trust`, notes discarded:
 /// completeness only).
 fn cached_complete(
@@ -1757,6 +1766,7 @@ fn cached_complete(
         && target.join("swaylock").is_file()
         && target.join("greet.toml").is_file()
         && target.join("launch.toml").is_file()
+        && target.join("notify.toml").is_file()
         && leaves.iter().all(|(file, _)| target.join(file).is_file())
         && static_files
             .iter()
@@ -1769,7 +1779,9 @@ fn cached_complete(
 /// `foot.ini` (only when the look has a `[terminal]` table), the launcher
 /// and locker leaves (`fuzzel.ini`, `swaylock`), the greeter fragment
 /// (`greet.toml`, read at system build time only, never live), the
-/// launcher fragment (`launch.toml`, read at every panel open),
+/// launcher fragment (`launch.toml`, read at every panel open), the
+/// notification fragment (`notify.toml`, read at daemon start and on
+/// re-theme),
 /// `render.json` and the daemon leaves (`mako`,
 /// `wob.ini`, `fcitx5/theme.conf`, `nightlight` when the look names a
 /// temperature) and the terminal static leaves (`apps/helix.toml`,
@@ -3447,12 +3459,14 @@ pub fn build_to_out(
     /// (only when the look has a `[terminal]` table), the launcher and
     /// locker leaves (`fuzzel.ini`, `swaylock`), the greeter fragment
     /// (`greet.toml`), the launcher fragment (`launch.toml`), the
+    /// notification fragment (`notify.toml`), the
     /// record, and the daemon leaves (`fcitx5/theme.conf` under its
     /// directory).
     type FullRender = (
         String,
         String,
         Option<String>,
+        String,
         String,
         String,
         String,
@@ -3475,11 +3489,14 @@ pub fn build_to_out(
             render_greet(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
         let launch =
             render_launch(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+        let notify =
+            render_notify(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
         for (file, text) in [
             ("scoot.toml", &scoot),
             ("bar.toml", &bar),
             ("greet.toml", &greet),
             ("launch.toml", &launch),
+            ("notify.toml", &notify),
         ] {
             text.parse::<toml::Table>()
                 .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
@@ -3503,6 +3520,7 @@ pub fn build_to_out(
             swaylock,
             greet,
             launch,
+            notify,
             rendered_json,
             leaves,
         ))
@@ -3520,6 +3538,7 @@ pub fn build_to_out(
                     swaylock: &str,
                     greet: &str,
                     launch: &str,
+                    notify: &str,
                     gtk3: &str,
                     gtk4: &str,
                     qt: &str,
@@ -3537,6 +3556,7 @@ pub fn build_to_out(
             ("swaylock".to_owned(), swaylock.to_owned()),
             ("greet.toml".to_owned(), greet.to_owned()),
             ("launch.toml".to_owned(), launch.to_owned()),
+            ("notify.toml".to_owned(), notify.to_owned()),
         ];
         if let Some(foot) = foot {
             staged.push(("foot.ini".to_owned(), foot.clone()));
@@ -3558,6 +3578,7 @@ pub fn build_to_out(
         mut swaylock,
         mut greet,
         mut launch,
+        mut notify,
         mut rendered_json,
         mut leaf_files,
     ) = render_once(&render_inputs)?;
@@ -3578,8 +3599,8 @@ pub fn build_to_out(
     let stage: &Path = scratch.path();
     // The staged files mirror the cache render exactly (first-party
     // fragments, the toolkit triple, foot's `foot.ini` when the look has a
-    // `[terminal]` table, the launcher and locker leaves, the greeter
-    // and launcher fragments, plus every leaf
+    // `[terminal]` table, the launcher and locker leaves, the greeter,
+    // launcher and notification fragments, plus every leaf
     // file, `fcitx5/theme.conf` under its directory): validate renders
     // what apply renders.
     let mut staged: Vec<(String, String)> = stage_of(
@@ -3590,6 +3611,7 @@ pub fn build_to_out(
         &swaylock,
         &greet,
         &launch,
+        &notify,
         &gtk3_css,
         &gtk4_css,
         &qt_scheme,
@@ -3648,6 +3670,7 @@ pub fn build_to_out(
                     swaylock,
                     greet,
                     launch,
+                    notify,
                     rendered_json,
                     leaf_files,
                 ) = render_once(&render_inputs)?;
@@ -3659,6 +3682,7 @@ pub fn build_to_out(
                     &swaylock,
                     &greet,
                     &launch,
+                    &notify,
                     &gtk3_css,
                     &gtk4_css,
                     &qt_scheme,

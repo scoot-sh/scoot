@@ -745,6 +745,7 @@ fn a_catalog_render_is_adopted_then_kept() {
         "bar.toml",
         "greet.toml",
         "launch.toml",
+        "notify.toml",
         "render.json",
     ] {
         std::fs::copy(from.join(file), published.join(file)).expect("publish file");
@@ -1135,6 +1136,7 @@ fn cursor_skip_renders_fresh_without_cursor_keys() {
         "bar.toml",
         "greet.toml",
         "launch.toml",
+        "notify.toml",
         "render.json",
     ] {
         std::fs::copy(from.join(file), published.join(file)).expect("publish file");

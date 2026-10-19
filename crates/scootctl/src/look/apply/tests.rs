@@ -431,6 +431,7 @@ fn an_offline_apply_records_repoints_and_renders() {
         "swaylock",
         "greet.toml",
         "launch.toml",
+        "notify.toml",
     ] {
         let text = std::fs::read_to_string(rendered.join(file)).expect("a rendered file");
         assert!(!text.is_empty(), "{file} renders");
@@ -550,6 +551,14 @@ fn the_render_carries_the_launcher_fragment() {
         assert!(launch.contains(line), "missing {line}:\n{launch}");
     }
     let parsed: toml::Table = toml::from_str(&launch).expect("launch.toml parses");
+    assert_eq!(parsed["colors"].as_table().expect("colors").len(), 13);
+    // The notification fragment renders beside the launcher's, from the
+    // same roles: the daemon reads it at start and on re-theme.
+    let notify = std::fs::read_to_string(rendered.join("notify.toml")).expect("notify.toml");
+    for line in ["surface =", "focus =", "border =", "font-size =", "opacity ="] {
+        assert!(notify.contains(line), "missing {line}:\n{notify}");
+    }
+    let parsed: toml::Table = toml::from_str(&notify).expect("notify.toml parses");
     assert_eq!(parsed["colors"].as_table().expect("colors").len(), 13);
 }
 
@@ -1880,6 +1889,7 @@ fn readers_racing_a_swap_see_old_or_new_never_half() {
                         "swaylock",
                         "greet.toml",
                         "launch.toml",
+                        "notify.toml",
                         "render.json",
                     ] {
                         assert!(rendered.join(file).is_file(), "half a swap: {record:?}");
@@ -2254,6 +2264,7 @@ fn validate_and_build_cover_a_directory_and_a_name() {
         "swaylock",
         "greet.toml",
         "launch.toml",
+        "notify.toml",
         "render.json",
     ] {
         assert!(out.join(file).is_file(), "{file} builds");
@@ -2842,6 +2853,7 @@ fn build_into_an_empty_out_writes_five_files_and_leaves_no_litter() {
         "swaylock",
         "greet.toml",
         "launch.toml",
+        "notify.toml",
         "render.json",
     ] {
         assert!(out.join(file).is_file(), "{file} renders");

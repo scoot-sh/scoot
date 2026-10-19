@@ -397,6 +397,18 @@ pub fn render_greet(look: &ResolvedLook) -> Result<String, GrammarError> {
     Ok(out)
 }
 
+/// Render the notification fragment (`notify.toml`): the thirteen color
+/// roles of the shell-app contract (design section 9), the look's UI
+/// font at its popup size, translucent at the popups opacity, with the
+/// look's radius. scootnotify reads this at start and on re-theme; it
+/// never reads Stylix. Like [`render_launch`], overrides merge into the
+/// base tables: an `[apps.scootnotify]` `colors.*` key replaces the
+/// derived role, and a dotless key (`font`, `font-size`, `opacity`,
+/// `radius`) replaces the top-level value, so each is emitted once.
+pub fn render_notify(look: &ResolvedLook) -> Result<String, GrammarError> {
+    render_shell_fragment(look, "scootnotify")
+}
+
 /// Render the launcher fragment (`launch.toml`): the thirteen color
 /// roles of the shell-app contract (design section 9), the look's UI
 /// font at its popup size, translucent at the popups opacity, with the
@@ -406,6 +418,15 @@ pub fn render_greet(look: &ResolvedLook) -> Result<String, GrammarError> {
 /// a dotless key (`font`, `font-size`, `opacity`, `radius`) replaces the
 /// top-level value, so each is emitted once.
 pub fn render_launch(look: &ResolvedLook) -> Result<String, GrammarError> {
+    render_shell_fragment(look, "scootlaunch")
+}
+
+/// The shared shell-app fragment renderer behind [`render_notify`] and
+/// [`render_launch`]: the same thirteen roles, the same dotless keys,
+/// the same `[icons] theme`, differing only in whose `[apps.<app>]`
+/// overrides merge in. One function so the two fragments cannot drift
+/// apart key by key.
+fn render_shell_fragment(look: &ResolvedLook, app: &str) -> Result<String, GrammarError> {
     let p = &look.palette;
     // A hand-built `ResolvedLook` skips the name grammar, so the comment
     // quotes rather than interpolates: a newline in the name stays one line.
@@ -440,12 +461,12 @@ pub fn render_launch(look: &ResolvedLook) -> Result<String, GrammarError> {
         colors.insert(key.to_string(), toml_str(color));
     }
     let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
-    // The icon theme the panel looks up names in: the look's `icons`
+    // The icon theme the app looks up names in: the look's `icons`
     // theme (Adwaita by default), overridable per app as
-    // `[apps.scootlaunch] "icons.theme"`.
+    // `[apps.<app>] "icons.theme"`.
     let mut icons: BTreeMap<String, String> = BTreeMap::new();
     icons.insert("theme".to_string(), toml_str(&look.icons_theme));
-    for (section, keys) in override_sections("scootlaunch", &look.apps)? {
+    for (section, keys) in override_sections(app, &look.apps)? {
         if section.is_empty() {
             top.extend(keys);
         } else if section == "colors" {

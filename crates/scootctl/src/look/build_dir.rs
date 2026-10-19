@@ -11,6 +11,8 @@ use std::path::Path;
 /// launcher and locker leaves, the greeter fragment (`greet.toml`: the
 /// login screen reads it at system build time, never live), the launcher
 /// fragment (`launch.toml`: the panel reads it at every open), the
+/// notification fragment (`notify.toml`: the daemon reads it at start
+/// and on re-theme), the
 /// render record, and the daemon leaves. `foot.ini` joins them only when
 /// the look has a `[terminal]` table, and `nightlight` only when the look
 /// names a temperature; `fcitx5/theme.conf` lives under its directory,
@@ -18,7 +20,7 @@ use std::path::Path;
 /// `qt6ct.conf`, `settings.ini` and the fontconfig file stay
 /// apply-rendered (the conf points through the state link, which `build`
 /// does not know).
-const BUILD_FILES: [&str; 14] = [
+const BUILD_FILES: [&str; 15] = [
     "scoot.toml",
     "bar.toml",
     "foot.ini",
@@ -26,6 +28,7 @@ const BUILD_FILES: [&str; 14] = [
     "swaylock",
     "greet.toml",
     "launch.toml",
+    "notify.toml",
     "render.json",
     "gtk/gtk-3.0.css",
     "gtk/gtk-4.0.css",

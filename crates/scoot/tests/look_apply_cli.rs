@@ -496,6 +496,7 @@ fn offline_commands_list_show_validate_and_build() {
         "swaylock",
         "greet.toml",
         "launch.toml",
+        "notify.toml",
         "render.json",
     ] {
         assert!(out.join(file).is_file(), "build writes {file}");
@@ -582,6 +583,7 @@ fn a_swap_applies_two_looks_through_the_scoped_reload() {
         "swaylock",
         "greet.toml",
         "launch.toml",
+        "notify.toml",
         "render.json",
     ] {
         assert!(link.join(file).is_file(), "a swap renders {file}");
