@@ -21,7 +21,7 @@ use scoot_rt::print::warn;
 
 use crate::bus::server::{self, Server};
 use crate::config::{self, Config};
-use crate::look::{self, Look};
+use crate::look::{self};
 use crate::model::store::IdFile;
 use crate::popup::{self, Popup};
 

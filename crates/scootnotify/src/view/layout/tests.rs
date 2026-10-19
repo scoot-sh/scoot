@@ -14,10 +14,6 @@ fn text() -> Text {
     Text::new(FontArc::new(FontVec::try_from_vec(scootui::testfont::build()).unwrap()))
 }
 
-fn text() -> Text {
-    Text::new(scootui::testfont::font())
-}
-
 fn note(id: u32, app: &str, summary: &str, body: &str) -> Notification {
     Notification {
         id,

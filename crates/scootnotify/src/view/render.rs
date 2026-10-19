@@ -13,7 +13,7 @@ use scootui::text::Text;
 
 use crate::config::Config;
 use crate::look::Look;
-use crate::model::store::Urgency;
+use crate::bus::hints::Urgency;
 use super::layout::{Card, Rect, Stack};
 
 /// The decoded icon size, in device pixels: the 48 px slot at scale 2.

@@ -35,6 +35,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use scoot_rt::print::warn;
+use scootui::output::Size;
 use scootui::outputs::Frame;
 use scootui::paint::Canvas;
 use scootui::surfaces::{Buffers, Demand, Effect, Globals, LayerLive, LayerSpec, Plan};
@@ -46,6 +47,8 @@ use wayland_client::protocol::{
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum};
 use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notification_v1::ExtIdleNotificationV1;
 use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
+use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::WpFractionalScaleV1;
+use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::xdg::activation::v1::client::xdg_activation_token_v1::{
     self, XdgActivationTokenV1,
 };
@@ -57,7 +60,8 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
 
 use crate::config::{Anchor as StackAnchor, Config};
 use crate::look::Look;
-use crate::model::store::{Notification, Urgency};
+use crate::model::store::Notification;
+use crate::bus::hints::Urgency;
 use crate::view::layout::{self, Stack};
 use crate::view::render::{self, Hover, IconBits, ICON_SIDE};
 
@@ -127,8 +131,8 @@ pub struct App {
     demand: Demand,
     buffers: Buffers,
     live: Option<LayerLive>,
-    configured_size: Option<(u32, u32)>,
-    content_size: Option<(u32, u32)>,
+    configured_size: Option<Size>,
+    content_size: Option<Size>,
     stack: Stack,
     icons: HashMap<u32, IconBits>,
     urgencies: HashMap<u32, Urgency>,
@@ -248,14 +252,17 @@ impl App {
             Effect::Create => {}
             _ => return,
         }
-        let (width, height) = self.content_size.unwrap_or((self.config.width_px, 1));
+        let content = self.content_size.unwrap_or(Size {
+            width: self.config.width_px,
+            height: 1,
+        });
         let margin = self.config.margin_px;
         let spec = LayerSpec {
             namespace: NAMESPACE,
             exclusive_keyboard: false,
             anchor: anchor_of(self.config.anchor),
-            width,
-            height,
+            width: content.width,
+            height: content.height.max(1),
             margin: [margin, margin, margin, margin],
             exclusive_zone: 0,
         };
@@ -351,10 +358,14 @@ impl App {
     fn draw(&mut self, qh: &QueueHandle<Self>) {
         let content = self.content_size;
         let size = match self.configured_size {
-            Some((0, 0)) | None => content,
-            Some((w, h)) => {
-                let (cw, ch) = content.unwrap_or((self.config.width_px, 1));
-                Some((if w == 0 { cw } else { w }, if h == 0 { ch } else { h }))
+            None => content,
+            Some(configured) => {
+                let Size { width: cw, height: ch } =
+                    content.unwrap_or(Size { width: self.config.width_px, height: 1 });
+                Some(Size {
+                    width: if configured.width == 0 { cw } else { configured.width },
+                    height: if configured.height == 0 { ch } else { configured.height },
+                })
             }
         };
         match self.demand.plan(size, self.dirty) {
@@ -426,7 +437,9 @@ impl App {
         let Some(live) = self.live.as_mut() else {
             return false;
         };
-        if self.content_size.is_some_and(|(w, h)| w != frame.size.width || h != frame.size.height) {
+        if self.content_size.is_some_and(|content| {
+            content.width != frame.size.width || content.height != frame.size.height
+        }) {
             live.set_size(frame.size.width, frame.size.height);
         }
         live.surface().attach(Some(slot.buffer()), 0, 0);
@@ -526,7 +539,7 @@ impl Popup {
         let mut queue = conn.new_event_queue();
         let qh = queue.handle();
         let _registry = conn.display().get_registry(&qh, ());
-        let mut app = App::new(config.clone(), look.clone(), font_path.clone());
+        let mut app = App::new(config.clone(), look.clone(), font_path.cloned());
         queue
             .roundtrip(&mut app)
             .map_err(|error| format!("no compositor ({error:?}): headless"))?;
@@ -588,7 +601,10 @@ impl Popup {
             app.content_size = if app.stack.cards.is_empty() {
                 None
             } else {
-                Some((app.stack.width, app.stack.height.max(1)))
+                Some(Size {
+                    width: app.stack.width,
+                    height: app.stack.height.max(1),
+                })
             };
             app.dirty = true;
         }
@@ -746,7 +762,7 @@ impl Popup {
     /// [`Popup::fd`] beside the bus and the timerfd, reads the guard
     /// when it speaks, and drops it unread otherwise (the documented
     /// read-after-poll shape: the next turn collects it).
-    pub fn prepare_read(&self) -> Option<wayland_client::event_queue::ReadEventsGuard<'_>> {
+    pub fn prepare_read(&self) -> Option<wayland_client::ReadEventsGuard> {
         self.queue.prepare_read()
     }
 
@@ -844,6 +860,8 @@ empty_dispatch!(wl_compositor::WlCompositor);
 empty_dispatch!(wl_surface::WlSurface);
 empty_dispatch!(wl_shm::WlShm);
 empty_dispatch!(wl_shm_pool::WlShmPool);
+empty_dispatch!(WpViewport);
+empty_dispatch!(WpFractionalScaleV1);
 empty_dispatch!(ZwlrLayerShellV1);
 empty_dispatch!(XdgActivationV1);
 empty_dispatch!(ExtIdleNotifierV1);
@@ -1094,7 +1112,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
                         app.destroy_live();
                     }
                 }
-                app.configured_size = Some((width, height));
+                app.configured_size = Some(Size { width, height });
                 app.dirty = true;
             }
             zwlr_layer_surface_v1::Event::Closed => {
