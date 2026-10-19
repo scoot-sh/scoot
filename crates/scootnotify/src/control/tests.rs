@@ -797,11 +797,29 @@ fn an_oversized_request_line_is_refused_and_the_connection_closes() {
         server.conns().is_empty(),
         "the overlong line closes the connection"
     );
+    // The refusal line, then the close: the close can race as a reset
+    // (the socket closes with the flood still unread), so the read
+    // tolerates one, but the error line itself must arrive.
     client
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
     let mut reply = Vec::new();
-    client.read_to_end(&mut reply).unwrap();
+    let mut chunk = [0u8; 4096];
+    loop {
+        match client.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => reply.extend_from_slice(&chunk[..n]),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::BrokenPipe
+                ) =>
+            {
+                break;
+            }
+            Err(error) => panic!("the refusal reads: {error}"),
+        }
+    }
     let text = String::from_utf8(reply).unwrap();
     assert!(text.contains("error"), "{text}");
     assert!(text.contains("65536"), "{text}");
