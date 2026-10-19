@@ -229,6 +229,50 @@ fn notify(client: &mut Conn, app: &str, summary: &str, actions: &[&str]) -> u32 
     }
 }
 
+/// One `Notify` with an `urgency` hint byte (0 low, 1 normal, 2
+/// critical): returns the id.
+fn notify_urgent(client: &mut Conn, app: &str, summary: &str, urgency: u8) -> u32 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(200);
+    let token = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut body = Writer::new();
+    body.str(app);
+    body.u32(0);
+    body.str("");
+    body.str(summary);
+    body.str("body");
+    let actions = body.open_array(4).unwrap();
+    body.close_array(actions);
+    let hints = body.open_array(8).unwrap();
+    assert!(body.open_struct());
+    body.str("urgency");
+    body.variant("y");
+    body.u8(urgency);
+    body.close_struct();
+    body.close_array(hints);
+    body.i32(-1);
+    let body = body.take_body().unwrap();
+    client
+        .call(
+            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token,
+        )
+        .expect("the call queues");
+    let start = Instant::now();
+    loop {
+        assert!(start.elapsed() < Duration::from_secs(10), "no Notify reply");
+        let (events, _) = client.pump();
+        for event in events {
+            if let Event::Reply {
+                token: got, body, ..
+            } = event
+                && got == token
+            {
+                return Reader::le(&body).u32().unwrap();
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 /// Runs `scootnotify msg …` against a spawned server, with its
 /// environment. Returns the output.
 fn msg(runtime: &tempfile::TempDir, args: &[&str]) -> std::process::Output {
@@ -459,6 +503,11 @@ fn dnd_holds_history_keeps_and_restore_re_shows_end_to_end() {
     let mut server = spawn_server(&bus, &runtime);
     let mut client = connect(&bus);
     wait_serving(&mut client, &mut server);
+    // The serving probe's 1 ms card may still be live or already
+    // expired: dismissing everything lands it in history exactly once,
+    // so the ring below holds only what this test puts there.
+    let out = msg(&runtime, &["dismiss", "--all"]);
+    assert!(out.status.success());
 
     // DND on: a normal card holds (a new id, nothing live), a critical
     // still shows.
@@ -467,20 +516,20 @@ fn dnd_holds_history_keeps_and_restore_re_shows_end_to_end() {
     assert!(String::from_utf8(out.stdout).unwrap().contains("\"dnd\":\"on\""));
     let held = notify(&mut client, "Mail", "New mail", &[]);
     assert!(list_cards(&runtime).is_empty());
-    let critical = notify(&mut client, "Alert", "Fire", &[]);
+    let critical = notify_urgent(&mut client, "Alert", "Fire", 2);
     assert_eq!(list_cards(&runtime).len(), 1);
     let _ = critical;
 
-    // History keeps the held card, unseen; the shown one is not there yet.
+    // History keeps the held card, unseen; the probe sits first.
     let out = msg(&runtime, &["history", "--json"]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(parsed["type"], "history");
     let entries = parsed["history"].as_array().unwrap();
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0]["app_name"], "Mail");
-    assert_eq!(entries[0]["seen"], false);
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[1]["app_name"], "Mail");
+    assert_eq!(entries[1]["seen"], false);
     let _ = held;
 
     // Restore re-shows the held card as a new live card.
@@ -521,6 +570,11 @@ fn a_rule_exec_fires_end_to_end_and_history_false_skips() {
     let mut server = spawn_server(&bus, &runtime);
     let mut client = connect(&bus);
     wait_serving(&mut client, &mut server);
+    // The serving probe's 1 ms card may still be live or already
+    // expired: dismissing everything lands it in history exactly once,
+    // so the ring below holds only what this test puts there.
+    let out = msg(&runtime, &["dismiss", "--all"]);
+    assert!(out.status.success());
 
     notify(&mut client, "Hook", "ring", &[]);
     // Hidden: nothing live.
@@ -531,12 +585,16 @@ fn a_rule_exec_fires_end_to_end_and_history_false_skips() {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(fired.metadata().is_ok(), "the rule exec ran");
-    // But the hidden card is in history (hide is not history=false).
+    // The hidden card is in history (hide is not history=false): the
+    // probe first, the hook newest and unseen.
     let out = msg(&runtime, &["history", "--json"]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
-    assert_eq!(parsed["history"].as_array().unwrap().len(), 1);
+    let entries = parsed["history"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[1]["app_name"], "Hook");
+    assert_eq!(entries[1]["seen"], false);
 
     // `history = false` keeps the match out of the ring entirely.
     notify(&mut client, "Quiet", "shh", &[]);
@@ -544,7 +602,7 @@ fn a_rule_exec_fires_end_to_end_and_history_false_skips() {
     assert!(out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
-    assert_eq!(parsed["history"].as_array().unwrap().len(), 1);
+    assert_eq!(parsed["history"].as_array().unwrap().len(), 2);
 
     kill(server);
 }

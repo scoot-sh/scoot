@@ -47,9 +47,19 @@ fn quick_children_free_their_slots() {
     let mut spawner = Spawner::default();
     for _ in 0..8 {
         spawner.spawn(&request("true")).expect("true runs");
+        // Each `true` exits at once: wait for the exit (fail-fast: a
+        // child that never exits fails the test, never hangs the suite),
+        // so the next spawn's opening reap frees the slot.
+        let start = std::time::Instant::now();
+        while spawner.running() > 0 {
+            spawner.reap();
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(5),
+                "a `true` that never exits"
+            );
+            std::thread::yield_now();
+        }
     }
-    // Every `true` exited at once: the next spawn's opening reap frees
-    // them all, so eight sequential runs never trip the bound of four.
     spawner.reap();
     assert_eq!(spawner.running(), 0);
 }
