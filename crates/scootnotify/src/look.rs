@@ -44,7 +44,7 @@
 //! later ticket may resolve it); v1 documents that it does not pick the
 //! file.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use scootui::color::Color;
 use scootui::theme::Theme;
@@ -134,6 +134,53 @@ pub fn load(explicit: Option<&Path>) -> (Look, Vec<String>) {
     (look, notes)
 }
 
+/// The look state's directory: `$SCOOT_LOOK_STATE` (a private session's),
+/// else `$XDG_STATE_HOME/scoot`, else `~/.local/state/scoot`. `None` when
+/// no home is usable: there is then no state link, only the defaults.
+/// The daemon resolves this once and hands it to every reload, so tests
+/// pass their own.
+pub fn state_dir() -> Option<PathBuf> {
+    scoot_look::state::state_dir_from_env(None)
+}
+
+/// Re-reads the look layer for a reload: `Ok(None)` when no layer is
+/// there (no state dir, or nothing at its path), `Err` for a
+/// present-but-bad fragment (unreadable, or TOML that does not parse at
+/// all), so the caller keeps the last good look. A refused key still
+/// keeps its default with a warning, as at startup: only a fragment that
+/// is not a table at all refuses the reload. `state` is the look state's
+/// directory ([`state_dir`]); tests pass their own.
+pub fn reload_layer(state: Option<&Path>) -> Result<Option<(Look, Vec<String>)>, String> {
+    let Some(dir) = state else {
+        return Ok(None);
+    };
+    let path = dir.join("look").join("notify.toml");
+    let text = match scoot_look::state::read_capped(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "cannot read {} ({error}): keeping the running look",
+                path.display()
+            ));
+        }
+    };
+    let table: toml::Table = text.parse().map_err(|error| {
+        format!(
+            "{} does not parse ({error}): keeping the running look",
+            path.display()
+        )
+    })?;
+    let mut look = Look::default();
+    let mut refused = Vec::new();
+    apply_table(&mut look, &table, &mut refused);
+    let mut notes = Vec::new();
+    for note in refused {
+        notes.push(format!("{}: {note}", path.display()));
+    }
+    Ok(Some((look, notes)))
+}
+
 /// Parses a `notify.toml` fragment: the allowlisted keys over the
 /// defaults, plus one note per refused key. Pure over its input, so tests
 /// never touch the filesystem.
@@ -147,20 +194,20 @@ pub fn parse(text: &str) -> (Look, Vec<String>) {
             return (look, notes);
         }
     };
-    for (key, value) in &table {
+    apply_table(&mut look, &table, &mut notes);
+    (look, notes)
+}
+
+/// Merges one parsed fragment table over `look`, noting refusals.
+fn apply_table(look: &mut Look, table: &toml::Table, notes: &mut Vec<String>) {
+    for (key, value) in table {
         if key == "colors" {
             let Some(colors) = value.as_table() else {
                 notes.push(String::from("`colors` is not a table: skipped"));
                 continue;
             };
             for (name, color) in colors {
-                apply(
-                    look_color(&mut look, name),
-                    "colors",
-                    name,
-                    color,
-                    &mut notes,
-                );
+                apply(look_color(look, name), "colors", name, color, notes);
             }
             continue;
         }
@@ -170,13 +217,12 @@ pub fn parse(text: &str) -> (Look, Vec<String>) {
                 continue;
             };
             for (name, icon) in icons {
-                apply(look_icons(&mut look, name), "icons", name, icon, &mut notes);
+                apply(look_icons(look, name), "icons", name, icon, notes);
             }
             continue;
         }
-        apply(look_dotless(&mut look, key), "", key, value, &mut notes);
+        apply(look_dotless(look, key), "", key, value, notes);
     }
-    (look, notes)
 }
 
 /// Applies one fragment value through the allowlist and the grammar: a

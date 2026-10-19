@@ -13,10 +13,10 @@ publish = false
 # Linux-only crates).
 #
 # Popups draw through `scootui` (the on-demand overlay surface, text and
-# PNG icons), the look layer through `scoot-look`, and the idle pause
-# through `ext-idle-notify`: the bar family's own set, as the panel's
-# are. The control socket, DND, rules, history and Nix arrive in later
-# tickets (dev/design/scootnotify.md, Tickets).
+# PNG icons, and the control socket's server half), the look layer through
+# `scoot-look`, and the idle pause through `ext-idle-notify`: the bar
+# family's own set, as the panel's are. DND, rules, history and Nix arrive
+# in later tickets (dev/design/scootnotify.md, Tickets).
 
 [dependencies]
 # The shared D-Bus client: the wire, the connection with its per-message
@@ -25,11 +25,15 @@ scoot-dbus.workspace = true
 # Panic-free printing behind the binary's own name, shared with the
 # other shell apps instead of another copy.
 scoot-rt.workspace = true
-# The card stack's on-demand overlay surface, text, PNG icons and the
-# poll-loop Wayland half: the shared crate, behind features so the
-# headless path (no compositor) links only what it uses. No keyboard
-# (pointer only), no entry, no control socket in this ticket.
-scootui = { path = "../scootui", default-features = false, features = ["surfaces", "wayland", "icons", "png"] }
+# The card stack's on-demand overlay surface, text, PNG icons, the
+# poll-loop Wayland half and the control socket's server half: the shared
+# crate, behind features so the headless path (no compositor, no control
+# client) links only what it uses. No keyboard (pointer only), no entry.
+scootui = { path = "../scootui", default-features = false, features = ["surfaces", "wayland", "icons", "png", "control"] }
+# The control socket's requests, replies and events (`list`, `dismiss`,
+# `invoke`, `reload`, `subscribe`, `version`; `wait` is client-side): the
+# same versions scootbar speaks, so no new package enters the tree.
+serde_json.workspace = true
 # The look layer's allowlist, value grammar and state-dir rule: the
 # workspace's existing version, so no new package enters the tree.
 scoot-look.workspace = true

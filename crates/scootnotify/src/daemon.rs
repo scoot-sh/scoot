@@ -1,26 +1,31 @@
-//! The daemon: one `poll(2)` loop over the bus fd, one timerfd, and the
-//! popup's Wayland fd.
+//! The daemon: one `poll(2)` loop over the bus fd, one timerfd, the
+//! popup's Wayland fd, and the control socket's listener and clients.
 //!
 //! With a compositor the daemon shows the card stack on an on-demand
 //! overlay surface (clocks start on the frame callback; hover and input
 //! idle pause them); without one it stays headless (arrival is display,
 //! cards wait for no surface). At idle — no cards with deadlines, no
 //! surface, nothing staged — the timerfd disarms, and the loop sleeps on
-//! the bus fd (and the Wayland fd, which speaks only for pointer, idle
-//! and output events) alone: 0 wakeups with no cards.
+//! the bus fd, the control listener and the clients (the Wayland fd, which
+//! speaks only for pointer, idle and output events) alone: 0 wakeups with
+//! no cards. The control socket adds a poll timeout only while a stalled
+//! peer's deadline or the listener's rest lapses, never at idle.
 //!
 //! Exit statuses: 0 done (only `--check` exits on its own; the daemon
 //! runs until killed), 1 failed, 3 the name is owned.
 
 use std::os::fd::{AsFd, BorrowedFd};
+use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use scoot_dbus::conn::{self, Conn, Event};
 use scoot_rt::print::warn;
+use scootui::control::{Claim, Server as ControlServer};
 
 use crate::bus::server::{self, Server};
 use crate::config::{self, Config};
+use crate::control::respond::{AppliedReload, Responder};
 use crate::look::{self};
 use crate::model::store::IdFile;
 use crate::popup::{self, Popup};
@@ -48,6 +53,9 @@ pub fn serve(config_path: Option<&str>, font_path: Option<&str>) -> i32 {
     for note in &notes {
         warn(format_args!("scootnotify: {note}"));
     }
+    // Resolved once: every reload reads the layer from here, and tests
+    // hand the responder their own.
+    let look_state = look::state_dir();
     let font = font_path.map(PathBuf::from);
     let address = std::env::var_os("DBUS_SESSION_BUS_ADDRESS");
     let mut conn = match conn::bus_addr_for(address.as_deref()) {
@@ -84,6 +92,29 @@ pub fn serve(config_path: Option<&str>, font_path: Option<&str>) -> i32 {
             return 3;
         }
     }
+    // The control socket first, so a second daemon refuses before it
+    // takes the name's work: one daemon per display, like the bus name.
+    let control_paths = match scootui::control::paths::from_env("scootnotify") {
+        Ok(paths) => paths,
+        Err(error) => {
+            warn(format_args!("scootnotify: control socket: {error}"));
+            return 1;
+        }
+    };
+    let claim = match Claim::acquire(&control_paths) {
+        Ok(claim) => claim,
+        Err(error) => {
+            warn(format_args!("scootnotify: {error}"));
+            return 1;
+        }
+    };
+    let mut control = match ControlServer::new(claim.listener()) {
+        Ok(server) => server,
+        Err(error) => {
+            warn(format_args!("scootnotify: control socket: {error}"));
+            return 1;
+        }
+    };
     let ids = IdFile::open(ids_path());
     let mut server = Server::new(config.clone(), ids);
     // A compositor means popups (presentation on the frame callback);
@@ -99,7 +130,15 @@ pub fn serve(config_path: Option<&str>, font_path: Option<&str>) -> i32 {
             None
         }
     };
-    match run_loop(&mut conn, &mut server, popup) {
+    match run_loop(
+        &mut conn,
+        &mut server,
+        popup,
+        &mut control,
+        claim.listener(),
+        &path,
+        look_state.as_ref(),
+    ) {
         LoopEnd::BusGone => {
             warn(format_args!("scootnotify: the bus went away"));
             1
@@ -141,19 +180,35 @@ enum LoopEnd {
 }
 
 /// Serves until the bus or the compositor goes away: pumps method calls
-/// into the server, arms one timerfd to the earliest expiry, fires what
-/// is due, and draws the stack when dirty.
-fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> LoopEnd {
+/// into the server, serves the control clients (`list`, `dismiss`,
+/// `invoke`, `reload`, `subscribe`, `version`), arms one timerfd to the
+/// earliest expiry, fires what is due, broadcasts the turn's control
+/// events, and draws the stack when dirty.
+fn run_loop(
+    conn: &mut Conn,
+    server: &mut Server,
+    mut popup: Option<Popup>,
+    control: &mut ControlServer,
+    listener: &UnixListener,
+    config_path: &PathBuf,
+    look_state: Option<&PathBuf>,
+) -> LoopEnd {
     let timer = match timerfd() {
         Some(timer) => timer,
         None => return LoopEnd::BusGone,
     };
     let mut hovered: Option<u32> = None;
+    // The control listener rests after a failed accept (see below), and
+    // stalled control peers set the poll's timeout: both `None` at idle,
+    // so the socket adds no wakeups.
+    let mut rest_until: Option<Instant> = None;
+    let mut stall_anchor: Option<Instant> = None;
     loop {
         let (events, capped) = conn.pump();
         if conn.dead() {
             return LoopEnd::BusGone;
         }
+        let now = Instant::now();
         let now_ms = now_ms();
         for event in events {
             if let Event::MethodCall {
@@ -181,9 +236,31 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
                     return LoopEnd::BusGone;
                 }
             }
+        }
+        let applied = serve_control(
+            control,
+            listener,
+            server,
+            conn,
+            config_path,
+            look_state,
+            now,
+            now_ms,
+            &mut rest_until,
+        );
+        if let Some(applied) = applied {
+            apply_reload(&mut popup, applied);
+        }
+        if let Some(popup) = popup.as_mut() {
             popup.refresh(&server.store().ordered(), now_ms);
         }
         server.fire_expiries(conn);
+        // The turn's control events, from the bus, the pointer and `msg`
+        // alike, go to this turn's subscribers. Drained every turn, so a
+        // flood cannot grow the queue past one turn's worth.
+        for event in server.take_control_events() {
+            control.broadcast(event.kind as u8, &event.line);
+        }
         if let Some(popup) = popup.as_mut() {
             popup.draw();
         }
@@ -197,14 +274,24 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
         if capped || conn.has_staged_work() || conn.want_write() {
             continue;
         }
+        let stalled = control.sweep(now);
+        if stalled > 0 {
+            warn(format_args!(
+                "scootnotify: dropped {stalled} control connection(s) stalled past the write deadline"
+            ));
+        }
         // The Wayland read guard: prepared before the poll, read when
         // the fd speaks, dropped unread otherwise (the documented
         // read-after-poll shape: the next turn collects it).
         let guard = popup.as_ref().and_then(|popup| popup.prepare_read());
-        let wayland = wait(
+        let wayland = poll_turn(
             conn.as_fd(),
             timer.as_fd(),
             popup.as_ref().map(|popup| popup.fd()),
+            control,
+            listener,
+            rest_until,
+            control.stall_timeout(&mut stall_anchor),
         );
         drain_timer(&timer);
         if wayland && let Some(guard) = guard {
@@ -215,6 +302,77 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
         }
     }
 }
+
+/// Serves the control socket for one turn: drains the listener (unless it
+/// is resting after a failed accept), then serves every client. All
+/// traffic is non-blocking, so every client is served optimistically: a
+/// client with nothing to say costs one refused read. Returns the turn's
+/// reload for the popup, if any.
+#[allow(clippy::too_many_arguments)] // The loop's one control wiring: every serving input in one place.
+fn serve_control(
+    control: &mut ControlServer,
+    listener: &UnixListener,
+    server: &mut Server,
+    bus: &mut Conn,
+    config_path: &PathBuf,
+    look_state: Option<&PathBuf>,
+    now: Instant,
+    now_ms: u64,
+    rest_until: &mut Option<Instant>,
+) -> Option<AppliedReload> {
+    use rustix::event::PollFlags;
+    if rest_until.is_some_and(|until| now < until) {
+        // Resting: a failed accept is retried once the poll times out
+        // (see `poll_turn`), not spun on.
+    } else if let Err(error) = control.accept(listener) {
+        warn(format_args!(
+            "scootnotify: cannot accept control clients: {error}"
+        ));
+        *rest_until = Some(now + LISTEN_REST);
+    } else {
+        *rest_until = None;
+    }
+    let mut responder = Responder::new(
+        server,
+        bus,
+        config_path,
+        look_state.map(PathBuf::as_path),
+        now,
+        now_ms,
+        control.subscribers(),
+    );
+    // Served optimistically (see above): readiness is assumed, and the
+    // non-blocking reads refuse clients with nothing to say.
+    let ready = PollFlags::IN | PollFlags::OUT | PollFlags::HUP | PollFlags::ERR;
+    let mut index = 0;
+    while index < control.conns().len() {
+        if control.service(index, ready, &mut responder) {
+            index += 1;
+        }
+    }
+    responder.applied
+}
+
+/// Applies a reload's popup half: the new config lays out, the new look
+/// re-themes, under the live cards. Infallible: the request half already
+/// validated everything, so a refused file or fragment never reaches
+/// here. The warnings go to the log, as at startup.
+fn apply_reload(popup: &mut Option<Popup>, applied: AppliedReload) {
+    for note in &applied.notes {
+        warn(format_args!("scootnotify: note: {note}"));
+    }
+    if let Some(popup) = popup.as_mut() {
+        if let Some(config) = applied.config {
+            popup.reconfigure(config);
+        }
+        popup.retheme(applied.look);
+    }
+}
+
+/// How long the control listener rests after a failed accept: retrying at
+/// once would spin (the listener is level-triggered), exiting would take
+/// the daemon with it.
+const LISTEN_REST: Duration = Duration::from_secs(1);
 
 /// Applies one popup event to the store, queueing its signals: the
 /// token (if minted) always precedes its invoke.
@@ -325,23 +483,58 @@ fn arm_timer(timer: &rustix::fd::OwnedFd, deadline: Option<Instant>) {
     let _ = timerfd_settime(timer, TimerfdTimerFlags::empty(), &spec);
 }
 
-/// Polls the bus fd, the timerfd, and the Wayland fd (when there is
-/// one) with no timeout: woken by traffic or the next expiry, never by
-/// time otherwise. Returns whether the Wayland fd spoke. A bounded poll
-/// here would be a wakeup every bound at idle; the loop only reaches
-/// this wait with nothing staged, nothing queued and the timer armed,
-/// so nothing is missed by sleeping until the fds speak (all poll
-/// level-triggered).
-fn wait(bus: BorrowedFd<'_>, timer: BorrowedFd<'_>, wayland: Option<BorrowedFd<'_>>) -> bool {
-    use rustix::event::{PollFd, PollFlags, poll};
-    let third = wayland.unwrap_or(bus);
-    let mut fds = [
-        PollFd::new(&bus, PollFlags::IN),
-        PollFd::new(&timer, PollFlags::IN),
-        PollFd::new(&third, PollFlags::IN),
-    ];
-    let _ = poll(&mut fds, None);
-    wayland.is_some() && !fds[2].revents().is_empty()
+/// Polls the bus fd, the timerfd, the Wayland fd (when there is one),
+/// the control listener (unless it is resting after a failed accept)
+/// and its clients, with a timeout only while a stalled peer's deadline
+/// or the listener's rest lapses. Returns whether the Wayland fd spoke.
+/// A bounded poll here would be a wakeup every bound at idle; the loop
+/// only reaches this wait with nothing staged, nothing queued and the
+/// timer armed, so nothing is missed by sleeping until the fds speak (all
+/// poll level-triggered).
+fn poll_turn(
+    bus: BorrowedFd<'_>,
+    timer: BorrowedFd<'_>,
+    wayland: Option<BorrowedFd<'_>>,
+    control: &ControlServer,
+    listener: &UnixListener,
+    rest_until: Option<Instant>,
+    stall: Option<Duration>,
+) -> bool {
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+    let mut fds = Vec::with_capacity(4 + control.conns().len());
+    fds.push(PollFd::new(&bus, PollFlags::IN));
+    fds.push(PollFd::new(&timer, PollFlags::IN));
+    // Unwrapped beside the bus: the binding lives for the poll, and the
+    // index records whether it is the Wayland fd or a second bus slot.
+    let wayland_fd = wayland.unwrap_or(bus);
+    let wayland_at = if wayland.is_some() {
+        fds.push(PollFd::new(&wayland_fd, PollFlags::IN));
+        Some(fds.len() - 1)
+    } else {
+        None
+    };
+    // The listener rests after a failed accept: it keeps no slot, so a
+    // connection it cannot accept does not keep the level-triggered poll
+    // returning (no spin). The poll's timeout re-arms it.
+    if rest_until.is_none_or(|until| Instant::now() >= until) {
+        fds.push(PollFd::new(listener, PollFlags::IN));
+    }
+    for conn in control.conns() {
+        fds.push(PollFd::new(conn.stream(), conn.interest()));
+    }
+    let rest = rest_until.and_then(|until| until.checked_duration_since(Instant::now()));
+    let timeout = match (stall, rest) {
+        (Some(left), Some(rest)) => Some(left.min(rest)),
+        (Some(left), None) => Some(left),
+        (None, Some(rest)) => Some(rest),
+        (None, None) => None,
+    };
+    let timespec = timeout.map(|left| Timespec {
+        tv_sec: left.as_secs() as _,
+        tv_nsec: left.subsec_nanos() as _,
+    });
+    let _ = poll(&mut fds, timespec.as_ref());
+    wayland_at.is_some_and(|at| !fds[at].revents().is_empty())
 }
 
 /// Reads a fired timerfd back to disarmed: edge-triggered peace.

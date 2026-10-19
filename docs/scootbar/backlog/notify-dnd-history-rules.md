@@ -3,7 +3,7 @@ title: "scootnotify: do not disturb, the history ring and `restore`, `[[rule]]` 
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "notify-control"
+blocked: null
 milestone: "M7"
 ---
 

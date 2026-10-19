@@ -37,16 +37,16 @@ To move the stack, set where it anchors and how far it stands off the
 edges:
 
 - `width_px`: the card width in logical pixels. Type: integer, 10 to
-  1024. Default: `360`. Example: `width_px = 400`. Reload: restart.
+  1024. Default: `360`. Example: `width_px = 400`. Reload: `msg reload`.
 - `margin_px`: the stack's distance from the screen edges in logical
   pixels. Type: integer, 0 to 128. Default: `12`. Example:
-  `margin_px = 24`. Reload: restart.
+  `margin_px = 24`. Reload: `msg reload`.
 - `anchor`: the screen corner. Type: `top-left`, `top-right`,
   `bottom-left` or `bottom-right`. Default: `top-right`. Example:
-  `anchor = "bottom-right"`. Reload: restart.
+  `anchor = "bottom-right"`. Reload: `msg reload`.
 - `output`: the output the stack shows on. Type: string (1 to 256
   printable bytes) or absent. Default: absent, a null output — the
-  compositor's choice. Example: `output = "HDMI-1"`. Reload: restart.
+  compositor's choice. Example: `output = "HDMI-1"`. Reload: `msg reload`.
   On hotplug the stack moves if its output left; with zero outputs the
   cards wait with their clocks stopped.
 
@@ -64,17 +64,17 @@ through a manual lock.
 
 - `timeout_low_ms`: low-urgency expiry for `expire_timeout = -1`, in
   milliseconds. Type: integer, at most `timeout_max_ms`. Default:
-  `5000`. Example: `timeout_low_ms = 3000`. Reload: restart.
+  `5000`. Example: `timeout_low_ms = 3000`. Reload: `msg reload`.
 - `timeout_normal_ms`: normal-urgency expiry for `expire_timeout =
   -1`, in milliseconds. Type: integer, at most `timeout_max_ms`.
   Default: `10000`. Example: `timeout_normal_ms = 8000`. Reload:
-  restart.
+  `msg reload`.
 - `timeout_max_ms`: what a positive `expire_timeout` is honored up to,
   in milliseconds. Type: integer, 1 to 86400000. Default: `3600000`
-  (one hour). Example: `timeout_max_ms = 600000`. Reload: restart.
+  (one hour). Example: `timeout_max_ms = 600000`. Reload: `msg reload`.
 - `pause_when_idle_secs`: seconds without input after which every
   expiry clock pauses (0 disables). Type: integer, 0 to 3600. Default:
-  `60`. Example: `pause_when_idle_secs = 120`. Reload: restart. Only
+  `60`. Example: `pause_when_idle_secs = 120`. Reload: `msg reload`. Only
   real input counts (a playing video does not), and an agent driving
   the session keeps cards flowing.
 
@@ -87,28 +87,29 @@ through a manual lock.
 
 - `max_visible`: cards on screen at once; past it a "+N more" pill
   covers the rest. Type: integer, 1 to 16. Default: `5`. Example:
-  `max_visible = 3`. Reload: restart.
+  `max_visible = 3`. Reload: `msg reload`.
 - `body_lines`: body lines per card before the ellipsis. Type:
   integer, 1 to 16. Default: `5`. Example: `body_lines = 8`. Reload:
-  restart.
+  `msg reload`.
 - `border_px`: the urgency border width in logical pixels (0 draws
   none). Type: integer, 0 to 8. Default: `2`. Example: `border_px =
-  3`. Reload: restart. Low draws `border`, normal `focus`, critical
+  3`. Reload: `msg reload`. Low draws `border`, normal `focus`, critical
   `urgent`.
 - `radius`: the card corner radius in logical pixels. Type: integer, 0
-  to 64. Default: `8`. Example: `radius = 12`. Reload: restart.
+  to 64. Default: `8`. Example: `radius = 12`. Reload: `msg reload`.
 - `max_live`: live notifications at most; past it the oldest
   non-critical one closes with reason 4. Type: integer, 1 to 1024.
-  Default: `128`. Example: `max_live = 64`. Reload: restart.
+  Default: `128`. Example: `max_live = 64`. Reload: `msg reload`.
 - `rate_per_sec`, `rate_burst`: the per-sender token bucket,
   notifications per second and burst. Type: integers, 1 to 1000.
   Defaults: `20`, `40`. Example: `rate_per_sec = 10`. Reload:
-  restart. Past the bucket a `Notify` still gets its id, but the card
+  `msg reload`. Past the bucket a `Notify` still gets its id, but the card
   goes unshown.
 
-Every reload row says restart: config changes apply at the next daemon
-start. (`msg reload` arrives with the control socket; the re-theme
-path it drives is already built.)
+Every key above applies live: edit the file, then `scootnotify msg
+reload`. A refused file keeps the running config and cards, and says
+why. `msg reload --look` re-reads only the look layer, never touching
+the file — a look swap under a half-edited file.
 
 ## The look layer
 
@@ -134,9 +135,10 @@ cards:
 | Corners | `shape.radius` |
 
 > **Symptom:** the cards ignore a look swap.
-> A swap reaches the daemon with the control socket's `reload`, which
-> is a later ticket. Until then, restart the daemon after applying a
-> look.
+> The swap reaches the daemon through `scootnotify msg reload --look`
+> (plain `msg reload` re-reads the file too). If the look changed but
+> the cards did not, the fragment refused: the daemon warns per key and
+> keeps the last good look.
 
 > **Symptom:** no icon on the card.
 > PNG `image-data` and reachable PNG paths draw; a theme name draws

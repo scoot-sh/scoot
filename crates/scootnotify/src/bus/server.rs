@@ -28,6 +28,7 @@ use scoot_dbus::proto::{self, Reader, Writer, request, request_reply};
 
 use crate::bus::notify::{self, NOTIFY_SIGNATURE};
 use crate::config::Config;
+use crate::control::protocol::{self, EventKind};
 use crate::model::store::{Closure, IdFile, Store};
 
 /// The bus name, object and interface: the spec's §2 service.
@@ -287,6 +288,18 @@ pub struct Server {
     /// first contains it, and a card that arrives while locked or
     /// output-less waits with its clock stopped.
     present_on_arrival: bool,
+    /// Control events queued where the store changes (arrivals, closes,
+    /// invokes): the daemon loop drains these once a turn onto the
+    /// subscribed control connections. Drained every turn, so a flood
+    /// cannot grow this past one turn's worth.
+    control: Vec<ControlEvent>,
+}
+
+/// One queued control event: the subscriber kind it goes to, and the
+/// line the daemon broadcasts.
+pub struct ControlEvent {
+    pub kind: EventKind,
+    pub line: Vec<u8>,
 }
 
 impl Server {
@@ -296,7 +309,61 @@ impl Server {
             store: Store::new(config, ids),
             apps: HashMap::new(),
             present_on_arrival: true,
+            control: Vec::new(),
         }
+    }
+
+    /// Drains the queued control events: the daemon loop broadcasts these
+    /// once a turn, then drops what no subscriber took.
+    pub fn take_control_events(&mut self) -> Vec<ControlEvent> {
+        std::mem::take(&mut self.control)
+    }
+
+    /// Queues a `notify` event for `id`'s arrival, shown as `list` shows
+    /// it. Nothing is queued when the id is already gone (it cannot be:
+    /// the caller just stored it).
+    fn push_notify(&mut self, id: u32, now: Instant, now_ms: u64) {
+        let Some(note) = self.store.get(id) else {
+            return;
+        };
+        let output = self.store.output_name();
+        let mut line = Vec::new();
+        protocol::write_event(
+            &mut line,
+            &protocol::Event::Notify {
+                notification: Box::new(protocol::view(note, now, now_ms, output)),
+            },
+        );
+        self.control.push(ControlEvent {
+            kind: EventKind::Notify,
+            line,
+        });
+    }
+
+    /// Queues a `close` event for `closure`.
+    fn push_close(&mut self, closure: Closure) {
+        let mut line = Vec::new();
+        protocol::write_event(
+            &mut line,
+            &protocol::Event::Close {
+                id: closure.id,
+                reason: closure.reason.name(),
+            },
+        );
+        self.control.push(ControlEvent {
+            kind: EventKind::Close,
+            line,
+        });
+    }
+
+    /// Queues an `invoke` event.
+    fn push_invoke(&mut self, id: u32, action: &str) {
+        let mut line = Vec::new();
+        protocol::write_event(&mut line, &protocol::Event::Invoke { id, action });
+        self.control.push(ControlEvent {
+            kind: EventKind::Invoke,
+            line,
+        });
     }
 
     /// Stops presenting on arrival: the popup daemon calls this when it
@@ -401,20 +468,22 @@ impl Server {
                     return;
                 };
                 self.remember_app(sender, &incoming.app_name);
-                let (arrival, evicted) = self.store.notify(incoming, Instant::now(), now_ms);
+                let now = Instant::now();
+                let (arrival, evicted) = self.store.notify(incoming, now, now_ms);
                 // Headless arrival is display: the clock starts at once.
                 // The popup daemon clears `present_on_arrival` and moves
                 // this to the frame callback instead.
                 if self.present_on_arrival
                     && let crate::model::store::Arrival::Shown { id, .. } = arrival
                 {
-                    self.store.presented(id, Instant::now(), now_ms);
+                    self.store.presented(id, now, now_ms);
                 }
-                for closure in evicted
-                    .into_iter()
-                    .chain(self.store.expired(Instant::now()))
-                {
+                if let crate::model::store::Arrival::Shown { id, .. } = arrival {
+                    self.push_notify(id, now, now_ms);
+                }
+                for closure in evicted.into_iter().chain(self.store.expired(now)) {
                     self.signal_closed(conn, closure);
+                    self.push_close(closure);
                 }
                 let id = match arrival {
                     crate::model::store::Arrival::Shown { id, .. } => id,
@@ -443,6 +512,7 @@ impl Server {
                     Some(closure) => {
                         conn.reply_return(sender, serial, "", &[]);
                         self.signal_closed(conn, closure);
+                        self.push_close(closure);
                     }
                     // The spec's empty D-Bus Error message for an id
                     // that no longer exists: a name, no body.
@@ -512,6 +582,7 @@ impl Server {
     pub fn fire_expiries(&mut self, conn: &mut Conn) {
         for closure in self.store.expired(Instant::now()) {
             self.signal_closed(conn, closure);
+            self.push_close(closure);
         }
     }
 
@@ -529,9 +600,11 @@ impl Server {
         let Some(invocation) = self.store.invoke(id, action) else {
             return false;
         };
+        self.push_invoke(invocation.id, &invocation.action);
         self.signal_action(conn, invocation.id, &invocation.action, token);
         if let Some(closure) = invocation.closed {
             self.signal_closed(conn, closure);
+            self.push_close(closure);
         }
         true
     }
@@ -543,6 +616,7 @@ impl Server {
             return false;
         };
         self.signal_closed(conn, closure);
+        self.push_close(closure);
         true
     }
 
@@ -554,6 +628,7 @@ impl Server {
         for id in ids {
             if let Some(closure) = self.store.dismiss(id) {
                 self.signal_closed(conn, closure);
+                self.push_close(closure);
                 out += 1;
             }
         }

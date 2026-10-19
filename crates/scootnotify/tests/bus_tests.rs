@@ -78,8 +78,9 @@ fn spawn_server(daemon: &Daemon, runtime: &tempfile::TempDir) -> Child {
 /// One call outstanding at a time — an error (the name unowned yet)
 /// resends, a reply returns — so at most one probe card ever exists.
 /// On timeout the panic names the server's fate (its exit code and
-/// stderr when it died, which is the startup crash; still-running when
-/// it is slow), because a bare deadline cost a debugging round already.
+/// stderr when it died, which is the startup crash; what its stderr
+/// says so far when it still runs, which is how far startup got),
+/// because a bare deadline cost a debugging round already.
 fn wait_serving(client: &mut Conn, server: &mut Child) {
     let start = Instant::now();
     // A 1 ms card: the reply proves serving, the card itself is gone
@@ -104,9 +105,23 @@ fn wait_serving(client: &mut Conn, server: &mut Child) {
                     panic!("the server died at startup ({status}): {err}");
                 }
                 None => {
-                    panic!("the server still runs but never owned the name in 10 s");
+                    panic!(
+                        "the server still runs but never owned the name in 30 s; \
+                         its stderr so far: {}",
+                        read_available(server.stderr.as_mut())
+                    );
                 }
             }
+        }
+        // A dead-at-startup server fails here in milliseconds, not at
+        // the 30 s deadline: otherwise a startup crash reads exactly
+        // like a serving stall.
+        if let Some(status) = server.try_wait().expect("the server reaps") {
+            let mut err = String::new();
+            if let Some(mut stderr) = server.stderr.take() {
+                let _ = stderr.read_to_string(&mut err);
+            }
+            panic!("the server died at startup ({status}): {err}");
         }
         if client.dead() {
             panic!("the bus died while waiting for the server");
@@ -236,6 +251,35 @@ fn bus_info(client: &mut Conn, token: u64) -> Vec<String> {
         out.push(reader.str().unwrap().to_owned());
     }
     out
+}
+
+/// Reads what the daemon's stderr holds without blocking: the daemon
+/// is still alive, so EOF never comes. Best effort (a failure to drain
+/// says so); the pipe is left nonblocking, which is fine on a path that
+/// panics right after.
+fn read_available(stderr: Option<&mut std::process::ChildStderr>) -> String {
+    use std::os::fd::AsFd as _;
+    let Some(stderr) = stderr else {
+        return String::from("(stderr already taken)");
+    };
+    let fd = stderr.as_fd();
+    let flags = match rustix::fs::fcntl_getfl(fd) {
+        Ok(flags) => flags,
+        Err(_) => return String::from("(stderr would not drain)"),
+    };
+    if rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK).is_err() {
+        return String::from("(stderr would not drain)");
+    }
+    let mut out = Vec::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        match rustix::io::read(fd, &mut buf) {
+            Ok(0) => break,
+            Ok(n) => out.extend_from_slice(&buf[..n]),
+            Err(_) => break,
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Drains `client` until a `NotificationClosed` for `id` arrives.
