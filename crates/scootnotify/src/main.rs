@@ -269,20 +269,26 @@ fn wait(app: Option<&str>, summary: Option<&str>, timeout_secs: u64) -> i32 {
             ));
             return 1;
         }
-        match subscription.read_line(Some(left)) {
+        match subscription.read(Some(left)) {
             Err(error) => {
                 warn(format_args!("scootnotify: {error}"));
                 return 1;
             }
-            // With time left, a socket timeout cannot have fired: the
-            // daemon closed the subscription, and events may be missed.
-            Ok(None) => {
+            Ok(client::Read::Timeout) => {
+                warn(format_args!(
+                    "scootnotify: timed out after {timeout_secs}s with no matching notification"
+                ));
+                return 1;
+            }
+            // The daemon closed the subscription, and events may have
+            // been missed.
+            Ok(client::Read::Eof) => {
                 warn(format_args!(
                     "scootnotify: the daemon closed the subscription before anything matched"
                 ));
                 return 1;
             }
-            Ok(Some(line)) => {
+            Ok(client::Read::Line(line)) => {
                 if line.as_bytes() == scootnotify::control::protocol::DROPPED {
                     warn(format_args!(
                         "scootnotify: the daemon dropped this subscription: events may have been \

@@ -177,8 +177,8 @@ pub fn stream_to(
 ) -> Result<(), Error> {
     let mut subscription = subscribe_to(paths, request)?;
     loop {
-        match subscription.read_line(None) {
-            Ok(Some(line)) => {
+        match subscription.read(None) {
+            Ok(Read::Line(line)) => {
                 let dropped = line.as_bytes() == DROPPED;
                 if !each(&line) {
                     return Ok(());
@@ -190,7 +190,9 @@ pub fn stream_to(
             }
             // A clean end between lines (see `stream`): resubscribe and
             // query after any end.
-            Ok(None) => return Ok(()),
+            Ok(Read::Eof) => return Ok(()),
+            // Unreachable: no timeout was set. A clean end either way.
+            Ok(Read::Timeout) => return Ok(()),
             Err(error) => return Err(error),
         }
     }
@@ -203,20 +205,27 @@ pub struct Subscription {
     socket: PathBuf,
 }
 
+/// What one [`Subscription::read`] found.
+pub enum Read {
+    /// One whole line, newline included.
+    Line(String),
+    /// The timeout lapsed with nothing read.
+    Timeout,
+    /// The daemon closed the connection between lines.
+    Eof,
+}
+
 impl Subscription {
     /// Reads one line, waiting at most `timeout` (`None` waits forever).
-    /// Returns `None` on a clean end between lines, or on a read timeout
-    /// (the caller retries with what is left of its deadline). A cut line
-    /// is [`Error::Cut`]; a `dropped` line is returned like any other, and
-    /// the caller ends the wait as missed events.
-    pub fn read_line(&mut self, timeout: Option<Duration>) -> Result<Option<String>, Error> {
+    /// A cut line is [`Error::Cut`]; a `dropped` line is returned like any
+    /// other, and the caller ends the wait as missed events.
+    pub fn read(&mut self, timeout: Option<Duration>) -> Result<Read, Error> {
         let io_error = |error| Error::Io {
             socket: self.socket.clone(),
             error,
         };
         // `None` blocks until a line comes: events arrive when they
-        // arrive. `Some` bounds one attempt; a timeout is `Ok(None)`,
-        // and the caller retries with what is left of its deadline.
+        // arrive. `Some` bounds one attempt.
         self.reader
             .get_mut()
             .set_read_timeout(timeout)
@@ -224,7 +233,7 @@ impl Subscription {
         let mut line = String::new();
         // One line, bounded: a daemon gone wrong cannot fill memory.
         match (&mut self.reader).take(MAX_REPLY).read_line(&mut line) {
-            Ok(0) => return Ok(None),
+            Ok(0) => return Ok(Read::Eof),
             Ok(_) => {}
             Err(error)
                 if matches!(
@@ -232,7 +241,7 @@ impl Subscription {
                     io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
                 ) =>
             {
-                return Ok(None);
+                return Ok(Read::Timeout);
             }
             Err(error)
                 if matches!(
@@ -244,7 +253,7 @@ impl Subscription {
                 return if !line.is_empty() {
                     Err(Error::Cut)
                 } else {
-                    Ok(None)
+                    Ok(Read::Eof)
                 };
             }
             Err(error) => return Err(io_error(error)),
@@ -257,7 +266,7 @@ impl Subscription {
                 Error::Cut
             });
         }
-        Ok(Some(line))
+        Ok(Read::Line(line))
     }
 }
 
@@ -293,8 +302,8 @@ pub fn subscribe_to(paths: &Paths, request: &Request<'_>) -> Result<Subscription
         socket: paths.socket.clone(),
     };
     // The reply, bounded: without it there is no subscription.
-    match subscription.read_line(Some(TIMEOUT)) {
-        Ok(Some(line)) => {
+    match subscription.read(Some(TIMEOUT)) {
+        Ok(Read::Line(line)) => {
             let reply: serde_json::Value =
                 serde_json::from_str(&line).map_err(|e| Error::BadReply(e.to_string()))?;
             if reply["type"] == "error" {
@@ -308,7 +317,7 @@ pub fn subscribe_to(paths: &Paths, request: &Request<'_>) -> Result<Subscription
             }
             Ok(subscription)
         }
-        Ok(None) => Err(Error::NoReply),
+        Ok(Read::Eof | Read::Timeout) => Err(Error::NoReply),
         Err(error) => Err(error),
     }
 }
