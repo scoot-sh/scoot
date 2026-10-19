@@ -3,7 +3,7 @@ title: The panel
 description: "Open, type, pick: keys, mouse, config, and theming for the scootlaunch panel."
 ---
 
-![The launcher panel in moonrise, filtered to "term"](../../../assets/scootlaunch-moonrise.png)
+![The launcher panel in moonrise, with icon tiles](../../../assets/scootlaunch-moonrise.png)
 
 Bare `scootlaunch` opens the panel: an overlay surface with exclusive
 keyboard, centered on the output, 40 em wide with 10 rows by default.
@@ -161,7 +161,7 @@ well-known file, as the bar does. Rows show the entry icon with the
 name beside it and its match highlighted. A light look draws the same
 panel from the same roles:
 
-![The launcher panel in music-desk, filtered to "ca"](../../../assets/scootlaunch-music-desk.png)
+![The launcher panel in music-desk, with icon tiles, light look](../../../assets/scootlaunch-music-desk.png)
 
 ## Troubleshooting
 
