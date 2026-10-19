@@ -653,7 +653,8 @@ fn empty_holds_no_surface_or_buffers() {
         "a shown card maps its buffers"
     );
     // Dismiss it through the bus (a right click's path): the stack
-    // empties, and everything unmaps.
+    // empties, and everything unmaps. The reply proves the close
+    // landed (an unsent call would wait out the whole timeout below).
     let mut body = Writer::new();
     body.u32(id);
     client
@@ -668,6 +669,11 @@ fn empty_holds_no_surface_or_buffers() {
             142,
         )
         .unwrap();
+    let Event::Reply { .. } = until(client, |event| {
+        matches!(event, Event::Reply { token: 142, .. })
+    }) else {
+        unreachable!()
+    };
     wait_shown(&mut server, &log, "the stack gone", || {
         session.scoot_screenshot(1).at(x0 + 180, y0 + 30) != rgb(SURFACE)
     });
