@@ -41,8 +41,8 @@ use scootui::paint::Canvas;
 use scootui::surfaces::{Buffers, Demand, Effect, Globals, LayerLive, LayerSpec, Plan};
 use scootui::text::Text;
 use wayland_client::protocol::{
-    wl_buffer, wl_callback, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
-    wl_shm_pool, wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_output, wl_pointer, wl_region, wl_registry, wl_seat,
+    wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum};
 use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notification_v1::ExtIdleNotificationV1;
@@ -457,7 +457,7 @@ impl App {
             let fresh = std::mem::take(&mut self.unpresented);
             live.surface().frame(qh, fresh);
         }
-        self.set_input_region();
+        self.set_input_region(qh);
         live.surface().commit();
         slot.mark_committed();
         self.demand.drew(frame);
@@ -467,13 +467,13 @@ impl App {
 
     /// Sets the input region to the cards' union: the gaps click
     /// through to whatever is behind.
-    fn set_input_region(&mut self) {
+    fn set_input_region(&mut self, qh: &QueueHandle<Self>) {
         let (Some(live), Some(compositor)) = (self.live.as_ref(), self.compositor.as_ref()) else {
             return;
         };
         // A layer surface without a region takes input everywhere; an
         // empty stack never reaches here (it hides instead).
-        let region = compositor.create_region();
+        let region = compositor.create_region(qh, ());
         for card in &self.stack.cards {
             let r = card.rect;
             region.add(r.x as i32, r.y as i32, r.width as i32, r.height as i32);
@@ -762,7 +762,7 @@ impl Popup {
     /// [`Popup::fd`] beside the bus and the timerfd, reads the guard
     /// when it speaks, and drops it unread otherwise (the documented
     /// read-after-poll shape: the next turn collects it).
-    pub fn prepare_read(&self) -> Option<wayland_client::ReadEventsGuard> {
+    pub fn prepare_read(&self) -> Option<wayland_client::backend::ReadEventsGuard> {
         self.queue.prepare_read()
     }
 
@@ -823,9 +823,9 @@ fn decode_icon(note: &Notification) -> Option<IconBits> {
             let mut rgba = vec![0u8; src_w * src_h * 4];
             for (dst, src) in rgba.chunks_exact_mut(4).zip(image.pixels.chunks_exact(4)) {
                 let a = u32::from(src[3]);
-                dst[0] = (u32::from(src[2]) * a + 127) / 255.min(255) as u8;
-                dst[1] = (u32::from(src[1]) * a + 127) / 255.min(255) as u8;
-                dst[2] = (u32::from(src[0]) * a + 127) / 255.min(255) as u8;
+                dst[0] = ((u32::from(src[2]) * a + 127) / 255).min(255) as u8;
+                dst[1] = ((u32::from(src[1]) * a + 127) / 255).min(255) as u8;
+                dst[2] = ((u32::from(src[0]) * a + 127) / 255).min(255) as u8;
                 dst[3] = a.min(255) as u8;
             }
             let mut pixels = vec![0u8; side * side * 4];
@@ -858,6 +858,7 @@ macro_rules! empty_dispatch {
 
 empty_dispatch!(wl_compositor::WlCompositor);
 empty_dispatch!(wl_surface::WlSurface);
+empty_dispatch!(wl_region::WlRegion);
 empty_dispatch!(wl_shm::WlShm);
 empty_dispatch!(wl_shm_pool::WlShmPool);
 empty_dispatch!(WpViewport);
@@ -979,7 +980,6 @@ impl Dispatch<wl_seat::WlSeat, ()> for App {
                     return;
                 };
                 app.pointer = Some(seat.get_pointer(qh, ()));
-                app.seat_ready = true;
             }
         }
     }
