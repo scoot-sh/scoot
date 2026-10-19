@@ -399,10 +399,18 @@ impl App {
         if dims.0 == 0 || dims.1 == 0 {
             return false;
         }
-        let Some(shm) = self.shm.as_ref() else {
+        let shm = self.shm.clone();
+        if self.text.is_none() {
+            return false;
+        }
+        // The input region follows the layout, not the pixels: set it
+        // before the buffer is taken (the take borrows the pools, and
+        // the text borrows the glyph cache).
+        self.set_input_region(qh);
+        let (Some(shm), Some(text)) = (shm, self.text.as_mut()) else {
             return false;
         };
-        let slot = match self.buffers.take(shm, qh, dims, wl_shm::Format::Argb8888, ()) {
+        let slot = match self.buffers.take(&shm, qh, dims, wl_shm::Format::Argb8888, ()) {
             Ok(Some(slot)) => slot,
             Ok(None) => return false,
             Err(error) => {
@@ -410,13 +418,6 @@ impl App {
                 return false;
             }
         };
-        let Some(text) = self.text.as_mut() else {
-            return false;
-        };
-        // The input region follows the layout, not the pixels: set it
-        // before the buffer is taken (the take borrows the pools, and
-        // the region borrows nothing after this call).
-        self.set_input_region(qh);
         {
             let Some(mut canvas) = Canvas::new(slot.pixels_mut(), dims.0, dims.1) else {
                 return false;
@@ -934,7 +935,6 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                 }
                 _ => {}
             },
-            _ => {}
             wl_registry::Event::GlobalRemove { name } => {
                 // An output going away: the stack moves (a null output
                 // follows the compositor; a named one falls back), and
@@ -944,6 +944,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                     app.destroy_live();
                 }
             }
+            _ => {}
         }
     }
 }
