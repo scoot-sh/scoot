@@ -106,12 +106,22 @@ fn wait_serving(client: &mut Conn, server: &mut Child) {
                 }
                 None => {
                     panic!(
-                        "the server still runs but never owned the name in 10 s; \
+                        "the server still runs but never owned the name in 30 s; \
                          its stderr so far: {}",
                         read_available(server.stderr.as_mut())
                     );
                 }
             }
+        }
+        // A dead-at-startup server fails here in milliseconds, not at
+        // the 30 s deadline: otherwise a startup crash reads exactly
+        // like a serving stall.
+        if let Some(status) = server.try_wait().expect("the server reaps") {
+            let mut err = String::new();
+            if let Some(mut stderr) = server.stderr.take() {
+                let _ = stderr.read_to_string(&mut err);
+            }
+            panic!("the server died at startup ({status}): {err}");
         }
         if client.dead() {
             panic!("the bus died while waiting for the server");

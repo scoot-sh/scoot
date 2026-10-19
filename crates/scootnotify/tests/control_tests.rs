@@ -46,7 +46,21 @@ fn connect(daemon: &Daemon) -> Conn {
 /// A scratch tree for one daemon run: its runtime dir, config home,
 /// state home and home. Nothing real is read or written.
 fn scratch(tag: &str) -> tempfile::TempDir {
-    tempfile::TempDir::with_prefix(format!("scootnotify-control-{tag}")).expect("a scratch dir")
+    let dir = tempfile::TempDir::with_prefix(format!("snc-{tag}")).expect("a scratch dir");
+    // `sun_path` holds 108 bytes on Linux, one the NUL: the control
+    // socket must fit 107 (see `scootui/src/control/paths.rs`). Fail
+    // fast with the tag named instead of burning 30 s per test in
+    // `wait_serving`.
+    debug_assert!(
+        dir.path()
+            .join(format!("scootnotify-{DISPLAY}.sock"))
+            .as_os_str()
+            .len()
+            <= 107,
+        "control socket path too long for tag {tag}: {}",
+        dir.path().display()
+    );
+    dir
 }
 
 /// Spawns the daemon binary serving `daemon`'s bus, headless (no
@@ -122,6 +136,16 @@ fn wait_serving(client: &mut Conn, server: &mut Child) {
                     );
                 }
             }
+        }
+        // A dead-at-startup server fails here in milliseconds, not at
+        // the 30 s deadline: otherwise a startup crash reads exactly
+        // like a serving stall.
+        if let Some(status) = server.try_wait().expect("the server reaps") {
+            let mut err = String::new();
+            if let Some(mut stderr) = server.stderr.take() {
+                let _ = stderr.read_to_string(&mut err);
+            }
+            panic!("the server died at startup ({status}): {err}");
         }
         if client.dead() {
             panic!("the bus died while waiting for the server");
