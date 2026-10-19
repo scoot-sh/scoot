@@ -525,8 +525,7 @@ fn subscribe_streams_notify_and_close() {
     let parsed = loop {
         let event = read_line(&mut reader);
         let parsed: serde_json::Value = serde_json::from_str(&event).unwrap();
-        if parsed.get("type") == Some(&serde_json::Value::from("close")) && parsed["id"] == id
-        {
+        if parsed.get("type") == Some(&serde_json::Value::from("close")) && parsed["id"] == id {
             break parsed;
         }
     };
