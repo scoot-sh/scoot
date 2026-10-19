@@ -354,6 +354,13 @@ impl App {
     /// Draws the stack into a pooled buffer and commits it, requesting a
     /// frame callback for cards this commit first contains.
     fn draw(&mut self, qh: &QueueHandle<Self>) {
+        // No pixels before the first configure: attaching a buffer
+        // before acking the initial configure is a protocol error, and
+        // the compositor kills the client for it. The configure sets
+        // `dirty`, so the very next turn draws.
+        if self.live.is_some() && self.configured_size.is_none() {
+            return;
+        }
         let content = self.content_size;
         let size = match self.configured_size {
             None => content,
