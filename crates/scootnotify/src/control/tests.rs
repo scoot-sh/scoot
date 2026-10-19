@@ -224,6 +224,35 @@ fn read_until(stream: &mut UnixStream, want: &[u8]) {
     }
 }
 
+/// One bounded `Notify`, for tests that fix the clock.
+fn incoming(
+    sender: &str,
+    app: &str,
+    summary: &str,
+    body: &str,
+    resident: bool,
+    urgency: Urgency,
+) -> Incoming {
+    Incoming {
+        app_name: app.to_owned(),
+        replaces_id: 0,
+        app_icon: String::new(),
+        summary: summary.to_owned(),
+        body: body.to_owned(),
+        actions: vec![Action {
+            key: String::from("default"),
+            label: String::from("Open"),
+        }],
+        hints: Hints {
+            resident,
+            urgency,
+            ..Hints::default()
+        },
+        expire_timeout: -1,
+        sender: sender.to_owned(),
+    }
+}
+
 struct Harness {
     server: NotifyServer,
     conn: Conn,
@@ -259,6 +288,26 @@ impl Harness {
         self.notify_full(sender, app, summary, body, false, Urgency::Normal)
     }
 
+    /// One live card at `now`/`now_ms`: the caller fixing the clock makes
+    /// expiry arithmetic exact (a view computed a microsecond later would
+    /// truncate a millisecond off).
+    fn notify_at(
+        &mut self,
+        sender: &str,
+        app: &str,
+        summary: &str,
+        body: &str,
+        now: Instant,
+        now_ms: u64,
+    ) -> u32 {
+        let incoming = incoming(sender, app, summary, body, false, Urgency::Normal);
+        let (arrival, _) = self.server.store_mut().notify(incoming, now, now_ms);
+        match arrival {
+            crate::model::store::Arrival::Shown { id, .. } => id,
+            crate::model::store::Arrival::Suppressed { .. } => panic!("the bucket is full"),
+        }
+    }
+
     fn notify_full(
         &mut self,
         sender: &str,
@@ -268,24 +317,7 @@ impl Harness {
         resident: bool,
         urgency: Urgency,
     ) -> u32 {
-        let incoming = Incoming {
-            app_name: app.to_owned(),
-            replaces_id: 0,
-            app_icon: String::new(),
-            summary: summary.to_owned(),
-            body: body.to_owned(),
-            actions: vec![Action {
-                key: String::from("default"),
-                label: String::from("Open"),
-            }],
-            hints: Hints {
-                resident,
-                urgency,
-                ..Hints::default()
-            },
-            expire_timeout: -1,
-            sender: sender.to_owned(),
-        };
+        let incoming = incoming(sender, app, summary, body, resident, urgency);
         let now = Instant::now();
         let (arrival, _) = self.server.store_mut().notify(incoming, now, 1_000);
         match arrival {
@@ -296,18 +328,33 @@ impl Harness {
 
     /// Answers one request line, parsed as JSON.
     fn ask(&mut self, line: &str) -> serde_json::Value {
-        self.ask_with_look(line, None)
+        self.ask_at(line, None, Instant::now(), 1_000)
     }
 
-    fn ask_with_look(&mut self, line: &str, look_state: Option<&Path>) -> serde_json::Value {
-        let now = Instant::now();
+    fn ask_with_look(
+        &mut self,
+        line: &str,
+        look_state: Option<&Path>,
+    ) -> serde_json::Value {
+        self.ask_at(line, look_state, Instant::now(), 1_000)
+    }
+
+    /// Answers one request line at `now`/`now_ms`: the caller fixing the
+    /// clock makes expiry arithmetic exact.
+    fn ask_at(
+        &mut self,
+        line: &str,
+        look_state: Option<&Path>,
+        now: Instant,
+        now_ms: u64,
+    ) -> serde_json::Value {
         let mut responder = Responder::new(
             &mut self.server,
             &mut self.conn,
             &self.config_path,
             look_state,
             now,
-            1_000,
+            now_ms,
             0,
         );
         let mut out = Vec::new();
@@ -327,12 +374,13 @@ fn an_empty_list_is_an_empty_array() {
 #[test]
 fn list_shows_every_live_field() {
     let mut harness = Harness::new();
-    let id = harness.notify(":1.1", "Firefox", "Done", "<b>file</b> &amp; more");
-    harness
-        .server
-        .store_mut()
-        .presented(id, Instant::now(), 1_000);
-    let reply = harness.ask(&Request::List.line());
+    // One clock for arrival, presentation and the view alike, so the
+    // 10 s default reads exactly (a later view would truncate a
+    // millisecond off the remainder).
+    let now = Instant::now();
+    let id = harness.notify_at(":1.1", "Firefox", "Done", "<b>file</b> &amp; more", now, 1_000);
+    harness.server.store_mut().presented(id, now, 1_000);
+    let reply = harness.ask_at(&Request::List.line(), None, now, 1_000);
     let cards = reply["notifications"].as_array().unwrap();
     assert_eq!(cards.len(), 1);
     let card = &cards[0];
@@ -737,8 +785,9 @@ fn an_oversized_request_line_is_refused_and_the_connection_closes() {
     let mut handler = Silent;
     use rustix::event::PollFlags;
     let ready = PollFlags::IN | PollFlags::OUT | PollFlags::HUP | PollFlags::ERR;
-    // Served until it closes (the overlong line may arrive in pieces).
-    for _ in 0..10 {
+    // Served until it closes (the overlong line arrives in 4 KiB
+    // reads, so one round per piece).
+    for _ in 0..40 {
         if server.conns().is_empty() {
             break;
         }
