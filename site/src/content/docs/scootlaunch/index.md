@@ -1,21 +1,21 @@
 ---
 title: scootlaunch overview
-description: "The keyboard-first application launcher — this page covers the shipped desktop entry index and ranked search; the panel, launching and the dmenu mode arrive in later tickets."
+description: "The keyboard-first application launcher — the desktop entry index, ranked search, and the overlay panel; launching and the dmenu mode arrive in later tickets."
 ---
 
 A keyboard-first application launcher for scoot and any compositor
-with `wlr-layer-shell-v1`. What ships today is the foundation every
-later piece stands on: the desktop entry index, ranked search, and
-the headless agent interface. The panel, launching and the dmenu mode
-are later tickets and are not here yet.
+with `wlr-layer-shell-v1`. What ships today is the desktop entry
+index, ranked search, the headless agent interface, and the overlay
+panel with its entry and virtualized list. Launching and the dmenu
+mode are later tickets and are not here yet.
 
 ```sh
 scootlaunch --list --json                  # every visible entry, as JSON
 scootlaunch --query "fire" --json          # ranked as the UI would rank it
+scootlaunch                                # open the panel
 ```
 
-One binary, linking nothing beyond glibc and libgcc_s, needing no
-compositor connection and holding nothing when closed. It reads the
+One binary, holding nothing when closed. It reads the
 same desktop files every launcher reads (`$XDG_DATA_HOME` then each
 `$XDG_DATA_DIRS` entry's `applications/`, subdirectories walked,
 first file per id wins, `Hidden=true` masking across data dirs),
@@ -38,6 +38,11 @@ and caches the result under `$XDG_CACHE_HOME/scootlaunch/index-v1`.
   `--query --json` prints the same schema in ranked order.
 - Expands `Exec` strictly per the spec, or with `--lenient` the way
   GLib reads the real files that break the quoting rule.
+- Opens the panel (bare `scootlaunch`): the overlay
+  exclusive-keyboard surface with the entry and the ranked,
+  match-highlighted list. Details, keys and theming are in [The
+  panel](./panel.md). Picking prints the entry id for now; launching
+  is the next ticket.
 
 Every flag is in the [CLI reference](./cli.md). An app missing from
 the list is diagnosed there too.
