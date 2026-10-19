@@ -239,7 +239,7 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
         spins = 0;
         if spin_debug {
             stages[6] += 1;
-            if stages[0] % 5_000_000 == 0 {
+            if stages[0] % 50_000 == 0 {
                 let _ = std::fs::write(
                     "/tmp/scootnotify-spin.log",
                     format!("alive: tops={} stages={stages:?}\n", stages[0]),
@@ -250,7 +250,18 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
         // the fd speaks, dropped unread otherwise (the documented
         // read-after-poll shape: the next turn collects it).
         let guard = popup.as_ref().and_then(|popup| popup.prepare_read());
-        let wayland = wait(conn.as_fd(), timer.as_fd(), popup.as_ref().map(|popup| popup.fd()));
+        let (bus_hot, timer_hot, wayland_hot) =
+            wait(conn.as_fd(), timer.as_fd(), popup.as_ref().map(|popup| popup.fd()));
+        let wayland = wayland_hot;
+        if spin_debug && stages[0] % 50_000 == 0 {
+            let _ = std::fs::write(
+                "/tmp/scootnotify-poll.log",
+                format!(
+                    "tops={} stages={stages:?} hot=({bus_hot},{timer_hot},{wayland_hot})\n",
+                    stages[0]
+                ),
+            );
+        }
         drain_timer(&timer);
         if wayland
             && let Some(guard) = guard
@@ -369,12 +380,16 @@ fn arm_timer(timer: &rustix::fd::OwnedFd, deadline: Option<Instant>) {
 
 /// Polls the bus fd, the timerfd, and the Wayland fd (when there is
 /// one) with no timeout: woken by traffic or the next expiry, never by
-/// time otherwise. Returns whether the Wayland fd spoke. A bounded poll
+/// time otherwise. Returns which fds spoke. A bounded poll
 /// here would be a wakeup every bound at idle; the loop only reaches
 /// this wait with nothing staged, nothing queued and the timer armed,
 /// so nothing is missed by sleeping until the fds speak (all poll
 /// level-triggered).
-fn wait(bus: BorrowedFd<'_>, timer: BorrowedFd<'_>, wayland: Option<BorrowedFd<'_>>) -> bool {
+fn wait(
+    bus: BorrowedFd<'_>,
+    timer: BorrowedFd<'_>,
+    wayland: Option<BorrowedFd<'_>>,
+) -> (bool, bool, bool) {
     use rustix::event::{PollFd, PollFlags, poll};
     let third = wayland.unwrap_or(bus);
     let mut fds = [
@@ -383,7 +398,11 @@ fn wait(bus: BorrowedFd<'_>, timer: BorrowedFd<'_>, wayland: Option<BorrowedFd<'
         PollFd::new(&third, PollFlags::IN),
     ];
     let _ = poll(&mut fds, None);
-    wayland.is_some() && !fds[2].revents().is_empty()
+    (
+        !fds[0].revents().is_empty(),
+        !fds[1].revents().is_empty(),
+        wayland.is_some() && !fds[2].revents().is_empty(),
+    )
 }
 
 /// Reads a fired timerfd back to disarmed: edge-triggered peace.
