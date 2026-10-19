@@ -37,7 +37,7 @@ use scootui::keyboard::{
     KeyOutput, KeyboardSeat, MIN_TEXT_BYTES, dispatch_keyboard, negotiate_version,
 };
 use scootui::output::Size;
-use scootui::paint::{Canvas, Span};
+use scootui::paint::Canvas;
 use scootui::surfaces::{Buffers, Demand, Effect, Globals, LayerLive, LayerSpec, Plan};
 use scootui::text::Text;
 use wayland_client::protocol::{
@@ -590,13 +590,10 @@ fn paint_panel(
             None,
             "No applications",
             em,
-            i64::from(inner),
+            i64::from(entry_geo.text_x()),
             baseline,
             look.theme.dim,
-            Span {
-                x: inner,
-                width: entry_geo.width,
-            },
+            entry_geo.clip(),
         );
         return;
     }

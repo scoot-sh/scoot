@@ -45,13 +45,14 @@ impl Geometry {
         (self.em * 0.5).round().clamp(0.0, 64.0) as u32
     }
 
-    /// Where text starts.
-    fn text_x(self) -> u32 {
+    /// Where text starts: callers drawing beside the widgets use this to
+    /// stay aligned with them.
+    pub fn text_x(self) -> u32 {
         self.x.saturating_add(self.inset())
     }
 
     /// The text's clip: the widget minus the inset on both sides.
-    fn clip(self) -> Span {
+    pub fn clip(self) -> Span {
         Span {
             x: self.text_x(),
             width: self.width.saturating_sub(self.inset().saturating_mul(2)),
