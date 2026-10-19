@@ -1,10 +1,11 @@
 ---
 title: "scootlaunch: the dmenu contract (fuzzel's flags the call sites use) and run mode"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-19"
 ---
 
 # scootlaunch: dmenu and run
@@ -41,3 +42,24 @@ Part of this ticket's work, not a follow-up: update `site/src/content/docs/scoot
 ## Not in this ticket
 
 Swapping the call sites in Nix (`launch-nix`).
+
+## Resolution
+
+Landed 2026-10-19 in PR #678 (`feat(scootlaunch): dmenu and run
+modes`), on `feat/launch-dmenu`.
+
+What shipped: `src/cli.rs` (the `--dmenu`/`--run` commands, `=` and
+space value forms, loud exit 2 on anything else), `src/dmenu.rs` (the
+bounded stdin read, the ranked state machine reusing the matcher's
+`Ranker` with no frecency, the masked password entry over a leaked
+1 KiB caller buffer wiped on drop), `src/dmenu/lines.rs` (the
+terminator-aware splitter: 1 MiB, 65,536 lines, 4 KiB per line),
+`src/run.rs` (the `$PATH` scan: first directory wins, symlinks
+followed, 65,536 names), `src/panel.rs` (the dmenu paint with the
+prompt at `Geometry::text_x()` and the `*` mask, `--index` printing,
+per-invocation color overrides), `tests/dmenu.rs` (every repo call
+site's flags, the masked prompt, `--no-run-if-empty`, Escape, the
+65,536-line bound, run mode), the `dmenu` fuzz target wired into the
+scootlaunch CI job, and `site/.../scootlaunch/cli.md` rewritten with
+the flags, the stdin/stdout contract, exit codes and a runnable
+snippet (plus `index.md`/`panel.md` deltas).

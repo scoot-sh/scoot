@@ -3,7 +3,7 @@ title: "`scootlaunch`: the launcher, and a dmenu mode the bar's pickers can use 
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "launch-icons, launch-dmenu, launch-agent-json, launch-windows-mode, launch-nix, launch-packaging, launch-default-flip"
+blocked: "launch-icons, launch-agent-json, launch-windows-mode, launch-nix, launch-packaging, launch-default-flip"
 milestone: "M7"
 ---
 
