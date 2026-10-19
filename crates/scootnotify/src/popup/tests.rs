@@ -188,8 +188,10 @@ fn retheme_swaps_the_look_and_marks_dirty() {
         width: 360,
         height: 100,
     });
-    let mut new = Look::default();
-    new.font_size_px = 20.0;
+    let new = Look {
+        font_size_px: 20.0,
+        ..Look::default()
+    };
     app.retheme(new);
     assert_eq!(app.look.font_size_px, 20.0);
     assert!(app.dirty);

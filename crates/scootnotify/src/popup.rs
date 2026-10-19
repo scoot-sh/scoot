@@ -233,9 +233,7 @@ impl App {
     /// compositor's choice). A name with no output left falls back to
     /// the compositor's choice, warned once per run.
     fn output(&mut self) -> Option<wl_output::WlOutput> {
-        let Some(want) = self.config.output.as_deref() else {
-            return None;
-        };
+        let want = self.config.output.as_deref()?;
         if let Some((_, output, _)) = self.outputs.iter().find(|(_, _, name)| name == want) {
             return Some(output.clone());
         }
@@ -473,11 +471,11 @@ impl App {
         // compositor answers its own size, and re-asking every draw
         // would storm configures). The size rides the same commit as
         // the pixels, so they apply together.
-        if self.content_size.is_some() && self.content_size != self.sized_to {
-            if let Some(content) = self.content_size {
-                live.set_size(content.width.max(1), content.height.max(1));
-                self.sized_to = Some(content);
-            }
+        if let Some(content) = self.content_size
+            && self.content_size != self.sized_to
+        {
+            live.set_size(content.width.max(1), content.height.max(1));
+            self.sized_to = Some(content);
         }
         live.surface().attach(Some(slot.buffer()), 0, 0);
         // Full damage, every draw: the bar's shape (exact buffer rect).

@@ -39,6 +39,7 @@ pub type Hover = Option<(u32, Option<usize>)>;
 /// transparent and click through). Allocates nothing after warm-up: the
 /// lines, labels and rectangles are the layout's, and the glyph cache
 /// holds every drawn glyph after the first paint.
+#[allow(clippy::too_many_arguments)] // A paint helper, as the bar's own are.
 pub fn paint(
     canvas: &mut Canvas<'_>,
     text: &mut Text,
@@ -68,7 +69,7 @@ pub fn paint(
 
 /// Paints one card: the urgency ring, the surface, the icon, the lines,
 /// the progress bar, the buttons.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // A paint helper, as the bar's own are.
 fn paint_card(
     canvas: &mut Canvas<'_>,
     text: &mut Text,
@@ -432,9 +433,9 @@ fn paint_pill(
     em: f32,
     clip: Span,
 ) {
-    let label = &stack.pill_label;
+    let label: &str = &stack.pill_label;
     let metrics = text.metrics(em);
-    let label_w = text.measure(None, &label, em);
+    let label_w = text.measure(None, label, em);
     let pill_w = label_w + 2 * super::layout::PAD;
     let pill_h = (metrics.ascent.ceil() + metrics.descent.ceil()) as u32 + super::layout::PAD;
     let x = stack.width.saturating_sub(pill_w) / 2;
@@ -444,7 +445,7 @@ fn paint_pill(
     text.draw(
         canvas,
         None,
-        &label,
+        label,
         em,
         x as i64 + super::layout::PAD as i64,
         baseline,

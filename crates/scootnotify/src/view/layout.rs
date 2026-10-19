@@ -155,7 +155,7 @@ pub fn layout(live: &[&Notification], config: &Config, text: &Text, em: f32, now
         let text_w = content_w.saturating_sub(icon_w);
         let text_x = content_x + icon_w;
         let mut card_y = y + border + PAD;
-        let summary = wrap_runs(
+        let summary = wrap_spans(
             &summary_runs(&note.summary),
             text,
             em,
@@ -333,25 +333,8 @@ fn age_text(elapsed_ms: u64) -> String {
     }
 }
 
-/// Wraps already-run text (summary): greedy by advance widths, breaks at
-/// spaces and after CJK characters, hard-breaks overlong words, at most
-/// `max_lines` lines with an ellipsis on the last.
-fn wrap_runs(
-    spans: &[crate::markup::Span],
-    text: &Text,
-    em: f32,
-    max_width: u32,
-    max_lines: usize,
-    x: u32,
-    y: u32,
-    ascent: u32,
-    line_h: u32,
-) -> Vec<Line> {
-    wrap_spans(spans, text, em, max_width, max_lines, x, y, ascent, line_h)
-}
-
 /// Wraps markup spans into at most `max_lines` lines of styled runs.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // A layout helper with one job.
 fn wrap_spans(
     spans: &[crate::markup::Span],
     text: &Text,

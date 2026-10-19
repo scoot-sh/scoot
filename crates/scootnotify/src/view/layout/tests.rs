@@ -58,8 +58,10 @@ fn newest_is_on_top_and_oldest_below() {
 #[test]
 fn past_max_visible_a_pill_covers_the_rest() {
     let text = text();
-    let mut config = Config::default();
-    config.max_visible = 2;
+    let config = Config {
+        max_visible: 2,
+        ..Config::default()
+    };
     let notes: Vec<Notification> = (1..=4).map(|id| note(id, "a", "s", "b")).collect();
     let refs: Vec<&Notification> = notes.iter().collect();
     let stack = layout(&refs, &config, &text, 13.0, 2_000);
@@ -88,8 +90,10 @@ fn the_input_region_is_the_cards_union() {
 #[test]
 fn a_long_body_wraps_and_ellipsizes() {
     let text = text();
-    let mut config = Config::default();
-    config.body_lines = 2;
+    let config = Config {
+        body_lines: 2,
+        ..Config::default()
+    };
     let body = "word ".repeat(200);
     let single = note(1, "a", "s", &body);
     let stack = layout(&[&single], &config, &text, 13.0, 2_000);
