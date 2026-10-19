@@ -327,10 +327,11 @@ fn arm_timer(timer: &rustix::fd::OwnedFd, deadline: Option<Instant>) {
 /// level-triggered).
 fn wait(bus: BorrowedFd<'_>, timer: BorrowedFd<'_>, wayland: Option<BorrowedFd<'_>>) -> bool {
     use rustix::event::{PollFd, PollFlags, poll};
+    let third = wayland.unwrap_or(bus);
     let mut fds = [
         PollFd::new(&bus, PollFlags::IN),
         PollFd::new(&timer, PollFlags::IN),
-        PollFd::new(&wayland.unwrap_or(bus), PollFlags::IN),
+        PollFd::new(&third, PollFlags::IN),
     ];
     let _ = poll(&mut fds, None);
     wayland.is_some() && !fds[2].revents().is_empty()

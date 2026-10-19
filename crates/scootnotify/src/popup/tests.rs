@@ -169,7 +169,7 @@ fn retheme_swaps_the_look_and_marks_dirty() {
     // sizes equal and skip the draw).
     let mut app = App::new(Config::default(), Look::default(), None);
     app.dirty = false;
-    app.content_size = Some((360, 100));
+    app.content_size = Some(scootui::output::Size { width: 360, height: 100 });
     let mut new = Look::default();
     new.font_size_px = 20.0;
     app.retheme(new);

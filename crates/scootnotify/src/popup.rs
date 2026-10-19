@@ -413,6 +413,10 @@ impl App {
         let Some(text) = self.text.as_mut() else {
             return false;
         };
+        // The input region follows the layout, not the pixels: set it
+        // before the buffer is taken (the take borrows the pools, and
+        // the region borrows nothing after this call).
+        self.set_input_region(qh);
         {
             let Some(mut canvas) = Canvas::new(slot.pixels_mut(), dims.0, dims.1) else {
                 return false;
@@ -457,7 +461,6 @@ impl App {
             let fresh = std::mem::take(&mut self.unpresented);
             live.surface().frame(qh, fresh);
         }
-        self.set_input_region(qh);
         live.surface().commit();
         slot.mark_committed();
         self.demand.drew(frame);
@@ -931,6 +934,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                 }
                 _ => {}
             },
+            _ => {}
             wl_registry::Event::GlobalRemove { name } => {
                 // An output going away: the stack moves (a null output
                 // follows the compositor; a named one falls back), and
@@ -1033,18 +1037,22 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                     app.pending.push(Event::DismissAll);
                     return;
                 }
-                let Some((id, button)) = app.hit() else {
-                    return;
-                };
+                // A click in a gap never arrives (the gaps click
+                // through); a click on a card dismisses or invokes.
                 if button == BTN_RIGHT {
-                    app.pending.push(Event::Dismiss(id));
+                    if let Some((id, _)) = app.hit() {
+                        app.pending.push(Event::Dismiss(id));
+                    }
                     return;
                 }
                 if button != BTN_LEFT {
                     return;
                 }
+                let Some((id, hit_button)) = app.hit() else {
+                    return;
+                };
                 app.button_serial = Some(serial);
-                match button {
+                match hit_button {
                     Some(index) => {
                         let key = app.stack.cards.iter().find(|card| card.id == id).and_then(
                             |card| card.buttons.get(index).map(|button| button.key.clone()),

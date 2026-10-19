@@ -17,7 +17,7 @@ use crate::model::expiry::Clock;
 use crate::model::store::{Icon, Notification};
 use crate::view::layout;
 
-fn text() -> Text {
+fn make_text() -> Text {
     Text::new(FontArc::new(FontVec::try_from_vec(scootui::testfont::build()).unwrap()))
 }
 
@@ -46,7 +46,7 @@ fn note(id: u32, summary: &str, body: &str) -> Notification {
 }
 
 fn painted(stack: &layout::Stack, look: &Look) -> (Vec<u8>, u32, u32) {
-    let mut text = text();
+    let mut paint_text = make_text();
     let config = Config::default();
     let urgencies = HashMap::from([(1, Urgency::Normal)]);
     // Device pixels at scale 1: the buffer is the logical size.
@@ -54,7 +54,7 @@ fn painted(stack: &layout::Stack, look: &Look) -> (Vec<u8>, u32, u32) {
     let dims = (stack.width, stack.height);
     {
         let mut canvas = Canvas::new(&mut pixels, dims.0, dims.1).unwrap();
-        paint(&mut canvas, &mut text, stack, &config, look, &urgencies, None, &HashMap::new());
+        paint(&mut canvas, &mut paint_text, stack, &config, look, &urgencies, None, &HashMap::new());
     }
     (pixels, dims.0, dims.1)
 }
@@ -66,11 +66,11 @@ fn at(pixels: &[u8], width: u32, x: u32, y: u32) -> [u8; 3] {
 
 #[test]
 fn a_card_has_its_ring_fill_and_ink() {
-    let text = text();
+    let font_text = make_text();
     let config = Config::default();
     let look = Look::default();
     let single = note(1, "Hello", "World");
-    let stack = layout::layout(&[&single], &config, &text, look.font_size_px, 2_000);
+    let stack = layout::layout(&[&single], &config, &font_text, look.font_size_px, 2_000);
     assert_eq!(stack.cards.len(), 1);
     let (pixels, width, height) = painted(&stack, &look);
     assert!(height > 0);
@@ -90,7 +90,7 @@ fn a_card_has_its_ring_fill_and_ink() {
 
 #[test]
 fn urgency_colors_the_ring() {
-    let text = text();
+    let font_text = make_text();
     let config = Config::default();
     let look = Look::default();
     for (urgency, ring) in [
@@ -100,10 +100,10 @@ fn urgency_colors_the_ring() {
     ] {
         let mut single = note(1, "Hello", "World");
         single.urgency = urgency;
-        let stack = layout::layout(&[&single], &config, &text, look.font_size_px, 2_000);
+        let stack = layout::layout(&[&single], &config, &font_text, look.font_size_px, 2_000);
         let mut urgencies = HashMap::new();
         urgencies.insert(1, urgency);
-        let mut paint_text = text();
+        let mut paint_text = make_text();
         let mut pixels = vec![0u8; stack.width as usize * stack.height as usize * 4];
         {
             let mut canvas = Canvas::new(&mut pixels, stack.width, stack.height).unwrap();
@@ -121,7 +121,7 @@ fn urgency_colors_the_ring() {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_repaint_allocates_nothing_after_warm_up() {
-    let text = text();
+    let font_text = make_text();
     let config = Config::default();
     let look = Look::default();
     let mut actions_note = note(1, "Hello", "World *bold* and more words to wrap around");
@@ -136,9 +136,9 @@ fn a_repaint_allocates_nothing_after_warm_up() {
         },
     ];
     actions_note.value = Some(42);
-    let stack = layout::layout(&[&actions_note], &config, &text, look.font_size_px, 2_000);
+    let stack = layout::layout(&[&actions_note], &config, &font_text, look.font_size_px, 2_000);
     let urgencies = HashMap::from([(1, Urgency::Normal)]);
-    let mut paint_text = text();
+    let mut paint_text = make_text();
     let mut pixels = vec![0u8; stack.width as usize * stack.height as usize * 4];
     // Warm up: layout-adjacent measures plus every glyph the paint
     // draws, including the pill and the second card state below.
