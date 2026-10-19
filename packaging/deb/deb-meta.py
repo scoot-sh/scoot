@@ -38,8 +38,9 @@ ALLOW = {
     # The compositor links five system libraries past libc; the bar and
     # the wallpaper daemon link nothing past it (measured: scootbg and
     # scootbar are libc-only on the release build); the launcher links
-    # only the keyboard library (measured: libxkbcommon.so.0 beside
-    # libc on the release build).
+    # the keyboard library (measured: libxkbcommon.so.0 beside libc on
+    # the release build; its libm.so.6 rides inside libc6 on Debian, so
+    # shlibdeps emits no extra name for it).
     "scoot": {
         "libc6",
         "libgcc-s1",

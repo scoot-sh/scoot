@@ -33,7 +33,9 @@ only).
 (`site/src/content/docs/reference/packaging.md`): the
 compositor links `libinput.so.10`, `libseat.so.1`, `libudev.so.1`,
 `libpixman-1.so.0`, `libxkbcommon.so.0`, the launcher links
-`libxkbcommon.so.0` for its keyboard, and the wallpaper daemon and
+`libxkbcommon.so.0` for its keyboard (plus `libm.so.6` through the SVG
+icon stack, which rides inside `glibc` everywhere, so no extra
+dependency names it), and the wallpaper daemon and
 the bar link nothing past the C library. The Arch package names:
 
 - `libseat.so.1` comes from **`seatd`**, not `libseat`: Arch renamed

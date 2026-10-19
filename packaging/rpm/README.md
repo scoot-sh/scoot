@@ -34,7 +34,9 @@ requirements) is four binaries RPM derives on its own.
 (`site/src/content/docs/reference/packaging.md`), not memory: the
 compositor links `libinput.so.10`, `libseat.so.1`, `libudev.so.1`,
 `libpixman-1.so.0`, `libxkbcommon.so.0`, the launcher links
-`libxkbcommon.so.0` for its keyboard, and the wallpaper daemon and the
+`libxkbcommon.so.0` for its keyboard (plus `libm.so.6` through the SVG
+icon stack, which rides inside the C library package everywhere, so no
+extra requirement names it), and the wallpaper daemon and the
 bar link nothing past the C library. Runtime requirements for those
 sonames are auto-generated from the binaries at build time, so only the
 `-devel` names below are written in the specs. Verified 2026-10-08

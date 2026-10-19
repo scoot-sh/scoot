@@ -51,8 +51,9 @@ page (`site/src/content/docs/reference/packaging.md`).
 The compositor links `libinput.so.10`, `libseat.so.1`, `libudev.so.1`,
 `libpixman-1.so.0`, `libxkbcommon.so.0` (plus the C library and its
 closure); the wallpaper daemon and the bar link nothing past the C
-library; the launcher links `libxkbcommon.so.0` for its keyboard and
-nothing else. On Debian 12 / Ubuntu 24.04 and newer the sonames resolve
+library; the launcher links `libxkbcommon.so.0` for its keyboard (plus
+`libm.so.6` through the SVG icon stack, which rides inside `libc6` on
+Debian, so `shlibdeps` emits no extra name for it). On Debian 12 / Ubuntu 24.04 and newer the sonames resolve
 to `libinput10`, `libseat1`, `libudev1`, `libpixman-1-0`,
 `libxkbcommon0` (plus `libc6`, `libgcc-s1` via shlibdeps). The GPU
 libraries (`libgbm1`, `libdrm2`) are not in any shipped `.deb`'s
