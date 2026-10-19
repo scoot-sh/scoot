@@ -148,6 +148,9 @@ pub struct Entry {
     pub actions: Vec<Action>,
     /// The desktop file, through whatever symlinks led to it.
     pub path: PathBuf,
+    /// The `Path=` working directory, if the file names one. The
+    /// launch reads it (else `$HOME`); the cache carries it opaquely.
+    pub workdir: Option<String>,
     /// Why a hidden entry is hidden. `None` shows.
     pub hidden: Option<filter::HiddenReason>,
 }
@@ -438,6 +441,10 @@ fn entry_from_file(
         }
     }
     let hidden = hidden_for(main, env);
+    let workdir = main
+        .get("Path")
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     (
         Some(Entry {
             id: id.to_string(),
@@ -451,6 +458,7 @@ fn entry_from_file(
             dbus_activatable,
             actions,
             path: path.to_path_buf(),
+            workdir,
             hidden,
         }),
         notes,

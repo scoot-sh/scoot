@@ -67,12 +67,22 @@ pub struct Ui {
     history: Frecency,
     now: u64,
     query_codes: Vec<u32>,
-    displayed: Vec<usize>,
+    displayed: Vec<Shown>,
     seen: Vec<bool>,
     fold_scratch: String,
     span_scratch: Vec<(u32, u32)>,
     /// One highlight span buffer per visible slot, reused every rerank.
     highlight_slots: Vec<Vec<(u32, u32)>>,
+}
+
+/// One shown row: the entry, and which of its actions won the rank
+/// (`None` for the entry itself). The collapse keeps each entry once,
+/// at its best row's position, so a query matching an action name
+/// still launches that action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Shown {
+    entry: usize,
+    action: Option<usize>,
 }
 
 impl Ui {
@@ -119,7 +129,7 @@ impl Ui {
     pub fn shown(&self) -> Vec<&index::Entry> {
         self.displayed
             .iter()
-            .map(|index| &self.entries[*index])
+            .map(|shown| &self.entries[shown.entry])
             .collect()
     }
 
@@ -127,7 +137,16 @@ impl Ui {
     pub fn selected(&self) -> Option<&index::Entry> {
         self.list
             .selected()
-            .map(|row| &self.entries[self.displayed[row]])
+            .and_then(|row| self.displayed.get(row))
+            .map(|shown| &self.entries[shown.entry])
+    }
+
+    /// The selected row's desktop action, if the rank was won by an
+    /// action row (`ActivateAction`, not `Activate`, launches it).
+    pub fn selected_action(&self) -> Option<&index::Action> {
+        let shown = self.displayed.get(self.list.selected()?)?;
+        let action = shown.action?;
+        self.entries.get(shown.entry)?.actions.get(action)
     }
 
     /// This frame's list state, for the draw.
@@ -145,7 +164,8 @@ impl Ui {
     pub fn row_text(&self, row: usize) -> &str {
         self.displayed
             .get(row)
-            .map(|entry| self.entries[*entry].name.as_str())
+            .and_then(|shown| self.entries.get(shown.entry))
+            .map(|entry| entry.name.as_str())
             .unwrap_or("")
     }
 
@@ -240,13 +260,16 @@ impl Ui {
                 .rank(&self.fold_scratch, &self.rows, &self.history, self.now);
             self.displayed.reserve(order.len());
             for row in order.iter().copied() {
-                let entry = self.rows[row as usize].entry;
-                if self.entries[entry].hidden.is_some() {
+                let ranked = self.rows[row as usize].entry;
+                if self.entries[ranked].hidden.is_some() {
                     continue;
                 }
-                if !self.seen[entry] {
-                    self.seen[entry] = true;
-                    self.displayed.push(entry);
+                if !self.seen[ranked] {
+                    self.seen[ranked] = true;
+                    self.displayed.push(Shown {
+                        entry: ranked,
+                        action: self.rows[row as usize].action,
+                    });
                 }
             }
         };
@@ -272,10 +295,11 @@ impl Ui {
             }
             let spans = &mut self.highlight_slots[slot];
             spans.clear();
-            let Some(entry) = self.displayed.get(row) else {
+            let Some(shown) = self.displayed.get(row) else {
                 continue;
             };
-            let row_index = self.entry_row_of[*entry];
+            let entry = shown.entry;
+            let row_index = self.entry_row_of[entry];
             if row_index == usize::MAX {
                 continue;
             }
@@ -290,7 +314,10 @@ impl Ui {
             ) {
                 continue;
             }
-            let name = &self.entries[*entry].name;
+            let Some(entry) = self.entries.get(entry) else {
+                continue;
+            };
+            let name = &entry.name;
             let folded = &row.name_folded;
             for (start, end) in self.span_scratch.iter().copied() {
                 if let Some(byte_span) = byte_span(name, folded, &mut self.fold_scratch, start, end)

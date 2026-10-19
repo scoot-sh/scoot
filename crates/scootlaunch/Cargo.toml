@@ -23,6 +23,11 @@ scoot-rt.workspace = true
 # dev/design/shell-apps.md, Decisions needed 3): the one C library past
 # std's the panel accepts, as the CI job's link gate records.
 scootui = { path = "../scootui", default-features = false, features = ["entry", "surfaces", "keyboard"] }
+# The session-bus calls behind launching (the systemd scope move and
+# `org.freedesktop.Application` activation): the workspace's hand-rolled
+# client (`std` + `rustix` only, no new package in the tree, no `libc`
+# crate, no new `.so` in the link set).
+scoot-dbus.workspace = true
 # The look layer's allowlist, value grammar and state-dir rule: the
 # workspace's existing version, so no new package enters the tree.
 scoot-look.workspace = true

@@ -34,6 +34,7 @@ fn test_entry(id: &str) -> super::super::Entry {
             exec: vec!["foo".to_string(), "--act".to_string()],
         }],
         path: PathBuf::from("/x/a.desktop"),
+        workdir: None,
         hidden: None,
     }
 }

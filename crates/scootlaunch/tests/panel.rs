@@ -1,207 +1,31 @@
 //! The panel on a headless scoot: open, type through `scoot msg type`
-//! and pick; toggle; dismiss; and the per-shipped-look goldens.
+//! and launch; toggle; dismiss; and the per-shipped-look goldens.
 //!
 //! Each test starts its own headless scoot with a fixture applications
 //! tree (so no test reads the machine's desktop files) and drives the
 //! real `scootlaunch` binary. Skipped without a `scoot` binary beside
 //! the test binary; `SCOOTLAUNCH_REQUIRE_SCOOT` makes that a failure, so
-//! CI cannot go green by skipping.
+//! CI cannot go green by skipping. A pick launches its stub (which
+//! records the environment the launch gave it) and exits 0 with empty
+//! stdout; a dismiss exits 1.
+
+#[path = "harness.rs"]
+mod harness;
 
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command, Stdio};
+use std::time::Duration;
 
-use scootui::test_support::{Session, Shot, rgb};
+use harness::{
+    Panel, desktop, launch_bin, rgb, session_with_apps, session_with_stubs, wait_for, wait_marker,
+};
 
-/// The require variable turning these tests' skips into failures.
-const REQUIRE: &str = "SCOOTLAUNCH_REQUIRE_SCOOT";
-
-fn launch_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_scootlaunch"))
-}
-
-fn desktop(name: &str, exec: &str) -> String {
-    format!("[Desktop Entry]\nType=Application\nName={name}\nExec={exec}\n")
-}
-
-/// A session with a fixture applications tree: `apps` holds
-/// `name.desktop` files, and nothing else is indexed.
-fn session_with_apps(tag: &str, apps: &[(&str, &str)]) -> Option<(Session, PathBuf)> {
-    let session = Session::scoot_requiring(&launch_bin(), tag, 1, "", REQUIRE)?;
-    let data_home = session.scratch.0.join("data-home");
-    let applications = data_home.join("applications");
-    fs::create_dir_all(&applications).unwrap();
-    for (file, body) in apps {
-        fs::write(applications.join(file), body).unwrap();
-    }
-    let empty_dirs = session.scratch.0.join("empty-dirs");
-    fs::create_dir_all(&empty_dirs).unwrap();
-    Some((session, data_home))
-}
-
-struct Panel {
-    session: Session,
-    child: Child,
-    log: PathBuf,
-    data_home: PathBuf,
-}
-
-impl Panel {
-    fn start(tag: &str, apps: &[(&str, &str)], args: &[&str]) -> Option<Self> {
-        let (session, data_home) = session_with_apps(tag, apps)?;
-        Self::start_on(session, data_home, args)
-    }
-
-    /// Starts the panel on an existing session: the look layer (or any
-    /// other sandbox file) lands before the open, so the panel reads it.
-    fn start_on(session: Session, data_home: PathBuf, args: &[&str]) -> Option<Self> {
-        let log = session.scratch.0.join("panel.log");
-        let file = fs::File::create(&log).unwrap();
-        let empty_dirs = session.scratch.0.join("empty-dirs");
-        let mut command = Command::new(launch_bin());
-        command
-            .env("XDG_RUNTIME_DIR", &session.scratch.0)
-            .env_remove("WAYLAND_DISPLAY")
-            .env_remove("WAYLAND_SOCKET")
-            .env_remove("WAYLAND_DEBUG")
-            .env("WAYLAND_DISPLAY", &session.wayland_display)
-            .arg("--font")
-            .arg(session.font())
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(file);
-        session.scratch.sandbox(&mut command);
-        // The sandbox pins config/state/cache; the fixture data homes
-        // ride above, so the panel indexes the fixture, not the machine.
-        command
-            .env("XDG_DATA_HOME", &data_home)
-            .env("XDG_DATA_DIRS", &empty_dirs);
-        let child = command.spawn().unwrap();
-        Some(Self {
-            session,
-            child,
-            log,
-            data_home,
-        })
-    }
-
-    fn ipc(&self, request: &str) -> serde_json::Value {
-        let reply = self.session.scoot_ipc(request);
-        assert_eq!(reply["type"], "ok", "{request}: {reply}");
-        reply
-    }
-
-    fn shot(&self) -> Shot {
-        self.session.scoot_screenshot(1)
-    }
-
-    /// Saves the output's screenshot as a PNG at
-    /// `$SCOOTLAUNCH_SHOTS/NAME.png` when that directory is set: the
-    /// evidence for the pixels the assertions read.
-    fn save(&self, name: &str) {
-        use base64::Engine as _;
-        let Some(dir) = std::env::var_os("SCOOTLAUNCH_SHOTS") else {
-            return;
-        };
-        let reply = self
-            .session
-            .scoot_ipc(r#"{"type":"screenshot","output":1,"cursor":false}"#);
-        let png = base64::engine::general_purpose::STANDARD
-            .decode(reply["png"].as_str().unwrap())
-            .unwrap();
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(PathBuf::from(dir).join(format!("{name}.png")), png).unwrap();
-    }
-
-    fn type_text(&self, text: &str) {
-        self.ipc(&format!(
-            "{{\"type\":\"type\",\"text\":{}}}",
-            serde_json::to_string(text).unwrap()
-        ));
-    }
-
-    fn key(&self, keys: &str) {
-        self.ipc(&format!(r#"{{"type":"key","keys":"{keys}"}}"#));
-    }
-
-    fn click(&self, x: u32, y: u32) {
-        self.ipc(&format!(
-            r#"{{"type":"click","x":{x},"y":{y},"button":"left"}}"#
-        ));
-    }
-
-    /// Waits for the panel's border color to appear on screen: the
-    /// compositor mapped the surface and drew the chrome. The ring is 2
-    /// px wide, so every other pixel still hits it.
-    fn wait_shown(&self, border: [u8; 3]) {
-        wait_for("the panel shown", Duration::from_secs(10), || {
-            let shot = self.shot();
-            (0..1600)
-                .step_by(2)
-                .any(|x| (0..1000).step_by(2).any(|y| shot.at(x, y) == border))
-        });
-    }
-
-    fn wait_exit(&mut self) -> std::process::ExitStatus {
-        wait_for("the panel to exit", Duration::from_secs(10), || {
-            self.child.try_wait().unwrap().is_some()
-        });
-        self.child.try_wait().unwrap().unwrap()
-    }
-
-    /// Finds the panel through its opaque border ring: the ring's
-    /// bounding box, whatever the compositor's placement.
-    fn find_panel(&self, border: [u8; 3]) -> (u32, u32, u32, u32) {
-        let shot = self.shot();
-        let mut xs = Vec::new();
-        let mut ys = Vec::new();
-        for x in (0..1600).step_by(2) {
-            for y in (0..1000).step_by(2) {
-                if shot.at(x, y) == border {
-                    xs.push(x);
-                    ys.push(y);
-                }
-            }
-        }
-        assert!(!xs.is_empty(), "no border ring on screen");
-        (
-            *xs.iter().min().unwrap(),
-            *ys.iter().min().unwrap(),
-            *xs.iter().max().unwrap(),
-            *ys.iter().max().unwrap(),
-        )
-    }
-
-    fn stdout(&mut self) -> String {
-        use std::io::Read as _;
-        let mut out = String::new();
-        self.child
-            .stdout
-            .take()
-            .unwrap()
-            .read_to_string(&mut out)
-            .unwrap();
-        out
-    }
-
-    fn stderr(&self) -> String {
-        fs::read_to_string(&self.log).unwrap_or_default()
-    }
-
-    fn clean(&self) {
-        let log = self.stderr();
-        assert!(!log.contains("protocol"), "{log}");
-    }
-}
-
-fn wait_for(what: &str, timeout: Duration, mut done: impl FnMut() -> bool) {
-    let deadline = Instant::now() + timeout;
-    while !done() {
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+fn refs<'a>(bodies: &'a [(&'a str, String)]) -> Vec<(&'a str, &'a str)> {
+    bodies
+        .iter()
+        .map(|(file, body)| (*file, body.as_str()))
+        .collect()
 }
 
 fn apps() -> Vec<(&'static str, String)> {
@@ -212,17 +36,14 @@ fn apps() -> Vec<(&'static str, String)> {
     ]
 }
 
-fn refs<'a>(bodies: &'a [(&'a str, String)]) -> Vec<(&'a str, &'a str)> {
-    bodies
-        .iter()
-        .map(|(file, body)| (*file, body.as_str()))
-        .collect()
-}
-
 #[test]
-fn open_type_select_prints_the_id() {
-    let bodies = apps();
-    let Some(mut panel) = Panel::start("type-select", &refs(&bodies), &[]) else {
+fn open_type_select_launches() {
+    let Some((session, data_home, markers)) =
+        session_with_stubs("type-select", &["firefox", "files", "terminal"])
+    else {
+        return;
+    };
+    let Some(mut panel) = Panel::start_on(session, data_home, &[], &[]) else {
         return;
     };
     // The defaults (no look layer in the sandbox): surface #1e1e2e,
@@ -232,7 +53,7 @@ fn open_type_select_prints_the_id() {
     panel.type_text("term");
     std::thread::sleep(Duration::from_millis(500));
     panel.save("type-select");
-    // The redraw reached the screen: only "Terminal" matches, so the
+    // The redraw reached the screen: only "terminal" matches, so the
     // second row's middle is panel fill, not a row.
     let (x0, y0, x1, _) = panel.find_panel(rgb("#f9e2af"));
     assert_eq!(
@@ -243,12 +64,32 @@ fn open_type_select_prints_the_id() {
     panel.key("Return");
     let status = panel.wait_exit();
     let out = panel.stdout();
-    assert!(status.success(), "exit 0 on a pick: {}", panel.stderr());
-    assert_eq!(
-        out,
-        "terminal.desktop\n",
-        "the pick prints: {}",
-        panel.stderr()
+    assert!(status.success(), "exit 0 on a launch: {}", panel.stderr());
+    assert_eq!(out, "", "a launch prints nothing: {}", panel.stderr());
+    // The filtered pick ran: only the terminal stub fired.
+    let terminal = wait_marker(&markers[2]);
+    assert!(terminal.contains("terminal.sh"), "{terminal}");
+    assert!(
+        fs::read_to_string(&markers[0])
+            .unwrap_or_default()
+            .is_empty()
+    );
+    assert!(
+        fs::read_to_string(&markers[1])
+            .unwrap_or_default()
+            .is_empty()
+    );
+    // The launch is recorded for frecency.
+    let history = panel
+        .session
+        .scratch
+        .state_home()
+        .join("scootlaunch")
+        .join("history");
+    let text = fs::read_to_string(&history).unwrap_or_default();
+    assert!(
+        text.contains("terminal.desktop"),
+        "the launch is recorded: {text}"
     );
     panel.clean();
     assert!(
@@ -266,11 +107,15 @@ fn open_type_select_prints_the_id() {
 }
 
 #[test]
-fn ctrl_n_moves_and_return_picks() {
+fn ctrl_n_moves_and_return_launches() {
     // The modifiers-mask Control path, end to end: Ctrl+N moves like
     // Down through a real compositor's modifiers events.
-    let bodies = apps();
-    let Some(mut panel) = Panel::start("ctrl-n", &refs(&bodies), &[]) else {
+    let Some((session, data_home, markers)) =
+        session_with_stubs("ctrl-n", &["firefox", "files", "terminal"])
+    else {
+        return;
+    };
+    let Some(mut panel) = Panel::start_on(session, data_home, &[], &[]) else {
         return;
     };
     panel.wait_shown(rgb("#f9e2af"));
@@ -280,11 +125,43 @@ fn ctrl_n_moves_and_return_picks() {
     panel.save("ctrl-n");
     panel.key("Return");
     let status = panel.wait_exit();
-    let out = panel.stdout();
-    assert!(status.success(), "exit 0 on a pick: {}", panel.stderr());
-    // Empty query orders by name (Files, Firefox, Terminal); Ctrl+N
-    // moves from Files to Firefox.
-    assert_eq!(out, "firefox.desktop\n", "Ctrl+N moved: {}", panel.stderr());
+    assert!(status.success(), "exit 0 on a launch: {}", panel.stderr());
+    assert_eq!(panel.stdout(), "", "a launch prints nothing");
+    // Empty query orders by name (files, firefox, terminal); Ctrl+N
+    // moves from files to firefox.
+    let firefox = wait_marker(&markers[0]);
+    assert!(firefox.contains("firefox.sh"), "Ctrl+N moved: {firefox}");
+    panel.clean();
+}
+
+#[test]
+fn a_launch_gets_a_fresh_token_not_the_panels() {
+    // The environment rules: the panel's own token never leaks into
+    // the child; the minted one does.
+    let Some((session, data_home, markers)) = session_with_stubs("token-env", &["alpha"]) else {
+        return;
+    };
+    let Some(mut panel) = Panel::start_on(
+        session,
+        data_home,
+        &[],
+        &[("XDG_ACTIVATION_TOKEN", "parent-token-xyz")],
+    ) else {
+        return;
+    };
+    panel.wait_shown(rgb("#f9e2af"));
+    std::thread::sleep(Duration::from_millis(300));
+    panel.key("Return");
+    let status = panel.wait_exit();
+    assert!(status.success(), "exit 0 on a launch: {}", panel.stderr());
+    let line = wait_marker(&markers[0]);
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    assert_eq!(fields.len(), 4, "{line}");
+    assert!(fields[0].ends_with("alpha.sh"), "{line}");
+    assert_ne!(
+        fields[1], "parent-token-xyz",
+        "the panel's token must not leak: {line}"
+    );
     panel.clean();
 }
 
@@ -328,7 +205,7 @@ fn the_toggle_closes_a_running_instance() {
 }
 
 #[test]
-fn escape_dismisses_without_a_pick() {
+fn escape_dismisses_without_a_launch() {
     let bodies = apps();
     let Some(mut panel) = Panel::start("escape", &refs(&bodies), &[]) else {
         return;
@@ -338,7 +215,7 @@ fn escape_dismisses_without_a_pick() {
     panel.key("Escape");
     let status = panel.wait_exit();
     assert_eq!(status.code(), Some(1), "dismiss exits 1");
-    assert_eq!(panel.stdout(), "", "no pick prints");
+    assert_eq!(panel.stdout(), "", "no launch prints");
     panel.clean();
 }
 
@@ -366,13 +243,13 @@ fn pointer_motion_outside_does_not_dismiss() {
 }
 
 #[test]
-fn a_click_on_a_row_picks_it() {
-    let bodies: Vec<(&str, String)> = vec![
-        ("alpha.desktop", desktop("Alpha", "/usr/bin/alpha")),
-        ("beta.desktop", desktop("Beta", "/usr/bin/beta")),
-        ("gamma.desktop", desktop("Gamma", "/usr/bin/gamma")),
-    ];
-    let Some(mut panel) = Panel::start("row-click", &refs(&bodies), &[]) else {
+fn a_click_on_a_row_launches_it() {
+    let Some((session, data_home, markers)) =
+        session_with_stubs("row-click", &["alpha", "beta", "gamma"])
+    else {
+        return;
+    };
+    let Some(mut panel) = Panel::start_on(session, data_home, &[], &[]) else {
         return;
     };
     panel.wait_shown(rgb("#f9e2af"));
@@ -385,10 +262,50 @@ fn a_click_on_a_row_picks_it() {
     let out = panel.stdout();
     assert!(
         status.success(),
-        "exit 0 on a mouse pick: {}",
+        "exit 0 on a mouse launch: {}",
         panel.stderr()
     );
-    assert_eq!(out, "beta.desktop\n", "the row picks: {}", panel.stderr());
+    assert_eq!(out, "", "a launch prints nothing");
+    let beta = wait_marker(&markers[1]);
+    assert!(beta.contains("beta.sh"), "the row launched: {beta}");
+    panel.clean();
+}
+
+#[test]
+fn a_missing_target_shows_its_error_and_stays_open() {
+    // The Exec target vanished between index and launch: the error
+    // draws for 2 s, the panel stays open, no history is recorded.
+    let bodies: Vec<(&str, String)> = vec![(
+        "gone.desktop",
+        desktop("Gone", "/nonexistent-scootlaunch-target"),
+    )];
+    let Some(mut panel) = Panel::start("gone-target", &refs(&bodies), &[]) else {
+        return;
+    };
+    panel.wait_shown(rgb("#f9e2af"));
+    std::thread::sleep(Duration::from_millis(300));
+    panel.key("Return");
+    // Still open past the launch: the error draws, nothing exits.
+    std::thread::sleep(Duration::from_millis(800));
+    assert!(
+        panel.child.try_wait().unwrap().is_none(),
+        "the panel stays open on a spawn failure"
+    );
+    panel.save("gone-target-error");
+    panel.key("Escape");
+    let status = panel.wait_exit();
+    assert_eq!(status.code(), Some(1), "Escape dismisses after the error");
+    // A failed spawn records nothing.
+    assert!(
+        !panel
+            .session
+            .scratch
+            .state_home()
+            .join("scootlaunch")
+            .join("history")
+            .exists(),
+        "a failed spawn records nothing"
+    );
     panel.clean();
 }
 
@@ -428,7 +345,7 @@ fn golden_one(name: &str) {
     let look_dir = session.scratch.state_home().join("scoot").join("look");
     fs::create_dir_all(&look_dir).unwrap();
     fs::write(look_dir.join("launch.toml"), &fragment).unwrap();
-    let Some(mut panel) = Panel::start_on(session, data_home, &[]) else {
+    let Some(mut panel) = Panel::start_on(session, data_home, &[], &[]) else {
         return;
     };
     let table: toml::Table = fragment.parse().expect("launch.toml parses");

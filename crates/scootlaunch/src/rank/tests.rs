@@ -41,6 +41,7 @@ fn entry_with_actions(
             })
             .collect(),
         path: std::path::PathBuf::from(format!("/x/{id}")),
+        workdir: None,
         hidden: None,
     }
 }

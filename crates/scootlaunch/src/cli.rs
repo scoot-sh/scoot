@@ -45,7 +45,7 @@ usage: scootlaunch [--font PATH] [--config PATH] [--lenient]
        scootlaunch --check [--config PATH]
 
   (no command) open the panel: the overlay exclusive-keyboard launcher,
-    printing the chosen entry id (exit 0), or nothing on dismiss (exit 1)
+    launching the chosen entry (exit 0), or nothing on dismiss (exit 1)
   --font PATH    the panel's .ttf/.otf file (else the first well-known one)
   --config PATH  the panel's own launch.toml (else $XDG_CONFIG_HOME/scoot/launch.toml)
   --list       list indexed desktop entries (no compositor needed)
