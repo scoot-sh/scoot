@@ -226,3 +226,4 @@ hits the wall:
 - [docs-catch-up-shell-apps](docs-catch-up-shell-apps.md)
 - [launch-spawn-detach-cwd-and-close](launch-spawn-detach-cwd-and-close.md)
 - [launch-dmenu-doc-and-pin-notes](launch-dmenu-doc-and-pin-notes.md)
+- [notify-popups-review-notes](notify-popups-review-notes.md)
