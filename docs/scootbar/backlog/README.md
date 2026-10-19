@@ -222,3 +222,4 @@ hits the wall:
 - [launch-look-selected-row-contrast](launch-look-selected-row-contrast.md)
 - [release-plz-changelog-include-shell-apps](release-plz-changelog-include-shell-apps.md)
 - [docs-catch-up-shell-apps](docs-catch-up-shell-apps.md)
+- [launch-spawn-detach-cwd-and-close](launch-spawn-detach-cwd-and-close.md)
