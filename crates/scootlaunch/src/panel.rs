@@ -723,13 +723,10 @@ fn paint_panel(
             None,
             error,
             em,
-            i64::from(inner),
+            i64::from(entry_geo.text_x()),
             baseline,
             look.theme.urgent,
-            Span {
-                x: inner,
-                width: entry_geo.width,
-            },
+            entry_geo.clip(),
         );
         return;
     }
