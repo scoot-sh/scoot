@@ -26,6 +26,10 @@ Filed 2026-10-12 from the [scootnotify design](../../../dev/design/scootnotify.m
 Each package builds in CI's packaging jobs and installs on a clean container, and the site
 builds with the snippet gates green.
 
+## Docs (same PR)
+
+Part of this ticket's work, not a follow-up: update `site/src/content/docs/start/ (install pages) and site/src/content/docs/scootnotify/index.md` with per-distro install of scootnotify. Task-first, type/default/example/reload per option, `> **Symptom:**` boxes, snippet gates green (`site/OUTLINE.md`). A change with no user-visible effect says so in the PR instead.
+
 ## Evidence the review needs
 
 - The standard set re-run by the reviewer on the commit under review: `cargo nextest run` for the touched crates, `cargo clippy … -- -D warnings`, `cargo fmt --check`, and the crate's fuzz targets for their CI budget.

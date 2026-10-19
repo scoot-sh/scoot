@@ -19,3 +19,7 @@ Filed 2026-10-12. Serves **daily-drive**. The criteria are the
 - mako stays one option away for a release.
 
 Needs the maintainer's ruling.
+
+## Docs (same PR)
+
+Part of this ticket's work, not a follow-up: update `site/src/content/docs/scootnotify/index.md and README.md (What works / Not yet)` with scootnotify as the default, how to opt out, and the breaking marker. Task-first, type/default/example/reload per option, `> **Symptom:**` boxes, snippet gates green (`site/OUTLINE.md`). A change with no user-visible effect says so in the PR instead.

@@ -215,3 +215,10 @@ hits the wall:
 [keyboard layout event](../../backlog/ipc/keyboard-layout-event.md).
 
 - [Audit the popup and icon zero-allocation pins](scootui-popup-alloc-pins-audit.md): they ran without a counting allocator until #670.
+- [launch-panel-shrink-to-content](launch-panel-shrink-to-content.md)
+- [launch-panel-bare-desktop-click](launch-panel-bare-desktop-click.md)
+- [launch-toggle-race-and-socket-mode](launch-toggle-race-and-socket-mode.md)
+- [launch-ci-scootui-manifest-fanout](launch-ci-scootui-manifest-fanout.md)
+- [launch-look-selected-row-contrast](launch-look-selected-row-contrast.md)
+- [release-plz-changelog-include-shell-apps](release-plz-changelog-include-shell-apps.md)
+- [docs-catch-up-shell-apps](docs-catch-up-shell-apps.md)

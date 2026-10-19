@@ -30,3 +30,7 @@ surface would be held for free. Critical cards stay on the `overlay` surface.
 ## Acceptance
 
 A recorded go or no-go in this entry, and the design updated.
+
+## Docs (same PR)
+
+Part of this ticket's work, not a follow-up: update `site/src/content/docs/scootnotify/configure.md` with the fullscreen-hold behavior and its option, if the spike ships one; else a dev/ note only. Task-first, type/default/example/reload per option, `> **Symptom:**` boxes, snippet gates green (`site/OUTLINE.md`). A change with no user-visible effect says so in the PR instead.

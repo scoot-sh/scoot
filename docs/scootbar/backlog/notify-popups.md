@@ -40,6 +40,10 @@ Headless-harness tests:
 
 Also: zero allocation per repaint, and 0 idle wakeups with no cards.
 
+## Docs (same PR)
+
+Part of this ticket's work, not a follow-up: update `site/src/content/docs/scootnotify/index.md and a new site/src/content/docs/scootnotify/configure.md` with popup placement, timeouts, urgency, the look layer and the conformance table row changes. Task-first, type/default/example/reload per option, `> **Symptom:**` boxes, snippet gates green (`site/OUTLINE.md`). A change with no user-visible effect says so in the PR instead.
+
 ## Evidence the review needs
 
 - The standard set re-run by the reviewer on the commit under review: `cargo nextest run` for the touched crates, `cargo clippy … -- -D warnings`, `cargo fmt --check`, and the crate's fuzz targets for their CI budget.

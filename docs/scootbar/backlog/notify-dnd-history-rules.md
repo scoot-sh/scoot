@@ -27,6 +27,10 @@ From the [design](../../../dev/design/scootnotify.md#do-not-disturb-history-rule
 - Rule order and merging.
 - A rule `exec` flood bounded at 4 children with RSS and fds flat.
 
+## Docs (same PR)
+
+Part of this ticket's work, not a follow-up: update `site/src/content/docs/scootnotify/configure.md (rules, history, do-not-disturb)` with rule syntax with examples, history limits, DND behavior. Task-first, type/default/example/reload per option, `> **Symptom:**` boxes, snippet gates green (`site/OUTLINE.md`). A change with no user-visible effect says so in the PR instead.
+
 ## Evidence the review needs
 
 - The standard set re-run by the reviewer on the commit under review: `cargo nextest run` for the touched crates, `cargo clippy … -- -D warnings`, `cargo fmt --check`, and the crate's fuzz targets for their CI budget.

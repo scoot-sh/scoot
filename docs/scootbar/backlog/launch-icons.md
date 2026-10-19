@@ -27,6 +27,10 @@ Serves **daily-drive**.
 - A letter tile appears without the feature.
 - Icons render at device pixels on a fractional output.
 
+## Docs (same PR)
+
+Part of this ticket's work, not a follow-up: update `site/src/content/docs/scootlaunch/panel.md` with the icon column, icon theme lookup and the size/memory budget; `look` icon role if added. Task-first, type/default/example/reload per option, `> **Symptom:**` boxes, snippet gates green (`site/OUTLINE.md`). A change with no user-visible effect says so in the PR instead.
+
 ## Evidence the review needs
 
 - The standard set re-run by the reviewer on the commit under review: `cargo nextest run` for the touched crates, `cargo clippy … -- -D warnings`, `cargo fmt --check`, and the crate's fuzz targets for their CI budget.

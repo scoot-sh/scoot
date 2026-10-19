@@ -30,6 +30,10 @@ round. Serves **daily-drive**.
 - The launched app shows in its own scope under a user manager.
 - The fallback is exercised with no bus.
 
+## Docs (same PR)
+
+Part of this ticket's work, not a follow-up: update `site/src/content/docs/scootlaunch/panel.md` with what a pick launches (scope, environment, token, fallback) and `DBusActivatable`; troubleshooting `> **Symptom:**` for an app that starts outside its scope. Task-first, type/default/example/reload per option, `> **Symptom:**` boxes, snippet gates green (`site/OUTLINE.md`). A change with no user-visible effect says so in the PR instead.
+
 ## Evidence the review needs
 
 - The standard set re-run by the reviewer on the commit under review: `cargo nextest run` for the touched crates, `cargo clippy … -- -D warnings`, `cargo fmt --check`, and the crate's fuzz targets for their CI budget.

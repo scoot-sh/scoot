@@ -33,6 +33,10 @@ Stylix reaches it only as the `stylix` look.
   - `--check`.
 - An M2 real-login proof per look.
 
+## Docs (same PR)
+
+Part of this ticket's work, not a follow-up: update `site/src/content/docs/start/ (the Nix install page) and site/src/content/docs/scootlaunch/index.md` with the `programs.scoot` launcher option and what it wires. Task-first, type/default/example/reload per option, `> **Symptom:**` boxes, snippet gates green (`site/OUTLINE.md`). A change with no user-visible effect says so in the PR instead.
+
 ## Evidence the review needs
 
 - The standard set re-run by the reviewer on the commit under review: `cargo nextest run` for the touched crates, `cargo clippy … -- -D warnings`, `cargo fmt --check`, and the crate's fuzz targets for their CI budget.
