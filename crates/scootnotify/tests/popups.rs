@@ -12,8 +12,7 @@
 #[path = "lockclient/mod.rs"]
 mod lockclient;
 
-use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -87,12 +86,18 @@ fn sway_or_skip(tag: &str, outputs: u32) -> Option<Session> {
 /// child. The compositor choice is the session's (null output); the
 /// look layer is absent (scratch state home), so every pixel row reads
 /// the built-in defaults.
-fn spawn_popup(session: &Session, bus: &Daemon, config: &str) -> Child {
+fn spawn_popup(session: &Session, bus: &Daemon, config: &str) -> (Child, PathBuf) {
     let binary = notify_bin();
     let config_path = session.scratch.0.join("config").join("scoot").join("notify.toml");
     std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
     std::fs::write(&config_path, config).unwrap();
     let font = session.scratch.font();
+    // The daemon's stderr goes to a file, not (only) a pipe: a wedged
+    // daemon's log is readable while it lives (a pipe blocks until it
+    // dies), and a dead one's names its fate. Returned for the failure
+    // paths below.
+    let log = session.scratch.0.join("scootnotify.log");
+    let log_file = std::fs::File::create(&log).expect("the daemon log creates");
     let mut command = Command::new(binary);
     // Spin-detector switch (debug only): the daemon counts no-poll
     // turns and writes /tmp/scootnotify-spin.log past 200k.
@@ -121,14 +126,15 @@ fn spawn_popup(session: &Session, bus: &Daemon, config: &str) -> Child {
         .env("HOME", &session.scratch.0)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    command.spawn().expect("the popup binary starts")
+        .stderr(log_file);
+    let child = command.spawn().expect("the popup binary starts");
+    (child, log)
 }
 
 /// Pumps `client` until its `Notify` is answered: the daemon serving.
 /// (A 1 ms card: the reply proves serving, the card itself is gone
 /// before any test counts live ones.)
-fn wait_serving(client: &mut Conn, server: &mut Child) {
+fn wait_serving(client: &mut Conn, server: &mut Child, log: &Path) {
     let start = Instant::now();
     let body = notify_body("Probe", 0, "p", "p", &[], &[], 1);
     client
@@ -138,10 +144,7 @@ fn wait_serving(client: &mut Conn, server: &mut Child) {
         if start.elapsed() >= Duration::from_secs(30) {
             match server.try_wait().expect("the server reaps") {
                 Some(status) => {
-                    let mut err = String::new();
-                    if let Some(mut stderr) = server.stderr.take() {
-                        let _ = stderr.read_to_string(&mut err);
-                    }
+                    let err = std::fs::read_to_string(log).unwrap_or_default();
                     panic!("the server died at startup ({status}): {err}");
                 }
                 None => {
@@ -216,6 +219,7 @@ fn notify_body(
 fn notify(
     client: &mut Conn,
     server: &mut Child,
+    log: &Path,
     app: &str,
     replaces: u32,
     summary: &str,
@@ -234,10 +238,7 @@ fn notify(
         if start.elapsed() >= Duration::from_secs(10) {
             match server.try_wait().expect("the server reaps") {
                 Some(status) => {
-                    let mut err = String::new();
-                    if let Some(mut stderr) = server.stderr.take() {
-                        let _ = stderr.read_to_string(&mut err);
-                    }
+                    let err = std::fs::read_to_string(log).unwrap_or_default();
                     panic!("Notify {token} unanswered: the server died ({status}): {err}");
                 }
                 None => {
@@ -298,24 +299,18 @@ fn stack_origin() -> (u32, u32) {
 
 /// Waits until `check` sees the stack (or the timeout names what never
 /// showed, with the daemon's stderr).
-fn wait_shown(server: &mut Child, what: &str, mut check: impl FnMut() -> bool) {
+fn wait_shown(server: &mut Child, log: &Path, what: &str, mut check: impl FnMut() -> bool) {
     let start = Instant::now();
     loop {
         if check() {
             return;
         }
         if let Some(status) = server.try_wait().unwrap() {
-            let mut err = String::new();
-            if let Some(mut stderr) = server.stderr.take() {
-                let _ = stderr.read_to_string(&mut err);
-            }
+            let err = std::fs::read_to_string(log).unwrap_or_default();
             panic!("{what}: the daemon died ({status}): {err}");
         }
         if start.elapsed() >= Duration::from_secs(15) {
-            let mut err = String::new();
-            if let Some(mut stderr) = server.stderr.take() {
-                let _ = stderr.read_to_string(&mut err);
-            }
+            let err = std::fs::read_to_string(log).unwrap_or_default();
             panic!("never {what}; the daemon said: {err}");
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -333,15 +328,15 @@ fn kill(mut child: Child) {
 fn pixels_per_card_state() {
     let Some(bus) = bus_or_skip() else { return };
     let Some(session) = scoot_or_skip("pixels", 1) else { return };
-    let mut server = spawn_popup(&session, &bus, "");
+    let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
-    wait_serving(&mut client, &mut server);
+    wait_serving(&mut client, &mut server, &log);
     let (x0, y0) = stack_origin();
     let shot = || session.scoot_screenshot(1);
 
     // Normal: the `focus` ring, the surface fill, foreground ink.
     let _ = notify(&mut client, &mut server, "a", 0, "Hello", "World", &[], &[], 0, 101);
-    wait_shown(&mut server, "the normal card", || {
+    wait_shown(&mut server, &log, "the normal card", || {
         shot().at(x0 + 180, y0 + 1) == rgb(FOCUS)
     });
     let shown = shot();
@@ -352,7 +347,7 @@ fn pixels_per_card_state() {
 
     // Critical: the `urgent` ring over the same fill.
     let _ = notify(&mut client, &mut server, "b", 0, "Fire", "Alarm", &[], &[("urgency", 2)], 0, 102);
-    wait_shown(&mut server, "the critical card", || {
+    wait_shown(&mut server, &log, "the critical card", || {
         shot().at(x0 + 180, y0 + 1) == rgb(URGENT)
     });
 
@@ -360,6 +355,7 @@ fn pixels_per_card_state() {
     let _ = notify(
         &mut client,
         &mut server,
+        &log,
         "c",
         0,
         "Pick",
@@ -369,7 +365,7 @@ fn pixels_per_card_state() {
         0,
         103,
     );
-    wait_shown(&mut server, "the action buttons", || {
+    wait_shown(&mut server, &log, "the action buttons", || {
         shot().at(x0 + 12, y0 + 120) == rgb(FOCUS)
             || shot().at(x0 + 100, y0 + 140) == rgb(FOCUS)
     });
@@ -378,6 +374,7 @@ fn pixels_per_card_state() {
     let _ = notify(
         &mut client,
         &mut server,
+        &log,
         "d",
         0,
         "Copy",
@@ -387,14 +384,14 @@ fn pixels_per_card_state() {
         0,
         104,
     );
-    wait_shown(&mut server, "the progress bar", || {
+    wait_shown(&mut server, &log, "the progress bar", || {
         let pixels = shot();
         (0..360u32).any(|dx| pixels.at(x0 + dx, y0 + 200) == rgb(FOCUS))
     });
 
     // Low: the `border` ring over the same fill.
     let _ = notify(&mut client, &mut server, "e", 0, "Quiet", "Low", &[], &[("urgency", 0)], 0, 100);
-    wait_shown(&mut server, "the low card", || {
+    wait_shown(&mut server, &log, "the low card", || {
         shot().at(x0 + 180, y0 + 1) == rgb(BORDER_LOW)
     });
     kill(server);
@@ -407,14 +404,15 @@ fn pixels_per_card_state() {
 fn a_click_invokes_with_the_token_first() {
     let Some(bus) = bus_or_skip() else { return };
     let Some(session) = scoot_or_skip("click", 1) else { return };
-    let mut server = spawn_popup(&session, &bus, "");
+    let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
-    wait_serving(&mut client, &mut server);
+    wait_serving(&mut client, &mut server, &log);
     watch_signals(&mut client);
     let (x0, y0) = stack_origin();
     let id = notify(
         &mut client,
         &mut server,
+        &log,
         "a",
         0,
         "Hello",
@@ -424,7 +422,7 @@ fn a_click_invokes_with_the_token_first() {
         0,
         111,
     );
-    wait_shown(&mut server, "the card", || {
+    wait_shown(&mut server, &log, "the card", || {
         session.scoot_screenshot(1).at(x0 + 180, y0 + 1) == rgb(FOCUS)
     });
     // Into the body (below the summary, above the buttons there are
@@ -484,9 +482,9 @@ fn a_click_invokes_with_the_token_first() {
 fn a_locked_arrival_waits_for_unlock() {
     let Some(bus) = bus_or_skip() else { return };
     let Some(session) = scoot_or_skip("lock", 1) else { return };
-    let mut server = spawn_popup(&session, &bus, "");
+    let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
-    wait_serving(&mut client, &mut server);
+    wait_serving(&mut client, &mut server, &log);
     watch_signals(&mut client);
     let locker = lockclient::Locker::start(&session.wayland_socket());
     let start = Instant::now();
@@ -525,7 +523,7 @@ fn a_locked_arrival_waits_for_unlock() {
     }
     // Unlocked: the card shows, then expires normally (reason 1).
     drop(locker);
-    wait_shown(&mut server, "the card after unlock", || {
+    wait_shown(&mut server, &log, "the card after unlock", || {
         session.scoot_screenshot(1).at(x0 + 180, y0 + 1) == rgb(FOCUS)
     });
     let start = Instant::now();
@@ -558,9 +556,9 @@ fn a_locked_arrival_waits_for_unlock() {
 fn unplugging_an_output_moves_the_stack() {
     let Some(bus) = bus_or_skip() else { return };
     let Some(session) = sway_or_skip("hotplug", 1) else { return };
-    let mut server = spawn_popup(&session, &bus, "");
+    let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
-    wait_serving(&mut client, &mut server);
+    wait_serving(&mut client, &mut server, &log);
     let shown_on = |session: &Session, name: &str| {
         let shot = session.screencopy(name);
         // Any card-colored pixel in the top-right: the ring or the fill.
@@ -589,7 +587,7 @@ fn unplugging_an_output_moves_the_stack() {
         .swaymsg(&["-t", "get_outputs", "-r"])
         .pipe_outputs();
     assert!(!names.is_empty());
-    wait_shown(&mut server, "the card on sway", || {
+    wait_shown(&mut server, &log, "the card on sway", || {
         names.iter().any(|name| shown_on(&session, name).is_some())
     });
     // A second output, then unplug the first: the stack moves, nothing
@@ -606,7 +604,7 @@ fn unplugging_an_output_moves_the_stack() {
     };
     session.swaymsg(&["output", &pair[0], "unplug"]);
     let left = pair[1].clone();
-    wait_shown(&mut server, "the card on the output that is left", || {
+    wait_shown(&mut server, &log, "the card on the output that is left", || {
         shown_on(&session, &left).is_some()
     });
     assert!(server.try_wait().unwrap().is_none(), "the daemon died on hotplug");
@@ -619,9 +617,9 @@ fn unplugging_an_output_moves_the_stack() {
 fn empty_holds_no_surface_or_buffers() {
     let Some(bus) = bus_or_skip() else { return };
     let Some(session) = scoot_or_skip("empty", 1) else { return };
-    let mut server = spawn_popup(&session, &bus, "");
+    let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
-    wait_serving(&mut client, &mut server);
+    wait_serving(&mut client, &mut server, &log);
     let pid = server.id();
     std::thread::sleep(Duration::from_secs(2));
     let idle_fds = test_support::open_fds(pid);
@@ -632,7 +630,7 @@ fn empty_holds_no_surface_or_buffers() {
     );
     let (x0, y0) = stack_origin();
     let id = notify(&mut client, &mut server, "a", 0, "Hello", "World", &[], &[], 0, 141);
-    wait_shown(&mut server, "the card", || {
+    wait_shown(&mut server, &log, "the card", || {
         session.scoot_screenshot(1).at(x0 + 180, y0 + 1) == rgb(FOCUS)
     });
     assert!(
@@ -655,7 +653,7 @@ fn empty_holds_no_surface_or_buffers() {
             142,
         )
         .unwrap();
-    wait_shown(&mut server, "the stack gone", || {
+    wait_shown(&mut server, &log, "the stack gone", || {
         session.scoot_screenshot(1).at(x0 + 180, y0 + 30) != rgb(SURFACE)
     });
     let start = Instant::now();
@@ -677,9 +675,9 @@ fn empty_holds_no_surface_or_buffers() {
 fn no_cards_means_no_wakeups() {
     let Some(bus) = bus_or_skip() else { return };
     let Some(session) = scoot_or_skip("idle", 1) else { return };
-    let mut server = spawn_popup(&session, &bus, "");
+    let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
-    wait_serving(&mut client, &mut server);
+    wait_serving(&mut client, &mut server, &log);
     // Past the probe card's 1 ms life, and settled.
     std::thread::sleep(Duration::from_secs(2));
     let pid = server.id();
