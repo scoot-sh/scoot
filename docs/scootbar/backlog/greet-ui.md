@@ -3,7 +3,7 @@ title: "scootgreet: the login screen, entry, focus chain, layout and Caps Lock, 
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "greet-greetd-client, scootui-entry-and-list"
+blocked: "greet-greetd-client"
 milestone: "M7"
 ---
 

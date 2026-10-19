@@ -3,7 +3,7 @@ title: "scootlaunch: the panel, keys, the virtualized list, the look layer"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scootui-entry-and-list"
+blocked: null
 milestone: "M7"
 ---
 

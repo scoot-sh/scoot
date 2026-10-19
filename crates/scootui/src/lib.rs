@@ -11,7 +11,9 @@
 //! layout, render and the layer-surface glue (which moves when
 //! `scootui-surfaces-on-demand` generalizes it).
 //!
-//! Features: `widgets` (the popup and the ellipsis cut), `icons` (path
+//! Features: `widgets` (the popup and the ellipsis cut), `entry` (the
+//! text entry with its password mode, the virtualized list, the inline
+//! selector and the focus chain), `icons` (path
 //! icons and the cache), `png` (PNG image icons), `tray` (tray pixmaps),
 //! `surfaces` (the on-demand layer and full-screen toplevel surfaces with
 //! their buffer pool), `wayland` (the poll loop's Wayland primitives:
@@ -80,6 +82,9 @@ pub mod test_support;
 
 #[cfg(feature = "widgets")]
 pub mod popup;
+
+#[cfg(feature = "entry")]
+pub mod entry;
 
 #[cfg(feature = "icons")]
 pub mod icon;

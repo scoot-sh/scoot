@@ -13,6 +13,14 @@ default = ["widgets", "icons"]
 widgets = []
 # Path and cached icons (no PNG decoder, no tray pixmaps).
 icons = []
+# The text entry, virtualized list, inline selector and focus chain the
+# launcher and the greeter type and pick through (scootlaunch's query
+# entry plus ranked list, scootgreet's password entry plus user and
+# session selectors). Pure state machines plus paint into the caller's
+# canvas: no Wayland, no I/O, no new dependency. Implied by no other
+# feature, so scootbar (which never enables it) links and draws exactly
+# what it did before.
+entry = []
 # PNG image icons, decoded once and cached.
 png = ["dep:png", "icons"]
 # Tray pixmaps, scaled through the shared resampler.
