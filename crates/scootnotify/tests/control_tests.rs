@@ -573,7 +573,8 @@ fn wait_matches_a_live_card_an_arrival_and_times_out() {
     );
     assert!(!out.status.success());
     assert!(start.elapsed() < Duration::from_secs(10));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("timed out"));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("timed out"), "stderr: {stderr}");
 
     kill(server);
 }
