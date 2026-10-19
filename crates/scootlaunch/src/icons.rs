@@ -52,9 +52,11 @@ pub const MAX_NAME_LEN: usize = 128;
 /// PNG files past this are refused (as `scootui::icon::image`'s).
 pub const MAX_PNG_FILE: u64 = 8 * 1024 * 1024;
 /// SVG files past this are refused before parsing: icons are text-small.
+#[cfg(feature = "svg")]
 pub const MAX_SVG_FILE: u64 = 512 * 1024;
 /// SVG `<` opens past this are refused before parsing: bounds parse
 /// time and memory without parsing first.
+#[cfg(feature = "svg")]
 pub const MAX_SVG_NODES: usize = 20_000;
 /// The longest icon side rendered, in device pixels: bounds raster
 /// time. The panel asks for at most a row height times a 3x scale.
@@ -484,12 +486,18 @@ fn is_usable_file(path: &Path) -> bool {
     if size == 0 {
         return false;
     }
-    let cap = if extension == "png" {
-        MAX_PNG_FILE
+    if extension == "png" {
+        size <= MAX_PNG_FILE
     } else {
-        MAX_SVG_FILE
-    };
-    size <= cap
+        #[cfg(feature = "svg")]
+        {
+            size <= MAX_SVG_FILE
+        }
+        #[cfg(not(feature = "svg"))]
+        {
+            false
+        }
+    }
 }
 
 /// A decoded icon at its raster size: premultiplied `b, g, r, a`,
