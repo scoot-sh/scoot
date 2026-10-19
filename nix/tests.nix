@@ -17152,8 +17152,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- '"$MENU" "$@"' ${bluePickScoot}
     grep -F -q -- '[ "$SCOOTLAUNCH" = "1" ]' ${netPickScoot}
     grep -F -q -- '[ "$SCOOTLAUNCH" = "1" ]' ${bluePickScoot}
-    grep -F -q -- "THEME=''''" ${netPickScoot}
-    grep -F -q -- "THEME=''''" ${bluePickScoot}
+    grep -F -q -- "THEME='''" ${netPickScoot}
+    grep -F -q -- "THEME='''" ${bluePickScoot}
     echo "ok: the opt-in runs the launcher and every menu through scootlaunch, unflagged"
 
     ${lib.optionalString isLinux ''
