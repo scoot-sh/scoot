@@ -27,7 +27,9 @@ pub fn default_path() -> PathBuf {
 
 /// The built-in defaults every row below documents: low 5 s, normal 10 s,
 /// critical never (the spec's urgency rule), at most 128 live, a
-/// per-sender bucket of 20 per second bursting to 40.
+/// per-sender bucket of 20 per second bursting to 40; a 360 px card
+/// stack at the top right with a 12 px margin, at most 5 cards, bodies
+/// wrapped to 5 lines, and expiry paused after 60 s without input.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
@@ -46,6 +48,47 @@ pub struct Config {
     /// Per-sender burst: past it a `Notify` still gets its id, but the
     /// card goes to history unshown.
     pub rate_burst: u32,
+    /// The card width, in logical pixels.
+    pub width_px: u32,
+    /// At most this many cards on screen; past it a "+N more" pill
+    /// covers the rest.
+    pub max_visible: u32,
+    /// The stack's distance from the screen edges, in logical pixels.
+    pub margin_px: u32,
+    /// The screen corner the stack anchors to.
+    pub anchor: Anchor,
+    /// The output the stack shows on: `None` is a null output, the
+    /// compositor's choice (today its primary; the
+    /// `layer-shell-default-output` ticket moves that to the output the
+    /// user is on). A name pins that output; when it is gone the stack
+    /// falls back to the compositor's choice.
+    pub output: Option<String>,
+    /// Body lines per card before the ellipsis.
+    pub body_lines: u32,
+    /// The urgency border width, in logical pixels (0 draws none).
+    pub border_px: u32,
+    /// The card corner radius, in logical pixels.
+    pub radius: u32,
+    /// Seconds without input after which every expiry clock pauses (0
+    /// disables): `ext-idle-notify` v2 counts only real input, so a
+    /// playing video does not count as presence. Someone who walked
+    /// away comes back to their notifications.
+    pub pause_when_idle_secs: u32,
+}
+
+/// The screen corner the stack anchors to: the layer-shell anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Anchor {
+    /// Top left.
+    TopLeft,
+    /// Top right (the default).
+    #[default]
+    TopRight,
+    /// Bottom left.
+    BottomLeft,
+    /// Bottom right.
+    BottomRight,
 }
 
 impl Default for Config {
@@ -57,6 +100,15 @@ impl Default for Config {
             max_live: 128,
             rate_per_sec: 20,
             rate_burst: 40,
+            width_px: 360,
+            max_visible: 5,
+            margin_px: 12,
+            anchor: Anchor::TopRight,
+            output: None,
+            body_lines: 5,
+            border_px: 2,
+            radius: 8,
+            pause_when_idle_secs: 60,
         }
     }
 }
@@ -124,6 +176,57 @@ impl Config {
             return Err(format!(
                 "config refused: timeout_normal_ms is {} (past timeout_max_ms {})",
                 self.timeout_normal_ms, self.timeout_max_ms
+            ));
+        }
+        if self.width_px < 10 || self.width_px > 1024 {
+            return Err(format!(
+                "config refused: width_px is {} (10 to 1024)",
+                self.width_px
+            ));
+        }
+        if self.max_visible == 0 || self.max_visible > 16 {
+            return Err(format!(
+                "config refused: max_visible is {} (1 to 16)",
+                self.max_visible
+            ));
+        }
+        if self.margin_px > 128 {
+            return Err(format!(
+                "config refused: margin_px is {} (0 to 128)",
+                self.margin_px
+            ));
+        }
+        if let Some(output) = &self.output
+            && (output.is_empty()
+                || output.len() > 256
+                || output.bytes().any(|byte| byte < 0x20 || byte == 0x7f))
+        {
+            return Err(format!(
+                "config refused: output is not a usable output name (1 to 256 printable bytes)"
+            ));
+        }
+        if self.body_lines == 0 || self.body_lines > 16 {
+            return Err(format!(
+                "config refused: body_lines is {} (1 to 16)",
+                self.body_lines
+            ));
+        }
+        if self.border_px > 8 {
+            return Err(format!(
+                "config refused: border_px is {} (0 to 8)",
+                self.border_px
+            ));
+        }
+        if self.radius > 64 {
+            return Err(format!(
+                "config refused: radius is {} (0 to 64)",
+                self.radius
+            ));
+        }
+        if self.pause_when_idle_secs > 3600 {
+            return Err(format!(
+                "config refused: pause_when_idle_secs is {} (0 to 3600)",
+                self.pause_when_idle_secs
             ));
         }
         Ok(self)

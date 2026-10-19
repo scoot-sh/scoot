@@ -20,8 +20,11 @@ pub mod bus;
 pub mod cli;
 pub mod config;
 pub mod daemon;
+pub mod look;
 pub mod markup;
 pub mod model;
+pub mod popup;
+pub mod view;
 
 /// Replays a committed fuzz corpus (`fuzz/corpus/<kind>` plus
 /// `fuzz/regressions/<kind>`) through `check` on stable: every seed
