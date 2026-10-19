@@ -90,6 +90,23 @@ fn arrows_tab_and_ctrl_hands_move() {
 }
 
 #[test]
+fn plain_home_and_end_move_the_caret_and_leave_the_selection() {
+    let mut ui = three();
+    for ch in "fi".chars() {
+        let mut buf = [0u8; 4];
+        ui.key(u32::from(ch), false, ch.encode_utf8(&mut buf));
+    }
+    let selected = ui.selected().map(|e| e.id.clone());
+    assert_eq!(ui.entry().caret(), 2);
+    ui.key(scootui::entry::KEY_HOME, false, "");
+    assert_eq!(ui.entry().caret(), 0, "Home goes to the line start");
+    assert_eq!(ui.selected().map(|e| e.id.clone()), selected);
+    ui.key(scootui::entry::KEY_END, false, "");
+    assert_eq!(ui.entry().caret(), 2, "End goes to the line end");
+    assert_eq!(ui.selected().map(|e| e.id.clone()), selected);
+}
+
+#[test]
 fn escape_cancels_and_ctrl_enter_runs_typed_text() {
     let mut ui = three();
     assert_eq!(ui.key(KEY_ESCAPE, false, ""), Outcome::Cancelled);

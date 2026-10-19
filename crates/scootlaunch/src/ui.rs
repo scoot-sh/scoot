@@ -21,7 +21,7 @@
 //! reports its id, and Ctrl+Enter reports the typed text, for the caller
 //! to print. Nothing here spawns.
 
-use scootui::entry::{Entry, KEY_TAB, List};
+use scootui::entry::{Entry, KEY_END, KEY_HOME, KEY_TAB, List};
 
 use crate::index;
 use crate::rank::{self, Ranker, Row, frecency::Frecency};
@@ -177,7 +177,11 @@ impl Ui {
             self.list.select_prev();
             return Outcome::Changed;
         }
-        if self.list.apply_key(keysym, ctrl) {
+        // Plain Home/End are the entry's caret keys; the list takes them
+        // only with Ctrl (the design's key table). `List::apply_key`
+        // would swallow both, so they skip it.
+        let for_the_entry = !ctrl && (keysym == KEY_HOME || keysym == KEY_END);
+        if !for_the_entry && self.list.apply_key(keysym, ctrl) {
             return Outcome::Changed;
         }
         if self.entry.apply_key(keysym, ctrl, text) {

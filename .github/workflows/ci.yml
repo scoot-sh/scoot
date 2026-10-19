@@ -1899,6 +1899,13 @@ jobs:
             echo "::error title=scootlaunch reaches the libc crate past xkbcommon::$bad"
             exit 1
           fi
+          # `cargo tree -i` names scootui and scootlaunch as fine (the libc
+          # chain runs through them), so a `libc` line in either manifest
+          # would pass it: refuse that directly.
+          if grep -nE '^libc[[:space:]]*(=|\.)' crates/scootlaunch/Cargo.toml crates/scootui/Cargo.toml; then
+            echo "::error title=a first-party crate depends on the libc crate directly::scootlaunch and scootui reach libc only through xkbcommon"
+            exit 1
+          fi
           echo "ok: the libc crate enters only through xkbcommon"
           # Weighed alone, never in a --workspace build (feature unification).
           RUSTFLAGS="-D warnings" cargo build --release -p scootlaunch
