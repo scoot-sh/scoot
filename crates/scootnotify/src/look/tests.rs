@@ -70,7 +70,6 @@ fn hostile_input_never_panics() {
         "[icons]\ntheme = \"../evil\"\ntheme = \".hidden\"\n",
         "opacity = \"opaque\"\nfont-size = 1.5\n",
         "[colors]\nborder = \"#1234567890abcdef\"\n",
-        "\u{feff}[colors]\nbackground = \"#101010\"\n",
     ] {
         let (look, notes) = parse(hostile);
         assert!(!notes.is_empty(), "{hostile:?}");
@@ -82,6 +81,15 @@ fn hostile_input_never_panics() {
     let (look, notes) = parse("[colors]\n");
     assert_eq!(look, Look::default());
     assert!(notes.is_empty());
+}
+
+#[test]
+fn a_bom_is_not_hostile() {
+    // TOML accepts the byte-order mark: the fragment parses, and the
+    // key lands.
+    let (look, notes) = parse("\u{feff}[colors]\nbackground = \"#101010\"\n");
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(look.theme.background, Color::parse("#101010").unwrap());
 }
 
 #[test]
