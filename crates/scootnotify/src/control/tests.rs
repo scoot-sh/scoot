@@ -981,10 +981,7 @@ fn dnd_holds_normal_cards_and_criticals_pass_through() {
     let now = Instant::now();
     let normal_in = incoming(":1.1", "Mail", "New", "body", false, Urgency::Normal);
     let (arrival, _) = harness.server.store_mut().notify(normal_in, now, 1_000);
-    assert!(matches!(
-        arrival,
-        crate::model::store::Arrival::Held { .. }
-    ));
+    assert!(matches!(arrival, crate::model::store::Arrival::Held { .. }));
     // Nothing live, but history keeps it, unseen.
     assert!(harness.server.store().live_ids().is_empty());
     assert_eq!(harness.server.store().history().len(), 1);
@@ -1034,7 +1031,11 @@ fn history_lists_closed_cards_oldest_first_and_restore_re_shows() {
     assert_eq!(live.id, 3);
     // The restored entry reads seen, and unread drops to zero.
     let reply = harness.ask(&Request::History.line());
-    assert!(reply["history"].as_array().unwrap()[1]["seen"].as_bool().unwrap());
+    assert!(
+        reply["history"].as_array().unwrap()[1]["seen"]
+            .as_bool()
+            .unwrap()
+    );
     assert_eq!(harness.server.store().unread(), 0);
 }
 

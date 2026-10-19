@@ -512,8 +512,16 @@ fn dnd_holds_history_keeps_and_restore_re_shows_end_to_end() {
     // DND on: a normal card holds (a new id, nothing live), a critical
     // still shows.
     let out = msg(&runtime, &["dnd", "on"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
-    assert!(String::from_utf8(out.stdout).unwrap().contains("\"dnd\":\"on\""));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .contains("\"dnd\":\"on\"")
+    );
     let held = notify(&mut client, "Mail", "New mail", &[]);
     assert!(list_cards(&runtime).is_empty());
     let critical = notify_urgent(&mut client, "Alert", "Fire", 2);
@@ -534,17 +542,29 @@ fn dnd_holds_history_keeps_and_restore_re_shows_end_to_end() {
 
     // Restore re-shows the held card as a new live card.
     let out = msg(&runtime, &["restore"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(list_cards(&runtime).len(), 2);
 
     // DND off answers the mode; held cards stay held (nothing shows
     // retroactively), and an empty restore refuses loudly.
     let out = msg(&runtime, &["dnd", "off"]);
     assert!(out.status.success());
-    assert!(String::from_utf8(out.stdout).unwrap().contains("\"dnd\":\"off\""));
+    assert!(
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .contains("\"dnd\":\"off\"")
+    );
     let out = msg(&runtime, &["dnd"]);
     assert!(out.status.success());
-    assert!(String::from_utf8(out.stdout).unwrap().contains("\"dnd\":\"off\""));
+    assert!(
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .contains("\"dnd\":\"off\"")
+    );
 
     kill(server);
 }

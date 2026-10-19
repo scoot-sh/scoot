@@ -22,7 +22,9 @@ fn argv_request(argv: &[&str]) -> ExecRequest {
 /// How many fds this process holds: the flood-fds-flat pin reads it.
 #[cfg(target_os = "linux")]
 fn fds_now() -> usize {
-    std::fs::read_dir("/proc/self/fd").map(|entries| entries.count()).unwrap_or(0)
+    std::fs::read_dir("/proc/self/fd")
+        .map(|entries| entries.count())
+        .unwrap_or(0)
 }
 
 #[test]

@@ -226,10 +226,7 @@ fn history_human() -> i32 {
             return 1;
         }
     };
-    let Some(entries) = parsed
-        .get("history")
-        .and_then(|entries| entries.as_array())
-    else {
+    let Some(entries) = parsed.get("history").and_then(|entries| entries.as_array()) else {
         warn(format_args!(
             "scootnotify: unreadable reply from the daemon: no `history`"
         ));

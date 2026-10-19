@@ -84,7 +84,10 @@ fn pixels_never_cross_into_history() {
     store.presented(id, start, 0);
     // Dismiss it so it enters history as a seen card.
     store.dismiss(id);
-    let newest = store.history().newest().expect("a dismissal enters history");
+    let newest = store
+        .history()
+        .newest()
+        .expect("a dismissal enters history");
     assert!(newest.seen);
     assert!(newest.icon.is_none());
 }

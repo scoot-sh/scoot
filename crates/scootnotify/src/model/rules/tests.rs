@@ -7,7 +7,14 @@ use crate::config::{Rule, RuleUrgency};
 use super::{Timeout, decide, matches};
 
 fn ruled(rules: &[Rule]) -> super::Decision {
-    decide(rules, "Mail", "mail.desktop", "email.arrived", Urgency::Normal, "New mail")
+    decide(
+        rules,
+        "Mail",
+        "mail.desktop",
+        "email.arrived",
+        Urgency::Normal,
+        "New mail",
+    )
 }
 
 #[test]
@@ -94,10 +101,24 @@ fn a_trailing_dot_is_a_class_prefix() {
         category: Some("device.".to_owned()),
         ..Rule::default()
     };
-    assert!(matches(&rule, "a", "b", "device.added", Urgency::Normal, "s"));
+    assert!(matches(
+        &rule,
+        "a",
+        "b",
+        "device.added",
+        Urgency::Normal,
+        "s"
+    ));
     assert!(matches(&rule, "a", "b", "device", Urgency::Normal, "s"));
     assert!(!matches(&rule, "a", "b", "devicex", Urgency::Normal, "s"));
-    assert!(!matches(&rule, "a", "b", "other.added", Urgency::Normal, "s"));
+    assert!(!matches(
+        &rule,
+        "a",
+        "b",
+        "other.added",
+        Urgency::Normal,
+        "s"
+    ));
 }
 
 #[test]

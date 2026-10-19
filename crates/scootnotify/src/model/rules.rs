@@ -63,7 +63,11 @@ pub fn matches(
     urgency: Urgency,
     summary: &str,
 ) -> bool {
-    if rule.app_name.as_deref().is_some_and(|want| want != app_name) {
+    if rule
+        .app_name
+        .as_deref()
+        .is_some_and(|want| want != app_name)
+    {
         return false;
     }
     if rule

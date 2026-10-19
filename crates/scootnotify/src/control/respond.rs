@@ -19,7 +19,7 @@ use std::time::Instant;
 
 use scoot_dbus::conn::Conn;
 
-use super::protocol::{PROTOCOL_VERSION, DndMode, ReloadScope, Reply, Request, write_reply};
+use super::protocol::{DndMode, PROTOCOL_VERSION, ReloadScope, Reply, Request, write_reply};
 use super::{Handler, Kinds, MAX_SUBSCRIBERS};
 use crate::bus::server::Server;
 use crate::config::{self, Config};

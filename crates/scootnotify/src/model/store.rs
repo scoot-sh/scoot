@@ -185,7 +185,9 @@ pub enum Arrival {
     /// Held by DND or a rule's `hide`: the id is spent, the card never
     /// stored, and (unless `transient` or a rule's `history = false`)
     /// the history ring keeps it, unseen.
-    Held { id: u32 },
+    Held {
+        id: u32,
+    },
     /// Past the rate limit: the id is spent, the card never stored, and
     /// `suppressed` counts it for the summary card.
     Suppressed {
@@ -624,8 +626,11 @@ impl Store {
     /// `None` when history is empty.
     pub fn restore(&mut self, now: Instant, now_ms: u64) -> Option<(u32, Option<Closure>)> {
         let entry = self.history.newest()?.clone();
-        let (urgency, category, desktop_entry) =
-            (entry.urgency, entry.category.clone(), entry.desktop_entry.clone());
+        let (urgency, category, desktop_entry) = (
+            entry.urgency,
+            entry.category.clone(),
+            entry.desktop_entry.clone(),
+        );
         let icon = match &entry.icon {
             None => Icon::None,
             Some(crate::model::history::IconName::Name(name)) => Icon::Name(name.clone()),

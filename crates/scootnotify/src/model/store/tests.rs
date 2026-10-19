@@ -593,7 +593,10 @@ fn restore_re_shows_the_newest_with_a_new_id() {
     assert_eq!(store.get(id).unwrap().app_name, "b");
     // The restored card presents and expires normally.
     store.presented(id, start, 0);
-    assert_eq!(store.expired(start + Duration::from_millis(10_000)).len(), 1);
+    assert_eq!(
+        store.expired(start + Duration::from_millis(10_000)).len(),
+        1
+    );
 }
 
 #[test]
