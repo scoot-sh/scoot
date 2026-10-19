@@ -257,8 +257,7 @@ fn bus_info(client: &mut Conn, token: u64) {
     let Event::Reply { .. } = until(
         client,
         |event| matches!(event, Event::Reply { token: got, .. } if *got == token),
-    )
-    else {
+    ) else {
         unreachable!()
     };
 }

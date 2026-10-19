@@ -331,11 +331,7 @@ impl Harness {
         self.ask_at(line, None, Instant::now(), 1_000)
     }
 
-    fn ask_with_look(
-        &mut self,
-        line: &str,
-        look_state: Option<&Path>,
-    ) -> serde_json::Value {
+    fn ask_with_look(&mut self, line: &str, look_state: Option<&Path>) -> serde_json::Value {
         self.ask_at(line, look_state, Instant::now(), 1_000)
     }
 
@@ -378,7 +374,14 @@ fn list_shows_every_live_field() {
     // 10 s default reads exactly (a later view would truncate a
     // millisecond off the remainder).
     let now = Instant::now();
-    let id = harness.notify_at(":1.1", "Firefox", "Done", "<b>file</b> &amp; more", now, 1_000);
+    let id = harness.notify_at(
+        ":1.1",
+        "Firefox",
+        "Done",
+        "<b>file</b> &amp; more",
+        now,
+        1_000,
+    );
     harness.server.store_mut().presented(id, now, 1_000);
     let reply = harness.ask_at(&Request::List.line(), None, now, 1_000);
     let cards = reply["notifications"].as_array().unwrap();
