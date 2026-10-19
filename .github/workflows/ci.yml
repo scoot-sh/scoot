@@ -218,6 +218,7 @@ jobs:
       scootnotify: ${{ steps.classify.outputs.scootnotify }}
       look: ${{ steps.classify.outputs.look }}
       backlog: ${{ steps.classify.outputs.backlog }}
+      release-config: ${{ steps.classify.outputs.release_config }}
       docs-site: ${{ steps.classify.outputs.docs_site }}
       session: ${{ steps.classify.outputs.session }}
     steps:
@@ -239,6 +240,7 @@ jobs:
           scootnotify=true
           look=true
           backlog=true
+          release_config=true
           docs_site=true
           session=true
           if [ "$EVENT" = pull_request ] && changed=$(git diff --name-only --no-renames HEAD^1 HEAD) && [ -n "$changed" ]; then
@@ -251,6 +253,7 @@ jobs:
             scootnotify=false
             look=false
             backlog=false
+            release_config=false
             docs_site=false
             session=false
             while IFS= read -r path; do
@@ -283,7 +286,13 @@ jobs:
                 # The release tooling: release.yml's lint job owns it
                 # (actionlint over both release workflows, the tools'
                 # tests), so a change there alone runs nothing here.
-                .github/workflows/release.yml | .github/workflows/release-plz.yml | release-plz.toml | scripts/release-resolve | scripts/release-notes | scripts/workspace-version | scripts/sync-fuzz-locks | scripts/test_release_resolve.py) ;;
+                .github/workflows/release.yml | .github/workflows/release-plz.yml | scripts/release-resolve | scripts/release-notes | scripts/workspace-version | scripts/sync-fuzz-locks | scripts/test_release_resolve.py) ;;
+                # release-plz's config and the check that every crate newer
+                # than the last tag has its entry there (its own job; a new
+                # crate's Cargo.toml reaches the catch-all below and runs it
+                # too).
+                release-plz.toml | scripts/check-release-plz-crates | scripts/test_check_release_plz_crates.py)
+                  release_config=true ;;
                 # The backlog tool and its tests: only their own job.
                 scripts/backlog | scripts/test_backlog.py)
                   backlog=true ;;
@@ -414,12 +423,13 @@ jobs:
                   scootnotify=true
                   look=true
                   backlog=true
+                  release_config=true
                   docs_site=true
                   session=true ;;
               esac
             done <<<"$changed"
           fi
-          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar scootlaunch=$scootlaunch scootnotify=$scootnotify look=$look backlog=$backlog docs_site=$docs_site session=$session"
+          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar scootlaunch=$scootlaunch scootnotify=$scootnotify look=$look backlog=$backlog release_config=$release_config docs_site=$docs_site session=$session"
           {
             echo "scoot=$scoot"
             echo "macos=$macos"
@@ -429,6 +439,7 @@ jobs:
             echo "scootnotify=$scootnotify"
             echo "look=$look"
             echo "backlog=$backlog"
+            echo "release_config=$release_config"
             echo "docs_site=$docs_site"
             echo "session=$session"
           } >>"$GITHUB_OUTPUT"
@@ -447,6 +458,26 @@ jobs:
       - uses: actions/checkout@v7
       - name: scripts/backlog tests
         run: python3 scripts/test_backlog.py
+
+  # release-plz fails on any crate newer than the last tag unless
+  # release-plz.toml gives it a tag template of its own (see the script's
+  # header); that left main's release-plz workflow red for 15 hours once.
+  # Needs the tags. Fail open like the other jobs.
+  release-plz-crates:
+    name: release-plz covers every crate
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.release-config != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Check release-plz.toml against the last tag
+        run: scripts/check-release-plz-crates
+      - name: The check's own tests
+        run: python3 scripts/test_check_release_plz_crates.py
 
   # The session launcher harness (scripts/scoot-session-test.sh): the proof
   # that the greeter-started session orders the display import before

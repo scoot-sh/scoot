@@ -106,9 +106,12 @@ A new crate under `crates/` needs a `[[package]]` entry in `release-plz.toml`
 with its own `git_tag_name` (for example `<crate>-v{{ version }}`) the first
 release after it lands. All packages share the `v{{ version }}` tag, so
 without it release-plz looks for the crate in the previous release's checkout,
-where it does not exist, and the release PR job fails. `scoot-look` is the
-worked example; the crate also goes in the `scoot` package's
-`changelog_include`.
+where it does not exist, and the release PR job fails. `scoot-look` was the
+first example; the crate also goes in the `scoot` package's
+`changelog_include` when its changes are user-visible. CI enforces the entry:
+`scripts/check-release-plz-crates` fails a change that adds a crate without
+one, and warns about an entry whose crate is already in the last tag (drop it
+in the next release PR).
 
 The maintainer reviews the PR and may change the version in `Cargo.toml` and
 the heading in `CHANGELOG.md` before merging. Merging it is the release:
