@@ -222,6 +222,7 @@ fn notify_body(
 /// the server's fate (its exit code and stderr when it died, which is
 /// the startup crash; still-running when it is slow), because a bare
 /// deadline cost a debugging round already.
+#[allow(clippy::too_many_arguments)] // One call site per arg; a struct would hide them.
 fn notify(
     client: &mut Conn,
     server: &mut Child,
