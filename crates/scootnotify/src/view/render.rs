@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use scootui::paint::{Canvas, Corners, Span};
+use scootui::paint::{Canvas, Span};
 use scootui::text::Text;
 
 use crate::config::Config;
@@ -123,27 +123,16 @@ fn paint_card(
 }
 
 /// Fills `rect` with `color` at `alpha` (255 opaque) and rounded corners
-/// of `radius`: the card fill and its urgency ring. The opaque path is
-/// the shared rounded fill; the translucent path blends coverage × alpha
-/// per pixel through the shared blender (the gaps stay transparent
-/// either way).
+/// of `radius`: the card fill and its urgency ring. Coverage is analytic
+/// per pixel (the bar's corner tables would allocate per repaint), run
+/// through the shared blender, so this allocates nothing and reads
+/// correct over any destination (the inset fill over its ring, cartoon
+/// text over the fill).
 fn fill_card(canvas: &mut Canvas<'_>, rect: Rect, radius: u32, color: scootui::color::Color, alpha: u8) {
     if rect.width == 0 || rect.height == 0 {
         return;
     }
     let radius = radius.min(rect.width / 2).min(rect.height / 2);
-    if alpha == 255 {
-        let corners = Corners::new(radius);
-        canvas.fill_rounded(
-            rect.x,
-            rect.y,
-            rect.x + rect.width,
-            rect.y + rect.height,
-            color,
-            &corners,
-        );
-        return;
-    }
     let clip = Span {
         x: 0,
         width: canvas.width(),
@@ -158,6 +147,8 @@ fn fill_card(canvas: &mut Canvas<'_>, rect: Rect, radius: u32, color: scootui::c
             if coverage == 0 {
                 continue;
             }
+            // The fill's alpha times the corner's coverage, through one
+            // blend: opaque fills replace, translucent ones composite.
             let blended = (u32::from(alpha) * u32::from(coverage) + 127) / 255;
             canvas.blend(x as i64, y as i64, blended.min(255) as u8, color, clip);
         }
@@ -210,8 +201,13 @@ fn paint_icon(
     let side = super::layout::ICON_PX;
     let ix = card.rect.x + border + super::layout::PAD;
     let iy = card.rect.y + border + super::layout::PAD;
-    let corners = Corners::new(8);
-    canvas.fill_rounded(ix, iy, ix + side, iy + side, look.theme.dim, &corners);
+    fill_card(
+        canvas,
+        crate::view::layout::Rect { x: ix, y: iy, width: side, height: side },
+        8,
+        look.theme.dim,
+        255,
+    );
     let metrics = text.metrics(em);
     // The tile letter on the stack (no format!: the repaint allocates
     // nothing).
@@ -340,15 +336,7 @@ fn paint_button(
 ) {
     let rect = button.rect;
     if hovered {
-        let corners = Corners::new(6);
-        canvas.fill_rounded(
-            rect.x,
-            rect.y,
-            rect.x + rect.width,
-            rect.y + rect.height,
-            look.theme.hover,
-            &corners,
-        );
+        fill_card(canvas, rect, 6, look.theme.hover, 255);
     } else {
         // The 1 px outline, four edges.
         canvas.fill_rect(
