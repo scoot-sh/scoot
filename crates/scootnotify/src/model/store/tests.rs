@@ -579,18 +579,17 @@ fn a_replace_applies_the_rule_overrides_without_hiding() {
 fn restore_re_shows_the_newest_with_a_new_id() {
     let mut store = store();
     let start = now();
-    let _ = shown(&mut store, ":1.1", "a");
-    let _ = shown(&mut store, ":1.1", "b");
+    let a = shown(&mut store, ":1.1", "a");
+    let b = shown(&mut store, ":1.1", "b");
     // Two live cards, nothing closed: history is empty, restore refuses.
     assert!(store.history().is_empty());
     assert!(store.restore(start, 0).is_none());
-    let live: Vec<u32> = store.live_ids();
-    store.dismiss(live[0]);
-    store.dismiss(live[1]);
+    store.dismiss(a);
+    store.dismiss(b);
     assert_eq!(store.history().len(), 2);
     let (id, evicted) = store.restore(start, 0).expect("history is kept");
     assert_eq!(evicted, None);
-    assert_ne!(id, live[0]);
+    assert_ne!(id, b);
     assert_eq!(store.get(id).unwrap().app_name, "b");
     // The restored card presents and expires normally.
     store.presented(id, start, 0);

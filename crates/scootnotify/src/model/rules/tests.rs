@@ -121,12 +121,13 @@ fn later_scalars_win_and_execs_accumulate() {
         ..Rule::default()
     };
     let decision = ruled(&[first, second]);
-    // Later keys win.
+    // Later keys win (where the later rule speaks: it never sets an
+    // output, so the first rule's pin stands).
     assert_eq!(decision.urgency, Some(Urgency::Critical));
     assert_eq!(decision.timeout, Some(Timeout::Never));
     assert!(decision.hide);
     assert!(!decision.keep_history);
-    assert_eq!(decision.output.as_deref(), None);
+    assert_eq!(decision.output.as_deref(), Some("HDMI-1"));
     assert!(decision.dnd_bypass);
     // Every matching exec runs, in rule order.
     assert_eq!(decision.execs.len(), 2);
