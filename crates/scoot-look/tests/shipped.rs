@@ -1,5 +1,5 @@
 //! The five shipped looks under `looks/`: each validates as a shipped look
-//! and renders the first-party fragments plus the greeter's.
+//! and renders the first-party fragments plus the greeter's and the launcher's.
 //!
 //! The gate behind the theming page's "a check renders every look into
 //! every target and fails on a missing role": CI runs this on every change
@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use scoot_look::{
     Origin, RenderInputs, check_contrast, parse_kv_config, render_bar, render_fuzzel, render_greet,
-    render_scoot, render_swaylock, resolve,
+    render_launch, render_scoot, render_swaylock, resolve,
 };
 
 /// Every directory under `looks/` with a `look.toml`.
@@ -294,6 +294,28 @@ fn every_shipped_look_validates_and_renders() {
             greet.get("font").and_then(|font| font.as_str()),
             Some(look.fonts.sans.as_str()),
             "{name}: the greeter reads the UI sans"
+        );
+        // The launcher fragment renders for every shipped look too: all
+        // thirteen shell-app roles, the UI font at its popup size, the
+        // popups opacity, with the look's radius. scootlaunch reads it
+        // at every open.
+        let launch = render_launch(&look)
+            .unwrap_or_else(|e| panic!("{name}: launch.toml does not render: {e}"));
+        let launch: toml::Value =
+            toml::from_str(&launch).unwrap_or_else(|e| panic!("{name}: launch.toml reparse: {e}"));
+        let colors = launch
+            .get("colors")
+            .and_then(|colors| colors.as_table())
+            .unwrap_or_else(|| panic!("{name}: launch.toml has no [colors]"));
+        assert_eq!(
+            colors.len(),
+            13,
+            "{name}: launch.toml carries the thirteen shell-app roles"
+        );
+        assert_eq!(
+            launch.get("font").and_then(|font| font.as_str()),
+            Some(look.fonts.ui.as_str()),
+            "{name}: the panel reads the UI font"
         );
     }
 }

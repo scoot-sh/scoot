@@ -951,3 +951,93 @@ fn greet_overrides_merge() {
     )]);
     assert!(render_greet(&look).is_err());
 }
+
+#[test]
+fn launch_fragment_carries_the_shell_contract() {
+    // The launcher fragment holds all thirteen color roles, the UI font
+    // at its popup size, translucent at the popups opacity, with the
+    // look's radius. Moonrise sets no popups opacity, so it renders the
+    // 1.0 default; its popup size defaults to its 10 pt size (13 px).
+    let frag = render_launch(&moonrise()).expect("renders");
+    for line in [
+        "background = \"#2B3648\"",
+        "foreground = \"#F6EEDC\"",
+        "dim = \"#9C8B95\"",
+        "accent = \"#FFA45C\"",
+        "urgent = \"#E87F6A\"",
+        "surface = \"#2B3648\"",
+        "hover = \"#FFA45C\"",
+        "focus = \"#FFA45C\"",
+        "border = \"#9C8B95\"",
+        "accent-fg = \"#2B3648\"",
+        "selection = \"#FFA45C\"",
+        "selection-text = \"#2B3648\"",
+        "match = \"#FFA45C\"",
+        "font = \"DroidSansM Nerd Font Propo\"",
+        "font-size = 13",
+        "opacity = 1.0",
+        "radius = 14",
+    ] {
+        assert!(frag.contains(line), "missing {line}:\n{frag}");
+    }
+    // One `[colors]`, and the scalar keys stay top-level (before it):
+    // keys after a table would land in that table.
+    assert_eq!(frag.matches("[colors]").count(), 1, "colors table:\n{frag}");
+    let colors_at = frag.find("[colors]").expect("a colors table");
+    for key in ["font =", "font-size =", "opacity =", "radius ="] {
+        let at = frag.find(key).expect("a scalar key");
+        assert!(at < colors_at, "{key} lands under [colors]:\n{frag}");
+    }
+    let parsed: toml::Table = toml::from_str(&frag).expect("launch fragment reparses");
+    assert_eq!(parsed["colors"].as_table().expect("colors").len(), 13);
+    assert_eq!(parsed["font"].as_str(), Some("DroidSansM Nerd Font Propo"));
+}
+
+#[test]
+fn launch_fragment_follows_popups_opacity() {
+    // Unlike the greeter's, the launcher's opacity is the look's
+    // `opacity.popups`: a translucent look draws a translucent panel.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[shape]",
+        "[opacity]\nbar = 0.5\npopups = 0.5\nterminal = 0.5\n[shape]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let frag = render_launch(&look).expect("renders");
+    assert!(
+        frag.contains("opacity = 0.5"),
+        "launcher follows popups opacity:\n{frag}"
+    );
+}
+
+#[test]
+fn launch_overrides_merge() {
+    // `[apps.scootlaunch]` roles replace the derived ones and dotless
+    // keys replace the top-level values, each emitted once.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[apps.scootlaunch]\n\"colors.accent\" = \"#000000\"\n\"radius\" = 3\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let frag = render_launch(&look).expect("renders");
+    assert_eq!(
+        frag.matches("[colors]").count(),
+        1,
+        "duplicate table:\n{frag}"
+    );
+    let parsed: toml::Table = toml::from_str(&frag).expect("launch fragment reparses");
+    assert_eq!(parsed["colors"]["accent"].as_str(), Some("#000000"));
+    assert_eq!(parsed["radius"].as_integer(), Some(3));
+    // A scoot key through the launcher renderer is refused, not misplaced.
+    let mut look = moonrise();
+    look.apps = BTreeMap::from([(
+        "scootlaunch".to_string(),
+        BTreeMap::from([("binds.foo".to_string(), toml::Value::String("x".into()))]),
+    )]);
+    assert!(render_launch(&look).is_err());
+}
