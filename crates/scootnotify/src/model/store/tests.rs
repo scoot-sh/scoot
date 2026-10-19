@@ -435,6 +435,15 @@ fn dnd_holds_normal_cards_unseen_while_criticals_show() {
     store.set_dnd(Dnd::Off);
     assert!(store.live_ids().len() == 1);
     assert_eq!(store.unread(), 1);
+    // A transient card held by DND still answers its id, but never
+    // enters history.
+    store.set_dnd(Dnd::On);
+    let mut transient_in = incoming(":1.1", "c");
+    transient_in.hints.transient = true;
+    let before = store.history().len();
+    let (arrival, _) = store.notify(transient_in, now(), 0);
+    assert!(matches!(arrival, Arrival::Held { .. }));
+    assert_eq!(store.history().len(), before);
 }
 
 #[test]
@@ -470,6 +479,26 @@ fn a_rule_hide_holds_and_history_false_skips() {
     );
     let (arrival, _) = store.notify(incoming(":1.1", "Quiet"), start, 0);
     assert!(matches!(arrival, Arrival::Held { .. }));
+    assert!(store.history().is_empty());
+    // `history = false` without `hide`: the card shows, but its close
+    // leaves nothing behind.
+    let mut store = Store::new(
+        Config {
+            rule: vec![Rule {
+                app_name: Some("Loud".to_owned()),
+                history: false,
+                ..Rule::default()
+            }],
+            ..Config::default()
+        },
+        IdFile::open(None),
+    );
+    let (arrival, _) = store.notify(incoming(":1.1", "Loud"), start, 0);
+    let Arrival::Shown { id, .. } = arrival else {
+        panic!("shows");
+    };
+    store.presented(id, start, 0);
+    store.dismiss(id);
     assert!(store.history().is_empty());
 }
 

@@ -39,6 +39,7 @@ fn a_fifth_child_while_four_run_is_refused() {
     let error = spawner.spawn(&request("true")).unwrap_err();
     assert!(error.contains("4"), "{error}");
     spawner.kill_all();
+    spawner.reap();
     assert_eq!(spawner.running(), 0);
 }
 
@@ -109,6 +110,15 @@ fn a_flood_leaves_fds_flat() {
         after <= before + 2,
         "an exec flood costs fds: {before} -> {after}"
     );
+    // And the freed slots serve again.
+    for _ in 0..MAX_CHILDREN {
+        spawner
+            .spawn(&argv_request(&["sleep", "120"]))
+            .expect("slots freed");
+    }
+    spawner.kill_all();
+    spawner.reap();
+    assert_eq!(spawner.running(), 0);
 }
 
 #[test]
