@@ -29,10 +29,10 @@ BuildRequires:  libxkbcommon-devel
 scootlaunch is the keyboard-first application launcher for the scoot
 compositor, and runs standalone under any compositor speaking standard
 Wayland protocols. It ranks desktop entries as you type, launches them
-with an activation token in their own systemd scope, and also drives
-dmenu-style picks and headless `--list --json` queries. A missing
-config file is the built-in defaults: check one with `scootlaunch
---check`.
+with an activation token in their own systemd scope, and also answers
+menu-style picks from standard input and headless list queries. A
+missing config file is the built-in defaults: check one with
+`scootlaunch --check`.
 
 %prep
 # Same vendored-tarball layout as scoot.spec: ./source/, not ./Name-Version.

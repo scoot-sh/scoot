@@ -116,7 +116,10 @@ Notes:
   on all five entry points (the project ships no man pages yet, for any
   distro) and `no-documentation` on `scootbg` (its config surface is the
   `[wallpaper]` section documented in the `scoot` package's example, so it
-  deliberately ships no `%doc` of its own). One documented override file,
+  deliberately ships no `%doc` of its own) and on `scootlaunch` (its
+  three optional keys are documented on the site, and a missing file is
+  the built-in defaults, so it deliberately ships no `%doc` of its own
+  either; `%check` covers `--check` on those defaults). One documented override file,
   `packaging/rpm/rpmlintrc`, used only by the openSUSE job: openSUSE's
   en_US dictionary flags the bare token `config` (config files and their
   `~/.config` paths), Fedora's does not — the filter is scoped to that
