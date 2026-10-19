@@ -200,10 +200,16 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
             if spin_debug {
                 spins += 1;
                 if spins == 200_000 {
-                    eprintln!(
-                        "SPIN?: 200k no-poll turns (capped={capped} staged={} write={})",
-                        conn.has_staged_work(),
-                        conn.want_write()
+                    // To a file, not stderr: the harness holds the
+                    // pipe open while the daemon lives, so stderr is
+                    // unreadable until it dies.
+                    let _ = std::fs::write(
+                        "/tmp/scootnotify-spin.log",
+                        format!(
+                            "200k no-poll turns (capped={capped} staged={} write={})\n",
+                            conn.has_staged_work(),
+                            conn.want_write()
+                        ),
                     );
                 }
             }
