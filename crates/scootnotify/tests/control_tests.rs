@@ -430,7 +430,7 @@ fn version_and_list_answer() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("\"protocol\":1"), "{stdout}");
+    assert!(stdout.contains("\"protocol\":2"), "{stdout}");
 
     let out = msg(&runtime, &["list", "--json"]);
     assert!(
@@ -448,6 +448,103 @@ fn version_and_list_answer() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(String::from_utf8(out.stdout).unwrap().is_empty());
+
+    kill(server);
+}
+
+#[test]
+fn dnd_holds_history_keeps_and_restore_re_shows_end_to_end() {
+    let Some(bus) = bus_or_skip() else { return };
+    let runtime = scratch("dnd-hist");
+    let mut server = spawn_server(&bus, &runtime);
+    let mut client = connect(&bus);
+    wait_serving(&mut client, &mut server);
+
+    // DND on: a normal card holds (a new id, nothing live), a critical
+    // still shows.
+    let out = msg(&runtime, &["dnd", "on"]);
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8(out.stdout).unwrap().contains("\"dnd\":\"on\""));
+    let held = notify(&mut client, "Mail", "New mail", &[]);
+    assert!(list_cards(&runtime).is_empty());
+    let critical = notify(&mut client, "Alert", "Fire", &[]);
+    assert_eq!(list_cards(&runtime).len(), 1);
+    let _ = critical;
+
+    // History keeps the held card, unseen; the shown one is not there yet.
+    let out = msg(&runtime, &["history", "--json"]);
+    assert!(out.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert_eq!(parsed["type"], "history");
+    let entries = parsed["history"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["app_name"], "Mail");
+    assert_eq!(entries[0]["seen"], false);
+    let _ = held;
+
+    // Restore re-shows the held card as a new live card.
+    let out = msg(&runtime, &["restore"]);
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(list_cards(&runtime).len(), 2);
+
+    // DND off answers the mode; held cards stay held (nothing shows
+    // retroactively), and an empty restore refuses loudly.
+    let out = msg(&runtime, &["dnd", "off"]);
+    assert!(out.status.success());
+    assert!(String::from_utf8(out.stdout).unwrap().contains("\"dnd\":\"off\""));
+    let out = msg(&runtime, &["dnd"]);
+    assert!(out.status.success());
+    assert!(String::from_utf8(out.stdout).unwrap().contains("\"dnd\":\"off\""));
+
+    kill(server);
+}
+
+#[test]
+fn a_rule_exec_fires_end_to_end_and_history_false_skips() {
+    let Some(bus) = bus_or_skip() else { return };
+    let runtime = scratch("rule-exec");
+    // The daemon reads its own file at start: one rule hides its match
+    // and rings a hook, another keeps its match out of history.
+    let config_dir = runtime.path().join("config").join("scoot");
+    std::fs::create_dir_all(&config_dir).expect("a config dir");
+    let fired = runtime.path().join("hook-fired");
+    std::fs::write(
+        config_dir.join("notify.toml"),
+        format!(
+            "[[rule]]\napp_name = \"Hook\"\nhide = true\nexec = [\"sh\", \"-c\", \"touch {}\"]\n\
+             [[rule]]\napp_name = \"Quiet\"\nhistory = false\n",
+            fired.display()
+        ),
+    )
+    .expect("a config file");
+    let mut server = spawn_server(&bus, &runtime);
+    let mut client = connect(&bus);
+    wait_serving(&mut client, &mut server);
+
+    notify(&mut client, "Hook", "ring", &[]);
+    // Hidden: nothing live.
+    assert!(list_cards(&runtime).is_empty());
+    // The hook ran: the file appears (the daemon spawns and reaps it).
+    let start = Instant::now();
+    while fired.metadata().is_err() && start.elapsed() < Duration::from_secs(10) {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(fired.metadata().is_ok(), "the rule exec ran");
+    // But the hidden card is in history (hide is not history=false).
+    let out = msg(&runtime, &["history", "--json"]);
+    assert!(out.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert_eq!(parsed["history"].as_array().unwrap().len(), 1);
+
+    // `history = false` keeps the match out of the ring entirely.
+    notify(&mut client, "Quiet", "shh", &[]);
+    let out = msg(&runtime, &["history", "--json"]);
+    assert!(out.status.success());
+    let parsed: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
+    assert_eq!(parsed["history"].as_array().unwrap().len(), 1);
 
     kill(server);
 }

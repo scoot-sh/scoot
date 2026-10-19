@@ -997,8 +997,11 @@ fn dnd_holds_normal_cards_and_criticals_pass_through() {
 #[test]
 fn history_lists_closed_cards_oldest_first_and_restore_re_shows() {
     let mut harness = Harness::new();
-    let first = harness.notify(":1.1", "A", "one", "body one");
-    let second = harness.notify(":1.1", "B", "two", "body two");
+    let now = Instant::now();
+    let first = harness.notify_at(":1.1", "A", "one", "body one", now, 1_000);
+    harness.server.store_mut().presented(first, now, 1_000);
+    let second = harness.notify_at(":1.1", "B", "two", "body two", now, 1_000);
+    harness.server.store_mut().presented(second, now, 1_000);
     harness.ask(
         &Request::Dismiss {
             id: Some(first),

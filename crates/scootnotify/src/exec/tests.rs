@@ -30,11 +30,11 @@ fn a_fifth_child_while_four_run_is_refused() {
     let mut spawner = Spawner::default();
     for _ in 0..MAX_CHILDREN {
         spawner
-            .spawn(&argv_request(&["/bin/sleep", "120"]))
+            .spawn(&argv_request(&["sleep", "120"]))
             .expect("slots free");
     }
     assert_eq!(spawner.running(), MAX_CHILDREN);
-    let error = spawner.spawn(&request("/bin/true")).unwrap_err();
+    let error = spawner.spawn(&request("true")).unwrap_err();
     assert!(error.contains("4"), "{error}");
     spawner.kill_all();
     assert_eq!(spawner.running(), 0);
@@ -46,7 +46,7 @@ fn a_fifth_child_while_four_run_is_refused() {
 fn quick_children_free_their_slots() {
     let mut spawner = Spawner::default();
     for _ in 0..8 {
-        spawner.spawn(&request("/bin/true")).expect("true runs");
+        spawner.spawn(&request("true")).expect("true runs");
     }
     // Every `true` exited at once: the next spawn's opening reap frees
     // them all, so eight sequential runs never trip the bound of four.
@@ -67,7 +67,7 @@ fn a_missing_program_is_an_error_not_a_panic() {
 #[test]
 fn an_empty_argv_is_refused() {
     let mut spawner = Spawner::default();
-    let mut empty = request("/bin/true");
+    let mut empty = request("true");
     empty.argv.clear();
     assert!(spawner.spawn(&empty).is_err());
     assert_eq!(spawner.running(), 0);
@@ -79,9 +79,9 @@ fn a_flood_leaves_fds_flat() {
     let mut spawner = Spawner::default();
     let before = fds_now();
     for _ in 0..MAX_CHILDREN {
-        let _ = spawner.spawn(&argv_request(&["/bin/sleep", "120"]));
+        let _ = spawner.spawn(&argv_request(&["sleep", "120"]));
     }
-    let error = spawner.spawn(&request("/bin/true")).unwrap_err();
+    let error = spawner.spawn(&request("true")).unwrap_err();
     assert!(error.contains("4"), "{error}");
     spawner.kill_all();
     spawner.reap();
@@ -97,9 +97,9 @@ fn the_environment_carries_the_notification() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("a scratch dir");
     let out = dir.join("env");
-    let mut hook = request("/bin/sh");
+    let mut hook = request("sh");
     hook.argv = vec![
-        "/bin/sh".to_owned(),
+        "sh".to_owned(),
         "-c".to_owned(),
         format!("env > {}", out.display()),
     ];
