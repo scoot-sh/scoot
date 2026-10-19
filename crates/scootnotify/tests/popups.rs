@@ -200,9 +200,13 @@ fn notify_body(
     out.take_body().unwrap()
 }
 
-/// One `Notify` answered: returns the id.
+/// One `Notify` answered: returns the id. On timeout the panic names
+/// the server's fate (its exit code and stderr when it died, which is
+/// the startup crash; still-running when it is slow), because a bare
+/// deadline cost a debugging round already.
 fn notify(
     client: &mut Conn,
+    server: &mut Child,
     app: &str,
     replaces: u32,
     summary: &str,
@@ -216,14 +220,40 @@ fn notify(
     client
         .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token)
         .expect("the call queues");
-    let Event::Reply {
-        signature, body, ..
-    } = until(client, |event| matches!(event, Event::Reply { token: got, .. } if *got == token))
-    else {
-        unreachable!()
-    };
-    assert_eq!(signature, "u");
-    Reader::le(&body).u32().unwrap()
+    let start = Instant::now();
+    loop {
+        if start.elapsed() >= Duration::from_secs(10) {
+            match server.try_wait().expect("the server reaps") {
+                Some(status) => {
+                    let mut err = String::new();
+                    if let Some(mut stderr) = server.stderr.take() {
+                        let _ = stderr.read_to_string(&mut err);
+                    }
+                    panic!("Notify {token} unanswered: the server died ({status}): {err}");
+                }
+                None => {
+                    panic!("Notify {token} unanswered: the server still runs");
+                }
+            }
+        }
+        if client.dead() {
+            panic!("the bus died waiting for Notify {token}");
+        }
+        let (events, _) = client.pump();
+        for event in events {
+            if let Event::Reply {
+                token: got,
+                signature,
+                body,
+            } = event
+                && got == token
+            {
+                assert_eq!(signature, "u");
+                return Reader::le(&body).u32().unwrap();
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 /// Subscribes `client` to the server's signals, barriered so the rule
@@ -298,7 +328,7 @@ fn pixels_per_card_state() {
     let shot = || session.scoot_screenshot(1);
 
     // Normal: the `focus` ring, the surface fill, foreground ink.
-    let _ = notify(&mut client, "a", 0, "Hello", "World", &[], &[], 0, 101);
+    let _ = notify(&mut client, &mut server, "a", 0, "Hello", "World", &[], &[], 0, 101);
     wait_shown(&mut server, "the normal card", || {
         shot().at(x0 + 180, y0 + 1) == rgb(FOCUS)
     });
@@ -309,7 +339,7 @@ fn pixels_per_card_state() {
     assert!(ink, "the summary draws foreground ink");
 
     // Critical: the `urgent` ring over the same fill.
-    let _ = notify(&mut client, "b", 0, "Fire", "Alarm", &[], &[("urgency", 2)], 0, 102);
+    let _ = notify(&mut client, &mut server, "b", 0, "Fire", "Alarm", &[], &[("urgency", 2)], 0, 102);
     wait_shown(&mut server, "the critical card", || {
         shot().at(x0 + 180, y0 + 1) == rgb(URGENT)
     });
@@ -317,6 +347,7 @@ fn pixels_per_card_state() {
     // Actions: the button outline draws `focus`.
     let _ = notify(
         &mut client,
+        &mut server,
         "c",
         0,
         "Pick",
@@ -334,6 +365,7 @@ fn pixels_per_card_state() {
     // Progress: the `value` fill draws `selection` (accent by default).
     let _ = notify(
         &mut client,
+        &mut server,
         "d",
         0,
         "Copy",
@@ -349,7 +381,7 @@ fn pixels_per_card_state() {
     });
 
     // Low: the `border` ring over the same fill.
-    let _ = notify(&mut client, "e", 0, "Quiet", "Low", &[], &[("urgency", 0)], 0, 100);
+    let _ = notify(&mut client, &mut server, "e", 0, "Quiet", "Low", &[], &[("urgency", 0)], 0, 100);
     wait_shown(&mut server, "the low card", || {
         shot().at(x0 + 180, y0 + 1) == rgb(BORDER_LOW)
     });
@@ -370,6 +402,7 @@ fn a_click_invokes_with_the_token_first() {
     let (x0, y0) = stack_origin();
     let id = notify(
         &mut client,
+        &mut server,
         "a",
         0,
         "Hello",
@@ -464,7 +497,7 @@ fn a_locked_arrival_waits_for_unlock() {
     }
     // A 2 s card arrives under the lock: nothing drawn, and no expiry
     // through a full timeout and more (its clock never started).
-    let id = notify(&mut client, "a", 0, "Hello", "World", &[], &[], 2000, 121);
+    let id = notify(&mut client, &mut server, "a", 0, "Hello", "World", &[], &[], 2000, 121);
     std::thread::sleep(Duration::from_millis(500));
     assert!(covered(&session), "a card drawn over the lock");
     std::thread::sleep(Duration::from_millis(2500));
@@ -539,7 +572,7 @@ fn unplugging_an_output_moves_the_stack() {
         }
         found.then_some(())
     };
-    let _ = notify(&mut client, "a", 0, "Hello", "World", &[], &[], 0, 131);
+    let _ = notify(&mut client, &mut server, "a", 0, "Hello", "World", &[], &[], 0, 131);
     let names: Vec<String> = session
         .swaymsg(&["-t", "get_outputs", "-r"])
         .pipe_outputs();
@@ -586,7 +619,7 @@ fn empty_holds_no_surface_or_buffers() {
         "an idle daemon maps no buffers"
     );
     let (x0, y0) = stack_origin();
-    let id = notify(&mut client, "a", 0, "Hello", "World", &[], &[], 0, 141);
+    let id = notify(&mut client, &mut server, "a", 0, "Hello", "World", &[], &[], 0, 141);
     wait_shown(&mut server, "the card", || {
         session.scoot_screenshot(1).at(x0 + 180, y0 + 1) == rgb(FOCUS)
     });
