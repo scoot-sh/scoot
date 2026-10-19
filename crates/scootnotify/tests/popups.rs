@@ -94,6 +94,12 @@ fn spawn_popup(session: &Session, bus: &Daemon, config: &str) -> Child {
     std::fs::write(&config_path, config).unwrap();
     let font = session.scratch.font();
     let mut command = Command::new(binary);
+    // `SCOOTNOTIFY_WAYLAND_DEBUG=1` turns on the Wayland wire log (the
+    // client's own `WAYLAND_DEBUG`): what the stack asked for and what
+    // the compositor answered, for a showing failure.
+    if std::env::var_os("SCOOTNOTIFY_WAYLAND_DEBUG").is_some() {
+        command.env("WAYLAND_DEBUG", "1");
+    }
     command
         .arg("daemon")
         .arg("--config")
