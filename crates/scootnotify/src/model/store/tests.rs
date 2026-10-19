@@ -389,29 +389,6 @@ fn id_blocks_persist_across_an_open() {
 }
 
 #[test]
-fn id_blocks_persist_across_an_open() {
-    let dir = std::env::temp_dir().join(format!("scootnotify-ids-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("scootnotify-test.ids");
-    let mut first = IdFile::open(Some(path.clone()));
-    assert!(first.persistent());
-    assert_eq!(first.allocate(), 1);
-    assert_eq!(first.allocate(), 2);
-    // A second open (the restart) continues past the block, never at 1.
-    let mut second = IdFile::open(Some(path.clone()));
-    assert_eq!(second.allocate(), 1025);
-    // A corrupt file degrades to 1, never a panic or a refusal.
-    std::fs::write(&path, "garbage\n").unwrap();
-    assert_eq!(IdFile::open(Some(path)).allocate(), 1);
-    // No directory at all is ephemeral but functional.
-    let mut ephemeral = IdFile::open(None);
-    assert!(!ephemeral.persistent());
-    assert_eq!(ephemeral.allocate(), 1);
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
 fn the_id_file_is_owner_only_and_leaves_no_temp_behind() {
     use std::os::unix::fs::PermissionsExt;
     let dir = std::env::temp_dir().join(format!("scootnotify-ids-own-{}", std::process::id()));
@@ -624,7 +601,6 @@ fn restore_re_shows_the_newest_with_a_new_id() {
 fn set_config_truncates_history_and_keeps_dnd() {
     use super::super::dnd::Dnd;
     let mut store = store();
-    let start = now();
     for _ in 0..3 {
         let id = shown(&mut store, ":1.1", "a");
         store.dismiss(id);

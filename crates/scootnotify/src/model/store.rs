@@ -623,7 +623,7 @@ impl Store {
     /// non-critical closes with reason 4, as for a fresh arrival.
     /// `None` when history is empty.
     pub fn restore(&mut self, now: Instant, now_ms: u64) -> Option<(u32, Option<Closure>)> {
-        let entry = self.history.newest()?;
+        let entry = self.history.newest()?.clone();
         let (urgency, category, desktop_entry) =
             (entry.urgency, entry.category.clone(), entry.desktop_entry.clone());
         let icon = match &entry.icon {

@@ -38,6 +38,8 @@ fn note(id: u32, summary: &str, body: &str) -> Notification {
         desktop_entry: String::new(),
         transient: false,
         resident: false,
+        keep_history: true,
+        output: None,
         value: None,
         seq: u64::from(id),
         timeout_ms: Some(10_000),
