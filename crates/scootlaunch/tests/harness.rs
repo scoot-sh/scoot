@@ -1,6 +1,10 @@
 //! The panel tests' harness: a headless scoot beside fixture
 //! applications, and stub launch targets recording what the launch
-//! gave them. Shared by the panel tests and the spawn tests.
+//! gave them. Shared by the panel, spawn and agent tests: each target
+//! uses a different subset, so unused items are allowed here rather
+//! than in every consumer.
+//!
+#![allow(dead_code, unused_imports)]
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
