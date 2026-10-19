@@ -251,6 +251,15 @@ fn run_loop(
         if let Some(applied) = applied {
             apply_reload(&mut popup, applied);
         }
+        // Rule `exec`s fire here: spawn what the turn queued (bus and
+        // control alike), then reap what exited. A spawn refusal is a
+        // line on the log, never a wedge.
+        for request in server.take_execs() {
+            if let Err(error) = server.spawn_exec(&request) {
+                warn(format_args!("scootnotify: {error}"));
+            }
+        }
+        server.reap_exec();
         if let Some(popup) = popup.as_mut() {
             popup.refresh(&server.store().ordered(), now_ms);
         }
@@ -292,6 +301,7 @@ fn run_loop(
             listener,
             rest_until,
             control.stall_timeout(&mut stall_anchor),
+            server,
         );
         drain_timer(&timer);
         if wayland && let Some(guard) = guard {
@@ -485,8 +495,9 @@ fn arm_timer(timer: &rustix::fd::OwnedFd, deadline: Option<Instant>) {
 
 /// Polls the bus fd, the timerfd, the Wayland fd (when there is one),
 /// the control listener (unless it is resting after a failed accept)
-/// and its clients, with a timeout only while a stalled peer's deadline
-/// or the listener's rest lapses. Returns whether the Wayland fd spoke.
+/// and its clients, and the rule-exec pidfds, with a timeout only while
+/// a stalled peer's deadline, an exec child without a pidfd, or the
+/// listener's rest lapses. Returns whether the Wayland fd spoke.
 /// A bounded poll here would be a wakeup every bound at idle; the loop
 /// only reaches this wait with nothing staged, nothing queued and the
 /// timer armed, so nothing is missed by sleeping until the fds speak (all
@@ -499,9 +510,10 @@ fn poll_turn(
     listener: &UnixListener,
     rest_until: Option<Instant>,
     stall: Option<Duration>,
+    server: &Server,
 ) -> bool {
     use rustix::event::{PollFd, PollFlags, Timespec, poll};
-    let mut fds = Vec::with_capacity(4 + control.conns().len());
+    let mut fds = Vec::with_capacity(8 + control.conns().len());
     fds.push(PollFd::new(&bus, PollFlags::IN));
     fds.push(PollFd::new(&timer, PollFlags::IN));
     // Unwrapped beside the bus: the binding lives for the poll, and the
@@ -513,6 +525,12 @@ fn poll_turn(
     } else {
         None
     };
+    // Rule children that exited wake the loop through their pidfds, so
+    // no zombie outlives its exit by more than a turn.
+    let mut len = fds.len();
+    fds.resize_with(fds.capacity(), || PollFd::new(&bus, PollFlags::empty()));
+    server.exec_sources(&mut fds, &mut len);
+    fds.truncate(len);
     // The listener rests after a failed accept: it keeps no slot, so a
     // connection it cannot accept does not keep the level-triggered poll
     // returning (no spin). The poll's timeout re-arms it.
@@ -523,11 +541,13 @@ fn poll_turn(
         fds.push(PollFd::new(conn.stream(), conn.interest()));
     }
     let rest = rest_until.and_then(|until| until.checked_duration_since(Instant::now()));
-    let timeout = match (stall, rest) {
-        (Some(left), Some(rest)) => Some(left.min(rest)),
-        (Some(left), None) => Some(left),
-        (None, Some(rest)) => Some(rest),
-        (None, None) => None,
+    let timeout = match (stall, server.exec_poll_timeout(), rest) {
+        (Some(left), exec, Some(rest)) => Some(left.min(exec.unwrap_or(rest)).min(rest)),
+        (Some(left), exec, None) => Some(left.min(exec.unwrap_or(left))),
+        (None, Some(exec), Some(rest)) => Some(exec.min(rest)),
+        (None, Some(exec), None) => Some(exec),
+        (None, None, Some(rest)) => Some(rest),
+        (None, None, None) => None,
     };
     let timespec = timeout.map(|left| Timespec {
         tv_sec: left.as_secs() as _,

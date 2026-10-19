@@ -28,6 +28,10 @@ use crate::bus::hints::Urgency;
 use crate::bus::image::Image;
 use crate::bus::notify::{Action, Incoming};
 use crate::config::Config;
+use crate::exec::ExecRequest;
+use crate::model::dnd::Dnd;
+use crate::model::history::{History, HistoryEntry};
+use crate::model::rules::{self, Timeout};
 
 use super::expiry::{Clock, resolve_timeout};
 
@@ -150,6 +154,11 @@ pub struct Notification {
     pub desktop_entry: String,
     pub transient: bool,
     pub resident: bool,
+    /// False keeps the card out of history (a rule's `history = false`):
+    /// held and closed alike.
+    pub keep_history: bool,
+    /// This card's output, over the file's (a rule's `output`).
+    pub output: Option<String>,
     pub value: Option<u8>,
     /// Insertion order: the eviction oldest-first rule.
     pub seq: u64,
@@ -163,15 +172,20 @@ pub struct Notification {
     pub clock: Clock,
 }
 
-/// What one `Notify` did: shown (possibly replacing), or counted unshown
-/// past the sender's bucket — with its id either way, since the method
-/// must answer.
+/// What one `Notify` did: shown (possibly replacing), held for history
+/// by DND or a rule (never on screen), or counted unshown past the
+/// sender's bucket — with its id either way, since the method must
+/// answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Arrival {
     Shown {
         id: u32,
         replaced: bool,
     },
+    /// Held by DND or a rule's `hide`: the id is spent, the card never
+    /// stored, and (unless `transient` or a rule's `history = false`)
+    /// the history ring keeps it, unseen.
+    Held { id: u32 },
     /// Past the rate limit: the id is spent, the card never stored, and
     /// `suppressed` counts it for the summary card.
     Suppressed {
@@ -254,13 +268,40 @@ impl IdFile {
 
     /// Writes the block end: best effort — a failure degrades to
     /// ephemeral (the in-run counter still never reuses a live id),
-    /// never to an error.
+    /// never to an error. Atomic (a temp file in the same directory,
+    /// renamed over the target, so a crash never leaves a half-written
+    /// reservation) and owner-only (`0600`: the ids restart the counter
+    /// past what a client may still hold, and no other user reads them).
     fn write_end(&self) {
-        if let Some(path) = &self.path {
-            if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
-            }
-            let _ = std::fs::write(path, format!("{}\n", self.end));
+        use std::os::unix::fs::OpenOptionsExt;
+        let Some(path) = &self.path else {
+            return;
+        };
+        let Some(parent) = path.parent() else {
+            return;
+        };
+        if std::fs::create_dir_all(parent).is_err() {
+            return;
+        }
+        let temp = parent.join(format!(".scootnotify-ids-{}.tmp", std::process::id()));
+        let write = (|| {
+            use std::io::Write;
+            let mut temp = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&temp)?;
+            temp.write_all(format!("{}\n", self.end).as_bytes())?;
+            temp.flush()?;
+            Ok::<_, std::io::Error>(())
+        })();
+        if write.is_err() {
+            let _ = std::fs::remove_file(&temp);
+            return;
+        }
+        if std::fs::rename(&temp, path).is_err() {
+            let _ = std::fs::remove_file(&temp);
         }
     }
 }
@@ -308,6 +349,15 @@ pub struct Store {
     /// Cards counted unshown per sender, for the summary card.
     suppressed: HashMap<String, u64>,
     seq: u64,
+    /// Do-not-disturb: held cards skip the screen for history. Survives
+    /// a reload (never reset by `set_config`), never a restart.
+    dnd: Dnd,
+    /// Closed cards and held ones, oldest first, capped by
+    /// `history_max`.
+    history: History,
+    /// Rule `exec`s the last arrival fired: the daemon drains these and
+    /// spawns them (the store never runs a child itself).
+    pending_exec: Vec<ExecRequest>,
 }
 
 impl Store {
@@ -321,6 +371,9 @@ impl Store {
             buckets: HashMap::new(),
             suppressed: HashMap::new(),
             seq: 0,
+            dnd: Dnd::Off,
+            history: History::default(),
+            pending_exec: Vec::new(),
         }
     }
 
@@ -331,9 +384,11 @@ impl Store {
 
     /// Replaces the running config (`msg reload`): timeouts, caps and
     /// rate limits apply to what arrives next. Live cards keep their ids,
-    /// clocks and resolved timeouts.
+    /// clocks and resolved timeouts; DND keeps its mode; history keeps
+    /// its entries, truncated to the new cap (newest kept).
     pub fn set_config(&mut self, config: Config) {
         self.config = config;
+        self.history.truncate(self.config.history_max);
     }
 
     /// The pinned output, if any: the JSON view's `output` (`None` is the
@@ -342,15 +397,55 @@ impl Store {
         self.config.output.as_deref()
     }
 
+    /// One card's output: its rule's pin, else the file's.
+    pub fn output_for<'a>(&'a self, note: &'a Notification) -> Option<&'a str> {
+        note.output.as_deref().or(self.output_name())
+    }
+
+    /// The DND mode.
+    pub fn dnd(&self) -> Dnd {
+        self.dnd
+    }
+
+    /// Sets the DND mode: `true` when it changed.
+    pub fn set_dnd(&mut self, dnd: Dnd) -> bool {
+        if self.dnd == dnd {
+            return false;
+        }
+        self.dnd = dnd;
+        true
+    }
+
+    /// The history ring: `msg history` reads this.
+    pub fn history(&self) -> &History {
+        &self.history
+    }
+
+    /// The entries not yet seen on screen.
+    pub fn unread(&self) -> usize {
+        self.history.unread()
+    }
+
+    /// Drains the rule `exec`s the last arrival fired: the daemon
+    /// spawns these. Drained every turn, so a flood cannot grow this
+    /// past one turn's worth.
+    pub fn take_execs(&mut self) -> Vec<ExecRequest> {
+        std::mem::take(&mut self.pending_exec)
+    }
+
     /// Cards counted unshown for `sender` (rate-limited past the
     /// bucket): the summary card reads this.
     pub fn suppressed(&self, sender: &str) -> u64 {
         self.suppressed.get(sender).copied().unwrap_or(0)
     }
 
-    /// One `Notify`: replaced in place, stored fresh, or counted
-    /// unshown. Returns the arrival and, when the global cap gave, the
-    /// eviction (already invalidated, signal first).
+    /// One `Notify`: replaced in place, shown fresh, held for history
+    /// by DND or a rule, or counted unshown past the bucket. Returns the
+    /// arrival and, when the global cap gave, the eviction (already
+    /// invalidated, signal first). Rule `exec`s queue in
+    /// [`Store::take_execs`]: fresh arrivals and held ones fire them, a
+    /// `replaces_id` update never does (a volume OSD holding one card
+    /// must not ring the hook on every tick).
     pub fn notify(
         &mut self,
         incoming: Incoming,
@@ -358,17 +453,28 @@ impl Store {
         now_ms: u64,
     ) -> (Arrival, Option<Closure>) {
         // A replace for the same unique sender or the same app:
-        // swapped in place, expiry restarted, never a new id.
+        // swapped in place, expiry restarted, never a new id. DND never
+        // holds a replace (the card is already on screen); the rules'
+        // urgency and timeout still steer the swapped content.
         if incoming.replaces_id != 0
             && let Some(current) = self.live.get(&incoming.replaces_id)
             && (current.sender == incoming.sender || current.app_name == incoming.app_name)
         {
             let id = incoming.replaces_id;
-            let timeout = resolve_timeout(
-                incoming.expire_timeout,
+            let decision = rules::decide(
+                &self.config.rule,
+                &incoming.app_name,
+                &incoming.hints.desktop_entry,
+                &incoming.hints.category,
                 incoming.hints.urgency,
-                &self.config,
+                &incoming.summary,
             );
+            let urgency = decision.urgency.unwrap_or(incoming.hints.urgency);
+            let timeout = match decision.timeout {
+                Some(Timeout::Never) => None,
+                Some(Timeout::Ms(ms)) => Some(ms),
+                None => resolve_timeout(incoming.expire_timeout, urgency, &self.config),
+            };
             let icon = icon_of(&incoming);
             let plain = crate::markup::plain(&crate::markup::parse(&incoming.body));
             if let Some(current) = self.live.get_mut(&id) {
@@ -379,33 +485,66 @@ impl Store {
                 current.body = incoming.body;
                 current.plain_body = plain;
                 current.actions = incoming.actions;
-                current.urgency = incoming.hints.urgency;
+                current.urgency = urgency;
                 current.category = incoming.hints.category;
                 current.desktop_entry = incoming.hints.desktop_entry;
                 current.transient = incoming.hints.transient;
                 current.resident = incoming.hints.resident;
+                current.keep_history = decision.keep_history;
+                current.output = decision.output;
                 current.value = incoming.hints.value;
                 current.timeout_ms = timeout;
                 current.clock.restart(now, timeout);
             }
             return (Arrival::Shown { id, replaced: true }, None);
         }
-        // Fresh: the bucket decides shown or counted.
+        // Fresh: the rules steer first.
+        let decision = rules::decide(
+            &self.config.rule,
+            &incoming.app_name,
+            &incoming.hints.desktop_entry,
+            &incoming.hints.category,
+            incoming.hints.urgency,
+            &incoming.summary,
+        );
+        let urgency = decision.urgency.unwrap_or(incoming.hints.urgency);
+        let timeout = match decision.timeout {
+            Some(Timeout::Never) => None,
+            Some(Timeout::Ms(ms)) => Some(ms),
+            None => resolve_timeout(incoming.expire_timeout, urgency, &self.config),
+        };
+        let plain = crate::markup::plain(&crate::markup::parse(&incoming.body));
+        let held = decision.hide || self.holds(urgency, decision.dnd_bypass);
+        if held {
+            let id = self.alloc_id();
+            self.queue_execs(&decision, &incoming, &plain, id, urgency);
+            if !incoming.hints.transient && decision.keep_history {
+                self.history.push(
+                    held_entry(&incoming, &plain, urgency, now_ms),
+                    self.config.history_max,
+                );
+            }
+            return (Arrival::Held { id }, None);
+        }
+        // Past the bucket, the id is spent and counted, and (unless
+        // `transient` or a rule's `history = false`) the ring keeps it,
+        // unshown — never stored live, never an exec.
         if !self.bucket(&incoming.sender, now) {
             let id = self.alloc_id();
-            *self.suppressed.entry(incoming.sender).or_insert(0) += 1;
+            *self.suppressed.entry(incoming.sender.clone()).or_insert(0) += 1;
+            if !incoming.hints.transient && decision.keep_history {
+                self.history.push(
+                    held_entry(&incoming, &plain, urgency, now_ms),
+                    self.config.history_max,
+                );
+            }
             return (Arrival::Suppressed { id }, None);
         }
         let evicted = self.evict_if_capped();
         let id = self.alloc_id();
-        let timeout = resolve_timeout(
-            incoming.expire_timeout,
-            incoming.hints.urgency,
-            &self.config,
-        );
         self.seq += 1;
         let icon = icon_of(&incoming);
-        let plain = crate::markup::plain(&crate::markup::parse(&incoming.body));
+        self.queue_execs(&decision, &incoming, &plain, id, urgency);
         self.order.push_back(id);
         self.live.insert(
             id,
@@ -418,11 +557,13 @@ impl Store {
                 body: incoming.body,
                 plain_body: plain,
                 actions: incoming.actions,
-                urgency: incoming.hints.urgency,
+                urgency,
                 category: incoming.hints.category,
                 desktop_entry: incoming.hints.desktop_entry,
                 transient: incoming.hints.transient,
                 resident: incoming.hints.resident,
+                keep_history: decision.keep_history,
+                output: decision.output,
                 value: incoming.hints.value,
                 seq: self.seq,
                 timeout_ms: timeout,
@@ -438,6 +579,94 @@ impl Store {
             },
             evicted,
         )
+    }
+
+    /// Whether DND holds a fresh card of `urgency`: held unless a
+    /// rule's `dnd-bypass`, or a critical the config lets through.
+    fn holds(&self, urgency: Urgency, dnd_bypass: bool) -> bool {
+        self.dnd.holds()
+            && !dnd_bypass
+            && !(urgency == Urgency::Critical && self.config.dnd_allows_critical)
+    }
+
+    /// Queues every matching `exec` for `incoming` (a fresh arrival or a
+    /// held one, never a replace or a bucket refusal).
+    fn queue_execs(
+        &mut self,
+        decision: &crate::model::rules::Decision,
+        incoming: &Incoming,
+        plain: &str,
+        id: u32,
+        urgency: Urgency,
+    ) {
+        for argv in &decision.execs {
+            self.pending_exec.push(ExecRequest {
+                argv: argv.clone(),
+                id,
+                app_name: incoming.app_name.clone(),
+                summary: incoming.summary.clone(),
+                body: plain.to_owned(),
+                urgency: match urgency {
+                    Urgency::Low => "low",
+                    Urgency::Normal => "normal",
+                    Urgency::Critical => "critical",
+                },
+                category: incoming.hints.category.clone(),
+                desktop_entry: incoming.hints.desktop_entry.clone(),
+            });
+        }
+    }
+
+    /// Re-shows the newest history entry as a new card with a new id:
+    /// `msg restore`. The entry stays (marked seen); the card shows even
+    /// under DND (the user asked for it). At the live cap the oldest
+    /// non-critical closes with reason 4, as for a fresh arrival.
+    /// `None` when history is empty.
+    pub fn restore(&mut self, now: Instant, now_ms: u64) -> Option<(u32, Option<Closure>)> {
+        let entry = self.history.newest()?;
+        let (urgency, category, desktop_entry) =
+            (entry.urgency, entry.category.clone(), entry.desktop_entry.clone());
+        let icon = match &entry.icon {
+            None => Icon::None,
+            Some(crate::model::history::IconName::Name(name)) => Icon::Name(name.clone()),
+            Some(crate::model::history::IconName::Path(path)) => Icon::Path(path.clone()),
+        };
+        let timeout = resolve_timeout(-1, urgency, &self.config);
+        let evicted = self.evict_if_capped();
+        let id = self.alloc_id();
+        self.seq += 1;
+        self.order.push_back(id);
+        self.live.insert(
+            id,
+            Notification {
+                id,
+                app_name: entry.app_name.clone(),
+                sender: String::new(),
+                icon,
+                summary: entry.summary.clone(),
+                body: entry.body.clone(),
+                plain_body: entry.body.clone(),
+                actions: Vec::new(),
+                urgency,
+                category,
+                desktop_entry,
+                transient: false,
+                resident: false,
+                keep_history: true,
+                output: None,
+                value: None,
+                seq: self.seq,
+                timeout_ms: timeout,
+                created_ms: now_ms,
+                shown_ms: None,
+                clock: Clock::waiting(),
+            },
+        );
+        self.history.mark_newest_seen();
+        // The clock starts where the daemon starts every card's: headless
+        // presents on arrival, the popup on the frame callback.
+        let _ = now;
+        Some((id, evicted))
     }
 
     /// First presentation of `id`: the expiry clock starts. The daemon
@@ -568,9 +797,18 @@ impl Store {
     }
 
     /// Removes `id` with `reason`, invalidating before the signal.
+    /// Removes `id` with `reason`, invalidating before the signal. A
+    /// closed card enters history (seen when it was ever presented),
+    /// unless `transient` or a rule's `history = false`.
     fn remove(&mut self, id: u32, reason: CloseReason) -> Option<Closure> {
-        self.live.remove(&id)?;
+        let note = self.live.remove(&id)?;
         self.order.retain(|queued| *queued != id);
+        if !note.transient && note.keep_history {
+            self.history.push(
+                HistoryEntry::of(&note, note.clock.shown()),
+                self.config.history_max,
+            );
+        }
         Some(Closure { id, reason })
     }
 
@@ -633,6 +871,27 @@ fn icon_of(incoming: &Incoming) -> Icon {
         }
     }
     classify_icon(&incoming.app_icon)
+}
+
+/// A history entry for a card that never showed (DND, a rule's
+/// `hide`, past the bucket): unseen, with its icon as a name or path.
+fn held_entry(incoming: &Incoming, plain: &str, urgency: Urgency, now_ms: u64) -> HistoryEntry {
+    let icon = match icon_of(incoming) {
+        Icon::None | Icon::Data(_) => None,
+        Icon::Name(name) => Some(crate::model::history::IconName::Name(name)),
+        Icon::Path(path) => Some(crate::model::history::IconName::Path(path)),
+    };
+    HistoryEntry {
+        app_name: incoming.app_name.clone(),
+        summary: incoming.summary.clone(),
+        body: plain.to_owned(),
+        urgency,
+        category: incoming.hints.category.clone(),
+        desktop_entry: incoming.hints.desktop_entry.clone(),
+        icon,
+        created_ms: now_ms,
+        seen: false,
+    }
 }
 
 #[cfg(test)]

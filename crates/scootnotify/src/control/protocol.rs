@@ -10,7 +10,9 @@
 //!
 //! ```text
 //! {"type":"notifications","notifications":[{...}]}
-//! {"type":"version","protocol":1,"version":"0.3.1"}
+//! {"type":"history","history":[{...}]}
+//! {"type":"dnd","dnd":"on"}
+//! {"type":"version","protocol":2,"version":"0.3.1"}
 //! {"type":"subscribed","events":["notify","close"]}
 //! {"type":"ok"}
 //! {"type":"ok","scope":"look"}
@@ -46,25 +48,33 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::Value;
 
 use crate::bus::hints::Urgency;
+use crate::model::history::HistoryEntry;
 use crate::model::store::{CloseReason, Notification};
 
 /// Bumped whenever a wire change would make an old client or daemon
 /// misread a new one. Compatibility rides on this number, never on the
-/// crate version.
-pub const PROTOCOL_VERSION: u32 = 1;
+/// crate version. 2 adds `dnd`, `history` and `restore` (with the `dnd`
+/// event and reply): a version-1 client asking a version-2 daemon gets
+/// its old replies byte-identical, and a version mismatch is refused by
+/// name either way.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// What a client can ask for.
 ///
 /// ```text
-/// {"protocol":1,"type":"list"}
-/// {"protocol":1,"type":"dismiss","id":3}
-/// {"protocol":1,"type":"dismiss","all":true}
-/// {"protocol":1,"type":"invoke","id":3}
-/// {"protocol":1,"type":"invoke","id":3,"action":"default"}
-/// {"protocol":1,"type":"reload"}
-/// {"protocol":1,"type":"reload","scope":"look"}
-/// {"protocol":1,"type":"subscribe","events":["notify","close"]}
-/// {"protocol":1,"type":"version"}
+/// {"protocol":2,"type":"list"}
+/// {"protocol":2,"type":"dismiss","id":3}
+/// {"protocol":2,"type":"dismiss","all":true}
+/// {"protocol":2,"type":"invoke","id":3}
+/// {"protocol":2,"type":"invoke","id":3,"action":"default"}
+/// {"protocol":2,"type":"reload"}
+/// {"protocol":2,"type":"reload","scope":"look"}
+/// {"protocol":2,"type":"subscribe","events":["notify","close"]}
+/// {"protocol":2,"type":"dnd"}
+/// {"protocol":2,"type":"dnd","mode":"toggle"}
+/// {"protocol":2,"type":"history"}
+/// {"protocol":2,"type":"restore"}
+/// {"protocol":2,"type":"version"}
 /// ```
 ///
 /// (`wait` is not a verb: `scootnotify msg wait` subscribes, reads the
@@ -88,8 +98,45 @@ pub enum Request<'a> {
     Reload { scope: Option<ReloadScope> },
     /// Dedicate this connection to events of these kinds.
     Subscribe { events: Vec<EventKind> },
+    /// The DND mode: read it (no `mode`), or set it (`on`, `off`,
+    /// `toggle`). Answers — and, to subscribers, emits — the mode.
+    Dnd { mode: Option<DndMode> },
+    /// The history ring, oldest first, as JSON.
+    History,
+    /// Re-show the newest history entry as a new card with a new id.
+    /// Refused loudly when history is empty.
+    Restore,
     /// The daemon's version and protocol.
     Version,
+}
+
+/// How one `dnd` request steers the mode: set it (`on`, `off`), flip it
+/// (`toggle`), or read it (absent).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DndMode {
+    On,
+    Off,
+    Toggle,
+}
+
+impl DndMode {
+    /// The `mode` string on the wire.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Off => "off",
+            Self::Toggle => "toggle",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "on" => Some(Self::On),
+            "off" => Some(Self::Off),
+            "toggle" => Some(Self::Toggle),
+            _ => None,
+        }
+    }
 }
 
 /// A `reload`'s scope: what it re-reads.
@@ -129,16 +176,19 @@ pub enum EventKind {
     /// An action was invoked through `msg invoke` or a click
     /// (`{"type":"invoke","id":N,"action":"..."}`).
     Invoke,
+    /// DND changed (`{"type":"dnd","dnd":"on|off"}`).
+    Dnd,
 }
 
 impl EventKind {
-    pub const ALL: [Self; 3] = [Self::Notify, Self::Close, Self::Invoke];
+    pub const ALL: [Self; 4] = [Self::Notify, Self::Close, Self::Invoke, Self::Dnd];
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Notify => "notify",
             Self::Close => "close",
             Self::Invoke => "invoke",
+            Self::Dnd => "dnd",
         }
     }
 
@@ -156,6 +206,9 @@ impl Request<'_> {
             Self::Invoke { .. } => "invoke",
             Self::Reload { .. } => "reload",
             Self::Subscribe { .. } => "subscribe",
+            Self::Dnd { .. } => "dnd",
+            Self::History => "history",
+            Self::Restore => "restore",
             Self::Version => "version",
         }
     }
@@ -177,6 +230,8 @@ impl Request<'_> {
             #[serde(skip_serializing_if = "Option::is_none")]
             scope: Option<&'r str>,
             #[serde(skip_serializing_if = "Option::is_none")]
+            mode: Option<&'r str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
             events: Option<Vec<&'static str>>,
         }
         let mut line = Line {
@@ -186,10 +241,11 @@ impl Request<'_> {
             all: None,
             action: None,
             scope: None,
+            mode: None,
             events: None,
         };
         match self {
-            Self::List | Self::Version => {}
+            Self::List | Self::Version | Self::History | Self::Restore => {}
             Self::Dismiss { id, all } => {
                 line.id = *id;
                 line.all = (*all).then_some(true);
@@ -200,6 +256,9 @@ impl Request<'_> {
             }
             Self::Reload { scope } => {
                 line.scope = scope.map(|scope| scope.name());
+            }
+            Self::Dnd { mode } => {
+                line.mode = mode.map(|mode| mode.name());
             }
             Self::Subscribe { events } => {
                 line.events = Some(events.iter().map(|kind| kind.name()).collect());
@@ -235,6 +294,8 @@ pub enum RequestError {
     UnknownScope(String),
     /// `subscribe` names a kind that does not exist.
     UnknownEvent(String),
+    /// `dnd` names a mode that does not exist.
+    UnknownMode(String),
 }
 
 impl fmt::Display for RequestError {
@@ -262,8 +323,13 @@ impl fmt::Display for RequestError {
             ),
             Self::UnknownEvent(kind) => write!(
                 f,
-                "unknown event kind `{}` (they are: notify, close, invoke)",
+                "unknown event kind `{}` (they are: notify, close, invoke, dnd)",
                 kind.escape_debug()
+            ),
+            Self::UnknownMode(mode) => write!(
+                f,
+                "unknown dnd mode `{}` (it takes: on, off, toggle, or nothing to read)",
+                mode.escape_debug()
             ),
         }
     }
@@ -285,6 +351,9 @@ struct Envelope<'a> {
     /// A `reload`'s scope, absent for a plain reload.
     #[serde(borrow)]
     scope: Option<Cow<'a, str>>,
+    /// A `dnd` request's mode, absent to read the mode.
+    #[serde(borrow)]
+    mode: Option<Cow<'a, str>>,
     events: Option<Vec<String>>,
 }
 
@@ -376,6 +445,18 @@ pub fn parse(line: &[u8]) -> Result<Request<'_>, RequestError> {
             }
             Ok(Request::Subscribe { events })
         }
+        "dnd" => {
+            let mode = match envelope.mode.as_deref() {
+                None => None,
+                Some(name) => Some(
+                    DndMode::parse(name)
+                        .ok_or_else(|| RequestError::UnknownMode(name.to_owned()))?,
+                ),
+            };
+            Ok(Request::Dnd { mode })
+        }
+        "history" => Ok(Request::History),
+        "restore" => Ok(Request::Restore),
         "version" => Ok(Request::Version),
         _ => Err(RequestError::Unknown(kind.into_owned())),
     }
@@ -487,6 +568,59 @@ pub fn view<'a>(
     }
 }
 
+/// One history entry, as `history` shows it: what a closed or held
+/// card left behind. There is no live id (the old one was invalidated
+/// by its `NotificationClosed`, as the spec requires), so `restore`
+/// re-shows the newest as a new card. New keys may be added; none is
+/// removed or changes meaning within a protocol version.
+#[derive(Debug, Serialize)]
+pub struct HistoryView<'a> {
+    pub app_name: &'a str,
+    pub desktop_entry: &'a str,
+    pub summary: &'a str,
+    /// The body with markup stripped.
+    pub body: &'a str,
+    /// `low`, `normal` or `critical`.
+    pub urgency: &'static str,
+    pub category: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<IconView<'a>>,
+    /// CLOCK_REALTIME ms at arrival.
+    pub created: u64,
+    /// Whether the card was ever on screen.
+    pub seen: bool,
+}
+
+/// The JSON view of one history entry.
+pub fn history_view(entry: &HistoryEntry) -> HistoryView<'_> {
+    use crate::model::history::IconName;
+    HistoryView {
+        app_name: &entry.app_name,
+        desktop_entry: &entry.desktop_entry,
+        summary: &entry.summary,
+        body: &entry.body,
+        urgency: match entry.urgency {
+            Urgency::Low => "low",
+            Urgency::Normal => "normal",
+            Urgency::Critical => "critical",
+        },
+        category: &entry.category,
+        icon: match &entry.icon {
+            None => None,
+            Some(IconName::Name(name)) => Some(IconView {
+                kind: "name",
+                value: Cow::Borrowed(name),
+            }),
+            Some(IconName::Path(path)) => Some(IconView {
+                kind: "path",
+                value: Cow::Borrowed(path),
+            }),
+        },
+        created: entry.created_ms,
+        seen: entry.seen,
+    }
+}
+
 /// An event on a subscribed connection.
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -503,6 +637,8 @@ pub enum Event<'a> {
     Close { id: u32, reason: &'static str },
     /// An action was invoked, through `msg invoke` or a click.
     Invoke { id: u32, action: &'a str },
+    /// DND changed, through `msg dnd`, a bind or the bar.
+    Dnd { dnd: &'a str },
 }
 
 impl CloseReason {
@@ -540,6 +676,10 @@ pub enum Reply<'a> {
     Notifications {
         notifications: Vec<NotificationView<'a>>,
     },
+    /// The answer to `history`: the ring, oldest first.
+    History { history: Vec<HistoryView<'a>> },
+    /// The answer to `dnd`: the mode after the request ran.
+    Dnd { dnd: &'a str },
     Ok {
         /// The scoped-reload receipt: a look-scoped reload carries one
         /// (`"look"`), so the CLI can tell a scoped reply from a plain one.

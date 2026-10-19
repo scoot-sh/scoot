@@ -13,7 +13,7 @@ use scoot_dbus::conn::Conn;
 use scoot_dbus::proto::{Message, Writer, frame_at};
 
 use super::protocol::{
-    EventKind, PROTOCOL_VERSION, ReloadScope, Request, parse, write_event, write_reply,
+    DndMode, EventKind, PROTOCOL_VERSION, ReloadScope, Request, parse, write_event, write_reply,
 };
 use super::respond::Responder;
 use super::{Handler, Server};
@@ -31,67 +31,97 @@ fn parse_text(text: &str) -> Result<Request<'_>, super::protocol::RequestError> 
 #[test]
 fn every_verb_parses() {
     assert_eq!(
-        parse_text(r#"{"protocol":1,"type":"list"}"#).unwrap(),
+        parse_text(r#"{"protocol":2,"type":"list"}"#).unwrap(),
         Request::List
     );
     assert_eq!(
-        parse_text(r#"{"protocol":1,"type":"dismiss","id":3}"#).unwrap(),
+        parse_text(r#"{"protocol":2,"type":"history"}"#).unwrap(),
+        Request::History
+    );
+    assert_eq!(
+        parse_text(r#"{"protocol":2,"type":"restore"}"#).unwrap(),
+        Request::Restore
+    );
+    assert_eq!(
+        parse_text(r#"{"protocol":2,"type":"dnd"}"#).unwrap(),
+        Request::Dnd { mode: None }
+    );
+    assert_eq!(
+        parse_text(r#"{"protocol":2,"type":"dnd","mode":"on"}"#).unwrap(),
+        Request::Dnd {
+            mode: Some(DndMode::On)
+        }
+    );
+    assert_eq!(
+        parse_text(r#"{"protocol":2,"type":"dnd","mode":"toggle"}"#).unwrap(),
+        Request::Dnd {
+            mode: Some(DndMode::Toggle)
+        }
+    );
+    assert_eq!(
+        parse_text(r#"{"protocol":2,"type":"dismiss","id":3}"#).unwrap(),
         Request::Dismiss {
             id: Some(3),
             all: false
         }
     );
     assert_eq!(
-        parse_text(r#"{"protocol":1,"type":"dismiss","all":true}"#).unwrap(),
+        parse_text(r#"{"protocol":2,"type":"dismiss","all":true}"#).unwrap(),
         Request::Dismiss {
             id: None,
             all: true
         }
     );
     assert_eq!(
-        parse_text(r#"{"protocol":1,"type":"invoke","id":3}"#).unwrap(),
+        parse_text(r#"{"protocol":2,"type":"invoke","id":3}"#).unwrap(),
         Request::Invoke {
             id: 3,
             action: Cow::Borrowed("default")
         }
     );
     assert_eq!(
-        parse_text(r#"{"protocol":1,"type":"invoke","id":3,"action":"open"}"#).unwrap(),
+        parse_text(r#"{"protocol":2,"type":"invoke","id":3,"action":"open"}"#).unwrap(),
         Request::Invoke {
             id: 3,
             action: Cow::Borrowed("open")
         }
     );
     assert_eq!(
-        parse_text(r#"{"protocol":1,"type":"reload"}"#).unwrap(),
+        parse_text(r#"{"protocol":2,"type":"reload"}"#).unwrap(),
         Request::Reload { scope: None }
     );
     assert_eq!(
-        parse_text(r#"{"protocol":1,"type":"reload","scope":"look"}"#).unwrap(),
+        parse_text(r#"{"protocol":2,"type":"reload","scope":"look"}"#).unwrap(),
         Request::Reload {
             scope: Some(ReloadScope::Look)
         }
     );
     assert_eq!(
-        parse_text(r#"{"protocol":1,"type":"subscribe"}"#).unwrap(),
+        parse_text(r#"{"protocol":2,"type":"subscribe"}"#).unwrap(),
         Request::Subscribe {
             events: EventKind::ALL.to_vec()
         }
     );
     assert_eq!(
-        parse_text(r#"{"protocol":1,"type":"subscribe","events":[]}"#).unwrap(),
+        parse_text(r#"{"protocol":2,"type":"subscribe","events":[]}"#).unwrap(),
         Request::Subscribe {
             events: EventKind::ALL.to_vec()
         }
     );
     assert_eq!(
-        parse_text(r#"{"protocol":1,"type":"subscribe","events":["close"]}"#).unwrap(),
+        parse_text(r#"{"protocol":2,"type":"subscribe","events":["close"]}"#).unwrap(),
         Request::Subscribe {
             events: vec![EventKind::Close]
         }
     );
     assert_eq!(
-        parse_text(r#"{"protocol":1,"type":"version"}"#).unwrap(),
+        parse_text(r#"{"protocol":2,"type":"subscribe","events":["notify","dnd"]}"#).unwrap(),
+        Request::Subscribe {
+            events: vec![EventKind::Notify, EventKind::Dnd]
+        }
+    );
+    assert_eq!(
+        parse_text(r#"{"protocol":2,"type":"version"}"#).unwrap(),
         Request::Version
     );
 }
@@ -100,6 +130,12 @@ fn every_verb_parses() {
 fn requests_round_trip_through_their_lines() {
     let requests = [
         Request::List,
+        Request::History,
+        Request::Restore,
+        Request::Dnd { mode: None },
+        Request::Dnd {
+            mode: Some(DndMode::Toggle),
+        },
         Request::Dismiss {
             id: Some(3),
             all: false,
@@ -119,6 +155,9 @@ fn requests_round_trip_through_their_lines() {
         Request::Subscribe {
             events: vec![EventKind::Notify, EventKind::Close],
         },
+        Request::Subscribe {
+            events: vec![EventKind::Dnd],
+        },
         Request::Version,
     ];
     for request in &requests {
@@ -130,7 +169,7 @@ fn requests_round_trip_through_their_lines() {
 #[test]
 fn unknown_fields_are_ignored() {
     assert_eq!(
-        parse_text(r#"{"protocol":1,"type":"list","future":true}"#).unwrap(),
+        parse_text(r#"{"protocol":2,"type":"list","future":true}"#).unwrap(),
         Request::List
     );
 }
@@ -143,35 +182,40 @@ fn framing_refusals_name_themselves() {
     assert!(parse(b"{not json").is_err());
     let error = parse_text(r#"{"type":"list"}"#).unwrap_err();
     assert!(error.to_string().contains("protocol"), "{error}");
-    let error = parse_text(r#"{"protocol":2,"type":"list"}"#).unwrap_err();
-    assert!(error.to_string().contains("2"), "{error}");
-    let error = parse_text(r#"{"protocol":1}"#).unwrap_err();
+    let error = parse_text(r#"{"protocol":999,"type":"list"}"#).unwrap_err();
+    assert!(error.to_string().contains("999"), "{error}");
+    let error = parse_text(r#"{"protocol":2}"#).unwrap_err();
     assert!(error.to_string().contains("type"), "{error}");
-    let error = parse_text(r#"{"protocol":1,"type":"history"}"#).unwrap_err();
-    assert!(error.to_string().contains("history"), "{error}");
+    let error = parse_text(r#"{"protocol":2,"type":"history-bogus"}"#).unwrap_err();
+    assert!(error.to_string().contains("history-bogus"), "{error}");
+    // A version-1 client speaks a version the daemon no longer parses.
+    let error = parse_text(r#"{"protocol":1,"type":"list"}"#).unwrap_err();
+    assert!(error.to_string().contains("mismatch"), "{error}");
 }
 
 #[test]
 fn id_and_scope_refusals_name_themselves() {
     // `dismiss` with neither an id nor `"all":true`.
-    assert!(parse_text(r#"{"protocol":1,"type":"dismiss"}"#).is_err());
+    assert!(parse_text(r#"{"protocol":2,"type":"dismiss"}"#).is_err());
     // Not whole numbers that fit: floats, strings, negatives, zero, huge.
     for bad in ["3.5", "\"3\"", "-1", "0", "4294967296"] {
         let error =
-            parse_text(&format!(r#"{{"protocol":1,"type":"dismiss","id":{bad}}}"#)).unwrap_err();
+            parse_text(&format!(r#"{{"protocol":2,"type":"dismiss","id":{bad}}}"#)).unwrap_err();
         assert!(error.to_string().contains("id"), "{bad}: {error}");
         let error =
-            parse_text(&format!(r#"{{"protocol":1,"type":"invoke","id":{bad}}}"#)).unwrap_err();
+            parse_text(&format!(r#"{{"protocol":2,"type":"invoke","id":{bad}}}"#)).unwrap_err();
         assert!(error.to_string().contains("id"), "{bad}: {error}");
     }
-    assert!(parse_text(r#"{"protocol":1,"type":"invoke"}"#).is_err());
-    let error = parse_text(r#"{"protocol":1,"type":"reload","scope":"leave"}"#).unwrap_err();
+    assert!(parse_text(r#"{"protocol":2,"type":"invoke"}"#).is_err());
+    let error = parse_text(r#"{"protocol":2,"type":"reload","scope":"leave"}"#).unwrap_err();
     assert!(error.to_string().contains("leave"), "{error}");
-    let error = parse_text(r#"{"protocol":1,"type":"subscribe","events":["dnd"]}"#).unwrap_err();
-    assert!(error.to_string().contains("dnd"), "{error}");
+    let error = parse_text(r#"{"protocol":2,"type":"subscribe","events":["bogus"]}"#).unwrap_err();
+    assert!(error.to_string().contains("bogus"), "{error}");
+    let error = parse_text(r#"{"protocol":2,"type":"dnd","mode":"loud"}"#).unwrap_err();
+    assert!(error.to_string().contains("loud"), "{error}");
     // The bounds: 1 and u32::MAX pass.
-    assert!(parse_text(r#"{"protocol":1,"type":"dismiss","id":1}"#).is_ok());
-    assert!(parse_text(r#"{"protocol":1,"type":"dismiss","id":4294967295}"#).is_ok());
+    assert!(parse_text(r#"{"protocol":2,"type":"dismiss","id":1}"#).is_ok());
+    assert!(parse_text(r#"{"protocol":2,"type":"dismiss","id":4294967295}"#).is_ok());
 }
 
 /// A connected bus `Conn` whose peer is the test, mirroring the bus
@@ -304,6 +348,7 @@ impl Harness {
         let (arrival, _) = self.server.store_mut().notify(incoming, now, now_ms);
         match arrival {
             crate::model::store::Arrival::Shown { id, .. } => id,
+            crate::model::store::Arrival::Held { .. } => panic!("DND held the card"),
             crate::model::store::Arrival::Suppressed { .. } => panic!("the bucket is full"),
         }
     }
@@ -322,6 +367,7 @@ impl Harness {
         let (arrival, _) = self.server.store_mut().notify(incoming, now, 1_000);
         match arrival {
             crate::model::store::Arrival::Shown { id, .. } => id,
+            crate::model::store::Arrival::Held { .. } => panic!("DND held the card"),
             crate::model::store::Arrival::Suppressed { .. } => panic!("the bucket is full"),
         }
     }
@@ -754,9 +800,10 @@ fn hostile_lines_are_refused_without_harm() {
         "}",
         "null",
         "[1]",
-        "{\"protocol\":1,\"type\":\"dismiss\",\"id\":\"3\"}",
-        "{\"protocol\":1,\"type\":\"invoke\",\"id\":3.5}",
-        "{\"protocol\":1,\"type\":\"reload\",\"scope\":\"look\",\"scope\":\"leave\"}",
+        "{\"protocol\":2,\"type\":\"dismiss\",\"id\":\"3\"}",
+        "{\"protocol\":2,\"type\":\"invoke\",\"id\":3.5}",
+        "{\"protocol\":2,\"type\":\"reload\",\"scope\":\"look\",\"scope\":\"leave\"}",
+        "{\"protocol\":2,\"type\":\"dnd\",\"mode\":\"loud\"}",
     ] {
         let reply = harness.ask(hostile);
         assert_eq!(reply["type"], "error", "{hostile}");
@@ -781,7 +828,7 @@ fn an_oversized_request_line_is_refused_and_the_connection_closes() {
     }
     // Past the 64 KiB cap: refused, and the connection goes away.
     let big = format!(
-        "{{\"protocol\":1,\"type\":\"list\",\"pad\":\"{}\"}}\n",
+        "{{\"protocol\":2,\"type\":\"list\",\"pad\":\"{}\"}}\n",
         "x".repeat(70_000)
     );
     client.write_all(big.as_bytes()).unwrap();
@@ -876,6 +923,149 @@ fn event_lines_are_one_json_object_each() {
     );
     let reply: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(reply["type"], "subscribed");
+}
+
+#[test]
+fn dnd_reads_sets_and_toggles_with_an_event_on_change() {
+    let mut harness = Harness::new();
+    // Reading the mode answers without an event.
+    let reply = harness.ask(&Request::Dnd { mode: None }.line());
+    assert_eq!(reply["type"], "dnd");
+    assert_eq!(reply["dnd"], "off");
+    assert!(harness.server.take_control_events().is_empty());
+    // Setting it answers the new mode and queues the event.
+    let reply = harness.ask(
+        &Request::Dnd {
+            mode: Some(DndMode::On),
+        }
+        .line(),
+    );
+    assert_eq!(reply["dnd"], "on");
+    let events = harness.server.take_control_events();
+    assert_eq!(events.len(), 1);
+    let event: serde_json::Value = serde_json::from_slice(&events[0].line).unwrap();
+    assert_eq!(event["type"], "dnd");
+    assert_eq!(event["dnd"], "on");
+    // Setting what holds changes nothing: no second event.
+    let reply = harness.ask(
+        &Request::Dnd {
+            mode: Some(DndMode::On),
+        }
+        .line(),
+    );
+    assert_eq!(reply["dnd"], "on");
+    assert!(harness.server.take_control_events().is_empty());
+    // Toggling flips it back.
+    let reply = harness.ask(
+        &Request::Dnd {
+            mode: Some(DndMode::Toggle),
+        }
+        .line(),
+    );
+    assert_eq!(reply["dnd"], "off");
+    let events = harness.server.take_control_events();
+    assert_eq!(events.len(), 1);
+}
+
+/// Reverting `set_dnd` to always report changed leaves the no-second-
+/// event arm failing: the changed pin is load-bearing.
+#[test]
+fn dnd_holds_normal_cards_and_criticals_pass_through() {
+    let mut harness = Harness::new();
+    harness.ask(
+        &Request::Dnd {
+            mode: Some(DndMode::On),
+        }
+        .line(),
+    );
+    let now = Instant::now();
+    let normal_in = incoming(":1.1", "Mail", "New", "body", false, Urgency::Normal);
+    let (arrival, _) = harness.server.store_mut().notify(normal_in, now, 1_000);
+    assert!(matches!(
+        arrival,
+        crate::model::store::Arrival::Held { .. }
+    ));
+    // Nothing live, but history keeps it, unseen.
+    assert!(harness.server.store().live_ids().is_empty());
+    assert_eq!(harness.server.store().history().len(), 1);
+    assert_eq!(harness.server.store().unread(), 1);
+    // A critical still shows.
+    let id = harness.notify_full(":1.1", "Alert", "Fire", "body", false, Urgency::Critical);
+    assert!(harness.server.store().get(id).is_some());
+}
+
+#[test]
+fn history_lists_closed_cards_oldest_first_and_restore_re_shows() {
+    let mut harness = Harness::new();
+    let first = harness.notify(":1.1", "A", "one", "body one");
+    let second = harness.notify(":1.1", "B", "two", "body two");
+    harness.ask(
+        &Request::Dismiss {
+            id: Some(first),
+            all: false,
+        }
+        .line(),
+    );
+    harness.ask(
+        &Request::Dismiss {
+            id: Some(second),
+            all: false,
+        }
+        .line(),
+    );
+    let reply = harness.ask(&Request::History.line());
+    assert_eq!(reply["type"], "history");
+    let entries = reply["history"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["app_name"], "A");
+    assert_eq!(entries[0]["body"], "body one");
+    assert_eq!(entries[0]["seen"], true);
+    assert_eq!(entries[1]["app_name"], "B");
+    // Restore re-shows the newest as a new live card.
+    let reply = harness.ask(&Request::Restore.line());
+    assert_eq!(reply["type"], "ok");
+    assert_eq!(harness.server.store().live_ids().len(), 1);
+    let live = &harness.server.store().ordered()[0];
+    assert_eq!(live.app_name, "B");
+    assert_ne!(live.id, second);
+    assert_eq!(live.id, 3);
+    // The restored entry reads seen, and unread drops to zero.
+    let reply = harness.ask(&Request::History.line());
+    assert!(reply["history"].as_array().unwrap()[1]["seen"].as_bool().unwrap());
+    assert_eq!(harness.server.store().unread(), 0);
+}
+
+#[test]
+fn restore_on_an_empty_history_is_a_loud_error() {
+    let mut harness = Harness::new();
+    let reply = harness.ask(&Request::History.line());
+    assert_eq!(reply["history"], serde_json::Value::Array(vec![]));
+    let reply = harness.ask(&Request::Restore.line());
+    assert_eq!(reply["type"], "error");
+    assert!(reply["message"].as_str().unwrap().contains("empty"));
+}
+
+#[test]
+fn a_reload_keeps_dnd_and_truncates_history_to_the_new_cap() {
+    let mut harness = Harness::new();
+    harness.ask(
+        &Request::Dnd {
+            mode: Some(DndMode::On),
+        }
+        .line(),
+    );
+    let now = Instant::now();
+    for _ in 0..3 {
+        let in_ = incoming(":1.1", "Mail", "New", "body", false, Urgency::Normal);
+        harness.server.store_mut().notify(in_, now, 1_000);
+    }
+    assert_eq!(harness.server.store().history().len(), 3);
+    std::fs::write(&harness.config_path, "history_max = 2\n").unwrap();
+    let reply = harness.ask(&Request::Reload { scope: None }.line());
+    assert_eq!(reply["type"], "ok");
+    // DND survives the reload; history keeps the newest two.
+    assert_eq!(harness.server.dnd(), crate::model::dnd::Dnd::On);
+    assert_eq!(harness.server.store().history().len(), 2);
 }
 
 impl Drop for Harness {

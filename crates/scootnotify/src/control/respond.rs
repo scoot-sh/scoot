@@ -1,10 +1,12 @@
 //! What the daemon answers to each control request.
 //!
 //! Every request is answered at once, from the daemon's state: `list`
-//! reads the live set, `dismiss` and `invoke` close and invoke as a click
-//! would (emitting the bus signals too), `subscribe` dedicates the
-//! connection to events, `reload` re-reads the config file and the look
-//! layer and live-applies them, and `version` is what it sounds like.
+//! reads the live set, `history` the ring, `dnd` reads or steers the
+//! mode, `restore` re-shows the newest entry, `dismiss` and `invoke`
+//! close and invoke as a click would (emitting the bus signals too),
+//! `subscribe` dedicates the connection to events, `reload` re-reads
+//! the config file and the look layer and live-applies them, and
+//! `version` is what it sounds like.
 //!
 //! A refused `reload` changes nothing: the file is re-read and fully
 //! validated before the running config is touched, and a refused look
@@ -17,11 +19,12 @@ use std::time::Instant;
 
 use scoot_dbus::conn::Conn;
 
-use super::protocol::{PROTOCOL_VERSION, ReloadScope, Reply, Request, write_reply};
+use super::protocol::{PROTOCOL_VERSION, DndMode, ReloadScope, Reply, Request, write_reply};
 use super::{Handler, Kinds, MAX_SUBSCRIBERS};
 use crate::bus::server::Server;
 use crate::config::{self, Config};
 use crate::look::{self, Look};
+use crate::model::dnd::Dnd;
 
 /// What a successful reload applied: the config for the popup to lay out
 /// from (`None` for a scoped reload, which never touches it), the look to
@@ -96,17 +99,62 @@ impl Handler for Responder<'_> {
         };
         match request {
             Request::List => {
-                let output = self.server.store().output_name();
                 let notifications = self
                     .server
                     .store()
                     .ordered()
                     .iter()
-                    .map(|note| super::protocol::view(note, self.now, self.now_ms, output))
+                    .map(|note| {
+                        let output = self.server.store().output_for(note);
+                        super::protocol::view(note, self.now, self.now_ms, output)
+                    })
                     .collect();
                 reply = Reply::Notifications { notifications };
                 write_reply(out, &reply);
             }
+            Request::History => {
+                let history = self
+                    .server
+                    .store()
+                    .history()
+                    .iter()
+                    .map(super::protocol::history_view)
+                    .collect();
+                reply = Reply::History { history };
+                write_reply(out, &reply);
+            }
+            Request::Dnd { mode } => {
+                let dnd = match mode {
+                    None => self.server.dnd(),
+                    Some(DndMode::On) => {
+                        self.server.set_dnd(Dnd::On);
+                        self.server.dnd()
+                    }
+                    Some(DndMode::Off) => {
+                        self.server.set_dnd(Dnd::Off);
+                        self.server.dnd()
+                    }
+                    Some(DndMode::Toggle) => {
+                        let next = match self.server.dnd() {
+                            Dnd::Off => Dnd::On,
+                            Dnd::On => Dnd::Off,
+                        };
+                        self.server.set_dnd(next);
+                        self.server.dnd()
+                    }
+                };
+                reply = Reply::Dnd { dnd: dnd.name() };
+                write_reply(out, &reply);
+            }
+            Request::Restore => match self.server.restore_and_signal(self.bus, self.now_ms) {
+                Some(_) => write_reply(out, &Reply::Ok { scope: None }),
+                None => write_reply(
+                    out,
+                    &Reply::Error {
+                        message: &"history is empty: nothing to restore",
+                    },
+                ),
+            },
             Request::Dismiss { id, all } => match (id, all) {
                 // Both an id and `all`: the id wins (`all` ignored). The
                 // CLI refuses this combination, so only a raw socket sends it.

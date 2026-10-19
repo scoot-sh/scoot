@@ -15,8 +15,9 @@ publish = false
 # Popups draw through `scootui` (the on-demand overlay surface, text and
 # PNG icons, and the control socket's server half), the look layer through
 # `scoot-look`, and the idle pause through `ext-idle-notify`: the bar
-# family's own set, as the panel's are. DND, rules, history and Nix arrive
-# in later tickets (dev/design/scootnotify.md, Tickets).
+# family's own set, as the panel's are. A rule's `exec` spawns through
+# `std::process` with pidfds from `rustix/process`: no new package enters
+# the tree for this ticket (dev/design/scootnotify.md, Tickets).
 
 [dependencies]
 # The shared D-Bus client: the wire, the connection with its per-message
@@ -42,8 +43,10 @@ scoot-look.workspace = true
 toml = "1"
 serde.workspace = true
 # Waiting on the bus fd and the expiry timerfd through raw syscalls, no
-# `libc` crate: the same `rustix` the D-Bus client pulls in.
-rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "time"] }
+# `libc` crate: the same `rustix` the D-Bus client pulls in. The `process`
+# feature feeds the rule-exec spawner's pidfds (`pidfd_open`); nothing in
+# it links a shared library beyond what std links.
+rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "process", "time"] }
 # The popup's own Wayland objects (the overlay layer surface it draws
 # on, the seat and pointer that drive it, the activation tokens and the
 # idle notifications): plain crates, as scootbar binds them, so nothing

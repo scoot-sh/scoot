@@ -347,3 +347,18 @@ fn expiry_emits_reason_1() {
     let mut reader = Reader::le(message.body.rest());
     assert_eq!((reader.u32().unwrap(), reader.u32().unwrap()), (id, 1));
 }
+
+#[test]
+fn a_dnd_held_notify_still_answers_its_id() {
+    use crate::model::dnd::Dnd;
+    let mut harness = Harness::new();
+    harness.server.set_dnd(Dnd::On);
+    let body = notify_body("Mail", 0, "Hi", "there", &[], -1);
+    let id = reply_u32(&harness.call(":1.1", INTERFACE, "Notify", NOTIFY_SIGNATURE, &body));
+    assert_eq!(id, 1);
+    // Nothing live, but history keeps it, unseen: no signal went out
+    // for it (the peer stays quiet past the reply).
+    assert!(harness.server.store().live_ids().is_empty());
+    assert_eq!(harness.server.store().history().len(), 1);
+    assert_eq!(harness.server.store().unread(), 1);
+}
