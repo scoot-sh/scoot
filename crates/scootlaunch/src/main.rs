@@ -20,6 +20,7 @@
 
 #![forbid(unsafe_code)]
 
+mod agent;
 mod cli;
 mod config;
 mod dmenu;
@@ -77,6 +78,8 @@ fn run(argv: &[String]) -> i32 {
         cmd_query(&args)
     } else if args.list {
         cmd_list(&args)
+    } else if args.run_id.is_some() {
+        cmd_run_id(&args)
     } else if args.check {
         cmd_check(args.config.as_deref())
     } else if args.dmenu {
@@ -302,6 +305,90 @@ fn cmd_list(args: &cli::Args) -> i32 {
         Err(error) => {
             let _ = std::io::stderr()
                 .write_fmt(format_args!("scootlaunch: cannot write output: {error}\n"));
+            1
+        }
+    }
+}
+
+/// `--run-id ID [--action A] [--lenient]`: launch one entry headlessly,
+/// through the panel's spawn path with no surface and no token.
+///
+/// Stdout carries exactly one JSON object: a success object on exit 0
+/// (`{"ok":true,"pid":N,"scope":"…"}` for a spawn, `{"ok":true,
+/// "activated":true}` for a `DBusActivatable` activation,
+/// `{"ok":true,"detached":true}` for the bus-less fallback), or an
+/// error object on exit 1 (`{"ok":false,"code":"…","error":"…"}` with
+/// `invalid-id`, `unknown-id`, `ambiguous-id`, `invalid-action`,
+/// `unknown-action` or `launch-failed`). Usage errors stay exit 2 from
+/// the CLI. Notes and warnings go to stderr, never stdout.
+fn cmd_run_id(args: &cli::Args) -> i32 {
+    let id = args.run_id.as_deref().unwrap_or("");
+    let env = index::Env::from_env();
+    let opts = index::BuildOpts {
+        use_cache: true,
+        lenient_exec: args.lenient,
+    };
+    let built = index::build(&env, &opts);
+    for note in &built.notes {
+        warn(format_args!("scootlaunch: {note}"));
+    }
+    let (entry, action) = match agent::resolve(&built.entries, id, args.action.as_deref()) {
+        Ok(resolved) => resolved,
+        Err(error) => return emit_run_err(&agent::RunErr::resolve(&error)),
+    };
+    let ctx = spawn::Ctx {
+        state_home: env.xdg_state_home.clone(),
+        home: std::env::var_os("HOME").map(PathBuf::from),
+        display_set: std::env::var_os("DISPLAY").is_some(),
+        now: rank::frecency::now_secs(),
+    };
+    match spawn::launch_entry_report(entry, action, None, &ctx) {
+        Ok(report) => {
+            let ok = agent::RunOk::from_report(&report);
+            match serde_json::to_string(&ok) {
+                Ok(mut json) => {
+                    json.push('\n');
+                    match print(&json) {
+                        Ok(()) => 0,
+                        Err(error) => {
+                            let _ = std::io::stderr().write_fmt(format_args!(
+                                "scootlaunch: cannot write output: {error}\n"
+                            ));
+                            1
+                        }
+                    }
+                }
+                Err(error) => {
+                    warn(format_args!("scootlaunch: cannot encode --run-id: {error}"));
+                    1
+                }
+            }
+        }
+        Err(reason) => emit_run_err(&agent::RunErr::launch_failed(&reason)),
+    }
+}
+
+/// Prints one error object on stdout (the `--run-id` contract) and
+/// exits 1. A dead reader (`--run-id x | head -c0`) is a quiet exit 1,
+/// as for any Unix tool.
+fn emit_run_err(error: &agent::RunErr) -> i32 {
+    match serde_json::to_string(error) {
+        Ok(mut json) => {
+            json.push('\n');
+            match print(&json) {
+                Ok(()) => 1,
+                Err(write_error) => {
+                    let _ = std::io::stderr().write_fmt(format_args!(
+                        "scootlaunch: cannot write output: {write_error}\n"
+                    ));
+                    1
+                }
+            }
+        }
+        Err(encode_error) => {
+            warn(format_args!(
+                "scootlaunch: cannot encode --run-id: {encode_error}"
+            ));
             1
         }
     }

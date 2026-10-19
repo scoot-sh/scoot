@@ -1,6 +1,7 @@
 //! The command line: `scootlaunch` (the panel), `scootlaunch --list
 //! [--all] [--lenient] [--json]`, `scootlaunch --query TEXT [--all]
-//! [--lenient] [--json]`, `scootlaunch --check [--config PATH]`,
+//! [--lenient] [--json]`, `scootlaunch --run-id ID [--action A]
+//! [--lenient]`, `scootlaunch --check [--config PATH]`,
 //! `scootlaunch --dmenu [flags]` (lines on stdin, the pick on stdout)
 //! and `scootlaunch --run` (executables on `$PATH`).
 //!
@@ -20,8 +21,8 @@ use scootui::color::Color;
 mod tests;
 
 /// The command line's modes: at most one per invocation. The bare
-/// panel, `--list`, `--query`, `--check`, `--dmenu` and `--run` are
-/// the commands; everything else modifies one of them.
+/// panel, `--list`, `--query`, `--run-id`, `--check`, `--dmenu` and
+/// `--run` are the commands; everything else modifies one of them.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Args {
     pub list: bool,
@@ -31,6 +32,12 @@ pub struct Args {
     pub help: bool,
     pub version: bool,
     pub query: Option<String>,
+    /// `--run-id ID`: launch one entry headlessly, through the
+    /// panel's spawn path with no surface. Always JSON on stdout.
+    pub run_id: Option<String>,
+    /// `--action A`: which desktop action of `--run-id` to launch.
+    /// Needs `--run-id`.
+    pub action: Option<String>,
     pub font: Option<String>,
     pub config: Option<String>,
     pub check: bool,
@@ -106,6 +113,7 @@ scootlaunch: a keyboard-first application launcher for Wayland
 usage: scootlaunch [--font PATH] [--config PATH] [--lenient]
        scootlaunch --list [--all] [--lenient] [--json]
        scootlaunch --query TEXT [--all] [--lenient] [--json]
+       scootlaunch --run-id ID [--action A] [--lenient]
        scootlaunch --check [--config PATH]
        scootlaunch --dmenu [--prompt TEXT] [--prompt-only TEXT] [--password]
                      [--no-run-if-empty] [--only-match] [--index]
@@ -122,6 +130,10 @@ usage: scootlaunch [--font PATH] [--config PATH] [--lenient]
   --all        include hidden entries, with their reason
   --lenient    Exec quoting: accept what GLib accepts, not just the spec
   --json       print the agent JSON schema (id, name, exec argv, ...) array
+  --run-id ID  launch one entry headlessly (no compositor needed):
+                 prints one JSON object and exits 0, or prints an error
+                 object and exits 1
+  --action A   which desktop action of --run-id to launch (needs --run-id)
   --check      validate the panel's config file and exit
   --dmenu      lines on stdin, the pick on stdout (exit 0); Escape exits 1;
                  a dmenu pick prints and launches nothing
@@ -142,12 +154,14 @@ usage: scootlaunch [--font PATH] [--config PATH] [--lenient]
   --version    print the version
 
 TEXT is the next argument after --query, whatever it holds. --prompt,
---prompt-only, --placeholder, --layer and the colors take their value
-attached (--prompt=TEXT) or as the next argument (--prompt TEXT).
---font and --config are panel options; --all, --json and --lenient
-modify --list and --query (--lenient also shapes the panel's index).
-The dmenu flags need --dmenu; the colors and --layer shape the panel,
---run and --dmenu alike. One command per invocation.
+--prompt-only, --placeholder, --layer, --action and the colors take
+their value attached (--prompt=TEXT) or as the next argument
+(--prompt TEXT). --run-id takes its value either way too. --font and
+--config are panel options; --all, --json and --lenient modify --list
+and --query (--lenient also shapes the panel's index and --run-id).
+The dmenu flags need --dmenu; --action needs --run-id; the colors and
+--layer shape the panel, --run and --dmenu alike. One command per
+invocation.
 ";
 
 /// A usage error. Printed by the caller; exit status 2.
@@ -158,16 +172,17 @@ pub enum Error {
     /// A positional argument, which no command takes.
     UnexpectedArg(String),
     /// A flag without the command it modifies (`--all`/`--json` without
-    /// `--list` or `--query`; `--font` without the panel; `--config`
-    /// without the panel or `--check`; the dmenu flags without
-    /// `--dmenu`; the colors/`--layer` without a panel).
+    /// `--list` or `--query`; `--action` without `--run-id`; `--font`
+    /// without the panel; `--config` without the panel or `--check`;
+    /// the dmenu flags without `--dmenu`; the colors/`--layer` without
+    /// a panel).
     NeedsCommand(String),
-    /// A value flag (`--query`, `--font`, `--config`, `--prompt`,
-    /// `--prompt-only`, `--placeholder`, `--layer`, a color) with no
-    /// value after it.
+    /// A value flag (`--query`, `--run-id`, `--action`, `--font`,
+    /// `--config`, `--prompt`, `--prompt-only`, `--placeholder`,
+    /// `--layer`, a color) with no value after it.
     NeedsValue(String),
     /// Two commands together (any two of `--list`, `--query`,
-    /// `--check`, `--dmenu`, `--run`), or `--prompt` with
+    /// `--run-id`, `--check`, `--dmenu`, `--run`), or `--prompt` with
     /// `--prompt-only`: two commands, not modifiers.
     ConflictingCommands,
     /// A value flag with a value outside its grammar: `--layer`
@@ -180,14 +195,14 @@ pub enum Error {
     },
 }
 
-const USAGE: &str = "usage is scootlaunch [--font PATH] [--config PATH] [--lenient], scootlaunch --list [--all] [--lenient] [--json], scootlaunch --query TEXT [--all] [--lenient] [--json], scootlaunch --check [--config PATH], scootlaunch --dmenu [flags] or scootlaunch --run";
+const USAGE: &str = "usage is scootlaunch [--font PATH] [--config PATH] [--lenient], scootlaunch --list [--all] [--lenient] [--json], scootlaunch --query TEXT [--all] [--lenient] [--json], scootlaunch --run-id ID [--action A] [--lenient], scootlaunch --check [--config PATH], scootlaunch --dmenu [flags] or scootlaunch --run";
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::UnknownFlag(flag) => write!(
                 f,
-                "unknown flag {flag}: supported flags are --list --query --all --lenient --json --font --config --check --dmenu --run --prompt --prompt-only --password --no-run-if-empty --only-match --index --placeholder --layer --background-color --text-color --border-color --selection-color --selection-text-color --match-color --prompt-color --help --version"
+                "unknown flag {flag}: supported flags are --list --query --run-id --action --all --lenient --json --font --config --check --dmenu --run --prompt --prompt-only --password --no-run-if-empty --only-match --index --placeholder --layer --background-color --text-color --border-color --selection-color --selection-text-color --match-color --prompt-color --help --version"
             ),
             Error::UnexpectedArg(arg) => write!(f, "unexpected argument {arg}: {USAGE}"),
             Error::NeedsCommand(flag) => {
@@ -199,7 +214,7 @@ impl fmt::Display for Error {
             Error::ConflictingCommands => {
                 write!(
                     f,
-                    "cannot combine --list, --query, --check, --dmenu, --run or --prompt with --prompt-only: {USAGE}"
+                    "cannot combine --list, --query, --run-id, --check, --dmenu, --run or --prompt with --prompt-only: {USAGE}"
                 )
             }
             Error::InvalidValue {
@@ -217,11 +232,11 @@ impl fmt::Display for Error {
 }
 
 /// Parses `argv` (including `argv[0]`, the program name). Every flag is
-/// a whole argument, except the value flags (`--prompt`,
-/// `--prompt-only`, `--placeholder`, `--layer`, the seven colors),
-/// which also take `--flag=value`. `--query` takes the next argument
-/// as its text, whatever it holds. `--password` never eats the next
-/// argument, so a following value is never eaten by mistake.
+/// a whole argument, except the value flags (`--run-id`, `--action`,
+/// `--prompt`, `--prompt-only`, `--placeholder`, `--layer`, the seven
+/// colors), which also take `--flag=value`. `--query` takes the next
+/// argument as its text, whatever it holds. `--password` never eats
+/// the next argument, so a following value is never eaten by mistake.
 pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
     let mut args = Args {
         list: false,
@@ -231,6 +246,8 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
         help: false,
         version: false,
         query: None,
+        run_id: None,
+        action: None,
         font: None,
         config: None,
         check: false,
@@ -313,6 +330,12 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
             "--check" => {
                 no_attached(&argv[index], attached)?;
                 args.check = true;
+            }
+            "--run-id" => {
+                args.run_id = Some(take_value(argv, &mut index, attached, "--run-id")?);
+            }
+            "--action" => {
+                args.action = Some(take_value(argv, &mut index, attached, "--action")?);
             }
             "--font" => {
                 args.font = Some(take_value(argv, &mut index, attached, "--font")?);
@@ -428,6 +451,9 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
     if args.query.is_some() {
         commands += 1;
     }
+    if args.run_id.is_some() {
+        commands += 1;
+    }
     if args.check {
         commands += 1;
     }
@@ -440,18 +466,24 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
     if commands > 1 {
         return Err(Error::ConflictingCommands);
     }
+    // `--action` needs `--run-id`.
+    if args.action.is_some() && args.run_id.is_none() {
+        return Err(Error::NeedsCommand("--action".to_string()));
+    }
     // `--prompt` and `--prompt-only` are two prompts, not one with a
     // modifier: the prompt-only value is the prompt.
     if args.prompt.is_some() && args.prompt_only.is_some() {
         return Err(Error::ConflictingCommands);
     }
     // `--font` is a panel option: it shapes nothing headless.
-    if args.font.is_some() && (args.list || args.query.is_some() || args.check) {
+    if args.font.is_some()
+        && (args.list || args.query.is_some() || args.run_id.is_some() || args.check)
+    {
         return Err(Error::NeedsCommand("--font".to_string()));
     }
     // `--config` names the panel's file: the panel modes and `--check`
     // take it, the headless commands do not.
-    if args.config.is_some() && (args.list || args.query.is_some()) {
+    if args.config.is_some() && (args.list || args.query.is_some() || args.run_id.is_some()) {
         return Err(Error::NeedsCommand("--config".to_string()));
     }
     for flag in ["--all", "--json"] {
@@ -481,14 +513,18 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
     // `--run` and `--dmenu` take them, the headless commands and
     // `--check` do not.
     if (!args.colors.is_empty() || args.layer.is_some())
-        && (args.list || args.query.is_some() || args.check)
+        && (args.list || args.query.is_some() || args.run_id.is_some() || args.check)
     {
         return Err(Error::NeedsCommand("--background-color".to_string()));
     }
     // `--lenient` modifies the headless commands and the panel's own
-    // index alike; a bare `--lenient` is the panel's strictness flag.
-    // With `--dmenu` or `--run` there is no desktop index to shape,
-    // and it rides along harmlessly.
+    // index alike (`--run-id` included); a bare `--lenient` is the
+    // panel's strictness flag. With `--dmenu` or `--run` there is no
+    // desktop index to shape, and it rides along harmlessly.
+    //
+    // `--all` and `--json` modify `--list` and `--query` only:
+    // `--run-id` is always one JSON object (hidden entries included),
+    // so either flag with it is a loud error via the loop above.
     Ok(args)
 }
 
@@ -501,6 +537,8 @@ fn empty_args() -> Args {
         help: false,
         version: false,
         query: None,
+        run_id: None,
+        action: None,
         font: None,
         config: None,
         check: false,
