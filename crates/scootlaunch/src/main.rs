@@ -6,17 +6,26 @@
 //! `TryExec`, actions, the Exec quoting and field codes, and the
 //! cache keyed by canonical path, inode and mtime — plus fuzzy
 //! matching with frecency (`--list` and `--query`, each with
-//! `[--all] [--lenient] [--json]`). The panel, launching and the
+//! `[--all] [--lenient] [--json]`), and the overlay exclusive-keyboard
+//! panel (bare `scootlaunch`, with the entry and the virtualized list,
+//! the single-instance toggle and the look layer). Launching and the
 //! dmenu mode are later tickets. The plan is
 //! `dev/design/scootlaunch.md`.
 //!
-//! No `unsafe` here. Nothing here links beyond what `std` links.
+//! No `unsafe` here. The keyboard links libxkbcommon through `scootui`
+//! (decided in `dev/design/shell-apps.md`); nothing else here links
+//! beyond what `std` links.
 
 #![forbid(unsafe_code)]
 
 mod cli;
+mod config;
 mod index;
+mod look;
+mod panel;
 mod rank;
+mod socket;
+mod ui;
 
 // Tests pinning the warm-query path count heap allocations through
 // this (scootbg_mem::count), forwarding everything else to the
@@ -27,6 +36,7 @@ mod rank;
 static COUNTING_ALLOC: scootbg_mem::CountingAlloc = scootbg_mem::CountingAlloc;
 
 use std::io::Write as _;
+use std::path::PathBuf;
 
 use scoot_rt::print::{print, warn};
 
@@ -55,8 +65,51 @@ fn run(argv: &[String]) -> i32 {
         }
     } else if args.query.is_some() {
         cmd_query(&args)
-    } else {
+    } else if args.list {
         cmd_list(&args)
+    } else if args.check {
+        cmd_check(args.config.as_deref())
+    } else {
+        panel::open(&panel::Options {
+            font: args.font.map(PathBuf::from),
+            config: args.config.map(PathBuf::from),
+            lenient: args.lenient,
+        })
+    }
+}
+
+/// `--check [--config PATH]`: validates the panel's config file and
+/// exits, without a compositor (0 valid, 2 refused). A missing file is
+/// the defaults, and valid.
+fn cmd_check(config: Option<&str>) -> i32 {
+    let path = config
+        .map(PathBuf::from)
+        .unwrap_or_else(config::default_path);
+    match std::fs::read(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let _ = std::io::stdout().write_fmt(format_args!(
+                "{}: no config, built-in defaults apply\n",
+                path.display()
+            ));
+            0
+        }
+        Err(error) => {
+            warn(format_args!(
+                "scootlaunch: cannot read {}: {error}",
+                path.display()
+            ));
+            2
+        }
+        Ok(bytes) => match config::parse(&bytes) {
+            Ok(_) => {
+                let _ = std::io::stdout().write_fmt(format_args!("{}: valid\n", path.display()));
+                0
+            }
+            Err(error) => {
+                warn(format_args!("scootlaunch: {error}"));
+                2
+            }
+        },
     }
 }
 

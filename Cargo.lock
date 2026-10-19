@@ -1006,12 +1006,19 @@ dependencies = [
 name = "scootlaunch"
 version = "0.3.1"
 dependencies = [
+ "base64",
  "rustix 1.1.4",
+ "scoot-look",
  "scoot-rt",
  "scootbg-mem",
+ "scootui",
  "serde",
  "serde_json",
  "tempfile",
+ "toml",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
 ]
 
 [[package]]

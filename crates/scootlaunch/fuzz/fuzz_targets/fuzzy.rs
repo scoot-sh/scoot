@@ -44,6 +44,7 @@ mod fuzz {
         let mut folded = String::new();
         fuzzy::fold_into(query, &mut folded);
         let mut dp = fuzzy::Dp::new();
+        let mut spans = Vec::new();
         for field in FIELDS {
             let mut field_folded = String::new();
             fuzzy::fold_into(field, &mut field_folded);
@@ -58,6 +59,15 @@ mod fuzz {
                     fuzzy::mask_of(&field_folded)
                 ));
             }
+            // The display spans agree with the scorer on existence: a
+            // highlight exists exactly where a score does.
+            let field_codes: Vec<u32> =
+                field_folded.chars().map(|char| char as u32).collect();
+            let query_codes: Vec<u32> = folded.chars().map(|char| char as u32).collect();
+            assert_eq!(
+                fuzzy::greedy_spans(&field_codes, &query_codes, &mut spans),
+                scored.is_some()
+            );
         }
         Some(())
     }
