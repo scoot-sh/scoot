@@ -108,6 +108,8 @@ impl Handler for Responder<'_> {
                 write_reply(out, &reply);
             }
             Request::Dismiss { id, all } => match (id, all) {
+                // Both an id and `all`: the id wins (`all` ignored). The
+                // CLI refuses this combination, so only a raw socket sends it.
                 (Some(id), _) => match self.server.dismiss_and_signal(self.bus, id) {
                     true => write_reply(out, &Reply::Ok { scope: None }),
                     false => write_reply(

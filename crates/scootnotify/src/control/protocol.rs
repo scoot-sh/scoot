@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! {"type":"notifications","notifications":[{...}]}
-//! {"type":"version","protocol":1,"version":"0.1.0"}
+//! {"type":"version","protocol":1,"version":"0.3.1"}
 //! {"type":"subscribed","events":["notify","close"]}
 //! {"type":"ok"}
 //! {"type":"ok","scope":"look"}
@@ -75,7 +75,8 @@ pub enum Request<'a> {
     List,
     /// Close one card (`id`), or every live card (`all`), with reason 2,
     /// as a click would. Unknown ids are refused loudly, never a silent
-    /// ok.
+    /// ok. A request carrying both an `id` and `"all":true` (only over
+    /// the raw socket; the CLI refuses the combination) dismisses that id.
     Dismiss { id: Option<u32>, all: bool },
     /// Run card `id`'s `action` as a click would (`default` when absent),
     /// emitting `ActionInvoked` and closing with reason 2 unless the card

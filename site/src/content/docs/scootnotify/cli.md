@@ -77,11 +77,12 @@ scootnotify msg reload              # the file and the look layer
 scootnotify msg reload --look       # only the look layer
 scootnotify msg subscribe notify close
 scootnotify msg version
-# {"type":"version","protocol":1,"version":"0.1.0"}
+# {"type":"version","protocol":1,"version":"0.3.1"}
 ```
 
 Unknown ids and unknown actions are loud errors, never silent
-successes:
+successes. `msg dismiss` takes an id or `--all`, never both; over the
+raw socket a `dismiss` carrying both dismisses that id.
 
 ```sh
 scootnotify msg dismiss 999
