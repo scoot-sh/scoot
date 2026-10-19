@@ -677,9 +677,13 @@ pub enum Reply<'a> {
         notifications: Vec<NotificationView<'a>>,
     },
     /// The answer to `history`: the ring, oldest first.
-    History { history: Vec<HistoryView<'a>> },
+    History {
+        history: Vec<HistoryView<'a>>,
+    },
     /// The answer to `dnd`: the mode after the request ran.
-    Dnd { dnd: &'a str },
+    Dnd {
+        dnd: &'a str,
+    },
     Ok {
         /// The scoped-reload receipt: a look-scoped reload carries one
         /// (`"look"`), so the CLI can tell a scoped reply from a plain one.

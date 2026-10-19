@@ -95,7 +95,18 @@ fn a_flood_leaves_fds_flat() {
     assert!(error.contains("4"), "{error}");
     spawner.kill_all();
     spawner.reap();
-    assert_eq!(fds_now(), before, "an exec flood costs no fds");
+    // Deterministic half: every child is collected.
+    assert_eq!(spawner.running(), 0);
+    // The fd half tolerates two strays: under `cargo test` every test
+    // shares one process, and another test may hold a transient fd
+    // across this measurement (under nextest each test is its own
+    // process and the count is exact). A real leak keeps all four
+    // pidfds, which this still catches.
+    let after = fds_now();
+    assert!(
+        after <= before + 2,
+        "an exec flood costs fds: {before} -> {after}"
+    );
 }
 
 #[test]

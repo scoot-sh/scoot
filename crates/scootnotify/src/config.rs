@@ -251,9 +251,7 @@ impl Rule {
                     ));
                 }
                 if word.bytes().any(|byte| byte == 0) {
-                    return Err(format!(
-                        "config refused: {name} exec carries a NUL byte"
-                    ));
+                    return Err(format!("config refused: {name} exec carries a NUL byte"));
                 }
             }
         }

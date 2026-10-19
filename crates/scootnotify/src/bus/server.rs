@@ -344,11 +344,7 @@ impl Server {
     }
 
     /// Every running rule child's pidfd, for the poll set.
-    pub fn exec_sources<'fd>(
-        &'fd self,
-        fds: &mut [rustix::event::PollFd<'fd>],
-        len: &mut usize,
-    ) {
+    pub fn exec_sources<'fd>(&'fd self, fds: &mut [rustix::event::PollFd<'fd>], len: &mut usize) {
         self.exec.sources(fds, len);
     }
 
