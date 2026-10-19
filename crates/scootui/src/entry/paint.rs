@@ -39,10 +39,22 @@ impl Geometry {
         self.width > 0 && self.row_height > 0
     }
 
+    /// The gap between a widget's edge (ring or selection fill) and its
+    /// text: half an em, so the first letter never touches the edge.
+    fn inset(self) -> u32 {
+        (self.em * 0.5).round().clamp(0.0, 64.0) as u32
+    }
+
+    /// Where text starts.
+    fn text_x(self) -> u32 {
+        self.x.saturating_add(self.inset())
+    }
+
+    /// The text's clip: the widget minus the inset on both sides.
     fn clip(self) -> Span {
         Span {
-            x: self.x,
-            width: self.width,
+            x: self.text_x(),
+            width: self.width.saturating_sub(self.inset().saturating_mul(2)),
         }
     }
 }
@@ -70,7 +82,7 @@ pub fn paint_entry(
             None,
             placeholder,
             geo.em,
-            i64::from(geo.x),
+            i64::from(geo.text_x()),
             baseline,
             theme.dim,
             clip,
@@ -80,7 +92,7 @@ pub fn paint_entry(
         let wide = text.measure(None, line, geo.em);
         canvas.fill_rect(
             Span {
-                x: geo.x,
+                x: geo.text_x(),
                 width: wide,
             },
             geo.y,
@@ -92,7 +104,7 @@ pub fn paint_entry(
             None,
             line,
             geo.em,
-            i64::from(geo.x),
+            i64::from(geo.text_x()),
             baseline,
             theme.background,
             clip,
@@ -104,14 +116,16 @@ pub fn paint_entry(
             None,
             line,
             geo.em,
-            i64::from(geo.x),
+            i64::from(geo.text_x()),
             baseline,
             theme.foreground,
             clip,
         );
         if focused {
             let prefix = line.get(..entry.caret().min(line.len())).unwrap_or("");
-            let at = geo.x.saturating_add(text.measure(None, prefix, geo.em));
+            let at = geo
+                .text_x()
+                .saturating_add(text.measure(None, prefix, geo.em));
             canvas.fill_rect(
                 Span { x: at, width: 2 },
                 geo.y.saturating_add(1),
@@ -155,7 +169,7 @@ pub fn paint_password(
             .max(0.0) as u32;
         canvas.fill_rect(
             Span {
-                x: geo.x,
+                x: geo.text_x(),
                 width: wide,
             },
             geo.y,
@@ -164,7 +178,7 @@ pub fn paint_password(
         );
     }
     let advance = text.advance(MASK_CHAR, geo.em);
-    let mut pen = geo.x as f32;
+    let mut pen = geo.text_x() as f32;
     let stop = clip.end() as f32;
     for _ in 0..entry.char_len() {
         if pen >= stop {
@@ -183,7 +197,7 @@ pub fn paint_password(
         pen += advance;
     }
     if focused && !entry.selected_all() {
-        let mut caret = geo.x as f32;
+        let mut caret = geo.text_x() as f32;
         for _ in 0..entry.caret_chars() {
             caret += advance;
         }
@@ -260,7 +274,7 @@ pub fn paint_selector<'a, 'b>(
                 None,
                 row_text(index),
                 geo.em,
-                i64::from(geo.x),
+                i64::from(geo.text_x()),
                 baseline,
                 theme.foreground,
                 clip,
@@ -272,7 +286,7 @@ pub fn paint_selector<'a, 'b>(
                 None,
                 empty,
                 geo.em,
-                i64::from(geo.x),
+                i64::from(geo.text_x()),
                 baseline,
                 theme.dim,
                 clip,
@@ -336,7 +350,7 @@ fn paint_rows<'a, 'b>(
             None,
             label,
             geo.em,
-            i64::from(geo.x),
+            i64::from(geo.text_x()),
             baseline,
             base,
             clip,
@@ -362,7 +376,9 @@ fn paint_rows<'a, 'b>(
                 (Some(head), Some(body)) => (head, body),
                 _ => continue,
             };
-            let at = geo.x.saturating_add(text.measure(None, head, geo.em));
+            let at = geo
+                .text_x()
+                .saturating_add(text.measure(None, head, geo.em));
             text.draw(
                 canvas,
                 None,

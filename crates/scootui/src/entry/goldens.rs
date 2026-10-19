@@ -28,16 +28,18 @@ use crate::theme::Theme;
 const EM: f32 = 20.0;
 const ROW_H: u32 = 28;
 const WIDTH: u32 = 400;
+/// Half an em: the gap between a widget's edge and its text.
+const INSET: u32 = 10;
 
-const GOLDEN_ENTRY_EMPTY_FOCUSED: u64 = 3149028585085770021;
-const GOLDEN_ENTRY_TEXT_CARET_MID: u64 = 5766987728371049165;
-const GOLDEN_ENTRY_SELECTED_ALL: u64 = 9302073803395868837;
-const GOLDEN_ENTRY_UNFOCUSED: u64 = 14603425038574043717;
-const GOLDEN_PASSWORD_MASKED: u64 = 5542427092276782005;
-const GOLDEN_LIST_SELECTION_HIGHLIGHTS: u64 = 1731100073103986893;
-const GOLDEN_LIST_SCROLLED: u64 = 6455015051196483077;
-const GOLDEN_SELECTOR_COLLAPSED: u64 = 12834986976437744389;
-const GOLDEN_SELECTOR_EXPANDED: u64 = 8777716930260852013;
+const GOLDEN_ENTRY_EMPTY_FOCUSED: u64 = 16614668564813265701;
+const GOLDEN_ENTRY_TEXT_CARET_MID: u64 = 6727157936884326765;
+const GOLDEN_ENTRY_SELECTED_ALL: u64 = 11087678023190917221;
+const GOLDEN_ENTRY_UNFOCUSED: u64 = 5902647548692030597;
+const GOLDEN_PASSWORD_MASKED: u64 = 15244525020742787061;
+const GOLDEN_LIST_SELECTION_HIGHLIGHTS: u64 = 5463997336095684813;
+const GOLDEN_LIST_SCROLLED: u64 = 5428548557355056837;
+const GOLDEN_SELECTOR_COLLAPSED: u64 = 3465626071466733637;
+const GOLDEN_SELECTOR_EXPANDED: u64 = 17309038250503822317;
 
 fn text() -> Text {
     Text::new(FontArc::new(
@@ -115,11 +117,38 @@ fn golden_entry_empty_focused() {
         geo.y + geo.row_height,
         rgb(theme.dim)
     ));
-    // The caret stands at the line start in accent.
+    // The ring's left edge is accent (an empty line draws no caret).
     assert_eq!(canvas.at(geo.x + 1, geo.y + ROW_H / 2), rgb(theme.accent));
     // The focus ring runs the top edge in accent.
     assert_eq!(canvas.at(geo.x + 4, geo.y), rgb(theme.accent));
     assert_eq!(hash(&canvas, WIDTH, ROW_H + 16), GOLDEN_ENTRY_EMPTY_FOCUSED);
+}
+
+#[test]
+fn the_first_letter_keeps_clear_of_the_ring() {
+    let theme = theme();
+    let mut pixels = vec![0u8; (WIDTH * (ROW_H + 16)) as usize * 4];
+    let mut canvas = washed_canvas(&mut pixels, WIDTH, ROW_H + 16);
+    let mut text = text();
+    let mut entry = Entry::new(64);
+    assert_eq!(entry.insert_text("Hello"), InsertOutcome::Inserted);
+    let geo = entry_geo();
+    paint_entry(&mut canvas, &mut text, &theme, &entry, &geo, true, "");
+    // The ring is 2 px wide; between it and the text edge stays clear of
+    // ink, on every row inside the ring.
+    for y in geo.y + 2..geo.y + geo.row_height - 2 {
+        for x in geo.x + 2..geo.x + INSET {
+            assert_ne!(canvas.at(x, y), rgb(theme.foreground), "ink at ({x},{y})");
+        }
+    }
+    assert!(any_in(
+        &canvas,
+        geo.x + INSET,
+        geo.y + 2,
+        geo.x + INSET + 40,
+        geo.y + geo.row_height - 2,
+        rgb(theme.foreground)
+    ));
 }
 
 #[test]
@@ -144,7 +173,7 @@ fn golden_entry_text_caret_mid() {
         geo.y + geo.row_height,
         rgb(theme.foreground)
     ));
-    let caret = geo.x + text.measure(None, "a1:mp", EM);
+    let caret = geo.x + INSET + text.measure(None, "a1:mp", EM);
     assert_eq!(canvas.at(caret + 1, geo.y + ROW_H / 2), rgb(theme.accent));
     assert_eq!(
         hash(&canvas, WIDTH, ROW_H + 16),
@@ -164,7 +193,7 @@ fn golden_entry_selected_all() {
     let geo = entry_geo();
     paint_entry(&mut canvas, &mut text, &theme, &entry, &geo, true, "");
     // The selection fill sits under the text in accent.
-    assert_eq!(canvas.at(geo.x + 1, geo.y + 1), rgb(theme.accent));
+    assert_eq!(canvas.at(geo.x + INSET + 1, geo.y + 1), rgb(theme.accent));
     assert_eq!(hash(&canvas, WIDTH, ROW_H + 16), GOLDEN_ENTRY_SELECTED_ALL);
 }
 
@@ -181,7 +210,7 @@ fn golden_entry_unfocused() {
     // No ring: the top edge stays background.
     assert_eq!(canvas.at(geo.x + 4, geo.y), rgb(theme.background));
     // No caret: past the text end sits background, not accent.
-    let end = geo.x + text.measure(None, "09", EM);
+    let end = geo.x + INSET + text.measure(None, "09", EM);
     assert_eq!(canvas.at(end + 4, geo.y + ROW_H / 2), rgb(theme.background));
     assert_eq!(hash(&canvas, WIDTH, ROW_H + 16), GOLDEN_ENTRY_UNFOCUSED);
 }
@@ -208,7 +237,7 @@ fn golden_password_masked() {
         geo.y + geo.row_height,
         rgb(theme.foreground)
     ));
-    let mask_end = geo.x + (7.0 * text.advance(super::line::MASK_CHAR, EM)).ceil() as u32;
+    let mask_end = geo.x + INSET + (7.0 * text.advance(super::line::MASK_CHAR, EM)).ceil() as u32;
     assert_eq!(
         canvas.at(mask_end + 12, geo.y + ROW_H / 2),
         rgb(theme.background)
