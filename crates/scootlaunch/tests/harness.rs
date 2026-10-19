@@ -37,9 +37,9 @@ pub fn desktop_with_icon(name: &str, exec: &str, icon: &str) -> String {
 }
 
 /// A fixture icon theme under `data_home/icons/FixtureTheme`: a solid
-/// red `alpha.png`, a solid red `beta.svg`, and no `gamma`, so one row
-/// draws each image path and one the letter tile. Answers the theme
-/// name for the look layer's `[icons] theme`.
+/// red `alpha.png`, a solid blue `beta.svg`, and no `gamma`, so two rows
+/// draw image icons (one per decoder) and one the letter tile. Answers
+/// the theme name for the look layer's `[icons] theme`.
 ///
 /// Run the panel tests with `SCOOTLAUNCH_SHOTS` set to regenerate the
 /// docs screenshots from this same fixture (see `icons_docs_one` in
@@ -66,7 +66,7 @@ pub fn fixture_icon_theme(data_home: &std::path::Path) -> String {
     fs::write(dir.join("alpha.png"), &buf).unwrap();
     fs::write(
         dir.join("beta.svg"),
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"48\" height=\"48\"><rect width=\"48\" height=\"48\" fill=\"#ff0000\"/></svg>",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"48\" height=\"48\"><rect width=\"48\" height=\"48\" fill=\"#0000ff\"/></svg>",
     )
     .unwrap();
     fs::write(

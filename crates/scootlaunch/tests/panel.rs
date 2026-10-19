@@ -412,9 +412,10 @@ fn golden_one(name: &str) {
 /// The icon column draws, per shipped look: a headless panel over the
 /// fixture icon theme (a PNG icon, an SVG icon, a tile fallback), a
 /// query typed, and the icon column's pixels counted over the rows.
-/// Two image squares and one tile must show; neutering `draw_icon`
-/// (returning early) leaves the column at row background and fails both
-/// counts, so the icon draw path has pixel coverage.
+/// The red PNG square, the blue SVG square and the accent tile must
+/// each show; neutering `draw_icon` (returning early) leaves the column
+/// at row background and fails all three counts, so the icon draw path
+/// has pixel coverage per decoder.
 ///
 /// The same open saves `scootlaunch-{name}.png` when
 /// `SCOOTLAUNCH_SHOTS` is set: those saves are the docs screenshots
@@ -488,10 +489,11 @@ fn icons_docs_one(name: &str) {
     let side = (em.round().max(1.0) as u32).min(row_h.saturating_sub(2).max(1));
     let icon_x = x0 + 10 + (em * 0.5).round().clamp(0.0, 64.0) as u32;
     let list_y = y0 + 10 + row_h + 4;
-    // All three rows match "a" — Alpha (PNG image), Beta (SVG image),
-    // Gamma (letter tile) — in match order, so count over the column:
-    // two image squares and one tile must show.
+    // All three rows match "a" — Alpha (red PNG image), Beta (blue SVG
+    // image), Gamma (letter tile) — in match order, so count over the
+    // column: each decoder's square and the tile must show.
     let mut red = 0u32;
+    let mut blue = 0u32;
     let mut tile = 0u32;
     for row in 0..3 {
         let y = list_y + row * row_h + row_h.saturating_sub(side) / 2;
@@ -501,6 +503,9 @@ fn icons_docs_one(name: &str) {
                 if pixel == [255, 0, 0] {
                     red += 1;
                 }
+                if pixel == [0, 0, 255] {
+                    blue += 1;
+                }
                 if pixel == accent {
                     tile += 1;
                 }
@@ -509,7 +514,11 @@ fn icons_docs_one(name: &str) {
     }
     assert!(
         red >= side * side,
-        "{name}: {red} red icon pixels for two {side}px image rows"
+        "{name}: {red} red PNG icon pixels for one {side}px image row"
+    );
+    assert!(
+        blue >= side * side,
+        "{name}: {blue} blue SVG icon pixels for one {side}px image row"
     );
     assert!(
         tile >= side * side / 2,
