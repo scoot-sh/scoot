@@ -15,7 +15,7 @@
 # and the launcher is pure Rust on the `linux_raw` rustix backend with no
 # C beyond what std links plus libxkbcommon (the panel's seat keyboard;
 # see the link gate in `.github/workflows/ci.yml`, which refuses any
-# other library), so there are no `buildInputs` to give it.
+# other library), so libxkbcommon is the only `buildInputs` entry.
 #
 # A crane `buildPackage` over the workspace's shared base dependency
 # artifact (every override reuses it: the flags below gate only the

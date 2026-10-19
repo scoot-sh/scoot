@@ -87,6 +87,12 @@ on the system side): the daemon switch alone runs the flake's build
 with no file. The keys, the panel and the look layer are in [The
 panel](./panel.md).
 
+An explicit `menuPackage` beside a mismatched daemon is allowed but
+loses theming one way: daemon `scootlaunch` with a fuzzel menu runs
+that menu unthemed (no color flags travel with it), while daemon
+`fuzzel` with a scootlaunch menu stays themed (it accepts the same
+flags as overrides).
+
 To go back, drop the line (or set `"fuzzel"`) and switch again. The
 default stays `"fuzzel"`: nothing changes unless the line names
 `scootlaunch`.

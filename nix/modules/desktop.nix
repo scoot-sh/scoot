@@ -96,7 +96,7 @@ let
     clipboard = {
       combo = "super+v";
       slot = "clipboard";
-      blurb = "clipboard picker (`cliphist` through `fuzzel`)";
+      blurb = "clipboard picker (`cliphist` through `fuzzel`, `scootlaunch` under the opt-in)";
     };
     notifDismiss = {
       combo = "super+n";
@@ -136,12 +136,12 @@ let
     network = {
       combo = "super+w";
       slot = "apps.network";
-      blurb = "WiFi picker (`scoot-network-pick` through `fuzzel`)";
+      blurb = "WiFi picker (`scoot-network-pick` through `fuzzel`, `scootlaunch` under the opt-in)";
     };
     bluetooth = {
       combo = "super+b";
       slot = "apps.bluetooth";
-      blurb = "Bluetooth picker (`scoot-bluetooth-pick` through `fuzzel`)";
+      blurb = "Bluetooth picker (`scoot-bluetooth-pick` through `fuzzel`, `scootlaunch` under the opt-in)";
     };
   };
   # Whether a notification state icon is shaped like the bar takes
@@ -586,8 +586,10 @@ in
         example = "slurp";
         description = ''
           The output chooser before each screencast. `fuzzel` (a dmenu
-          list of outputs), `slurp` (click a screen), or `none` (no
-          picker: cast `outputName`, or any output when that is null).
+          list of outputs -- the name stays `fuzzel` but runs
+          scootlaunch under the opt-in), `slurp` (click a screen), or
+          `none` (no picker: cast `outputName`, or any output when
+          that is null).
         '';
       };
 

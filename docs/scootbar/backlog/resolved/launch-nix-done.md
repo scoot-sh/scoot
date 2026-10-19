@@ -65,7 +65,7 @@ Evidence: `nix eval` of the `scootlaunch-modules` and
 green; `nix build .#checks.aarch64-darwin.scoot-modules` green on
 the Mac; `nix fmt -- --check` clean; the Linux `nix flake check`
 legs (the new build, `--check` over rendered files, the opt-in
-content pins) green in CI run 39281851467 on the exact head;
+content pins) green in CI run 39290370719 on the exact head;
 docs-site green. Two deviations: no M2 real-login proof (no M2
 access; the headless and eval pins stand in), and `nix fmt` needed
 one formatting pass after edits. Not run: the dev VM (root disk

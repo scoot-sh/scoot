@@ -4,7 +4,6 @@ status: "open"
 area: "scootbar"
 priority: "low"
 blocked: "launch-agent-json, launch-windows-mode, launch-packaging, launch-default-flip"
-blocked: "launch-agent-json, launch-windows-mode, launch-nix, launch-packaging, launch-default-flip"
 milestone: "M7"
 ---
 
