@@ -319,8 +319,9 @@ pub fn prerendered_for(
 
 /// Verifies one pre-rendered directory: `render.json` names this look
 /// with this source hash, and the fragments exist (`scoot.toml`,
-/// `bar.toml` and the greeter's `greet.toml`: the state link points at
-/// this directory, so an incomplete catalog render re-renders fresh).
+/// `bar.toml`, the greeter's `greet.toml` and the launcher's
+/// `launch.toml`: the state link points at this directory, so an
+/// incomplete catalog render re-renders fresh).
 /// Returns the note for the fresh-render fallback when it does not.
 fn verify_prerendered(name: &str, source_hash_hex: &str, dir: &Path) -> Result<(), String> {
     let refused = |why: String| {
@@ -339,7 +340,7 @@ fn verify_prerendered(name: &str, source_hash_hex: &str, dir: &Path) -> Result<(
     if json.get("source_hash").and_then(|h| h.as_str()) != Some(source_hash_hex) {
         return Err(refused("render.json source hash differs".to_owned()));
     }
-    for file in ["scoot.toml", "bar.toml", "greet.toml"] {
+    for file in ["scoot.toml", "bar.toml", "greet.toml", "launch.toml"] {
         if !dir.join(file).is_file() {
             return Err(refused(format!("{file} is missing")));
         }

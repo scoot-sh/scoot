@@ -740,7 +740,13 @@ fn a_catalog_render_is_adopted_then_kept() {
     let published = fixture.roots.join("look-a");
     std::fs::create_dir_all(&published).expect("publish dir");
     let from = PathBuf::from(&first.rendered);
-    for file in ["scoot.toml", "bar.toml", "greet.toml", "render.json"] {
+    for file in [
+        "scoot.toml",
+        "bar.toml",
+        "greet.toml",
+        "launch.toml",
+        "render.json",
+    ] {
         std::fs::copy(from.join(file), published.join(file)).expect("publish file");
     }
     let mut compositor = FakeCompositor::ok();
@@ -1124,7 +1130,13 @@ fn cursor_skip_renders_fresh_without_cursor_keys() {
     let published = fixture.roots.join("look-a");
     std::fs::create_dir_all(&published).expect("publish dir");
     let from = PathBuf::from(&first.rendered);
-    for file in ["scoot.toml", "bar.toml", "greet.toml", "render.json"] {
+    for file in [
+        "scoot.toml",
+        "bar.toml",
+        "greet.toml",
+        "launch.toml",
+        "render.json",
+    ] {
         std::fs::copy(from.join(file), published.join(file)).expect("publish file");
     }
     let published_scoot =

@@ -1,16 +1,20 @@
 ---
 title: CLI reference
-description: "Every scootlaunch command and flag that ships today: --list, --query, --all, --lenient, --json, and the agent JSON schema."
+description: "Every scootlaunch command and flag that ships today: the panel, --list, --query, --all, --lenient, --json, --check, and the agent JSON schema."
 ---
 
 Every `scootlaunch` command and flag that ships today, and how it
 behaves at the edges. What scootlaunch is for is in
-[Overview](./index.md). Later tickets add `--run-id`, the panel and
+[Overview](./index.md). Later tickets add `--run-id` and
 the dmenu mode; this page grows with them.
 
 ## Commands
 
 ```sh
+scootlaunch                                # open the panel (see The panel)
+scootlaunch --font PATH                    # the panel with an explicit typeface
+scootlaunch --config PATH                  # the panel with an explicit config file
+scootlaunch --check [--config PATH]        # validate the config file and exit
 scootlaunch --list                         # every visible entry: id and name per line
 scootlaunch --list --all                   # hidden entries too, with their reason
 scootlaunch --list --json                  # the agent JSON schema, one array
@@ -23,11 +27,14 @@ scootlaunch --help                         # print help
 scootlaunch --version                      # print the version
 ```
 
-`--all`, `--lenient` and `--json` need `--list` or `--query`.
-`--list` and `--query` cannot combine. TEXT is the next argument
-after `--query`, whatever it holds. Anything else is a loud error:
-exit 2, naming the flag and the supported list, never silently
-ignored.
+`--all` and `--json` need `--list` or `--query` (`--lenient` also
+shapes the panel's index). `--font` is a panel option; `--config`
+belongs to the panel and `--check`. `--list` and `--query` cannot
+combine, and neither combines with `--check`. TEXT is the next
+argument after `--query`, whatever it holds. Anything else is a loud
+error: exit 2, naming the flag and the supported list, never silently
+ignored. The panel prints the picked id (exit 0) or nothing on
+dismiss (exit 1).
 
 ## Ranking
 

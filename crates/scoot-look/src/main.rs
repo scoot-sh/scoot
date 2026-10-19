@@ -36,7 +36,7 @@ use std::path::Path;
 use scoot_look::{
     ImportOptions, Origin, RenderInputs, STATIC_LEAVES, check_contrast, check_static_leaf,
     import_base16, render_bar, render_foot, render_fuzzel, render_greet, render_gtk3_css,
-    render_gtk4_css, render_json, render_leaf_files, render_qt_scheme, render_scoot,
+    render_gtk4_css, render_json, render_launch, render_leaf_files, render_qt_scheme, render_scoot,
     render_swaylock, resolve, source_hash, validate_apps_allowlist, validate_for_origin,
 };
 
@@ -604,6 +604,12 @@ fn build_dir(
         eprintln!("error: {e}");
         std::process::exit(1);
     });
+    // The launcher fragment scootlaunch reads at every open: beside the
+    // first-party ones, so every catalog render carries the panel's look.
+    let launch = render_launch(&look).unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    });
     let leaves = render_leaf_files(&look).unwrap_or_else(|e| {
         eprintln!("error: {e}");
         std::process::exit(1);
@@ -627,6 +633,7 @@ fn build_dir(
         ("fuzzel.ini", fuzzel),
         ("swaylock", swaylock),
         ("greet.toml", greet),
+        ("launch.toml", launch),
         (
             "render.json",
             render_json(&look.name, &source_hash(&bytes), inputs),

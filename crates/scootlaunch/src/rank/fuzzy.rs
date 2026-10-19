@@ -275,3 +275,46 @@ pub fn weigh(raw: i32, weight: u32) -> i32 {
     let scaled = (raw.max(0) as u32).saturating_mul(weight) / 10;
     scaled.min(i32::MAX as u32) as i32
 }
+
+/// The leftmost subsequence match of `query` in `field` (both folded
+/// codepoint slices), as merged `(start, end)` char-index runs written
+/// into `out` (cleared first). Display only: the list highlights the
+/// matched characters of the name it shows, and a greedy leftmost match
+/// is what a highlight wants, not the score's optimal alignment. Succeeds
+/// exactly when a subsequence match exists (so exactly when [`score_codes`]
+/// matches the same pair); on failure `out` is empty. Writes into the
+/// caller's buffer, so a warmed-up caller allocates nothing.
+pub fn greedy_spans(field: &[u32], query: &[u32], out: &mut Vec<(u32, u32)>) -> bool {
+    out.clear();
+    if query.is_empty() {
+        return true;
+    }
+    if query.len() > field.len() {
+        return false;
+    }
+    let mut want = 0;
+    let mut run: Option<(u32, u32)> = None;
+    for (index, code) in field.iter().copied().enumerate() {
+        if want < query.len() && code == query[want] {
+            let at = index as u32;
+            match run {
+                Some((start, end)) if end == at => run = Some((start, at.saturating_add(1))),
+                _ => {
+                    if let Some(span) = run.take() {
+                        out.push(span);
+                    }
+                    run = Some((at, at.saturating_add(1)));
+                }
+            }
+            want += 1;
+        }
+    }
+    if want < query.len() {
+        out.clear();
+        return false;
+    }
+    if let Some(span) = run.take() {
+        out.push(span);
+    }
+    true
+}

@@ -20,6 +20,9 @@ fn list_alone_parses() {
             help: false,
             version: false,
             query: None,
+            font: None,
+            config: None,
+            check: false,
         }
     );
 }
@@ -84,8 +87,51 @@ fn list_with_every_modifier_parses() {
 }
 
 #[test]
-fn bare_invocation_is_no_command() {
-    assert_eq!(parse_args(&argv(&["scootlaunch"])), Err(Error::NoCommand));
+fn bare_invocation_is_the_panel() {
+    let args = parse_args(&argv(&["scootlaunch"])).unwrap();
+    assert!(!args.list && args.query.is_none() && !args.check && !args.help);
+}
+
+#[test]
+fn panel_flags_parse() {
+    let args = parse_args(&argv(&[
+        "scootlaunch",
+        "--font",
+        "/tmp/a.ttf",
+        "--config",
+        "/tmp/launch.toml",
+        "--lenient",
+    ]))
+    .unwrap();
+    assert_eq!(args.font.as_deref(), Some("/tmp/a.ttf"));
+    assert_eq!(args.config.as_deref(), Some("/tmp/launch.toml"));
+    assert!(args.lenient);
+}
+
+#[test]
+fn check_takes_an_optional_config() {
+    let args = parse_args(&argv(&["scootlaunch", "--check"])).unwrap();
+    assert!(args.check && args.config.is_none());
+    let args = parse_args(&argv(&[
+        "scootlaunch",
+        "--check",
+        "--config",
+        "/tmp/x.toml",
+    ]))
+    .unwrap();
+    assert!(args.check);
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--check", "--list"])),
+        Err(Error::ConflictingCommands)
+    );
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--list", "--font", "/tmp/a.ttf"])),
+        Err(Error::NeedsCommand("--font".to_string()))
+    );
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--font"])),
+        Err(Error::NeedsValue("--font".to_string()))
+    );
 }
 
 #[test]
@@ -131,7 +177,10 @@ fn positional_arguments_are_refused() {
 
 #[test]
 fn modifiers_need_a_command() {
-    for flag in ["--all", "--lenient", "--json"] {
+    // `--lenient` shapes the panel's own index too, so it stands alone;
+    // `--all` and `--json` modify the headless commands only.
+    assert!(parse_args(&argv(&["scootlaunch", "--lenient"])).is_ok());
+    for flag in ["--all", "--json"] {
         assert_eq!(
             parse_args(&argv(&["scootlaunch", flag])),
             Err(Error::NeedsCommand(flag.to_string())),

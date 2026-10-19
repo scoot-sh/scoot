@@ -142,3 +142,43 @@ fn hostile_bytes_never_panic() {
     let query = folded(&wide);
     let _ = scored(&query, &query);
 }
+
+fn spanned(field: &str, query: &str) -> Option<Vec<(u32, u32)>> {
+    let field = folded(field);
+    let query = folded(query);
+    let field: Vec<u32> = field.chars().map(|char| char as u32).collect();
+    let query: Vec<u32> = query.chars().map(|char| char as u32).collect();
+    let mut out = Vec::new();
+    greedy_spans(&field, &query, &mut out).then_some(out)
+}
+
+fn scored_folded(field: &str, query: &str) -> Option<i32> {
+    scored(&folded(field), &folded(query))
+}
+
+#[test]
+fn spans_cover_the_leftmost_match_as_runs() {
+    assert_eq!(spanned("firefox", "ff"), Some(vec![(0, 1), (4, 5)]));
+    assert_eq!(spanned("firefox", "fire"), Some(vec![(0, 4)]));
+    assert_eq!(spanned("firefox", ""), Some(vec![]));
+    assert_eq!(spanned("ab", "abc"), None);
+    assert_eq!(spanned("firefox", "fz"), None);
+}
+
+#[test]
+fn spans_agree_with_scoring_on_match_existence() {
+    // Greedy display spans succeed exactly where the scorer matches:
+    // a subsequence exists or it does not, whatever the alignment.
+    let fields = ["firefox", "Files", "a-b_c/d.e", "Привет", "Terminal", ""];
+    let queries = ["", "f", "ff", "fx", "fz", "firefox!", "e", "ф", "a/b", "-"];
+    for field in fields {
+        for query in queries {
+            let scored_some = scored_folded(field, query).is_some();
+            assert_eq!(
+                spanned(field, query).is_some(),
+                scored_some,
+                "{field} / {query}"
+            );
+        }
+    }
+}

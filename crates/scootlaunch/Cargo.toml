@@ -1,31 +1,62 @@
 [package]
 name = "scootlaunch"
-description = "Keyboard-first application launcher for Wayland: the desktop entry index, fuzzy matching with frecency, and --list/--query --json"
+description = "Keyboard-first application launcher for Wayland: the desktop entry index, fuzzy matching with frecency, --list/--query --json, and the overlay exclusive-keyboard panel"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# Linux only, like scootbar, scootnotify and scootui: the panel speaks
+# layer-shell and exclusive keyboard, and never runs on a Mac (the macOS
+# CI job leaves it out with the other Linux-only crates).
 [dependencies]
 # Panic-free printing behind the binary's own name, shared with the
 # other shell apps instead of a third copy.
 scoot-rt.workspace = true
-# The agent interface (`--list --json`) and the cache's compact binary
-# are the workspace's existing versions, chosen by measurement
+# The panel's widgets, on-demand layer surface, seat keyboard and
+# headless-test harness names: the entry and virtualized list, the
+# overlay exclusive-keyboard surface with its buffer pool, the keymap and
+# repeat, behind features so a build that never opens the panel (the
+# `--list`/`--query` agent interface) links only what it uses. The
+# keyboard feature links libxkbcommon (decided in
+# dev/design/shell-apps.md, Decisions needed 3): the one C library past
+# std's the panel accepts, as the CI job's link gate records.
+scootui = { path = "../scootui", default-features = false, features = ["entry", "surfaces", "keyboard"] }
+# The look layer's allowlist, value grammar and state-dir rule: the
+# workspace's existing version, so no new package enters the tree.
+scoot-look.workspace = true
+# The agent interface (`--list --json`), the user and look configs: the
+# workspace's existing versions, chosen by measurement
 # (dev/spikes/scootbar/config-parser.md, docs/scootbg's dependency
 # record §5); `toml` adds no new package in the tree (`scoot` pins it).
 serde.workspace = true
 serde_json.workspace = true
+toml = "1"
 # `open` with `O_NONBLOCK` (a FIFO swapped in for a desktop file between
-# the type check and the open must not block the launcher) through raw
+# the type check and the open must not block the launcher), the toggle
+# socket's peer credentials, and the panel's poll set through raw
 # syscalls, no `libc` crate: the same `rustix` the Wayland crates pull in.
-rustix = { version = "1", default-features = false, features = ["std", "fs"] }
+rustix = { version = "1", default-features = false, features = ["std", "fs", "event", "net", "process", "time"] }
+# The panel's own Wayland objects (the layer surface it draws on, the
+# seat and pointer that drive it): plain crates, as scootbar binds them,
+# so nothing links libwayland.
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
 # Scratch dirs as `TempDir` guards in the index tests: the same version
 # scootbar's tests carry (same lock entry, MIT OR Apache-2.0).
 [dev-dependencies]
 tempfile = "3"
+# The headless-compositor harness the panel integration tests drive the
+# real binary through (plus the keyboard/seat pair the unit tests pin):
+# the same crate as the binary's, with test support on.
+scootui = { path = "../scootui", features = ["test-support"] }
+# Decoding the compositor's screenshot PNGs when `SCOOTLAUNCH_SHOTS`
+# asks the integration tests to save them: the workspace's existing
+# version.
+base64.workspace = true
 # The counting allocator behind the warm-query `count_allocations`
 # test (Linux-only, like the crate itself): the same version
 # scootbar's tests carry.

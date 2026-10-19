@@ -430,6 +430,7 @@ fn an_offline_apply_records_repoints_and_renders() {
         "fuzzel.ini",
         "swaylock",
         "greet.toml",
+        "launch.toml",
     ] {
         let text = std::fs::read_to_string(rendered.join(file)).expect("a rendered file");
         assert!(!text.is_empty(), "{file} renders");
@@ -501,6 +502,54 @@ fn the_render_carries_the_greeter_fragment() {
         assert!(greet.contains(line), "missing {line}:\n{greet}");
     }
     let parsed: toml::Table = toml::from_str(&greet).expect("greet.toml parses");
+    assert_eq!(parsed["colors"].as_table().expect("colors").len(), 13);
+}
+
+#[test]
+fn the_render_carries_the_launcher_fragment() {
+    // Ticket `launch-ui`: every render carries the panel fragment
+    // scootlaunch reads at every open. The fixture look's defaults
+    // resolve surface to the background and hover/focus/selection to the
+    // accent; the popup size defaults to the 10 pt size (13 px); the UI
+    // font is the look's `fonts.ui`.
+    let fixture = fixture("launcher-fragment");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let mut compositor = FakeCompositor::not_running();
+    apply_with_live(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
+    )
+    .expect("an offline apply succeeds");
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    let launch = std::fs::read_to_string(rendered.join("launch.toml")).expect("launch.toml");
+    for line in [
+        "background = \"#2B3648\"",
+        "foreground = \"#F6EEDC\"",
+        "accent = \"#FFA45C\"",
+        "surface = \"#2B3648\"",
+        "focus = \"#FFA45C\"",
+        "selection = \"#FFA45C\"",
+        "match = \"#FFA45C\"",
+        "font = \"DejaVu Sans\"",
+        "font-size = 13",
+        "opacity = 1.0",
+        "radius = 14",
+    ] {
+        assert!(launch.contains(line), "missing {line}:\n{launch}");
+    }
+    let parsed: toml::Table = toml::from_str(&launch).expect("launch.toml parses");
     assert_eq!(parsed["colors"].as_table().expect("colors").len(), 13);
 }
 
@@ -1830,6 +1879,7 @@ fn readers_racing_a_swap_see_old_or_new_never_half() {
                         "fuzzel.ini",
                         "swaylock",
                         "greet.toml",
+                        "launch.toml",
                         "render.json",
                     ] {
                         assert!(rendered.join(file).is_file(), "half a swap: {record:?}");
@@ -2203,6 +2253,7 @@ fn validate_and_build_cover_a_directory_and_a_name() {
         "fuzzel.ini",
         "swaylock",
         "greet.toml",
+        "launch.toml",
         "render.json",
     ] {
         assert!(out.join(file).is_file(), "{file} builds");
@@ -2790,6 +2841,7 @@ fn build_into_an_empty_out_writes_five_files_and_leaves_no_litter() {
         "fuzzel.ini",
         "swaylock",
         "greet.toml",
+        "launch.toml",
         "render.json",
     ] {
         assert!(out.join(file).is_file(), "{file} renders");

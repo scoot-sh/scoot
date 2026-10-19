@@ -92,8 +92,8 @@ pub use leaves::{
 pub use render::{
     BAR_RADIUS_LIMIT, RenderInputs, font_desc, gtk_theme_name, parse_kv_config, qt_argb,
     qt_argb_soft, qt_style_name, render_bar, render_fontconfig, render_foot, render_fuzzel,
-    render_greet, render_gtk_ini, render_gtk3_css, render_gtk4_css, render_json, render_qt_scheme,
-    render_qt6ct_conf, render_scoot, render_swaylock, source_hash,
+    render_greet, render_gtk_ini, render_gtk3_css, render_gtk4_css, render_json, render_launch,
+    render_qt_scheme, render_qt6ct_conf, render_scoot, render_swaylock, source_hash,
 };
 pub use resolve::resolve;
 pub use resolved::ResolvedLook;
