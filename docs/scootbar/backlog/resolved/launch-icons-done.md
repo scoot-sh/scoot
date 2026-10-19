@@ -43,7 +43,7 @@ Window icons.
 
 ## Resolution
 
-Shipped in PR #684 (`feat/launch-icons` branch): theme lookup with
+Shipped in PR #679 (`feat/launch-icons` branch): theme lookup with
 PNG first and `resvg` SVG, the icon column, and the `[icons] theme`
 look role.
 
