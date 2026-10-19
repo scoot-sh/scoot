@@ -175,15 +175,16 @@ impl Spawner {
         self.live.len()
     }
 
-    /// Kills and collects every running child: tests only, so a flood
-    /// test's sleeps never outlive it.
+    /// Kills and waits every running child: tests only, so a flood
+    /// test's sleeps never outlive it. Slots free only through
+    /// [`Spawner::reap`]: collecting the waited is the spawner's own
+    /// job, and the flood tests pin it.
     #[cfg(test)]
     pub fn kill_all(&mut self) {
         for live in &mut self.live {
             let _ = live.child.kill();
             let _ = live.child.wait();
         }
-        self.live.clear();
     }
 }
 
