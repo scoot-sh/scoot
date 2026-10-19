@@ -1,14 +1,12 @@
 ---
 title: CLI reference
-description: "Every scootnotify command and flag that ships today: daemon, --check, --config, --font."
+description: "Every scootnotify command and flag: daemon, --check, --config, --font, and msg (list, dismiss, invoke, reload, subscribe, wait, version)."
 ---
 
-Every `scootnotify` command and flag that ships today, and how it
-behaves at the edges. What scootnotify is for is in
-[Overview](./index.md); placement, timeouts and the look layer are in
-[Configure](./configure.md). Later tickets add `msg` (list, dismiss,
-invoke, history, DND, subscribe, wait) and rules; this page
-grows with them.
+Every `scootnotify` command and flag, and how it behaves at the
+edges. What scootnotify is for is in [Overview](./index.md);
+placement, timeouts and the look layer are in
+[Configure](./configure.md).
 
 ## Commands
 
@@ -17,14 +15,19 @@ scootnotify daemon                          # own the name and serve until kille
 scootnotify daemon --check                  # validate the config, exit 0 or 1
 scootnotify daemon --config PATH            # read PATH instead of the default
 scootnotify daemon --font PATH              # draw with PATH instead of the first well-known font
+scootnotify msg list [--json]               # live notifications: lines, or JSON
+scootnotify msg dismiss [ID | --all]        # close cards, as a click would
+scootnotify msg invoke ID [ACTION]          # run a card's action (default: "default")
+scootnotify msg reload [--look]             # re-read the config and the look layer
+scootnotify msg subscribe [notify] [close] [invoke]  # print events until closed
+scootnotify msg wait [--app APP] [--summary-contains TEXT] [--timeout SECS]
 scootnotify --help                          # print help
 scootnotify --version                       # print the version
 ```
 
-Only `daemon` serves yet; anything else is a loud error (exit 2,
-naming the command). `--help` and `--version` win wherever they
-stand. Exit statuses: 0 done, 1 failed, 2 misused, 3 the name is
-already owned (the unit stops instead of restart-looping).
+`--help` and `--version` win wherever they stand. Exit statuses: 0
+done, 1 failed, 2 misused, 3 the name is already owned (the unit stops
+instead of restart-looping).
 
 A taken name refuses with the owner named:
 
@@ -45,7 +48,7 @@ missing file is the built-in defaults. Unknown keys are refused (a
 typo that silently did nothing would be worse than an error), and
 out-of-range numbers name their key. The file is capped at 64 KiB. A
 bad file at daemon start runs on the built-in defaults and reports
-the error; `--check` exits 1 on it. Every key lives in
+the error; `--check` and `msg reload` exit 1 on it. Every key lives in
 [Configure](./configure.md).
 
 ```sh
@@ -53,7 +56,131 @@ scootnotify daemon --check --config ./notify.toml
 # ./notify.toml: valid
 ```
 
+## Ask the running daemon
+
+`msg` talks to the daemon over its control socket, one request per
+invocation. `dismiss` and `invoke` print nothing on success;
+`list`, `reload` and `version` print the reply; `subscribe` prints the
+`subscribed` reply and then one JSON event per line until the daemon
+closes the connection.
+
+```sh
+scootnotify msg list
+# 3 [normal] Firefox: Download complete
+scootnotify msg list --json
+# {"type":"notifications","notifications":[{...}]}
+scootnotify msg dismiss 3
+scootnotify msg dismiss --all
+scootnotify msg invoke 3            # the "default" action
+scootnotify msg invoke 3 open
+scootnotify msg reload              # the file and the look layer
+scootnotify msg reload --look       # only the look layer
+scootnotify msg subscribe notify close
+scootnotify msg version
+# {"type":"version","protocol":1,"version":"0.1.0"}
+```
+
+Unknown ids and unknown actions are loud errors, never silent
+successes:
+
+```sh
+scootnotify msg dismiss 999
+# scootnotify: daemon: unknown notification id 999
+# exit 1
+```
+
+`reload` validates whole and keeps the last good: a bad file keeps
+the running config and cards, and the reply says why. `--look`
+re-reads only the look layer and never touches the user file, so a
+swap under a half-edited file still applies. A refused fragment (or
+no layer at all) refuses the scoped reload with the running look
+standing.
+
+## Wait for one
+
+`msg wait` blocks until a notification matches every filter given and
+prints its JSON, or until `--timeout` (30 s when absent) and exits 1.
+`--app` names the app exactly; `--summary-contains` is a substring of
+the summary. Cards already live match at once; later ones match as
+they arrive, with nothing missed between the baseline and the watch.
+
+```sh
+scootnotify msg wait --app Thunderbird --summary-contains "New mail" --timeout 60
+# {"id":4,"app_name":"Thunderbird",...}
+```
+
+This is the computer-use primitive: an agent that started a download
+blocks on its completion instead of polling screenshots.
+
+## The control socket
+
+One daemon per Wayland display:
+`$XDG_RUNTIME_DIR/scootnotify-<display>.sock`, owner-only (`0600`),
+with a `.lock` beside it. At most 16 connections (a 17th closes the
+oldest non-subscriber) and 4 subscribers (a 5th is refused); a peer
+that stops reading is dropped past 30 s. Requests are one JSON object
+per line carrying the protocol they speak:
+
+```sh
+printf '{"protocol":1,"type":"list"}\n' | socat - UNIX-CONNECT:"$XDG_RUNTIME_DIR/scootnotify-$WAYLAND_DISPLAY.sock"
+```
+
+A request whose `protocol` is not `1` is refused with a mismatch
+error, so a client and a daemon from different builds disagree loudly
+rather than misread each other. Compatibility rides on that number,
+never on the crate version.
+
+## The JSON view
+
+`list` and `notify` events carry this object per live card
+(`--json` for the raw form):
+
+```json
+{
+  "id": 3,
+  "app_name": "Firefox",
+  "desktop_entry": "firefox",
+  "summary": "Download complete",
+  "body": "plain text, markup stripped",
+  "urgency": "normal",
+  "category": "transfer.complete",
+  "actions": [{"key": "open", "label": "Open"}],
+  "icon": {"kind": "name", "value": "firefox"},
+  "created": 1720000000000,
+  "shown": 1720000000123,
+  "expires": 1720000010123,
+  "output": null
+}
+```
+
+`urgency` is `low`, `normal` or `critical`. `icon` is absent where the
+card shows none; its `kind` is `name`, `path` or `data`, and pixels
+never cross the socket (for `data` the value is the size, such as
+`"48x48"`). `shown` is null until first presented; `expires` is null
+where the card never expires, and is recomputed from the running
+clock on every read (hover and input-idle pauses push the real
+deadline past it). `output` is the pinned output, or null where the
+compositor chooses. New keys may be added; none is removed or changes
+meaning within a protocol version.
+
+Events on a subscribed connection:
+
+```json
+{"type": "notify", "notification": {"id": 3, "...": "..."}}
+{"type": "close", "id": 3, "reason": "dismissed"}
+{"type": "invoke", "id": 3, "action": "open"}
+```
+
+The close reasons are `expired`, `dismissed`, `closed`
+(`CloseNotification`) and `evicted` (the live cap).
+
 ## Troubleshooting
+
+> **Symptom:** `msg` says no daemon is running.
+
+Nothing listens on the socket: start one with `scootnotify daemon`,
+and check the display matches (`WAYLAND_DISPLAY` names the socket,
+so a nested session and its host never share one).
 
 > **Symptom:** the daemon exits 3 saying the name is owned.
 
@@ -62,6 +189,32 @@ Another notification daemon (mako, dunst, swaync) holds
 it back on the next notification. Stop it first
 (`systemctl --user stop mako`) and remove or mask its activation
 file; scootnotify never takes the name from anyone.
+
+> **Symptom:** a second daemon refuses, saying one is already running.
+
+One daemon owns each display's socket and lock. Stop the running one
+first; a crashed one's stale socket is recognized by its free lock
+and replaced.
+
+> **Symptom:** `msg reload` refuses the file.
+
+The running config and cards stand; the reply names the bad key.
+Validate with `daemon --check --config PATH`, fix, and reload again.
+A half-edited file never half-applies: with `--look` it is not even
+read.
+
+> **Symptom:** `msg subscribe` ends with no error.
+
+The daemon drops a subscriber it cannot write to (a full socket) and
+closes it with nothing more. Resubscribe, then `list`: the baseline
+covers what the stream may have missed. The same holds after a
+`dropped` line, which is always last.
+
+> **Symptom:** `msg wait` times out although the card is on screen.
+
+The filters must all match: `--app` is exact (check `list` for the
+sender's real app name), `--summary-contains` is a substring of the
+plain-text summary.
 
 > **Symptom:** notifications never expire.
 

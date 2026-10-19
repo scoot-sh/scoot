@@ -1,8 +1,8 @@
 //! `scootnotify`: the notification daemon's library — the D-Bus server
-//! and the model, headless in this ticket.
+//! and the model, the popup stack, and the control socket.
 //!
 //! The binary (`main.rs`) is the thin CLI over this: `daemon`,
-//! `daemon --check`, `--help`, `--version`. The fuzz targets
+//! `daemon --check`, `msg`, `--help`, `--version`. The fuzz targets
 //! (`fuzz/`, their own workspace) call the `fuzz_check` functions here.
 //!
 //! No `unsafe` here. Nothing here links beyond what `std` links.
@@ -28,6 +28,7 @@ static COUNTING_ALLOC: scootbg_mem::CountingAlloc = scootbg_mem::CountingAlloc;
 pub mod bus;
 pub mod cli;
 pub mod config;
+pub mod control;
 pub mod daemon;
 pub mod look;
 pub mod markup;

@@ -329,6 +329,19 @@ impl Store {
         self.live.keys().copied().collect()
     }
 
+    /// Replaces the running config (`msg reload`): timeouts, caps and
+    /// rate limits apply to what arrives next. Live cards keep their ids,
+    /// clocks and resolved timeouts.
+    pub fn set_config(&mut self, config: Config) {
+        self.config = config;
+    }
+
+    /// The pinned output, if any: the JSON view's `output` (`None` is the
+    /// compositor's choice).
+    pub fn output_name(&self) -> Option<&str> {
+        self.config.output.as_deref()
+    }
+
     /// Cards counted unshown for `sender` (rate-limited past the
     /// bucket): the summary card reads this.
     pub fn suppressed(&self, sender: &str) -> u64 {

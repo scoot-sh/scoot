@@ -527,6 +527,30 @@ impl App {
         self.dirty = true;
     }
 
+    /// Applies a reloaded config in place: the new layout under the live
+    /// cards, which keep their ids, clocks and hover. Returns whether the
+    /// idle period changed, so the caller can re-arm it.
+    fn apply_config(&mut self, config: Config) -> bool {
+        let idle_changed = self.config.pause_when_idle_secs != config.pause_when_idle_secs;
+        self.config = config;
+        // The layout's sizes depend on the config: force a rebuild on
+        // the next refresh, as `retheme` does.
+        self.content_size = None;
+        self.dirty = true;
+        idle_changed
+    }
+
+    /// Re-arms the idle notification after a reload changed its period:
+    /// the old one goes away, and `arm_idle` arms the new period (or
+    /// nothing when it disables pausing, or while no seat exists — the
+    /// seat arrival arms it then).
+    fn rearm_idle(&mut self, qh: &QueueHandle<Self>) {
+        if let Some(idle) = self.idle.take() {
+            idle.destroy();
+        }
+        self.arm_idle(qh);
+    }
+
     /// Arms the idle notification once the seat exists: `pause_when_idle
     /// = 0` disables, a notifier without v2 warns once and never pauses.
     fn arm_idle(&mut self, qh: &QueueHandle<Self>) {
@@ -824,6 +848,17 @@ impl Popup {
     /// never reach it (the caller keeps the last good).
     pub fn retheme(&mut self, look: Look) {
         self.app.retheme(look);
+    }
+
+    /// Applies a reloaded config in place: the new layout under the live
+    /// cards, which keep their ids, clocks and hover, with the look
+    /// unchanged. The control ticket's plain `msg reload` calls this; a
+    /// refused file never reaches it (the caller keeps the last good).
+    pub fn reconfigure(&mut self, config: Config) {
+        if self.app.apply_config(config) {
+            let qh = self.queue.handle();
+            self.app.rearm_idle(&qh);
+        }
     }
 }
 
