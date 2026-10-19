@@ -223,3 +223,4 @@ hits the wall:
 - [release-plz-changelog-include-shell-apps](release-plz-changelog-include-shell-apps.md)
 - [docs-catch-up-shell-apps](docs-catch-up-shell-apps.md)
 - [launch-spawn-detach-cwd-and-close](launch-spawn-detach-cwd-and-close.md)
+- [launch-dmenu-doc-and-pin-notes](launch-dmenu-doc-and-pin-notes.md)
