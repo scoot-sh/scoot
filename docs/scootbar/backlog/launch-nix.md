@@ -3,7 +3,7 @@ title: "scootlaunch: Nix module, the look layer, the opt-in launcher and picker 
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "launch-dmenu, launch-icons"
+blocked: "launch-icons"
 milestone: "M7"
 ---
 

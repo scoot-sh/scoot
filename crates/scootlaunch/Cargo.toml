@@ -42,7 +42,7 @@ toml = "1"
 # the type check and the open must not block the launcher), the toggle
 # socket's peer credentials, and the panel's poll set through raw
 # syscalls, no `libc` crate: the same `rustix` the Wayland crates pull in.
-rustix = { version = "1", default-features = false, features = ["std", "fs", "event", "net", "process", "time"] }
+rustix = { version = "1", default-features = false, features = ["std", "fs", "event", "net", "process", "time", "pipe"] }
 # The panel's own Wayland objects (the layer surface it draws on, the
 # seat and pointer that drive it): plain crates, as scootbar binds them,
 # so nothing links libwayland.

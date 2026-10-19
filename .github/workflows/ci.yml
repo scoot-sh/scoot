@@ -1928,9 +1928,10 @@ jobs:
       # step above compiles) for a fixed budget: a fixed number of runs from
       # a fixed seed, so a run is the same run every time, from the seed
       # corpus and every past finding (`regressions/`). Compiling them is
-      # half the point: they build the parser, the expander, the matcher
-      # and the history reader by `#[path]`, so a refactor that breaks
-      # those includes fails here, not on the next person to fuzz. Stable
+      # half the point: they build the parser, the expander, the matcher,
+      # the history reader and the dmenu stdin splitter by `#[path]`, so
+      # a refactor that breaks those includes fails here, not on the
+      # next person to fuzz. Stable
       # toolchain, no sanitizer (`-s none`), as the fuzz README runs it;
       # cargo-fuzz from the pinned nixpkgs. A finding prints its input in
       # base64, since the runner's disk is gone after the job.
@@ -1940,7 +1941,7 @@ jobs:
           fuzz=$(nix build --inputs-from . nixpkgs#cargo-fuzz --no-link --print-out-paths)
           export PATH="$fuzz/bin:$PATH"
           scratch="$RUNNER_TEMP/scootlaunch-fuzz"
-          mkdir -p "$scratch/parse" "$scratch/exec" "$scratch/fuzzy" "$scratch/history" "$scratch/artifacts"
+          mkdir -p "$scratch/parse" "$scratch/exec" "$scratch/fuzzy" "$scratch/history" "$scratch/dmenu" "$scratch/artifacts"
           cd crates/scootlaunch
           # cargo-fuzz has no `--locked` to pass on, so the fuzz workspace's
           # own lock file is held to it here: a stale one fails the step
@@ -1964,6 +1965,7 @@ jobs:
           run exec -runs=1000000 -max_len=4096
           run fuzzy -runs=500000 -max_len=1024
           run history -runs=250000 -max_len=65536
+          run dmenu -runs=250000 -max_len=16384
 
       - name: Save the cargo cache
         # Same condition as the Linux job's save; see the comment there.

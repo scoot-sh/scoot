@@ -1,12 +1,13 @@
 # scootlaunch's fuzz targets
 
-Four `cargo fuzz` targets over the parsers of outside input: the
+Five `cargo fuzz` targets over the parsers of outside input: the
 desktop entry parser (`parse`), the Exec expander (`exec`), the fuzzy
-matcher (`fuzzy`), and the history file (`history`). Test tooling
+matcher (`fuzzy`), the history file (`history`), and the dmenu stdin
+splitter (`dmenu`). Test tooling
 only: never part of the shipped binary, and never a member of the
 repository's workspace (the `[workspace]` table below makes this its
 own), so `cargo build --workspace`, nextest, clippy and the flake's
-builds never compile it. How to run it: the CI job runs all four for
+builds never compile it. How to run it: the CI job runs all five for
 a fixed budget from a fixed seed; by hand:
 
 ```sh
@@ -41,6 +42,10 @@ test inputs only, and are never built into the binary.
   a bounded history or nothing, never a panic, whatever the input;
   weights compute at hostile timestamps. Compiles
   `src/rank/frecency.rs` by `#[path]`, and uses nothing but `std`.
+- **`dmenu`**: arbitrary bytes as dmenu stdin. Splitting answers
+  bounded lines (at most 65,536, each at most 4 KiB), never a panic,
+  whatever the input. Compiles `src/dmenu/lines.rs` by `#[path]`,
+  and uses nothing but `std`.
 
 The seed corpora are real desktop files: a NixOS desktop's
 `/run/current-system/sw/share/applications` (the dev VM), a Fedora

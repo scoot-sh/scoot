@@ -4,16 +4,19 @@
 //! One process per open: the surface is created on open and destroyed on
 //! close, so nothing is held at idle. The look layer is read at every
 //! open; the single-instance toggle (see [`socket`](crate::socket))
-//! decides whether this invocation opens or dismisses. Picking an
-//! entry launches it ([`spawn`](crate::spawn): the activation token,
-//! the environment, its own systemd scope, the detached fallback);
-//! dismissing exits 1. A failed spawn draws its error for 2 s and the
+//! decides whether an apps or run invocation opens or dismisses (dmenu
+//! instances neither listen nor signal: each opens its own panel).
+//! Picking an apps or run entry launches it ([`spawn`](crate::spawn):
+//! the activation token, the environment, its own systemd scope, the
+//! detached fallback); a dmenu pick prints and launches nothing.
+//! Dismissing exits 1. A failed spawn draws its error for 2 s and the
 //! panel stays open.
 //!
 //! Keys and mouse follow the design's table: typing filters, the
-//! selection keys move, Enter launches the selection, Ctrl+Enter runs
-//! the typed text, Escape dismisses. A click launches the row; the
-//! wheel scrolls. The token is minted from the choosing key or button
+//! selection keys move, Enter launches (or prints) the selection,
+//! Ctrl+Enter runs the typed text (apps/run) or prints it (dmenu, even
+//! with `--only-match`), Escape dismisses. A click launches (or prints)
+//! the row; the wheel scrolls. The token is minted from the choosing key or button
 //! serial (never a focus serial, which the compositor refuses); past
 //! its 200 ms bound the launch goes without one. A click
 //! on the bare desktop does not dismiss in v1: with exclusive keyboard
@@ -35,8 +38,8 @@ use std::os::unix::io::AsFd as _;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use scoot_rt::print::warn;
-use scootui::entry::{Geometry, paint_entry, paint_list};
+use scoot_rt::print::{print, warn};
+use scootui::entry::{Geometry, paint_entry, paint_list, paint_password};
 use scootui::keyboard::{
     KeyOutput, KeyboardSeat, MIN_TEXT_BYTES, dispatch_keyboard, negotiate_version,
 };
@@ -60,6 +63,8 @@ use wayland_protocols::xdg::activation::v1::client::xdg_activation_v1::XdgActiva
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{self, Anchor};
 
+use crate::cli::ColorOverrides;
+use crate::dmenu::{DmenuUi, Outcome as DmenuOutcome, Print as DmenuPrint};
 use crate::index::{Action, Entry};
 use crate::look::Look;
 use crate::spawn::{self, Token};
@@ -83,34 +88,69 @@ const BTN_LEFT: u32 = 0x110;
 /// mask (`Shift` is `0x1`, `Lock` is `0x2`).
 const MOD_CTRL: u32 = 0x4;
 
-/// What the panel opens with: `--font PATH`, `--config PATH`, and the
-/// index's `--lenient`.
+/// What the panel opens with: `--font PATH`, `--config PATH`, the
+/// index's `--lenient`, and the mode (apps, run, or dmenu).
 pub struct Options {
     pub font: Option<PathBuf>,
     pub config: Option<PathBuf>,
     pub lenient: bool,
+    pub mode: Mode,
 }
 
-/// Opens the panel and runs it to a launch or a dismiss: 0 for a
-/// launched pick, 1 for a dismiss, a runtime failure or a bad file
-/// (the flags were fine, as the bar's), 2 for a bad invocation.
-pub fn open(opts: &Options) -> i32 {
-    // The toggle first: a live panel is told to close, and this
-    // invocation exits without needing a font, an index or a
-    // compositor connection of its own.
-    let socket_path = match crate::socket::live_socket_path() {
-        Ok(path) => path,
-        Err(error) => {
-            warn(format_args!("scootlaunch: {error}"));
-            return 1;
-        }
-    };
-    let claim = match crate::socket::open(&socket_path) {
-        Ok(crate::socket::Open::Signalled) => return 0,
-        Ok(crate::socket::Open::Listen(claim)) => claim,
-        Err(error) => {
-            warn(format_args!("scootlaunch: {error}"));
-            return 1;
+/// The panel's mode: the apps index, the `$PATH` scan, or the dmenu
+/// lines. Each carries the per-invocation color overrides (above the
+/// user's file and the look); the dmenu mode carries its input flags
+/// and its lines besides.
+pub enum Mode {
+    Apps { colors: ColorOverrides },
+    Run { colors: ColorOverrides },
+    Dmenu(DmenuConfig),
+}
+
+/// What a dmenu open carries: the resolved prompt (`> ` when neither
+/// `--prompt` nor `--prompt-only` names one), whether the list is
+/// hidden (`--prompt-only`), the mask (`--password`), the match rules,
+/// the dim hint (empty by default), the stdin lines, and the color
+/// overrides. A pick prints (the line, or its 0-based stdin index with
+/// `--index`) and launches nothing.
+pub struct DmenuConfig {
+    pub lines: Vec<String>,
+    pub prompt: String,
+    pub prompt_only: bool,
+    pub password: bool,
+    pub only_match: bool,
+    pub index: bool,
+    pub placeholder: String,
+    pub colors: ColorOverrides,
+}
+
+/// Opens the panel and runs it to a launch, a print or a dismiss: 0
+/// for a launched or printed pick, 1 for a dismiss, a runtime failure
+/// or a bad file (the flags were fine, as the bar's), 2 for a bad
+/// invocation.
+pub fn open(opts: Options) -> i32 {
+    // The toggle first (apps and run modes only: dmenu instances
+    // neither listen nor signal — each opens its own panel). A live
+    // panel is told to close, and this invocation exits without
+    // needing a font, an index or a compositor connection of its own.
+    let claim = match &opts.mode {
+        Mode::Dmenu(_) => None,
+        Mode::Apps { .. } | Mode::Run { .. } => {
+            let socket_path = match crate::socket::live_socket_path() {
+                Ok(path) => path,
+                Err(error) => {
+                    warn(format_args!("scootlaunch: {error}"));
+                    return 1;
+                }
+            };
+            match crate::socket::open(&socket_path) {
+                Ok(crate::socket::Open::Signalled) => return 0,
+                Ok(crate::socket::Open::Listen(claim)) => Some(claim),
+                Err(error) => {
+                    warn(format_args!("scootlaunch: {error}"));
+                    return 1;
+                }
+            }
         }
     };
     // The user's own file: missing is the defaults; bad is a loud
@@ -147,26 +187,77 @@ pub fn open(opts: &Options) -> i32 {
         }
     };
     // The look layer, read at this open: missing is the defaults, one
-    // warning per fallback.
-    let (look, notes) = crate::look::load(None);
+    // warning per fallback. The per-invocation colors override it.
+    let (mut look, notes) = crate::look::load(None);
     for note in &notes {
         warn(format_args!("scootlaunch: {note}"));
     }
-    // The index and the frecency the list ranks with.
+    let colors = match &opts.mode {
+        Mode::Apps { colors } | Mode::Run { colors } => colors,
+        Mode::Dmenu(config) => &config.colors,
+    };
+    apply_colors(&mut look, colors);
+    // The index and the frecency the apps list ranks with (run mode
+    // scans `$PATH` instead, dmenu ranks its own lines with no
+    // history): building the index anywhere else wastes a full scan.
     let env = crate::index::Env::from_env();
-    let built = crate::index::build(
-        &env,
-        &crate::index::BuildOpts {
-            use_cache: true,
-            lenient_exec: opts.lenient,
-        },
-    );
-    for note in &built.notes {
-        warn(format_args!("scootlaunch: {note}"));
+    let built = match &opts.mode {
+        Mode::Apps { .. } => Some(crate::index::build(
+            &env,
+            &crate::index::BuildOpts {
+                use_cache: true,
+                lenient_exec: opts.lenient,
+            },
+        )),
+        Mode::Dmenu(_) | Mode::Run { .. } => None,
+    };
+    if let Some(built) = &built {
+        for note in &built.notes {
+            warn(format_args!("scootlaunch: {note}"));
+        }
     }
     let history = crate::rank::frecency::load(env.xdg_state_home.as_deref());
     let now = crate::rank::frecency::now_secs();
-    let ui = Ui::open(built.entries, history, now, config.rows as usize);
+    let rows = config.rows as usize;
+    // A prompt-only dmenu panel shows the entry alone: no gap, no list.
+    let prompt_only = matches!(&opts.mode, Mode::Dmenu(config) if config.prompt_only);
+    let list_rows = if prompt_only { 0 } else { config.rows };
+    let prompt_color = colors.prompt.unwrap_or(look.theme.foreground);
+    // The dmenu presentation and the empty-list text: borrowed out of
+    // the mode before the model moves it.
+    let dmenu = match &opts.mode {
+        Mode::Dmenu(config) => Some(DmenuSpec {
+            prompt: config.prompt.clone(),
+            placeholder: config.placeholder.clone(),
+            index: config.index,
+            prompt_color,
+            prompt_only: config.prompt_only,
+        }),
+        _ => None,
+    };
+    let empty_text: &'static str = match &opts.mode {
+        Mode::Run { .. } => "No executables",
+        _ => "No applications",
+    };
+    let model = match opts.mode {
+        Mode::Apps { .. } => match built {
+            Some(built) => BuiltModel::Apps(Ui::open(built.entries, history, now, rows)),
+            None => {
+                warn(format_args!("scootlaunch: no index to open on"));
+                return 1;
+            }
+        },
+        Mode::Run { .. } => {
+            let names = crate::run::executable_names(&env.path_dirs);
+            BuiltModel::Run(Ui::open(crate::run::to_entries(&names), history, now, rows))
+        }
+        Mode::Dmenu(config) => BuiltModel::Dmenu {
+            lines: config.lines,
+            only_match: config.only_match,
+            prompt_only: config.prompt_only,
+            password: config.password,
+        },
+    };
     let launch = LaunchCtx {
         state_home: env.xdg_state_home.clone(),
         home: std::env::var_os("HOME").map(PathBuf::from),
@@ -184,23 +275,55 @@ pub fn open(opts: &Options) -> i32 {
     let em = look.font_size_px.clamp(1.0, 256.0);
     let row_h = em.ceil() as u32 + 8;
     let width = (config.width_em as f32 * em) as u32;
+    // A prompt-only dmenu panel shows the entry alone: no gap, no list
+    // (the `list_rows` above already resolved this for the same rows).
     let height = BORDER
         .saturating_add(PAD)
         .saturating_mul(2)
-        .saturating_add(row_h.saturating_mul(config.rows.saturating_add(1)))
+        .saturating_add(row_h.saturating_mul(list_rows.saturating_add(1)))
         .saturating_add(GAP);
     run_panel(
         claim,
-        ui,
+        model,
         &mut text,
         &look,
         PanelSpec {
             width,
             height,
             row_h,
+            rows: list_rows as usize,
             launch,
+            dmenu,
+            empty_text,
         },
     )
+}
+
+/// Applies the per-invocation `rrggbbaa` overrides above the look
+/// layer: `background` replaces the panel fill (its alpha becomes the
+/// panel's opacity), the rest replace their roles. Only the
+/// background may be translucent (the CLI refuses any other alpha),
+/// since the panel draws those roles solid.
+fn apply_colors(look: &mut Look, colors: &ColorOverrides) {
+    if let Some((color, alpha)) = colors.background {
+        look.surface = color;
+        look.opacity = f32::from(alpha) / 255.0;
+    }
+    if let Some(color) = colors.text {
+        look.theme.foreground = color;
+    }
+    if let Some(color) = colors.border {
+        look.focus = color;
+    }
+    if let Some(color) = colors.selection {
+        look.theme.accent = color;
+    }
+    if let Some(color) = colors.selection_text {
+        look.theme.background = color;
+    }
+    if let Some(color) = colors.r#match {
+        look.theme.hover = color;
+    }
 }
 
 /// What a launch resolves against: read once at open, so the spawn
@@ -211,19 +334,61 @@ struct LaunchCtx {
     display_set: bool,
 }
 
-/// What the Wayland session opens with: the panel's size and the
-/// launch context, bundled so the runner takes few arguments.
+/// What the Wayland session opens with: the panel's size, the
+/// launch context, the dmenu presentation (if any) and the empty-list
+/// text, bundled so the runner takes few arguments.
 struct PanelSpec {
     width: u32,
     height: u32,
     row_h: u32,
+    rows: usize,
     launch: LaunchCtx,
+    dmenu: Option<DmenuSpec>,
+    empty_text: &'static str,
 }
 
-/// Runs the Wayland session to a pick or a dismiss.
+/// The dmenu presentation: resolved in [`open`] before the model moves
+/// the config's lines.
+struct DmenuSpec {
+    /// The prompt before the entry (`> ` by default).
+    prompt: String,
+    /// The dim hint while the entry is empty (empty by default).
+    placeholder: String,
+    /// Print the pick's 0-based stdin index instead of its line.
+    index: bool,
+    /// The prompt ink (the `--prompt-color` override, else foreground).
+    prompt_color: scootui::color::Color,
+    /// An input field with no list: stdin was not read.
+    prompt_only: bool,
+}
+
+/// The built state machine, before the Wayland session assembles it:
+/// apps and run share [`Ui`] (over the desktop index, or over `$PATH`
+/// names); dmenu carries its lines for [`run_panel`] to build the
+/// [`DmenuUi`].
+enum BuiltModel {
+    Apps(Ui),
+    Run(Ui),
+    Dmenu {
+        lines: Vec<String>,
+        only_match: bool,
+        prompt_only: bool,
+        password: bool,
+    },
+}
+
+/// The panel's state machine: apps and run picks launch, dmenu picks
+/// print.
+enum Model {
+    Apps(Ui),
+    Run(Ui),
+    Dmenu(DmenuUi),
+}
+
+/// Runs the Wayland session to a pick, a print or a dismiss.
 fn run_panel(
-    claim: crate::socket::Claim,
-    ui: Ui,
+    claim: Option<crate::socket::Claim>,
+    built: BuiltModel,
     text: &mut Text,
     look: &Look,
     spec: PanelSpec,
@@ -241,7 +406,29 @@ fn run_panel(
     let qh = queue.handle();
     conn.display().get_registry(&qh, ());
     let mut pump = Pump { queue, qh };
-    let mut app = App::new(claim, ui, spec.width, spec.height, spec.row_h, spec.launch);
+    let model = match built {
+        BuiltModel::Apps(ui) => Model::Apps(ui),
+        BuiltModel::Run(ui) => Model::Run(ui),
+        BuiltModel::Dmenu {
+            lines,
+            only_match,
+            prompt_only,
+            password,
+        } => Model::Dmenu(match password {
+            true => DmenuUi::open_secret(lines, spec.rows, only_match, prompt_only),
+            false => DmenuUi::open(lines, spec.rows, only_match, prompt_only),
+        }),
+    };
+    let mut app = App::new(
+        claim,
+        model,
+        spec.width,
+        spec.height,
+        spec.row_h,
+        spec.launch,
+        spec.dmenu,
+        spec.empty_text,
+    );
     // The registry sweep: globals, then outputs, keyboard and pointer.
     if !pump.wait_until(PATIENCE, &mut app, |app| app.ready()) {
         warn(format_args!(
@@ -277,6 +464,9 @@ enum Exit {
     /// spawn, the scope), not printed. Boxed: the request dwarfs the
     /// other exits.
     Launch(Box<LaunchRequest>),
+    /// A dmenu pick: printed on the way out (the line, its index, or
+    /// the typed text), never launched.
+    Print(String),
     /// Dismissed (Escape, outside click, toggle, compositor close).
     Dismiss,
     /// A runtime failure, already warned about.
@@ -325,12 +515,16 @@ fn execute_launch(
 /// buffers, the seat and pointer, the panel's state machine, and what
 /// the compositor last said.
 struct App {
-    claim: crate::socket::Claim,
-    ui: Ui,
+    /// The toggle's listen claim (`None` in dmenu mode, which neither
+    /// listens nor signals). Removing the file happens on drop.
+    claim: Option<crate::socket::Claim>,
+    model: Model,
     width: u32,
     height: u32,
     row_h: u32,
     launch: LaunchCtx,
+    dmenu: Option<DmenuSpec>,
+    empty_text: &'static str,
     compositor: Option<wl_compositor::WlCompositor>,
     shm: Option<wl_shm::WlShm>,
     layer_shell: Option<ZwlrLayerShellV1>,
@@ -370,21 +564,26 @@ struct App {
 }
 
 impl App {
+    #[allow(clippy::too_many_arguments)]
     fn new(
-        claim: crate::socket::Claim,
-        ui: Ui,
+        claim: Option<crate::socket::Claim>,
+        model: Model,
         width: u32,
         height: u32,
         row_h: u32,
         launch: LaunchCtx,
+        dmenu: Option<DmenuSpec>,
+        empty_text: &'static str,
     ) -> Self {
         Self {
             claim,
-            ui,
+            model,
             width,
             height,
             row_h,
             launch,
+            dmenu,
+            empty_text,
             compositor: None,
             shm: None,
             layer_shell: None,
@@ -505,11 +704,23 @@ impl App {
         !self.pointer_in || self.pointer_x >= self.width || self.pointer_y >= self.height
     }
 
+    /// Whether the toggle's `close` arrived (apps/run only; dmenu
+    /// holds no toggle): a second invocation dismisses this one.
+    fn accept_close(&self) -> bool {
+        self.claim
+            .as_ref()
+            .is_some_and(|claim| claim.accept_close())
+    }
+
     /// The shown list row under the pointer, if the pointer is over one.
     fn hit_row(&self) -> Option<usize> {
         if !self.pointer_in || self.pointer_x >= self.width {
             return None;
         }
+        let list = match &self.model {
+            Model::Apps(ui) | Model::Run(ui) => ui.list(),
+            Model::Dmenu(dui) => dui.list(),
+        };
         let list_y = BORDER
             .saturating_add(PAD)
             .saturating_add(self.row_h)
@@ -519,7 +730,7 @@ impl App {
         }
         let row = (self.pointer_y - list_y) / self.row_h;
         let row = row as usize;
-        (row < self.ui.list().visible_range().len()).then_some(row)
+        (row < list.visible_range().len()).then_some(row)
     }
 
     /// Draws the panel into a pooled buffer and commits it.
@@ -567,17 +778,37 @@ impl App {
         // clears (the drive expires it after 2 s): the failed pick
         // stays visible, and the panel stays open.
         let error = self.spawn_error.as_ref().map(|(text, _)| text.clone());
-        paint_panel(
-            slot.pixels_mut(),
-            dims,
-            &self.ui,
-            text,
-            look,
-            self.width,
-            self.height,
-            self.row_h,
-            error.as_deref(),
-        );
+        let dmenu = self.dmenu.as_ref();
+        match &self.model {
+            Model::Apps(ui) | Model::Run(ui) => paint_panel(
+                slot.pixels_mut(),
+                dims,
+                ui,
+                text,
+                look,
+                self.width,
+                self.height,
+                self.row_h,
+                error.as_deref(),
+                self.empty_text,
+            ),
+            Model::Dmenu(dui) => {
+                let Some(dmenu) = dmenu else {
+                    return;
+                };
+                paint_dmenu(
+                    slot.pixels_mut(),
+                    dims,
+                    dui,
+                    text,
+                    look,
+                    self.width,
+                    self.height,
+                    self.row_h,
+                    dmenu,
+                );
+            }
+        }
         let Some(live) = self.live.as_mut() else {
             return;
         };
@@ -625,33 +856,83 @@ impl App {
     }
 
     fn apply_press(&mut self, keysym: u32, decoded: &str) {
-        match self.ui.key(keysym, self.ctrl, decoded) {
-            Outcome::Ignored => {}
-            Outcome::Changed => self.dirty = true,
-            Outcome::Selected(_) => {
-                let serial = self.key_serial;
-                if let Some(entry) = self.ui.selected() {
+        match &mut self.model {
+            Model::Apps(ui) => match ui.key(keysym, self.ctrl, decoded) {
+                Outcome::Ignored => {}
+                Outcome::Changed => self.dirty = true,
+                Outcome::Selected(_) => {
+                    let serial = self.key_serial;
+                    if let Some(entry) = ui.selected() {
+                        self.exit = Some(Exit::Launch(Box::new(LaunchRequest {
+                            entry: Some(entry.clone()),
+                            action: ui.selected_action().cloned(),
+                            run_argv: None,
+                            serial,
+                        })));
+                    }
+                }
+                Outcome::Run(run) => {
+                    let argv = spawn::split_run_argv(&run);
+                    if argv.is_empty() {
+                        return;
+                    }
                     self.exit = Some(Exit::Launch(Box::new(LaunchRequest {
-                        entry: Some(entry.clone()),
-                        action: self.ui.selected_action().cloned(),
-                        run_argv: None,
-                        serial,
+                        entry: None,
+                        action: None,
+                        run_argv: Some(argv),
+                        serial: self.key_serial,
                     })));
                 }
-            }
-            Outcome::Run(run) => {
-                let argv = spawn::split_run_argv(&run);
-                if argv.is_empty() {
-                    return;
+                Outcome::Cancelled => self.exit = Some(Exit::Dismiss),
+            },
+            // A run pick launches its basename through `PATH`
+            // (frecency keys it `run:<basename>` inside the spawn); the
+            // typed-text path is the apps one.
+            Model::Run(ui) => match ui.key(keysym, self.ctrl, decoded) {
+                Outcome::Ignored => {}
+                Outcome::Changed => self.dirty = true,
+                Outcome::Selected(_) => {
+                    let serial = self.key_serial;
+                    if let Some(entry) = ui.selected() {
+                        self.exit = Some(Exit::Launch(Box::new(LaunchRequest {
+                            entry: None,
+                            action: None,
+                            run_argv: Some(vec![entry.name.clone()]),
+                            serial,
+                        })));
+                    }
                 }
-                self.exit = Some(Exit::Launch(Box::new(LaunchRequest {
-                    entry: None,
-                    action: None,
-                    run_argv: Some(argv),
-                    serial: self.key_serial,
-                })));
-            }
-            Outcome::Cancelled => self.exit = Some(Exit::Dismiss),
+                Outcome::Run(run) => {
+                    let argv = spawn::split_run_argv(&run);
+                    if argv.is_empty() {
+                        return;
+                    }
+                    self.exit = Some(Exit::Launch(Box::new(LaunchRequest {
+                        entry: None,
+                        action: None,
+                        run_argv: Some(argv),
+                        serial: self.key_serial,
+                    })));
+                }
+                Outcome::Cancelled => self.exit = Some(Exit::Dismiss),
+            },
+            // A dmenu pick prints and launches nothing: the line (or
+            // its 0-based stdin index with `--index`), or the typed
+            // text. One write happens in `finish`, on the way out.
+            Model::Dmenu(dui) => match dui.key(keysym, self.ctrl, decoded) {
+                DmenuOutcome::Ignored => {}
+                DmenuOutcome::Changed => self.dirty = true,
+                DmenuOutcome::Print(print) => {
+                    let index = self.dmenu.as_ref().is_some_and(|spec| spec.index);
+                    let output = match print {
+                        DmenuPrint::Text(text) => text,
+                        DmenuPrint::Line(line) if index => format!("{line}"),
+                        DmenuPrint::Line(line) => dui.line(line).unwrap_or("").to_string(),
+                    };
+                    self.exit = Some(Exit::Print(format!("{output}\n")));
+                }
+                DmenuOutcome::Cancelled => self.exit = Some(Exit::Dismiss),
+            },
         }
     }
 
@@ -685,6 +966,7 @@ fn paint_panel(
     height: u32,
     row_h: u32,
     error: Option<&str>,
+    empty_text: &str,
 ) {
     let (buffer_w, buffer_h) = dims;
     let width = width.min(buffer_w);
@@ -737,7 +1019,7 @@ fn paint_panel(
         text.draw(
             &mut canvas,
             None,
-            "No applications",
+            empty_text,
             em,
             i64::from(entry_geo.text_x()),
             baseline,
@@ -760,6 +1042,104 @@ fn paint_panel(
         ui.list(),
         &list_geo,
         &|row| ui.row_text(row),
+        false,
+    );
+}
+
+/// Paints the dmenu panel: the same chrome, the prompt at the entry's
+/// text start (in the prompt color), the entry beside it, and the
+/// list's visible rows below — or nothing below in prompt-only mode.
+/// In password mode the entry draws masked (`*` per character, never
+/// the secret); an error never draws here (a dmenu pick prints, and
+/// printing cannot fail into the panel). Anything drawn beside the
+/// entry starts at [`Geometry::text_x`], aligned with the widgets.
+#[allow(clippy::too_many_arguments)]
+fn paint_dmenu(
+    pixels: &mut [u8],
+    dims: (u32, u32),
+    dui: &DmenuUi,
+    text: &mut Text,
+    look: &Look,
+    width: u32,
+    height: u32,
+    row_h: u32,
+    spec: &DmenuSpec,
+) {
+    let (buffer_w, buffer_h) = dims;
+    let width = width.min(buffer_w);
+    let height = height.min(buffer_h);
+    if width == 0 || height == 0 || row_h == 0 {
+        return;
+    }
+    chrome(pixels, buffer_w, width, height, look);
+    let Some(mut canvas) = Canvas::new(pixels, buffer_w, buffer_h) else {
+        return;
+    };
+    let em = look.font_size_px.clamp(1.0, 256.0);
+    let inner = BORDER.saturating_add(PAD);
+    let entry_geo = Geometry {
+        x: inner,
+        y: inner,
+        width: width.saturating_sub(inner.saturating_mul(2)),
+        row_height: row_h,
+        em,
+    };
+    let metrics = text.metrics(em);
+    let baseline = i64::from(inner) + metrics.baseline(row_h);
+    // The prompt first, at the text start; the entry shifts right by
+    // its measured width, so prompt and query never overlap.
+    let prompt_w = if spec.prompt.is_empty() {
+        0
+    } else {
+        text.draw(
+            &mut canvas,
+            None,
+            spec.prompt.as_str(),
+            em,
+            i64::from(entry_geo.text_x()),
+            baseline,
+            spec.prompt_color,
+            entry_geo.clip(),
+        );
+        text.measure(None, spec.prompt.as_str(), em)
+    };
+    let entry_geo = Geometry {
+        x: entry_geo.x.saturating_add(prompt_w),
+        width: entry_geo.width.saturating_sub(prompt_w),
+        ..entry_geo
+    };
+    if let Some(secret) = dui.secret_entry() {
+        paint_password(&mut canvas, text, &look.theme, secret, &entry_geo, true);
+    } else if let Some(entry) = dui.plain_entry() {
+        paint_entry(
+            &mut canvas,
+            text,
+            &look.theme,
+            entry,
+            &entry_geo,
+            true,
+            spec.placeholder.as_str(),
+        );
+    }
+    if spec.prompt_only || dui.list().count() == 0 {
+        // No list: a prompt-only field, or nothing (yet) matching.
+        // Fuzzel shows just the input either way.
+        return;
+    }
+    let list_geo = Geometry {
+        x: inner,
+        y: inner.saturating_add(row_h).saturating_add(GAP),
+        width: width.saturating_sub(inner.saturating_mul(2)),
+        row_height: row_h,
+        em,
+    };
+    paint_list(
+        &mut canvas,
+        text,
+        &look.theme,
+        dui.list(),
+        &list_geo,
+        &|row| dui.row_text(row),
         false,
     );
 }
@@ -809,8 +1189,8 @@ fn chrome(pixels: &mut [u8], buffer_w: u32, width: u32, height: u32, look: &Look
     }
 }
 
-/// The queue pump: flush, dispatch, repeat ticks, the toggle socket, and
-/// draws, until a pick or a dismiss.
+/// The queue pump: flush, dispatch, repeat ticks, the toggle socket
+/// (apps/run only), and draws, until a pick, a print or a dismiss.
 struct Pump {
     queue: wayland_client::EventQueue<App>,
     qh: QueueHandle<App>,
@@ -822,8 +1202,8 @@ impl Pump {
     }
 
     /// Runs dispatches until `done`, or the timeout. `false` on timeout.
-    /// The toggle socket is watched throughout: a `close` arriving
-    /// mid-open dismisses.
+    /// The toggle socket is watched throughout (apps/run): a `close`
+    /// arriving mid-open dismisses.
     fn wait_until(
         &mut self,
         timeout: Duration,
@@ -850,7 +1230,7 @@ impl Pump {
             if self.queue.flush().is_err() {
                 return done(app);
             }
-            if app.claim.accept_close() {
+            if app.accept_close() {
                 app.exit = Some(Exit::Dismiss);
                 return true;
             }
@@ -868,14 +1248,30 @@ impl Pump {
                 tv_nsec: wait.subsec_nanos() as _,
             };
             let wayland = guard.connection_fd();
-            let toggle = app.claim.as_fd();
-            let mut polls = [
-                rustix::event::PollFd::new(&wayland, rustix::event::PollFlags::IN),
-                rustix::event::PollFd::new(&toggle, rustix::event::PollFlags::IN),
-            ];
-            let _ = rustix::event::poll(&mut polls, Some(&timespec));
-            if !polls[0].revents().is_empty() {
-                let _ = guard.read();
+            match app.claim.as_ref() {
+                Some(claim) => {
+                    let toggle = claim.as_fd();
+                    let mut polls = [
+                        rustix::event::PollFd::new(&wayland, rustix::event::PollFlags::IN),
+                        rustix::event::PollFd::new(&toggle, rustix::event::PollFlags::IN),
+                    ];
+                    let _ = rustix::event::poll(&mut polls, Some(&timespec));
+                    if !polls[0].revents().is_empty() {
+                        let _ = guard.read();
+                    }
+                }
+                // Dmenu mode holds no toggle: wait on the connection
+                // alone.
+                None => {
+                    let mut polls = [rustix::event::PollFd::new(
+                        &wayland,
+                        rustix::event::PollFlags::IN,
+                    )];
+                    let _ = rustix::event::poll(&mut polls, Some(&timespec));
+                    if !polls[0].revents().is_empty() {
+                        let _ = guard.read();
+                    }
+                }
             }
             // A toggle close with a quiet connection drops the guard
             // unread (the documented `read_after_poll` shape): the next
@@ -899,7 +1295,7 @@ impl Pump {
                 return self.finish(app, 1, None);
             }
             app.drain_repeats();
-            if app.claim.accept_close() {
+            if app.accept_close() {
                 return self.finish(app, 1, Some(Exit::Dismiss));
             }
             // A spawn failure clears after 2 s, redrawing the list
@@ -929,18 +1325,33 @@ impl Pump {
                 // The repeat timer and the toggle socket wake the loop with
                 // the connection: at idle (no key held, no toggle) the poll
                 // waits on the connection alone, costing no wakeups.
+                // Dmenu mode holds no toggle: two fds, not three.
                 let wayland = guard.connection_fd();
                 let repeat = app.seat.repeat_fd();
-                let toggle = app.claim.as_fd();
                 let repeat_fd = repeat.unwrap_or(wayland);
-                let mut polls = [
-                    rustix::event::PollFd::new(&wayland, rustix::event::PollFlags::IN),
-                    rustix::event::PollFd::new(&repeat_fd, rustix::event::PollFlags::IN),
-                    rustix::event::PollFd::new(&toggle, rustix::event::PollFlags::IN),
-                ];
-                let _ = rustix::event::poll(&mut polls, None);
-                if !polls[0].revents().is_empty() {
-                    let _ = guard.read();
+                match app.claim.as_ref() {
+                    Some(claim) => {
+                        let toggle = claim.as_fd();
+                        let mut polls = [
+                            rustix::event::PollFd::new(&wayland, rustix::event::PollFlags::IN),
+                            rustix::event::PollFd::new(&repeat_fd, rustix::event::PollFlags::IN),
+                            rustix::event::PollFd::new(&toggle, rustix::event::PollFlags::IN),
+                        ];
+                        let _ = rustix::event::poll(&mut polls, None);
+                        if !polls[0].revents().is_empty() {
+                            let _ = guard.read();
+                        }
+                    }
+                    None => {
+                        let mut polls = [
+                            rustix::event::PollFd::new(&wayland, rustix::event::PollFlags::IN),
+                            rustix::event::PollFd::new(&repeat_fd, rustix::event::PollFlags::IN),
+                        ];
+                        let _ = rustix::event::poll(&mut polls, None);
+                        if !polls[0].revents().is_empty() {
+                            let _ = guard.read();
+                        }
+                    }
                 }
                 // A due repeat or a toggle close with a quiet connection
                 // drops the guard unread (the documented `read_after_poll`
@@ -962,6 +1373,7 @@ impl Pump {
                 }
                 Exit::Dismiss => return self.finish(app, 1, Some(Exit::Dismiss)),
                 Exit::Failed => return self.finish(app, 1, Some(Exit::Failed)),
+                Exit::Print(text) => return self.finish(app, 0, Some(Exit::Print(text))),
             }
         }
     }
@@ -1039,7 +1451,7 @@ impl Pump {
                 }
                 return TokenWait::Token(Token::new(done));
             }
-            if app.claim.accept_close() {
+            if app.accept_close() {
                 token.destroy();
                 return TokenWait::Dismissed;
             }
@@ -1062,14 +1474,30 @@ impl Pump {
                 tv_nsec: wait.subsec_nanos() as _,
             };
             let wayland = guard.connection_fd();
-            let toggle = app.claim.as_fd();
-            let mut polls = [
-                rustix::event::PollFd::new(&wayland, rustix::event::PollFlags::IN),
-                rustix::event::PollFd::new(&toggle, rustix::event::PollFlags::IN),
-            ];
-            let _ = rustix::event::poll(&mut polls, Some(&timespec));
-            if !polls[0].revents().is_empty() {
-                let _ = guard.read();
+            // A launch always holds the toggle (only apps and run
+            // launch; dmenu prints), so the wait watches both.
+            match app.claim.as_ref() {
+                Some(claim) => {
+                    let toggle = claim.as_fd();
+                    let mut polls = [
+                        rustix::event::PollFd::new(&wayland, rustix::event::PollFlags::IN),
+                        rustix::event::PollFd::new(&toggle, rustix::event::PollFlags::IN),
+                    ];
+                    let _ = rustix::event::poll(&mut polls, Some(&timespec));
+                    if !polls[0].revents().is_empty() {
+                        let _ = guard.read();
+                    }
+                }
+                None => {
+                    let mut polls = [rustix::event::PollFd::new(
+                        &wayland,
+                        rustix::event::PollFlags::IN,
+                    )];
+                    let _ = rustix::event::poll(&mut polls, Some(&timespec));
+                    if !polls[0].revents().is_empty() {
+                        let _ = guard.read();
+                    }
+                }
             }
             // A toggle close with a quiet connection drops the guard
             // unread: the next turn's `accept_close` collects it.
@@ -1089,7 +1517,9 @@ enum TokenWait {
 impl Pump {
     /// Tears the session down: the surface and its buffers go first (no
     /// surface held past close), then the socket file with the claim.
-    /// `code` is the fallback; a taken exit decides instead.
+    /// `code` is the fallback; a taken exit decides instead. A print
+    /// writes once, on the way out: a reader that went away (`--dmenu
+    /// ... | head -c0`) warns and exits 1, as the headless commands do.
     fn finish(self, mut app: App, code: i32, exit: Option<Exit>) -> i32 {
         let exit = app.exit.take().or(exit);
         let launch = LaunchCtx {
@@ -1117,6 +1547,15 @@ impl Pump {
                 }
             }
             Some(Exit::Dismiss) => 1,
+            // A dmenu pick, printed once on the way out: the line, its
+            // index, or the typed text. Nothing launches.
+            Some(Exit::Print(text)) => match print(&text) {
+                Ok(()) => 0,
+                Err(error) => {
+                    warn(format_args!("scootlaunch: cannot write the pick: {error}"));
+                    1
+                }
+            },
             Some(Exit::Failed) | None => code,
         }
     }
@@ -1354,23 +1793,64 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                     return;
                 }
                 // A click outside never arrives here (it goes to the
-                // surface below); a click on a row launches it at once.
+                // surface below); a click on a row picks it at once:
+                // apps and run launch it, dmenu prints it.
                 if let Some(row) = app.hit_row() {
-                    let row = app.ui.list().visible_range().start.saturating_add(row);
-                    match app.ui.click(row) {
-                        Outcome::Selected(_) => {
-                            let serial = app.button_serial;
-                            if let Some(entry) = app.ui.selected() {
-                                app.exit = Some(Exit::Launch(Box::new(LaunchRequest {
-                                    entry: Some(entry.clone()),
-                                    action: app.ui.selected_action().cloned(),
-                                    run_argv: None,
-                                    serial,
-                                })));
+                    match &mut app.model {
+                        Model::Apps(ui) => {
+                            let row = ui.list().visible_range().start.saturating_add(row);
+                            match ui.click(row) {
+                                Outcome::Selected(_) => {
+                                    let serial = app.button_serial;
+                                    if let Some(entry) = ui.selected() {
+                                        app.exit = Some(Exit::Launch(Box::new(LaunchRequest {
+                                            entry: Some(entry.clone()),
+                                            action: ui.selected_action().cloned(),
+                                            run_argv: None,
+                                            serial,
+                                        })));
+                                    }
+                                }
+                                Outcome::Cancelled => app.exit = Some(Exit::Dismiss),
+                                Outcome::Ignored | Outcome::Changed | Outcome::Run(_) => {}
                             }
                         }
-                        Outcome::Cancelled => app.exit = Some(Exit::Dismiss),
-                        Outcome::Ignored | Outcome::Changed | Outcome::Run(_) => {}
+                        Model::Run(ui) => {
+                            let row = ui.list().visible_range().start.saturating_add(row);
+                            match ui.click(row) {
+                                Outcome::Selected(_) => {
+                                    let serial = app.button_serial;
+                                    if let Some(entry) = ui.selected() {
+                                        app.exit = Some(Exit::Launch(Box::new(LaunchRequest {
+                                            entry: None,
+                                            action: None,
+                                            run_argv: Some(vec![entry.name.clone()]),
+                                            serial,
+                                        })));
+                                    }
+                                }
+                                Outcome::Cancelled => app.exit = Some(Exit::Dismiss),
+                                Outcome::Ignored | Outcome::Changed | Outcome::Run(_) => {}
+                            }
+                        }
+                        Model::Dmenu(dui) => {
+                            let row = dui.list().visible_range().start.saturating_add(row);
+                            match dui.click(row) {
+                                DmenuOutcome::Print(print) => {
+                                    let index = app.dmenu.as_ref().is_some_and(|spec| spec.index);
+                                    let output = match print {
+                                        DmenuPrint::Text(text) => text,
+                                        DmenuPrint::Line(line) if index => format!("{line}"),
+                                        DmenuPrint::Line(line) => {
+                                            dui.line(line).unwrap_or("").to_string()
+                                        }
+                                    };
+                                    app.exit = Some(Exit::Print(format!("{output}\n")));
+                                }
+                                DmenuOutcome::Cancelled => app.exit = Some(Exit::Dismiss),
+                                DmenuOutcome::Ignored | DmenuOutcome::Changed => {}
+                            }
+                        }
                     }
                 }
             }
@@ -1378,11 +1858,20 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                 if !matches!(axis, WEnum::Value(wl_pointer::Axis::VerticalScroll)) {
                     return;
                 }
+                // The wheel scrolls the window without moving the
+                // selection (a prompt-only dmenu panel shows no list,
+                // so its window is empty and the scroll is a no-op).
                 if value > 0.0 {
-                    app.ui.scroll(false);
+                    match &mut app.model {
+                        Model::Apps(ui) | Model::Run(ui) => ui.scroll(false),
+                        Model::Dmenu(dui) => dui.scroll(false),
+                    }
                     app.dirty = true;
                 } else if value < 0.0 {
-                    app.ui.scroll(true);
+                    match &mut app.model {
+                        Model::Apps(ui) | Model::Run(ui) => ui.scroll(true),
+                        Model::Dmenu(dui) => dui.scroll(true),
+                    }
                     app.dirty = true;
                 }
             }

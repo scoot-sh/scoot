@@ -1,18 +1,20 @@
 ---
 title: scootlaunch overview
-description: "The keyboard-first application launcher — the desktop entry index, ranked search, and the overlay panel; launching and the dmenu mode arrive in later tickets."
+description: "The keyboard-first application launcher — the desktop entry index, ranked search, the overlay panel, launching, and the dmenu and run modes."
 ---
 
 A keyboard-first application launcher for scoot and any compositor
 with `wlr-layer-shell-v1`. What ships today is the desktop entry
-index, ranked search, the headless agent interface, and the overlay
-panel with its entry and virtualized list. Launching and the dmenu
-mode are later tickets and are not here yet.
+index, ranked search, the headless agent interface, the overlay panel
+with its entry and virtualized list, launching, and the dmenu and run
+modes.
 
 ```sh
 scootlaunch --list --json                  # every visible entry, as JSON
 scootlaunch --query "fire" --json          # ranked as the UI would rank it
 scootlaunch                                # open the panel
+printf 'a\nb\n' | scootlaunch --dmenu      # pick a line, print it
+scootlaunch --run                          # the panel over $PATH executables
 ```
 
 One binary, holding nothing when closed. It reads the
@@ -41,8 +43,9 @@ and caches the result under `$XDG_CACHE_HOME/scootlaunch/index-v1`.
 - Opens the panel (bare `scootlaunch`): the overlay
   exclusive-keyboard surface with the entry and the ranked,
   match-highlighted list. Details, keys and theming are in [The
-  panel](./panel.md). Picking prints the entry id for now; launching
-  is the next ticket.
+  panel](./panel.md). Picking launches the entry and exits 0 (a dmenu
+  pick prints instead of launching; see the [CLI
+  reference](./cli.md)).
 
 Every flag is in the [CLI reference](./cli.md). An app missing from
 the list is diagnosed there too.
