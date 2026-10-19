@@ -719,11 +719,11 @@ stdout (`fuzzel --dmenu`, with `--no-run-if-empty` staying quiet on
 an empty history and `--only-match` refusing custom entries — the
 pickers' flags). Proven live, not just documented: `printf
 'alpha\nbeta\ngamma\n' | fuzzel --dmenu`, the filter and Return driven
-through scoot's own IPC, prints `beta` and exits 0 — and a future
+through scoot's own IPC, prints `beta` and exits 0 — and
 `scootlaunch --dmenu` keeps that shape, so the bar's WiFi / power /
 audio pickers swap daemons without changing a call site (see
 [the launcher entry](https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/backlog/launcher.md):
-the `daemon` enum below widens to it without renaming anything).
+`desktop.launcher.daemon = "scootlaunch"` flips the slot to it).
 
 Launched apps land in the session: fuzzel
 forks the picked entry (a `Terminal=true` entry through your
@@ -739,7 +739,7 @@ re-render into `[binds]`; no re-login, `scoot msg reload` is enough):
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `desktop.launcher.enable` | bool | `true` with the profile | the package on PATH and both binds bound (drun on `Super+d`, run on `Ctrl+Alt+Space`) |
-| `desktop.launcher.daemon` | enum (`"fuzzel"`) | `"fuzzel"` | the program behind `enable` (a future scootlaunch widens this without renaming anything) |
+| `desktop.launcher.daemon` | enum (`"fuzzel"`, `"scootlaunch"`) | `"fuzzel"` | the program behind `enable` (`scootlaunch` draws its own panel from the look and runs the pickers through its `--dmenu` — see [scootlaunch](../scootlaunch/)) |
 | `desktop.launcher.package` | package or null | fuzzel (Linux-only: null off Linux) | point at your own fuzzel build; null with the switch on fails evaluation naming it |
 | `desktop.theme.targets.launcher.enable` | bool | `true` | theme the menu from the look (background and text, selection and border); `false` keeps fuzzel's own style |
 | `desktop.keys.binds.launcher.enable` / `.launcherRun.enable` | bool | `true` | bind the drun / run menu (`false` leaves that combo unbound) |

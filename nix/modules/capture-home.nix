@@ -52,7 +52,21 @@ let
   grimBin = binOr "grim" cap.grimPackage;
   slurpBin = binOr "slurp" cap.slurpPackage;
   wlCopyBin = binOr "wl-copy" cap.wlClipboardPackage;
-  menuBin = if cap.menuPackage != null then lib.getExe cap.menuPackage else "fuzzel";
+  # The output chooser's menu: the daemon behind
+  # `desktop.launcher.daemon` (the profile's launcher, same derivation
+  # the launcher already themes: no second copy), bare name from PATH
+  # otherwise, with the same fail-quiet contract as above. The binary
+  # inside the package is scootlaunch's own build's bin/scootlaunch,
+  # and bin/fuzzel for everything else (the contract the descriptions
+  # name).
+  isScootLaunch = cfg.desktop.launcher.daemon == "scootlaunch";
+  menuBin =
+    if cap.menuPackage == null then
+      (if isScootLaunch then "scootlaunch" else "fuzzel")
+    else if (cap.menuPackage.pname or (lib.getName cap.menuPackage)) == "scootlaunch" then
+      lib.getExe' cap.menuPackage "scootlaunch"
+    else
+      lib.getExe' cap.menuPackage "fuzzel";
 
   # The output chooser xdpw asks before each cast (see `chooser` in
   # `desktop.nix`): a dmenu list of outputs through the profile's
@@ -69,18 +83,27 @@ let
   # travels inside it, where no line limit applies: the live look's
   # colors read out of its `fuzzel.ini` once a swap renders one, the
   # eval-time flags before that (no `--config`: that flag replaces the
-  # user's own config, while flags layer only the colors over it).
-  chooserScript = pkgs.writeShellScriptBin "scoot-screencast-chooser" ''
-    ${lookLeafLib}
-    look_ini=${lookFuzzelIni}
-    live_colors=$(scoot_fuzzel_look_flags "$look_ini") || live_colors=""
-    # shellcheck disable=SC2086
-    if [ -n "$live_colors" ]; then
-      exec ${menuBin} --dmenu --prompt='Share: ' $live_colors
+  # user's own config, while flags layer only the colors over it). With
+  # scootlaunch the same wrapper execs its `--dmenu` with no color
+  # flags: the look arrives through the layer.
+  chooserScript = pkgs.writeShellScriptBin "scoot-screencast-chooser" (
+    if isScootLaunch then
+      ''
+        exec ${menuBin} --dmenu --prompt='Share: '
+      ''
     else
-      exec ${menuBin} --dmenu --prompt='Share: '${fuzzelThemeFlags}
-    fi
-  '';
+      ''
+        ${lookLeafLib}
+        look_ini=${lookFuzzelIni}
+        live_colors=$(scoot_fuzzel_look_flags "$look_ini") || live_colors=""
+        # shellcheck disable=SC2086
+        if [ -n "$live_colors" ]; then
+          exec ${menuBin} --dmenu --prompt='Share: ' $live_colors
+        else
+          exec ${menuBin} --dmenu --prompt='Share: '${fuzzelThemeFlags}
+        fi
+      ''
+  );
   chooserCmd =
     if cap.chooser == "fuzzel" then
       "${chooserScript}/bin/scoot-screencast-chooser"
@@ -147,12 +170,18 @@ in
 
     menuPackage = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = if isLinux then (if pkgs ? fuzzel then pkgs.fuzzel else null) else null;
-      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel else null";
+      default =
+        if !isLinux then
+          null
+        else if cfg.desktop.launcher.daemon == "scootlaunch" then
+          (pkgs.scootlaunch or null)
+        else
+          (if pkgs ? fuzzel then pkgs.fuzzel else null);
+      defaultText = lib.literalExpression "follows programs.scoot.desktop.launcher.daemon (fuzzel or scootlaunch) on Linux, else null";
       description = ''
         The dmenu-style menu the output chooser runs
-        (`fuzzel --dmenu`, themed by the look -- the launcher, which
-        reuses this same package). Read only with
+        (the launcher's dmenu contract, themed by the look -- the
+        launcher, which reuses this same package). Read only with
         `chooser = "fuzzel"`. Null installs nothing. Linux-only:
         null off Linux.
       '';
@@ -206,7 +235,8 @@ in
           message = ''
             programs.scoot.desktop.capture.chooser is "fuzzel" but
             programs.scoot.desktop.capture.menuPackage is null: set it
-            explicitly (apply the overlay, or point at a fuzzel).
+            explicitly (apply the overlay, or point at a launcher
+            speaking the dmenu contract).
           '';
         }
         {

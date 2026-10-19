@@ -506,11 +506,18 @@ in
       launcher = desktop.options.launcher // {
         package = lib.mkOption {
           type = lib.types.nullOr lib.types.package;
-          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null;
-          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null";
+          default =
+            if !pkgs.stdenv.hostPlatform.isLinux then
+              null
+            else if cfg.desktop.launcher.daemon == "scootlaunch" then
+              pkgs.scootlaunch or null
+            else
+              pkgs.fuzzel or null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then ((pkgs.scootlaunch or null) for daemon scootlaunch, else pkgs.fuzzel or null) else null";
           description = ''
-            The launcher package to install system-wide (fuzzel).
-            Null installs nothing. Linux-only: null off Linux.
+            The launcher package to install system-wide (following
+            `desktop.launcher.daemon`: fuzzel or scootlaunch). Null
+            installs nothing. Linux-only: null off Linux.
           '';
         };
       };

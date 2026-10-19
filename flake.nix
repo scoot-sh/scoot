@@ -66,6 +66,8 @@
         (builtins.fromTOML (builtins.readFile ./crates/scootbg/Cargo.toml)).package.description;
       scootbarDescription =
         (builtins.fromTOML (builtins.readFile ./crates/scootbar/Cargo.toml)).package.description;
+      scootlaunchDescription =
+        (builtins.fromTOML (builtins.readFile ./crates/scootlaunch/Cargo.toml)).package.description;
     in
     {
       # `nix build` / `nix run`, for getting the binaries without a dev shell.
@@ -550,6 +552,26 @@
             description = scootbarDescription;
           };
 
+          # The launcher, the same shape as the bar (Linux only, one
+          # binary, nothing linked beyond std's and libxkbcommon, no
+          # font in its closure), in its own file so that its Cargo
+          # features are `callPackage` arguments and a different build
+          # is an `.override` (see nix/scootlaunch.nix). Shares the
+          # base dependency artifact (see `mkDeps`).
+          scootlaunch = pkgs.callPackage ./nix/scootlaunch.nix {
+            inherit version;
+            inherit craneLib;
+            inherit (craneCommon)
+              src
+              cargoLock
+              outputHashes
+              strictDeps
+              doCheck
+              ;
+            cargoArtifacts = depsBase;
+            description = scootlaunchDescription;
+          };
+
           # One compositor build: `scoot` above, over the dependency artifact
           # compiled with the same default features (see `mkDeps`). The
           # CPU-only minimal build is cargo-only
@@ -570,7 +592,7 @@
           docs-site = pkgs.callPackage ./nix/docs-site.nix { };
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-          inherit scootbg scootbar;
+          inherit scootbg scootbar scootlaunch;
           # The desktop profile's default cursor theme (Mocu white plus
           # Mocu-Black), built from the vendored SVGs scoot also draws
           # as its built-in cursors (see nix/mocu-cursor-theme.nix).
@@ -712,6 +734,7 @@
           # Not `scootbar-demo`: a demo to run, not a package to build on
           # (it is scootbar plus a font a system's own font setup provides).
           "scootbar"
+          "scootlaunch"
         ]) built;
 
       # `programs.scoot`: a home-manager module (per-user config file,
@@ -766,6 +789,19 @@
                 (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scootbar or null
               );
             };
+          # `programs.scootlaunch` (nix/modules/scootlaunch-home.nix):
+          # its own module, not part of `default`, so importing scoot's
+          # changes nothing about the launcher. The flake's build is
+          # `mkDefault`, as above; null where it does not build
+          # (Darwin), where enabling the option is then refused by name.
+          scootlaunch =
+            { pkgs, ... }:
+            {
+              imports = [ ./nix/modules/scootlaunch-home.nix ];
+              programs.scootlaunch.package = nixpkgs.lib.mkDefault (
+                (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scootlaunch or null
+              );
+            };
         };
 
       # Home-manager modules (`homeModules.*`): the only spelling. There is
@@ -798,6 +834,16 @@
               imports = [ ./nix/modules/scootbar-nixos.nix ];
               programs.scootbar.package = nixpkgs.lib.mkDefault (
                 (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scootbar or null
+              );
+            };
+          # `programs.scootlaunch` (nix/modules/scootlaunch-nixos.nix),
+          # as the home-manager one: separate from `default`.
+          scootlaunch =
+            { pkgs, ... }:
+            {
+              imports = [ ./nix/modules/scootlaunch-nixos.nix ];
+              programs.scootlaunch.package = nixpkgs.lib.mkDefault (
+                (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scootlaunch or null
               );
             };
         };
@@ -837,6 +883,14 @@
             scootLook = self.packages.${pkgs.stdenv.hostPlatform.system}.scoot-look;
             homeModule = self.homeModules.scootbar;
             nixosModule = self.nixosModules.scootbar;
+          };
+          # The scootlaunch modules (nix/scootlaunch-tests.nix): the
+          # rendered file holds only the user's settings, and the real
+          # launcher validates every rendered file with `--check`.
+          scootlaunch-modules = pkgs.callPackage ./nix/scootlaunch-tests.nix {
+            inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) scootlaunch;
+            homeModule = self.homeModules.scootlaunch;
+            nixosModule = self.nixosModules.scootlaunch;
           };
         }
       );

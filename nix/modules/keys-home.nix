@@ -30,8 +30,28 @@ let
   brightnessCtl = binOr "brightnessctl" keys.brightnessPackage;
   wpctl = binOr "wpctl" keys.volumePackage;
   playerctl = binOr "playerctl" keys.mediaPackage;
-  fuzzel =
-    if cfg.desktop.launcher.package != null then lib.getExe cfg.desktop.launcher.package else "fuzzel";
+  # The menu binary inside its package: scootlaunch's own build carries
+  # bin/scootlaunch, everything else (fuzzel, the test stubs)
+  # bin/fuzzel -- the contract the option descriptions name.
+  menuExe =
+    pkg:
+    if (pkg.pname or (lib.getName pkg)) == "scootlaunch" then
+      lib.getExe' pkg "scootlaunch"
+    else
+      lib.getExe' pkg "fuzzel";
+  launcherBin =
+    if cfg.desktop.launcher.package != null then
+      menuExe cfg.desktop.launcher.package
+    else if cfg.desktop.launcher.daemon == "scootlaunch" then
+      "scootlaunch"
+    else
+      "fuzzel";
+  # The opt-in switch (see `desktop.nix`): with
+  # `desktop.launcher.daemon = "scootlaunch"` the binds run scootlaunch
+  # and every menu below speaks its `--dmenu`, with no color flags (the
+  # look arrives through the runtime layer, and the user's own file wins
+  # per key -- see site/src/content/docs/scootlaunch/index.md).
+  isScootLaunch = cfg.desktop.launcher.daemon == "scootlaunch";
   makoctl =
     if cfg.desktop.notifications.package != null then
       lib.getExe' cfg.desktop.notifications.package "makoctl"
@@ -49,7 +69,12 @@ let
     else
       "wl-copy";
   fuzzelPickBin =
-    if clip.menuPackage != null then lib.getExe' clip.menuPackage "fuzzel" else "fuzzel";
+    if clip.menuPackage != null then
+      menuExe clip.menuPackage
+    else if isScootLaunch then
+      "scootlaunch"
+    else
+      "fuzzel";
   scootBin = if cfg.package != null then lib.getExe' cfg.package "scoot" else "scoot";
 
   # The lock probe the picker embeds (`@SCOOT_BIN@` replaced, the way
@@ -104,25 +129,36 @@ let
   #   corrupt an entry copied with them, the common `echo | wl-copy` shape).
   # A pick wiped mid-flight (the lock landed between list and decode)
   # decodes to nothing and is dropped the same way.
+  # The picker's menu invocation: with scootlaunch no color flags (the
+  # look arrives through its own layer); with fuzzel the live look's
+  # colors as CLI flags when a swap rendered them, else the eval-time
+  # flags. No `--config` either way: that flag replaces the user's own
+  # config, while flags layer only the seven colors over it.
+  clipMenuSel =
+    if isScootLaunch then
+      ''sel="$(${cliphistBin} ${clipboardDbFlags}list | ${fuzzelPickBin} --dmenu --prompt='clipboard: ' --no-run-if-empty --only-match)" || exit 0''
+    else
+      ''
+        # The live look's colors as CLI flags when a swap rendered them (next
+        # launch), else the eval-time flags above. No `--config` either way:
+        # that flag replaces the user's own config, while flags layer only
+        # the seven colors over it.
+        look_ini=${lookFuzzelIni}
+        live_colors=$(scoot_fuzzel_look_flags "$look_ini") || live_colors=""
+        # shellcheck disable=SC2086
+        if [ -n "$live_colors" ]; then
+          sel="$(${cliphistBin} ${clipboardDbFlags}list | ${fuzzelPickBin} --dmenu --prompt='clipboard: ' --no-run-if-empty --only-match $live_colors)" || exit 0
+        else
+          sel="$(${cliphistBin} ${clipboardDbFlags}list | ${fuzzelPickBin} --dmenu --prompt='clipboard: ' --no-run-if-empty --only-match${clipboardThemeFlags})" || exit 0
+        fi'';
   clipboardPick = pkgs.writeShellScriptBin "scoot-clipboard-pick" ''
-    ${lookLeafLib}
+    ${lib.optionalString (!isScootLaunch) lookLeafLib}
     ${clipboardGuard}
     if ! clipboard_unlocked; then
       echo "scoot-clipboard-pick: the session is locked -- unlock to pick from history" >&2
       exit 1
     fi
-    # The live look's colors as CLI flags when a swap rendered them (next
-    # launch), else the eval-time flags above. No `--config` either way:
-    # that flag replaces the user's own config, while flags layer only
-    # the seven colors over it.
-    look_ini=${lookFuzzelIni}
-    live_colors=$(scoot_fuzzel_look_flags "$look_ini") || live_colors=""
-    # shellcheck disable=SC2086
-    if [ -n "$live_colors" ]; then
-      sel="$(${cliphistBin} ${clipboardDbFlags}list | ${fuzzelPickBin} --dmenu --prompt='clipboard: ' --no-run-if-empty --only-match $live_colors)" || exit 0
-    else
-      sel="$(${cliphistBin} ${clipboardDbFlags}list | ${fuzzelPickBin} --dmenu --prompt='clipboard: ' --no-run-if-empty --only-match${clipboardThemeFlags})" || exit 0
-    fi
+    ${clipMenuSel}
     case "$sel" in
       "") exit 0 ;;
     esac
@@ -133,38 +169,49 @@ let
     ${wlCopyBin} <"$tmp"
   '';
 
-  # The launcher: fuzzel as the keymap's drun/run binds (XDG apps,
+  # The launcher: the keymap's drun/run binds (XDG apps,
   # most-launched first, PATH executables on the run bind -- see
-  # site/src/content/docs/desktop/index.md#launcher). A script because the theme needs a
-  # shell beside the binary (the live look's colors read out of its
-  # `fuzzel.ini` once a swap renders one, seven eval-time colors as CLI
-  # flags before that -- the same ones the picker above carries, one
-  # menu, one palette), and a
-  # `[binds]` action gets no shell of its own. Absolute fuzzel path when the
-  # launcher child names a package (the one fuzzel the picker already
+  # site/src/content/docs/desktop/index.md#launcher). With fuzzel a script
+  # because the theme needs a shell beside the binary (the live look's
+  # colors read out of its `fuzzel.ini` once a swap renders one, seven
+  # eval-time colors as CLI flags before that -- the same ones the picker
+  # above carries, one menu, one palette), and a
+  # `[binds]` action gets no shell of its own. With scootlaunch the same
+  # wrapper execs the binary with no color flags at all: the look arrives
+  # through the layer, and the user's own file wins per key again, where
+  # fuzzel's CLI flags beat it. Absolute launcher path when the
+  # launcher child names a package (the one launcher the picker already
   # themes: same derivation, no second copy), bare name from PATH
   # otherwise, with the same fail-quiet contract as the picker above.
   # Extra args pass through (`"$@"`), which is what carries the run
   # bind's `--list-executables-in-path`.
   #
-  # `--layer=overlay`: fuzzel's own default is `top`, which the
+  # `--layer=overlay` rides along either way (accepted by both: fuzzel's
+  # own default is `top`, which the
   # compositor hides under a fullscreen window (the mako lesson -- see
-  # `notifications-home.nix`); `overlay` stays above it. Exclusive
+  # `notifications-home.nix`); `overlay` stays above it). Exclusive
   # keyboard is fuzzel's default and stays: nothing else takes keys
-  # while the launcher is open. No lock probe here (unlike the picker):
+  # while the launcher is open (scootlaunch is always exclusive). No lock probe here (unlike the picker):
   # while locked no `[binds]` action fires at all, so these binds never
   # run behind the lock screen -- and a manual run only lists apps.
-  launcherScript = pkgs.writeShellScriptBin "scoot-launcher" ''
-    ${lookLeafLib}
-    look_ini=${lookFuzzelIni}
-    live_colors=$(scoot_fuzzel_look_flags "$look_ini") || live_colors=""
-    # shellcheck disable=SC2086
-    if [ -n "$live_colors" ]; then
-      exec ${fuzzel} --layer=overlay $live_colors "$@"
+  launcherScript = pkgs.writeShellScriptBin "scoot-launcher" (
+    if isScootLaunch then
+      ''
+        exec ${launcherBin} --layer=overlay "$@"
+      ''
     else
-      exec ${fuzzel} --layer=overlay${launcherThemeFlags} "$@"
-    fi
-  '';
+      ''
+        ${lookLeafLib}
+        look_ini=${lookFuzzelIni}
+        live_colors=$(scoot_fuzzel_look_flags "$look_ini") || live_colors=""
+        # shellcheck disable=SC2086
+        if [ -n "$live_colors" ]; then
+          exec ${launcherBin} --layer=overlay $live_colors "$@"
+        else
+          exec ${launcherBin} --layer=overlay${launcherThemeFlags} "$@"
+        fi
+      ''
+  );
 
   # Screenshot scripts: dated files into `~/Pictures` (`$HOME`
   # expands here, inside the script -- a `[binds]` action gets no

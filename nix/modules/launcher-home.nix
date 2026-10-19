@@ -22,6 +22,16 @@ let
   launch = cfg.desktop.launcher;
 
   isLinux = pkgs.stdenv.hostPlatform.isLinux;
+  # The daemon behind `desktop.launcher.daemon` (fuzzel or scootlaunch):
+  # the same pick the keymap's binds run. Shared with the NixOS side's
+  # default so either side alone names the same launcher.
+  launcherPackage =
+    if !isLinux then
+      null
+    else if launch.daemon == "scootlaunch" then
+      (pkgs.scootlaunch or null)
+    else
+      (if pkgs ? fuzzel then pkgs.fuzzel else null);
 in
 {
   options.programs.scoot.desktop.launcher = {
@@ -32,13 +42,14 @@ in
     # instead of installing nothing silently.
     package = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = if isLinux then (if pkgs ? fuzzel then pkgs.fuzzel else null) else null;
-      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel else null";
+      default = launcherPackage;
+      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then (pkgs.scootlaunch or null) for daemon scootlaunch, else pkgs.fuzzel or null) else null";
       description = ''
         The launcher package to run the keymap's binds from (must
         speak fuzzel's flags and `--dmenu`: the bar's future pickers
-        call that contract, which a future scootlaunch keeps). Null
-        installs nothing. Linux-only: null off Linux.
+        call that contract, which scootlaunch keeps for the supported
+        set). Follows `desktop.launcher.daemon` (fuzzel or scootlaunch).
+        Null installs nothing. Linux-only: null off Linux.
       '';
     };
   };

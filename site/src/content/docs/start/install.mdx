@@ -348,6 +348,26 @@ your `PATH`. To build `.deb`, `.rpm` or Arch packages yourself, see
 </TabItem>
 </Tabs>
 
+## Try the scoot launcher
+
+On either Nix setup above, one switch swaps the fuzzel menu for the
+[launcher](../../scootlaunch/) behind the same binds:
+
+```nix title="configuration.nix and home.nix"
+programs.scoot.desktop.launcher.daemon = "scootlaunch";
+```
+
+Rebuild (or switch home-manager) and press `Super+d`: the same apps,
+ranked the same way, drawn by scootlaunch's own panel from the look
+instead of from fuzzel's color flags. The clipboard picker, the
+WiFi/Bluetooth pickers and the screencast chooser follow the same
+switch through its `--dmenu`. The launcher's own file (`font`,
+`width_em`, `rows`) is `programs.scootlaunch.settings` — import
+`scoot.homeModules.scootlaunch` (`scoot.nixosModules.scootlaunch` on
+the system side) to manage it; the switch alone runs the flake's
+build with no file. To go back, drop the line (or set `"fuzzel"`)
+and switch again.
+
 ## Check that it works
 
 <Steps>
