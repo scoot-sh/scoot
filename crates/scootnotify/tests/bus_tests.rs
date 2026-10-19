@@ -18,6 +18,13 @@ use scoot_dbus::conn::{self, Conn, Event};
 use scoot_dbus::proto::{self, Reader, Writer};
 use scoot_dbus::testdaemon::{Daemon, until};
 
+// The idle-pump pin counts through this (Linux-only, like the crate
+// under test): without it the pin would read a vacuous 0 through the
+// default allocator.
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static COUNTING_ALLOC: scootbg_mem::CountingAlloc = scootbg_mem::CountingAlloc;
+
 const BUS_NAME: &str = "org.freedesktop.Notifications";
 const OBJECT: &str = "/org/freedesktop/Notifications";
 const INTERFACE: &str = "org.freedesktop.Notifications";
