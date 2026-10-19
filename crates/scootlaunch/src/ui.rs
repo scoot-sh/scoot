@@ -169,6 +169,21 @@ impl Ui {
             .unwrap_or("")
     }
 
+    /// The shown row's icon key (`Icon=`), or `None` past the end or
+    /// when the entry names none. No allocation: the draw resolves it
+    /// through the theme lookup, never the rank.
+    pub fn row_icon(&self, row: usize) -> Option<&str> {
+        self.displayed
+            .get(row)
+            .and_then(|shown| self.entries.get(shown.entry))
+            .and_then(|entry| entry.icon.as_deref())
+    }
+
+    /// The shown row's name for a tile fallback, or nothing past the end.
+    pub fn row_label(&self, row: usize) -> &str {
+        self.row_text(row)
+    }
+
     /// Feeds one decoded key: `keysym` from the seat, `ctrl` whether
     /// Control is held (the app's own tracking off the modifiers mask),
     /// `text` what the seat decoded (possibly empty, possibly a control

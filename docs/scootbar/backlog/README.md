@@ -169,7 +169,9 @@ Shared foundation ([epic](extract-scootui.md)):
 [`scootlaunch`: the launcher](launcher.md) (epic):
 - [Prototype: the go/no-go gate against fuzzel](resolved/launch-prototype-done.md) (medium): GO, measured 2026-10-18 on the dev VM (no M2 access)
 - [The desktop entry index](resolved/launch-desktop-index-done.md), [matching and ranking](launch-match-rank.md)
-- [The panel](resolved/launch-ui-done.md), [launching](launch-spawn.md), [icons](launch-icons.md)
+- [The panel](resolved/launch-ui-done.md), [launching](launch-spawn.md), [icons](resolved/launch-icons-done.md)
+- [dmenu and run](launch-dmenu.md), [the agent interface](resolved/launch-agent-json-done.md)
+- [The panel](resolved/launch-ui-done.md), [launching](launch-spawn.md), [icons](resolved/launch-icons-done.md)
 - [dmenu and run](launch-dmenu.md), [the agent interface](resolved/launch-agent-json-done.md)
 - [Nix, the look layer and the opt-in switch](launch-nix.md), [packaging and the site](launch-packaging.md), [flip the default](launch-default-flip.md); later, [windows mode](launch-windows-mode.md)
 

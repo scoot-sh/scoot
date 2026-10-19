@@ -21,8 +21,12 @@ scoot-rt.workspace = true
 # `--list`/`--query` agent interface) links only what it uses. The
 # keyboard feature links libxkbcommon (decided in
 # dev/design/shell-apps.md, Decisions needed 3): the one C library past
-# std's the panel accepts, as the CI job's link gate records.
-scootui = { path = "../scootui", default-features = false, features = ["entry", "surfaces", "keyboard"] }
+# std's the panel accepts, as the CI job's link gate records. The `icons`
+# and `png` features are the theme lookup's PNG decode (the same `png`
+# version scootui already carries: no new package in the tree); `svg`
+# adds `resvg` with no default features (no system fonts, no network,
+# no `libc` crate: the CI tree gate stays green).
+scootui = { path = "../scootui", default-features = false, features = ["entry", "surfaces", "keyboard", "icons", "png"] }
 # The session-bus calls behind launching (the systemd scope move and
 # `org.freedesktop.Application` activation): the workspace's hand-rolled
 # client (`std` + `rustix` only, no new package in the tree, no `libc`
@@ -49,11 +53,25 @@ rustix = { version = "1", default-features = false, features = ["std", "fs", "ev
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+# SVG app icons, rasterized only when no PNG of the right size exists:
+# `resvg` with no default features (no system-font loading, no network,
+# no `libc` crate). Default-on: without it an SVG-only entry draws a
+# letter tile. The size row is measured for the waiver ruling.
+resvg = { version = "0.48", default-features = false, optional = true }
+
+[features]
+default = ["svg"]
+# SVG rasterization through `resvg` (see above). Off: SVG names fall
+# back to the letter tile; PNG still resolves.
+svg = ["dep:resvg"]
 
 # Scratch dirs as `TempDir` guards in the index tests: the same version
 # scootbar's tests carry (same lock entry, MIT OR Apache-2.0).
 [dev-dependencies]
 tempfile = "3"
+# PNG fixtures in the icon tests: the same version scootui decodes
+# with (same lock entry), test-only, never in the shipped binary.
+png = "0.18"
 # The headless-compositor harness the panel integration tests drive the
 # real binary through (plus the keyboard/seat pair the unit tests pin):
 # the same crate as the binary's, with test support on.

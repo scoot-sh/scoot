@@ -4,6 +4,7 @@ status: "open"
 area: "scootbar"
 priority: "low"
 blocked: "launch-icons, launch-windows-mode, launch-nix, launch-packaging, launch-default-flip"
+blocked: "launch-agent-json, launch-windows-mode, launch-nix, launch-packaging, launch-default-flip"
 milestone: "M7"
 ---
 
@@ -23,7 +24,9 @@ Children, in order:
 1. [launch-prototype](resolved/launch-prototype-done.md): the go/no-go gate against fuzzel, out of the
    workspace.
 2. [launch-desktop-index](resolved/launch-desktop-index-done.md), then [launch-match-rank](resolved/launch-match-rank-done.md).
-3. [launch-ui](resolved/launch-ui-done.md), then [launch-spawn](launch-spawn.md) and [launch-icons](launch-icons.md).
+3. [launch-ui](resolved/launch-ui-done.md), then [launch-spawn](launch-spawn.md) and [launch-icons](resolved/launch-icons-done.md).
+4. [launch-dmenu](launch-dmenu.md) and [launch-agent-json](resolved/launch-agent-json-done.md).
+3. [launch-ui](resolved/launch-ui-done.md), then [launch-spawn](launch-spawn.md) and [launch-icons](resolved/launch-icons-done.md).
 4. [launch-dmenu](launch-dmenu.md) and [launch-agent-json](resolved/launch-agent-json-done.md).
 5. [launch-nix](launch-nix.md), [launch-packaging](launch-packaging.md),
    [launch-default-flip](launch-default-flip.md); later, [launch-windows-mode](launch-windows-mode.md).

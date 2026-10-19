@@ -46,6 +46,7 @@ allow = [
     "Apache-2.0",
     "ISC",
     "BSD-3-Clause",
+    "BSD-2-Clause",
     "Unicode-3.0",
     "Zlib",
     "Unlicense",

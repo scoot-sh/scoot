@@ -977,12 +977,14 @@ fn launch_fragment_carries_the_shell_contract() {
         "font-size = 13",
         "opacity = 1.0",
         "radius = 14",
+        "theme = \"Adwaita\"",
     ] {
         assert!(frag.contains(line), "missing {line}:\n{frag}");
     }
-    // One `[colors]`, and the scalar keys stay top-level (before it):
-    // keys after a table would land in that table.
+    // One `[colors]`, one `[icons]`, and the scalar keys stay top-level
+    // (before the first table): keys after a table would land in it.
     assert_eq!(frag.matches("[colors]").count(), 1, "colors table:\n{frag}");
+    assert_eq!(frag.matches("[icons]").count(), 1, "icons table:\n{frag}");
     let colors_at = frag.find("[colors]").expect("a colors table");
     for key in ["font =", "font-size =", "opacity =", "radius ="] {
         let at = frag.find(key).expect("a scalar key");
@@ -990,6 +992,7 @@ fn launch_fragment_carries_the_shell_contract() {
     }
     let parsed: toml::Table = toml::from_str(&frag).expect("launch fragment reparses");
     assert_eq!(parsed["colors"].as_table().expect("colors").len(), 13);
+    assert_eq!(parsed["icons"]["theme"].as_str(), Some("Adwaita"));
     assert_eq!(parsed["font"].as_str(), Some("DroidSansM Nerd Font Propo"));
 }
 

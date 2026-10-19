@@ -101,7 +101,8 @@ pub const SCOOTBAR_ALLOWLIST: &[&str] = &[
 ];
 
 /// Dotted keys a look may set in the shell apps' fragments (design section
-/// 9): the thirteen color roles, the face, its size, opacity and radius.
+/// 9): the thirteen color roles, the face, its size, opacity, radius,
+/// and the icon theme name.
 pub const SHELL_APP_ALLOWLIST: &[&str] = &[
     "colors.background",
     "colors.foreground",
@@ -120,6 +121,7 @@ pub const SHELL_APP_ALLOWLIST: &[&str] = &[
     "font-size",
     "opacity",
     "radius",
+    "icons.theme",
 ];
 
 /// Whether `key` (an `[apps.<app>]` dotted key) is allowlisted for `app`.
@@ -340,7 +342,7 @@ pub fn value_kind(app: &str, key: &str) -> Option<ValueKind> {
             | "colors.selection"
             | "colors.selection-text"
             | "colors.match" => Some(ValueKind::Color),
-            "font" => Some(ValueKind::Identifier),
+            "font" | "icons.theme" => Some(ValueKind::Identifier),
             "font-size" => Some(ValueKind::IntRange { min: 1, max: 256 }),
             "opacity" => Some(ValueKind::Opacity),
             "radius" => Some(ValueKind::IntRange { min: 0, max: 64 }),

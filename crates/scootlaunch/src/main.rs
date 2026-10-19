@@ -24,6 +24,7 @@ mod agent;
 mod cli;
 mod config;
 mod dmenu;
+mod icons;
 mod index;
 mod look;
 mod panel;

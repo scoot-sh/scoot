@@ -52,6 +52,9 @@ use scootui::theme::Theme;
 pub const DEFAULT_FONT_SIZE_PX: f32 = 13.0;
 /// The default panel corner radius, in device pixels.
 pub const DEFAULT_RADIUS: u32 = 8;
+/// The default icon theme, when the fragment names none: what the
+/// looks resolve to (`Adwaita`).
+pub const DEFAULT_ICON_THEME: &str = "Adwaita";
 
 /// The panel's resolved look: the widget theme plus the panel's own fill,
 /// border, size, opacity and radius.
@@ -72,6 +75,9 @@ pub struct Look {
     pub radius: u32,
     /// The look's UI family (`font`): validated, informational in v1.
     pub font_family: String,
+    /// The icon theme the panel looks up names in (`[icons] theme`):
+    /// the look's theme, `Adwaita` by default.
+    pub icon_theme: String,
 }
 
 impl Default for Look {
@@ -85,6 +91,7 @@ impl Default for Look {
             opacity: 1.0,
             radius: DEFAULT_RADIUS,
             font_family: String::new(),
+            icon_theme: DEFAULT_ICON_THEME.to_string(),
         }
     }
 }
@@ -152,6 +159,16 @@ pub fn parse(text: &str) -> (Look, Vec<String>) {
             }
             continue;
         }
+        if key == "icons" {
+            let Some(icons) = value.as_table() else {
+                notes.push(String::from("`icons` is not a table: skipped"));
+                continue;
+            };
+            for (name, icon) in icons {
+                apply(look_icons(&mut look, name), "icons", name, icon, &mut notes);
+            }
+            continue;
+        }
         apply(look_dotless(&mut look, key), "", key, value, &mut notes);
     }
     (look, notes)
@@ -192,6 +209,7 @@ enum Slot<'a> {
     Opacity(&'a mut f32),
     Radius(&'a mut u32),
     FontFamily(&'a mut String),
+    IconTheme(&'a mut String),
     /// An allowlisted key the panel draws nothing with (`border`,
     /// `accent-fg`): validated above, then dropped.
     Ignore,
@@ -228,6 +246,10 @@ impl Slot<'_> {
                 Some(family) => *slot = family.to_owned(),
                 None => notes.push(format!("`{dotted}` is not a font name: default applies")),
             },
+            Slot::IconTheme(slot) => match value.as_str() {
+                Some(theme) if is_icon_theme(theme) => *slot = theme.to_owned(),
+                _ => notes.push(format!("`{dotted}` is not an icon theme: default applies")),
+            },
         }
     }
 }
@@ -260,6 +282,26 @@ fn look_dotless<'a>(look: &'a mut Look, key: &str) -> Option<Slot<'a>> {
         "radius" => Some(Slot::Radius(&mut look.radius)),
         _ => None,
     }
+}
+
+/// The slot for an `[icons]` key: only `theme` today.
+fn look_icons<'a>(look: &'a mut Look, name: &str) -> Option<Slot<'a>> {
+    match name {
+        "theme" => Some(Slot::IconTheme(&mut look.icon_theme)),
+        _ => None,
+    }
+}
+
+/// Whether `theme` is a usable icon theme name: 1 to 64 ASCII letters,
+/// digits and `._+-`, never starting with a dot (no traversal, no
+/// absolute path).
+fn is_icon_theme(theme: &str) -> bool {
+    if theme.is_empty() || theme.len() > 64 || theme.starts_with('.') {
+        return false;
+    }
+    theme.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || byte == b'.' || byte == b'_' || byte == b'+' || byte == b'-'
+    })
 }
 
 #[cfg(test)]

@@ -7,6 +7,7 @@
 #![allow(dead_code, unused_imports)]
 
 use std::fs;
+use std::io::Write as _;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -26,6 +27,54 @@ pub fn launch_bin() -> PathBuf {
 #[allow(dead_code)]
 pub fn desktop(name: &str, exec: &str) -> String {
     format!("[Desktop Entry]\nType=Application\nName={name}\nExec={exec}\n")
+}
+
+/// A desktop entry with an `Icon=` key: the panel resolves it through
+/// the icon theme, falling back to a letter tile when nothing matches.
+#[allow(dead_code)]
+pub fn desktop_with_icon(name: &str, exec: &str, icon: &str) -> String {
+    format!("[Desktop Entry]\nType=Application\nName={name}\nExec={exec}\nIcon={icon}\n")
+}
+
+/// A fixture icon theme under `data_home/icons/FixtureTheme`: a solid
+/// red `alpha.png`, a solid blue `beta.svg`, and no `gamma`, so two rows
+/// draw image icons (one per decoder) and one the letter tile. Answers
+/// the theme name for the look layer's `[icons] theme`.
+///
+/// Run the panel tests with `SCOOTLAUNCH_SHOTS` set to regenerate the
+/// docs screenshots from this same fixture (see `icons_docs_one` in
+/// `panel.rs`); the bytes below are the whole capture setup, so the
+/// committed PNGs are reproducible from this helper alone.
+#[allow(dead_code)]
+pub fn fixture_icon_theme(data_home: &std::path::Path) -> String {
+    let theme = data_home.join("icons").join("FixtureTheme");
+    let dir = theme.join("48x48").join("apps");
+    fs::create_dir_all(&dir).unwrap();
+    // Solid opaque red, 48x48: the panel blends it over the row, so an
+    // image row reads back exact red pixels.
+    let mut buf = Vec::new();
+    let mut encoder = png::Encoder::new(&mut buf, 48, 48);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    let mut red = Vec::with_capacity(48 * 48 * 4);
+    for _ in 0..48 * 48 {
+        red.extend_from_slice(&[255, 0, 0, 255]);
+    }
+    writer.write_image_data(&red).unwrap();
+    drop(writer);
+    fs::write(dir.join("alpha.png"), &buf).unwrap();
+    fs::write(
+        dir.join("beta.svg"),
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"48\" height=\"48\"><rect width=\"48\" height=\"48\" fill=\"#0000ff\"/></svg>",
+    )
+    .unwrap();
+    fs::write(
+        theme.join("index.theme"),
+        "[Icon Theme]\nName=FixtureTheme\nDirectories=48x48/apps\n\n[48x48/apps]\nSize=48\nType=Fixed\n",
+    )
+    .unwrap();
+    "FixtureTheme".to_string()
 }
 
 /// A session with a fixture applications tree: `apps` holds
@@ -120,6 +169,9 @@ impl Panel {
 
     /// Starts the panel on an existing session: the look layer (or any
     /// other sandbox file) lands before the open, so the panel reads it.
+    /// `SCOOTLAUNCH_TEST_FONT` overrides the typeface (a real font for
+    /// the docs screenshots); unset, the hermetic test font is used, so
+    /// CI never depends on machine fonts.
     pub fn start_on(
         session: Session,
         data_home: PathBuf,
@@ -129,6 +181,10 @@ impl Panel {
         let log = session.scratch.0.join("panel.log");
         let file = fs::File::create(&log).unwrap();
         let empty_dirs = session.scratch.0.join("empty-dirs");
+        let font = std::env::var_os("SCOOTLAUNCH_TEST_FONT")
+            .map(PathBuf::from)
+            .filter(|path| path.is_file())
+            .unwrap_or_else(|| session.font());
         let mut command = Command::new(launch_bin());
         command
             .env("XDG_RUNTIME_DIR", &session.scratch.0)
@@ -137,7 +193,7 @@ impl Panel {
             .env_remove("WAYLAND_DEBUG")
             .env("WAYLAND_DISPLAY", &session.wayland_display)
             .arg("--font")
-            .arg(session.font())
+            .arg(font)
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
