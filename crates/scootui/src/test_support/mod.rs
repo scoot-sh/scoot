@@ -199,6 +199,20 @@ impl Session {
         Self::scoot_with_env(app, tag, outputs, config, &[])
     }
 
+    /// [`Session::scoot`] with the skip's require variable named by the
+    /// caller (`SCOOTLAUNCH_REQUIRE_SCOOT` for the launcher's tests):
+    /// the shared harness's default names the bar's (`scoot.rs` predates
+    /// the other apps; renaming it would touch every bar test).
+    pub fn scoot_requiring(
+        app: &Path,
+        tag: &str,
+        outputs: u32,
+        config: &str,
+        require: &str,
+    ) -> Option<Self> {
+        Self::scoot_inner(app, tag, outputs, config, &[], require)
+    }
+
     /// [`Session::scoot`] with extra environment for the compositor: a
     /// keyboard test sets `XKB_DEFAULT_LAYOUT` (and friends) per session,
     /// a greeter test its session variables. Applied after the sandbox,
@@ -211,9 +225,20 @@ impl Session {
         config: &str,
         env: &[(&str, &str)],
     ) -> Option<Self> {
+        Self::scoot_inner(app, tag, outputs, config, env, "SCOOTBAR_REQUIRE_SCOOT")
+    }
+
+    fn scoot_inner(
+        app: &Path,
+        tag: &str,
+        outputs: u32,
+        config: &str,
+        env: &[(&str, &str)],
+        require: &str,
+    ) -> Option<Self> {
         let Some(scoot) = scoot_bin(app) else {
             skip(
-                "SCOOTBAR_REQUIRE_SCOOT",
+                require,
                 &format!(
                     "there is no scoot binary beside {} (build `-p scoot`, or set \
                      SCOOTBAR_TEST_SCOOT)",
