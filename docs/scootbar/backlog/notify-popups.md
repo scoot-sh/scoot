@@ -53,3 +53,49 @@ Part of this ticket's work, not a follow-up: update `site/src/content/docs/scoot
 ## Not in this ticket
 
 The control socket, DND, rules, history, the bar.
+
+## Resolution
+
+Shipped in the `feat(scootnotify)` popups PR: the card stack on one
+on-demand `overlay` layer surface, pointer actions with the token
+first, frame-callback presentation, hover and input-idle pauses, null
+or named outputs with hotplug, `notify.toml` placement/timeout keys,
+and the `notify.toml` look layer with the re-theme path (`msg
+reload` itself is `notify-control`).
+
+What landed:
+
+- `view/layout` (newest on top, `max_visible` + "+N more" pill, wrap
+  with ellipsis, the cards'-union input region) and `view/render`
+  (urgency ring, fills, text, icons, progress, buttons, pill), with a
+  mutation-proved zero-allocation repaint pin under the binary's own
+  counting allocator.
+- `popup`: the on-demand surface (created on the first card,
+  destroyed with unmapped buffers on the last), pointer hits (body,
+  button, right, middle), `ActivationToken` minted from the click's
+  serial and emitted before `ActionInvoked`, clocks starting on the
+  frame callback (arrivals while locked or output-less wait stopped),
+  hover pause per card and `ext-idle-notify` v2 pause for all, named
+  output with compositor-choice fallback, and hide-on-close so the
+  stack re-shows.
+- `notify.toml` gains placement and style keys (all optional);
+  `scoot-look render_notify` plus the apply / build / cache / sync
+  paths (`RENDER_VERSION` 12): every render carries `notify.toml`
+  with the thirteen shell-app roles, the UI font at its popup size,
+  the popups opacity and the look radius.
+- Site `scootnotify/index.md` rewritten for popups, new
+  `scootnotify/configure.md` (task-first, type/default/example per
+  option, symptom boxes), sidebar entry; snippet gate green.
+- CI: `scootui` and `scoot-look` fan out to the `scootnotify` job,
+  which builds scoot first and runs the headless popup suite with
+  `SCOOTNOTIFY_REQUIRE_SCOOT/SWAY/DBUS_DAEMON`.
+
+Evidence (dev VM, aarch64): the headless suite (pixels per state,
+token-first click, locked arrival held, hotplug move, empty
+surface/buffers, no-wakeup idle) green on both runners; the three
+mutation proofs red-then-green (repaint allocs 3 vs 0, token order
+`["invoke","token","closed"]`, locked expiry unseen); ratchet rows
+in the PR body against mako. Bugs found by testing, fixed: pixels
+before the initial configure ack (compositor kills the client),
+surface pinned to the first card's size, a Release-driven redraw
+loop, a close that never re-showed.
