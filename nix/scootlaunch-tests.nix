@@ -258,6 +258,7 @@ let
   menuSources = [
     ./modules/keys-home.nix
     ./modules/capture-home.nix
+    ./modules/nixos.nix
     ./modules/apps-network-pick.sh
     ./modules/apps-bluetooth-pick.sh
   ];

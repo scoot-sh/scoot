@@ -6768,9 +6768,54 @@ let
         true
       )
       (
+        assert
+          osOverlaidScoot.config.programs.scoot.desktop.clipboard.menuPackage.drvPath
+          == osOverlaidScoot.config.programs.scoot.desktop.launcher.package.drvPath;
+        true
+      )
+      (
+        assert
+          osOverlaidScoot.config.programs.scoot.desktop.apps.network.menuPackage.drvPath
+          == osOverlaidScoot.config.programs.scoot.desktop.launcher.package.drvPath;
+        true
+      )
+      (
+        assert
+          osOverlaidScoot.config.programs.scoot.desktop.apps.bluetooth.menuPackage.drvPath
+          == osOverlaidScoot.config.programs.scoot.desktop.launcher.package.drvPath;
+        true
+      )
+      (
+        assert
+          osOverlaidScoot.config.programs.scoot.desktop.capture.menuPackage.drvPath
+          == osOverlaidScoot.config.programs.scoot.desktop.launcher.package.drvPath;
+        true
+      )
+      (
         assert lib.any (
           p: p.drvPath == built.scootlaunch.drvPath
         ) osOverlaidScoot.config.environment.systemPackages;
+        true
+      )
+      # Without the opt-in every OS-side menu stays fuzzel (the default
+      # daemon), on the same derivation both sides install.
+      (
+        assert
+          osOverlaid.config.programs.scoot.desktop.clipboard.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+        true
+      )
+      (
+        assert
+          osOverlaid.config.programs.scoot.desktop.apps.network.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+        true
+      )
+      (
+        assert
+          osOverlaid.config.programs.scoot.desktop.apps.bluetooth.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+        true
+      )
+      (
+        assert osOverlaid.config.programs.scoot.desktop.capture.menuPackage.drvPath == pkgs.fuzzel.drvPath;
         true
       )
       # scootbar's Cargo features are `.override` arguments that reach the
