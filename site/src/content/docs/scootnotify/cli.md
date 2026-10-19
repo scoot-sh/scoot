@@ -16,10 +16,13 @@ scootnotify daemon --check                  # validate the config, exit 0 or 1
 scootnotify daemon --config PATH            # read PATH instead of the default
 scootnotify daemon --font PATH              # draw with PATH instead of the first well-known font
 scootnotify msg list [--json]               # live notifications: lines, or JSON
+scootnotify msg history [--json]            # the history ring: lines, or JSON
+scootnotify msg dnd [on|off|toggle|status]  # read or steer do-not-disturb
+scootnotify msg restore                     # re-show the newest history entry
 scootnotify msg dismiss [ID | --all]        # close cards, as a click would
 scootnotify msg invoke ID [ACTION]          # run a card's action (default: "default")
 scootnotify msg reload [--look]             # re-read the config and the look layer
-scootnotify msg subscribe [notify] [close] [invoke]  # print events until closed
+scootnotify msg subscribe [notify] [close] [invoke] [dnd]  # print events until closed
 scootnotify msg wait [--app APP] [--summary-contains TEXT] [--timeout SECS]
 scootnotify --help                          # print help
 scootnotify --version                       # print the version
@@ -69,20 +72,33 @@ scootnotify msg list
 # 3 [normal] Firefox: Download complete
 scootnotify msg list --json
 # {"type":"notifications","notifications":[{...}]}
+scootnotify msg history
+# * [normal] Mail: New mail
+scootnotify msg history --json
+# {"type":"history","history":[{...}]}
+scootnotify msg dnd status
+# {"type":"dnd","dnd":"off"}
+scootnotify msg dnd on
+scootnotify msg dnd toggle
+scootnotify msg restore
 scootnotify msg dismiss 3
 scootnotify msg dismiss --all
 scootnotify msg invoke 3            # the "default" action
 scootnotify msg invoke 3 open
 scootnotify msg reload              # the file and the look layer
 scootnotify msg reload --look       # only the look layer
-scootnotify msg subscribe notify close
+scootnotify msg subscribe notify close dnd
 scootnotify msg version
-# {"type":"version","protocol":1,"version":"0.3.1"}
+# {"type":"version","protocol":2,"version":"0.3.1"}
 ```
 
 Unknown ids and unknown actions are loud errors, never silent
 successes. `msg dismiss` takes an id or `--all`, never both; over the
-raw socket a `dismiss` carrying both dismisses that id.
+raw socket a `dismiss` carrying both dismisses that id. `msg dnd` with
+no argument reads the mode; `msg restore` re-shows the newest history
+entry as a new card even under DND, and refuses loudly on an empty
+ring. `msg history` marks unseen entries with a `*` in human lines;
+`--json` is the stable view.
 
 ```sh
 scootnotify msg dismiss 999
@@ -126,7 +142,7 @@ per line carrying the protocol they speak:
 printf '{"protocol":1,"type":"list"}\n' | socat - UNIX-CONNECT:"$XDG_RUNTIME_DIR/scootnotify-$WAYLAND_DISPLAY.sock"
 ```
 
-A request whose `protocol` is not `1` is refused with a mismatch
+A request whose `protocol` is not `2` is refused with a mismatch
 error, so a client and a daemon from different builds disagree loudly
 rather than misread each other. Compatibility rides on that number,
 never on the crate version.
@@ -170,10 +186,36 @@ Events on a subscribed connection:
 {"type": "notify", "notification": {"id": 3, "...": "..."}}
 {"type": "close", "id": 3, "reason": "dismissed"}
 {"type": "invoke", "id": 3, "action": "open"}
+{"type": "dnd", "dnd": "on"}
 ```
 
 The close reasons are `expired`, `dismissed`, `closed`
-(`CloseNotification`) and `evicted` (the live cap).
+(`CloseNotification`) and `evicted` (the live cap). The `dnd` event
+carries the mode after the change (`on` or `off`).
+
+## History entries
+
+`msg history --json` carries this object per ring entry, oldest
+first:
+
+```json
+{
+  "app_name": "Mail",
+  "desktop_entry": "",
+  "summary": "New mail",
+  "body": "plain text, markup stripped",
+  "urgency": "normal",
+  "category": "email.arrived",
+  "icon": {"kind": "name", "value": "Mail"},
+  "created": 1720000000000,
+  "seen": false
+}
+```
+
+`seen` says whether the card was ever on screen; the unread count is
+the entries with `seen: false`. There is no live id: the old one was
+invalidated by its `NotificationClosed`. New keys may be added; none
+is removed or changes meaning within a protocol version.
 
 ## Troubleshooting
 
@@ -203,6 +245,18 @@ The running config and cards stand; the reply names the bad key.
 Validate with `daemon --check --config PATH`, fix, and reload again.
 A half-edited file never half-applies: with `--look` it is not even
 read.
+
+> **Symptom:** turning DND off shows nothing.
+>
+> That is the design: held cards stay in history, and only `restore`
+> brings one back on screen. The unread count is the entries never
+> shown.
+
+> **Symptom:** `msg restore` says the history is empty.
+>
+> The ring holds closed and held cards only; `transient` cards and
+> cards a rule keeps out with `history = false` never enter. A restart
+> empties the ring: it is in-memory by design.
 
 > **Symptom:** `msg subscribe` ends with no error.
 

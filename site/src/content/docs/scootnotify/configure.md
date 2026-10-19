@@ -29,6 +29,8 @@ timeout_max_ms = 3600000
 max_live = 128
 rate_per_sec = 20
 rate_burst = 40
+history_max = 64
+dnd_allows_critical = true
 ```
 
 ## Placement
@@ -105,6 +107,122 @@ through a manual lock.
   Defaults: `20`, `40`. Example: `rate_per_sec = 10`. Reload:
   `msg reload`. Past the bucket a `Notify` still gets its id, but the card
   goes unshown.
+- `history_max`: history ring entries kept, oldest first. Type: integer,
+  0 to 256 (0 keeps none). Default: `64`. Example: `history_max = 100`.
+  Reload: `msg reload` (truncates to the new cap, newest kept).
+- `dnd_allows_critical`: critical cards show while DND holds the rest.
+  Type: boolean. Default: `true`. Example:
+  `dnd_allows_critical = false`. Reload: `msg reload`.
+
+## History
+
+Every closed card lands in the in-memory ring (newest last, at most
+`history_max`), and so does every card that skips the screen — held by
+DND, hidden by a rule, or past the rate bucket. `transient`
+notifications never enter. Entries keep app, summary, body, urgency,
+category, time and an icon name or path — never pixels. The ring
+survives a reload, never a restart. Read it with
+`scootnotify msg history`, bring the newest back with
+`scootnotify msg restore` (a new card with a new id, even under DND).
+
+> **Symptom:** the unread count never drops.
+> Turning DND off shows nothing retroactively. Each `restore` marks one
+> entry seen; the count is the entries never shown on screen.
+
+## Do not disturb
+
+While DND is on, new cards skip the screen and go straight to history,
+except critical ones (while `dnd_allows_critical` holds) and cards a
+rule lets through (`dnd_bypass`). A held card's expiry never starts, so
+it stays unread until seen. The mode survives a reload, never a
+restart.
+
+```sh
+scootnotify msg dnd on       # hold everything but criticals
+scootnotify msg dnd toggle   # the bar's click runs this
+scootnotify msg dnd status   # or with no argument: on or off
+```
+
+## Rules
+
+`[[rule]]` tables match cards and steer them, in file order. A rule
+with no match key matches everything. Every matching rule applies;
+for the scalar actions the later rule wins; every matching `exec`
+runs, at most 4 children at once.
+
+```toml
+[[rule]]
+app_name = "Mail"
+category = "email."
+set_urgency = "normal"
+timeout_ms = 8000
+
+[[rule]]
+app_name = "Volume"
+hide = true
+
+[[rule]]
+app_name = "Thunderbird"
+exec = ["play", "/usr/share/sounds/new-mail.wav"]
+```
+
+Match keys (all optional, all must hold):
+
+- `app_name`: exact app name. Type: string, 1 to 128 bytes.
+  Example: `app_name = "Mail"`. Reload: `msg reload`.
+- `desktop_entry`: exact desktop entry. Type: string, 1 to 128 bytes.
+  Example: `desktop_entry = "firefox"`. Reload: `msg reload`.
+- `category`: exact category, or a `class.` prefix when it ends with a
+  dot. Type: string, 1 to 128 bytes. Example: `category = "device."`
+  matches `device.added`. Reload: `msg reload`.
+- `urgency`: `low`, `normal` or `critical`. Example:
+  `urgency = "critical"`. Reload: `msg reload`.
+- `summary_contains`: a plain substring of the summary, never a regex.
+  Type: string, 1 to 128 bytes. Example:
+  `summary_contains = "Download complete"`. Reload: `msg reload`.
+
+Action keys:
+
+- `set_urgency`: the card's urgency, over the hint's (the design's
+  `urgency` action, renamed: one table cannot carry the match
+  `urgency` and the action under the same name). Type: `low`, `normal`
+  or `critical`. Example: `set_urgency = "low"`. Reload: `msg reload`.
+- `timeout_ms`: expiry over the resolved one. Type: integer, 0 to
+  86400000 (0 never expires). Example: `timeout_ms = 30000`. Reload:
+  `msg reload`.
+- `hide`: straight to history, never on screen. Type: boolean, default
+  `false`. Example: `hide = true`. Reload: `msg reload`.
+- `history`: `false` keeps the card out of history, shown or not. Type:
+  boolean, default `true`. Example: `history = false`. Reload:
+  `msg reload`.
+- `output`: pins this card's output, over the file's. Type: string (1
+  to 256 printable bytes). Example: `output = "HDMI-1"`. Reload:
+  `msg reload`.
+- `dnd_bypass`: shows through DND, like a critical card. Type: boolean,
+  default `false`. Example: `dnd_bypass = true`. Reload:
+  `msg reload`.
+- `exec`: an argv run on arrival, never through a shell, with the
+  card's fields in `SCOOTNOTIFY_APP`, `SCOOTNOTIFY_SUMMARY`,
+  `SCOOTNOTIFY_BODY`, `SCOOTNOTIFY_URGENCY`, `SCOOTNOTIFY_CATEGORY`,
+  `SCOOTNOTIFY_DESKTOP_ENTRY` and `SCOOTNOTIFY_ID`. At most 16 words,
+  each 1 to 4096 bytes. A rule `exec` never fires for a `replaces_id`
+  update. At most 4 run at once; past that the spawn refuses with a log
+  line. Example: `exec = ["play", "ding.wav"]`. Reload: `msg reload`.
+  A sound hook is the expected use: the daemon plays no sound itself.
+
+At most 32 `[[rule]]` tables; a 33rd refuses the file, like any
+out-of-range value.
+
+> **Symptom:** a rule never fires.
+> Match keys are exact (except `category` past a trailing dot, and
+> `summary_contains`). Check `msg list --json` for the card's real
+> `app_name` and `category`: senders often name themselves differently
+> than the app you see.
+
+> **Symptom:** the sound never plays.
+> Check the daemon log for `cannot run`: the program must exist and
+> run (a shell line needs `sh -c`, quoted by you). Past 4 running
+> children the spawn refuses until one exits.
 
 Every key above applies live: edit the file, then `scootnotify msg
 reload`. A refused file keeps the running config and cards, and says
