@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 use scoot_look::{
     Origin, RenderInputs, check_contrast, parse_kv_config, render_bar, render_fuzzel, render_greet,
-    render_launch, render_scoot, render_swaylock, resolve,
+    render_launch, render_notify, render_scoot, render_swaylock, resolve,
 };
 
 /// Every directory under `looks/` with a `look.toml`.
@@ -316,6 +316,22 @@ fn every_shipped_look_validates_and_renders() {
             launch.get("font").and_then(|font| font.as_str()),
             Some(look.fonts.ui.as_str()),
             "{name}: the panel reads the UI font"
+        );
+        // The notification fragment renders for every shipped look too:
+        // the same thirteen roles, font, opacity and radius. scootnotify
+        // reads it at start and on re-theme.
+        let notify = render_notify(&look)
+            .unwrap_or_else(|e| panic!("{name}: notify.toml does not render: {e}"));
+        let notify: toml::Value =
+            toml::from_str(&notify).unwrap_or_else(|e| panic!("{name}: notify.toml reparse: {e}"));
+        let colors = notify
+            .get("colors")
+            .and_then(|colors| colors.as_table())
+            .unwrap_or_else(|| panic!("{name}: notify.toml has no [colors]"));
+        assert_eq!(
+            colors.len(),
+            13,
+            "{name}: notify.toml carries the thirteen shell-app roles"
         );
     }
 }

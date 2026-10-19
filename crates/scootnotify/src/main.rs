@@ -51,7 +51,7 @@ fn run(argv: &[String]) -> i32 {
     if args.check {
         return cmd_check(args.config.as_deref());
     }
-    daemon::serve(args.config.as_deref())
+    daemon::serve(args.config.as_deref(), args.font.as_deref())
 }
 
 /// `daemon --check`: validates the config file and exits, without a bus

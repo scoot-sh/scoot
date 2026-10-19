@@ -11,7 +11,10 @@ fn an_empty_file_is_the_defaults() {
 fn every_key_sets() {
     let config = parse(
         b"timeout_low_ms = 1000\ntimeout_normal_ms = 2000\ntimeout_max_ms = 3000\n\
-          max_live = 7\nrate_per_sec = 3\nrate_burst = 9\n",
+          max_live = 7\nrate_per_sec = 3\nrate_burst = 9\n\
+          width_px = 400\nmax_visible = 3\nmargin_px = 8\nanchor = \"bottom-left\"\n\
+          output = \"HDMI-1\"\nbody_lines = 3\nborder_px = 1\nradius = 4\n\
+          pause_when_idle_secs = 30\n",
     )
     .unwrap();
     assert_eq!(config.timeout_low_ms, 1000);
@@ -20,6 +23,15 @@ fn every_key_sets() {
     assert_eq!(config.max_live, 7);
     assert_eq!(config.rate_per_sec, 3);
     assert_eq!(config.rate_burst, 9);
+    assert_eq!(config.width_px, 400);
+    assert_eq!(config.max_visible, 3);
+    assert_eq!(config.margin_px, 8);
+    assert_eq!(config.anchor, super::Anchor::BottomLeft);
+    assert_eq!(config.output.as_deref(), Some("HDMI-1"));
+    assert_eq!(config.body_lines, 3);
+    assert_eq!(config.border_px, 1);
+    assert_eq!(config.radius, 4);
+    assert_eq!(config.pause_when_idle_secs, 30);
 }
 
 #[test]
@@ -60,9 +72,33 @@ fn out_of_range_numbers_name_their_key() {
             "timeout_low_ms = 1\ntimeout_normal_ms = 11\ntimeout_max_ms = 10\n",
             "timeout_normal_ms",
         ),
+        ("width_px = 9\n", "width_px"),
+        ("width_px = 1025\n", "width_px"),
+        ("max_visible = 0\n", "max_visible"),
+        ("max_visible = 17\n", "max_visible"),
+        ("margin_px = 129\n", "margin_px"),
+        ("anchor = \"middle\"\n", "anchor"),
+        ("output = \"\"\n", "output"),
+        ("body_lines = 0\n", "body_lines"),
+        ("body_lines = 17\n", "body_lines"),
+        ("border_px = 9\n", "border_px"),
+        ("radius = 65\n", "radius"),
+        ("pause_when_idle_secs = 3601\n", "pause_when_idle_secs"),
     ] {
         let error = parse(text.as_bytes()).unwrap_err();
         assert!(error.contains(key), "{text}: {error}");
+    }
+}
+
+/// The popup rows' boundaries hold: zero border, zero idle pause (both
+/// meaningful off states), and every anchor spelling.
+#[test]
+fn the_popup_boundary_rows_hold() {
+    assert!(parse(b"border_px = 0\n").is_ok());
+    assert!(parse(b"pause_when_idle_secs = 0\n").is_ok());
+    for anchor in ["top-left", "top-right", "bottom-left", "bottom-right"] {
+        let text = format!("anchor = \"{anchor}\"\n");
+        assert!(parse(text.as_bytes()).is_ok(), "{anchor}");
     }
 }
 

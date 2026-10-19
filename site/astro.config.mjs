@@ -203,6 +203,7 @@ export default defineConfig({
           label: 'scootnotify',
           items: [
             { label: 'Overview', slug: 'scootnotify' },
+            { label: 'Configure', slug: 'scootnotify/configure' },
             { label: 'CLI reference', slug: 'scootnotify/cli' },
           ],
         },

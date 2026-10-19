@@ -281,6 +281,12 @@ pub struct Server {
     /// Unique sender to its last `app_name`: `CloseNotification` carries
     /// only an id, so the same-app half of the policy reads here.
     apps: HashMap<String, String>,
+    /// Whether arrival presents at once (headless: no surface to hide
+    /// behind, so arrival is display). The popup daemon clears this: a
+    /// card's clock starts on the frame callback for the commit that
+    /// first contains it, and a card that arrives while locked or
+    /// output-less waits with its clock stopped.
+    present_on_arrival: bool,
 }
 
 impl Server {
@@ -289,7 +295,25 @@ impl Server {
         Self {
             store: Store::new(config, ids),
             apps: HashMap::new(),
+            present_on_arrival: true,
         }
+    }
+
+    /// Stops presenting on arrival: the popup daemon calls this when it
+    /// owns a surface, and presents through [`Store::presented`] on the
+    /// frame callback instead.
+    pub fn set_present_on_arrival(&mut self, present: bool) {
+        self.present_on_arrival = present;
+    }
+
+    /// The store, for the popup daemon's layout, hover and idle rules.
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
+    /// The store, mutably: presenting, dismissing, invoking, pausing.
+    pub fn store_mut(&mut self) -> &mut Store {
+        &mut self.store
     }
 
     /// Routes one method call: replies, and queues the signals its
@@ -379,8 +403,11 @@ impl Server {
                 self.remember_app(sender, &incoming.app_name);
                 let (arrival, evicted) = self.store.notify(incoming, Instant::now(), now_ms);
                 // Headless arrival is display: the clock starts at once.
-                // The popups ticket moves this to the frame callback.
-                if let crate::model::store::Arrival::Shown { id, .. } = arrival {
+                // The popup daemon clears `present_on_arrival` and moves
+                // this to the frame callback instead.
+                if self.present_on_arrival
+                    && let crate::model::store::Arrival::Shown { id, .. } = arrival
+                {
                     self.store.presented(id, Instant::now(), now_ms);
                 }
                 for closure in evicted
@@ -488,6 +515,51 @@ impl Server {
         }
     }
 
+    /// Invokes `action` on `id` for a pointer click: the token (if any)
+    /// first, then `ActionInvoked`, then the close the invoke caused
+    /// (none for `resident` cards). Unknown ids and unknown keys invoke
+    /// nothing. Returns whether anything went out.
+    pub fn invoke_and_signal(
+        &mut self,
+        conn: &mut Conn,
+        id: u32,
+        action: &str,
+        token: Option<&str>,
+    ) -> bool {
+        let Some(invocation) = self.store.invoke(id, action) else {
+            return false;
+        };
+        self.signal_action(conn, invocation.id, &invocation.action, token);
+        if let Some(closure) = invocation.closed {
+            self.signal_closed(conn, closure);
+        }
+        true
+    }
+
+    /// Dismisses `id` for a right click or a body click without a
+    /// `default` action (reason 2). Returns whether anything went out.
+    pub fn dismiss_and_signal(&mut self, conn: &mut Conn, id: u32) -> bool {
+        let Some(closure) = self.store.dismiss(id) else {
+            return false;
+        };
+        self.signal_closed(conn, closure);
+        true
+    }
+
+    /// Dismisses everything on screen for a middle click (reason 2 each).
+    /// Returns how many went out.
+    pub fn dismiss_all_and_signal(&mut self, conn: &mut Conn) -> usize {
+        let ids = self.store.live_ids();
+        let mut out = 0;
+        for id in ids {
+            if let Some(closure) = self.store.dismiss(id) {
+                self.signal_closed(conn, closure);
+                out += 1;
+            }
+        }
+        out
+    }
+
     /// The earliest running deadline: the timerfd arms to this.
     pub fn earliest_deadline(&self) -> Option<Instant> {
         self.store.earliest_deadline()
@@ -510,6 +582,28 @@ impl Server {
         body.u32(closure.reason.code());
         if let Some(arg) = body.take_body() {
             conn.signal(OBJECT_PATH, INTERFACE, "NotificationClosed", "uu", &arg);
+        }
+    }
+
+    /// Queues a pointer invocation's signals: the `ActivationToken`
+    /// first, then `ActionInvoked`, as §9.2.3 orders them ("can be
+    /// emitted before a ActionInvoked signal"). Without a minted token
+    /// (no activation global, the compositor never answered) the invoke
+    /// still goes out: the token is a may, the action is the click.
+    pub fn signal_action(&self, conn: &mut Conn, id: u32, action: &str, token: Option<&str>) {
+        if let Some(token) = token {
+            let mut body = Writer::new();
+            body.u32(id);
+            body.str(token);
+            if let Some(arg) = body.take_body() {
+                conn.signal(OBJECT_PATH, INTERFACE, "ActivationToken", "us", &arg);
+            }
+        }
+        let mut body = Writer::new();
+        body.u32(id);
+        body.str(action);
+        if let Some(arg) = body.take_body() {
+            conn.signal(OBJECT_PATH, INTERFACE, "ActionInvoked", "us", &arg);
         }
     }
 }

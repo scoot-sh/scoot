@@ -1044,3 +1044,47 @@ fn launch_overrides_merge() {
     )]);
     assert!(render_launch(&look).is_err());
 }
+
+#[test]
+fn notify_fragment_carries_the_shell_contract() {
+    // The notification fragment holds the same thirteen color roles,
+    // the UI font at its popup size, translucent at the popups opacity,
+    // with the look's radius: whatever the launcher draws, the stack
+    // draws, key for key.
+    let launch = render_launch(&moonrise()).expect("renders");
+    let frag = render_notify(&moonrise()).expect("renders");
+    for line in launch.lines() {
+        assert!(
+            frag.contains(line),
+            "notify misses launch line {line:?}:\n{frag}"
+        );
+    }
+    let parsed: toml::Table = toml::from_str(&frag).expect("notify fragment reparses");
+    assert_eq!(parsed["colors"].as_table().expect("colors").len(), 13);
+    assert_eq!(parsed["icons"]["theme"].as_str(), Some("Adwaita"));
+}
+
+#[test]
+fn notify_overrides_merge_under_its_own_app() {
+    // `[apps.scootnotify]` roles replace the derived ones; a
+    // `[apps.scootlaunch]` key does not leak into the notify fragment.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[apps.scootnotify]\n\"colors.accent\" = \"#000000\"\n\"radius\" = 3\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let frag = render_notify(&look).expect("renders");
+    let parsed: toml::Table = toml::from_str(&frag).expect("notify fragment reparses");
+    assert_eq!(parsed["colors"]["accent"].as_str(), Some("#000000"));
+    assert_eq!(parsed["radius"].as_integer(), Some(3));
+    // A scoot key through the notify renderer is refused, not misplaced.
+    let mut look = moonrise();
+    look.apps = BTreeMap::from([(
+        "scootnotify".to_string(),
+        BTreeMap::from([("binds.foo".to_string(), toml::Value::String("x".into()))]),
+    )]);
+    assert!(render_notify(&look).is_err());
+}

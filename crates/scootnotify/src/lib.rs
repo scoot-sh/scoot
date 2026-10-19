@@ -16,12 +16,24 @@
 // Re-typing every reader would be a redesign, not this ticket.
 #![allow(clippy::result_unit_err)]
 
+// Tests pinning allocations count heap allocations through this
+// (scootbg_mem::count), forwarding everything else to the system
+// allocator. Test-only, Linux-only like the crate it comes from: the
+// shipped library uses the default. Without this the pins read a
+// vacuous 0 (the allocator they count through would be nobody's).
+#[cfg(all(test, target_os = "linux"))]
+#[global_allocator]
+static COUNTING_ALLOC: scootbg_mem::CountingAlloc = scootbg_mem::CountingAlloc;
+
 pub mod bus;
 pub mod cli;
 pub mod config;
 pub mod daemon;
+pub mod look;
 pub mod markup;
 pub mod model;
+pub mod popup;
+pub mod view;
 
 /// Replays a committed fuzz corpus (`fuzz/corpus/<kind>` plus
 /// `fuzz/regressions/<kind>`) through `check` on stable: every seed

@@ -354,16 +354,19 @@ jobs:
                 # canvas, text, theme, popups and icons, fanning out to
                 # every consumer (scootbar and scootlaunch: the panel
                 # types through its entry and list, maps its on-demand
-                # surfaces and decodes its seat keyboard; scootnotify and
-                # scootgreet join as their tickets land, per
-                # dev/design/shell-apps.md). Its manifest also runs the
-                # Linux job, as scootbar's does.
+                # surfaces and decodes its seat keyboard; scootnotify's
+                # stack maps its on-demand surfaces and draws its text
+                # and icons through it, and scootgreet joins as its
+                # ticket lands, per dev/design/shell-apps.md). Its
+                # manifest also runs the Linux job, as scootbar's does.
                 crates/scootui/Cargo.toml)
                   scoot=true
-                  scootbar=true ;;
+                  scootbar=true
+                  scootnotify=true ;;
                 crates/scootui/*)
                   scootbar=true
-                  scootlaunch=true ;;
+                  scootlaunch=true
+                  scootnotify=true ;;
                 # The leaf both scootui and scoot-dbus depend on
                 # (crates/scoot-rt): `print` and `runtime_dir`, fanning out
                 # to both sets, today scootbar, scootlaunch and scootnotify.
@@ -397,14 +400,18 @@ jobs:
                 # scootbar and scoot jobs too; scootlaunch reads its
                 # allowlist, grammar and state dir for the panel's look
                 # layer (and renders its fragment), so they fan out to
-                # the scootlaunch job as well; the workspace manifests
-                # catch it through the catch-all, which also sets look=true.
+                # the scootlaunch job as well; scootnotify reads the same
+                # for the stack's look layer (and renders its fragment),
+                # so they fan out to the scootnotify job as well; the
+                # workspace manifests catch it through the catch-all,
+                # which also sets look=true.
                 crates/scoot-look/*)
                   look=true
                   scoot=true
                   macos=true
                   scootbar=true
-                  scootlaunch=true ;;
+                  scootlaunch=true
+                  scootnotify=true ;;
                 # The shipped looks (looks/): the scoot-look test over the
                 # directory validates and renders every look there, which
                 # is the gate behind the theming page's "a check renders
@@ -2028,7 +2035,11 @@ jobs:
         run: cargo clippy -p scootnotify --all-targets -- -D warnings
 
       # Both runners, for the reason the Linux job gives: nextest isolates
-      # each test in its own process, `cargo test` shares one.
+      # each test in its own process, `cargo test` shares one. The popup
+      # integration tests drive the real binary under headless compositors
+      # they start themselves, so this job builds scoot first; and the
+      # REQUIRE variables turn their skips into failures, so this job
+      # cannot go green by skipping.
       - name: cargo nextest and cargo test
         shell: nix develop --command bash -euo pipefail {0}
         env:
@@ -2036,6 +2047,8 @@ jobs:
           # real server binary; without this a missing one would skip
           # them quietly.
           SCOOTNOTIFY_REQUIRE_DBUS_DAEMON: "1"
+          SCOOTNOTIFY_REQUIRE_SCOOT: "1"
+          SCOOTNOTIFY_REQUIRE_SWAY: "1"
         run: |
           # `dbus-daemon` from the pinned nixpkgs for this step only, as
           # in the scootbar job: the dev shell is every job's, and a tool
@@ -2043,8 +2056,14 @@ jobs:
           dbus=$(nix build --inputs-from . 'nixpkgs#dbus^out' --no-link --print-out-paths)
           test -x "$dbus/bin/dbus-daemon"
           export PATH="$dbus/bin:$PATH"
+          # The hotplug test's second compositor: only sway can add and
+          # remove outputs at runtime. Headless, pixman, no GPU; from the
+          # flake's own pinned nixpkgs, out of the binary cache.
+          sway=$(nix build --inputs-from . nixpkgs#sway --no-link --print-out-paths)
+          export SCOOTBAR_TEST_SWAY="$sway/bin/sway"
           export TMPDIR="$RUNNER_TEMP/scootnotify-tmp"
           mkdir -p "$TMPDIR"
+          cargo build -p scoot -p scootnotify
           cargo nextest run -p scootnotify --no-fail-fast
           cargo test -p scootnotify
 

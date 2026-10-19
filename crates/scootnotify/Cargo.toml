@@ -1,6 +1,6 @@
 [package]
 name = "scootnotify"
-description = "Notification daemon for Wayland: the org.freedesktop.Notifications server and its model, headless"
+description = "Notification daemon for Wayland: the org.freedesktop.Notifications server, its model, and the on-demand overlay popup stack"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,12 +8,15 @@ license.workspace = true
 publish = false
 
 # Linux only, like scootbar and scoot-dbus: it serves a session-bus name
-# and never runs on a Mac (`scoot-dbus` says so; the macOS CI job leaves
-# it out with the other Linux-only crates).
+# and draws on a layer-shell surface, and never runs on a Mac
+# (`scoot-dbus` says so; the macOS CI job leaves it out with the other
+# Linux-only crates).
 #
-# No drawing in this ticket (notify-server): the D-Bus server and the
-# model only. Popups, the control socket and Nix arrive in later tickets
-# (dev/design/scootnotify.md, Tickets).
+# Popups draw through `scootui` (the on-demand overlay surface, text and
+# PNG icons), the look layer through `scoot-look`, and the idle pause
+# through `ext-idle-notify`: the bar family's own set, as the panel's
+# are. The control socket, DND, rules, history and Nix arrive in later
+# tickets (dev/design/scootnotify.md, Tickets).
 
 [dependencies]
 # The shared D-Bus client: the wire, the connection with its per-message
@@ -22,6 +25,14 @@ scoot-dbus.workspace = true
 # Panic-free printing behind the binary's own name, shared with the
 # other shell apps instead of another copy.
 scoot-rt.workspace = true
+# The card stack's on-demand overlay surface, text, PNG icons and the
+# poll-loop Wayland half: the shared crate, behind features so the
+# headless path (no compositor) links only what it uses. No keyboard
+# (pointer only), no entry, no control socket in this ticket.
+scootui = { path = "../scootui", default-features = false, features = ["surfaces", "wayland", "icons", "png"] }
+# The look layer's allowlist, value grammar and state-dir rule: the
+# workspace's existing version, so no new package enters the tree.
+scoot-look.workspace = true
 # The config file (`notify.toml`): the same version `scoot` pins, so no
 # new package enters the tree.
 toml = "1"
@@ -29,11 +40,32 @@ serde.workspace = true
 # Waiting on the bus fd and the expiry timerfd through raw syscalls, no
 # `libc` crate: the same `rustix` the D-Bus client pulls in.
 rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "time"] }
+# The popup's own Wayland objects (the overlay layer surface it draws
+# on, the seat and pointer that drive it, the activation tokens and the
+# idle notifications): plain crates, as scootbar binds them, so nothing
+# links libwayland.
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
 # Scratch dirs as `TempDir` guards in the bus tests: the same version
 # scootbar's tests carry (same lock entry, MIT OR Apache-2.0).
 [dev-dependencies]
 tempfile = "3"
+# The test font's `FontVec` in the layout tests: the same version
+# scootui shapes with (same lock entry), test-only, never in the
+# shipped binary.
+ab_glyph = "0.2"
+# PNG fixtures in the popup tests: the same version scootui decodes
+# with (same lock entry), test-only, never in the shipped binary.
+png = "0.18"
+# Sway's output list in the hotplug test: the workspace's existing
+# version, test-only.
+serde_json.workspace = true
+# The headless-compositor harness the popup integration tests drive the
+# real binary through: the same crate as the binary's, with test support
+# on.
+scootui = { path = "../scootui", features = ["test-support"] }
 # The counting allocator behind the zero-allocation pin (Linux-only, like
 # the crate itself): the same version scootbar's tests carry.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
