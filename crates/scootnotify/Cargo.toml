@@ -59,6 +59,9 @@ ab_glyph = "0.2"
 # PNG fixtures in the popup tests: the same version scootui decodes
 # with (same lock entry), test-only, never in the shipped binary.
 png = "0.18"
+# Sway's output list in the hotplug test: the workspace's existing
+# version, test-only.
+serde_json.workspace = true
 # The headless-compositor harness the popup integration tests drive the
 # real binary through: the same crate as the binary's, with test support
 # on.
