@@ -616,12 +616,6 @@ impl Popup {
         self.app.gone
     }
 
-    /// The outputs known: zero means cards wait with their clocks
-    /// stopped.
-    pub fn outputs(&self) -> usize {
-        self.app.outputs.len()
-    }
-
     /// Rebuilds the layout from the live set: redraws on change, shows
     /// on the first card, hides on the last close. Decodes icons for
     /// new cards (once, at arrival scale). Pure cost on content change;
@@ -830,12 +824,6 @@ impl Popup {
     /// never reach it (the caller keeps the last good).
     pub fn retheme(&mut self, look: Look) {
         self.app.retheme(look);
-    }
-
-    /// The current look, for tests.
-    #[cfg(test)]
-    pub fn look(&self) -> &Look {
-        &self.app.look
     }
 }
 
