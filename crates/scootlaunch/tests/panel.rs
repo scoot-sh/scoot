@@ -491,14 +491,16 @@ fn icons_docs_one(name: &str) {
     let list_y = y0 + 10 + row_h + 4;
     // All three rows match "a" — Alpha (red PNG image), Beta (blue SVG
     // image), Gamma (letter tile) — in match order, so count over the
-    // column: each decoder's square and the tile must show.
+    // column: each decoder's square and the tile must show. Each rect
+    // grows 1 px per side: `find_panel` steps by 2, so its box can sit
+    // 1 px off the true border, while only icons paint these colors.
     let mut red = 0u32;
     let mut blue = 0u32;
     let mut tile = 0u32;
     for row in 0..3 {
         let y = list_y + row * row_h + row_h.saturating_sub(side) / 2;
-        for x in icon_x..icon_x + side {
-            for yy in y..y + side {
+        for x in icon_x.saturating_sub(1)..icon_x + side + 1 {
+            for yy in y.saturating_sub(1)..y + side + 1 {
                 let pixel = shot.at(x, yy);
                 if pixel == [255, 0, 0] {
                     red += 1;
