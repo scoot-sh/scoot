@@ -36,3 +36,19 @@ Part of this ticket's work, not a follow-up: update `site/src/content/docs/scoot
 ## Not in this ticket
 
 UI changes.
+
+## Resolution (2026-10-19, PR #680)
+
+`--run-id ID [--action A]` launches one entry headlessly through the panel's
+spawn path with no surface and no token (`crates/scootlaunch/src/agent.rs`
+for resolution and the `RunOk`/`RunErr` JSON shapes;
+`spawn::launch_entry_report` and its twins, which the panel's `launch_entry`
+calls and discards, so both share activation-first-with-Exec-fallback, the
+environment rules, the systemd scope, the detached fallback and frecency).
+Exact id first, then the unique suffix-insensitive form; hostile ids/actions
+refuse with an error object and exit 1, never a launch of the wrong entry.
+`site/src/content/docs/scootlaunch/cli.md` carries the full schema with a
+paste-ready agent loop, and the agents page links it. Evidence: 298 nextest
+green with `SCOOTLAUNCH_REQUIRE_SCOOT=1` plus the opposite runner, clippy and
+fmt clean, libc only via xkbcommon, release 1315568 bytes linking only
+libxkbcommon past std, three mutation pins red-then-green (see the report).
