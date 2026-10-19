@@ -2141,3 +2141,119 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    //! The fractional icon side: `paint_panel` at 1.5x draws a bigger
+    //! icon bitmap from the scaled em, not a stretched 1x one. No
+    //! compositor needed: the draw runs into a buffer and the icon
+    //! square's pixels are counted.
+
+    use super::*;
+    use crate::rank::frecency::Frecency;
+    use std::io::Write as _;
+
+    fn test_text(dir: &std::path::Path) -> Text {
+        let path = dir.join("test.ttf");
+        std::fs::write(&path, scootui::testfont::build()).expect("font");
+        scootui::font::text(Some(&path), &[]).expect("text")
+    }
+
+    fn red_png(path: &std::path::Path) {
+        let mut buf = Vec::new();
+        let mut encoder = png::Encoder::new(&mut buf, 48, 48);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().expect("png header");
+        let mut red = Vec::with_capacity(48 * 48 * 4);
+        for _ in 0..48 * 48 {
+            red.extend_from_slice(&[255, 0, 0, 255]);
+        }
+        writer.write_image_data(&red).expect("png data");
+        drop(writer);
+        std::fs::write(path, &buf).expect("png")
+    }
+
+    #[test]
+    fn fractional_scale_draws_a_bigger_icon_bitmap() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let theme = dir.path().join("icons").join("Fixture");
+        let apps = theme.join("48x48").join("apps");
+        std::fs::create_dir_all(&apps).expect("mkdir");
+        red_png(&apps.join("red.png"));
+        std::fs::write(
+            theme.join("index.theme"),
+            "[Icon Theme]\nName=Fixture\nDirectories=48x48/apps\n\n[48x48/apps]\nSize=48\nType=Fixed\n",
+        )
+        .expect("index");
+        let entry = Entry {
+            id: "red.desktop".to_owned(),
+            name: "Red".to_owned(),
+            generic_name: None,
+            comment: None,
+            keywords: Vec::new(),
+            icon: Some("red".to_owned()),
+            exec: vec!["red.desktop".to_owned()],
+            terminal: false,
+            dbus_activatable: false,
+            actions: Vec::new(),
+            path: std::path::PathBuf::from("/usr/share/applications/red.desktop"),
+            workdir: None,
+            hidden: None,
+        };
+        let ui = Ui::open(vec![entry], Frecency::empty(), 0, 10);
+        let look = Look::default();
+        let mut text = test_text(dir.path());
+        // 1.5x through the fractional scale: 180/120.
+        let scale = scootui::density::Scale::Fractional(180);
+        assert_eq!(scale.factor(), 1.5);
+        let width = 400u32;
+        let row_h = 13 + 8; // The default em ceiled, plus the row pad.
+        let height = 2 * (2 + 8) + row_h * 11 + 4;
+        let width_d = (f64::from(width) * 1.5).round() as u32;
+        let height_d = (f64::from(height) * 1.5).round() as u32;
+        let mut pixels = vec![0u8; width_d as usize * height_d as usize * 4];
+        let mut icons = crate::icons::Cache::default();
+        paint_panel(
+            &mut pixels,
+            (width_d, height_d),
+            &ui,
+            &mut text,
+            &look,
+            width,
+            height,
+            row_h,
+            None,
+            "empty",
+            scale,
+            "Fixture",
+            &[dir.path().join("icons")],
+            &mut icons,
+        );
+        // The 1.5x icon side from the scaled em, as `paint_panel`
+        // derives it: above the 13 px a scale-1 draw would use.
+        let em = (f64::from(look.font_size_px) * 1.5) as f32;
+        let row_h_d = (f64::from(row_h) * 1.5).round() as u32;
+        let side = (em.round().max(1.0) as u32).min(row_h_d.saturating_sub(2).max(1));
+        assert!(side > 13, "a 1.5x side {side} above the 1x side 13");
+        // The entry's icon square, as `paint_panel` places it.
+        let inner = (2.0f64 * 1.5).round() as u32 + (8.0f64 * 1.5).round() as u32;
+        let icon_x = inner + (em * 0.5).round().clamp(0.0, 64.0) as u32;
+        let entry_y = inner + row_h_d.saturating_sub(side) / 2;
+        // BGRA premultiplied, as the canvas blends it: opaque red.
+        let mut red = 0u32;
+        for x in icon_x..icon_x + side {
+            for y in entry_y..entry_y + side {
+                let at = (y * width_d + x) as usize * 4;
+                let pixel = &pixels[at..at + 4];
+                if pixel == [0, 0, 255, 255] {
+                    red += 1;
+                }
+            }
+        }
+        assert!(
+            red >= side * side / 2,
+            "{red} red icon pixels for one {side}px entry icon at 1.5x"
+        );
+    }
+}
