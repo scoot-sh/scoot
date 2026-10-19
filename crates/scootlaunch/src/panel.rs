@@ -4,13 +4,18 @@
 //! One process per open: the surface is created on open and destroyed on
 //! close, so nothing is held at idle. The look layer is read at every
 //! open; the single-instance toggle (see [`socket`](crate::socket))
-//! decides whether this invocation opens or dismisses. Selecting an
-//! entry prints its id (exit 0); dismissing exits 1. Launching is the
-//! next ticket (`launch-spawn`).
+//! decides whether this invocation opens or dismisses. Picking an
+//! entry launches it ([`spawn`](crate::spawn): the activation token,
+//! the environment, its own systemd scope, the detached fallback);
+//! dismissing exits 1. A failed spawn draws its error for 2 s and the
+//! panel stays open.
 //!
 //! Keys and mouse follow the design's table: typing filters, the
-//! selection keys move, Enter picks, Ctrl+Enter runs the typed text,
-//! Escape dismisses. A click picks the row; the wheel scrolls. A click
+//! selection keys move, Enter launches the selection, Ctrl+Enter runs
+//! the typed text, Escape dismisses. A click launches the row; the
+//! wheel scrolls. The token is minted from the choosing key or button
+//! serial (never a focus serial, which the compositor refuses); past
+//! its 200 ms bound the launch goes without one. A click
 //! on the bare desktop does not dismiss in v1: with exclusive keyboard
 //! the compositor holds focus (`layer_keyboard_focus` keeps an
 //! exclusive surface first), so no keyboard leave arrives and the click
@@ -26,12 +31,11 @@
 //! so the app tracks pressed keys itself (cleared on every focus change)
 //! to tell a release from a press.
 
-use std::io::Write as _;
 use std::os::unix::io::AsFd as _;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use scoot_rt::print::{print, warn};
+use scoot_rt::print::warn;
 use scootui::entry::{Geometry, paint_entry, paint_list};
 use scootui::keyboard::{
     KeyOutput, KeyboardSeat, MIN_TEXT_BYTES, dispatch_keyboard, negotiate_version,
@@ -49,10 +53,16 @@ use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_man
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::WpFractionalScaleV1;
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
+use wayland_protocols::xdg::activation::v1::client::xdg_activation_token_v1::{
+    Event as ActivationTokenEvent, XdgActivationTokenV1,
+};
+use wayland_protocols::xdg::activation::v1::client::xdg_activation_v1::XdgActivationV1;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{self, Anchor};
 
+use crate::index::{Action, Entry};
 use crate::look::Look;
+use crate::spawn::{self, Token};
 use crate::ui::{Outcome, Ui};
 use scootui::outputs::Frame;
 
@@ -81,8 +91,8 @@ pub struct Options {
     pub lenient: bool,
 }
 
-/// Opens the panel and runs it to a pick or a dismiss: 0 for a printed
-/// id or run text, 1 for a dismiss, a runtime failure or a bad file
+/// Opens the panel and runs it to a launch or a dismiss: 0 for a
+/// launched pick, 1 for a dismiss, a runtime failure or a bad file
 /// (the flags were fine, as the bar's), 2 for a bad invocation.
 pub fn open(opts: &Options) -> i32 {
     // The toggle first: a live panel is told to close, and this
@@ -157,6 +167,11 @@ pub fn open(opts: &Options) -> i32 {
     let history = crate::rank::frecency::load(env.xdg_state_home.as_deref());
     let now = crate::rank::frecency::now_secs();
     let ui = Ui::open(built.entries, history, now, config.rows as usize);
+    let launch = LaunchCtx {
+        state_home: env.xdg_state_home.clone(),
+        home: std::env::var_os("HOME").map(PathBuf::from),
+        display_set: std::env::var_os("DISPLAY").is_some(),
+    };
     // The typeface: the flag, then the file, then the well-known ones.
     let given = opts.font.clone().or_else(|| config.font.map(PathBuf::from));
     let mut text = match scootui::font::text(given.as_deref(), &[]) {
@@ -174,7 +189,35 @@ pub fn open(opts: &Options) -> i32 {
         .saturating_mul(2)
         .saturating_add(row_h.saturating_mul(config.rows.saturating_add(1)))
         .saturating_add(GAP);
-    run_panel(claim, ui, &mut text, &look, width, height, row_h)
+    run_panel(
+        claim,
+        ui,
+        &mut text,
+        &look,
+        PanelSpec {
+            width,
+            height,
+            row_h,
+            launch,
+        },
+    )
+}
+
+/// What a launch resolves against: read once at open, so the spawn
+/// never touches the process environment (which the tests sandbox).
+struct LaunchCtx {
+    state_home: Option<PathBuf>,
+    home: Option<PathBuf>,
+    display_set: bool,
+}
+
+/// What the Wayland session opens with: the panel's size and the
+/// launch context, bundled so the runner takes few arguments.
+struct PanelSpec {
+    width: u32,
+    height: u32,
+    row_h: u32,
+    launch: LaunchCtx,
 }
 
 /// Runs the Wayland session to a pick or a dismiss.
@@ -183,9 +226,7 @@ fn run_panel(
     ui: Ui,
     text: &mut Text,
     look: &Look,
-    width: u32,
-    height: u32,
-    row_h: u32,
+    spec: PanelSpec,
 ) -> i32 {
     let conn = match Connection::connect_to_env() {
         Ok(conn) => conn,
@@ -200,7 +241,7 @@ fn run_panel(
     let qh = queue.handle();
     conn.display().get_registry(&qh, ());
     let mut pump = Pump { queue, qh };
-    let mut app = App::new(claim, ui, width, height, row_h);
+    let mut app = App::new(claim, ui, spec.width, spec.height, spec.row_h, spec.launch);
     // The registry sweep: globals, then outputs, keyboard and pointer.
     if !pump.wait_until(PATIENCE, &mut app, |app| app.ready()) {
         warn(format_args!(
@@ -232,12 +273,52 @@ fn run_panel(
 
 /// The exit: what the drive ended with.
 enum Exit {
-    /// A pick or run text, printed on the way out.
-    Print(String),
+    /// A pick or run text: launched on the way out (the token, the
+    /// spawn, the scope), not printed. Boxed: the request dwarfs the
+    /// other exits.
+    Launch(Box<LaunchRequest>),
     /// Dismissed (Escape, outside click, toggle, compositor close).
     Dismiss,
     /// A runtime failure, already warned about.
     Failed,
+}
+
+/// What one pick carries into the launch: the entry (or nothing for
+/// run text) with the argv resolved at pick time, and the choosing
+/// input's serial for the token.
+struct LaunchRequest {
+    entry: Option<Entry>,
+    action: Option<Action>,
+    /// Ad-hoc argv (`Ctrl+Enter`): the typed text split on spaces
+    /// ([`spawn::split_run_argv`]). `None` for an entry pick (the
+    /// entry's own argv launches).
+    run_argv: Option<Vec<String>>,
+    serial: Option<u32>,
+}
+
+/// Runs one pick to completion: the entry (or command) with `token`.
+/// Frecency is recorded inside the spawn on any launch an app came
+/// out of. `Err` is a spawn failure: nothing started, nothing
+/// recorded.
+fn execute_launch(
+    request: &LaunchRequest,
+    token: Option<&Token>,
+    launch: &LaunchCtx,
+    now: u64,
+) -> Result<(), String> {
+    let ctx = spawn::Ctx {
+        state_home: launch.state_home.clone(),
+        home: launch.home.clone(),
+        display_set: launch.display_set,
+        now,
+    };
+    match &request.entry {
+        Some(entry) => spawn::launch_entry(entry, request.action.as_ref(), token, &ctx),
+        None => match &request.run_argv {
+            Some(argv) => spawn::launch_command(argv, token, &ctx),
+            None => Err("nothing to launch".to_string()),
+        },
+    }
 }
 
 /// The Wayland state: bound globals, the on-demand surface and its
@@ -249,9 +330,11 @@ struct App {
     width: u32,
     height: u32,
     row_h: u32,
+    launch: LaunchCtx,
     compositor: Option<wl_compositor::WlCompositor>,
     shm: Option<wl_shm::WlShm>,
     layer_shell: Option<ZwlrLayerShellV1>,
+    activation: Option<XdgActivationV1>,
     viewporter: Option<WpViewporter>,
     fractional: Option<WpFractionalScaleManagerV1>,
     seat_proxy: Option<wl_seat::WlSeat>,
@@ -264,6 +347,16 @@ struct App {
     /// same keysym with empty text as a navigation press, so this tells
     /// them apart. Cleared on every focus change.
     pressed: Vec<u32>,
+    /// The last key press's serial, for the token of an Enter pick
+    /// (the compositor only honors key and button serials delivered
+    /// to this client — never a focus serial).
+    key_serial: Option<u32>,
+    /// The last button press's serial, for the token of a click pick.
+    button_serial: Option<u32>,
+    /// The token's `done`, while a launch waits for it.
+    token_done: Option<String>,
+    /// A spawn failure, shown in the panel until its instant passes.
+    spawn_error: Option<(String, Instant)>,
     pointer_in: bool,
     pointer_x: u32,
     pointer_y: u32,
@@ -277,16 +370,25 @@ struct App {
 }
 
 impl App {
-    fn new(claim: crate::socket::Claim, ui: Ui, width: u32, height: u32, row_h: u32) -> Self {
+    fn new(
+        claim: crate::socket::Claim,
+        ui: Ui,
+        width: u32,
+        height: u32,
+        row_h: u32,
+        launch: LaunchCtx,
+    ) -> Self {
         Self {
             claim,
             ui,
             width,
             height,
             row_h,
+            launch,
             compositor: None,
             shm: None,
             layer_shell: None,
+            activation: None,
             viewporter: None,
             fractional: None,
             seat_proxy: None,
@@ -296,6 +398,10 @@ impl App {
             seat: KeyboardSeat::new(),
             ctrl: false,
             pressed: Vec::new(),
+            key_serial: None,
+            button_serial: None,
+            token_done: None,
+            spawn_error: None,
             pointer_in: false,
             pointer_x: 0,
             pointer_y: 0,
@@ -457,6 +563,10 @@ impl App {
                 return;
             }
         };
+        // A fresh spawn failure, drawn instead of the list until it
+        // clears (the drive expires it after 2 s): the failed pick
+        // stays visible, and the panel stays open.
+        let error = self.spawn_error.as_ref().map(|(text, _)| text.clone());
         paint_panel(
             slot.pixels_mut(),
             dims,
@@ -466,6 +576,7 @@ impl App {
             self.width,
             self.height,
             self.row_h,
+            error.as_deref(),
         );
         let Some(live) = self.live.as_mut() else {
             return;
@@ -517,8 +628,29 @@ impl App {
         match self.ui.key(keysym, self.ctrl, decoded) {
             Outcome::Ignored => {}
             Outcome::Changed => self.dirty = true,
-            Outcome::Selected(id) => self.exit = Some(Exit::Print(id)),
-            Outcome::Run(run) => self.exit = Some(Exit::Print(run)),
+            Outcome::Selected(_) => {
+                let serial = self.key_serial;
+                if let Some(entry) = self.ui.selected() {
+                    self.exit = Some(Exit::Launch(Box::new(LaunchRequest {
+                        entry: Some(entry.clone()),
+                        action: self.ui.selected_action().cloned(),
+                        run_argv: None,
+                        serial,
+                    })));
+                }
+            }
+            Outcome::Run(run) => {
+                let argv = spawn::split_run_argv(&run);
+                if argv.is_empty() {
+                    return;
+                }
+                self.exit = Some(Exit::Launch(Box::new(LaunchRequest {
+                    entry: None,
+                    action: None,
+                    run_argv: Some(argv),
+                    serial: self.key_serial,
+                })));
+            }
             Outcome::Cancelled => self.exit = Some(Exit::Dismiss),
         }
     }
@@ -541,7 +673,7 @@ impl App {
 /// `surface` at `opacity`), the entry line, and the list's visible rows.
 /// `dims` is the buffer size; the logical `width`/`height` size the panel
 /// when the compositor configures larger. The entry sits at the top, the
-/// list below a [`GAP`].
+/// list below a [`GAP`]. A fresh spawn failure draws instead of the list.
 #[allow(clippy::too_many_arguments)]
 fn paint_panel(
     pixels: &mut [u8],
@@ -552,6 +684,7 @@ fn paint_panel(
     width: u32,
     height: u32,
     row_h: u32,
+    error: Option<&str>,
 ) {
     let (buffer_w, buffer_h) = dims;
     let width = width.min(buffer_w);
@@ -581,6 +714,22 @@ fn paint_panel(
         true,
         PLACEHOLDER,
     );
+    if let Some(error) = error {
+        let metrics = text.metrics(em);
+        let baseline =
+            i64::from(inner.saturating_add(row_h).saturating_add(GAP)) + metrics.baseline(row_h);
+        text.draw(
+            &mut canvas,
+            None,
+            error,
+            em,
+            i64::from(entry_geo.text_x()),
+            baseline,
+            look.theme.urgent,
+            entry_geo.clip(),
+        );
+        return;
+    }
     if ui.list().count() == 0 {
         let metrics = text.metrics(em);
         let baseline =
@@ -753,6 +902,14 @@ impl Pump {
             if app.claim.accept_close() {
                 return self.finish(app, 1, Some(Exit::Dismiss));
             }
+            // A spawn failure clears after 2 s, redrawing the list
+            // under it.
+            if let Some((_, since)) = &app.spawn_error
+                && since.elapsed() >= spawn::ERROR_HOLD
+            {
+                app.spawn_error = None;
+                app.dirty = true;
+            }
             if app.exit.is_none() && app.dirty {
                 app.draw(text, look, &qh);
                 // Flush the draw at once: the poll below blocks until
@@ -764,53 +921,201 @@ impl Pump {
                     return self.finish(app, 1, None);
                 }
             }
-            if let Some(exit) = app.exit.take() {
-                return self.finish(app, 1, Some(exit));
+            let Some(exit) = app.exit.take() else {
+                // wait below
+                let Some(guard) = self.queue.prepare_read() else {
+                    continue;
+                };
+                // The repeat timer and the toggle socket wake the loop with
+                // the connection: at idle (no key held, no toggle) the poll
+                // waits on the connection alone, costing no wakeups.
+                let wayland = guard.connection_fd();
+                let repeat = app.seat.repeat_fd();
+                let toggle = app.claim.as_fd();
+                let repeat_fd = repeat.unwrap_or(wayland);
+                let mut polls = [
+                    rustix::event::PollFd::new(&wayland, rustix::event::PollFlags::IN),
+                    rustix::event::PollFd::new(&repeat_fd, rustix::event::PollFlags::IN),
+                    rustix::event::PollFd::new(&toggle, rustix::event::PollFlags::IN),
+                ];
+                let _ = rustix::event::poll(&mut polls, None);
+                if !polls[0].revents().is_empty() {
+                    let _ = guard.read();
+                }
+                // A due repeat or a toggle close with a quiet connection
+                // drops the guard unread (the documented `read_after_poll`
+                // shape): the next turn drains and draws.
+                continue;
+            };
+            match exit {
+                Exit::Launch(request) => {
+                    match self.launch_request(&mut app, &request) {
+                        LaunchDone::Launched => return self.finish(app, 0, None),
+                        LaunchDone::Dismissed => return self.finish(app, 1, Some(Exit::Dismiss)),
+                        // A failed spawn draws its error and stays
+                        // open: no frecency, no exit.
+                        LaunchDone::Failed(error) => {
+                            app.spawn_error = Some((error, Instant::now()));
+                            app.dirty = true;
+                        }
+                    }
+                }
+                Exit::Dismiss => return self.finish(app, 1, Some(Exit::Dismiss)),
+                Exit::Failed => return self.finish(app, 1, Some(Exit::Failed)),
+            }
+        }
+    }
+}
+
+/// What one pick's launch did: out, dismissed mid-token, or still
+/// open with an error to draw.
+enum LaunchDone {
+    Launched,
+    Dismissed,
+    Failed(String),
+}
+
+impl Pump {
+    /// Runs one pick to a launch: the token (200 ms, from the
+    /// choosing serial), then the spawn. A toggle `close` arriving
+    /// mid-token dismisses instead of launching: a slow bus never
+    /// holds the panel past its bounds.
+    fn launch_request(&mut self, app: &mut App, request: &LaunchRequest) -> LaunchDone {
+        let token = match request.serial {
+            Some(serial) => match self.request_token(app, request, serial) {
+                TokenWait::Token(token) => Some(token),
+                TokenWait::None => None,
+                TokenWait::Dismissed => return LaunchDone::Dismissed,
+            },
+            // No serial to mint from (a repeat-tick Enter with no press
+            // seen): the compositor would refuse the token, so the
+            // launch goes without one.
+            None => None,
+        };
+        let now = crate::rank::frecency::now_secs();
+        match execute_launch(request, token.as_ref(), &app.launch, now) {
+            Ok(_) => LaunchDone::Launched,
+            Err(error) => LaunchDone::Failed(error),
+        }
+    }
+
+    /// Mints the activation token for a pick: `set_serial` with the
+    /// choosing key or button serial, `set_surface` with the panel's
+    /// surface, `set_app_id` with the id, then `commit`. Waits for
+    /// `done` up to [`spawn::TOKEN_TIMEOUT`], watching the toggle
+    /// throughout.
+    fn request_token(&mut self, app: &mut App, request: &LaunchRequest, serial: u32) -> TokenWait {
+        let (Some(activation), Some(seat), Some(live)) = (
+            app.activation.as_ref(),
+            app.seat_proxy.as_ref(),
+            app.live.as_ref(),
+        ) else {
+            return TokenWait::None;
+        };
+        let app_id = match &request.entry {
+            Some(entry) => spawn::app_id_for(&entry.id).to_string(),
+            None => String::from("scootlaunch"),
+        };
+        app.token_done = None;
+        let token = activation.get_activation_token(&self.qh, ());
+        token.set_serial(serial, seat);
+        token.set_app_id(app_id);
+        token.set_surface(live.surface());
+        token.commit();
+        if self.queue.flush().is_err() {
+            token.destroy();
+            return TokenWait::None;
+        }
+        let deadline = Instant::now() + spawn::TOKEN_TIMEOUT;
+        loop {
+            if self.queue.dispatch_pending(app).is_err() {
+                token.destroy();
+                return TokenWait::None;
+            }
+            if let Some(done) = app.token_done.take() {
+                token.destroy();
+                if done.is_empty() {
+                    return TokenWait::None;
+                }
+                return TokenWait::Token(Token::new(done));
+            }
+            if app.claim.accept_close() {
+                token.destroy();
+                return TokenWait::Dismissed;
+            }
+            if Instant::now() >= deadline {
+                token.destroy();
+                return TokenWait::None;
+            }
+            if self.queue.flush().is_err() {
+                token.destroy();
+                return TokenWait::None;
             }
             let Some(guard) = self.queue.prepare_read() else {
                 continue;
             };
-            // The repeat timer and the toggle socket wake the loop with
-            // the connection: at idle (no key held, no toggle) the poll
-            // waits on the connection alone, costing no wakeups.
+            let wait = deadline
+                .checked_duration_since(Instant::now())
+                .unwrap_or(Duration::ZERO);
+            let timespec = rustix::time::Timespec {
+                tv_sec: wait.as_secs() as _,
+                tv_nsec: wait.subsec_nanos() as _,
+            };
             let wayland = guard.connection_fd();
-            let repeat = app.seat.repeat_fd();
             let toggle = app.claim.as_fd();
-            let repeat_fd = repeat.unwrap_or(wayland);
             let mut polls = [
                 rustix::event::PollFd::new(&wayland, rustix::event::PollFlags::IN),
-                rustix::event::PollFd::new(&repeat_fd, rustix::event::PollFlags::IN),
                 rustix::event::PollFd::new(&toggle, rustix::event::PollFlags::IN),
             ];
-            let _ = rustix::event::poll(&mut polls, None);
+            let _ = rustix::event::poll(&mut polls, Some(&timespec));
             if !polls[0].revents().is_empty() {
                 let _ = guard.read();
             }
-            // A due repeat or a toggle close with a quiet connection
-            // drops the guard unread (the documented `read_after_poll`
-            // shape): the next turn drains and draws.
+            // A toggle close with a quiet connection drops the guard
+            // unread: the next turn's `accept_close` collects it.
         }
     }
+}
 
+/// What the token wait ended with.
+enum TokenWait {
+    Token(Token),
+    /// No token (no serial, no globals, a timeout, an empty `done`):
+    /// the launch goes without one.
+    None,
+    /// A toggle `close` arrived mid-token: dismiss instead.
+    Dismissed,
+}
+impl Pump {
     /// Tears the session down: the surface and its buffers go first (no
     /// surface held past close), then the socket file with the claim.
     /// `code` is the fallback; a taken exit decides instead.
     fn finish(self, mut app: App, code: i32, exit: Option<Exit>) -> i32 {
         let exit = app.exit.take().or(exit);
+        let launch = LaunchCtx {
+            state_home: app.launch.state_home.clone(),
+            home: app.launch.home.clone(),
+            display_set: app.launch.display_set,
+        };
         app.destroy_live();
         self.queue.flush().ok();
         drop(app);
         drop(self);
         match exit {
-            Some(Exit::Print(line)) => match print(&format!("{line}\n")) {
-                Ok(()) => 0,
-                Err(error) => {
-                    let _ = std::io::stderr().write_fmt(format_args!(
-                        "scootlaunch: cannot write the pick: {error}\n"
-                    ));
-                    1
+            // Unreachable in practice (a pick needs keyboard focus,
+            // which needs a mapped surface, which needs the drive):
+            // with no event loop left there is no token to mint, so
+            // the launch goes without one; a failure warns and exits 1.
+            Some(Exit::Launch(request)) => {
+                let now = crate::rank::frecency::now_secs();
+                match execute_launch(&request, None, &launch, now) {
+                    Ok(_) => 0,
+                    Err(error) => {
+                        warn(format_args!("scootlaunch: {error}"));
+                        1
+                    }
                 }
-            },
+            }
             Some(Exit::Dismiss) => 1,
             Some(Exit::Failed) | None => code,
         }
@@ -845,6 +1150,22 @@ empty_dispatch!(WpViewporter);
 empty_dispatch!(WpFractionalScaleManagerV1);
 empty_dispatch!(WpFractionalScaleV1);
 empty_dispatch!(ZwlrLayerShellV1);
+empty_dispatch!(XdgActivationV1);
+
+impl Dispatch<XdgActivationTokenV1, ()> for App {
+    fn event(
+        app: &mut App,
+        _: &XdgActivationTokenV1,
+        event: <XdgActivationTokenV1 as Proxy>::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+        if let ActivationTokenEvent::Done { token } = event {
+            app.token_done = Some(token);
+        }
+    }
+}
 
 impl Dispatch<wl_registry::WlRegistry, ()> for App {
     fn event(
@@ -881,6 +1202,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                 }
                 "zwlr_layer_shell_v1" => {
                     app.layer_shell = Some(registry.bind(name, 4.min(version), qh, ()));
+                }
+                "xdg_activation_v1" => {
+                    app.activation = Some(registry.bind(name, 1.min(version), qh, ()));
                 }
                 "wp_viewporter" => {
                     app.viewporter = Some(registry.bind(name, 1.min(version), qh, ()));
@@ -943,6 +1267,14 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for App {
             }
             _ => {}
         }
+        // The choosing serial for an Enter pick: key presses only (a
+        // focus serial is what the compositor refuses). Stored on every
+        // press, spent synchronously by the pick in the same event.
+        if let wl_keyboard::Event::Key { serial, state, .. } = &event
+            && matches!(state, WEnum::Value(wl_keyboard::KeyState::Pressed))
+        {
+            app.key_serial = Some(*serial);
+        }
         let focused_before = app.seat.has_focus();
         let mut text = [0u8; MIN_TEXT_BYTES];
         match dispatch_keyboard(&mut app.seat, event, &mut text) {
@@ -1004,7 +1336,17 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
             } => {
                 (app.pointer_x, app.pointer_y) = (surface_x as u32, surface_y as u32);
             }
-            wl_pointer::Event::Button { button, state, .. } => {
+            wl_pointer::Event::Button {
+                button,
+                state,
+                serial,
+                ..
+            } => {
+                // The choosing serial for a click pick, stored like the
+                // key one above.
+                if matches!(state, WEnum::Value(wl_pointer::ButtonState::Pressed)) {
+                    app.button_serial = Some(serial);
+                }
                 if button != BTN_LEFT {
                     return;
                 }
@@ -1012,14 +1354,23 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                     return;
                 }
                 // A click outside never arrives here (it goes to the
-                // surface below); a click on a row picks it at once.
+                // surface below); a click on a row launches it at once.
                 if let Some(row) = app.hit_row() {
                     let row = app.ui.list().visible_range().start.saturating_add(row);
                     match app.ui.click(row) {
-                        Outcome::Selected(id) => app.exit = Some(Exit::Print(id)),
-                        Outcome::Run(run) => app.exit = Some(Exit::Print(run)),
+                        Outcome::Selected(_) => {
+                            let serial = app.button_serial;
+                            if let Some(entry) = app.ui.selected() {
+                                app.exit = Some(Exit::Launch(Box::new(LaunchRequest {
+                                    entry: Some(entry.clone()),
+                                    action: app.ui.selected_action().cloned(),
+                                    run_argv: None,
+                                    serial,
+                                })));
+                            }
+                        }
                         Outcome::Cancelled => app.exit = Some(Exit::Dismiss),
-                        Outcome::Ignored | Outcome::Changed => {}
+                        Outcome::Ignored | Outcome::Changed | Outcome::Run(_) => {}
                     }
                 }
             }

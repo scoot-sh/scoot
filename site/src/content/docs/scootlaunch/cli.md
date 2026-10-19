@@ -33,8 +33,9 @@ belongs to the panel and `--check`. `--list` and `--query` cannot
 combine, and neither combines with `--check`. TEXT is the next
 argument after `--query`, whatever it holds. Anything else is a loud
 error: exit 2, naming the flag and the supported list, never silently
-ignored. The panel prints the picked id (exit 0) or nothing on
-dismiss (exit 1).
+ignored. The panel launches the picked entry (exit 0) or nothing on
+dismiss (exit 1): the codes are unchanged from the print-the-id days,
+but a launch prints nothing anymore.
 
 ## Ranking
 

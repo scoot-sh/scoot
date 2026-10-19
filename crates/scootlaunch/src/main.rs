@@ -6,11 +6,12 @@
 //! `TryExec`, actions, the Exec quoting and field codes, and the
 //! cache keyed by canonical path, inode and mtime — plus fuzzy
 //! matching with frecency (`--list` and `--query`, each with
-//! `[--all] [--lenient] [--json]`), and the overlay exclusive-keyboard
+//! `[--all] [--lenient] [--json]`), the overlay exclusive-keyboard
 //! panel (bare `scootlaunch`, with the entry and the virtualized list,
-//! the single-instance toggle and the look layer). Launching and the
-//! dmenu mode are later tickets. The plan is
-//! `dev/design/scootlaunch.md`.
+//! the single-instance toggle and the look layer), and launching (the
+//! activation token, the environment, the systemd scope, the detached
+//! fallback, `DBusActivatable`). The dmenu mode is a later ticket.
+//! The plan is `dev/design/scootlaunch.md`.
 //!
 //! No `unsafe` here. The keyboard links libxkbcommon through `scootui`
 //! (decided in `dev/design/shell-apps.md`); nothing else here links
@@ -25,6 +26,7 @@ mod look;
 mod panel;
 mod rank;
 mod socket;
+mod spawn;
 mod ui;
 
 // Tests pinning the warm-query path count heap allocations through
@@ -46,6 +48,11 @@ fn main() {
 }
 
 fn run(argv: &[String]) -> i32 {
+    // The detached spawn's helper re-exec (no flag, no stdout
+    // contract: stdin carries the spec, the marker names it).
+    if spawn::is_detach_helper() {
+        return spawn::detach_main();
+    }
     let args = match cli::parse_args(argv) {
         Ok(args) => args,
         Err(error) => {

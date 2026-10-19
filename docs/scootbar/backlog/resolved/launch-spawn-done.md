@@ -1,10 +1,11 @@
 ---
 title: "scootlaunch: launching right (activation token, environment, systemd scope, fallback fork)"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-19"
 ---
 
 # scootlaunch: launching
@@ -43,3 +44,18 @@ Part of this ticket's work, not a follow-up: update `site/src/content/docs/scoot
 ## Not in this ticket
 
 dmenu mode.
+
+## Resolution (2026-10-19, PR #676)
+
+A picked entry launches instead of printing its id. `crates/scootlaunch/src/spawn.rs`
+(token from the choosing serial with a 200 ms bound, the environment rules, `Path=`
+newly indexed with the cache at v2, `StartTransientUnit` into
+`app-scootlaunch-<id>-<random>.scope` under `app.slice` with a 500 ms bound, the
+detached double-fork fallback with no bus, `Activate`/`ActivateAction` with
+`activation-token` in `platform_data`); the panel mints the token, launches,
+draws spawn failures for 2 s, and records frecency. Exit codes unchanged
+(0/1/2); stdout on a pick is now empty. Slice confirmed as `app.slice` from
+systemd's desktop-environment page. Docs in the same PR (`panel.md`, `cli.md`).
+Evidence: 229 nextest + opposite-runner green, six mutation pins red-then-green,
+release 1,250,032 bytes linking only libxkbcommon past std, and
+`systemctl --user status` showing a launch in its scope under `app.slice`.

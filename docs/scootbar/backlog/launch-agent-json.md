@@ -3,7 +3,7 @@ title: "scootlaunch: `--run-id` and the documented JSON schema for agents"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "launch-spawn"
+blocked: null
 milestone: "M7"
 ---
 

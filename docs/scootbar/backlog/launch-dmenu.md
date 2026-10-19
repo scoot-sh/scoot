@@ -3,7 +3,7 @@ title: "scootlaunch: the dmenu contract (fuzzel's flags the call sites use) and 
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "launch-spawn"
+blocked: null
 milestone: "M7"
 ---
 

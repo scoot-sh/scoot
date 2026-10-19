@@ -16,9 +16,10 @@ scootlaunch --font /path/to/font.ttf # open with an explicit typeface
 scootlaunch --check                  # validate the config file and exit
 ```
 
-Picking prints the chosen entry id and exits 0; dismissing exits 1.
-Launching is the next ticket: the id is printed for now, not spawned.
-The panel links `libxkbcommon.so.0` for its keyboard (the reference
+Picking launches the chosen entry and exits 0; dismissing exits 1.
+Ctrl+Enter runs the typed text as a command. Nothing prints: the
+launch replaces the id the panel used to print. The panel links
+`libxkbcommon.so.0` for its keyboard (the reference
 XKB implementation); a scoot desktop already carries it.
 
 ## Keys
@@ -28,8 +29,8 @@ XKB implementation); a scoot desktop already carries it.
 | typing | filters the list |
 | Up / Down, Ctrl+P / Ctrl+N, Shift+Tab / Tab | move the selection |
 | Page Up / Page Down, Ctrl+Home / Ctrl+End | by page, to the ends |
-| Enter | pick the selection (prints its id) |
-| Ctrl+Enter | run the typed text (prints it, for now) |
+| Enter | launch the selection |
+| Ctrl+Enter | run the typed text as a command |
 | Escape | dismiss (exit 1) |
 
 Left/Right, Home/End, BackSpace, Delete, Ctrl+W, Ctrl+U and Ctrl+A
@@ -54,6 +55,37 @@ opening.
 | `rows` | integer 1–64, `10` | `rows = 8` |
 
 Unknown keys are refused, never ignored.
+
+## What a pick launches
+
+Enter (or a click) on an entry launches it, then the panel closes:
+
+- **Token.** The panel mints an activation token from the key or
+  button press that chose the entry, and hands it to the app as
+  `XDG_ACTIVATION_TOKEN` (plus `DESKTOP_STARTUP_ID` for X clients).
+  A running single-instance app re-activates instead of starting
+  over. Past a 200 ms wait the launch goes without a token; a fresh
+  window still focuses on map.
+- **Environment.** The panel strips its own token first, sets the
+  new one, starts the app in `Path=` (else `$HOME`) with stdin from
+  `/dev/null`, and records the pick for frecency.
+- **Scope.** Each launch gets its own systemd scope,
+  `app-scootlaunch-<id>-<random>.scope` under `app.slice`, so the
+  app outlives the panel and shows up per-app in
+  `systemctl --user status`. The move waits at most 500 ms.
+- **Fallback.** With no session bus the app starts detached
+  instead (a double fork with `setsid`); it stays in the
+  compositor's cgroup. A refused scope move keeps the running app
+  where it started, with one warning.
+- **`DBusActivatable`.** Entries that say so are asked over
+  `org.freedesktop.Application` first (`Activate`, or
+  `ActivateAction` for a desktop action), with the token in
+  `platform_data`. No owner on the bus falls back to `Exec`.
+
+A spawn failure draws its error in the panel for 2 s and the panel
+stays open; nothing is recorded. Ctrl+Enter runs the typed text
+split on spaces, under the same rules (its scope derives from the
+command's name).
 
 ## Theming
 
@@ -103,3 +135,13 @@ paths and refuses, naming what it tried.
 The panel warns once per fallback on stderr: a dangling or missing
 link means no look layer, and a refused key names itself. `scoot look
 apply` re-renders the layer; the next open reads it.
+
+> **Symptom:** an app starts outside its scope.
+
+`systemctl --user status 'app-scootlaunch-*'` shows which scope an
+app landed in. No scope at all means the move was refused or timed
+out (500 ms): the app keeps running in the launcher's cgroup, and
+the run says why on stderr. A bus with no user manager behind it
+answers `ServiceUnknown` the same way; with no bus at all the app
+starts detached instead, and the docs say it stays in the
+compositor's cgroup.

@@ -115,9 +115,12 @@ jobs:
   #                                        -> scootbar=true (scootbar job, which
   #                                           also builds the Nix module check)
   #   crates/scoot-dbus/                 -> scootbar=true as well (the
-  #                                           client's first consumer) and
+  #                                           client's first consumer),
   #                                           scootnotify=true (the server,
-  #                                           below); no always-run job)
+  #                                           below) and scootlaunch=true
+  #                                           (the scope move and the
+  #                                           application activation); no
+  #                                           always-run job)
   #   crates/scootlaunch/                -> scootlaunch=true (scootlaunch
   #                                           job: fmt, clippy, both test
   #                                           runners, the fuzz targets for
@@ -375,16 +378,19 @@ jobs:
                   scootnotify=true ;;
                 # The shared D-Bus client (crates/scoot-dbus): scootbar's
                 # `conn`, `proto` and `link` plus the `mpris` and `bluez`
-                # readers, fanning out to every consumer (scootbar and
-                # scootnotify, per dev/design/shell-apps.md). Its manifest
-                # also runs the Linux job, as scootbar's does.
+                # readers, fanning out to every consumer (scootbar,
+                # scootnotify and scootlaunch, per
+                # dev/design/shell-apps.md). Its manifest also runs the
+                # Linux job, as scootbar's does.
                 crates/scoot-dbus/Cargo.toml)
                   scoot=true
                   scootbar=true
-                  scootnotify=true ;;
+                  scootnotify=true
+                  scootlaunch=true ;;
                 crates/scoot-dbus/*)
                   scootbar=true
-                  scootnotify=true ;;
+                  scootnotify=true
+                  scootlaunch=true ;;
                 # The look format crate (crates/scoot-look): its own job
                 # below. scootbar reads its allowlists and the compositor
                 # reads its look layer, so its files fan out to the

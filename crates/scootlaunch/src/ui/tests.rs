@@ -5,6 +5,10 @@ use super::*;
 use crate::rank::frecency::Frecency;
 
 fn entry(id: &str, name: &str) -> index::Entry {
+    entry_with_actions(id, name, &[])
+}
+
+fn entry_with_actions(id: &str, name: &str, actions: &[(&str, &str)]) -> index::Entry {
     index::Entry {
         id: id.to_owned(),
         name: name.to_owned(),
@@ -15,8 +19,16 @@ fn entry(id: &str, name: &str) -> index::Entry {
         exec: vec![id.to_owned()],
         terminal: false,
         dbus_activatable: false,
-        actions: Vec::new(),
+        actions: actions
+            .iter()
+            .map(|(aid, aname)| index::Action {
+                id: aid.to_string(),
+                name: aname.to_string(),
+                exec: vec![aid.to_string()],
+            })
+            .collect(),
         path: std::path::PathBuf::from("/usr/share/applications/x.desktop"),
+        workdir: None,
         hidden: None,
     }
 }
@@ -238,4 +250,31 @@ fn keystrokes_allocate_nothing_after_warm_up() {
         ui.scroll(true);
     });
     assert_eq!(allocs, 0, "scrolling allocates");
+}
+
+#[test]
+fn an_action_row_win_reports_its_action() {
+    let mut ui = Ui::open(
+        vec![entry_with_actions(
+            "firefox.desktop",
+            "Firefox",
+            &[("new-window", "New Window")],
+        )],
+        Frecency::empty(),
+        0,
+        10,
+    );
+    // An empty query shows entry rows only: no action yet.
+    assert!(ui.selected_action().is_none());
+    // Typing the action's name ranks its row first, and the selection
+    // carries the action for `ActivateAction`.
+    ui.key(0, false, "new window");
+    assert_eq!(
+        ui.selected().map(|entry| entry.id.as_str()),
+        Some("firefox.desktop")
+    );
+    assert_eq!(
+        ui.selected_action().map(|action| action.id.as_str()),
+        Some("new-window")
+    );
 }
