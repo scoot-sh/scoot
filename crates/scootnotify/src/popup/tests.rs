@@ -101,7 +101,7 @@ fn a_2x2_image_decodes_to_the_square() {
 
 #[test]
 fn hit_tests_buttons_before_bodies() {
-    let app = App::new(Config::default(), Look::default(), None);
+    let app = App::new(Config::default(), Look::default());
     let mut app = app;
     app.stack = Stack {
         width: 360,
@@ -167,7 +167,7 @@ fn retheme_swaps_the_look_and_marks_dirty() {
     // `retheme` needs no compositor: it swaps the look and forces the
     // next refresh to rebuild (the stack comparison would call equal
     // sizes equal and skip the draw).
-    let mut app = App::new(Config::default(), Look::default(), None);
+    let mut app = App::new(Config::default(), Look::default());
     app.dirty = false;
     app.content_size = Some(scootui::output::Size { width: 360, height: 100 });
     let mut new = Look::default();

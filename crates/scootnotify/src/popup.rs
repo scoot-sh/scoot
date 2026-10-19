@@ -110,7 +110,6 @@ pub struct App {
     config: Config,
     look: Look,
     text: Option<Text>,
-    font_path: Option<PathBuf>,
     compositor: Option<wl_compositor::WlCompositor>,
     shm: Option<wl_shm::WlShm>,
     layer_shell: Option<ZwlrLayerShellV1>,
@@ -158,12 +157,11 @@ struct Click {
 }
 
 impl App {
-    fn new(config: Config, look: Look, font_path: Option<PathBuf>) -> Self {
+    fn new(config: Config, look: Look) -> Self {
         Self {
             config,
             look,
             text: None,
-            font_path,
             compositor: None,
             shm: None,
             layer_shell: None,
@@ -543,7 +541,7 @@ impl Popup {
         let mut queue = conn.new_event_queue();
         let qh = queue.handle();
         let _registry = conn.display().get_registry(&qh, ());
-        let mut app = App::new(config.clone(), look.clone(), font_path.cloned());
+        let mut app = App::new(config.clone(), look.clone());
         queue
             .roundtrip(&mut app)
             .map_err(|error| format!("no compositor ({error:?}): headless"))?;
