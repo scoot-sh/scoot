@@ -53,10 +53,13 @@ fn suffix_insensitive_resolves_when_unique() {
 
 #[test]
 fn suffix_insensitive_ambiguity_launches_nothing() {
-    // Two entries whose stripped app ids collide: `a.desktop` and a
-    // literal `a` id (a run-shaped id in the same index).
-    let entries = vec![entry("a.desktop"), entry("a")];
-    let error = resolve(&entries, "a", None).unwrap_err();
+    // Two entries whose stripped shapes both match a query that
+    // matches neither exactly: `a` (a run-shaped id) and
+    // `a.desktop.desktop` (whose app id is `a.desktop`). A real index
+    // holds only `.desktop` ids, so this shape is synthetic — the
+    // guard stays so a future match relaxation cannot guess.
+    let entries = vec![entry("a"), entry("a.desktop.desktop")];
+    let error = resolve(&entries, "a.desktop", None).unwrap_err();
     assert_eq!(error.code(), "ambiguous-id");
 }
 
