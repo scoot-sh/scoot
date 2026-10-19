@@ -18,7 +18,8 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use harness::{
-    Panel, desktop, launch_bin, rgb, session_with_apps, session_with_stubs, wait_for, wait_marker,
+    Panel, desktop, desktop_with_icon, fixture_icon_theme, launch_bin, rgb, session_with_apps,
+    session_with_stubs, wait_for, wait_marker,
 };
 
 fn refs<'a>(bodies: &'a [(&'a str, String)]) -> Vec<(&'a str, &'a str)> {
@@ -402,6 +403,117 @@ fn golden_one(name: &str) {
     assert_eq!(
         selected, selection,
         "{name}: first row {selected:?} for selection {selection:?}"
+    );
+    panel.key("Escape");
+    panel.wait_exit();
+    panel.clean();
+}
+
+/// The icon column draws, per shipped look: a headless panel over the
+/// fixture icon theme (a PNG icon, an SVG icon, a tile fallback), a
+/// query typed, and the icon column's pixels counted over the rows.
+/// Two image squares and one tile must show; neutering `draw_icon`
+/// (returning early) leaves the column at row background and fails both
+/// counts, so the icon draw path has pixel coverage.
+///
+/// The same open saves `scootlaunch-{name}.png` when
+/// `SCOOTLAUNCH_SHOTS` is set: those saves are the docs screenshots
+/// (`docs/assets/` and `site/src/assets/`), reproducible with
+/// `SCOOTLAUNCH_SHOTS=<dir> cargo nextest run -p scootlaunch icons_docs`.
+#[test]
+fn icons_docs_moonrise() {
+    icons_docs_one("moonrise");
+}
+
+/// See [`icons_docs_moonrise`]: the light look draws the same column
+/// from the same roles.
+#[test]
+fn icons_docs_music_desk() {
+    icons_docs_one("music-desk");
+}
+
+fn icons_docs_one(name: &str) {
+    let bodies: Vec<(&str, String)> = vec![
+        (
+            "alpha.desktop",
+            desktop_with_icon("Alpha", "/usr/bin/alpha", "alpha"),
+        ),
+        (
+            "beta.desktop",
+            desktop_with_icon("Beta", "/usr/bin/beta", "beta"),
+        ),
+        ("gamma.desktop", desktop("Gamma", "/usr/bin/gamma")),
+    ];
+    let refs = refs(&bodies);
+    let (session, data_home) = match session_with_apps(&format!("icons-docs-{name}"), &refs) {
+        Some(session) => session,
+        None => return,
+    };
+    let theme = fixture_icon_theme(&data_home);
+    // The rendered fragment for the shipped look, pointed at the
+    // fixture theme instead of the machine's icon theme.
+    let fragment = render_launch_fragment(name);
+    let mut table: toml::Table = fragment.parse().expect("launch.toml parses");
+    table
+        .get_mut("icons")
+        .and_then(|icons| icons.as_table_mut())
+        .expect("icons table")
+        .insert(
+            "theme".to_string(),
+            toml::Value::String(theme),
+        );
+    let fragment = table.to_string();
+    let look_dir = session.scratch.state_home().join("scoot").join("look");
+    fs::create_dir_all(&look_dir).unwrap();
+    fs::write(look_dir.join("launch.toml"), &fragment).unwrap();
+    let Some(mut panel) = Panel::start_on(session, data_home, &[], &[]) else {
+        return;
+    };
+    let table: toml::Table = fragment.parse().expect("launch.toml parses");
+    let colors = table["colors"].as_table().expect("colors").clone();
+    let color = |key: &str| rgb(colors[key].as_str().unwrap());
+    let focus = color("focus");
+    let accent = color("accent");
+    let em = table["font-size"].as_integer().expect("font-size") as f32;
+    panel.wait_shown(focus);
+    std::thread::sleep(Duration::from_millis(300));
+    panel.type_text("a");
+    std::thread::sleep(Duration::from_millis(500));
+    panel.save(&format!("scootlaunch-{name}"));
+    let shot = panel.shot();
+    let (x0, y0, _, _) = panel.find_panel(focus);
+    // The icon column, as `paint_panel` derives it at scale 1: one icon
+    // side plus one space, from the em.
+    let row_h = em.ceil() as u32 + 8;
+    let side = (em.round().max(1.0) as u32).min(row_h.saturating_sub(2).max(1));
+    let icon_x = x0 + 10 + (em * 0.5).round().clamp(0.0, 64.0) as u32;
+    let list_y = y0 + 10 + row_h + 4;
+    // All three rows match "a" — Alpha (PNG image), Beta (SVG image),
+    // Gamma (letter tile) — in match order, so count over the column:
+    // two image squares and one tile must show.
+    let mut red = 0u32;
+    let mut tile = 0u32;
+    for row in 0..3 {
+        let y = list_y + row * row_h + row_h.saturating_sub(side) / 2;
+        for x in icon_x..icon_x + side {
+            for yy in y..y + side {
+                let pixel = shot.at(x, yy);
+                if pixel == [255, 0, 0] {
+                    red += 1;
+                }
+                if pixel == accent {
+                    tile += 1;
+                }
+            }
+        }
+    }
+    assert!(
+        red >= side * side,
+        "{name}: {red} red icon pixels for two {side}px image rows"
+    );
+    assert!(
+        tile >= side * side / 2,
+        "{name}: {tile} accent tile pixels for one {side}px tile row"
     );
     panel.key("Escape");
     panel.wait_exit();
