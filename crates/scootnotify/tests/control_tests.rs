@@ -98,6 +98,11 @@ fn wait_serving(client: &mut Conn, server: &mut Child) {
         )
         .expect("the first call queues");
     let start = Instant::now();
+    // How the wait ends, for the timeout panic: errors mean the name
+    // was genuinely unowned (the daemon never got there); silence with
+    // no errors at all means the bus never answered either way.
+    let mut errored_total = 0u64;
+    let mut events_total = 0u64;
     loop {
         if start.elapsed() >= Duration::from_secs(30) {
             match server.try_wait().expect("the server reaps") {
@@ -110,7 +115,8 @@ fn wait_serving(client: &mut Conn, server: &mut Child) {
                 }
                 None => {
                     panic!(
-                        "the server still runs but never owned the name in 30 s; \
+                        "the server still runs but never owned the name in 30 s \
+                         ({events_total} events, {errored_total} name-unowned errors); \
                          its stderr so far: {}",
                         read_available(server.stderr.as_mut())
                     );
@@ -124,6 +130,7 @@ fn wait_serving(client: &mut Conn, server: &mut Child) {
         let mut answered = false;
         let mut errored = false;
         for event in events {
+            events_total += 1;
             match event {
                 Event::Reply { token: 9000, .. } => answered = true,
                 Event::CallError { token: 9000, .. } => errored = true,
@@ -134,6 +141,7 @@ fn wait_serving(client: &mut Conn, server: &mut Child) {
             return;
         }
         if errored {
+            errored_total += 1;
             client
                 .call(
                     BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
