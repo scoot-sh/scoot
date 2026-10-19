@@ -36,3 +36,34 @@ Part of this ticket's work, not a follow-up: update `site/src/content/docs/start
 ## Not in this ticket
 
 The default flip.
+
+## Resolution
+
+Shipped in PR #682 (`feat(scootlaunch): deb, rpm and Arch packages,
+install.sh --launch, site section`):
+
+- deb: `scootlaunch` in `deb-meta.py` (`ALLOW` gains only
+  `libxkbcommon0` past libc; `Suggests: fonts-dejavu-core`), built by
+  `build-deb.sh` with binary plus licenses, and pinned by `test_deb.py`
+  (18/18 green: the keyboard-library shlibdeps passes, a compositor
+  library fails).
+- rpm: `packaging/rpm/scootlaunch.spec` (binary plus licenses,
+  `BuildRequires: libxkbcommon-devel`, `%check` runs `--version` and
+  `--check` on the built-in defaults).
+- Arch: `packaging/arch/scootlaunch/` and `scootlaunch-git/` release
+  and `-git` PKGBUILDs (`depends` gains only `libxkbcommon`, plus a
+  `ttf-dejavu` optdepend); both `.SRCINFO` files verified
+  byte-identical against real `makepkg --printsrcinfo` output.
+- Container workflows (`deb.yml`, `rpm.yml`, `arch.yml`) build, lint,
+  install and prove the launcher (`--version`, `--check`) beside the
+  rest; `release.yml` publishes the portable `scootlaunch` binary with
+  a `libxkbcommon0` bare-base gate.
+- `install.sh --launch` (opt-in until the default flip): record,
+  up-to-date, uninstall and font-report plumbing mirroring the bar
+  flags, covered by `test-install.sh` (all passed).
+- Site: the panel page joins the sidebar (it existed but was
+  unlisted), per-distro install on the overview, `--launch` on the
+  install page, the launcher row in compose, and the releases and
+  packaging reference rows. `customSets` already covered
+  `scootlaunch/**`; the dmenu flag table and `Symptom` boxes were
+  already in place from earlier PRs.
