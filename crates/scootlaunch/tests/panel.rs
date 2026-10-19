@@ -459,10 +459,7 @@ fn icons_docs_one(name: &str) {
         .get_mut("icons")
         .and_then(|icons| icons.as_table_mut())
         .expect("icons table")
-        .insert(
-            "theme".to_string(),
-            toml::Value::String(theme),
-        );
+        .insert("theme".to_string(), toml::Value::String(theme));
     let fragment = table.to_string();
     let look_dir = session.scratch.state_home().join("scoot").join("look");
     fs::create_dir_all(&look_dir).unwrap();
