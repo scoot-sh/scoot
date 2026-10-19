@@ -26,6 +26,7 @@
 # selection through `cargoExtraArgs`.
 {
   lib,
+  pkgs,
   # From flake.nix, shared with the other packages: that package's own
   # version, the fileset source, the lockfile and the git-checkout hashes,
   # the strict-deps/test settings, and the dependency artifact this builds
@@ -71,6 +72,13 @@ craneLib.buildPackage {
     cargoBuildNoDefaultFeatures = buildNoDefaultFeatures;
     cargoBuildFeatures = buildFeatures;
   };
+
+  # The one C library past std's the panel links (the seat keyboard,
+  # through xkbcommon-sys): on the link path the way the compositor's
+  # own inputs are, with pkg-config for the -sys build script's probe.
+  # Linux-only, like the package itself.
+  nativeBuildInputs = [ pkgs.pkg-config ];
+  buildInputs = pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.libxkbcommon ];
 
   # Same strip backstop and no-test reasons as the packages in flake.nix:
   # the release profile asks for a full strip, which crane leaves to cargo
