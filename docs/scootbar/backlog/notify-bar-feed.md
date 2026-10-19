@@ -3,7 +3,7 @@ title: "scootnotify: native DND and unread feed to the bar's `notifications` pus
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "notify-dnd-history-rules"
+blocked: null
 milestone: "M7"
 ---
 
