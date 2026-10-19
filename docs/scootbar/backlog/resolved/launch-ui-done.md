@@ -41,9 +41,9 @@ Launching (`launch-spawn`), icons (`launch-icons`).
 
 ## Resolution
 
-Shipped in the PR that carries this (see the branch `feat/launch-ui`):
-the overlay exclusive-keyboard panel, the `launch.toml` look fragment,
-and the CI/docs that go with them.
+Shipped in PR #674 (`feat/launch-ui` branch): the overlay
+exclusive-keyboard panel, the `launch.toml` look fragment, and the
+CI/docs that go with them.
 
 What landed:
 
