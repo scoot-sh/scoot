@@ -1,10 +1,11 @@
 ---
 title: "scootlaunch: `--run-id` and the documented JSON schema for agents"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-19"
 ---
 
 # scootlaunch: the agent interface
