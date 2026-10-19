@@ -669,7 +669,7 @@ fn empty_holds_no_surface_or_buffers() {
             142,
         )
         .unwrap();
-    let Event::Reply { .. } = until(client, |event| {
+    let Event::Reply { .. } = until(&mut client, |event| {
         matches!(event, Event::Reply { token: 142, .. })
     }) else {
         unreachable!()
