@@ -56,7 +56,8 @@ at most 128 bytes with no slash or leading dot; paths are absolute
 with no `..`; files are regular, PNG at most 8 MiB (16 MiB decode
 budget, 1024 px a side, 1 M pixels) and SVG at most 512 KiB with at
 most 20000 nodes, rendered at most 256 device pixels a side with no
-external references. A corrupt file, a huge header, a symlink loop
+network and no system fonts; file hrefs resolve to nothing drawable
+unless a valid image. A corrupt file, a huge header, a symlink loop
 and a missing theme all fall back to the tile. Icons render at device
 pixels: the side is the logical side times the surface scale, so a
 1.5 output draws a 1.5x bitmap through the viewport.

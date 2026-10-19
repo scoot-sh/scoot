@@ -27,11 +27,11 @@
 //! pixels: a decompression bomb is refused after a few dozen bytes);
 //! SVG at most [`MAX_SVG_FILE`] bytes, at most [`MAX_SVG_NODES`]
 //! `<` opens (one pass over the bytes before parsing), rendered at most
-//! [`MAX_RENDER_SIDE`] device pixels a side. SVG has no external
-//! references: `usvg` is built with no `resources_dir`, so an
-//! `image href` resolves to nothing and draws nothing, and the `resvg`
-//! build carries no network and no system-font loading
-//! (`default-features = false`). A corrupt PNG, a huge header, a
+//! [`MAX_RENDER_SIDE`] device pixels a side. SVG loads nothing over the
+//! network and no system fonts: `usvg` is built with no `resources_dir`,
+//! so a file `image href` resolves to nothing drawable unless it is a
+//! valid image, and the `resvg` build carries no network and no system-font
+//! loading (`default-features = false`). A corrupt PNG, a huge header, a
 //! symlink loop (the kernel's `ELOOP`), a missing theme and a missing
 //! file are all a letter tile, never an error and never a stall.
 //!
@@ -435,20 +435,12 @@ pub fn find_file(configured: &str, name: &str, side: u32, bases: &[PathBuf]) -> 
                 return Some(candidate);
             }
         }
-        for name in [
-            format!("/usr/share/pixmaps/{name}.{extension}"),
-            format!("/usr/share/pixmaps/{name}.xpm"),
-        ] {
-            if extension != "png" && name.ends_with(".xpm") {
-                continue;
-            }
-            let candidate = PathBuf::from(&name);
-            if name.ends_with(".xpm") {
-                continue;
-            }
-            if is_usable_file(&candidate) {
-                return Some(candidate);
-            }
+        // `/usr/share/pixmaps` holds loose files with no theme: PNG
+        // only, like the rest of the lookup (there is no XPM decoder,
+        // so no `.xpm` candidate is ever searched).
+        let candidate = PathBuf::from(format!("/usr/share/pixmaps/{name}.{extension}"));
+        if is_usable_file(&candidate) {
+            return Some(candidate);
         }
     }
     None

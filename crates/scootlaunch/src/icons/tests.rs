@@ -187,22 +187,58 @@ fn svg_bounds_hold() {
 }
 
 #[test]
-fn cache_is_bounded_and_tiles_fall_back() {
+fn cache_evicts_on_entry_count() {
+    // 72 distinct missing keys: each is a tile (0 bytes), so only the
+    // entry count can trip the bound. Without the eviction the cache
+    // would hold all 72; with it the count stays under the cap.
     let home = tmp();
     let base = home.path().join("icons");
     fs::create_dir_all(&base).expect("base");
     let bases = vec![base];
     let mut cache = Cache::default();
     for i in 0..(MAX_ENTRIES + 8) {
-        let icon = cache.get("Adwaita", &bases, Some("missing"), &format!("app{i}"), 16);
+        let missing = format!("missing-{i}");
+        let icon = cache.get("Adwaita", &bases, Some(&missing), &format!("app{i}"), 16);
         assert!(matches!(icon, Icon::Tile(_)));
     }
     let (entries, bytes) = cache.cached();
     assert!(entries <= MAX_ENTRIES, "{entries}");
-    assert!(bytes <= MAX_BYTES, "{bytes}");
+    assert!(entries == 8, "{entries}");
+    assert_eq!(bytes, 0);
     assert_eq!(tile_letter("Firefox"), 'F');
     assert_eq!(tile_letter(""), '?');
     assert_eq!(tile_letter("123"), '1');
+}
+
+#[test]
+fn cache_evicts_on_bytes() {
+    // One 256 px image icon times five: each decodes to 256 KiB, so the
+    // fifth pushes past the 1 MiB cap and trips the byte bound. Without
+    // the eviction the cache would hold all five (1280 KiB).
+    let home = tmp();
+    let mut files = Vec::new();
+    for i in 0..5 {
+        let file = home.path().join(format!("byte{i}.png"));
+        fs::write(&file, png_bytes(48, 48)).expect("png");
+        files.push(file);
+    }
+    let bases = vec![];
+    let mut cache = Cache::default();
+    for file in &files {
+        let icon = cache.get(
+            "Adwaita",
+            &bases,
+            Some(file.to_string_lossy().as_ref()),
+            "App",
+            256,
+        );
+        assert!(matches!(icon, Icon::Image(_)), "{file:?}");
+    }
+    let (entries, bytes) = cache.cached();
+    assert!(entries <= MAX_ENTRIES, "{entries}");
+    assert!(bytes <= MAX_BYTES, "{bytes}");
+    assert_eq!(bytes, 256 * 256 * 4, "{bytes}");
+    assert_eq!(entries, 1, "{entries}");
 }
 
 #[test]
