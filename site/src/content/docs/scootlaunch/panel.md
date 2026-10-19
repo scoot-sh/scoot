@@ -28,6 +28,43 @@ launch replaces the id the panel used to print. The panel links
 `libxkbcommon.so.0` for its keyboard (the reference
 XKB implementation); a scoot desktop already carries it.
 
+## Icons
+
+Each row shows one icon before its name. The entry shows the
+selected row's icon, so the two texts stay aligned.
+
+| Key | Type / default | Example |
+|---|---|---|
+| `Icon` (desktop entry) | theme name or absolute path, none (letter tile) | `Icon=firefox` |
+
+Lookup is the Icon Theme spec: the configured theme, its `Inherits`
+chain, `hicolor`, then the base directories (`~/.icons`,
+`$XDG_DATA_HOME/icons`, each `$XDG_DATA_DIRS/icons`,
+`/usr/share/pixmaps`). A name with a slash is an absolute path and is
+used directly. A PNG of the right size wins when the theme ships one;
+SVG rasterizes through `resvg` (the default-on `svg` feature) only
+when no PNG does. Without the feature, or when nothing resolves or
+decodes, the row draws a letter tile: the entry's first alphanumeric,
+in `accent` with `background` ink.
+
+Only the visible rows load, once per open, into a bounded cache (64
+icons, 1 MiB). The keystroke path never touches the cache, so typing
+still allocates nothing after warm-up.
+
+Bounds, so a hostile theme or file never panics or stalls: names are
+at most 128 bytes with no slash or leading dot; paths are absolute
+with no `..`; files are regular, PNG at most 8 MiB (16 MiB decode
+budget, 1024 px a side, 1 M pixels) and SVG at most 512 KiB with at
+most 20000 nodes, rendered at most 256 device pixels a side with no
+external references. A corrupt file, a huge header, a symlink loop
+and a missing theme all fall back to the tile. Icons render at device
+pixels: the side is the logical side times the surface scale, so a
+1.5 output draws a 1.5x bitmap through the viewport.
+
+The stripped release is 1446648 bytes without `svg` (budget 1.8 MB)
+and 2167544 bytes with it (the `svg` row, for the waiver ruling; the
+index-only 1053368-byte row predates icons).
+
 ## Keys
 
 | Key | Action |
@@ -99,10 +136,10 @@ command's name).
 ## Theming
 
 The panel reads `<state>/look/launch.toml` at every open: the
-thirteen shell-app color roles plus `font`, `font-size`, `opacity`
-and `radius`, merged per key as flags, then this file, then the look,
-then the built-ins. A refused key keeps its default and is reported;
-a missing layer is the defaults with one warning.
+thirteen shell-app color roles plus `font`, `font-size`, `opacity`,
+`radius` and `[icons] theme`, merged per key as flags, then this file,
+then the look, then the built-ins. A refused key keeps its default
+and is reported; a missing layer is the defaults with one warning.
 
 | Element | Role |
 |---|---|
@@ -113,14 +150,16 @@ a missing layer is the defaults with one warning.
 | Selected row fill / text | `selection` / `selection-text` (defaults `accent` / `background`) |
 | Panel border | `focus` (default `accent`) |
 | Caret, entry focus ring | `accent` |
+| Row icons, tile fill | `accent` with `background` ink (tile letter) |
 | Corners | `radius` |
 | Size | `font-size` (the look's popup size) |
+| Icon theme | `[icons] theme` (default `Adwaita`) |
 
 The `font` key names the look's UI family. There is no fontconfig in
 this stack: the panel draws with `--font PATH`, else the first usable
-well-known file, as the bar does. Rows show the entry name with its
-match highlighted; generic names, comments and icons arrive in later
-tickets. A light look draws the same panel from the same roles:
+well-known file, as the bar does. Rows show the entry icon with the
+name beside it and its match highlighted. A light look draws the same
+panel from the same roles:
 
 ![The launcher panel in music-desk, filtered to "ca"](../../../assets/scootlaunch-music-desk.png)
 
@@ -144,6 +183,14 @@ paths and refuses, naming what it tried.
 The panel warns once per fallback on stderr: a dangling or missing
 link means no look layer, and a refused key names itself. `scoot look
 apply` re-renders the layer; the next open reads it.
+
+> **Symptom:** rows show letters instead of icons.
+
+Letters are the fallback: no `svg` feature (SVG-only names), no icon
+theme, or nothing resolved or decoded. With the feature, an SVG-only
+entry still needs its theme installed. Check `Icon=` with
+`scootlaunch --list --json`, and the theme in
+`<state>/look/launch.toml` under `[icons]`.
 
 > **Symptom:** an app starts outside its scope.
 
