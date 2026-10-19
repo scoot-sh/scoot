@@ -331,7 +331,7 @@ impl Server {
         protocol::write_event(
             &mut line,
             &protocol::Event::Notify {
-                notification: protocol::view(note, now, now_ms, output),
+                notification: Box::new(protocol::view(note, now, now_ms, output)),
             },
         );
         self.control.push(ControlEvent {
@@ -481,10 +481,7 @@ impl Server {
                 if let crate::model::store::Arrival::Shown { id, .. } = arrival {
                     self.push_notify(id, now, now_ms);
                 }
-                for closure in evicted
-                    .into_iter()
-                    .chain(self.store.expired(now))
-                {
+                for closure in evicted.into_iter().chain(self.store.expired(now)) {
                     self.signal_closed(conn, closure);
                     self.push_close(closure);
                 }

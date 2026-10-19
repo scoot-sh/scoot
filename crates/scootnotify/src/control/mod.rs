@@ -14,7 +14,9 @@ pub mod protocol;
 pub mod respond;
 
 pub use scootui::control::paths;
-pub use scootui::control::{Claim, ClaimError, Handler, Kinds, MAX_CONNECTIONS, MAX_SUBSCRIBERS, Server};
+pub use scootui::control::{
+    Claim, ClaimError, Handler, Kinds, MAX_CONNECTIONS, MAX_SUBSCRIBERS, Server,
+};
 
 #[cfg(test)]
 mod tests;

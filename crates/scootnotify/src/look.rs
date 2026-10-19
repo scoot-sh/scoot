@@ -207,13 +207,7 @@ fn apply_table(look: &mut Look, table: &toml::Table, notes: &mut Vec<String>) {
                 continue;
             };
             for (name, color) in colors {
-                apply(
-                    look_color(look, name),
-                    "colors",
-                    name,
-                    color,
-                    notes,
-                );
+                apply(look_color(look, name), "colors", name, color, notes);
             }
             continue;
         }

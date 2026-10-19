@@ -159,12 +159,19 @@ fn list_human() -> i32 {
     let parsed: serde_json::Value = match serde_json::from_str(&reply) {
         Ok(parsed) => parsed,
         Err(error) => {
-            warn(format_args!("scootnotify: unreadable reply from the daemon: {error}"));
+            warn(format_args!(
+                "scootnotify: unreadable reply from the daemon: {error}"
+            ));
             return 1;
         }
     };
-    let Some(cards) = parsed.get("notifications").and_then(|cards| cards.as_array()) else {
-        warn(format_args!("scootnotify: unreadable reply from the daemon: no `notifications`"));
+    let Some(cards) = parsed
+        .get("notifications")
+        .and_then(|cards| cards.as_array())
+    else {
+        warn(format_args!(
+            "scootnotify: unreadable reply from the daemon: no `notifications`"
+        ));
         return 1;
     };
     let mut out = String::new();
@@ -178,7 +185,9 @@ fn list_human() -> i32 {
             card.get("app_name").and_then(|app| app.as_str()),
             card.get("summary").and_then(|summary| summary.as_str()),
         ) else {
-            warn(format_args!("scootnotify: unreadable reply from the daemon: a card is misshapen"));
+            warn(format_args!(
+                "scootnotify: unreadable reply from the daemon: a card is misshapen"
+            ));
             return 1;
         };
         out.push_str(&format!("{id} [{urgency}] {app}: {summary}\n"));

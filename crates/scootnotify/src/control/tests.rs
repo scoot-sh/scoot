@@ -30,22 +30,37 @@ fn parse_text(text: &str) -> Result<Request<'_>, super::protocol::RequestError> 
 
 #[test]
 fn every_verb_parses() {
-    assert_eq!(parse_text(r#"{"protocol":1,"type":"list"}"#).unwrap(), Request::List);
+    assert_eq!(
+        parse_text(r#"{"protocol":1,"type":"list"}"#).unwrap(),
+        Request::List
+    );
     assert_eq!(
         parse_text(r#"{"protocol":1,"type":"dismiss","id":3}"#).unwrap(),
-        Request::Dismiss { id: Some(3), all: false }
+        Request::Dismiss {
+            id: Some(3),
+            all: false
+        }
     );
     assert_eq!(
         parse_text(r#"{"protocol":1,"type":"dismiss","all":true}"#).unwrap(),
-        Request::Dismiss { id: None, all: true }
+        Request::Dismiss {
+            id: None,
+            all: true
+        }
     );
     assert_eq!(
         parse_text(r#"{"protocol":1,"type":"invoke","id":3}"#).unwrap(),
-        Request::Invoke { id: 3, action: Cow::Borrowed("default") }
+        Request::Invoke {
+            id: 3,
+            action: Cow::Borrowed("default")
+        }
     );
     assert_eq!(
         parse_text(r#"{"protocol":1,"type":"invoke","id":3,"action":"open"}"#).unwrap(),
-        Request::Invoke { id: 3, action: Cow::Borrowed("open") }
+        Request::Invoke {
+            id: 3,
+            action: Cow::Borrowed("open")
+        }
     );
     assert_eq!(
         parse_text(r#"{"protocol":1,"type":"reload"}"#).unwrap(),
@@ -53,19 +68,27 @@ fn every_verb_parses() {
     );
     assert_eq!(
         parse_text(r#"{"protocol":1,"type":"reload","scope":"look"}"#).unwrap(),
-        Request::Reload { scope: Some(ReloadScope::Look) }
+        Request::Reload {
+            scope: Some(ReloadScope::Look)
+        }
     );
     assert_eq!(
         parse_text(r#"{"protocol":1,"type":"subscribe"}"#).unwrap(),
-        Request::Subscribe { events: EventKind::ALL.to_vec() }
+        Request::Subscribe {
+            events: EventKind::ALL.to_vec()
+        }
     );
     assert_eq!(
         parse_text(r#"{"protocol":1,"type":"subscribe","events":[]}"#).unwrap(),
-        Request::Subscribe { events: EventKind::ALL.to_vec() }
+        Request::Subscribe {
+            events: EventKind::ALL.to_vec()
+        }
     );
     assert_eq!(
         parse_text(r#"{"protocol":1,"type":"subscribe","events":["close"]}"#).unwrap(),
-        Request::Subscribe { events: vec![EventKind::Close] }
+        Request::Subscribe {
+            events: vec![EventKind::Close]
+        }
     );
     assert_eq!(
         parse_text(r#"{"protocol":1,"type":"version"}"#).unwrap(),
@@ -77,12 +100,25 @@ fn every_verb_parses() {
 fn requests_round_trip_through_their_lines() {
     let requests = [
         Request::List,
-        Request::Dismiss { id: Some(3), all: false },
-        Request::Dismiss { id: None, all: true },
-        Request::Invoke { id: 3, action: Cow::Borrowed("open") },
+        Request::Dismiss {
+            id: Some(3),
+            all: false,
+        },
+        Request::Dismiss {
+            id: None,
+            all: true,
+        },
+        Request::Invoke {
+            id: 3,
+            action: Cow::Borrowed("open"),
+        },
         Request::Reload { scope: None },
-        Request::Reload { scope: Some(ReloadScope::Look) },
-        Request::Subscribe { events: vec![EventKind::Notify, EventKind::Close] },
+        Request::Reload {
+            scope: Some(ReloadScope::Look),
+        },
+        Request::Subscribe {
+            events: vec![EventKind::Notify, EventKind::Close],
+        },
         Request::Version,
     ];
     for request in &requests {
@@ -129,11 +165,9 @@ fn id_and_scope_refusals_name_themselves() {
         assert!(error.to_string().contains("id"), "{bad}: {error}");
     }
     assert!(parse_text(r#"{"protocol":1,"type":"invoke"}"#).is_err());
-    let error =
-        parse_text(r#"{"protocol":1,"type":"reload","scope":"leave"}"#).unwrap_err();
+    let error = parse_text(r#"{"protocol":1,"type":"reload","scope":"leave"}"#).unwrap_err();
     assert!(error.to_string().contains("leave"), "{error}");
-    let error =
-        parse_text(r#"{"protocol":1,"type":"subscribe","events":["dnd"]}"#).unwrap_err();
+    let error = parse_text(r#"{"protocol":1,"type":"subscribe","events":["dnd"]}"#).unwrap_err();
     assert!(error.to_string().contains("dnd"), "{error}");
     // The bounds: 1 and u32::MAX pass.
     assert!(parse_text(r#"{"protocol":1,"type":"dismiss","id":1}"#).is_ok());
@@ -147,7 +181,8 @@ fn connected() -> (Conn, UnixStream) {
     let (client, peer) = UnixStream::pair().unwrap();
     let thread = std::thread::spawn(move || {
         let mut peer = peer;
-        peer.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
         read_until(&mut peer, b"AUTH EXTERNAL\r\n");
         peer.write_all(b"DATA\r\n").unwrap();
         read_until(&mut peer, b"DATA\r\n");
@@ -163,7 +198,7 @@ fn connected() -> (Conn, UnixStream) {
             staged.extend_from_slice(&chunk[..n]);
         };
         let call = Message::parse(&staged[..len]).unwrap();
-        assert_eq!(call.member.as_deref(), Some("Hello"));
+        assert_eq!(call.member, Some("Hello"));
         let mut body = Writer::new();
         body.str(":9.9");
         let body = body.take_body().unwrap();
@@ -175,7 +210,8 @@ fn connected() -> (Conn, UnixStream) {
     });
     let conn = scoot_dbus::conn::setup(client).unwrap();
     let peer = thread.join().unwrap();
-    peer.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
     (conn, peer)
 }
 
@@ -292,7 +328,10 @@ fn an_empty_list_is_an_empty_array() {
 fn list_shows_every_live_field() {
     let mut harness = Harness::new();
     let id = harness.notify(":1.1", "Firefox", "Done", "<b>file</b> &amp; more");
-    harness.server.store_mut().presented(id, Instant::now(), 1_000);
+    harness
+        .server
+        .store_mut()
+        .presented(id, Instant::now(), 1_000);
     let reply = harness.ask(&Request::List.line());
     let cards = reply["notifications"].as_array().unwrap();
     assert_eq!(cards.len(), 1);
@@ -305,7 +344,10 @@ fn list_shows_every_live_field() {
     assert_eq!(card["body"], "file & more");
     assert_eq!(card["urgency"], "normal");
     assert_eq!(card["category"], "");
-    assert_eq!(card["actions"], serde_json::json!([{"key": "default", "label": "Open"}]));
+    assert_eq!(
+        card["actions"],
+        serde_json::json!([{"key": "default", "label": "Open"}])
+    );
     assert!(card.get("icon").is_none());
     assert_eq!(card["created"], 1_000);
     assert_eq!(card["shown"], 1_000);
@@ -328,7 +370,13 @@ fn an_unshown_card_has_null_shown_and_expires() {
 fn dismiss_closes_with_reason_two_and_tells_the_bus() {
     let mut harness = Harness::new();
     let id = harness.notify(":1.1", "Firefox", "Done", "body");
-    let reply = harness.ask(&Request::Dismiss { id: Some(id), all: false }.line());
+    let reply = harness.ask(
+        &Request::Dismiss {
+            id: Some(id),
+            all: false,
+        }
+        .line(),
+    );
     assert_eq!(reply["type"], "ok");
     assert!(harness.server.store().get(id).is_none());
     let events = harness.server.take_control_events();
@@ -343,9 +391,20 @@ fn dismiss_closes_with_reason_two_and_tells_the_bus() {
 fn dismissing_an_unknown_id_is_a_loud_error() {
     let mut harness = Harness::new();
     let id = harness.notify(":1.1", "Firefox", "Done", "body");
-    let reply = harness.ask(&Request::Dismiss { id: Some(id + 100), all: false }.line());
+    let reply = harness.ask(
+        &Request::Dismiss {
+            id: Some(id + 100),
+            all: false,
+        }
+        .line(),
+    );
     assert_eq!(reply["type"], "error");
-    assert!(reply["message"].as_str().unwrap().contains(&(id + 100).to_string()));
+    assert!(
+        reply["message"]
+            .as_str()
+            .unwrap()
+            .contains(&(id + 100).to_string())
+    );
     // The live card stands.
     assert!(harness.server.store().get(id).is_some());
     assert!(harness.server.take_control_events().is_empty());
@@ -356,7 +415,13 @@ fn dismiss_all_closes_everything() {
     let mut harness = Harness::new();
     harness.notify(":1.1", "A", "one", "body");
     harness.notify(":1.2", "B", "two", "body");
-    let reply = harness.ask(&Request::Dismiss { id: None, all: true }.line());
+    let reply = harness.ask(
+        &Request::Dismiss {
+            id: None,
+            all: true,
+        }
+        .line(),
+    );
     assert_eq!(reply["type"], "ok");
     assert!(harness.server.store().live_ids().is_empty());
     assert_eq!(harness.server.take_control_events().len(), 2);
@@ -367,7 +432,11 @@ fn invoke_runs_the_action_and_closes_unless_resident() {
     let mut harness = Harness::new();
     let id = harness.notify(":1.1", "Firefox", "Done", "body");
     let reply = harness.ask(
-        &Request::Invoke { id, action: Cow::Borrowed("default") }.line(),
+        &Request::Invoke {
+            id,
+            action: Cow::Borrowed("default"),
+        }
+        .line(),
     );
     assert_eq!(reply["type"], "ok");
     assert!(harness.server.store().get(id).is_none());
@@ -381,7 +450,11 @@ fn invoke_runs_the_action_and_closes_unless_resident() {
 
     let resident = harness.notify_full(":1.1", "Music", "Playing", "body", true, Urgency::Normal);
     let reply = harness.ask(
-        &Request::Invoke { id: resident, action: Cow::Borrowed("default") }.line(),
+        &Request::Invoke {
+            id: resident,
+            action: Cow::Borrowed("default"),
+        }
+        .line(),
     );
     assert_eq!(reply["type"], "ok");
     assert!(harness.server.store().get(resident).is_some());
@@ -392,12 +465,25 @@ fn invoking_what_is_not_there_names_it() {
     let mut harness = Harness::new();
     let id = harness.notify(":1.1", "Firefox", "Done", "body");
     let reply = harness.ask(
-        &Request::Invoke { id: id + 100, action: Cow::Borrowed("default") }.line(),
+        &Request::Invoke {
+            id: id + 100,
+            action: Cow::Borrowed("default"),
+        }
+        .line(),
     );
     assert_eq!(reply["type"], "error");
-    assert!(reply["message"].as_str().unwrap().contains(&(id + 100).to_string()));
+    assert!(
+        reply["message"]
+            .as_str()
+            .unwrap()
+            .contains(&(id + 100).to_string())
+    );
     let reply = harness.ask(
-        &Request::Invoke { id, action: Cow::Borrowed("snooze") }.line(),
+        &Request::Invoke {
+            id,
+            action: Cow::Borrowed("snooze"),
+        }
+        .line(),
     );
     assert_eq!(reply["type"], "error");
     assert!(reply["message"].as_str().unwrap().contains("snooze"));
@@ -419,7 +505,11 @@ fn subscribe_dedicates_the_connection_within_the_cap() {
     );
     let mut out = Vec::new();
     responder.handle(
-        Request::Subscribe { events: vec![EventKind::Notify, EventKind::Close] }.line().as_bytes(),
+        Request::Subscribe {
+            events: vec![EventKind::Notify, EventKind::Close],
+        }
+        .line()
+        .as_bytes(),
         &mut out,
     );
     let reply: serde_json::Value = serde_json::from_slice(&out).unwrap();
@@ -434,7 +524,9 @@ fn subscribe_dedicates_the_connection_within_the_cap() {
 #[test]
 fn a_fifth_subscriber_is_refused() {
     let mut harness = Harness::new();
-    let request = Request::Subscribe { events: EventKind::ALL.to_vec() };
+    let request = Request::Subscribe {
+        events: EventKind::ALL.to_vec(),
+    };
     for _ in 0..4 {
         let now = Instant::now();
         let mut responder = Responder::new(
@@ -552,7 +644,10 @@ fn a_scoped_reload_ignores_a_half_edited_user_file() {
     // The user file is half-edited: the scoped reload never reads it.
     std::fs::write(&harness.config_path, "output = \n").unwrap();
     let reply = harness.ask_with_look(
-        &Request::Reload { scope: Some(ReloadScope::Look) }.line(),
+        &Request::Reload {
+            scope: Some(ReloadScope::Look),
+        }
+        .line(),
         Some(&state),
     );
     assert_eq!(reply["type"], "ok");
@@ -564,7 +659,12 @@ fn a_scoped_reload_ignores_a_half_edited_user_file() {
 #[test]
 fn a_scoped_reload_without_a_layer_is_refused() {
     let mut harness = Harness::new();
-    let reply = harness.ask(&Request::Reload { scope: Some(ReloadScope::Look) }.line());
+    let reply = harness.ask(
+        &Request::Reload {
+            scope: Some(ReloadScope::Look),
+        }
+        .line(),
+    );
     assert_eq!(reply["type"], "error");
     assert!(reply["message"].as_str().unwrap().contains("no look layer"));
 }
@@ -576,14 +676,20 @@ fn a_reload_refused_on_a_bad_fragment_keeps_the_last_good() {
     std::fs::create_dir_all(state.join("look")).unwrap();
     std::fs::write(state.join("look").join("notify.toml"), "radius = 4\n").unwrap();
     let reply = harness.ask_with_look(
-        &Request::Reload { scope: Some(ReloadScope::Look) }.line(),
+        &Request::Reload {
+            scope: Some(ReloadScope::Look),
+        }
+        .line(),
         Some(&state),
     );
     assert_eq!(reply["type"], "ok");
     // The fragment is half-written: not a table at all.
     std::fs::write(state.join("look").join("notify.toml"), "radius = \n").unwrap();
     let reply = harness.ask_with_look(
-        &Request::Reload { scope: Some(ReloadScope::Look) }.line(),
+        &Request::Reload {
+            scope: Some(ReloadScope::Look),
+        }
+        .line(),
         Some(&state),
     );
     assert_eq!(reply["type"], "error");
@@ -623,7 +729,10 @@ fn an_oversized_request_line_is_refused_and_the_connection_closes() {
         }
     }
     // Past the 64 KiB cap: refused, and the connection goes away.
-    let big = format!("{{\"protocol\":1,\"type\":\"list\",\"pad\":\"{}\"}}\n", "x".repeat(70_000));
+    let big = format!(
+        "{{\"protocol\":1,\"type\":\"list\",\"pad\":\"{}\"}}\n",
+        "x".repeat(70_000)
+    );
     client.write_all(big.as_bytes()).unwrap();
     let mut handler = Silent;
     use rustix::event::PollFlags;
@@ -635,8 +744,13 @@ fn an_oversized_request_line_is_refused_and_the_connection_closes() {
         }
         server.service(0, ready, &mut handler);
     }
-    assert!(server.conns().is_empty(), "the overlong line closes the connection");
-    client.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    assert!(
+        server.conns().is_empty(),
+        "the overlong line closes the connection"
+    );
+    client
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
     let mut reply = Vec::new();
     client.read_to_end(&mut reply).unwrap();
     let text = String::from_utf8(reply).unwrap();
@@ -661,7 +775,9 @@ fn the_seventeenth_connection_evicts_the_oldest_non_subscriber() {
     server.admit(stream);
     assert_eq!(server.conns().len(), MAX_CONNECTIONS);
     // The oldest is gone: it reads EOF.
-    clients[0].set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    clients[0]
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
     let mut byte = [0u8; 1];
     assert_eq!(clients[0].read(&mut byte).unwrap(), 0);
     let _ = extra;
@@ -672,7 +788,10 @@ fn event_lines_are_one_json_object_each() {
     let mut out = Vec::new();
     write_event(
         &mut out,
-        &super::protocol::Event::Close { id: 3, reason: "expired" },
+        &super::protocol::Event::Close {
+            id: 3,
+            reason: "expired",
+        },
     );
     let event: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(event["type"], "close");
@@ -681,7 +800,9 @@ fn event_lines_are_one_json_object_each() {
     let mut out = Vec::new();
     write_reply(
         &mut out,
-        &super::protocol::Reply::Subscribed { events: vec!["notify"] },
+        &super::protocol::Reply::Subscribed {
+            events: vec!["notify"],
+        },
     );
     let reply: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(reply["type"], "subscribed");

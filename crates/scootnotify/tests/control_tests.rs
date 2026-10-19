@@ -78,9 +78,7 @@ fn control_paths(runtime: &tempfile::TempDir) -> Paths {
     Paths {
         app: String::from("scootnotify"),
         display: DISPLAY.to_owned(),
-        socket: runtime
-            .path()
-            .join(format!("scootnotify-{DISPLAY}.sock")),
+        socket: runtime.path().join(format!("scootnotify-{DISPLAY}.sock")),
         lock: runtime.path().join(format!("scootnotify-{DISPLAY}.lock")),
     }
 }
@@ -91,7 +89,9 @@ fn control_paths(runtime: &tempfile::TempDir) -> Paths {
 fn wait_serving(client: &mut Conn, server: &mut Child) {
     let body = notify_body("Probe", 0, "p", "p", &[], 1);
     client
-        .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000)
+        .call(
+            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
+        )
         .expect("the first call queues");
     let start = Instant::now();
     loop {
@@ -127,7 +127,9 @@ fn wait_serving(client: &mut Conn, server: &mut Child) {
         }
         if errored {
             client
-                .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000)
+                .call(
+                    BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
+                )
                 .expect("the retry queues");
         }
         std::thread::sleep(Duration::from_millis(5));
@@ -166,14 +168,18 @@ fn notify(client: &mut Conn, app: &str, summary: &str, actions: &[&str]) -> u32 
     let token = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let body = notify_body(app, 0, summary, "body", actions, -1);
     client
-        .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token)
+        .call(
+            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token,
+        )
         .expect("the call queues");
     let start = Instant::now();
     loop {
         assert!(start.elapsed() < Duration::from_secs(10), "no Notify reply");
         let (events, _) = client.pump();
         for event in events {
-            if let Event::Reply { token: got, body, .. } = event
+            if let Event::Reply {
+                token: got, body, ..
+            } = event
                 && got == token
             {
                 return Reader::le(&body).u32().unwrap();
@@ -205,7 +211,10 @@ fn list_cards(runtime: &tempfile::TempDir) -> Vec<serde_json::Value> {
     let reply = client::send_to(&control_paths(runtime), &Request::List).expect("list answers");
     let parsed: serde_json::Value = serde_json::from_str(&reply).expect("the reply is JSON");
     assert_eq!(parsed["type"], "notifications");
-    parsed["notifications"].as_array().expect("an array").clone()
+    parsed["notifications"]
+        .as_array()
+        .expect("an array")
+        .clone()
 }
 
 /// Drains `client` until an `ActionInvoked` for `id` arrives: its action
@@ -213,7 +222,10 @@ fn list_cards(runtime: &tempfile::TempDir) -> Vec<serde_json::Value> {
 fn wait_invoked(client: &mut Conn, id: u32) -> String {
     let start = Instant::now();
     loop {
-        assert!(start.elapsed() < Duration::from_secs(10), "no ActionInvoked for {id}");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no ActionInvoked for {id}"
+        );
         let (events, _) = client.pump();
         for event in events {
             if let Event::Signal { member, body, .. } = event
@@ -234,7 +246,10 @@ fn wait_invoked(client: &mut Conn, id: u32) -> String {
 fn wait_closed(client: &mut Conn, id: u32) -> u32 {
     let start = Instant::now();
     loop {
-        assert!(start.elapsed() < Duration::from_secs(10), "no NotificationClosed for {id}");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no NotificationClosed for {id}"
+        );
         let (events, _) = client.pump();
         for event in events {
             if let Event::Signal { member, body, .. } = event
@@ -262,7 +277,9 @@ fn control_stream(runtime: &tempfile::TempDir) -> UnixStream {
     loop {
         match UnixStream::connect(&paths.socket) {
             Ok(stream) => {
-                stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .unwrap();
                 return stream;
             }
             Err(_) if start.elapsed() < Duration::from_secs(10) => {
@@ -293,17 +310,29 @@ fn version_and_list_answer() {
     wait_serving(&mut client, &mut server);
 
     let out = msg(&runtime, &["version"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("\"protocol\":1"), "{stdout}");
 
     let out = msg(&runtime, &["list", "--json"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("\"notifications\":[]"), "{stdout}");
 
     let out = msg(&runtime, &["list"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(String::from_utf8(out.stdout).unwrap().is_empty());
 
     kill(server);
@@ -317,22 +346,38 @@ fn dismiss_and_invoke_end_to_end() {
     let mut client = connect(&bus);
     wait_serving(&mut client, &mut server);
 
-    let id = notify(&mut client, "Firefox", "Download complete", &["default", "Open"]);
+    let id = notify(
+        &mut client,
+        "Firefox",
+        "Download complete",
+        &["default", "Open"],
+    );
     assert_eq!(list_cards(&runtime).len(), 1);
 
     let out = msg(&runtime, &["list"]);
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("Firefox") && stdout.contains("Download complete"), "{stdout}");
+    assert!(
+        stdout.contains("Firefox") && stdout.contains("Download complete"),
+        "{stdout}"
+    );
 
     let out = msg(&runtime, &["invoke", &id.to_string()]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(wait_closed(&mut client, id), 2);
     assert!(list_cards(&runtime).is_empty());
 
     let again = notify(&mut client, "Firefox", "Up to date", &["default", "Open"]);
     let out = msg(&runtime, &["dismiss", &again.to_string()]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(wait_closed(&mut client, again), 2);
     assert!(list_cards(&runtime).is_empty());
 
@@ -345,7 +390,11 @@ fn dismiss_and_invoke_end_to_end() {
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("snooze"));
     let out = msg(&runtime, &["dismiss", "--all"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(list_cards(&runtime).is_empty());
 
     kill(server);
@@ -359,9 +408,18 @@ fn invoke_emits_action_invoked_on_the_bus() {
     let mut client = connect(&bus);
     wait_serving(&mut client, &mut server);
 
-    let id = notify(&mut client, "Firefox", "Done", &["default", "Open", "view", "View"]);
+    let id = notify(
+        &mut client,
+        "Firefox",
+        "Done",
+        &["default", "Open", "view", "View"],
+    );
     let out = msg(&runtime, &["invoke", &id.to_string(), "view"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert_eq!(wait_invoked(&mut client, id), "view");
 
     kill(server);
@@ -383,13 +441,24 @@ fn subscribe_streams_notify_and_close() {
             scootnotify::control::protocol::EventKind::Close,
         ],
     };
-    (&reader.get_ref()).write_all(subscribe.line().as_bytes()).unwrap();
+    reader
+        .get_mut()
+        .write_all(subscribe.line().as_bytes())
+        .unwrap();
     let reply = read_line(&mut reader);
     assert!(reply.contains("\"subscribed\""), "{reply}");
 
-    let id = notify(&mut client, "Firefox", "Download complete", &["default", "Open"]);
+    let id = notify(
+        &mut client,
+        "Firefox",
+        "Download complete",
+        &["default", "Open"],
+    );
     let event = read_line(&mut reader);
-    assert!(event.contains("\"notify\"") && event.contains("Download complete"), "{event}");
+    assert!(
+        event.contains("\"notify\"") && event.contains("Download complete"),
+        "{event}"
+    );
 
     let out = msg(&runtime, &["dismiss", &id.to_string()]);
     assert!(out.status.success());
@@ -412,13 +481,20 @@ fn wait_matches_a_live_card_an_arrival_and_times_out() {
 
     // The baseline: already live before the wait starts.
     notify(&mut client, "Firefox", "Already here", &["default", "Open"]);
-    let out = msg(&runtime, &["wait", "--summary-contains", "Already", "--timeout", "5"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let out = msg(
+        &runtime,
+        &["wait", "--summary-contains", "Already", "--timeout", "5"],
+    );
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8(out.stdout).unwrap();
     assert!(stdout.contains("Already here"), "{stdout}");
 
     // An arrival while waiting.
-    let mut waiting = Command::new(env!("CARGO_BIN_EXE_scootnotify"))
+    let waiting = Command::new(env!("CARGO_BIN_EXE_scootnotify"))
         .arg("msg")
         .args(["wait", "--app", "Thunderbird", "--timeout", "10"])
         .env("XDG_RUNTIME_DIR", runtime.path())
@@ -431,7 +507,11 @@ fn wait_matches_a_live_card_an_arrival_and_times_out() {
     std::thread::sleep(Duration::from_millis(500));
     notify(&mut client, "Thunderbird", "New mail", &["default", "Open"]);
     let out = waiting.wait_with_output().expect("msg wait exits");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(
         String::from_utf8(out.stdout).unwrap().contains("New mail"),
         "the match prints"
@@ -439,7 +519,10 @@ fn wait_matches_a_live_card_an_arrival_and_times_out() {
 
     // Nothing arrives: the timeout, fast.
     let start = Instant::now();
-    let out = msg(&runtime, &["wait", "--summary-contains", "Never", "--timeout", "1"]);
+    let out = msg(
+        &runtime,
+        &["wait", "--summary-contains", "Never", "--timeout", "1"],
+    );
     assert!(!out.status.success());
     assert!(start.elapsed() < Duration::from_secs(10));
     assert!(String::from_utf8_lossy(&out.stderr).contains("timed out"));
@@ -455,11 +538,19 @@ fn a_reload_with_a_bad_file_keeps_the_running_config_and_state() {
     let mut client = connect(&bus);
     wait_serving(&mut client, &mut server);
 
-    let config = runtime.path().join("config").join("scoot").join("notify.toml");
+    let config = runtime
+        .path()
+        .join("config")
+        .join("scoot")
+        .join("notify.toml");
     std::fs::create_dir_all(config.parent().unwrap()).unwrap();
     std::fs::write(&config, "max_live = 64\n").unwrap();
     let out = msg(&runtime, &["reload"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let id = notify(&mut client, "Firefox", "Held", &["default", "Open"]);
     std::fs::write(&config, "max_live = \n").unwrap();
@@ -486,15 +577,28 @@ fn a_scoped_reload_ignores_a_half_edited_user_file() {
     wait_serving(&mut client, &mut server);
 
     // A look layer with one role set.
-    let fragment = runtime.path().join("state").join("scoot").join("look").join("notify.toml");
+    let fragment = runtime
+        .path()
+        .join("state")
+        .join("scoot")
+        .join("look")
+        .join("notify.toml");
     std::fs::create_dir_all(fragment.parent().unwrap()).unwrap();
     std::fs::write(&fragment, "radius = 4\n").unwrap();
     // The user file is half-edited: the scoped reload never reads it.
-    let config = runtime.path().join("config").join("scoot").join("notify.toml");
+    let config = runtime
+        .path()
+        .join("config")
+        .join("scoot")
+        .join("notify.toml");
     std::fs::create_dir_all(config.parent().unwrap()).unwrap();
     std::fs::write(&config, "max_live = \n").unwrap();
     let out = msg(&runtime, &["reload", "--look"]);
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(
         String::from_utf8(out.stdout)
             .unwrap()
@@ -524,7 +628,10 @@ fn the_subscriber_cap_holds() {
         let subscribe = Request::Subscribe {
             events: scootnotify::control::protocol::EventKind::ALL.to_vec(),
         };
-        (&reader.get_ref()).write_all(subscribe.line().as_bytes()).unwrap();
+        reader
+            .get_mut()
+            .write_all(subscribe.line().as_bytes())
+            .unwrap();
         let reply = read_line(&mut reader);
         assert!(reply.contains("\"subscribed\""), "{reply}");
         held.push(reader);
@@ -535,7 +642,10 @@ fn the_subscriber_cap_holds() {
     let subscribe = Request::Subscribe {
         events: scootnotify::control::protocol::EventKind::ALL.to_vec(),
     };
-    (&reader.get_ref()).write_all(subscribe.line().as_bytes()).unwrap();
+    reader
+        .get_mut()
+        .write_all(subscribe.line().as_bytes())
+        .unwrap();
     let reply = read_line(&mut reader);
     assert!(reply.contains("\"type\":\"error\""), "{reply}");
 
@@ -558,7 +668,9 @@ fn the_connection_cap_evicts_the_oldest_non_subscriber() {
     let _extra = control_stream(&runtime);
     let start = Instant::now();
     let mut byte = [0u8; 1];
-    held[0].set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    held[0]
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
     loop {
         match held[0].read(&mut byte) {
             // EOF: the daemon closed the oldest connection.
@@ -588,7 +700,10 @@ fn the_socket_is_owner_only() {
     let mut client = connect(&bus);
     wait_serving(&mut client, &mut server);
 
-    let mode = std::fs::metadata(&control_paths(&runtime).socket).unwrap().permissions().mode();
+    let mode = std::fs::metadata(&control_paths(&runtime).socket)
+        .unwrap()
+        .permissions()
+        .mode();
     assert_eq!(mode & 0o777, 0o600, "the socket is owner-only");
 
     kill(server);
@@ -608,9 +723,13 @@ fn notify_replies_carry_the_id() {
 
     let body = notify_body("App", 0, "Summary", "Body", &[], -1);
     client
-        .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 4242)
+        .call(
+            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 4242,
+        )
         .unwrap();
-    let Event::Reply { signature, body, .. } = until(
+    let Event::Reply {
+        signature, body, ..
+    } = until(
         &mut client,
         |event| matches!(event, Event::Reply { token: got, .. } if *got == 4242),
     )

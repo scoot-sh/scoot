@@ -290,7 +290,10 @@ struct Envelope<'a> {
 /// Reads a `u32` id from its JSON value: whole numbers that fit, nothing
 /// else (no floats, no strings, no negatives).
 fn read_id(value: &Value) -> Option<u32> {
-    value.as_u64().and_then(|n| u32::try_from(n).ok()).filter(|id| *id != 0)
+    value
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|id| *id != 0)
 }
 
 /// Parses one request line (without its newline).
@@ -487,9 +490,12 @@ pub fn view<'a>(
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Event<'a> {
-    /// A notification arrived, shown as `list` shows it.
+    /// A notification arrived, shown as `list` shows it. Boxed: the
+    /// view is the enum's largest variant by far, and events are rare
+    /// (bounded by the sender rate limit), so the indirection costs
+    /// nothing measurable.
     Notify {
-        notification: NotificationView<'a>,
+        notification: Box<NotificationView<'a>>,
     },
     /// A card closed: `expired`, `dismissed`, `closed`
     /// (`CloseNotification`) or `evicted` (the live cap).

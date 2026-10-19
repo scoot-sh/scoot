@@ -17,9 +17,7 @@ use std::time::Instant;
 
 use scoot_dbus::conn::Conn;
 
-use super::protocol::{
-    PROTOCOL_VERSION, ReloadScope, Reply, Request, write_reply,
-};
+use super::protocol::{PROTOCOL_VERSION, ReloadScope, Reply, Request, write_reply};
 use super::{Handler, Kinds, MAX_SUBSCRIBERS};
 use crate::bus::server::Server;
 use crate::config::{self, Config};
@@ -134,10 +132,7 @@ impl Handler for Responder<'_> {
                 ),
             },
             Request::Invoke { id, action } => {
-                if self
-                    .server
-                    .invoke_and_signal(self.bus, id, &action, None)
-                {
+                if self.server.invoke_and_signal(self.bus, id, &action, None) {
                     write_reply(out, &Reply::Ok { scope: None });
                 } else if self.server.store().get(id).is_none() {
                     write_reply(
@@ -150,9 +145,7 @@ impl Handler for Responder<'_> {
                     write_reply(
                         out,
                         &Reply::Error {
-                            message: &format_args!(
-                                "notification {id} has no action `{action}`"
-                            ),
+                            message: &format_args!("notification {id} has no action `{action}`"),
                         },
                     );
                 }
@@ -252,7 +245,10 @@ impl Responder<'_> {
 fn reload_layer_applied(state: Option<&Path>) -> Result<(Look, Vec<String>), String> {
     match look::reload_layer(state)? {
         Some((look, notes)) => Ok((look, notes)),
-        None => Ok((Look::default(), vec![String::from("no look layer: built-in defaults apply")])),
+        None => Ok((
+            Look::default(),
+            vec![String::from("no look layer: built-in defaults apply")],
+        )),
     }
 }
 

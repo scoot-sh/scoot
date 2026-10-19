@@ -302,7 +302,9 @@ pub fn subscribe_to(paths: &Paths, request: &Request<'_>) -> Result<Subscription
                 return Err(Error::Daemon(message.to_owned()));
             }
             if reply["type"] != "subscribed" {
-                return Err(Error::BadReply(format!("expected a `subscribed` reply: {line}")));
+                return Err(Error::BadReply(format!(
+                    "expected a `subscribed` reply: {line}"
+                )));
             }
             Ok(subscription)
         }

@@ -74,7 +74,9 @@ fn msg_list_defaults_to_human_and_json_is_a_flag() {
         Command::Msg(Msg::List { json: false })
     );
     assert_eq!(
-        parse(&["scootnotify", "msg", "list", "--json"]).unwrap().command,
+        parse(&["scootnotify", "msg", "list", "--json"])
+            .unwrap()
+            .command,
         Command::Msg(Msg::List { json: true })
     );
     assert!(parse(&["scootnotify", "msg", "list", "--all"]).is_err());
@@ -83,12 +85,22 @@ fn msg_list_defaults_to_human_and_json_is_a_flag() {
 #[test]
 fn msg_dismiss_takes_an_id_or_all_but_not_both_or_neither() {
     assert_eq!(
-        parse(&["scootnotify", "msg", "dismiss", "3"]).unwrap().command,
-        Command::Msg(Msg::Dismiss { id: Some(3), all: false })
+        parse(&["scootnotify", "msg", "dismiss", "3"])
+            .unwrap()
+            .command,
+        Command::Msg(Msg::Dismiss {
+            id: Some(3),
+            all: false
+        })
     );
     assert_eq!(
-        parse(&["scootnotify", "msg", "dismiss", "--all"]).unwrap().command,
-        Command::Msg(Msg::Dismiss { id: None, all: true })
+        parse(&["scootnotify", "msg", "dismiss", "--all"])
+            .unwrap()
+            .command,
+        Command::Msg(Msg::Dismiss {
+            id: None,
+            all: true
+        })
     );
     assert!(parse(&["scootnotify", "msg", "dismiss"]).is_err());
     assert!(parse(&["scootnotify", "msg", "dismiss", "0"]).is_err());
@@ -100,12 +112,22 @@ fn msg_dismiss_takes_an_id_or_all_but_not_both_or_neither() {
 #[test]
 fn msg_invoke_needs_an_id_and_defaults_its_action() {
     assert_eq!(
-        parse(&["scootnotify", "msg", "invoke", "3"]).unwrap().command,
-        Command::Msg(Msg::Invoke { id: 3, action: String::from("default") })
+        parse(&["scootnotify", "msg", "invoke", "3"])
+            .unwrap()
+            .command,
+        Command::Msg(Msg::Invoke {
+            id: 3,
+            action: String::from("default")
+        })
     );
     assert_eq!(
-        parse(&["scootnotify", "msg", "invoke", "3", "open"]).unwrap().command,
-        Command::Msg(Msg::Invoke { id: 3, action: String::from("open") })
+        parse(&["scootnotify", "msg", "invoke", "3", "open"])
+            .unwrap()
+            .command,
+        Command::Msg(Msg::Invoke {
+            id: 3,
+            action: String::from("open")
+        })
     );
     assert!(parse(&["scootnotify", "msg", "invoke"]).is_err());
     assert!(parse(&["scootnotify", "msg", "invoke", "0"]).is_err());
@@ -119,7 +141,9 @@ fn msg_reload_takes_an_optional_look_scope() {
         Command::Msg(Msg::Reload { look: false })
     );
     assert_eq!(
-        parse(&["scootnotify", "msg", "reload", "--look"]).unwrap().command,
+        parse(&["scootnotify", "msg", "reload", "--look"])
+            .unwrap()
+            .command,
         Command::Msg(Msg::Reload { look: true })
     );
     assert!(parse(&["scootnotify", "msg", "reload", "--config"]).is_err());
@@ -129,11 +153,17 @@ fn msg_reload_takes_an_optional_look_scope() {
 fn msg_subscribe_names_kinds_or_takes_them_all() {
     assert_eq!(
         parse(&["scootnotify", "msg", "subscribe"]).unwrap().command,
-        Command::Msg(Msg::Subscribe { events: EventKind::ALL.to_vec() })
+        Command::Msg(Msg::Subscribe {
+            events: EventKind::ALL.to_vec()
+        })
     );
     assert_eq!(
-        parse(&["scootnotify", "msg", "subscribe", "close"]).unwrap().command,
-        Command::Msg(Msg::Subscribe { events: vec![EventKind::Close] })
+        parse(&["scootnotify", "msg", "subscribe", "close"])
+            .unwrap()
+            .command,
+        Command::Msg(Msg::Subscribe {
+            events: vec![EventKind::Close]
+        })
     );
     let error = parse(&["scootnotify", "msg", "subscribe", "dnd"]).unwrap_err();
     assert!(error.contains("dnd"), "{error}");
@@ -143,14 +173,23 @@ fn msg_subscribe_names_kinds_or_takes_them_all() {
 fn msg_wait_filters_are_optional_and_the_timeout_has_a_default() {
     assert_eq!(
         parse(&["scootnotify", "msg", "wait"]).unwrap().command,
-        Command::Msg(Msg::Wait { app: None, summary: None, timeout_secs: 30 })
+        Command::Msg(Msg::Wait {
+            app: None,
+            summary: None,
+            timeout_secs: 30
+        })
     );
     assert_eq!(
         parse(&[
-            "scootnotify", "msg", "wait",
-            "--app", "Firefox",
-            "--summary-contains", "complete",
-            "--timeout", "5",
+            "scootnotify",
+            "msg",
+            "wait",
+            "--app",
+            "Firefox",
+            "--summary-contains",
+            "complete",
+            "--timeout",
+            "5",
         ])
         .unwrap()
         .command,

@@ -137,7 +137,9 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
             argv[at]
         ));
     } else {
-        return Err(String::from("a command is required (they are: daemon, msg)"));
+        return Err(String::from(
+            "a command is required (they are: daemon, msg)",
+        ));
     }
     while let Some(word) = argv.get(at) {
         if word == "--check" {
@@ -175,7 +177,9 @@ fn parse_msg(words: &[String]) -> Result<Msg, String> {
                 if word == "--json" {
                     json = true;
                 } else {
-                    return Err(format!("unknown flag '{word}' for `msg list` (it takes: --json)"));
+                    return Err(format!(
+                        "unknown flag '{word}' for `msg list` (it takes: --json)"
+                    ));
                 }
             }
             Ok(Msg::List { json })
@@ -202,8 +206,12 @@ fn parse_msg(words: &[String]) -> Result<Msg, String> {
                 }
             }
             match (id, all) {
-                (Some(_), true) => Err(String::from("`msg dismiss` takes an id or `--all`, not both")),
-                (None, false) => Err(String::from("`msg dismiss` needs a notification id or `--all`")),
+                (Some(_), true) => Err(String::from(
+                    "`msg dismiss` takes an id or `--all`, not both",
+                )),
+                (None, false) => Err(String::from(
+                    "`msg dismiss` needs a notification id or `--all`",
+                )),
                 (id, all) => Ok(Msg::Dismiss { id, all }),
             }
         }
@@ -211,12 +219,22 @@ fn parse_msg(words: &[String]) -> Result<Msg, String> {
             let id = rest.first().ok_or_else(|| {
                 String::from("`msg invoke` needs a notification id (and an action, which defaults to `default`)")
             })?;
-            let id = id.parse::<u32>().ok().filter(|id| *id != 0).ok_or_else(|| {
-                format!("`msg invoke` needs a notification id from 1 to 4294967295, not '{id}'")
-            })?;
-            let action = rest.get(1).cloned().unwrap_or_else(|| String::from("default"));
+            let id = id
+                .parse::<u32>()
+                .ok()
+                .filter(|id| *id != 0)
+                .ok_or_else(|| {
+                    format!("`msg invoke` needs a notification id from 1 to 4294967295, not '{id}'")
+                })?;
+            let action = rest
+                .get(1)
+                .cloned()
+                .unwrap_or_else(|| String::from("default"));
             if rest.len() > 2 {
-                return Err(format!("unknown argument '{}' for `msg invoke` (it takes: ID [ACTION])", rest[2]));
+                return Err(format!(
+                    "unknown argument '{}' for `msg invoke` (it takes: ID [ACTION])",
+                    rest[2]
+                ));
             }
             Ok(Msg::Invoke { id, action })
         }
@@ -226,7 +244,9 @@ fn parse_msg(words: &[String]) -> Result<Msg, String> {
                 if word == "--look" {
                     look = true;
                 } else {
-                    return Err(format!("unknown flag '{word}' for `msg reload` (it takes: --look)"));
+                    return Err(format!(
+                        "unknown flag '{word}' for `msg reload` (it takes: --look)"
+                    ));
                 }
             }
             Ok(Msg::Reload { look })
@@ -234,8 +254,9 @@ fn parse_msg(words: &[String]) -> Result<Msg, String> {
         "subscribe" => {
             let mut events = Vec::new();
             for word in rest {
-                let kind = EventKind::parse(word)
-                    .ok_or_else(|| format!("unknown event kind `{word}` (they are: notify, close, invoke)"))?;
+                let kind = EventKind::parse(word).ok_or_else(|| {
+                    format!("unknown event kind `{word}` (they are: notify, close, invoke)")
+                })?;
                 if !events.contains(&kind) {
                     events.push(kind);
                 }
@@ -248,7 +269,9 @@ fn parse_msg(words: &[String]) -> Result<Msg, String> {
         "wait" => parse_wait(rest),
         "version" => {
             if let Some(word) = rest.first() {
-                return Err(format!("unknown argument '{word}' for `msg version` (it takes none)"));
+                return Err(format!(
+                    "unknown argument '{word}' for `msg version` (it takes none)"
+                ));
             }
             Ok(Msg::Version)
         }
@@ -266,9 +289,9 @@ fn parse_wait(words: &[String]) -> Result<Msg, String> {
     let mut at = 0;
     while let Some(word) = words.get(at) {
         if word == "--app" {
-            let value = words.get(at + 1).ok_or_else(|| {
-                String::from("`--app` needs a value (the app name to wait for)")
-            })?;
+            let value = words
+                .get(at + 1)
+                .ok_or_else(|| String::from("`--app` needs a value (the app name to wait for)"))?;
             app = Some(value.clone());
             at += 2;
         } else if word == "--summary-contains" {
@@ -278,15 +301,17 @@ fn parse_wait(words: &[String]) -> Result<Msg, String> {
             summary = Some(value.clone());
             at += 2;
         } else if word == "--timeout" {
-            let value = words.get(at + 1).ok_or_else(|| {
-                String::from("`--timeout` needs a value (seconds to wait)")
-            })?;
+            let value = words
+                .get(at + 1)
+                .ok_or_else(|| String::from("`--timeout` needs a value (seconds to wait)"))?;
             timeout_secs = value.parse::<u64>().map_err(|_| {
                 format!("`--timeout` needs a whole number of seconds, not '{value}'")
             })?;
             at += 2;
         } else {
-            return Err(format!("unknown flag '{word}' for `msg wait` (it takes: --app, --summary-contains, --timeout)"));
+            return Err(format!(
+                "unknown flag '{word}' for `msg wait` (it takes: --app, --summary-contains, --timeout)"
+            ));
         }
     }
     Ok(Msg::Wait {
