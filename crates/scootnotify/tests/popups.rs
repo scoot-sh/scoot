@@ -335,7 +335,7 @@ fn pixels_per_card_state() {
     let shot = || session.scoot_screenshot(1);
 
     // Normal: the `focus` ring, the surface fill, foreground ink.
-    let _ = notify(&mut client, &mut server, "a", 0, "Hello", "World", &[], &[], 0, 101);
+    let _ = notify(&mut client, &mut server, &log, "a", 0, "Hello", "World", &[], &[], 0, 101);
     wait_shown(&mut server, &log, "the normal card", || {
         shot().at(x0 + 180, y0 + 1) == rgb(FOCUS)
     });
@@ -346,7 +346,7 @@ fn pixels_per_card_state() {
     assert!(ink, "the summary draws foreground ink");
 
     // Critical: the `urgent` ring over the same fill.
-    let _ = notify(&mut client, &mut server, "b", 0, "Fire", "Alarm", &[], &[("urgency", 2)], 0, 102);
+    let _ = notify(&mut client, &mut server, &log, "b", 0, "Fire", "Alarm", &[], &[("urgency", 2)], 0, 102);
     wait_shown(&mut server, &log, "the critical card", || {
         shot().at(x0 + 180, y0 + 1) == rgb(URGENT)
     });
@@ -390,7 +390,7 @@ fn pixels_per_card_state() {
     });
 
     // Low: the `border` ring over the same fill.
-    let _ = notify(&mut client, &mut server, "e", 0, "Quiet", "Low", &[], &[("urgency", 0)], 0, 100);
+    let _ = notify(&mut client, &mut server, &log, "e", 0, "Quiet", "Low", &[], &[("urgency", 0)], 0, 100);
     wait_shown(&mut server, &log, "the low card", || {
         shot().at(x0 + 180, y0 + 1) == rgb(BORDER_LOW)
     });
@@ -507,7 +507,7 @@ fn a_locked_arrival_waits_for_unlock() {
     }
     // A 2 s card arrives under the lock: nothing drawn, and no expiry
     // through a full timeout and more (its clock never started).
-    let id = notify(&mut client, &mut server, "a", 0, "Hello", "World", &[], &[], 2000, 121);
+    let id = notify(&mut client, &mut server, &log, "a", 0, "Hello", "World", &[], &[], 2000, 121);
     std::thread::sleep(Duration::from_millis(500));
     assert!(covered(&session), "a card drawn over the lock");
     std::thread::sleep(Duration::from_millis(2500));
@@ -582,7 +582,7 @@ fn unplugging_an_output_moves_the_stack() {
         }
         found.then_some(())
     };
-    let _ = notify(&mut client, &mut server, "a", 0, "Hello", "World", &[], &[], 0, 131);
+    let _ = notify(&mut client, &mut server, &log, "a", 0, "Hello", "World", &[], &[], 0, 131);
     let names: Vec<String> = session
         .swaymsg(&["-t", "get_outputs", "-r"])
         .pipe_outputs();
@@ -629,7 +629,7 @@ fn empty_holds_no_surface_or_buffers() {
         "an idle daemon maps no buffers"
     );
     let (x0, y0) = stack_origin();
-    let id = notify(&mut client, &mut server, "a", 0, "Hello", "World", &[], &[], 0, 141);
+    let id = notify(&mut client, &mut server, &log, "a", 0, "Hello", "World", &[], &[], 0, 141);
     wait_shown(&mut server, &log, "the card", || {
         session.scoot_screenshot(1).at(x0 + 180, y0 + 1) == rgb(FOCUS)
     });
