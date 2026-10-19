@@ -9,7 +9,8 @@ use std::path::Path;
 /// Our output files, the only ones `build --out` may write: the two
 /// first-party fragments, the toolkit fragments, foot's `foot.ini`, the
 /// launcher and locker leaves, the greeter fragment (`greet.toml`: the
-/// login screen reads it at system build time, never live), the
+/// login screen reads it at system build time, never live), the launcher
+/// fragment (`launch.toml`: the panel reads it at every open), the
 /// render record, and the daemon leaves. `foot.ini` joins them only when
 /// the look has a `[terminal]` table, and `nightlight` only when the look
 /// names a temperature; `fcitx5/theme.conf` lives under its directory,
@@ -17,13 +18,14 @@ use std::path::Path;
 /// `qt6ct.conf`, `settings.ini` and the fontconfig file stay
 /// apply-rendered (the conf points through the state link, which `build`
 /// does not know).
-const BUILD_FILES: [&str; 13] = [
+const BUILD_FILES: [&str; 14] = [
     "scoot.toml",
     "bar.toml",
     "foot.ini",
     "fuzzel.ini",
     "swaylock",
     "greet.toml",
+    "launch.toml",
     "render.json",
     "gtk/gtk-3.0.css",
     "gtk/gtk-4.0.css",

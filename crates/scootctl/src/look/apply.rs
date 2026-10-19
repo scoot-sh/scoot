@@ -35,8 +35,8 @@ use scoot_look::state::{
 };
 use scoot_look::{
     Origin, RawLook, RenderInputs, check_contrast, parse_kv_config, render_bar, render_foot,
-    render_fuzzel, render_greet, render_gtk3_css, render_gtk4_css, render_json, render_leaf_files,
-    render_qt_scheme, render_scoot, render_swaylock, resolve, source_hash,
+    render_fuzzel, render_greet, render_gtk3_css, render_gtk4_css, render_json, render_launch,
+    render_leaf_files, render_qt_scheme, render_scoot, render_swaylock, resolve, source_hash,
 };
 
 use super::cycle::{Preview, PreviewRead, clear_preview, read_preview, write_preview};
@@ -837,10 +837,11 @@ fn check_foot_fragment(
 /// Renders the launcher, locker and greeter leaves and reparses each —
 /// the same fragments `apply` and `build` write, so `validate` and
 /// `apply` agree on them. The reparse is the check: neither line-based
-/// format has a check the tool can always run, and the greeter fragment
-/// has no app parser yet (scootgreet is later), so a fragment that does
-/// not read back as the pairs or table it wrote names a renderer bug.
-/// Refusals land in `errors`.
+/// format has a check the tool can always run, and the greeter and
+/// launcher fragments have no app parser yet (scootgreet is later;
+/// scootlaunch reads its fragment live, so a bad render would break
+/// every open), so a fragment that does not read back as the pairs or
+/// table it wrote names a renderer bug. Refusals land in `errors`.
 fn check_leaf_fragments(
     name: &str,
     merged: &scoot_look::ResolvedLook,
@@ -866,19 +867,24 @@ fn check_leaf_fragments(
             return;
         }
     }
-    let greet = match render_greet(merged) {
-        Ok(greet) => greet,
-        Err(error) => {
+    for (file, fragment) in [
+        ("greet.toml", render_greet(merged)),
+        ("launch.toml", render_launch(merged)),
+    ] {
+        let fragment = match fragment {
+            Ok(fragment) => fragment,
+            Err(error) => {
+                validation
+                    .errors
+                    .push(format!("cannot render {name}: {error}"));
+                return;
+            }
+        };
+        if let Err(error) = fragment.parse::<toml::Table>() {
             validation
                 .errors
-                .push(format!("cannot render {name}: {error}"));
-            return;
+                .push(format!("rendered {file} does not parse: {error}"));
         }
-    };
-    if let Err(error) = greet.parse::<toml::Table>() {
-        validation
-            .errors
-            .push(format!("rendered greet.toml does not parse: {error}"));
     }
 }
 
@@ -1487,8 +1493,9 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 /// adds the greeter fragment (`greet.toml`, read at system build time
 /// only, never live); 10 adds the terminal static leaves
 /// (`apps/helix.toml`, `apps/btop.theme`, `apps/starship.toml`, dropped
-/// from installed looks without `--trust`).
-pub const RENDER_VERSION: u32 = 10;
+/// from installed looks without `--trust`); 11 adds the launcher
+/// fragment (`launch.toml`, read at every panel open).
+pub const RENDER_VERSION: u32 = 11;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
@@ -1564,10 +1571,10 @@ fn cache_key(
 }
 
 /// Every fragment one render writes, owned: the per-app configs plus the
-/// daemon leaves, the greeter fragment, the terminal static leaves and the
-/// identity document. Both cache slots (the content-keyed one and `watch`'s
-/// reused one) render through this, so a watched save renders exactly what
-/// an apply would.
+/// daemon leaves, the greeter and launcher fragments, the terminal
+/// static leaves and the identity document. Both cache slots (the
+/// content-keyed one and `watch`'s reused one) render through this, so a
+/// watched save renders exactly what an apply would.
 struct RenderedFragments {
     scoot: String,
     bar: String,
@@ -1578,6 +1585,7 @@ struct RenderedFragments {
     fuzzel: String,
     swaylock: String,
     greet: String,
+    launch: String,
     rendered_json: String,
     leaves: Vec<(String, String)>,
     static_files: Vec<(String, Vec<u8>)>,
@@ -1609,12 +1617,14 @@ fn render_all_fragments(
     let swaylock =
         render_swaylock(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     let greet = render_greet(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let launch = render_launch(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     let leaves =
         render_leaf_files(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     for (file, text) in [
         ("scoot.toml", &scoot),
         ("bar.toml", &bar),
         ("greet.toml", &greet),
+        ("launch.toml", &launch),
     ] {
         text.parse::<toml::Table>()
             .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
@@ -1638,6 +1648,7 @@ fn render_all_fragments(
         fuzzel,
         swaylock,
         greet,
+        launch,
         rendered_json,
         leaves,
         static_files,
@@ -1658,6 +1669,7 @@ fn write_render_dir(tmp: &Path, fragments: &RenderedFragments) -> Result<(), std
         ("fuzzel.ini", fragments.fuzzel.as_str()),
         ("swaylock", fragments.swaylock.as_str()),
         ("greet.toml", fragments.greet.as_str()),
+        ("launch.toml", fragments.launch.as_str()),
     ];
     if let Some(foot) = &fragments.foot {
         files.push(("foot.ini", foot.as_str()));
@@ -1710,8 +1722,9 @@ fn render_tmp_dir(cache: &Path, name: &str) -> PathBuf {
 
 /// Whether the cached directory holds a complete render of `name`: its
 /// `render.json` names this look and every expected file is present,
-/// including the greeter fragment and the expected terminal static leaves
-/// (recomputed with `trust`, notes discarded: completeness only).
+/// including the greeter and launcher fragments and the expected
+/// terminal static leaves (recomputed with `trust`, notes discarded:
+/// completeness only).
 fn cached_complete(
     target: &Path,
     name: &str,
@@ -1743,6 +1756,7 @@ fn cached_complete(
         && target.join("fuzzel.ini").is_file()
         && target.join("swaylock").is_file()
         && target.join("greet.toml").is_file()
+        && target.join("launch.toml").is_file()
         && leaves.iter().all(|(file, _)| target.join(file).is_file())
         && static_files
             .iter()
@@ -1754,7 +1768,8 @@ fn cached_complete(
 /// (`gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`, `qt/scoot-look.conf`),
 /// `foot.ini` (only when the look has a `[terminal]` table), the launcher
 /// and locker leaves (`fuzzel.ini`, `swaylock`), the greeter fragment
-/// (`greet.toml`, read at system build time only, never live),
+/// (`greet.toml`, read at system build time only, never live), the
+/// launcher fragment (`launch.toml`, read at every panel open),
 /// `render.json` and the daemon leaves (`mako`,
 /// `wob.ini`, `fcitx5/theme.conf`, `nightlight` when the look names a
 /// temperature) and the terminal static leaves (`apps/helix.toml`,
@@ -3431,12 +3446,14 @@ pub fn build_to_out(
     /// One full render: the two first-party fragments, foot's `foot.ini`
     /// (only when the look has a `[terminal]` table), the launcher and
     /// locker leaves (`fuzzel.ini`, `swaylock`), the greeter fragment
-    /// (`greet.toml`), the record, and the daemon leaves
-    /// (`fcitx5/theme.conf` under its directory).
+    /// (`greet.toml`), the launcher fragment (`launch.toml`), the
+    /// record, and the daemon leaves (`fcitx5/theme.conf` under its
+    /// directory).
     type FullRender = (
         String,
         String,
         Option<String>,
+        String,
         String,
         String,
         String,
@@ -3456,10 +3473,13 @@ pub fn build_to_out(
             render_swaylock(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
         let greet =
             render_greet(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+        let launch =
+            render_launch(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
         for (file, text) in [
             ("scoot.toml", &scoot),
             ("bar.toml", &bar),
             ("greet.toml", &greet),
+            ("launch.toml", &launch),
         ] {
             text.parse::<toml::Table>()
                 .map_err(|error| format!("rendered {file} does not parse: {error}"))?;
@@ -3482,6 +3502,7 @@ pub fn build_to_out(
             fuzzel,
             swaylock,
             greet,
+            launch,
             rendered_json,
             leaves,
         ))
@@ -3498,6 +3519,7 @@ pub fn build_to_out(
                     fuzzel: &str,
                     swaylock: &str,
                     greet: &str,
+                    launch: &str,
                     gtk3: &str,
                     gtk4: &str,
                     qt: &str,
@@ -3514,6 +3536,7 @@ pub fn build_to_out(
             ("fuzzel.ini".to_owned(), fuzzel.to_owned()),
             ("swaylock".to_owned(), swaylock.to_owned()),
             ("greet.toml".to_owned(), greet.to_owned()),
+            ("launch.toml".to_owned(), launch.to_owned()),
         ];
         if let Some(foot) = foot {
             staged.push(("foot.ini".to_owned(), foot.clone()));
@@ -3534,6 +3557,7 @@ pub fn build_to_out(
         mut fuzzel,
         mut swaylock,
         mut greet,
+        mut launch,
         mut rendered_json,
         mut leaf_files,
     ) = render_once(&render_inputs)?;
@@ -3555,7 +3579,7 @@ pub fn build_to_out(
     // The staged files mirror the cache render exactly (first-party
     // fragments, the toolkit triple, foot's `foot.ini` when the look has a
     // `[terminal]` table, the launcher and locker leaves, the greeter
-    // fragment, plus every leaf
+    // and launcher fragments, plus every leaf
     // file, `fcitx5/theme.conf` under its directory): validate renders
     // what apply renders.
     let mut staged: Vec<(String, String)> = stage_of(
@@ -3565,6 +3589,7 @@ pub fn build_to_out(
         &fuzzel,
         &swaylock,
         &greet,
+        &launch,
         &gtk3_css,
         &gtk4_css,
         &qt_scheme,
@@ -3622,6 +3647,7 @@ pub fn build_to_out(
                     fuzzel,
                     swaylock,
                     greet,
+                    launch,
                     rendered_json,
                     leaf_files,
                 ) = render_once(&render_inputs)?;
@@ -3632,6 +3658,7 @@ pub fn build_to_out(
                     &fuzzel,
                     &swaylock,
                     &greet,
+                    &launch,
                     &gtk3_css,
                     &gtk4_css,
                     &qt_scheme,
