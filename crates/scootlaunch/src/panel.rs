@@ -282,6 +282,8 @@ pub fn open(opts: Options) -> i32 {
         .saturating_mul(2)
         .saturating_add(row_h.saturating_mul(list_rows.saturating_add(1)))
         .saturating_add(GAP);
+    let icon_theme = look.icon_theme.clone();
+    let icon_bases = crate::icons::theme_bases();
     run_panel(
         claim,
         model,
@@ -295,6 +297,8 @@ pub fn open(opts: Options) -> i32 {
             launch,
             dmenu,
             empty_text,
+            icon_theme,
+            icon_bases,
         },
     )
 }
@@ -345,6 +349,8 @@ struct PanelSpec {
     launch: LaunchCtx,
     dmenu: Option<DmenuSpec>,
     empty_text: &'static str,
+    icon_theme: String,
+    icon_bases: Vec<PathBuf>,
 }
 
 /// The dmenu presentation: resolved in [`open`] before the model moves
@@ -428,6 +434,8 @@ fn run_panel(
         spec.launch,
         spec.dmenu,
         spec.empty_text,
+        spec.icon_theme,
+        spec.icon_bases,
     );
     // The registry sweep: globals, then outputs, keyboard and pointer.
     if !pump.wait_until(PATIENCE, &mut app, |app| app.ready()) {
@@ -561,6 +569,12 @@ struct App {
     dirty: bool,
     exit: Option<Exit>,
     closed_retried: bool,
+    /// The icon theme and bases the visible rows resolve through, read
+    /// once at open. The cache lives for the open only: only visible
+    /// rows load, at most one file each, bounded by the module.
+    icon_theme: String,
+    icon_bases: Vec<PathBuf>,
+    icons: crate::icons::Cache,
 }
 
 impl App {
@@ -574,6 +588,8 @@ impl App {
         launch: LaunchCtx,
         dmenu: Option<DmenuSpec>,
         empty_text: &'static str,
+        icon_theme: String,
+        icon_bases: Vec<PathBuf>,
     ) -> Self {
         Self {
             claim,
@@ -611,6 +627,9 @@ impl App {
             dirty: true,
             exit: None,
             closed_retried: false,
+            icon_theme,
+            icon_bases,
+            icons: crate::icons::Cache::default(),
         }
     }
 
@@ -780,18 +799,24 @@ impl App {
         let error = self.spawn_error.as_ref().map(|(text, _)| text.clone());
         let dmenu = self.dmenu.as_ref();
         match &self.model {
-            Model::Apps(ui) | Model::Run(ui) => paint_panel(
-                slot.pixels_mut(),
-                dims,
-                ui,
-                text,
-                look,
-                self.width,
-                self.height,
-                self.row_h,
-                error.as_deref(),
-                self.empty_text,
-            ),
+            Model::Apps(ui) | Model::Run(ui) => {
+                paint_panel(
+                    slot.pixels_mut(),
+                    dims,
+                    ui,
+                    text,
+                    look,
+                    self.width,
+                    self.height,
+                    self.row_h,
+                    error.as_deref(),
+                    self.empty_text,
+                    frame.scale,
+                    &self.icon_theme,
+                    &self.icon_bases,
+                    &mut self.icons,
+                );
+            }
             Model::Dmenu(dui) => {
                 let Some(dmenu) = dmenu else {
                     return;
@@ -955,6 +980,13 @@ impl App {
 /// `dims` is the buffer size; the logical `width`/`height` size the panel
 /// when the compositor configures larger. The entry sits at the top, the
 /// list below a [`GAP`]. A fresh spawn failure draws instead of the list.
+///
+/// The icon column shifts both entry and list text right by the icon
+/// side plus one space, so the two stay aligned
+/// ([`Geometry::text_x`]): the entry draws the selected row's icon (or
+/// its tile), each visible list row draws its own. Only visible rows
+/// resolve or decode (one file each, bounded by [`crate::icons`]); the
+/// keystroke path never touches the cache.
 #[allow(clippy::too_many_arguments)]
 fn paint_panel(
     pixels: &mut [u8],
@@ -967,26 +999,73 @@ fn paint_panel(
     row_h: u32,
     error: Option<&str>,
     empty_text: &str,
+    scale: scootui::density::Scale,
+    icon_theme: &str,
+    icon_bases: &[PathBuf],
+    icons: &mut crate::icons::Cache,
 ) {
     let (buffer_w, buffer_h) = dims;
-    let width = width.min(buffer_w);
-    let height = height.min(buffer_h);
-    if width == 0 || height == 0 || row_h == 0 {
+    let factor = scale.factor().max(0.25);
+    let scale_len = |logical: u32| -> u32 {
+        if logical == 0 {
+            0
+        } else {
+            ((logical as f64 * factor)
+                .round()
+                .max(1.0)
+                .min(u32::MAX as f64)) as u32
+        }
+    };
+    let width_d = scale_len(width).min(buffer_w).max(1);
+    let height_d = scale_len(height).min(buffer_h).max(1);
+    let row_h_d = scale_len(row_h).max(1);
+    let border_d = scale_len(BORDER).max(1);
+    let pad_d = scale_len(PAD);
+    let gap_d = scale_len(GAP);
+    if width_d == 0 || height_d == 0 || row_h_d == 0 {
         return;
     }
-    chrome(pixels, buffer_w, width, height, look);
+    chrome_scaled(pixels, buffer_w, width_d, height_d, border_d, look);
     let Some(mut canvas) = Canvas::new(pixels, buffer_w, buffer_h) else {
         return;
     };
-    let em = look.font_size_px.clamp(1.0, 256.0);
-    let inner = BORDER.saturating_add(PAD);
+    let em = ((look.font_size_px as f64 * factor) as f32).clamp(1.0, 512.0);
+    let inner = border_d.saturating_add(pad_d);
+    // The icon column: one icon side plus one space, in device pixels.
+    // The side is the em rounded (as the bar's), fitted into the row.
+    let mut side = Text::art_side(em);
+    side = side
+        .min(row_h_d.saturating_sub(2).max(1))
+        .min(crate::icons::MAX_RENDER_SIDE)
+        .max(1);
+    let gap = text.art_gap(em).max(1);
+    let icon_col = side.saturating_add(gap);
+    let icon_x = inner.saturating_add((em * 0.5).round().clamp(0.0, 64.0) as u32);
     let entry_geo = Geometry {
-        x: inner,
+        x: inner.saturating_add(icon_col),
         y: inner,
-        width: width.saturating_sub(inner.saturating_mul(2)),
-        row_height: row_h,
+        width: width_d.saturating_sub(inner.saturating_mul(2).saturating_add(icon_col)),
+        row_height: row_h_d,
         em,
     };
+    // The entry's icon: the selection's, so the entry shows what Enter
+    // would launch. A tile when nothing resolves, as in the rows.
+    let selected = ui.selected();
+    let entry_icon = selected.and_then(|entry| entry.icon.as_deref());
+    let entry_label = selected.map(|entry| entry.name.as_str()).unwrap_or("");
+    draw_icon(
+        &mut canvas,
+        text,
+        look,
+        icons,
+        icon_theme,
+        icon_bases,
+        entry_icon,
+        entry_label,
+        icon_x,
+        inner.saturating_add(row_h_d.saturating_sub(side) / 2),
+        side,
+    );
     paint_entry(
         &mut canvas,
         text,
@@ -998,8 +1077,8 @@ fn paint_panel(
     );
     if let Some(error) = error {
         let metrics = text.metrics(em);
-        let baseline =
-            i64::from(inner.saturating_add(row_h).saturating_add(GAP)) + metrics.baseline(row_h);
+        let baseline = i64::from(inner.saturating_add(row_h_d).saturating_add(gap_d))
+            + metrics.baseline(row_h_d);
         text.draw(
             &mut canvas,
             None,
@@ -1014,8 +1093,8 @@ fn paint_panel(
     }
     if ui.list().count() == 0 {
         let metrics = text.metrics(em);
-        let baseline =
-            i64::from(inner.saturating_add(row_h).saturating_add(GAP)) + metrics.baseline(row_h);
+        let baseline = i64::from(inner.saturating_add(row_h_d).saturating_add(gap_d))
+            + metrics.baseline(row_h_d);
         text.draw(
             &mut canvas,
             None,
@@ -1029,10 +1108,10 @@ fn paint_panel(
         return;
     }
     let list_geo = Geometry {
-        x: inner,
-        y: inner.saturating_add(row_h).saturating_add(GAP),
+        x: inner.saturating_add(icon_col),
+        y: inner.saturating_add(row_h_d).saturating_add(gap_d),
         width: entry_geo.width,
-        row_height: row_h,
+        row_height: row_h_d,
         em,
     };
     paint_list(
@@ -1044,6 +1123,106 @@ fn paint_panel(
         &|row| ui.row_text(row),
         false,
     );
+    // The visible rows' icons, after the text (so a slow filesystem
+    // never moves the text): one bounded load each, cached per open.
+    let list_y = inner.saturating_add(row_h_d).saturating_add(gap_d);
+    for (slot, row) in ui.list().visible_range().enumerate() {
+        let slot = slot as u32;
+        let y = list_y.saturating_add(slot.saturating_mul(row_h_d));
+        let icon = ui.row_icon(row);
+        let label = ui.row_label(row);
+        draw_icon(
+            &mut canvas,
+            text,
+            look,
+            icons,
+            icon_theme,
+            icon_bases,
+            icon,
+            label,
+            icon_x,
+            y.saturating_add(row_h_d.saturating_sub(side) / 2),
+            side,
+        );
+    }
+}
+
+/// Draws one row's icon at (`x`, `y`), `side` device pixels square: the
+/// decoded image blended over the panel, or a letter tile in `accent`
+/// with the letter in `background`. Never panics: a short buffer or a
+/// missing glyph draws nothing.
+fn draw_icon(
+    canvas: &mut Canvas<'_>,
+    text: &mut Text,
+    look: &Look,
+    icons: &mut crate::icons::Cache,
+    theme: &str,
+    bases: &[PathBuf],
+    icon: Option<&str>,
+    label: &str,
+    x: u32,
+    y: u32,
+    side: u32,
+) {
+    if side == 0 {
+        return;
+    }
+    let loaded = icons.get(theme, bases, icon, label, side);
+    match loaded {
+        crate::icons::Icon::Image(decoded) => {
+            let width = canvas.width();
+            let clip = scootui::paint::Span { x: 0, width };
+            let width = decoded.width.min(side);
+            let height = decoded.height.min(side);
+            for row in 0..height {
+                let Some(line) = decoded.pixels.get(
+                    row as usize * decoded.width as usize * 4
+                        ..row as usize * decoded.width as usize * 4 + width as usize * 4,
+                ) else {
+                    continue;
+                };
+                for (col, pixel) in line.chunks_exact(4).enumerate() {
+                    let pixel = [pixel[0], pixel[1], pixel[2], pixel[3]];
+                    canvas.blend_premultiplied(
+                        x as i64 + col as i64,
+                        y as i64 + row as i64,
+                        pixel,
+                        clip,
+                    );
+                }
+            }
+        }
+        crate::icons::Icon::Tile(letter) => {
+            canvas.fill_rect(
+                scootui::paint::Span { x, width: side },
+                y,
+                y.saturating_add(side),
+                look.theme.accent,
+            );
+            let mut letter_text = [0u8; 4];
+            let letter_str = letter.encode_utf8(&mut letter_text);
+            let em = tile_em(side);
+            let metrics = text.metrics(em);
+            let baseline = y as i64 + metrics.baseline(side);
+            let ink_w = text.measure(None, letter_str, em);
+            let at = x.saturating_add(side.saturating_sub(ink_w) / 2);
+            text.draw(
+                canvas,
+                None,
+                letter_str,
+                em,
+                at as i64,
+                baseline,
+                look.theme.background,
+                scootui::paint::Span { x, width: side },
+            );
+        }
+    }
+}
+
+/// The tile letter's em: the icon side, so the glyph fills the tile.
+fn tile_em(side: u32) -> f32 {
+    (side as f32 * 0.72).clamp(1.0, 512.0)
 }
 
 /// Paints the dmenu panel: the same chrome, the prompt at the entry's
@@ -1150,6 +1329,20 @@ fn paint_dmenu(
 /// over the panel's pixels; redraws happen on state changes, never per
 /// frame.
 fn chrome(pixels: &mut [u8], buffer_w: u32, width: u32, height: u32, look: &Look) {
+    chrome_scaled(pixels, buffer_w, width, height, BORDER, look);
+}
+
+/// The chrome at a device border width: the fractional draw scales the
+/// border with the rest, so a 1.5 output keeps a 3-device-pixel ring
+/// instead of a stretched 2-pixel one.
+fn chrome_scaled(
+    pixels: &mut [u8],
+    buffer_w: u32,
+    width: u32,
+    height: u32,
+    border: u32,
+    look: &Look,
+) {
     let radius = look
         .radius
         .min(width.saturating_div(2))
@@ -1176,7 +1369,7 @@ fn chrome(pixels: &mut [u8], buffer_w: u32, width: u32, height: u32, look: &Look
             if distance > 0.0 {
                 continue;
             }
-            let pixel = if distance > -(BORDER as f32) {
+            let pixel = if distance > -(border as f32) {
                 focus
             } else {
                 surface

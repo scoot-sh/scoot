@@ -19,6 +19,20 @@ fn presentation_passes() {
     assert!(allows("scootbar", "power.icon-poweroff"));
     assert!(allows("scootbar", "battery.icon-charging"));
     assert!(allows("scootnotify", "colors.match"));
+    assert!(allows("scootlaunch", "icons.theme"));
+    assert!(allows("scootlaunch", "colors.match"));
+    let err = check_app_value(
+        "scootlaunch",
+        "icons.theme",
+        &toml::Value::String("Adwaita".into()),
+    );
+    assert!(err.is_none(), "icons.theme refused: {err:?}");
+    let err = check_app_value(
+        "scootlaunch",
+        "icons.theme",
+        &toml::Value::String("../escape".into()),
+    );
+    assert!(err.is_some(), "bad icons.theme passes");
 }
 
 #[test]

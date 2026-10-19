@@ -25,7 +25,8 @@ fn every_key_lands() {
          accent = \"#ff0000\"\nurgent = \"#00ff00\"\nsurface = \"#202020\"\n\
          hover = \"#0000ff\"\nfocus = \"#ffff00\"\nborder = \"#123456\"\n\
          accent-fg = \"#654321\"\nselection = \"#00ffff\"\n\
-         selection-text = \"#ff00ff\"\nmatch = \"#f0f000\"\n",
+         selection-text = \"#ff00ff\"\nmatch = \"#f0f000\"\n\
+         [icons]\ntheme = \"Papirus\"\n",
     );
     assert!(notes.is_empty(), "{notes:?}");
     assert_eq!(look.theme.background, Color::parse("#ff00ff").unwrap());
@@ -40,6 +41,7 @@ fn every_key_lands() {
     assert_eq!(look.opacity, 0.8);
     assert_eq!(look.radius, 4);
     assert_eq!(look.font_family, "DejaVu Sans");
+    assert_eq!(look.icon_theme, "Papirus");
 }
 
 #[test]

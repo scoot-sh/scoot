@@ -440,15 +440,22 @@ pub fn render_launch(look: &ResolvedLook) -> Result<String, GrammarError> {
         colors.insert(key.to_string(), toml_str(color));
     }
     let mut sections: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+    // The icon theme the panel looks up names in: the look's `icons`
+    // theme (Adwaita by default), overridable per app as
+    // `[apps.scootlaunch] "icons.theme"`.
+    let mut icons: BTreeMap<String, String> = BTreeMap::new();
+    icons.insert("theme".to_string(), toml_str(&look.icons_theme));
     for (section, keys) in override_sections("scootlaunch", &look.apps)? {
         if section.is_empty() {
             top.extend(keys);
         } else if section == "colors" {
             colors.extend(keys);
+        } else if section == "icons" {
+            icons.extend(keys);
         } else {
-            // Unreachable today: the allowlist holds only `colors.*` and
-            // the four dotless keys. Emit rather than drop, so a future
-            // key is visible instead of silently lost.
+            // Unreachable today: the allowlist holds only `colors.*`,
+            // `icons.theme` and the four dotless keys. Emit rather than
+            // drop, so a future key is visible instead of silently lost.
             sections.entry(section).or_default().extend(keys);
         }
     }
@@ -459,6 +466,10 @@ pub fn render_launch(look: &ResolvedLook) -> Result<String, GrammarError> {
     }
     out.push_str("\n[colors]\n");
     for (key, value) in &colors {
+        out.push_str(&format!("{} = {value}\n", toml_dotted(key)));
+    }
+    out.push_str("\n[icons]\n");
+    for (key, value) in &icons {
         out.push_str(&format!("{} = {value}\n", toml_dotted(key)));
     }
     for (section, keys) in &sections {
