@@ -3,7 +3,7 @@ title: "Spike: hold non-critical cards under a fullscreen window via a `top` lay
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "notify-popups"
+blocked: null
 milestone: "M7"
 ---
 

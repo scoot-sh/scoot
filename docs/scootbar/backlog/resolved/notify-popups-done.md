@@ -1,10 +1,11 @@
 ---
 title: "scootnotify: cards, the stack, lock and idle rules, outputs, the look layer"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-19"
 ---
 
 # scootnotify: popups
