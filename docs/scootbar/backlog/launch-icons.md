@@ -3,7 +3,7 @@ title: "scootlaunch: icon-theme lookup with inheritance, PNG first, SVG through 
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "launch-ui"
+blocked: null
 milestone: "M7"
 ---
 

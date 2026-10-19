@@ -3,7 +3,7 @@ title: "scootlaunch: launching right (activation token, environment, systemd sco
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "launch-ui"
+blocked: null
 milestone: "M7"
 ---
 
