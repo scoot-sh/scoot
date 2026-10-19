@@ -95,6 +95,15 @@ run-time `Suggests`, never `Depends`) — checked against trixie's own
 `Contents-amd64.gz`;
 other distros map the same sonames through their own file search.
 
+`scootlaunch` links one system library past the C library:
+`libxkbcommon.so.0` for its panel keyboard (a release build's `NEEDED`
+is exactly `libxkbcommon.so.0`, `libgcc_s.so.1`, `libc.so.6`).
+It resolves to `libxkbcommon0` on Debian, Ubuntu and openSUSE and to
+`libxkbcommon` on Fedora and Arch — the name each of the four package
+recipes depends on. Its headless commands (`--list`, `--query`,
+`--run-id`) never load it, but the loader still needs it present to
+start the binary at all.
+
 ### Toolchain floor: Rust 1.88
 
 The workspace sets `rust-version = "1.88"`. Which distro releases ship

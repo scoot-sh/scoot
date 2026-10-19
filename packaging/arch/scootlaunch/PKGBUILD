@@ -1,0 +1,39 @@
+# scootlaunch: the keyboard-first application launcher (release build).
+#
+# Built from the same release tag as every package here (`v$pkgver`):
+# one tag, one version for every binary (docs/versioning.md). The panel
+# links libxkbcommon for its keyboard (the reference XKB
+# implementation); it speaks standard Wayland protocols, so it needs no
+# versioned dependency on any compositor package.
+#
+# No tag is cut yet, so `sha256sums` is SKIP until the first release;
+# `updpkgsums` fills it then (see packaging/arch/README.md). CI builds
+# this exact file against a same-layout tarball of HEAD.
+
+pkgname=scootlaunch
+pkgver=0.2.1
+pkgrel=1
+pkgdesc='Keyboard-first application launcher for the scoot compositor'
+arch=('x86_64' 'aarch64')
+url='https://github.com/scoot-sh/scoot'
+license=('MIT')
+depends=('glibc' 'libgcc' 'libxkbcommon')
+makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
+optdepends=('ttf-dejavu: sans font the panel finds on its own')
+options=('!debug')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "scoot-$pkgver"
+  cargo build --release --locked -p scootlaunch
+  cargo deny list > THIRD-PARTY-LICENSES
+}
+
+package() {
+  cd "scoot-$pkgver"
+  install -Dm755 "${CARGO_TARGET_DIR:-target}/release/scootlaunch" "$pkgdir/usr/bin/scootlaunch"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+  install -Dm644 THIRD-PARTY-LICENSES "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-LICENSES"
+}

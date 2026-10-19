@@ -1,6 +1,6 @@
 # Debian and Ubuntu packages
 
-Three `.deb`s, one per shipped binary, built with cargo from the
+Four `.deb`s, one per shipped binary, built with cargo from the
 vendored sources and staged with `dpkg-deb`. Nothing
 here is published anywhere: no repository upload, no tag, no release
 in CI or out of it. The signed apt repository is designed below and
@@ -12,13 +12,15 @@ step.
 | `scoot` | tag `v$ver` | the workspace version (`Cargo.toml`) |
 | `scootbg` | tag `v$ver` | the same |
 | `scootbar` | tag `v$ver` | the same |
+| `scootlaunch` | tag `v$ver` | the same |
 
 One tag releases every binary at the repository's one version
 (docs/versioning.md), and `deb-meta.py` reads it from the root
 `Cargo.toml`. There is no `scootctl` package: it is the client library
 inside the `scoot` binary (`scoot msg`). `scoot` depends on exactly `scootbg (= $ver)`:
-the coupled pair installs at one version, and the bar depends on no
-compositor package at all (standard Wayland protocols only).
+the coupled pair installs at one version, and the bar and the launcher
+depend on no compositor package at all (standard Wayland protocols
+only).
 
 ## Why `dpkg-deb`, not `cargo-deb`
 
@@ -49,7 +51,8 @@ page (`site/src/content/docs/reference/packaging.md`).
 The compositor links `libinput.so.10`, `libseat.so.1`, `libudev.so.1`,
 `libpixman-1.so.0`, `libxkbcommon.so.0` (plus the C library and its
 closure); the wallpaper daemon and the bar link nothing past the C
-library. On Debian 12 / Ubuntu 24.04 and newer the sonames resolve
+library; the launcher links `libxkbcommon.so.0` for its keyboard and
+nothing else. On Debian 12 / Ubuntu 24.04 and newer the sonames resolve
 to `libinput10`, `libseat1`, `libudev1`, `libpixman-1-0`,
 `libxkbcommon0` (plus `libc6`, `libgcc-s1` via shlibdeps). The GPU
 libraries (`libgbm1`, `libdrm2`) are not in any shipped `.deb`'s
@@ -61,7 +64,9 @@ separate package.
 
 The bar `Suggests: fonts-dejavu-core`: it draws text only with a font,
 and the shipped example points at DejaVu (the first path the bar
-probes, `crates/scootbar/src/font.rs`).
+probes, `crates/scootbar/src/font.rs`). The launcher suggests the same
+package: its panel refuses to open with no font, but the headless list
+and query commands need none.
 
 ## Toolchain: the distro's rustc is too old, so the container pins one
 
@@ -107,6 +112,9 @@ asserted in CI, so one build runs on trixie, noble and newer.
   notice, a
   changelog, a `README.Debian`, and a starting `bar.toml.example`
   (proven valid: `scootbar daemon --check` prints `ok`).
+- `scootlaunch`: `/usr/bin/scootlaunch` plus its licenses, inventory,
+  notice and changelog (proven starting: `scootlaunch --check` with no
+  config exits 0 on the built-in defaults).
 
 Lintian posture: no errors; two standing warnings, explained rather
 than overridden -- `no-manual-page` on each binary (the binaries'
@@ -213,12 +221,13 @@ the repository stays maintainer-run until the key exists.
 
 `.github/workflows/deb.yml` stages the vendored tree
 (`scripts/vendor-release.sh`, the same entry point the release job
-uses), builds all three `.deb`s `--release --locked --offline` in a
+uses), builds all four `.deb`s `--release --locked --offline` in a
 `debian:bookworm-slim` container with the pinned toolchain on each
 architecture, derives and allow-list-checks `Depends`, lints with
 `lintian`, builds the unsigned repository index, and installs from it
 in plain `bookworm-slim` (and Ubuntu 24.04) containers: every
-`--version`, the bar's `--check` on its shipped example, and the
+`--version`, the bar's `--check` on its shipped example, the
+launcher's `--check` on the defaults, and the
 headless smoke test (`scripts/smoke-test.sh`) against the installed
 binaries. What it cannot prove yet: the signature itself (there is no
 key) and the release-tarball URLs (there is no source URL at all --

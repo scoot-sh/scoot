@@ -37,7 +37,9 @@ DEBIAN_REVISION = "1"
 ALLOW = {
     # The compositor links five system libraries past libc; the bar and
     # the wallpaper daemon link nothing past it (measured: scootbg and
-    # scootbar are libc-only on the release build).
+    # scootbar are libc-only on the release build); the launcher links
+    # only the keyboard library (measured: libxkbcommon.so.0 beside
+    # libc on the release build).
     "scoot": {
         "libc6",
         "libgcc-s1",
@@ -49,14 +51,16 @@ ALLOW = {
     },
     "scootbg": {"libc6", "libgcc-s1"},
     "scootbar": {"libc6", "libgcc-s1"},
+    "scootlaunch": {"libc6", "libgcc-s1", "libxkbcommon0"},
 }
 
-CRATE = {"scoot": "scoot", "scootbg": "scootbg", "scootbar": "scootbar"}
+CRATE = {"scoot": "scoot", "scootbg": "scootbg", "scootbar": "scootbar", "scootlaunch": "scootlaunch"}
 
 SHORT = {
     "scoot": "Scrolling-tiling Wayland compositor (auto CPU/GPU rendering, runs without a GPU)",
     "scootbg": "Wallpaper daemon for the scoot compositor",
     "scootbar": "Status bar for the scoot compositor",
+    "scootlaunch": "Keyboard-first application launcher for the scoot compositor",
 }
 
 LONG = {
@@ -89,6 +93,14 @@ LONG = {
         " This package ships the bar, its systemd user unit and a starting\n"
         " configuration. It writes nothing to a user's home."
     ),
+    "scootlaunch": (
+        " The keyboard-first application launcher for the scoot\n"
+        " compositor: desktop entries ranked as you type, on standard\n"
+        " Wayland protocols, so it runs against any compositor release.\n"
+        " .\n"
+        " This package ships the launcher and the license inventory. It\n"
+        " writes nothing to a user's home."
+    ),
 }
 
 # Extra control stanzas per package. `scoot`'s versioned `scootbg`
@@ -105,6 +117,10 @@ SUGGESTS = {
     # The bar draws text only with a font; without one it draws a plain
     # bar. DejaVu is what the shipped example config points at.
     "scootbar": "fonts-dejavu-core",
+    # The panel refuses to open with no font to draw (it probes the
+    # well-known paths, DejaVu first); the headless list and query
+    # commands need none, so this stays a suggestion, not a dependency.
+    "scootlaunch": "fonts-dejavu-core",
 }
 
 

@@ -1,11 +1,12 @@
-# scoot RPM packages: the spec files for scoot, scootbg and scootbar
-# (docs/backlog/resolved/rpm-package-done.md).
+# scoot RPM packages: the spec files for scoot, scootbg, scootbar and
+# scootlaunch (docs/backlog/resolved/rpm-package-done.md).
 #
 # WHAT IT DOES: stages the vendored-sources tarball with
-# scripts/vendor-release.sh, builds all three specs under `packaging/rpm/`
+# scripts/vendor-release.sh, builds all four specs under `packaging/rpm/`
 # with `rpmbuild -ba` in a Fedora 43 and an openSUSE Tumbleweed container,
-# lints each spec and each built RPM with `rpmlint`, installs the trio,
+# lints each spec and each built RPM with `rpmlint`, installs the set,
 # and runs `scoot --version`, the bar's `--check` on its shipped example,
+# the launcher's `--check` on the built-in defaults,
 # and — in the Fedora container, which is what the ticket's "done when"
 # names — the headless smoke test (`scripts/smoke-test.sh`) against the
 # installed binaries. That is the ticket's proof the packages work.
@@ -104,7 +105,7 @@ jobs:
           import re, subprocess
           crate_ver = subprocess.run(["scripts/workspace-version"], check=True,
                                      capture_output=True, text=True).stdout.strip()
-          for spec in ("scoot", "scootbg", "scootbar"):
+          for spec in ("scoot", "scootbg", "scootbar", "scootlaunch"):
               text = open(f"packaging/rpm/{spec}.spec").read()
               spec_ver = re.search(r'^Version:\s+(.*)$', text, re.M).group(1).strip()
               status = "ok" if spec_ver == crate_ver else "MISMATCH"
@@ -117,9 +118,9 @@ jobs:
             "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scoot-$ver-vendored.tar.gz"
           ls -l "$GITHUB_WORKSPACE/rpmbuild/SOURCES"
 
-      - name: rpmbuild all three specs
+      - name: rpmbuild all four specs
         run: |
-          for s in scoot scootbg scootbar; do
+          for s in scoot scootbg scootbar scootlaunch; do
             rpmbuild -ba --define "_topdir $GITHUB_WORKSPACE/rpmbuild" "packaging/rpm/$s.spec"
           done
           find "$GITHUB_WORKSPACE/rpmbuild/RPMS" "$GITHUB_WORKSPACE/rpmbuild/SRPMS" -name '*.rpm' | sort
@@ -169,9 +170,10 @@ jobs:
             || echo "ok: only the known DesktopNames notice (as on Fedora's own session files)"
 
       # The ticket's proof against the installed binaries: every
-      # --version, the bar's --check on its shipped example, and the
+      # --version, the bar's --check on its shipped example, the
+      # launcher's --check on the built-in defaults, and the
       # headless smoke test with the installed scoot and scootbg.
-      - name: Install the trio and prove it
+      - name: Install the set and prove it
         run: |
           # The fedora container image sets `tsflags=nodocs`, which would
           # skip the example configs this step checks: clear it, so the
@@ -180,7 +182,9 @@ jobs:
           scoot --version
           scootbg --version
           scootbar --version
+          scootlaunch --version
           scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
+          scootlaunch --check
           mkdir -p /tmp/rpm-smoke-xdg
           chmod 700 /tmp/rpm-smoke-xdg
           export XDG_RUNTIME_DIR=/tmp/rpm-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
@@ -203,10 +207,10 @@ jobs:
     name: rpmbuild + rpmlint + install (openSUSE Tumbleweed, x86_64)
     runs-on: ubuntu-latest
     container: opensuse/tumbleweed:latest
-    # Same three builds against the same staged tarball, proving the
+    # Same four builds against the same staged tarball, proving the
     # specs' SUSE conditionals. No smoke test here: the ticket's "done
     # when" names the Fedora container for it, and the bar --check plus
-    # --version runs below prove the installed trio starts.
+    # --version runs below prove the installed set starts.
     timeout-minutes: 90
     env:
       CARGO_TERM_COLOR: always
@@ -224,7 +228,7 @@ jobs:
       # transactions both times), while the same sequence in one shell
       # is proven green locally. Each phase below is its own ::group::,
       # so the log reads the same.
-      - name: Build, lint, install and prove the trio
+      - name: Build, lint, install and prove the set
         run: |
           echo '::group::Install the build and lint tools'
           # The image ships busybox-gawk, which conflicts with the gawk
@@ -275,7 +279,7 @@ jobs:
           import re, subprocess
           crate_ver = subprocess.run(["scripts/workspace-version"], check=True,
                                      capture_output=True, text=True).stdout.strip()
-          for spec in ("scoot", "scootbg", "scootbar"):
+          for spec in ("scoot", "scootbg", "scootbar", "scootlaunch"):
               text = open(f"packaging/rpm/{spec}.spec").read()
               spec_ver = re.search(r'^Version:\s+(.*)$', text, re.M).group(1).strip()
               status = "ok" if spec_ver == crate_ver else "MISMATCH"
@@ -288,8 +292,8 @@ jobs:
           ls -l "$GITHUB_WORKSPACE/rpmbuild/SOURCES"
           echo '::endgroup::'
 
-          echo '::group::rpmbuild all three specs'
-          for s in scoot scootbg scootbar; do
+          echo '::group::rpmbuild all four specs'
+          for s in scoot scootbg scootbar scootlaunch; do
             rpmbuild -ba --define "_topdir $GITHUB_WORKSPACE/rpmbuild" "packaging/rpm/$s.spec"
           done
           find "$GITHUB_WORKSPACE/rpmbuild/RPMS" "$GITHUB_WORKSPACE/rpmbuild/SRPMS" -name '*.rpm' | sort
@@ -327,7 +331,7 @@ jobs:
 
           # No desktop-file-validate here: the file is identical in both
           # jobs and the Fedora job gates it.
-          echo '::group::Install the trio and prove it'
+          echo '::group::Install the set and prove it'
           # The opensuse container image excludes `%doc` files
           # (/usr/etc/zypp/zypp.conf.d/excludedocs.conf), which would
           # skip the example this step checks: override it. The `zz-`
@@ -340,9 +344,11 @@ jobs:
           scoot --version
           scootbg --version
           scootbar --version
+          scootlaunch --version
           # %doc lands under /usr/share/doc/packages/ on SUSE (not
           # /usr/share/doc/ as on Fedora).
           scootbar daemon --check --config /usr/share/doc/packages/scootbar/bar.toml.example
+          scootlaunch --check
           echo '::endgroup::'
 
       - name: Upload the built RPMs and lint logs

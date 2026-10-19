@@ -1,6 +1,6 @@
 # RPM packages (Fedora and openSUSE)
 
-Three spec files, one per shipped binary, built from the vendored-sources
+Four spec files, one per shipped binary, built from the vendored-sources
 tarball (`scripts/vendor-release.sh`: the tagged tree plus `vendor/`,
 `.cargo/config.toml` and `THIRD-PARTY-LICENSES`, so the build is offline).
 Nothing here is published anywhere: there is no COPR project, no repo, no
@@ -11,13 +11,14 @@ tag, no release in CI or out of it.
 | `scoot.spec` | `scoot` | `v$Version` | the workspace version (`Cargo.toml`) |
 | `scootbg.spec` | `scootbg` | `v$Version` | the same |
 | `scootbar.spec` | `scootbar` | `v$Version` | the same |
+| `scootlaunch.spec` | `scootlaunch` | `v$Version` | the same |
 
 One tag releases every binary at the repository's one version
-(docs/versioning.md), so all three specs carry the same `Version` and
+(docs/versioning.md), so all four specs carry the same `Version` and
 the same release tarball. There is no `scootctl` package: it is the
 client library inside the `scoot` binary (`scoot msg`). `scoot` requires exactly `scootbg=$Version-$Release`:
-the coupled pair installs at one version, and the bar requires no
-compositor package at all (standard Wayland protocols only).
+the coupled pair installs at one version, and the bar and the launcher
+require no compositor package at all (standard Wayland protocols only).
 
 Why a hand-written spec and not `cargo-generate-rpm`: the generated file would need the same hand edits anyway
 (the session entry, the session user units, the portal selection, the
@@ -25,14 +26,15 @@ bar's user unit, the license set including the
 deny-generated inventory, the vendored offline build, the versioned
 `scootbg` requirement). The spec is the whole package definition; what
 `cargo-generate-rpm` would contribute (the file list, the soname
-requirements) is three binaries RPM derives on its own.
+requirements) is four binaries RPM derives on its own.
 
 ## Dependencies, from data
 
 `BuildRequires` is the `ldd`-derived list from the site's packaging page
 (`site/src/content/docs/reference/packaging.md`), not memory: the
 compositor links `libinput.so.10`, `libseat.so.1`, `libudev.so.1`,
-`libpixman-1.so.0`, `libxkbcommon.so.0`, and the wallpaper daemon and the
+`libpixman-1.so.0`, `libxkbcommon.so.0`, the launcher links
+`libxkbcommon.so.0` for its keyboard, and the wallpaper daemon and the
 bar link nothing past the C library. Runtime requirements for those
 sonames are auto-generated from the binaries at build time, so only the
 `-devel` names below are written in the specs. Verified 2026-10-08
@@ -69,7 +71,8 @@ Notes:
 - The bar's `--check` on the shipped example needs a font to pass:
   `dejavu-sans-fonts` on Fedora, `dejavu-fonts` on openSUSE (each
   provides a path the bar's fallback list already probes:
-  `crates/scootbar/src/font.rs`).
+  `crates/scootbar/src/font.rs`). The launcher's `--check` needs none:
+  with no config file it validates the built-in defaults.
 
 ## Installed files
 
@@ -98,6 +101,9 @@ Notes:
   `%systemd_user_post`/`%systemd_user_preun` scriptlets), licenses, and
   a starting `bar.toml.example` (proven valid: `scootbar daemon --check`
   prints `ok`, in `%check` and again after install).
+- `scootlaunch`: `/usr/bin/scootlaunch` plus its licenses (in `%check`
+  and again after install: `--version`, and `--check` with no config
+  file, which validates the built-in defaults).
 - `%check` in every spec runs only headless-safe probes (`--version`,
   `--print-default-config`, `daemon --check`): the headless smoke test
   needs a runtime, so it runs after install in CI, not in the build.
@@ -105,7 +111,7 @@ Notes:
   `strip = true`): with `debug_package %{nil}` no find-debuginfo run
   strips them, and an unstripped build would ship its symtab.
 - Accepted `rpmlint` warnings (errors are zero): `no-manual-page-for-binary`
-  on all four entry points (the project ships no man pages yet, for any
+  on all five entry points (the project ships no man pages yet, for any
   distro) and `no-documentation` on `scootbg` (its config surface is the
   `[wallpaper]` section documented in the `scoot` package's example, so it
   deliberately ships no `%doc` of its own). One documented override file,
@@ -169,7 +175,7 @@ and what stays manual:
 1. Nothing to rename: every release publishes
    `scoot-<version>-vendored.tar.gz`, the name each spec's `Source0`
    already downloads.
-2. In the release PR, before it merges, bump `Version` in all three
+2. In the release PR, before it merges, bump `Version` in all four
    specs to the proposed version, reset `Release` to `1` and add a
    `%changelog` entry (run `rpm.yml` by hand from the release PR; it
    fails if `Version` is not the workspace version).
@@ -184,10 +190,12 @@ and what stays manual:
 
 `.github/workflows/rpm.yml` stages the vendored tarball from HEAD with
 `scripts/vendor-release.sh` in a Fedora 43 and a Tumbleweed container,
-builds all three specs with `rpmbuild -ba` in each, lints every built RPM
-with `rpmlint`, installs the trio, and runs `scoot --version`,
-`scootbg --version`, `scootbar --version`, `scootbar daemon --check` on
-the shipped example, and — in the Fedora container only — the headless smoke test
+builds all four specs with `rpmbuild -ba` in each, lints every built RPM
+with `rpmlint`, installs the set, and runs `scoot --version`,
+`scootbg --version`, `scootbar --version`, `scootlaunch --version`,
+`scootbar daemon --check` on
+the shipped example, `scootlaunch --check` on the built-in defaults,
+and — in the Fedora container only — the headless smoke test
 (`scripts/smoke-test.sh`) against the installed binaries. The
 `desktop-file-validate` gate on the session entry also runs in the
 Fedora container only: the file is identical in both jobs, and

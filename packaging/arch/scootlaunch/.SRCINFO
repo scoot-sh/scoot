@@ -1,0 +1,22 @@
+pkgbase = scootlaunch
+	pkgdesc = Keyboard-first application launcher for the scoot compositor
+	pkgver = 0.2.1
+	pkgrel = 1
+	url = https://github.com/scoot-sh/scoot
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	makedepends = cargo-deny
+	makedepends = git
+	makedepends = wayland
+	makedepends = wayland-protocols
+	depends = glibc
+	depends = libgcc
+	depends = libxkbcommon
+	optdepends = ttf-dejavu: sans font the panel finds on its own
+	options = !debug
+	source = scootlaunch-0.2.1.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v0.2.1.tar.gz
+	sha256sums = SKIP
+
+pkgname = scootlaunch

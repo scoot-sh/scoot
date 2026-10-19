@@ -50,6 +50,31 @@ and caches the result under `$XDG_CACHE_HOME/scootlaunch/index-v1`.
 Every flag is in the [CLI reference](./cli.md). An app missing from
 the list is diagnosed there too.
 
+## Install
+
+The launcher rides the [install script](../start/install/#use-it-every-day)
+with `--launch`, opt-in until it becomes the default. Unified `vX.Y.Z`
+releases carry a `scootlaunch-<version>-<arch>` binary beside the rest.
+
+```sh
+curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --launch
+```
+
+The panel needs two things beside the binary; the headless commands
+(`--list`, `--query`, `--run-id`) need neither:
+
+| Distro | Keyboard library | A font |
+|---|---|---|
+| Debian 12 / Ubuntu 24.04 and newer | `sudo apt install libxkbcommon0` | `sudo apt install fonts-dejavu-core` |
+| Fedora 43 and newer | `sudo dnf install libxkbcommon` | `sudo dnf install dejavu-sans-fonts` |
+| openSUSE Tumbleweed | `sudo zypper install libxkbcommon0` | `sudo zypper install dejavu-fonts` |
+| Arch | `sudo pacman -S libxkbcommon` | `sudo pacman -S ttf-dejavu` |
+
+Any font file works with `--font PATH` instead of the packaged one.
+The install script's missing-library report names both for your
+distro. Distro packages (deb, rpm, Arch) are recipes in `packaging/`
+so far, not published repositories.
+
 ## Nix
 
 Two modules, one switch. `programs.scootlaunch` manages the

@@ -59,9 +59,16 @@ mkdir -p "$f/dl/scoot-v0.1.0" "$f/dl/scootbar-v0.2.0" "$f/dl/v0.3.0" "$f/dl/v0.2
 scoot_stub "$f/dl/scoot-v0.1.0/scoot-0.1.0-$arch" "scoot 0.1.0"
 stub "scootbg 0.1.0" "$f/dl/scoot-v0.1.0/scootbg-0.1.0-$arch"
 stub "scootbar 0.2.0" "$f/dl/scootbar-v0.2.0/scootbar-0.2.0-$arch"
+# An intact per-package tag for the --launch refusal test below: test 5
+# tampers with scoot-v0.1.0's scootbg, so --launch's clean failure
+# (no launcher asset outside unified releases) needs its own tree.
+mkdir -p "$f/dl/scoot-v0.1.1"
+stub "scoot 0.1.1" "$f/dl/scoot-v0.1.1/scoot-0.1.1-$arch"
+stub "scootbg 0.1.1" "$f/dl/scoot-v0.1.1/scootbg-0.1.1-$arch"
 scoot_stub "$f/dl/v0.3.0/scoot-0.3.0-$arch" "scoot 0.3.0"
 stub "scootbg 0.3.0" "$f/dl/v0.3.0/scootbg-0.3.0-$arch"
 stub "scootbar 0.3.0" "$f/dl/v0.3.0/scootbar-0.3.0-$arch"
+stub "scootlaunch 0.3.0" "$f/dl/v0.3.0/scootlaunch-0.3.0-$arch"
 # v0.2.1 ships no looks and its scoot knows no `look apply`: plain stubs,
 # so any apply attempt would show up as a missing stub-scoot-calls file
 # check below rather than a refusal.
@@ -648,6 +655,68 @@ if grep -q "dejavu-sans-fonts" "$work/out"; then
 fi
 if grep -q "none of the usual font files" "$work/out"; then fail "font reason with --no-bar"; fi
 ok "--no-bar needs no font"
+
+# 8b. --launch installs the launcher alongside, records it, stays up
+#     to date across re-runs, and uninstall removes it.
+h=$work/h-launch
+releases=file://$f/tags-unified.json run_in "$h" --launch || { cat "$work/out"; fail "install with --launch"; }
+unset releases
+[ "$("$h/.local/bin/scootlaunch")" = "scootlaunch 0.3.0" ] || fail "launcher is not the unified build"
+grep -q "^launch_tag=v0.3.0$" "$h/.local/share/scoot/install-version" || fail "record has no launch tag"
+# An up-to-date re-run with --launch downloads nothing.
+SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl-gone" SCOOT_INSTALL_RAW_URL="file://$f/raw-gone" releases=file://$f/tags-unified.json run_in "$h" --launch || { cat "$work/out"; fail "up-to-date --launch re-run"; }
+export SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl" SCOOT_INSTALL_RAW_URL="file://$f/raw"
+unset releases
+grep -q "already up to date (0.3.0)" "$work/out" || fail "--launch re-run says no up-to-date"
+# A re-run without --launch is not up to date: the record names a
+# launcher this run would not install.
+releases=file://$f/tags-unified.json run_in "$h" || { cat "$work/out"; fail "re-run without --launch"; }
+unset releases
+grep -q "Installing scoot" "$work/out" || fail "dropping --launch still claimed up to date"
+# Uninstall removes the launcher too (the merged manifest kept it).
+run_in "$h" --uninstall || fail "uninstall with a launcher"
+[ ! -e "$h/.local/bin/scootlaunch" ] || fail "uninstall left the launcher"
+h=$work/h1
+ok "--launch installs, records, and uninstalls the launcher"
+
+# 8c. --launch against a per-package tag fails before writing anything:
+#     no launcher asset exists outside the unified releases.
+#     (scoot-v0.1.1, intact: test 5 tampers with scoot-v0.1.0's scootbg.)
+h=$work/h-launch-old
+if releases=file://$f/tags-new.json run_in "$h" --launch; then fail "--launch accepted a per-package tag"; fi
+unset releases
+grep -Fq "scootlaunch-0.1.1-$arch" "$work/out" || { cat "$work/out"; fail "--launch names no missing asset"; }
+[ ! -e "$h/.local" ] || fail "--launch wrote files before failing"
+h=$work/h1
+ok "--launch refuses a release with no launcher asset"
+
+# 8d. --launch needs a font for its panel even with --no-bar: the
+#     report names the launcher, never the bar.
+export SCOOT_INSTALL_OS_RELEASE="$f/os-ubuntu" SCOOT_INSTALL_FONTS=/nonexistent/scoot-test-font.ttf
+if ! releases=file://$f/tags-unified.json run_in "$work/h-launch-font" --dry-run --no-bar --launch; then
+    cat "$work/out"
+    fail "dry run with --launch --no-bar"
+fi
+unset SCOOT_INSTALL_OS_RELEASE SCOOT_INSTALL_FONTS releases
+if grep -q "scootbar needs a font" "$work/out"; then
+    cat "$work/out"
+    fail "bar font line with --no-bar --launch"
+fi
+if ! grep -q "scootlaunch needs a font" "$work/out"; then
+    cat "$work/out"
+    fail "no launcher font line"
+fi
+if ! grep -Fq "  sudo apt install libinput10 fonts-dejavu-core" "$work/out"; then
+    cat "$work/out"
+    fail "no font package with --launch"
+fi
+ok "--launch names the launcher's font need"
+
+# 8e. A per-user --launch run prints the --system command with --launch.
+releases=file://$f/tags-unified.json run_in "$work/h-launch-sys" --launch --dry-run || { cat "$work/out"; fail "launch dry run"; }
+unset releases
+grep -Fq "sh -s -- --system --launch" "$work/out" || { cat "$work/out"; fail "no --launch in the --system command"; }
+ok "the --system command carries --launch"
 
 # 9. A system uninstall under sudo names the invoking user's config (N3),
 #    not root's; without sudo the message is unchanged. Needs a writable

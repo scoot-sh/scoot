@@ -317,6 +317,10 @@ If you used `--system`, log out and pick **scoot** on your login screen.
   instead of a tagged release, use the Nix flake above.
 - `--uninstall` (with `--system` if you used it) removes exactly what
   the script installed. Your config stays.
+- `--launch` also installs `scootlaunch`, the keyboard-first
+  [launcher](../../scootlaunch/) (opt-in until it becomes the default).
+  Its panel needs `libxkbcommon` and a font beside it; the script's
+  missing-library report names both for your distro.
 
 Read the script before you run it:
 [install.sh](https://www.scoot.sh/install.sh). Every option:
