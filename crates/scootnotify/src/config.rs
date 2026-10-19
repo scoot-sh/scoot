@@ -201,8 +201,10 @@ impl Config {
                 || output.len() > 256
                 || output.bytes().any(|byte| byte < 0x20 || byte == 0x7f))
         {
-            return Err("config refused: output is not a usable output name (1 to 256 printable bytes)"
-                .to_string());
+            return Err(
+                "config refused: output is not a usable output name (1 to 256 printable bytes)"
+                    .to_string(),
+            );
         }
         if self.body_lines == 0 || self.body_lines > 16 {
             return Err(format!(
