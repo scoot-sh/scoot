@@ -1,10 +1,11 @@
 ---
 title: "scootnotify: the control socket, `msg`, JSON, `subscribe` and `wait`, scoped `reload`"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-19"
 ---
 
 # scootnotify: the control interface
