@@ -225,20 +225,9 @@ pub fn launch_command_report(
 /// bus answers, the detached spawn when none does. `id` names the
 /// desktop entry (the scope and the frecency record); `scope_base`
 /// is what the scope derives from when there is no entry (an ad-hoc
-/// command's `argv[0]`).
-fn launch_exec(
-    frecency_key: &str,
-    scope_base: &str,
-    argv: &[String],
-    workdir: Option<&str>,
-    token: Option<&Token>,
-    ctx: &Ctx,
-) -> Result<(), String> {
-    launch_exec_report(frecency_key, scope_base, argv, workdir, token, ctx).map(|_| ())
-}
-
-/// The reporting twin of [`launch_exec`]: the same spawn path, with
-/// what happened answered for `--run-id`'s JSON.
+/// command's `argv[0]`). The reporting shape: the panel's
+/// [`launch_entry`] and [`launch_command`] discard the report, while
+/// `--run-id` prints it.
 fn launch_exec_report(
     frecency_key: &str,
     scope_base: &str,
