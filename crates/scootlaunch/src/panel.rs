@@ -1034,10 +1034,8 @@ fn paint_panel(
     // The icon column: one icon side plus one space, in device pixels.
     // The side is the em rounded (as the bar's), fitted into the row.
     let mut side = Text::art_side(em);
-    side = side
-        .min(row_h_d.saturating_sub(2).max(1))
-        .min(crate::icons::MAX_RENDER_SIDE)
-        .max(1);
+    let cap = crate::icons::MAX_RENDER_SIDE.min(row_h_d.saturating_sub(2).max(1));
+    side = side.clamp(1, cap);
     let gap = text.art_gap(em).max(1);
     let icon_col = side.saturating_add(gap);
     let icon_x = inner.saturating_add((em * 0.5).round().clamp(0.0, 64.0) as u32);
@@ -1151,6 +1149,7 @@ fn paint_panel(
 /// decoded image blended over the panel, or a letter tile in `accent`
 /// with the letter in `background`. Never panics: a short buffer or a
 /// missing glyph draws nothing.
+#[allow(clippy::too_many_arguments)]
 fn draw_icon(
     canvas: &mut Canvas<'_>,
     text: &mut Text,
