@@ -86,17 +86,17 @@ let
     launcher = {
       combo = "super+d";
       slot = "launcher";
-      blurb = "launcher (`fuzzel` drun: XDG apps)";
+      blurb = "launcher (drun: XDG apps)";
     };
     launcherRun = {
       combo = "ctrl+alt+space";
       slot = "launcher";
-      blurb = "run mode (`fuzzel --list-executables-in-path`: PATH executables beside apps)";
+      blurb = "run mode (PATH executables beside apps)";
     };
     clipboard = {
       combo = "super+v";
       slot = "clipboard";
-      blurb = "clipboard picker (`cliphist` through `fuzzel`)";
+      blurb = "clipboard picker (`cliphist` through `fuzzel`, `scootlaunch` under the opt-in)";
     };
     notifDismiss = {
       combo = "super+n";
@@ -136,12 +136,12 @@ let
     network = {
       combo = "super+w";
       slot = "apps.network";
-      blurb = "WiFi picker (`scoot-network-pick` through `fuzzel`)";
+      blurb = "WiFi picker (`scoot-network-pick` through `fuzzel`, `scootlaunch` under the opt-in)";
     };
     bluetooth = {
       combo = "super+b";
       slot = "apps.bluetooth";
-      blurb = "Bluetooth picker (`scoot-bluetooth-pick` through `fuzzel`)";
+      blurb = "Bluetooth picker (`scoot-bluetooth-pick` through `fuzzel`, `scootlaunch` under the opt-in)";
     };
   };
   # Whether a notification state icon is shaped like the bar takes
@@ -498,16 +498,16 @@ in
         };
       };
     };
-    # fuzzel now, scootlaunch later without changing option names: the
-    # daemon behind `daemon` is the only visible change when
-    # scootlaunch replaces it (same `enable`, same binds, same
-    # `--dmenu` contract the clipboard picker and the bar's future
-    # pickers call -- see `docs/scootbar/backlog/launcher.md`). Filled
-    # by the `desktop-launcher` child: fuzzel on the keymap's `Super+d`
-    # (drun: XDG apps from the user's and the system's `XDG_DATA_DIRS`)
-    # and `Ctrl+Alt+Space` (run: PATH executables beside apps), on the
-    # `overlay` layer (so it opens above fullscreen windows) with
-    # exclusive keyboard, themed by the look.
+    # fuzzel or scootlaunch behind one switch (the native-replacement
+    # contract: the daemon behind `daemon` is the only visible change
+    # when scootlaunch replaces fuzzel -- same `enable`, same binds,
+    # same `--dmenu` contract the clipboard picker and the bar's future
+    # pickers call). Filled
+    # by the `desktop-launcher` child: the launcher on the keymap's
+    # `Super+d` (drun: XDG apps from the user's and the system's
+    # `XDG_DATA_DIRS`) and `Ctrl+Alt+Space` (run: PATH executables
+    # beside apps), on the `overlay` layer (so it opens above
+    # fullscreen windows) with exclusive keyboard, themed by the look.
     #
     # On with the profile (still individually disable-able); without
     # it, `enable` works standalone (unthemed: a look needs the
@@ -518,24 +518,29 @@ in
         type = lib.types.bool;
         default = false;
         description = ''
-          Open the launcher: fuzzel (its package beside this) listing
-          XDG apps, most-launched first, with PATH executables on the
-          run bind. The launcher holds nothing when closed (no daemon,
-          no unit). Without it nothing answers the keymap's launcher
-          binds, and they stay unbound.
+          Open the launcher: the daemon behind `daemon` (its package
+          beside this) listing XDG apps, most-launched first, with PATH
+          executables on the run bind. The launcher holds nothing when
+          closed (no daemon, no unit). Without it nothing answers the
+          keymap's launcher binds, and they stay unbound.
         '';
       };
 
       daemon = lib.mkOption {
-        type = lib.types.enum [ "fuzzel" ];
+        type = lib.types.enum [
+          "fuzzel"
+          "scootlaunch"
+        ];
         default = "fuzzel";
         description = ''
-          The program behind `enable`. Only fuzzel today (layer-shell
-          `overlay` native, no toolkit, fastest cold start of the
-          maintained set -- see site/src/content/docs/desktop/index.md#launcher
-          for the measured pick); a
-          future scootlaunch widens this enum, the option and the binds
-          staying as they are.
+          The program behind `enable`. `fuzzel` (layer-shell `overlay`
+          native, no toolkit, fastest cold start of the maintained set
+          -- see site/src/content/docs/desktop/index.md#launcher for the
+          measured pick) or `scootlaunch` (the keyboard-first launcher:
+          its own panel over the same index, the look's own file instead
+          of CLI color flags, and the pickers and choosers through its
+          `--dmenu` -- see site/src/content/docs/scootlaunch/index.md).
+          The option and the binds stay as they are either way.
         '';
       };
     };
@@ -581,8 +586,10 @@ in
         example = "slurp";
         description = ''
           The output chooser before each screencast. `fuzzel` (a dmenu
-          list of outputs), `slurp` (click a screen), or `none` (no
-          picker: cast `outputName`, or any output when that is null).
+          list of outputs -- the name stays `fuzzel` but runs
+          scootlaunch under the opt-in), `slurp` (click a screen), or
+          `none` (no picker: cast `outputName`, or any output when
+          that is null).
         '';
       };
 
@@ -1324,7 +1331,7 @@ in
         description = ''
           Theme the history picker from the look (menu background
           and text, selection and border from its palette). Set to
-          `false` to keep fuzzel's own style.
+          `false` to keep the menu's own style.
         '';
       };
       targets.launcher.enable = lib.mkOption {
@@ -1334,7 +1341,7 @@ in
           Theme the launcher from the look (menu background and
           text, selection and border from its palette -- the same
           roles the history picker is themed from). Set to `false`
-          to keep fuzzel's own style.
+          to keep the menu's own style.
         '';
       };
       targets.capture.enable = lib.mkOption {
@@ -1445,7 +1452,7 @@ in
           Theme the WiFi picker from the look (menu background
           and text, selection and border from its palette -- the same
           roles the launcher is themed from). Set to `false` to keep
-          fuzzel's own style.
+          the menu's own style.
         '';
       };
       targets.bluetooth.enable = lib.mkOption {
@@ -1455,7 +1462,7 @@ in
           Theme the Bluetooth picker from the look (menu background
           and text, selection and border from its palette -- the same
           roles the launcher is themed from). Set to `false` to keep
-          fuzzel's own style.
+          the menu's own style.
         '';
       };
       targets.shell.enable = lib.mkOption {

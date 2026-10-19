@@ -506,11 +506,18 @@ in
       launcher = desktop.options.launcher // {
         package = lib.mkOption {
           type = lib.types.nullOr lib.types.package;
-          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null;
-          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null";
+          default =
+            if !pkgs.stdenv.hostPlatform.isLinux then
+              null
+            else if cfg.desktop.launcher.daemon == "scootlaunch" then
+              pkgs.scootlaunch or null
+            else
+              pkgs.fuzzel or null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then ((pkgs.scootlaunch or null) for daemon scootlaunch, else pkgs.fuzzel or null) else null";
           description = ''
-            The launcher package to install system-wide (fuzzel).
-            Null installs nothing. Linux-only: null off Linux.
+            The launcher package to install system-wide (following
+            `desktop.launcher.daemon`: fuzzel or scootlaunch). Null
+            installs nothing. Linux-only: null off Linux.
           '';
         };
       };
@@ -553,11 +560,18 @@ in
 
         menuPackage = lib.mkOption {
           type = lib.types.nullOr lib.types.package;
-          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null;
-          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null";
+          default =
+            if !pkgs.stdenv.hostPlatform.isLinux then
+              null
+            else if cfg.desktop.launcher.daemon == "scootlaunch" then
+              pkgs.scootlaunch or null
+            else
+              pkgs.fuzzel or null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then ((pkgs.scootlaunch or null) for daemon scootlaunch, else pkgs.fuzzel or null) else null";
           description = ''
             The dmenu-style menu to install system-wide for the
-            history picker (`fuzzel`). Null installs nothing.
+            history picker (following `desktop.launcher.daemon`:
+            fuzzel or scootlaunch). Null installs nothing.
             Linux-only: null off Linux.
           '';
         };
@@ -620,11 +634,18 @@ in
 
         menuPackage = lib.mkOption {
           type = lib.types.nullOr lib.types.package;
-          default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null;
-          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null";
+          default =
+            if !pkgs.stdenv.hostPlatform.isLinux then
+              null
+            else if cfg.desktop.launcher.daemon == "scootlaunch" then
+              pkgs.scootlaunch or null
+            else
+              pkgs.fuzzel or null;
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then ((pkgs.scootlaunch or null) for daemon scootlaunch, else pkgs.fuzzel or null) else null";
           description = ''
             The dmenu-style menu to install system-wide for the
-            output chooser (`fuzzel`, unthemed on this side: the
+            output chooser (following `desktop.launcher.daemon`:
+            fuzzel or scootlaunch, unthemed on this side: the
             themed flags are the home-manager side's). Null installs
             nothing. Linux-only: null off Linux.
           '';
@@ -683,11 +704,18 @@ in
 
           menuPackage = lib.mkOption {
             type = lib.types.nullOr lib.types.package;
-            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null;
-            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null";
+            default =
+              if !pkgs.stdenv.hostPlatform.isLinux then
+                null
+              else if cfg.desktop.launcher.daemon == "scootlaunch" then
+                pkgs.scootlaunch or null
+              else
+                pkgs.fuzzel or null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then ((pkgs.scootlaunch or null) for daemon scootlaunch, else pkgs.fuzzel or null) else null";
             description = ''
               The dmenu-style menu to install system-wide for the
-              WiFi picker (`fuzzel`). Null installs nothing.
+              WiFi picker (following `desktop.launcher.daemon`:
+              fuzzel or scootlaunch). Null installs nothing.
               Linux-only: null off Linux.
             '';
           };
@@ -708,11 +736,18 @@ in
 
           menuPackage = lib.mkOption {
             type = lib.types.nullOr lib.types.package;
-            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null;
-            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel or null else null";
+            default =
+              if !pkgs.stdenv.hostPlatform.isLinux then
+                null
+              else if cfg.desktop.launcher.daemon == "scootlaunch" then
+                pkgs.scootlaunch or null
+              else
+                pkgs.fuzzel or null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then ((pkgs.scootlaunch or null) for daemon scootlaunch, else pkgs.fuzzel or null) else null";
             description = ''
               The dmenu-style menu to install system-wide for the
-              Bluetooth picker (`fuzzel`). Null installs nothing.
+              Bluetooth picker (following `desktop.launcher.daemon`:
+              fuzzel or scootlaunch). Null installs nothing.
               Linux-only: null off Linux.
             '';
           };
@@ -1592,7 +1627,8 @@ in
           message = ''
             programs.scoot.desktop.launcher.enable is set but
             programs.scoot.desktop.launcher.package is null: set it
-            explicitly (apply the overlay, or point at a fuzzel).
+            explicitly (apply the overlay, or point at a fuzzel or
+            scootlaunch).
           '';
         }
       ];
@@ -1630,7 +1666,8 @@ in
           message = ''
             programs.scoot.desktop.clipboard.enable is set but
             programs.scoot.desktop.clipboard.menuPackage is null: set it
-            explicitly (apply the overlay, or point at a fuzzel).
+            explicitly (apply the overlay, or point at a launcher
+            speaking the dmenu contract).
           '';
         }
       ];
@@ -1717,7 +1754,8 @@ in
           message = ''
             programs.scoot.desktop.capture.chooser is "fuzzel" but
             programs.scoot.desktop.capture.menuPackage is null: set it
-            explicitly (apply the overlay, or point at a fuzzel).
+            explicitly (apply the overlay, or point at a launcher
+            speaking the dmenu contract).
           '';
         }
       ];
@@ -1766,7 +1804,17 @@ in
         let
           cap = cfg.desktop.capture;
           binOr = name: pkg: if pkg != null then "${lib.getExe' pkg name}" else name;
-          menuBin = binOr "fuzzel" cap.menuPackage;
+          # The menu binary inside its package: scootlaunch's own build
+          # carries bin/scootlaunch, everything else (fuzzel, the test
+          # stubs) bin/fuzzel -- the contract the option descriptions
+          # name.
+          menuBin =
+            if cap.menuPackage == null then
+              (if cfg.desktop.launcher.daemon == "scootlaunch" then "scootlaunch" else "fuzzel")
+            else if (cap.menuPackage.pname or (lib.getName cap.menuPackage)) == "scootlaunch" then
+              lib.getExe' cap.menuPackage "scootlaunch"
+            else
+              lib.getExe' cap.menuPackage "fuzzel";
           slurpBin = binOr "slurp" cap.slurpPackage;
           # A wrapper script beside the keymap's launcher script, for
           # the same reason as the home-manager side's: xdpw reads
@@ -1860,7 +1908,7 @@ in
             programs.scoot.desktop.apps.network.enable is set but
             programs.scoot.desktop.apps.network.menuPackage is null:
             set it explicitly (apply the overlay, or point at a
-            fuzzel).
+            launcher speaking the dmenu contract).
           '';
         }
       ];
@@ -1886,7 +1934,7 @@ in
             programs.scoot.desktop.apps.bluetooth.enable is set but
             programs.scoot.desktop.apps.bluetooth.menuPackage is null:
             set it explicitly (apply the overlay, or point at a
-            fuzzel).
+            launcher speaking the dmenu contract).
           '';
         }
       ];

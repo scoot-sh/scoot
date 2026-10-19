@@ -3,7 +3,7 @@ title: "scootlaunch: a windows mode over wlr-foreign-toplevel-management"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "launch-nix"
+blocked: null
 milestone: "M7"
 ---
 

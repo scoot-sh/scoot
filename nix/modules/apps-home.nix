@@ -32,12 +32,36 @@ let
   # one `spawn`), so the binds are always safe to render.
   binOr = name: pkg: if pkg != null then "${lib.getExe' pkg name}" else name;
 
-  # The pickers' menus: absolute fuzzel when the slot names one (the
-  # one fuzzel the launcher already themes: same derivation, no
-  # second copy), bare name from PATH otherwise, with the same
-  # fail-loud contract as above.
-  networkMenu = binOr "fuzzel" apps.network.menuPackage;
-  bluetoothMenu = binOr "fuzzel" apps.bluetooth.menuPackage;
+  # The pickers' menus: the daemon behind `desktop.launcher.daemon`
+  # (fuzzel or scootlaunch: the one launcher the slot already themes --
+  # same derivation, no second copy) when the slot knows one, bare name
+  # from PATH otherwise, with the same fail-loud contract as above.
+  # Both speak the launcher's dmenu contract (lines on stdin, the pick
+  # on stdout -- see dev/design/scootlaunch.md).
+  isScootLaunch = cfg.desktop.launcher.daemon == "scootlaunch";
+  # The dmenu menu's default package follows the launcher daemon (the
+  # pickers reuse the launcher's own menu: one derivation, no second
+  # copy). Linux-only, the way every slot tool is.
+  defaultMenu =
+    if !isLinux then
+      null
+    else if isScootLaunch then
+      (pkgs.scootlaunch or null)
+    else
+      (pkgs.fuzzel or null);
+  menuFor =
+    pkg:
+    if pkg == null then
+      (if isScootLaunch then "scootlaunch" else "fuzzel")
+    # The menu binary inside its package: scootlaunch's own build
+    # carries bin/scootlaunch, everything else (fuzzel, the test
+    # stubs) bin/fuzzel -- the contract the option descriptions name.
+    else if (pkg.pname or (lib.getName pkg)) == "scootlaunch" then
+      lib.getExe' pkg "scootlaunch"
+    else
+      lib.getExe' pkg "fuzzel";
+  networkMenu = menuFor apps.network.menuPackage;
+  bluetoothMenu = menuFor apps.bluetooth.menuPackage;
   nmcliBin = binOr "nmcli" apps.network.cliPackage;
   blueBin = binOr "bluetoothctl" apps.bluetooth.cliPackage;
   # The keyring lookup is best-effort: a key stashed there (the
@@ -63,10 +87,15 @@ let
   # The pickers' theme: the look's roles as fuzzel CLI colors, the
   # same seven leaves the launcher and the clipboard picker carry
   # (one menu, one palette -- see `fuzzel-theme.nix`). Nothing
-  # without a look (or opted out): fuzzel's own style stands.
+  # without a look (or opted out): the menu's own style stands. Empty
+  # with scootlaunch: the look arrives through its own layer, not as
+  # flags.
   fuzzelTheme = import ./fuzzel-theme.nix { inherit lib; };
   themeFor =
-    target: lib.optionalString (themeLook.themed cfg target) (fuzzelTheme (themeLook.lookFor cfg));
+    target:
+    lib.optionalString (!isScootLaunch && themeLook.themed cfg target) (
+      fuzzelTheme (themeLook.lookFor cfg)
+    );
 
   # What both pickers share: awk for the parsing, coreutils' `timeout`
   # bounding every bluetoothctl, keyring and notification call, and
@@ -93,11 +122,13 @@ let
       all = shared // values;
     in
     pkgs.writeShellScriptBin name (
-      builtins.replaceStrings [ "@LOOK_INI@" ] [ lookIni ] (
-        builtins.replaceStrings [ "@LOOK_LEAF_LIB@" ] [ lookLeafLib ] (
-          builtins.replaceStrings (builtins.attrNames all) (map lib.escapeShellArg (
-            builtins.attrValues all
-          )) (builtins.readFile file)
+      builtins.replaceStrings [ "@SCOOTLAUNCH@" ] [ (if isScootLaunch then "1" else "0") ] (
+        builtins.replaceStrings [ "@LOOK_INI@" ] [ lookIni ] (
+          builtins.replaceStrings [ "@LOOK_LEAF_LIB@" ] [ lookLeafLib ] (
+            builtins.replaceStrings (builtins.attrNames all) (map lib.escapeShellArg (
+              builtins.attrValues all
+            )) (builtins.readFile file)
+          )
         )
       )
     );
@@ -216,13 +247,13 @@ in
 
     network.menuPackage = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = linuxPkg "fuzzel";
-      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel else null";
+      default = defaultMenu;
+      defaultText = lib.literalExpression "follows programs.scoot.desktop.launcher.daemon (fuzzel or scootlaunch) on Linux, else null";
       description = ''
         The dmenu-style menu the WiFi picker runs
-        (`fuzzel --dmenu`, themed by the look -- the launcher,
-        which reuses this same package). Null installs nothing.
-        Linux-only: null off Linux.
+        (the launcher's dmenu contract, themed by the look -- the
+        launcher, which reuses this same package). Null installs
+        nothing. Linux-only: null off Linux.
       '';
     };
 
@@ -240,13 +271,13 @@ in
 
     bluetooth.menuPackage = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = linuxPkg "fuzzel";
-      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel else null";
+      default = defaultMenu;
+      defaultText = lib.literalExpression "follows programs.scoot.desktop.launcher.daemon (fuzzel or scootlaunch) on Linux, else null";
       description = ''
         The dmenu-style menu the Bluetooth picker runs
-        (`fuzzel --dmenu`, themed by the look -- the launcher,
-        which reuses this same package). Null installs nothing.
-        Linux-only: null off Linux.
+        (the launcher's dmenu contract, themed by the look -- the
+        launcher, which reuses this same package). Null installs
+        nothing. Linux-only: null off Linux.
       '';
     };
 
@@ -412,7 +443,7 @@ in
             programs.scoot.desktop.apps.network.enable is set but
             programs.scoot.desktop.apps.network.menuPackage is null:
             set it explicitly (apply the overlay, or point at a
-            fuzzel).
+            launcher speaking the dmenu contract).
           '';
         }
       ];
@@ -441,7 +472,7 @@ in
             programs.scoot.desktop.apps.bluetooth.enable is set but
             programs.scoot.desktop.apps.bluetooth.menuPackage is null:
             set it explicitly (apply the overlay, or point at a
-            fuzzel).
+            launcher speaking the dmenu contract).
           '';
         }
       ];

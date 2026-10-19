@@ -53,6 +53,10 @@ SINK=@SINK@
 NOTIFY=@NOTIFY@
 AWK=@AWK@
 TIMEOUT=@TIMEOUT@
+# Which menu speaks the dmenu contract below: `1` for scootlaunch (no
+# color flags: the look arrives through its own layer), `0` for fuzzel
+# (the live colors, else the eval-time flags in $THEME).
+SCOOTLAUNCH=@SCOOTLAUNCH@
 # Whether the audio slot's sink helper is there to offer.
 AUDIO=@AUDIO@
 # The look's menu colors as fuzzel flags (empty without a look): split
@@ -86,13 +90,18 @@ fail() {
     exit 1
 }
 
-# The menu behind every pick below: the live look's colors as CLI
+# The menu behind every pick below: with scootlaunch the dmenu flags
+# alone (no color flags); with fuzzel the live look's colors as CLI
 # flags when a swap rendered them, else the eval-time flags in $THEME.
 # Fuzzel reads the user's own config either way (no `--config`: that
 # flag replaces it); the flags layer only the seven colors over it. One
 # function, so the choice is made at pick time and every call site reads
 # the same.
 menu() {
+    if [ "$SCOOTLAUNCH" = "1" ]; then
+        "$MENU" "$@"
+        return $?
+    fi
     live_colors=$(scoot_fuzzel_look_flags "$LOOK_INI") || live_colors=""
     # shellcheck disable=SC2086
     if [ -n "$live_colors" ]; then

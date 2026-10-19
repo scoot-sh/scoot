@@ -142,13 +142,19 @@ in
 
     menuPackage = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = if isLinux then (if pkgs ? fuzzel then pkgs.fuzzel else null) else null;
-      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.fuzzel else null";
+      default =
+        if !isLinux then
+          null
+        else if cfg.desktop.launcher.daemon == "scootlaunch" then
+          (pkgs.scootlaunch or null)
+        else
+          (if pkgs ? fuzzel then pkgs.fuzzel else null);
+      defaultText = lib.literalExpression "follows programs.scoot.desktop.launcher.daemon (fuzzel or scootlaunch) on Linux, else null";
       description = ''
         The dmenu-style menu the history picker runs
-        (`fuzzel --dmenu`, themed by the look -- the launcher, which
-        reuses this same package). Null installs nothing. Linux-only:
-        null off Linux.
+        (the launcher's dmenu contract, themed by the look -- the
+        launcher, which reuses this same package). Null installs
+        nothing. Linux-only: null off Linux.
       '';
     };
   };
@@ -182,7 +188,8 @@ in
           message = ''
             programs.scoot.desktop.clipboard.enable is set but
             programs.scoot.desktop.clipboard.menuPackage is null: set it
-            explicitly (apply the overlay, or point at a fuzzel).
+            explicitly (apply the overlay, or point at a launcher
+            speaking the dmenu contract).
           '';
         }
         {

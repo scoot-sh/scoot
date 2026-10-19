@@ -65,6 +65,14 @@
 #   demo is a separate derivation running the bare bar; and no input of
 #   `scootbar` names a font (its built closure is checked by
 #   .github/workflows/nix-build.yml).
+# - scootlaunch (docs/scootbar/backlog/launch-nix.md): the overlay
+#   provides `pkgs.scootlaunch` on Linux, the flake's own build; on
+#   Darwin neither the overlay nor `packages` has one; its Cargo
+#   features reach the build through `.override` the same way; the
+#   module renders only the user's `settings` (no look layer); and the
+#   profile's opt-in (`desktop.launcher.daemon = "scootlaunch"`) puts
+#   the same derivation behind the launcher and every menu with no
+#   color flags.
 # - Stylix as a source of a look (`programs.scoot.stylix`, on by
 #   default): with Stylix present and a render binary on hand the catalog
 #   gains a synthesized look named `stylix` (the sixteen base16 slots,
@@ -139,12 +147,15 @@
 #   on the idle policy's lock lines; a null tool, a zero `maxItems`
 #   and a non-absolute or shell-special `dbPath` each fail eval;
 #   the launcher (`desktop-launcher` child) runs with the profile --
-#   fuzzel on the keymap's `Super+d` (drun: XDG apps) and
-#   `Ctrl+Alt+Space` (run: PATH executables beside apps) through one
-#   wrapper script, on the `overlay` layer (above fullscreen) with
+#   the daemon behind `launcher.daemon` (`fuzzel` by default,
+#   `scootlaunch` opted in) on the keymap's `Super+d` (drun: XDG apps)
+#   and `Ctrl+Alt+Space` (run: PATH executables beside apps) through
+#   one wrapper script, on the `overlay` layer (above fullscreen) with
 #   exclusive keyboard, themed by the look unless
 #   `theme.targets.launcher.enable` opts out, holding nothing when
-#   closed; a null package and an unknown `daemon` each fail eval;
+#   closed; with `scootlaunch` the same derivation sits behind the
+#   launcher and every menu (no color flags: the look arrives through
+#   the layer); a null package and an unknown `daemon` each fail eval;
 #   the capture stack (`desktop-capture` child) runs with the
 #   profile -- the portal backends (`xdg-desktop-portal-wlr` 0.8.4
 #   or later for ScreenCast/Screenshot, `-gtk` for the rest, the
@@ -1230,6 +1241,19 @@ let
     echo '#!/bin/sh' > $out/bin/scootbg
     chmod +x $out/bin/scootbg
   '';
+  # A stand-in `scootlaunch` for the opt-in evaluations: named like the
+  # real package, so `lib.getExe` resolves the binary the scripts name.
+  fakeLaunchScoot =
+    (pkgs.runCommand "scootlaunch" { } ''
+      mkdir -p $out/bin
+      echo '#!/bin/sh' > $out/bin/scootlaunch
+      chmod +x $out/bin/scootlaunch
+    '').overrideAttrs
+      (old: {
+        meta = (old.meta or { }) // {
+          mainProgram = "scootlaunch";
+        };
+      });
   # A stand-in fcitx5 addon (a CJK engine beside the core): a tiny
   # derivation, so the input-method `addons` pins stay hermetic (no
   # real engine in the check closure) on every platform.
@@ -1624,6 +1648,21 @@ let
   # The overlay, and the pure module defaulting to what it provides.
   overlaid = pkgs.appendOverlays [ flake.overlays.default ];
   osOverlaid = evalNixosWithRealLook [ ./modules/nixos.nix ] overlaid { enable = true; };
+  # The opt-in through the overlay: the daemon switch with the flake's
+  # own scootlaunch as the default package (nothing explicit), on both
+  # sides.
+  hmOverlaidScoot = evalHomeWith ./modules/home.nix overlaid {
+    enable = true;
+    desktop.enable = true;
+    look = null;
+    desktop.launcher.daemon = "scootlaunch";
+  };
+  osOverlaidScoot = evalNixosWithRealLook [ ./modules/nixos.nix ] overlaid {
+    enable = true;
+    desktop.enable = true;
+    look = null;
+    desktop.launcher.daemon = "scootlaunch";
+  };
   darwinOverlaid = darwinPkgs.appendOverlays [ flake.overlays.default ];
   # `lib.hasInfix` over strings that name store paths: the check is of
   # text, so their context (the derivations they refer to) is dropped, which
@@ -3242,6 +3281,24 @@ let
         desktop.launcher.enable = true;
         desktop.launcher.daemon = "bogus-daemon";
       }).config.programs.scoot.desktop.launcher.daemon;
+
+  # ...opted into scootlaunch: the daemon switch with the look behind
+  # it (music-desk, like `hmLaunch`). The launcher package is explicit
+  # (the pinned nixpkgs has no scootlaunch: the flake's own build is
+  # the default only with the overlay, pinned with `overlaid` below);
+  # every menu default follows the daemon on its own, so the same
+  # explicit derivation stands in for each here.
+  hmLaunchScoot = evalHome {
+    enable = true;
+    desktop.enable = true;
+    look = "music-desk";
+    desktop.launcher.daemon = "scootlaunch";
+    desktop.launcher.package = fakeLaunchScoot;
+    desktop.clipboard.menuPackage = fakeLaunchScoot;
+    desktop.apps.network.menuPackage = fakeLaunchScoot;
+    desktop.apps.bluetooth.menuPackage = fakeLaunchScoot;
+    desktop.capture.menuPackage = fakeLaunchScoot;
+  };
 
   # --- launcher system evaluations ---
   osLaunch = evalNixos {
@@ -6654,6 +6711,113 @@ let
         assert !(overlaid ? scootbar-demo);
         true
       )
+      # The overlay carries the flake's own scootlaunch...
+      (
+        assert overlaid.scootlaunch.drvPath == built.scootlaunch.drvPath;
+        true
+      )
+      # ...whose Cargo features are `.override` arguments that reach the
+      # cargo hook: the default build names none (the crate's default,
+      # SVG icons on).
+      (
+        assert
+          !built.scootlaunch.cargoBuildNoDefaultFeatures && built.scootlaunch.cargoBuildFeatures == [ ];
+        true
+      )
+      (
+        assert lib.getExe built.scootlaunch == "${built.scootlaunch}/bin/scootlaunch";
+        true
+      )
+      # ...and what the pure modules default to, with the daemon opted
+      # in: the flake's own build behind the launcher and every menu, on
+      # both sides, with every assertion holding.
+      (
+        assert allAssertionsHold hmOverlaidScoot.config;
+        true
+      )
+      (
+        assert
+          hmOverlaidScoot.config.programs.scoot.desktop.launcher.package.drvPath == built.scootlaunch.drvPath;
+        true
+      )
+      (
+        assert
+          hmOverlaidScoot.config.programs.scoot.desktop.clipboard.menuPackage.drvPath
+          == built.scootlaunch.drvPath;
+        true
+      )
+      (
+        assert
+          hmOverlaidScoot.config.programs.scoot.desktop.apps.network.menuPackage.drvPath
+          == built.scootlaunch.drvPath;
+        true
+      )
+      (
+        assert
+          hmOverlaidScoot.config.programs.scoot.desktop.capture.menuPackage.drvPath
+          == built.scootlaunch.drvPath;
+        true
+      )
+      (
+        assert allAssertionsHold osOverlaidScoot.config;
+        true
+      )
+      (
+        assert
+          osOverlaidScoot.config.programs.scoot.desktop.launcher.package.drvPath == built.scootlaunch.drvPath;
+        true
+      )
+      (
+        assert
+          osOverlaidScoot.config.programs.scoot.desktop.clipboard.menuPackage.drvPath
+          == osOverlaidScoot.config.programs.scoot.desktop.launcher.package.drvPath;
+        true
+      )
+      (
+        assert
+          osOverlaidScoot.config.programs.scoot.desktop.apps.network.menuPackage.drvPath
+          == osOverlaidScoot.config.programs.scoot.desktop.launcher.package.drvPath;
+        true
+      )
+      (
+        assert
+          osOverlaidScoot.config.programs.scoot.desktop.apps.bluetooth.menuPackage.drvPath
+          == osOverlaidScoot.config.programs.scoot.desktop.launcher.package.drvPath;
+        true
+      )
+      (
+        assert
+          osOverlaidScoot.config.programs.scoot.desktop.capture.menuPackage.drvPath
+          == osOverlaidScoot.config.programs.scoot.desktop.launcher.package.drvPath;
+        true
+      )
+      (
+        assert lib.any (
+          p: p.drvPath == built.scootlaunch.drvPath
+        ) osOverlaidScoot.config.environment.systemPackages;
+        true
+      )
+      # Without the opt-in every OS-side menu stays fuzzel (the default
+      # daemon), on the same derivation both sides install.
+      (
+        assert
+          osOverlaid.config.programs.scoot.desktop.clipboard.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+        true
+      )
+      (
+        assert
+          osOverlaid.config.programs.scoot.desktop.apps.network.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+        true
+      )
+      (
+        assert
+          osOverlaid.config.programs.scoot.desktop.apps.bluetooth.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+        true
+      )
+      (
+        assert osOverlaid.config.programs.scoot.desktop.capture.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+        true
+      )
       # scootbar's Cargo features are `.override` arguments that reach the
       # cargo hook: the default build names none (the crate's default,
       # the clock), and a build without modules turns the defaults off.
@@ -6760,7 +6924,15 @@ let
         true
       )
       (
+        assert !(darwinOverlaid ? scootlaunch);
+        true
+      )
+      (
         assert !(flake.packages.aarch64-darwin ? scootbar || flake.packages.aarch64-darwin ? scootbar-demo);
+        true
+      )
+      (
+        assert !(flake.packages.aarch64-darwin ? scootlaunch);
         true
       )
       (
@@ -6938,6 +7110,14 @@ let
   captureClipboardScript = slotScriptBin hmCapture "scoot-capture-clipboard";
   launchMoon = slotScriptBin hmLaunchLookMoon "scoot-launcher";
   launchGinger = slotScriptBin hmLaunchLookGinger "scoot-launcher";
+  # The opt-in's generated files: the launcher wrapper, the clipboard
+  # picker, both pickers and the screencast chooser as the keymap and
+  # xdpw run them -- all through scootlaunch, with no color flags.
+  launchScoot = slotScriptBin hmLaunchScoot "scoot-launcher";
+  clipPickerScoot = slotScriptBin hmLaunchScoot "scoot-clipboard-pick";
+  netPickScoot = slotScriptBin hmLaunchScoot "scoot-network-pick";
+  bluePickScoot = slotScriptBin hmLaunchScoot "scoot-bluetooth-pick";
+  captureScoot = hmLaunchScoot.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source;
   # The power policy's generated files: the switch script as the
   # keymap runs it, the charge script as the service runs it (the
   # `sync` verb stripped), the merged udev rules, and the charge
@@ -10871,6 +11051,66 @@ let
     # `tryEval`.
     (
       assert !hmLaunchDaemonBogus.success;
+      true
+    )
+    # The opt-in (`desktop.launcher.daemon = "scootlaunch"`): the slot
+    # runs, every assertion holds, and the same derivation sits behind
+    # the launcher and every menu (launcher, clipboard, both pickers,
+    # the capture chooser) -- one menu, no second copy.
+    (
+      assert allAssertionsHold hmLaunchScoot.config;
+      true
+    )
+    (
+      assert hmLaunchScoot.config.programs.scoot.desktop.launcher.daemon == "scootlaunch";
+      true
+    )
+    (
+      assert
+        hmLaunchScoot.config.programs.scoot.desktop.launcher.package.drvPath == fakeLaunchScoot.drvPath;
+      true
+    )
+    (
+      assert
+        hmLaunchScoot.config.programs.scoot.desktop.clipboard.menuPackage.drvPath
+        == hmLaunchScoot.config.programs.scoot.desktop.launcher.package.drvPath;
+      true
+    )
+    (
+      assert
+        hmLaunchScoot.config.programs.scoot.desktop.apps.network.menuPackage.drvPath
+        == hmLaunchScoot.config.programs.scoot.desktop.launcher.package.drvPath;
+      true
+    )
+    (
+      assert
+        hmLaunchScoot.config.programs.scoot.desktop.apps.bluetooth.menuPackage.drvPath
+        == hmLaunchScoot.config.programs.scoot.desktop.launcher.package.drvPath;
+      true
+    )
+    (
+      assert
+        hmLaunchScoot.config.programs.scoot.desktop.capture.menuPackage.drvPath
+        == hmLaunchScoot.config.programs.scoot.desktop.launcher.package.drvPath;
+      true
+    )
+    # ...installed beside the profile's own, and the binds unchanged
+    # (drun by default, PATH executables on the run bind -- scootlaunch
+    # keeps `--list-executables-in-path` as an alias for `--run`).
+    (
+      assert lib.any (p: (p.name or "") == "scoot-launcher") hmLaunchScoot.config.home.packages;
+      true
+    )
+    (
+      assert
+        hmLaunchScoot.config.programs.scoot.settings.binds."super+d"
+        == "spawn ${slotScriptBin hmLaunchScoot "scoot-launcher"}";
+      true
+    )
+    (
+      assert
+        hmLaunchScoot.config.programs.scoot.settings.binds."ctrl+alt+space"
+        == "spawn ${slotScriptBin hmLaunchScoot "scoot-launcher"} --list-executables-in-path";
       true
     )
   ];
@@ -16931,6 +17171,36 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "${pkgs.fuzzel}/bin/fuzzel --layer=overlay" ${launchTargetOff}
     echo "ok: opting out (or no look) leaves fuzzel unthemed but layered"
 
+    # 19e. The opt-in (`desktop.launcher.daemon = "scootlaunch"`): the
+    #      wrapper execs scootlaunch on the overlay layer with no color
+    #      flags (the look arrives through the layer), passing extra
+    #      args through for the run bind -- and no fuzzel remains.
+    grep -F -q -- "${fakeLaunchScoot}/bin/scootlaunch --layer=overlay" ${launchScoot}
+    grep -F -q -- '"$@"' ${launchScoot}
+    if grep -q -- "--background-color=" ${launchScoot}; then echo "color flag in the scootlaunch wrapper" >&2; exit 1; fi
+    if grep -q "scoot_fuzzel_look_flags" ${launchScoot}; then echo "fuzzel look helper in the scootlaunch wrapper" >&2; exit 1; fi
+    if grep -q "fuzzel" ${launchScoot}; then echo "fuzzel in the scootlaunch wrapper" >&2; exit 1; fi
+    # The clipboard picker through scootlaunch's dmenu, the lock guard
+    # staying, with no color flags either way.
+    grep -F -q -- "${fakeLaunchScoot}/bin/scootlaunch --dmenu --prompt='clipboard: ' --no-run-if-empty --only-match" ${clipPickerScoot}
+    grep -q "clipboard_unlocked" ${clipPickerScoot}
+    if grep -q -- "--background-color=" ${clipPickerScoot}; then echo "color flag in the scootlaunch picker" >&2; exit 1; fi
+    if grep -q "scoot_fuzzel_look_flags" ${clipPickerScoot}; then echo "fuzzel look helper in the scootlaunch picker" >&2; exit 1; fi
+    # Both pickers through scootlaunch's dmenu (the SCOOTLAUNCH branch
+    # of the shared menu helper, no color flags), naming the same
+    # binary the launcher runs.
+    grep -F -q -- "SCOOTLAUNCH=1" ${netPickScoot}
+    grep -F -q -- "SCOOTLAUNCH=1" ${bluePickScoot}
+    grep -F -q -- "${fakeLaunchScoot}/bin/scootlaunch" ${netPickScoot}
+    grep -F -q -- "${fakeLaunchScoot}/bin/scootlaunch" ${bluePickScoot}
+    grep -F -q -- '"$MENU" "$@"' ${netPickScoot}
+    grep -F -q -- '"$MENU" "$@"' ${bluePickScoot}
+    grep -F -q -- '[ "$SCOOTLAUNCH" = "1" ]' ${netPickScoot}
+    grep -F -q -- '[ "$SCOOTLAUNCH" = "1" ]' ${bluePickScoot}
+    grep -F -q -- "THEME='''" ${netPickScoot}
+    grep -F -q -- "THEME='''" ${bluePickScoot}
+    echo "ok: the opt-in runs the launcher and every menu through scootlaunch, unflagged"
+
     ${lib.optionalString isLinux ''
       # 19d. The user's own fuzzel config survives a swap: with a live
       #      look applied no call site passes a config-file flag (that
@@ -17005,6 +17275,20 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     if grep -q -- " -c '" ${captureRegionNoLook}; then echo "slurp color flag present with no look" >&2; exit 1; fi
     grep -F -q -- "${pkgs.slurp}/bin/slurp" ${captureRegionNoLook}
     echo "ok: opting out (or no look) leaves the chooser and the region picker unthemed"
+
+    # 20e. The opt-in: the chooser through scootlaunch's dmenu with no
+    #      color flags (the look arrives through the layer), still
+    #      capped at 30 fps with no fixed output beside the picker.
+    grep -F -q -- "[screencast]" ${captureScoot}
+    grep -F -q -- "chooser_type=dmenu" ${captureScoot}
+    grep -F -q -- "max_fps=30" ${captureScoot}
+    if grep -q -- "output_name" ${captureScoot}; then echo "output_name present beside a chooser" >&2; exit 1; fi
+    chooserScoot=$(grep '^chooser_cmd=' ${captureScoot} | cut -d= -f2-)
+    grep -F -q -- "${fakeLaunchScoot}/bin/scootlaunch --dmenu --prompt='Share: '" "''${chooserScoot}"
+    if grep -q -- "--background-color=" "''${chooserScoot}"; then echo "color flag in the scootlaunch chooser" >&2; exit 1; fi
+    if grep -q "scoot_fuzzel_look_flags" "''${chooserScoot}"; then echo "fuzzel look helper in the scootlaunch chooser" >&2; exit 1; fi
+    if grep -q "fuzzel" "''${chooserScoot}"; then echo "fuzzel in the scootlaunch chooser" >&2; exit 1; fi
+    echo "ok: the opt-in chooser is a scootlaunch dmenu list at 30 fps"
 
     # 20c. The slurp picker instead: xdpw's own click-to-pick shape
     #      (its man page's example line), the look on its border and
