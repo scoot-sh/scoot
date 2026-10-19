@@ -590,13 +590,7 @@ impl Server {
     /// emitted before a ActionInvoked signal"). Without a minted token
     /// (no activation global, the compositor never answered) the invoke
     /// still goes out: the token is a may, the action is the click.
-    pub fn signal_action(
-        &self,
-        conn: &mut Conn,
-        id: u32,
-        action: &str,
-        token: Option<&str>,
-    ) {
+    pub fn signal_action(&self, conn: &mut Conn, id: u32, action: &str, token: Option<&str>) {
         if let Some(token) = token {
             let mut body = Writer::new();
             body.u32(id);

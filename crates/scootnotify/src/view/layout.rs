@@ -132,13 +132,7 @@ pub struct Stack {
 /// the meta ages (CLOCK_REALTIME ms, the store's `created_ms` clock).
 /// `em` is the look's text size. Allocates (Strings, Vecs): this runs on
 /// content change, never per repaint.
-pub fn layout(
-    live: &[&Notification],
-    config: &Config,
-    text: &Text,
-    em: f32,
-    now_ms: u64,
-) -> Stack {
+pub fn layout(live: &[&Notification], config: &Config, text: &Text, em: f32, now_ms: u64) -> Stack {
     let metrics = text.metrics(em);
     let line_h = (metrics.ascent + metrics.descent + 4.0).ceil().max(1.0) as u32;
     let ascent = metrics.ascent.ceil().max(1.0) as u32;
@@ -153,12 +147,25 @@ pub fn layout(
     let mut y = 0u32;
     for note in live.iter().rev().take(max_visible) {
         let spans = crate::markup::parse(&note.body);
-        let icon_w = if has_icon_slot(note) { ICON_PX + PAD } else { 0 };
+        let icon_w = if has_icon_slot(note) {
+            ICON_PX + PAD
+        } else {
+            0
+        };
         let text_w = content_w.saturating_sub(icon_w);
         let text_x = content_x + icon_w;
         let mut card_y = y + border + PAD;
-        let summary =
-            wrap_runs(&summary_runs(&note.summary), text, em, text_w, 2, text_x, card_y, ascent, line_h);
+        let summary = wrap_runs(
+            &summary_runs(&note.summary),
+            text,
+            em,
+            text_w,
+            2,
+            text_x,
+            card_y,
+            ascent,
+            line_h,
+        );
         card_y += summary.len() as u32 * line_h;
         let meta_text = meta_text(note, now_ms);
         let meta = Line {
@@ -172,7 +179,9 @@ pub fn layout(
             baseline: i64::from(card_y + ascent),
         };
         card_y += line_h;
-        let body = wrap_spans(&spans, text, em, text_w, body_lines, text_x, card_y, ascent, line_h);
+        let body = wrap_spans(
+            &spans, text, em, text_w, body_lines, text_x, card_y, ascent, line_h,
+        );
         card_y += body.len() as u32 * line_h;
         let progress_bar = note.value.map(|_| {
             let bar = Rect {
@@ -270,11 +279,7 @@ pub fn layout(
 
 /// The "+N more" pill's height: one padded line, or nothing.
 fn pill_h(hidden: usize, line_h: u32) -> u32 {
-    if hidden == 0 {
-        0
-    } else {
-        line_h + PAD
-    }
+    if hidden == 0 { 0 } else { line_h + PAD }
 }
 
 /// The letter tile's letter: the app name's first alphanumeric,
@@ -365,7 +370,12 @@ fn wrap_spans(
         // `img` alt text already reads as text; control characters other
         // than tab never reach the screen.
         for c in span.text.chars().filter(|c| !c.is_control() || *c == '\t') {
-            chars.push((if c == '\t' { ' ' } else { c }, span.bold, span.underline, span_is_link(span)));
+            chars.push((
+                if c == '\t' { ' ' } else { c },
+                span.bold,
+                span.underline,
+                span_is_link(span),
+            ));
         }
     }
     // Hard newlines in the body break lines (the spec's bodies carry
@@ -416,7 +426,9 @@ fn wrap_spans(
         }
         while lines.len() < max_lines
             && chars.get(at).is_some_and(|(c, _, _, _)| *c == ' ')
-            && chars[..at].iter().any(|(c, _, _, _)| *c != ' ' && *c != '\n')
+            && chars[..at]
+                .iter()
+                .any(|(c, _, _, _)| *c != ' ' && *c != '\n')
         {
             at += 1;
         }

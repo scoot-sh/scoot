@@ -555,7 +555,13 @@ fn the_render_carries_the_launcher_fragment() {
     // The notification fragment renders beside the launcher's, from the
     // same roles: the daemon reads it at start and on re-theme.
     let notify = std::fs::read_to_string(rendered.join("notify.toml")).expect("notify.toml");
-    for line in ["surface =", "focus =", "border =", "font-size =", "opacity ="] {
+    for line in [
+        "surface =",
+        "focus =",
+        "border =",
+        "font-size =",
+        "opacity =",
+    ] {
         assert!(notify.contains(line), "missing {line}:\n{notify}");
     }
     let parsed: toml::Table = toml::from_str(&notify).expect("notify.toml parses");

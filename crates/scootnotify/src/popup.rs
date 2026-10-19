@@ -54,16 +54,14 @@ use wayland_protocols::xdg::activation::v1::client::xdg_activation_token_v1::{
 };
 use wayland_protocols::xdg::activation::v1::client::xdg_activation_v1::XdgActivationV1;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
-use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
-    self, Anchor,
-};
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{self, Anchor};
 
+use crate::bus::hints::Urgency;
 use crate::config::{Anchor as StackAnchor, Config};
 use crate::look::Look;
 use crate::model::store::Notification;
-use crate::bus::hints::Urgency;
 use crate::view::layout::{self, Stack};
-use crate::view::render::{self, Hover, IconBits, ICON_SIDE};
+use crate::view::render::{self, Hover, ICON_SIDE, IconBits};
 
 /// evdev button codes: wayland-client names no button codes.
 const BTN_LEFT: u32 = 0x110;
@@ -284,7 +282,9 @@ impl App {
                 self.dirty = true;
             }
             Err(error) => {
-                warn(format_args!("scootnotify: cannot show the stack: {error:?}"));
+                warn(format_args!(
+                    "scootnotify: cannot show the stack: {error:?}"
+                ));
             }
         }
     }
@@ -427,7 +427,10 @@ impl App {
         let (Some(shm), Some(text)) = (shm, self.text.as_mut()) else {
             return false;
         };
-        let slot = match self.buffers.take(&shm, qh, dims, wl_shm::Format::Argb8888, ()) {
+        let slot = match self
+            .buffers
+            .take(&shm, qh, dims, wl_shm::Format::Argb8888, ())
+        {
             Ok(Some(slot)) => slot,
             // Both buffers held: the next release retries (and only
             // then — releases never dirty an up-to-date surface, or
@@ -566,7 +569,11 @@ impl Popup {
     /// needs. `Err` (no display, no compositor, no layer shell, no
     /// font) means headless: the bus still serves, and cards wait with
     /// their clocks stopped.
-    pub fn connect(config: &Config, look: &Look, font_path: Option<&PathBuf>) -> Result<Self, String> {
+    pub fn connect(
+        config: &Config,
+        look: &Look,
+        font_path: Option<&PathBuf>,
+    ) -> Result<Self, String> {
         let conn = Connection::connect_to_env()
             .map_err(|error| format!("no compositor ({error:?}): headless"))?;
         let mut queue = conn.new_event_queue();
@@ -643,10 +650,13 @@ impl Popup {
         }
         // Urgencies follow the live set (the paint reads them per card).
         app.urgencies.clear();
-        app.urgencies.extend(live.iter().map(|note| (note.id, note.urgency)));
+        app.urgencies
+            .extend(live.iter().map(|note| (note.id, note.urgency)));
         // Decode icons for cards without any (arrival-priced, once).
         for note in live {
-            if matches!(note.icon, crate::model::store::Icon::None) || app.icons.contains_key(&note.id) {
+            if matches!(note.icon, crate::model::store::Icon::None)
+                || app.icons.contains_key(&note.id)
+            {
                 continue;
             }
             if let Some(bits) = decode_icon(note) {
@@ -655,9 +665,12 @@ impl Popup {
         }
         // Forget what left (a close frees its pixels with its card,
         // and drops its presentation: a re-arrival presents afresh).
-        app.icons.retain(|id, _| live.iter().any(|note| note.id == *id));
-        app.unpresented.retain(|id| live.iter().any(|note| note.id == *id));
-        app.presented.retain(|id| live.iter().any(|note| note.id == *id));
+        app.icons
+            .retain(|id, _| live.iter().any(|note| note.id == *id));
+        app.unpresented
+            .retain(|id| live.iter().any(|note| note.id == *id));
+        app.presented
+            .retain(|id| live.iter().any(|note| note.id == *id));
         let qh = self.queue.handle();
         if app.stack.cards.is_empty() {
             if app.live.is_some() {
@@ -775,13 +788,18 @@ impl Popup {
             let Some(guard) = self.queue.prepare_read() else {
                 continue;
             };
-            let wait = deadline.checked_duration_since(Instant::now()).unwrap_or(Duration::ZERO);
+            let wait = deadline
+                .checked_duration_since(Instant::now())
+                .unwrap_or(Duration::ZERO);
             let timespec = rustix::time::Timespec {
                 tv_sec: wait.as_secs() as _,
                 tv_nsec: wait.subsec_nanos() as _,
             };
             let wayland = guard.connection_fd();
-            let mut polls = [rustix::event::PollFd::new(&wayland, rustix::event::PollFlags::IN)];
+            let mut polls = [rustix::event::PollFd::new(
+                &wayland,
+                rustix::event::PollFlags::IN,
+            )];
             let _ = rustix::event::poll(&mut polls, Some(&timespec));
             if !polls[0].revents().is_empty() {
                 let _ = guard.read();
@@ -1084,16 +1102,29 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                 app.button_serial = Some(serial);
                 match hit_button {
                     Some(index) => {
-                        let key = app.stack.cards.iter().find(|card| card.id == id).and_then(
-                            |card| card.buttons.get(index).map(|button| button.key.clone()),
-                        );
+                        let key =
+                            app.stack
+                                .cards
+                                .iter()
+                                .find(|card| card.id == id)
+                                .and_then(|card| {
+                                    card.buttons.get(index).map(|button| button.key.clone())
+                                });
                         let Some(key) = key else {
                             return;
                         };
-                        app.click = Some(Click { id, key: Some(key), serial });
+                        app.click = Some(Click {
+                            id,
+                            key: Some(key),
+                            serial,
+                        });
                     }
                     None => {
-                        app.click = Some(Click { id, key: None, serial });
+                        app.click = Some(Click {
+                            id,
+                            key: None,
+                            serial,
+                        });
                     }
                 }
             }

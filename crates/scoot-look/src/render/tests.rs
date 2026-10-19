@@ -1054,7 +1054,10 @@ fn notify_fragment_carries_the_shell_contract() {
     let launch = render_launch(&moonrise()).expect("renders");
     let frag = render_notify(&moonrise()).expect("renders");
     for line in launch.lines() {
-        assert!(frag.contains(line), "notify misses launch line {line:?}:\n{frag}");
+        assert!(
+            frag.contains(line),
+            "notify misses launch line {line:?}:\n{frag}"
+        );
     }
     let parsed: toml::Table = toml::from_str(&frag).expect("notify fragment reparses");
     assert_eq!(parsed["colors"].as_table().expect("colors").len(), 13);

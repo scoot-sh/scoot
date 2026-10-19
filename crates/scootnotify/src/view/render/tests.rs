@@ -18,7 +18,9 @@ use crate::model::store::{Icon, Notification};
 use crate::view::layout;
 
 fn make_text() -> Text {
-    Text::new(FontArc::new(FontVec::try_from_vec(scootui::testfont::build()).unwrap()))
+    Text::new(FontArc::new(
+        FontVec::try_from_vec(scootui::testfont::build()).unwrap(),
+    ))
 }
 
 fn note(id: u32, summary: &str, body: &str) -> Notification {
@@ -54,7 +56,16 @@ fn painted(stack: &layout::Stack, look: &Look) -> (Vec<u8>, u32, u32) {
     let dims = (stack.width, stack.height);
     {
         let mut canvas = Canvas::new(&mut pixels, dims.0, dims.1).unwrap();
-        paint(&mut canvas, &mut paint_text, stack, &config, look, &urgencies, None, &HashMap::new());
+        paint(
+            &mut canvas,
+            &mut paint_text,
+            stack,
+            &config,
+            look,
+            &urgencies,
+            None,
+            &HashMap::new(),
+        );
     }
     (pixels, dims.0, dims.1)
 }
@@ -76,7 +87,10 @@ fn a_card_has_its_ring_fill_and_ink() {
     assert!(height > 0);
     // The top edge's middle is the normal-urgency ring (`focus`).
     let focus = look.focus;
-    assert_eq!(at(&pixels, width, width / 2, 1), [focus.r, focus.g, focus.b]);
+    assert_eq!(
+        at(&pixels, width, width / 2, 1),
+        [focus.r, focus.g, focus.b]
+    );
     // The content pad is the surface fill.
     let surface = look.surface;
     assert_eq!(at(&pixels, width, 5, 30), [surface.r, surface.g, surface.b]);
@@ -84,7 +98,9 @@ fn a_card_has_its_ring_fill_and_ink() {
     let foreground = look.theme.foreground;
     let card = &stack.cards[0];
     let row = card.summary[0].baseline as u32;
-    let ink = (0..width).any(|x| at(&pixels, width, x, row.saturating_sub(4)) == [foreground.r, foreground.g, foreground.b]);
+    let ink = (0..width).any(|x| {
+        at(&pixels, width, x, row.saturating_sub(4)) == [foreground.r, foreground.g, foreground.b]
+    });
     assert!(ink, "the summary draws foreground ink");
 }
 
@@ -107,9 +123,22 @@ fn urgency_colors_the_ring() {
         let mut pixels = vec![0u8; stack.width as usize * stack.height as usize * 4];
         {
             let mut canvas = Canvas::new(&mut pixels, stack.width, stack.height).unwrap();
-            paint(&mut canvas, &mut paint_text, &stack, &config, &look, &urgencies, None, &HashMap::new());
+            paint(
+                &mut canvas,
+                &mut paint_text,
+                &stack,
+                &config,
+                &look,
+                &urgencies,
+                None,
+                &HashMap::new(),
+            );
         }
-        assert_eq!(at(&pixels, stack.width, stack.width / 2, 1), [ring.r, ring.g, ring.b], "{urgency:?}");
+        assert_eq!(
+            at(&pixels, stack.width, stack.width / 2, 1),
+            [ring.r, ring.g, ring.b],
+            "{urgency:?}"
+        );
     }
 }
 
@@ -136,7 +165,13 @@ fn a_repaint_allocates_nothing_after_warm_up() {
         },
     ];
     actions_note.value = Some(42);
-    let stack = layout::layout(&[&actions_note], &config, &font_text, look.font_size_px, 2_000);
+    let stack = layout::layout(
+        &[&actions_note],
+        &config,
+        &font_text,
+        look.font_size_px,
+        2_000,
+    );
     let urgencies = HashMap::from([(1, Urgency::Normal)]);
     let mut paint_text = make_text();
     let mut pixels = vec![0u8; stack.width as usize * stack.height as usize * 4];
@@ -144,11 +179,29 @@ fn a_repaint_allocates_nothing_after_warm_up() {
     // draws, including the pill and the second card state below.
     for _ in 0..3 {
         let mut canvas = Canvas::new(&mut pixels, stack.width, stack.height).unwrap();
-        paint(&mut canvas, &mut paint_text, &stack, &config, &look, &urgencies, None, &HashMap::new());
+        paint(
+            &mut canvas,
+            &mut paint_text,
+            &stack,
+            &config,
+            &look,
+            &urgencies,
+            None,
+            &HashMap::new(),
+        );
     }
     let (_, allocs) = scootbg_mem::count_allocations(|| {
         let mut canvas = Canvas::new(&mut pixels, stack.width, stack.height).unwrap();
-        paint(&mut canvas, &mut paint_text, &stack, &config, &look, &urgencies, None, &HashMap::new());
+        paint(
+            &mut canvas,
+            &mut paint_text,
+            &stack,
+            &config,
+            &look,
+            &urgencies,
+            None,
+            &HashMap::new(),
+        );
     });
     assert_eq!(allocs, 0, "a repaint allocates");
 }

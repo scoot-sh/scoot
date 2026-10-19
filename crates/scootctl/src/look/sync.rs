@@ -340,7 +340,13 @@ fn verify_prerendered(name: &str, source_hash_hex: &str, dir: &Path) -> Result<(
     if json.get("source_hash").and_then(|h| h.as_str()) != Some(source_hash_hex) {
         return Err(refused("render.json source hash differs".to_owned()));
     }
-    for file in ["scoot.toml", "bar.toml", "greet.toml", "launch.toml", "notify.toml"] {
+    for file in [
+        "scoot.toml",
+        "bar.toml",
+        "greet.toml",
+        "launch.toml",
+        "notify.toml",
+    ] {
         if !dir.join(file).is_file() {
             return Err(refused(format!("{file} is missing")));
         }

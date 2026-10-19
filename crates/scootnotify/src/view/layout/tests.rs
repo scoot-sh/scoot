@@ -11,7 +11,9 @@ use crate::model::expiry::Clock;
 use crate::model::store::{Icon, Notification};
 
 fn text() -> Text {
-    Text::new(FontArc::new(FontVec::try_from_vec(scootui::testfont::build()).unwrap()))
+    Text::new(FontArc::new(
+        FontVec::try_from_vec(scootui::testfont::build()).unwrap(),
+    ))
 }
 
 fn note(id: u32, app: &str, summary: &str, body: &str) -> Notification {

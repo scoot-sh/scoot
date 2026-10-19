@@ -88,7 +88,12 @@ fn sway_or_skip(tag: &str, outputs: u32) -> Option<Session> {
 /// the built-in defaults.
 fn spawn_popup(session: &Session, bus: &Daemon, config: &str) -> (Child, PathBuf) {
     let binary = notify_bin();
-    let config_path = session.scratch.0.join("config").join("scoot").join("notify.toml");
+    let config_path = session
+        .scratch
+        .0
+        .join("config")
+        .join("scoot")
+        .join("notify.toml");
     std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
     std::fs::write(&config_path, config).unwrap();
     let font = session.scratch.font();
@@ -135,7 +140,9 @@ fn wait_serving(client: &mut Conn, server: &mut Child, log: &Path) {
     let start = Instant::now();
     let body = notify_body("Probe", 0, "p", "p", &[], &[], 1);
     client
-        .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000)
+        .call(
+            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
+        )
         .expect("the first call queues");
     loop {
         if start.elapsed() >= Duration::from_secs(30) {
@@ -167,7 +174,9 @@ fn wait_serving(client: &mut Conn, server: &mut Child, log: &Path) {
         }
         if errored {
             client
-                .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000)
+                .call(
+                    BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
+                )
                 .expect("a resent call queues");
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -228,7 +237,9 @@ fn notify(
 ) -> u32 {
     let body = notify_body(app, replaces, summary, body, actions, bytes, expire);
     client
-        .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token)
+        .call(
+            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token,
+        )
         .expect("the call queues");
     let start = Instant::now();
     loop {
@@ -283,9 +294,20 @@ fn watch_signals(client: &mut Conn) {
     // The barrier: the bus installs one connection's calls in order, so
     // the reply below proves the rule is live.
     client
-        .call(BUS_NAME, OBJECT, INTERFACE, "GetServerInformation", "", &[], 0, 8901)
+        .call(
+            BUS_NAME,
+            OBJECT,
+            INTERFACE,
+            "GetServerInformation",
+            "",
+            &[],
+            0,
+            8901,
+        )
         .unwrap();
-    let _ = until(client, |event| matches!(event, Event::Reply { token: 8901, .. }));
+    let _ = until(client, |event| {
+        matches!(event, Event::Reply { token: 8901, .. })
+    });
 }
 
 /// The stack's top-right corner: the surface's left edge and the first
@@ -324,7 +346,9 @@ fn kill(mut child: Child) {
 #[test]
 fn pixels_per_card_state() {
     let Some(bus) = bus_or_skip() else { return };
-    let Some(session) = scoot_or_skip("pixels", 1) else { return };
+    let Some(session) = scoot_or_skip("pixels", 1) else {
+        return;
+    };
     let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
     wait_serving(&mut client, &mut server, &log);
@@ -332,7 +356,19 @@ fn pixels_per_card_state() {
     let shot = || session.scoot_screenshot(1);
 
     // Normal: the `focus` ring, the surface fill, foreground ink.
-    let _ = notify(&mut client, &mut server, &log, "a", 0, "Hello", "World", &[], &[], 0, 101);
+    let _ = notify(
+        &mut client,
+        &mut server,
+        &log,
+        "a",
+        0,
+        "Hello",
+        "World",
+        &[],
+        &[],
+        0,
+        101,
+    );
     wait_shown(&mut server, &log, "the normal card", || {
         shot().at(x0 + 180, y0 + 1) == rgb(FOCUS)
     });
@@ -343,7 +379,19 @@ fn pixels_per_card_state() {
     assert!(ink, "the summary draws foreground ink");
 
     // Critical: the `urgent` ring over the same fill.
-    let _ = notify(&mut client, &mut server, &log, "b", 0, "Fire", "Alarm", &[], &[("urgency", 2)], 0, 102);
+    let _ = notify(
+        &mut client,
+        &mut server,
+        &log,
+        "b",
+        0,
+        "Fire",
+        "Alarm",
+        &[],
+        &[("urgency", 2)],
+        0,
+        102,
+    );
     wait_shown(&mut server, &log, "the critical card", || {
         shot().at(x0 + 180, y0 + 1) == rgb(URGENT)
     });
@@ -396,13 +444,23 @@ fn pixels_per_card_state() {
     );
     wait_shown(&mut server, &log, "the progress bar", || {
         let pixels = session.scoot_screenshot(1);
-        (y0 + 10..y0 + 85).any(|y| {
-            (0..360u32).any(|dx| pixels.at(x0 + dx, y) == rgb(FOCUS))
-        })
+        (y0 + 10..y0 + 85).any(|y| (0..360u32).any(|dx| pixels.at(x0 + dx, y) == rgb(FOCUS)))
     });
 
     // Low: the `border` ring over the same fill.
-    let _ = notify(&mut client, &mut server, &log, "e", 0, "Quiet", "Low", &[], &[("urgency", 0)], 0, 100);
+    let _ = notify(
+        &mut client,
+        &mut server,
+        &log,
+        "e",
+        0,
+        "Quiet",
+        "Low",
+        &[],
+        &[("urgency", 0)],
+        0,
+        100,
+    );
     wait_shown(&mut server, &log, "the low card", || {
         shot().at(x0 + 180, y0 + 1) == rgb(BORDER_LOW)
     });
@@ -415,7 +473,9 @@ fn pixels_per_card_state() {
 #[test]
 fn a_click_invokes_with_the_token_first() {
     let Some(bus) = bus_or_skip() else { return };
-    let Some(session) = scoot_or_skip("click", 1) else { return };
+    let Some(session) = scoot_or_skip("click", 1) else {
+        return;
+    };
     let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
     wait_serving(&mut client, &mut server, &log);
@@ -493,7 +553,9 @@ fn a_click_invokes_with_the_token_first() {
 #[test]
 fn a_locked_arrival_waits_for_unlock() {
     let Some(bus) = bus_or_skip() else { return };
-    let Some(session) = scoot_or_skip("lock", 1) else { return };
+    let Some(session) = scoot_or_skip("lock", 1) else {
+        return;
+    };
     let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
     wait_serving(&mut client, &mut server, &log);
@@ -519,11 +581,26 @@ fn a_locked_arrival_waits_for_unlock() {
     }
     // A 2 s card arrives under the lock: nothing drawn, and no expiry
     // through a full timeout and more (its clock never started).
-    let id = notify(&mut client, &mut server, &log, "a", 0, "Hello", "World", &[], &[], 2000, 121);
+    let id = notify(
+        &mut client,
+        &mut server,
+        &log,
+        "a",
+        0,
+        "Hello",
+        "World",
+        &[],
+        &[],
+        2000,
+        121,
+    );
     std::thread::sleep(Duration::from_millis(500));
     assert!(covered(&session), "a card drawn over the lock");
     std::thread::sleep(Duration::from_millis(2500));
-    assert!(covered(&session), "a card drawn over the lock after its timeout");
+    assert!(
+        covered(&session),
+        "a card drawn over the lock after its timeout"
+    );
     let (events, _) = client.pump();
     for event in events {
         if let Event::Signal { member, body, .. } = event {
@@ -540,7 +617,10 @@ fn a_locked_arrival_waits_for_unlock() {
     });
     let start = Instant::now();
     loop {
-        assert!(start.elapsed() < Duration::from_secs(10), "no expiry after unlock");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no expiry after unlock"
+        );
         let (events, _) = client.pump();
         let mut reason = None;
         for event in events {
@@ -567,7 +647,9 @@ fn a_locked_arrival_waits_for_unlock() {
 #[test]
 fn unplugging_an_output_moves_the_stack() {
     let Some(bus) = bus_or_skip() else { return };
-    let Some(session) = sway_or_skip("hotplug", 1) else { return };
+    let Some(session) = sway_or_skip("hotplug", 1) else {
+        return;
+    };
     let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
     wait_serving(&mut client, &mut server, &log);
@@ -594,10 +676,20 @@ fn unplugging_an_output_moves_the_stack() {
         }
         found.then_some(())
     };
-    let _ = notify(&mut client, &mut server, &log, "a", 0, "Hello", "World", &[], &[], 0, 131);
-    let names: Vec<String> = session
-        .swaymsg(&["-t", "get_outputs", "-r"])
-        .pipe_outputs();
+    let _ = notify(
+        &mut client,
+        &mut server,
+        &log,
+        "a",
+        0,
+        "Hello",
+        "World",
+        &[],
+        &[],
+        0,
+        131,
+    );
+    let names: Vec<String> = session.swaymsg(&["-t", "get_outputs", "-r"]).pipe_outputs();
     assert!(!names.is_empty());
     wait_shown(&mut server, &log, "the card on sway", || {
         names.iter().any(|name| shown_on(&session, name).is_some())
@@ -611,15 +703,24 @@ fn unplugging_an_output_moves_the_stack() {
         if names.len() >= 2 {
             break names;
         }
-        assert!(start.elapsed() < Duration::from_secs(10), "no second output");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no second output"
+        );
         std::thread::sleep(Duration::from_millis(50));
     };
     session.swaymsg(&["output", &pair[0], "unplug"]);
     let left = pair[1].clone();
-    wait_shown(&mut server, &log, "the card on the output that is left", || {
-        shown_on(&session, &left).is_some()
-    });
-    assert!(server.try_wait().unwrap().is_none(), "the daemon died on hotplug");
+    wait_shown(
+        &mut server,
+        &log,
+        "the card on the output that is left",
+        || shown_on(&session, &left).is_some(),
+    );
+    assert!(
+        server.try_wait().unwrap().is_none(),
+        "the daemon died on hotplug"
+    );
     kill(server);
 }
 
@@ -628,7 +729,9 @@ fn unplugging_an_output_moves_the_stack() {
 #[test]
 fn empty_holds_no_surface_or_buffers() {
     let Some(bus) = bus_or_skip() else { return };
-    let Some(session) = scoot_or_skip("empty", 1) else { return };
+    let Some(session) = scoot_or_skip("empty", 1) else {
+        return;
+    };
     let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
     wait_serving(&mut client, &mut server, &log);
@@ -641,7 +744,19 @@ fn empty_holds_no_surface_or_buffers() {
         "an idle daemon maps no buffers"
     );
     let (x0, y0) = stack_origin();
-    let id = notify(&mut client, &mut server, &log, "a", 0, "Hello", "World", &[], &[], 0, 141);
+    let id = notify(
+        &mut client,
+        &mut server,
+        &log,
+        "a",
+        0,
+        "Hello",
+        "World",
+        &[],
+        &[],
+        0,
+        141,
+    );
     wait_shown(&mut server, &log, "the card", || {
         session.scoot_screenshot(1).at(x0 + 180, y0 + 1) == rgb(FOCUS)
     });
@@ -676,7 +791,10 @@ fn empty_holds_no_surface_or_buffers() {
     });
     let start = Instant::now();
     while test_support::shm_mappings_named(pid, "scootnotify") != 0 {
-        assert!(start.elapsed() < Duration::from_secs(10), "buffers never unmapped");
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "buffers never unmapped"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(
@@ -692,7 +810,9 @@ fn empty_holds_no_surface_or_buffers() {
 #[test]
 fn no_cards_means_no_wakeups() {
     let Some(bus) = bus_or_skip() else { return };
-    let Some(session) = scoot_or_skip("idle", 1) else { return };
+    let Some(session) = scoot_or_skip("idle", 1) else {
+        return;
+    };
     let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
     wait_serving(&mut client, &mut server, &log);

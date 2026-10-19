@@ -9,8 +9,14 @@ use crate::config::Anchor as StackAnchor;
 #[test]
 fn anchors_map_to_their_corners() {
     assert_eq!(anchor_of(StackAnchor::TopLeft), Anchor::Top | Anchor::Left);
-    assert_eq!(anchor_of(StackAnchor::TopRight), Anchor::Top | Anchor::Right);
-    assert_eq!(anchor_of(StackAnchor::BottomLeft), Anchor::Bottom | Anchor::Left);
+    assert_eq!(
+        anchor_of(StackAnchor::TopRight),
+        Anchor::Top | Anchor::Right
+    );
+    assert_eq!(
+        anchor_of(StackAnchor::BottomLeft),
+        Anchor::Bottom | Anchor::Left
+    );
     assert_eq!(
         anchor_of(StackAnchor::BottomRight),
         Anchor::Bottom | Anchor::Right
@@ -74,7 +80,9 @@ fn a_2x2_image_decodes_to_the_square() {
             // Solid opaque red, straight RGBA.
             width: 2,
             height: 2,
-            pixels: vec![255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255],
+            pixels: vec![
+                255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255,
+            ],
         }),
         summary: String::new(),
         body: String::new(),
@@ -94,9 +102,16 @@ fn a_2x2_image_decodes_to_the_square() {
     };
     let bits = decode_icon(&note).expect("a tiny image decodes");
     assert_eq!(bits.side, ICON_SIDE);
-    assert_eq!(bits.pixels.len(), ICON_SIDE as usize * ICON_SIDE as usize * 4);
+    assert_eq!(
+        bits.pixels.len(),
+        ICON_SIDE as usize * ICON_SIDE as usize * 4
+    );
     // Premultiplied BGRA red, opaque: every pixel reads back red.
-    assert!(bits.pixels.chunks_exact(4).all(|pixel| pixel == [0, 0, 255, 255]));
+    assert!(
+        bits.pixels
+            .chunks_exact(4)
+            .all(|pixel| pixel == [0, 0, 255, 255])
+    );
 }
 
 #[test]
@@ -169,7 +184,10 @@ fn retheme_swaps_the_look_and_marks_dirty() {
     // sizes equal and skip the draw).
     let mut app = App::new(Config::default(), Look::default());
     app.dirty = false;
-    app.content_size = Some(scootui::output::Size { width: 360, height: 100 });
+    app.content_size = Some(scootui::output::Size {
+        width: 360,
+        height: 100,
+    });
     let mut new = Look::default();
     new.font_size_px = 20.0;
     app.retheme(new);

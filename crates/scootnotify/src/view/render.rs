@@ -11,10 +11,10 @@ use std::collections::HashMap;
 use scootui::paint::{Canvas, Span};
 use scootui::text::Text;
 
+use super::layout::{Card, Rect, Stack};
+use crate::bus::hints::Urgency;
 use crate::config::Config;
 use crate::look::Look;
-use crate::bus::hints::Urgency;
-use super::layout::{Card, Rect, Stack};
 
 /// The decoded icon size, in device pixels: the 48 px slot at scale 2.
 /// Scale 1 samples it down at draw time (nearest, no allocation).
@@ -57,7 +57,9 @@ pub fn paint(
     };
     for card in &stack.cards {
         let urgency = urgencies.get(&card.id).copied().unwrap_or(Urgency::Normal);
-        paint_card(canvas, text, card, config, look, em, urgency, clip, hover, icons);
+        paint_card(
+            canvas, text, card, config, look, em, urgency, clip, hover, icons,
+        );
     }
     if stack.hidden > 0 {
         paint_pill(canvas, text, stack, look, em, clip);
@@ -96,7 +98,13 @@ fn paint_card(
             width: rect.width.saturating_sub(2 * inset),
             height: rect.height.saturating_sub(2 * inset),
         };
-        fill_card(canvas, inner, radius.saturating_sub(inset), look.surface, alpha);
+        fill_card(
+            canvas,
+            inner,
+            radius.saturating_sub(inset),
+            look.surface,
+            alpha,
+        );
     } else {
         fill_card(canvas, rect, radius, look.surface, alpha);
     }
@@ -118,7 +126,15 @@ fn paint_card(
         _ => None,
     };
     for (index, button) in card.buttons.iter().enumerate() {
-        paint_button(text, canvas, button, look, em, clip, hovered_button == Some(index));
+        paint_button(
+            text,
+            canvas,
+            button,
+            look,
+            em,
+            clip,
+            hovered_button == Some(index),
+        );
     }
 }
 
@@ -128,7 +144,13 @@ fn paint_card(
 /// through the shared blender, so this allocates nothing and reads
 /// correct over any destination (the inset fill over its ring, cartoon
 /// text over the fill).
-fn fill_card(canvas: &mut Canvas<'_>, rect: Rect, radius: u32, color: scootui::color::Color, alpha: u8) {
+fn fill_card(
+    canvas: &mut Canvas<'_>,
+    rect: Rect,
+    radius: u32,
+    color: scootui::color::Color,
+    alpha: u8,
+) {
     if rect.width == 0 || rect.height == 0 {
         return;
     }
@@ -203,7 +225,12 @@ fn paint_icon(
     let iy = card.rect.y + border + super::layout::PAD;
     fill_card(
         canvas,
-        crate::view::layout::Rect { x: ix, y: iy, width: side, height: side },
+        crate::view::layout::Rect {
+            x: ix,
+            y: iy,
+            width: side,
+            height: side,
+        },
         8,
         look.theme.dim,
         255,
@@ -220,7 +247,8 @@ fn paint_icon(
         tile,
         em,
         ix as i64 + (side as i64 - tile_w) / 2,
-        iy as i64 + (side as i64 + metrics.ascent.ceil() as i64 - metrics.descent.ceil() as i64) / 2,
+        iy as i64
+            + (side as i64 + metrics.ascent.ceil() as i64 - metrics.descent.ceil() as i64) / 2,
         look.theme.background,
         clip,
     );
@@ -271,14 +299,19 @@ fn paint_line(
 ) {
     let mut pen = line.x;
     for run in &line.runs {
-        let color = if run.link {
-            look.theme.accent
-        } else {
-            base
-        };
+        let color = if run.link { look.theme.accent } else { base };
         text.draw(canvas, None, &run.text, em, pen, line.baseline, color, clip);
         if run.bold {
-            text.draw(canvas, None, &run.text, em, pen + 1, line.baseline, color, clip);
+            text.draw(
+                canvas,
+                None,
+                &run.text,
+                em,
+                pen + 1,
+                line.baseline,
+                color,
+                clip,
+            );
         }
         let width = text.measure(None, &run.text, em) as i64 + i64::from(u8::from(run.bold));
         if run.underline {

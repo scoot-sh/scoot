@@ -201,11 +201,13 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
         // the fd speaks, dropped unread otherwise (the documented
         // read-after-poll shape: the next turn collects it).
         let guard = popup.as_ref().and_then(|popup| popup.prepare_read());
-        let wayland = wait(conn.as_fd(), timer.as_fd(), popup.as_ref().map(|popup| popup.fd()));
+        let wayland = wait(
+            conn.as_fd(),
+            timer.as_fd(),
+            popup.as_ref().map(|popup| popup.fd()),
+        );
         drain_timer(&timer);
-        if wayland
-            && let Some(guard) = guard
-        {
+        if wayland && let Some(guard) = guard {
             let _ = guard.read();
         }
         if conn.dead() {
@@ -216,7 +218,12 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
 
 /// Applies one popup event to the store, queueing its signals: the
 /// token (if minted) always precedes its invoke.
-fn apply_popup(conn: &mut Conn, server: &mut Server, event: popup::Event, hovered: &mut Option<u32>) {
+fn apply_popup(
+    conn: &mut Conn,
+    server: &mut Server,
+    event: popup::Event,
+    hovered: &mut Option<u32>,
+) {
     let now = Instant::now();
     match event {
         popup::Event::Presented(ids) => {
