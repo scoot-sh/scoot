@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: "Every scootlaunch command and flag that ships today: the panel, --list, --query, --dmenu, --run, --all, --lenient, --json, --check, and the agent JSON schema."
+description: "Every scootlaunch command and flag that ships today: the panel, --list, --query, --run-id, --dmenu, --run, --all, --lenient, --json, --check, and the agent JSON schema."
 ---
 
 Every `scootlaunch` command and flag that ships today, and how it
@@ -23,15 +23,17 @@ scootlaunch --list --lenient               # Exec quoting the way GLib reads it
 scootlaunch --query TEXT                   # entries ranked for TEXT, best first
 scootlaunch --query TEXT --json            # the agent JSON schema, in ranked order
 scootlaunch --query ""                     # empty query: by frecency, then name
+scootlaunch --run-id ID [--action A]       # launch one entry headlessly, one JSON object
 scootlaunch --dmenu [flags]                # lines on stdin, the pick on stdout
 scootlaunch --run                          # the panel over executables on $PATH
 scootlaunch --help                         # print help
 scootlaunch --version                      # print the version
 ```
 
-`--all` and `--json` need `--list` or `--query` (`--lenient` also
-shapes the panel's index). `--font` is a panel option; `--config`
-belongs to the panel and `--check`. `--list`, `--query`, `--check`,
+`--all` and `--json` need `--list` or `--query` (`--lenient`
+also shapes the panel's index and `--run-id`). `--action` needs
+`--run-id`. `--font` is a panel option; `--config` belongs to the
+panel and `--check`. `--list`, `--query`, `--run-id`, `--check`,
 `--dmenu` and `--run` cannot combine. TEXT is the next
 argument after `--query`, whatever it holds. Anything else is a loud
 error: exit 2, naming the flag and the supported list, never silently
@@ -151,6 +153,77 @@ prints the same schema in ranked order.
 scootlaunch --list --json | jq '.[] | select(.id == "org.mozilla.firefox.desktop")'
 scootlaunch --query "fire" --json | jq '.[0] | {id, name}'
 ```
+
+## Run one entry headlessly
+
+`--run-id ID [--action A]` launches one entry with no compositor
+connection and no surface, through the same spawn path as a panel
+pick (activation first for `DBusActivatable` entries, else `Exec`;
+the environment rules, the systemd scope, the detached fallback with
+no bus, frecency). A fresh spawn still takes focus on map. No token:
+there is no surface and no serial to mint from.
+
+Stdout carries exactly one JSON object, nothing else. Exit 0 prints a
+success object; exit 1 prints an error object. Notes and warnings go
+to stderr.
+
+| Field | Type / default | Example |
+|---|---|---|
+| `ok` | `true` on success | `true` |
+| `pid` | number, when a child was spawned | `4242` |
+| `scope` | text, when the scope move landed | `"app-scootlaunch-firefox.desktop-1a2b3c4d.scope"` |
+| `activated` | `true`, when the launch was an in-place activation | `true` |
+| `detached` | `true`, when the launch went through the bus-less fallback | `true` |
+
+Only the fields that happened are present. A spawn whose scope move
+was refused still runs: `pid` is set, `scope` is absent, and one
+warning names the refusal on stderr.
+
+```sh
+scootlaunch --run-id org.mozilla.firefox.desktop
+# {"ok":true,"pid":4242,"scope":"app-scootlaunch-org.mozilla.firefox.desktop-1a2b3c4d.scope"}
+scootlaunch --run-id org.mozilla.firefox.desktop --action new-private-window
+# {"ok":true,"pid":4310,"scope":"app-scootlaunch-org.mozilla.firefox.desktop-9f8e7d6c.scope"}
+```
+
+The id matches exactly (`firefox.desktop`); the `.desktop` suffix may
+be left off when it names exactly one entry (`firefox`). Anything
+else never launches: a prefix, a fuzzy match, or a suffix-insensitive
+form naming more than one entry is an error. Hidden entries (`--all`)
+are still launchable by id. The action must name one of the entry's
+`actions` exactly.
+
+| `code` | Meaning |
+|---|---|
+| `invalid-id` | empty, longer than 1024 bytes, or holding control characters |
+| `unknown-id` | no entry matches |
+| `ambiguous-id` | the suffix-insensitive form matches more than one entry |
+| `invalid-action` | empty, longer than 1024 bytes, or holding control characters |
+| `unknown-action` | the entry has no action with that id |
+| `launch-failed` | the spawn or activation failed (nothing started) |
+
+Exit codes: 0 for a launch, 1 for a refused launch (the error object
+above), 2 for a usage error (`--action` without `--run-id`,
+`--run-id` combined with another command, a missing value). An agent
+loop an agent can paste:
+
+```sh
+scootlaunch --list --json | jq '.[] | {id, name}'
+scootlaunch --query "fire" --json | jq '.[0] | {id, name}'
+scootlaunch --run-id org.mozilla.firefox.desktop
+scoot msg windows | jq '.windows[] | {app_id, title}'
+```
+
+> **Symptom:** `--run-id` says `unknown-id` for an app the list shows.
+
+The list shows the exact id: copy it whole, suffix included. A typed
+prefix never launches.
+
+> **Symptom:** `--run-id` says `launch-failed` with no window.
+
+The `Exec` target vanished between the index and the launch, or the
+activation was refused and no `Exec` fallback exists. The object's
+`error` names the step; the index note on stderr names the file.
 
 ## Troubleshooting
 

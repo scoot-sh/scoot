@@ -35,6 +35,27 @@ the rules that keep automation honest:
 `wait-idle` is the pacing primitive: block until nothing has redrawn
 for `--quiet-ms` (default 200 ms) before screenshotting or typing.
 
+## Launch apps without screenshots
+
+`scootlaunch --list --json`, `--query TEXT --json` and
+`--run-id ID [--action A]` need no compositor connection: the same
+index, ranking and spawn path as the panel, headless. An agent in a
+VM enumerates and launches apps over SSH with `WAYLAND_DISPLAY` set,
+then sees the result through `windows`.
+
+```sh
+scootlaunch --list --json | jq '.[] | {id, name}'
+scootlaunch --query "fire" --json | jq '.[0] | {id, name}'
+scootlaunch --run-id org.mozilla.firefox.desktop
+scoot msg windows | jq '.windows[] | {app_id, title}'
+```
+
+`--run-id` prints one JSON object and exits 0, or prints an error
+object (`invalid-id`, `unknown-id`, `ambiguous-id`,
+`invalid-action`, `unknown-action`, `launch-failed`) and exits 1. The
+full schema, the exit codes and the troubleshooting boxes are in the
+[launcher CLI reference](../scootlaunch/cli.md#run-one-entry-headlessly).
+
 ## Machine-readable docs
 
 Every page ships as plain Markdown: the three bundles

@@ -20,6 +20,8 @@ fn list_alone_parses() {
             help: false,
             version: false,
             query: None,
+            run_id: None,
+            action: None,
             font: None,
             config: None,
             check: false,
@@ -478,5 +480,94 @@ fn bool_flags_with_equals_are_not_the_flag() {
     assert_eq!(
         parse_args(&argv(&["scootlaunch", "--dmenu", "--only-match=true"])),
         Err(Error::UnknownFlag("--only-match=true".to_string()))
+    );
+}
+
+#[test]
+fn run_id_takes_a_value_attached_or_next() {
+    let args = parse_args(&argv(&["scootlaunch", "--run-id", "firefox.desktop"])).unwrap();
+    assert_eq!(args.run_id.as_deref(), Some("firefox.desktop"));
+    assert!(args.action.is_none());
+    let args = parse_args(&argv(&["scootlaunch", "--run-id=firefox.desktop"])).unwrap();
+    assert_eq!(args.run_id.as_deref(), Some("firefox.desktop"));
+    let args = parse_args(&argv(&[
+        "scootlaunch",
+        "--run-id",
+        "firefox.desktop",
+        "--action",
+        "new-window",
+    ]))
+    .unwrap();
+    assert_eq!(args.action.as_deref(), Some("new-window"));
+    let args = parse_args(&argv(&[
+        "scootlaunch",
+        "--run-id=firefox.desktop",
+        "--action=new-window",
+    ]))
+    .unwrap();
+    assert_eq!(args.run_id.as_deref(), Some("firefox.desktop"));
+    assert_eq!(args.action.as_deref(), Some("new-window"));
+    // `--lenient` shapes the headless index too.
+    assert!(parse_args(&argv(&["scootlaunch", "--run-id", "x", "--lenient"])).is_ok());
+}
+
+#[test]
+fn run_id_without_a_value_is_loud() {
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--run-id"])),
+        Err(Error::NeedsValue("--run-id".to_string()))
+    );
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--run-id", "x", "--action"])),
+        Err(Error::NeedsValue("--action".to_string()))
+    );
+}
+
+#[test]
+fn action_needs_run_id() {
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--action", "new-window"])),
+        Err(Error::NeedsCommand("--action".to_string()))
+    );
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--list", "--action", "x"])),
+        Err(Error::NeedsCommand("--action".to_string()))
+    );
+}
+
+#[test]
+fn run_id_conflicts_with_other_commands() {
+    for extra in [
+        "--list",
+        "--check",
+        "--dmenu",
+        "--run",
+        "--list-executables-in-path",
+    ] {
+        assert_eq!(
+            parse_args(&argv(&["scootlaunch", "--run-id", "x", extra])),
+            Err(Error::ConflictingCommands),
+            "{extra} with --run-id"
+        );
+    }
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--query", "x", "--run-id", "y"])),
+        Err(Error::ConflictingCommands)
+    );
+    // `--all` and `--json` modify `--list`/`--query` only: with
+    // `--run-id` they name themselves loudly (the output is always one
+    // JSON object, hidden entries included).
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--run-id", "x", "--json"])),
+        Err(Error::NeedsCommand("--json".to_string()))
+    );
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--run-id", "x", "--all"])),
+        Err(Error::NeedsCommand("--all".to_string()))
+    );
+    // Panel options shape no headless command.
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--run-id", "x", "--font", "a"])),
+        Err(Error::NeedsCommand("--font".to_string()))
     );
 }

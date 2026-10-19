@@ -122,6 +122,26 @@ pub struct Ctx {
     pub now: u64,
 }
 
+/// What a launch did: the panel discards it (it just closes), while
+/// `--run-id` prints it as JSON. Every variant comes out of the same
+/// [`launch_entry_report`] path below — the headless interface holds
+/// no second spawn implementation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LaunchReport {
+    /// The spawned pid, when a child was spawned directly.
+    pub pid: Option<u32>,
+    /// The systemd scope the child was moved into, when the move
+    /// landed (a refused move still runs: `pid` set, `scope` none,
+    /// one warning on stderr).
+    pub scope: Option<String>,
+    /// The launch was an in-place `org.freedesktop.Application`
+    /// activation (no pid, no scope).
+    pub activated: bool,
+    /// The launch went through the detached fallback (no bus, no pid
+    /// knowable here, no scope).
+    pub detached: bool,
+}
+
 /// Launches an indexed entry (or one of its actions): activation for
 /// a `DBusActivatable` entry with an `Exec` fallback, else `Exec`.
 /// Silent on success (the panel just closes): `Ok(())` covers a fresh
@@ -135,6 +155,18 @@ pub fn launch_entry(
     token: Option<&Token>,
     ctx: &Ctx,
 ) -> Result<(), String> {
+    launch_entry_report(entry, action, token, ctx).map(|_| ())
+}
+
+/// The reporting twin of [`launch_entry`]: the same spawn path, with
+/// what happened answered for `--run-id`'s JSON. The panel keeps using
+/// [`launch_entry`]; the headless interface uses this.
+pub fn launch_entry_report(
+    entry: &Entry,
+    action: Option<&Action>,
+    token: Option<&Token>,
+    ctx: &Ctx,
+) -> Result<LaunchReport, String> {
     let argv = match action {
         Some(action) => &action.exec,
         None => &entry.exec,
@@ -143,7 +175,12 @@ pub fn launch_entry(
         match activate_entry(entry, action, token) {
             Ok(()) => {
                 record(ctx, &entry.id);
-                return Ok(());
+                return Ok(LaunchReport {
+                    pid: None,
+                    scope: None,
+                    activated: true,
+                    detached: false,
+                });
             }
             Err(reason) => {
                 if argv.is_empty() {
@@ -160,18 +197,28 @@ pub fn launch_entry(
         Some(action) => format!("{}#{}", entry.id, action.id),
         None => entry.id.clone(),
     };
-    launch_exec(&key, &entry.id, argv, entry.workdir.as_deref(), token, ctx)
+    launch_exec_report(&key, &entry.id, argv, entry.workdir.as_deref(), token, ctx)
 }
 
 /// Launches an ad-hoc command (the panel's `Ctrl+Enter` on typed
 /// text): `argv` split on spaces by the caller. Frecency keys it by
 /// `run:<argv0>`, as the frecency file's docs say.
 pub fn launch_command(argv: &[String], token: Option<&Token>, ctx: &Ctx) -> Result<(), String> {
+    launch_command_report(argv, token, ctx).map(|_| ())
+}
+
+/// The reporting twin of [`launch_command`]: the same path, with what
+/// happened answered.
+pub fn launch_command_report(
+    argv: &[String],
+    token: Option<&Token>,
+    ctx: &Ctx,
+) -> Result<LaunchReport, String> {
     let Some(first) = argv.first().filter(|arg| !arg.is_empty()) else {
         return Err("nothing to run: the text is empty".to_string());
     };
     let key = format!("run:{first}");
-    launch_exec(&key, &command_scope_base(first), argv, None, token, ctx)
+    launch_exec_report(&key, &command_scope_base(first), argv, None, token, ctx)
 }
 
 /// The shared `Exec` path: direct spawn plus the scope move when a
@@ -187,6 +234,19 @@ fn launch_exec(
     token: Option<&Token>,
     ctx: &Ctx,
 ) -> Result<(), String> {
+    launch_exec_report(frecency_key, scope_base, argv, workdir, token, ctx).map(|_| ())
+}
+
+/// The reporting twin of [`launch_exec`]: the same spawn path, with
+/// what happened answered for `--run-id`'s JSON.
+fn launch_exec_report(
+    frecency_key: &str,
+    scope_base: &str,
+    argv: &[String],
+    workdir: Option<&str>,
+    token: Option<&Token>,
+    ctx: &Ctx,
+) -> Result<LaunchReport, String> {
     let cwd = resolve_cwd(workdir, ctx.home.as_deref());
     let display_set = ctx.display_set;
     if bus_dials() {
@@ -197,18 +257,33 @@ fn launch_exec(
         match start_transient_unit(&scope, pid, &description, deadline) {
             Ok(()) => {
                 record(ctx, frecency_key);
-                Ok(())
+                Ok(LaunchReport {
+                    pid: Some(pid),
+                    scope: Some(scope),
+                    activated: false,
+                    detached: false,
+                })
             }
             Err(reason) => {
                 warn(format_args!("scootlaunch: {reason}; the app keeps running"));
                 record(ctx, frecency_key);
-                Ok(())
+                Ok(LaunchReport {
+                    pid: Some(pid),
+                    scope: None,
+                    activated: false,
+                    detached: false,
+                })
             }
         }
     } else {
         spawn_detached(argv, cwd.as_deref(), token, display_set)?;
         record(ctx, frecency_key);
-        Ok(())
+        Ok(LaunchReport {
+            pid: None,
+            scope: None,
+            activated: false,
+            detached: true,
+        })
     }
 }
 
