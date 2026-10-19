@@ -550,7 +550,8 @@ fn a_click_invokes_with_the_token_first() {
 
 /// A card arriving while locked is not drawn, and its clock does not
 /// start until after unlock: no pixels over the lock, no expiry through
-/// it, then a normal show-and-expire once unlocked.
+/// it, then a normal show-and-expire once unlocked. A card already on
+/// screen keeps expiring through the lock (reason 1 while covered).
 #[test]
 fn a_locked_arrival_waits_for_unlock() {
     let Some(bus) = bus_or_skip() else { return };
@@ -561,6 +562,26 @@ fn a_locked_arrival_waits_for_unlock() {
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
     wait_serving(&mut client, &mut server, &log);
     watch_signals(&mut client);
+    let (x0, y0) = stack_origin();
+    // A 6 s card shows first: it is still alive when the lock lands
+    // (locking takes a second or two), so its expiry proves cards on
+    // screen keep expiring through a manual lock.
+    let first = notify(
+        &mut client,
+        &mut server,
+        &log,
+        "a",
+        0,
+        "First",
+        "Shown",
+        &[],
+        &[],
+        6000,
+        120,
+    );
+    wait_shown(&mut server, &log, "the first card", || {
+        session.scoot_screenshot(1).at(x0 + 180, y0 + 1) == rgb(FOCUS)
+    });
     let locker = lockclient::Locker::start(&session.wayland_socket());
     let start = Instant::now();
     while !locker.is_locked() {
@@ -568,7 +589,6 @@ fn a_locked_arrival_waits_for_unlock() {
         std::thread::sleep(Duration::from_millis(20));
     }
     // The lock covers the corner the stack would take.
-    let (x0, y0) = stack_origin();
     let covered = |session: &Session| {
         let shot = session.scoot_screenshot(1);
         [(x0 + 180, y0 + 1), (x0 + 5, y0 + 30), (x0 + 300, y0 + 60)]
@@ -579,6 +599,32 @@ fn a_locked_arrival_waits_for_unlock() {
     while !covered(&session) {
         assert!(start.elapsed() < Duration::from_secs(10), "never covered");
         std::thread::sleep(Duration::from_millis(50));
+    }
+    // The on-screen card keeps expiring through the manual lock: its
+    // reason-1 close arrives while covered.
+    let start = Instant::now();
+    loop {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "no through-lock expiry for {first}"
+        );
+        let (events, _) = client.pump();
+        let mut reason = None;
+        for event in events {
+            if let Event::Signal { member, body, .. } = event
+                && member == "NotificationClosed"
+            {
+                let mut reader = Reader::le(&body);
+                if reader.u32().unwrap() == first {
+                    reason = Some(reader.u32().unwrap());
+                }
+            }
+        }
+        if let Some(reason) = reason {
+            assert_eq!(reason, 1);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
     }
     // A 2 s card arrives under the lock: nothing drawn, and no expiry
     // through a full timeout and more (its clock never started).
