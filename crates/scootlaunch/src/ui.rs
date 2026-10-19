@@ -348,7 +348,7 @@ impl Ui {
 /// construction), recording where the span starts and ends. `None` when
 /// the walk disagrees (never for spans the matcher just produced): the
 /// caller draws no span rather than panicking the frame.
-fn byte_span(
+pub(crate) fn byte_span(
     name: &str,
     folded: &str,
     scratch: &mut String,

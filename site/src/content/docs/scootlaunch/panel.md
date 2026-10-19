@@ -14,10 +14,16 @@ one process per open.
 scootlaunch                          # open the panel
 scootlaunch --font /path/to/font.ttf # open with an explicit typeface
 scootlaunch --check                  # validate the config file and exit
+printf 'a\nb\n' | scootlaunch --dmenu --prompt='pick: '  # pick a line, print it
+scootlaunch --run                    # the panel over executables on $PATH
 ```
 
 Picking launches the chosen entry and exits 0; dismissing exits 1.
-Ctrl+Enter runs the typed text as a command. Nothing prints: the
+Ctrl+Enter runs the typed text as a command. A dmenu pick prints
+instead of launching (the line, or its index with `--index`); run
+mode launches executables by basename. Flags, the stdin/stdout
+contract and exit codes are in the [CLI reference](./cli.md).
+Nothing prints for an apps or run launch: the
 launch replaces the id the panel used to print. The panel links
 `libxkbcommon.so.0` for its keyboard (the reference
 XKB implementation); a scoot desktop already carries it.
@@ -34,7 +40,10 @@ XKB implementation); a scoot desktop already carries it.
 | Escape | dismiss (exit 1) |
 
 Left/Right, Home/End, BackSpace, Delete, Ctrl+W, Ctrl+U and Ctrl+A
-edit the query. A click picks the row; the wheel scrolls. A click on
+edit the query. In dmenu mode Enter prints the selection (or the
+typed text when nothing matches, unless `--only-match` says
+otherwise) and Ctrl+Enter always prints the typed text. A click picks
+the row; the wheel scrolls. A click on
 the bare desktop does not dismiss in v1: with exclusive keyboard the
 compositor holds focus, so the click never reaches the panel. A
 second `scootlaunch` while the panel is open dismisses it, so one

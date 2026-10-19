@@ -8,10 +8,11 @@
 //! matching with frecency (`--list` and `--query`, each with
 //! `[--all] [--lenient] [--json]`), the overlay exclusive-keyboard
 //! panel (bare `scootlaunch`, with the entry and the virtualized list,
-//! the single-instance toggle and the look layer), and launching (the
+//! the single-instance toggle and the look layer), launching (the
 //! activation token, the environment, the systemd scope, the detached
-//! fallback, `DBusActivatable`). The dmenu mode is a later ticket.
-//! The plan is `dev/design/scootlaunch.md`.
+//! fallback, `DBusActivatable`), the dmenu mode (stdin lines in, the
+//! pick on stdout, `--dmenu`) and run mode (executables on `$PATH`,
+//! `--run`). The plan is `dev/design/scootlaunch.md`.
 //!
 //! No `unsafe` here. The keyboard links libxkbcommon through `scootui`
 //! (decided in `dev/design/shell-apps.md`); nothing else here links
@@ -21,10 +22,12 @@
 
 mod cli;
 mod config;
+mod dmenu;
 mod index;
 mod look;
 mod panel;
 mod rank;
+mod run;
 mod socket;
 mod spawn;
 mod ui;
@@ -76,13 +79,73 @@ fn run(argv: &[String]) -> i32 {
         cmd_list(&args)
     } else if args.check {
         cmd_check(args.config.as_deref())
-    } else {
-        panel::open(&panel::Options {
+    } else if args.dmenu {
+        cmd_dmenu(&args)
+    } else if args.run {
+        panel::open(panel::Options {
             font: args.font.map(PathBuf::from),
             config: args.config.map(PathBuf::from),
             lenient: args.lenient,
+            mode: panel::Mode::Run {
+                colors: args.colors,
+            },
+        })
+    } else {
+        panel::open(panel::Options {
+            font: args.font.map(PathBuf::from),
+            config: args.config.map(PathBuf::from),
+            lenient: args.lenient,
+            mode: panel::Mode::Apps {
+                colors: args.colors,
+            },
         })
     }
+}
+
+/// `--dmenu [flags]`: stdin lines through the panel, the pick on
+/// stdout (exit 0), Escape exits 1. A pick prints and launches
+/// nothing. `--prompt-only` never reads stdin (an input field with no
+/// list); `--no-run-if-empty` exits 1 without opening on empty stdin.
+fn cmd_dmenu(args: &cli::Args) -> i32 {
+    // `--prompt-only` does not read anything from stdin (fuzzel's
+    // meaning): the panel opens on no lines.
+    let lines = if args.prompt_only.is_some() {
+        Vec::new()
+    } else {
+        dmenu::read_stdin()
+    };
+    if args.no_run_if_empty && lines.is_empty() {
+        return 1;
+    }
+    let prompt = args
+        .prompt_only
+        .clone()
+        .or_else(|| args.prompt.clone())
+        .unwrap_or_else(|| "> ".to_string());
+    let colors = cli::ColorOverrides {
+        background: args.colors.background,
+        text: args.colors.text,
+        border: args.colors.border,
+        selection: args.colors.selection,
+        selection_text: args.colors.selection_text,
+        r#match: args.colors.r#match,
+        prompt: args.colors.prompt,
+    };
+    panel::open(panel::Options {
+        font: args.font.clone().map(PathBuf::from),
+        config: args.config.clone().map(PathBuf::from),
+        lenient: args.lenient,
+        mode: panel::Mode::Dmenu(panel::DmenuConfig {
+            prompt,
+            prompt_only: args.prompt_only.is_some(),
+            password: args.password,
+            only_match: args.only_match,
+            index: args.index,
+            placeholder: args.placeholder.clone().unwrap_or_default(),
+            lines,
+            colors,
+        }),
+    })
 }
 
 /// `--check [--config PATH]`: validates the panel's config file and

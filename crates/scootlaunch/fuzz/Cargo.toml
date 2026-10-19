@@ -1,9 +1,10 @@
 # `cargo fuzz` targets over the parsers of outside input: the desktop
-# entry parser, the Exec expander, the fuzzy matcher, and the history
-# file. Test tooling only: never part of the shipped binary, and never
-# a member of the repository's workspace (the `[workspace]` table below
-# makes this its own), so `cargo build --workspace`, nextest, clippy and
-# the flake's builds never compile it. How to run it: README.md here.
+# entry parser, the Exec expander, the fuzzy matcher, the history
+# file, and the dmenu stdin splitter. Test tooling only: never part of
+# the shipped binary, and never a member of the repository's workspace
+# (the `[workspace]` table below makes this its own), so `cargo build
+# --workspace`, nextest, clippy and the flake's builds never compile
+# it. How to run it: README.md here.
 [package]
 name = "scootlaunch-fuzz"
 version = "0.0.0"
@@ -46,6 +47,13 @@ bench = false
 [[bin]]
 name = "history"
 path = "fuzz_targets/history.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dmenu"
+path = "fuzz_targets/dmenu.rs"
 test = false
 doc = false
 bench = false

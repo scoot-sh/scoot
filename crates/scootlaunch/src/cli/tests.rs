@@ -23,6 +23,17 @@ fn list_alone_parses() {
             font: None,
             config: None,
             check: false,
+            dmenu: false,
+            run: false,
+            prompt: None,
+            prompt_only: None,
+            password: false,
+            no_run_if_empty: false,
+            only_match: false,
+            index: false,
+            placeholder: None,
+            layer: None,
+            colors: ColorOverrides::default(),
         }
     );
 }
@@ -136,15 +147,15 @@ fn check_takes_an_optional_config() {
 
 #[test]
 fn unknown_flags_name_themselves_and_the_supported_list() {
-    let error = parse_args(&argv(&["scootlaunch", "--dmenu"])).unwrap_err();
+    let error = parse_args(&argv(&["scootlaunch", "--frobnicate"])).unwrap_err();
     let text = error.to_string();
-    assert!(text.contains("--dmenu"), "{text}");
+    assert!(text.contains("--frobnicate"), "{text}");
     assert!(text.contains("--list"), "{text}");
+    assert!(text.contains("--dmenu"), "{text}");
     assert!(text.contains("--json"), "{text}");
-    // A dmenu-mode flag today is unknown: this ticket builds no dmenu.
     assert_eq!(
         error,
-        Error::UnknownFlag("--dmenu".to_string()),
+        Error::UnknownFlag("--frobnicate".to_string()),
         "loud, never silently ignored"
     );
 }
@@ -222,4 +233,250 @@ fn repeated_flags_are_idempotent() {
     ]))
     .unwrap();
     assert!(args.list && args.json && !args.all);
+}
+
+#[test]
+fn dmenu_alone_is_the_dmenu_mode() {
+    let args = parse_args(&argv(&["scootlaunch", "--dmenu"])).unwrap();
+    assert!(args.dmenu && !args.run && !args.list);
+    assert!(args.query.is_none() && !args.check);
+}
+
+#[test]
+fn run_and_its_alias_open_run_mode() {
+    assert!(parse_args(&argv(&["scootlaunch", "--run"])).unwrap().run);
+    assert!(
+        parse_args(&argv(&["scootlaunch", "--list-executables-in-path"]))
+            .unwrap()
+            .run
+    );
+}
+
+#[test]
+fn dmenu_flags_take_attached_or_next_values() {
+    // Every repo call site's shape, attached.
+    let args = parse_args(&argv(&[
+        "scootlaunch",
+        "--dmenu",
+        "--prompt=wifi: ",
+        "--no-run-if-empty",
+        "--only-match",
+    ]))
+    .unwrap();
+    assert_eq!(args.prompt.as_deref(), Some("wifi: "));
+    assert!(args.no_run_if_empty && args.only_match);
+    // The space form reads the same.
+    let args = parse_args(&argv(&[
+        "scootlaunch",
+        "--dmenu",
+        "--prompt",
+        "clipboard: ",
+        "--placeholder",
+        "pick one",
+        "--layer",
+        "overlay",
+    ]))
+    .unwrap();
+    assert_eq!(args.prompt.as_deref(), Some("clipboard: "));
+    assert_eq!(args.placeholder.as_deref(), Some("pick one"));
+    assert_eq!(args.layer.as_deref(), Some("overlay"));
+    // A value holding `=` rides through whole.
+    let args = parse_args(&argv(&["scootlaunch", "--dmenu", "--prompt=a=b"])).unwrap();
+    assert_eq!(args.prompt.as_deref(), Some("a=b"));
+}
+
+#[test]
+fn password_is_a_bare_flag() {
+    assert!(
+        parse_args(&argv(&["scootlaunch", "--dmenu", "--password"]))
+            .unwrap()
+            .password
+    );
+    // A value-taking shape is not the flag: `--password=x` cannot
+    // silently eat the next argument, and `=x` names itself loudly.
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--dmenu", "--password=x"])),
+        Err(Error::UnknownFlag("--password=x".to_string()))
+    );
+}
+
+#[test]
+fn colors_parse_as_rrggbbaa() {
+    let args = parse_args(&argv(&[
+        "scootlaunch",
+        "--dmenu",
+        "--background-color=1e1e2eff",
+        "--text-color=cdd6f4ff",
+        "--border-color=f9e2afff",
+        "--selection-color=cba6f7ff",
+        "--selection-text-color=11111bff",
+        "--match-color=f38ba8ff",
+        "--prompt-color=a6adc8ff",
+    ]))
+    .unwrap();
+    assert!(args.colors.background.is_some());
+    assert!(args.colors.text.is_some());
+    assert!(args.colors.prompt.is_some());
+    // Only the background may be translucent.
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--dmenu", "--text-color=cdd6f480"])),
+        Err(Error::InvalidValue {
+            flag: "--text-color".to_string(),
+            value: "cdd6f480".to_string(),
+            expected: "an opaque rrggbbaa (...ff; only --background-color may be translucent)",
+        })
+    );
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--dmenu", "--match-color=xyz"])),
+        Err(Error::InvalidValue {
+            flag: "--match-color".to_string(),
+            value: "xyz".to_string(),
+            expected: "rrggbbaa (eight hex digits)",
+        })
+    );
+}
+
+#[test]
+fn layer_takes_top_or_overlay() {
+    assert!(
+        parse_args(&argv(&["scootlaunch", "--dmenu", "--layer=top"]))
+            .unwrap()
+            .layer
+            .is_some()
+    );
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--dmenu", "--layer=bottom"])),
+        Err(Error::InvalidValue {
+            flag: "--layer".to_string(),
+            value: "bottom".to_string(),
+            expected: "top or overlay",
+        })
+    );
+}
+
+#[test]
+fn commands_conflict() {
+    for extra in [
+        "--list",
+        "--check",
+        "--dmenu",
+        "--run",
+        "--list-executables-in-path",
+    ] {
+        assert_eq!(
+            parse_args(&argv(&["scootlaunch", "--query", "x", extra])),
+            Err(Error::ConflictingCommands),
+            "{extra} with --query"
+        );
+    }
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--dmenu", "--run"])),
+        Err(Error::ConflictingCommands)
+    );
+    assert_eq!(
+        parse_args(&argv(&[
+            "scootlaunch",
+            "--dmenu",
+            "--prompt=a",
+            "--prompt-only=b"
+        ])),
+        Err(Error::ConflictingCommands),
+        "two prompts are two commands"
+    );
+}
+
+#[test]
+fn dmenu_flags_need_dmenu() {
+    for flag in [
+        "--prompt",
+        "--prompt-only",
+        "--password",
+        "--no-run-if-empty",
+        "--only-match",
+        "--index",
+        "--placeholder",
+    ] {
+        let tail: Vec<&str> = if matches!(flag, "--prompt" | "--prompt-only" | "--placeholder") {
+            vec![flag, "x"]
+        } else {
+            vec![flag]
+        };
+        let mut words = vec!["scootlaunch"];
+        words.extend(tail);
+        assert_eq!(
+            parse_args(&argv(&words)),
+            Err(Error::NeedsCommand(flag.to_string())),
+            "{flag} without --dmenu"
+        );
+    }
+    // ... but --dmenu satisfies every one of them.
+    assert!(
+        parse_args(&argv(&[
+            "scootlaunch",
+            "--dmenu",
+            "--prompt",
+            "x",
+            "--password",
+            "--no-run-if-empty",
+            "--only-match",
+            "--index",
+            "--placeholder",
+            "y"
+        ]))
+        .is_ok()
+    );
+}
+
+#[test]
+fn colors_and_layer_need_a_panel() {
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--list", "--text-color=cdd6f4ff"])),
+        Err(Error::NeedsCommand("--background-color".to_string()))
+    );
+    // The bare panel, --run and --dmenu all take them (the launcher
+    // script passes them to the bare panel too).
+    assert!(
+        parse_args(&argv(&[
+            "scootlaunch",
+            "--layer=overlay",
+            "--background-color=1e1e2eff"
+        ]))
+        .is_ok()
+    );
+    assert!(
+        parse_args(&argv(&[
+            "scootlaunch",
+            "--run",
+            "--selection-color=cba6f7ff"
+        ]))
+        .is_ok()
+    );
+}
+
+#[test]
+fn value_flags_without_a_value_are_loud() {
+    for flag in [
+        "--prompt",
+        "--prompt-only",
+        "--placeholder",
+        "--layer",
+        "--background-color",
+        "--font",
+        "--config",
+    ] {
+        assert_eq!(
+            parse_args(&argv(&["scootlaunch", "--dmenu", flag])),
+            Err(Error::NeedsValue(flag.to_string())),
+            "{flag} with nothing after it"
+        );
+    }
+}
+
+#[test]
+fn bool_flags_with_equals_are_not_the_flag() {
+    // A misparsed value-taking flag must never eat the next argument.
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--dmenu", "--only-match=true"])),
+        Err(Error::UnknownFlag("--only-match=true".to_string()))
+    );
 }
