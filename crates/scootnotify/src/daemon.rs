@@ -1,10 +1,13 @@
-//! The daemon: one `poll(2)` loop over the bus fd and one timerfd.
+//! The daemon: one `poll(2)` loop over the bus fd, one timerfd, and the
+//! popup's Wayland fd.
 //!
-//! Headless in this ticket: no Wayland, no surface, no pixels. Arrival
-//! is display (the clock starts at once); the popups ticket moves
-//! presentation to the frame callback, the control ticket adds the
-//! socket. At idle — no cards with deadlines — the timerfd disarms, and
-//! the loop sleeps on the bus fd alone.
+//! With a compositor the daemon shows the card stack on an on-demand
+//! overlay surface (clocks start on the frame callback; hover and input
+//! idle pause them); without one it stays headless (arrival is display,
+//! cards wait for no surface). At idle — no cards with deadlines, no
+//! surface, nothing staged — the timerfd disarms, and the loop sleeps on
+//! the bus fd (and the Wayland fd, which speaks only for pointer, idle
+//! and output events) alone: 0 wakeups with no cards.
 //!
 //! Exit statuses: 0 done (only `--check` exits on its own; the daemon
 //! runs until killed), 1 failed, 3 the name is owned.
@@ -18,11 +21,13 @@ use scoot_rt::print::warn;
 
 use crate::bus::server::{self, Server};
 use crate::config::{self, Config};
+use crate::look::{self, Look};
 use crate::model::store::IdFile;
+use crate::popup::{self, Popup};
 
 /// Runs the daemon: owns the name, serves until killed or the bus goes
 /// away. Returns the exit status (3 when the name is owned).
-pub fn serve(config_path: Option<&str>) -> i32 {
+pub fn serve(config_path: Option<&str>, font_path: Option<&str>) -> i32 {
     let path = config_path
         .map(PathBuf::from)
         .unwrap_or_else(config::default_path);
@@ -31,14 +36,19 @@ pub fn serve(config_path: Option<&str>) -> i32 {
         Err(error) => {
             // A bad config at start runs on built-in defaults and
             // reports the error: an exit would restart-loop with no
-            // notification daemon at all. (The popups ticket shows the
-            // card saying so; headless, stderr is the report.)
+            // notification daemon at all. (Headless, stderr is the
+            // report; with a surface, a card says so.)
             warn(format_args!(
                 "scootnotify: {error}; running on built-in defaults"
             ));
             Config::default()
         }
     };
+    let (look, notes) = look::load(None);
+    for note in &notes {
+        warn(format_args!("scootnotify: {note}"));
+    }
+    let font = font_path.map(PathBuf::from);
     let address = std::env::var_os("DBUS_SESSION_BUS_ADDRESS");
     let mut conn = match conn::bus_addr_for(address.as_deref()) {
         Ok(conn::BusAddr::Path(path)) => match conn::connect(&path) {
@@ -75,10 +85,27 @@ pub fn serve(config_path: Option<&str>) -> i32 {
         }
     }
     let ids = IdFile::open(ids_path());
-    let mut server = Server::new(config, ids);
-    match run_loop(&mut conn, &mut server) {
+    let mut server = Server::new(config.clone(), ids);
+    // A compositor means popups (presentation on the frame callback);
+    // none means headless (arrival is display). Either way the bus
+    // serves: cards without a surface wait with their clocks stopped.
+    let popup = match Popup::connect(&config, &look, font.as_ref()) {
+        Ok(popup) => {
+            server.set_present_on_arrival(false);
+            Some(popup)
+        }
+        Err(note) => {
+            warn(format_args!("scootnotify: {note}"));
+            None
+        }
+    };
+    match run_loop(&mut conn, &mut server, popup) {
         LoopEnd::BusGone => {
             warn(format_args!("scootnotify: the bus went away"));
+            1
+        }
+        LoopEnd::CompositorGone => {
+            warn(format_args!("scootnotify: the compositor went away"));
             1
         }
     }
@@ -110,15 +137,18 @@ fn ids_path() -> Option<PathBuf> {
 /// Why the loop ended: the daemon otherwise runs until killed.
 enum LoopEnd {
     BusGone,
+    CompositorGone,
 }
 
-/// Serves until the bus goes away: pumps method calls into the server,
-/// arms one timerfd to the earliest expiry, fires what is due.
-fn run_loop(conn: &mut Conn, server: &mut Server) -> LoopEnd {
+/// Serves until the bus or the compositor goes away: pumps method calls
+/// into the server, arms one timerfd to the earliest expiry, fires what
+/// is due, and draws the stack when dirty.
+fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> LoopEnd {
     let timer = match timerfd() {
         Some(timer) => timer,
         None => return LoopEnd::BusGone,
     };
+    let mut hovered: Option<u32> = None;
     loop {
         let (events, capped) = conn.pump();
         if conn.dead() {
@@ -144,18 +174,99 @@ fn run_loop(conn: &mut Conn, server: &mut Server) -> LoopEnd {
                 }
             }
         }
+        if let Some(popup) = popup.as_mut() {
+            for event in popup.dispatch() {
+                apply_popup(conn, server, event, &mut hovered);
+                if conn.dead() {
+                    return LoopEnd::BusGone;
+                }
+            }
+            popup.refresh(&server.store().ordered(), now_ms);
+        }
         server.fire_expiries(conn);
+        if let Some(popup) = popup.as_mut() {
+            popup.draw();
+        }
         arm_timer(&timer, server.earliest_deadline());
         if conn.dead() {
             return LoopEnd::BusGone;
         }
+        if popup.as_ref().is_some_and(|popup| popup.gone()) {
+            return LoopEnd::CompositorGone;
+        }
         if capped || conn.has_staged_work() || conn.want_write() {
             continue;
         }
-        wait(conn.as_fd(), timer.as_fd());
+        // The Wayland read guard: prepared before the poll, read when
+        // the fd speaks, dropped unread otherwise (the documented
+        // read-after-poll shape: the next turn collects it).
+        let guard = popup.as_ref().and_then(|popup| popup.prepare_read());
+        let wayland = wait(conn.as_fd(), timer.as_fd(), popup.as_ref().map(|popup| popup.fd()));
         drain_timer(&timer);
+        if wayland
+            && let Some(guard) = guard
+        {
+            let _ = guard.read();
+        }
         if conn.dead() {
             return LoopEnd::BusGone;
+        }
+    }
+}
+
+/// Applies one popup event to the store, queueing its signals: the
+/// token (if minted) always precedes its invoke.
+fn apply_popup(conn: &mut Conn, server: &mut Server, event: popup::Event, hovered: &mut Option<u32>) {
+    let now = Instant::now();
+    match event {
+        popup::Event::Presented(ids) => {
+            let now_ms = now_ms();
+            for id in ids {
+                server.store_mut().presented(id, now, now_ms);
+            }
+        }
+        popup::Event::ClickBody { id, token } => {
+            let has_default = server
+                .store()
+                .get(id)
+                .is_some_and(|note| note.actions.iter().any(|pair| pair.key == "default"));
+            if has_default {
+                server.invoke_and_signal(conn, id, "default", token.as_deref());
+            } else {
+                server.dismiss_and_signal(conn, id);
+            }
+        }
+        popup::Event::ClickButton { id, key, token } => {
+            server.invoke_and_signal(conn, id, &key, token.as_deref());
+        }
+        popup::Event::Dismiss(id) => {
+            server.dismiss_and_signal(conn, id);
+        }
+        popup::Event::DismissAll => {
+            server.dismiss_all_and_signal(conn);
+        }
+        popup::Event::Hover(card) => {
+            if *hovered != card {
+                if let Some(old) = hovered.take() {
+                    server.store_mut().resume(old, now);
+                }
+                if let Some(id) = card {
+                    server.store_mut().pause(id, now);
+                    *hovered = Some(id);
+                }
+            }
+        }
+        popup::Event::Idle(idled) => {
+            if idled {
+                server.store_mut().pause_all(now);
+            } else {
+                server.store_mut().resume_all(now);
+                // The hover still holds its card (the pointer never
+                // left): re-park it after the resume-all.
+                if let Some(id) = *hovered {
+                    server.store_mut().pause(id, now);
+                }
+            }
         }
     }
 }
@@ -207,19 +318,22 @@ fn arm_timer(timer: &rustix::fd::OwnedFd, deadline: Option<Instant>) {
     let _ = timerfd_settime(timer, TimerfdTimerFlags::empty(), &spec);
 }
 
-/// Polls the bus fd and the timerfd with no timeout: woken by traffic
-/// or the next expiry, never by time otherwise. A bounded poll here
-/// would be a wakeup every bound at idle; the loop only reaches this
-/// wait with nothing staged, nothing queued and the timer armed, so
-/// nothing is missed by sleeping until the fds speak (both poll
+/// Polls the bus fd, the timerfd, and the Wayland fd (when there is
+/// one) with no timeout: woken by traffic or the next expiry, never by
+/// time otherwise. Returns whether the Wayland fd spoke. A bounded poll
+/// here would be a wakeup every bound at idle; the loop only reaches
+/// this wait with nothing staged, nothing queued and the timer armed,
+/// so nothing is missed by sleeping until the fds speak (all poll
 /// level-triggered).
-fn wait(bus: BorrowedFd<'_>, timer: BorrowedFd<'_>) {
+fn wait(bus: BorrowedFd<'_>, timer: BorrowedFd<'_>, wayland: Option<BorrowedFd<'_>>) -> bool {
     use rustix::event::{PollFd, PollFlags, poll};
     let mut fds = [
         PollFd::new(&bus, PollFlags::IN),
         PollFd::new(&timer, PollFlags::IN),
+        PollFd::new(&wayland.unwrap_or(bus), PollFlags::IN),
     ];
     let _ = poll(&mut fds, None);
+    wayland.is_some() && !fds[2].revents().is_empty()
 }
 
 /// Reads a fired timerfd back to disarmed: edge-triggered peace.

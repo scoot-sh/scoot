@@ -268,10 +268,6 @@ pub fn layout(
     }
 }
 
-/// The letter tile's letter: the app name's first alphanumeric,
-/// uppercased, or '•' without one.
-}
-
 /// The "+N more" pill's height: one padded line, or nothing.
 fn pill_h(hidden: usize, line_h: u32) -> u32 {
     if hidden == 0 {
@@ -289,6 +285,7 @@ fn tile_letter(app: &str) -> char {
         .map(|c| c.to_uppercase().next().unwrap_or('•'))
         .unwrap_or('•')
 }
+
 /// Whether the card shows the icon slot: any icon but none.
 fn has_icon_slot(note: &Notification) -> bool {
     !matches!(note.icon, crate::model::store::Icon::None)

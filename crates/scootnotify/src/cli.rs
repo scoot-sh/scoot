@@ -14,6 +14,10 @@ pub struct Args {
     pub check: bool,
     /// `--config PATH`: read this file instead of the default.
     pub config: Option<String>,
+    /// `--font PATH`: draw with this font file instead of the first
+    /// well-known one (the look's `font` key names the family; this
+    /// names the file, as the panel's does).
+    pub font: Option<String>,
     /// `--help` / `--version`: handled before anything else.
     pub help: bool,
     pub version: bool,
@@ -23,7 +27,7 @@ pub struct Args {
 pub const HELP: &str = "scootnotify: the notification daemon\n\
     \n\
     Usage:\n\
-    \tscootnotify daemon [--check] [--config PATH]\n\
+    \tscootnotify daemon [--check] [--config PATH] [--font PATH]\n\
     \tscootnotify --help\n\
     \tscootnotify --version\n\
     \n\
@@ -33,6 +37,7 @@ pub const HELP: &str = "scootnotify: the notification daemon\n\
     Flags:\n\
     \t--check\t\tvalidate the config file and exit (0 valid, 1 refused)\n\
     \t--config PATH\tread this config file instead of the default\n\
+    \t--font PATH\tdraw with this font file instead of the first well-known one\n\
     \t--help\t\tprint this help and exit\n\
     \t--version\tprint the version and exit\n\
     \n\
@@ -47,6 +52,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut args = Args {
         check: false,
         config: None,
+        font: None,
         help: false,
         version: false,
     };
@@ -84,6 +90,12 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
                 .get(at + 1)
                 .ok_or_else(|| String::from("--config needs a value (the config file to read)"))?;
             args.config = Some(path.clone());
+            at += 2;
+        } else if word == "--font" {
+            let path = argv
+                .get(at + 1)
+                .ok_or_else(|| String::from("--font needs a value (the font file to draw with)"))?;
+            args.font = Some(path.clone());
             at += 2;
         } else {
             return Err(format!("unknown flag '{word}' (see --help)"));

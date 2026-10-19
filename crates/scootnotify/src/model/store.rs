@@ -526,6 +526,29 @@ impl Store {
         }
     }
 
+    /// Parks one card's clock (its hover began): the card stops
+    /// expiring under the pointer and runs again after.
+    pub fn pause(&mut self, id: u32, now: Instant) {
+        if let Some(current) = self.live.get_mut(&id) {
+            current.clock.pause(now);
+        }
+    }
+
+    /// Runs one card's clock again (its hover ended).
+    pub fn resume(&mut self, id: u32, now: Instant) {
+        if let Some(current) = self.live.get_mut(&id) {
+            current.clock.resume(now);
+        }
+    }
+
+    /// The live cards oldest first: the stack lays out from this.
+    pub fn ordered(&self) -> Vec<&Notification> {
+        self.order
+            .iter()
+            .filter_map(|id| self.live.get(id))
+            .collect()
+    }
+
     /// Reads one card: the JSON view and the tests use this.
     pub fn get(&self, id: u32) -> Option<&Notification> {
         self.live.get(&id)

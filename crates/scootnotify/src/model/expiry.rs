@@ -3,11 +3,10 @@
 //! card is first presented — on the `wl_surface.frame` callback for the
 //! commit that first contains it — never at arrival. A card that arrives
 //! while locked or output-less therefore waits with its clock stopped.
-//! This ticket is headless: the daemon presents immediately (arrival is
-//! display, with nothing to hide behind), and the popups ticket moves
-//! the call to the frame callback. The tests' stub presenter calls
-//! [`Clock::presented`] by hand, which is the seam the real callback
-//! uses.
+//! Headless (no compositor) the daemon presents on arrival instead:
+//! arrival is display, with nothing to hide behind. The tests' stub
+//! presenter calls [`Clock::presented`] by hand, which is the seam the
+//! real callback uses.
 //!
 //! Pure over an explicit `now`: every function takes it, so tests pin
 //! the rules without sleeping.
