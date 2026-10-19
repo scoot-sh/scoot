@@ -338,14 +338,14 @@ impl App {
         self.configured_size.is_some()
     }
 
-    fn globals(&self) -> Globals<'_> {
-        Globals {
-            compositor: self.compositor.as_ref().expect("swept"),
+    fn globals(&self) -> Option<Globals<'_>> {
+        Some(Globals {
+            compositor: self.compositor.as_ref()?,
             layer_shell: self.layer_shell.as_ref(),
             xdg_wm_base: None,
             viewporter: self.viewporter.as_ref(),
             fractional_scale: self.fractional.as_ref(),
-        }
+        })
     }
 
     /// Creates the surface for the current demand: a null output,
@@ -367,7 +367,12 @@ impl App {
             margin: [0, 0, 0, 0],
             exclusive_zone: 0,
         };
-        match LayerLive::create(&self.globals(), None, &spec, qh, ()) {
+        let Some(globals) = self.globals() else {
+            warn(format_args!("scootlaunch: no compositor to open on"));
+            self.exit = Some(Exit::Failed);
+            return;
+        };
+        match LayerLive::create(&globals, None, &spec, qh, ()) {
             Ok(live) => {
                 self.live = Some(live);
                 self.dirty = true;
@@ -437,13 +442,13 @@ impl App {
             Some(dims) => dims,
             None => return,
         };
-        let slot = match self.buffers.take(
-            self.shm.as_ref().expect("swept"),
-            qh,
-            dims,
-            wl_shm::Format::Argb8888,
-            (),
-        ) {
+        let Some(shm) = self.shm.as_ref() else {
+            return;
+        };
+        let slot = match self
+            .buffers
+            .take(shm, qh, dims, wl_shm::Format::Argb8888, ())
+        {
             Ok(Some(slot)) => slot,
             Ok(None) => return,
             Err(error) => {
@@ -906,11 +911,15 @@ impl Dispatch<wl_seat::WlSeat, ()> for App {
         {
             use wl_seat::Capability;
             if caps.contains(Capability::Keyboard) && app.keyboard.is_none() {
-                let seat = app.seat_proxy.as_ref().expect("the seat binds first");
+                let Some(seat) = app.seat_proxy.as_ref() else {
+                    return;
+                };
                 app.keyboard = Some(seat.get_keyboard(qh, ()));
             }
             if caps.contains(Capability::Pointer) && app.pointer.is_none() {
-                let seat = app.seat_proxy.as_ref().expect("the seat binds first");
+                let Some(seat) = app.seat_proxy.as_ref() else {
+                    return;
+                };
                 app.pointer = Some(seat.get_pointer(qh, ()));
             }
         }
