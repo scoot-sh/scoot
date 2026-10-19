@@ -149,15 +149,7 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
         None => return LoopEnd::BusGone,
     };
     let mut hovered: Option<u32> = None;
-    let spin_debug = std::env::var_os("SCOOTNOTIFY_SPIN_DEBUG").is_some();
-    let mut spins: u64 = 0;
-    // Where a wedged loop wedges: stage counters dumped with the spin
-    // log (debug only).
-    let mut stages: [u64; 7] = [0; 7];
     loop {
-        if spin_debug {
-            stages[0] += 1;
-        }
         let (events, capped) = conn.pump();
         if conn.dead() {
             return LoopEnd::BusGone;
@@ -183,32 +175,17 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
             }
         }
         if let Some(popup) = popup.as_mut() {
-            if spin_debug {
-                stages[1] += 1;
-            }
             for event in popup.dispatch() {
                 apply_popup(conn, server, event, &mut hovered);
                 if conn.dead() {
                     return LoopEnd::BusGone;
                 }
             }
-            if spin_debug {
-                stages[2] += 1;
-            }
             popup.refresh(&server.store().ordered(), now_ms);
-        }
-        if spin_debug {
-            stages[3] += 1;
         }
         server.fire_expiries(conn);
         if let Some(popup) = popup.as_mut() {
-            if spin_debug {
-                stages[4] += 1;
-            }
             popup.draw();
-        }
-        if spin_debug {
-            stages[5] += 1;
         }
         arm_timer(&timer, server.earliest_deadline());
         if conn.dead() {
@@ -218,50 +195,13 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
             return LoopEnd::CompositorGone;
         }
         if capped || conn.has_staged_work() || conn.want_write() {
-            if spin_debug {
-                spins += 1;
-                if spins == 200_000 {
-                    // To a file, not stderr: the harness holds the
-                    // pipe open while the daemon lives, so stderr is
-                    // unreadable until it dies.
-                    let _ = std::fs::write(
-                        "/tmp/scootnotify-spin.log",
-                        format!(
-                            "200k no-poll turns (capped={capped} staged={} write={}) stages={stages:?}\n",
-                            conn.has_staged_work(),
-                            conn.want_write()
-                        ),
-                    );
-                }
-            }
             continue;
-        }
-        spins = 0;
-        if spin_debug {
-            stages[6] += 1;
-            if stages[0] % 50_000 == 0 {
-                let _ = std::fs::write(
-                    "/tmp/scootnotify-spin.log",
-                    format!("alive: tops={} stages={stages:?}\n", stages[0]),
-                );
-            }
         }
         // The Wayland read guard: prepared before the poll, read when
         // the fd speaks, dropped unread otherwise (the documented
         // read-after-poll shape: the next turn collects it).
         let guard = popup.as_ref().and_then(|popup| popup.prepare_read());
-        let (bus_hot, timer_hot, wayland_hot) =
-            wait(conn.as_fd(), timer.as_fd(), popup.as_ref().map(|popup| popup.fd()));
-        let wayland = wayland_hot;
-        if spin_debug && stages[0] % 50_000 == 0 {
-            let _ = std::fs::write(
-                "/tmp/scootnotify-poll.log",
-                format!(
-                    "tops={} stages={stages:?} hot=({bus_hot},{timer_hot},{wayland_hot})\n",
-                    stages[0]
-                ),
-            );
-        }
+        let wayland = wait(conn.as_fd(), timer.as_fd(), popup.as_ref().map(|popup| popup.fd()));
         drain_timer(&timer);
         if wayland
             && let Some(guard) = guard
@@ -380,16 +320,12 @@ fn arm_timer(timer: &rustix::fd::OwnedFd, deadline: Option<Instant>) {
 
 /// Polls the bus fd, the timerfd, and the Wayland fd (when there is
 /// one) with no timeout: woken by traffic or the next expiry, never by
-/// time otherwise. Returns which fds spoke. A bounded poll
+/// time otherwise. Returns whether the Wayland fd spoke. A bounded poll
 /// here would be a wakeup every bound at idle; the loop only reaches
 /// this wait with nothing staged, nothing queued and the timer armed,
 /// so nothing is missed by sleeping until the fds speak (all poll
 /// level-triggered).
-fn wait(
-    bus: BorrowedFd<'_>,
-    timer: BorrowedFd<'_>,
-    wayland: Option<BorrowedFd<'_>>,
-) -> (bool, bool, bool) {
+fn wait(bus: BorrowedFd<'_>, timer: BorrowedFd<'_>, wayland: Option<BorrowedFd<'_>>) -> bool {
     use rustix::event::{PollFd, PollFlags, poll};
     let third = wayland.unwrap_or(bus);
     let mut fds = [
@@ -398,11 +334,7 @@ fn wait(
         PollFd::new(&third, PollFlags::IN),
     ];
     let _ = poll(&mut fds, None);
-    (
-        !fds[0].revents().is_empty(),
-        !fds[1].revents().is_empty(),
-        wayland.is_some() && !fds[2].revents().is_empty(),
-    )
+    wayland.is_some() && !fds[2].revents().is_empty()
 }
 
 /// Reads a fired timerfd back to disarmed: edge-triggered peace.

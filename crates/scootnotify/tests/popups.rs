@@ -99,9 +99,6 @@ fn spawn_popup(session: &Session, bus: &Daemon, config: &str) -> (Child, PathBuf
     let log = session.scratch.0.join("scootnotify.log");
     let log_file = std::fs::File::create(&log).expect("the daemon log creates");
     let mut command = Command::new(binary);
-    // Spin-detector switch (debug only): the daemon counts no-poll
-    // turns and writes /tmp/scootnotify-spin.log past 200k.
-    command.env("SCOOTNOTIFY_SPIN_DEBUG", "1");
     // `SCOOTNOTIFY_WAYLAND_DEBUG=1` turns on the Wayland wire log (the
     // client's own `WAYLAND_DEBUG`): what the stack asked for and what
     // the compositor answered, for a showing failure.
