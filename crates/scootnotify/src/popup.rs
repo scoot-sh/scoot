@@ -150,7 +150,6 @@ pub struct App {
     /// clocks in the store without a new presentation.
     presented: std::collections::HashSet<u32>,
     dirty: bool,
-    closed_retried: bool,
     pending: Vec<Event>,
     click: Option<Click>,
     gone: bool,
@@ -208,7 +207,6 @@ impl App {
             unpresented: Vec::new(),
             presented: std::collections::HashSet::new(),
             dirty: true,
-            closed_retried: false,
             pending: Vec::new(),
             click: None,
             gone: false,
@@ -318,6 +316,11 @@ impl App {
         self.destroy_live();
         self.unpresented.clear();
         self.presented.clear();
+        // The hover died with the surface: the daemon resumes the card
+        // (its pause was the pointer's, which is gone with the pixels).
+        if self.hover.map(|(id, _)| id).is_some() {
+            self.pending.push(Event::Hover(None));
+        }
         self.hover = None;
     }
 
@@ -492,7 +495,6 @@ impl App {
         slot.mark_committed();
         self.demand.drew(frame);
         self.draw_skipped = false;
-        self.closed_retried = false;
         true
     }
 
@@ -1161,15 +1163,19 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
                 if !live {
                     return;
                 }
+                // A fresh start, not a retry: `hide` forgets the closed
+                // surface, so the next refresh shows again while cards
+                // remain (a compositor that closes in a loop paces this
+                // at its own event rate, like every other client it
+                // closes). The panel exits here instead; the daemon
+                // runs until killed, so it re-shows.
                 match app.demand.closed() {
-                    Effect::DestroyAndRetry if !app.closed_retried => {
-                        app.closed_retried = true;
-                        app.destroy_live();
-                        app.configured_size = None;
-                        app.show(qh);
+                    Effect::DestroyAndRetry | Effect::DestroyAndGiveUp | Effect::Destroy => {
+                        app.hide();
                     }
-                    _ => app.destroy_live(),
+                    Effect::Ack(_) | Effect::None | Effect::Create => {}
                 }
+                let _ = qh;
             }
             _ => {}
         }
