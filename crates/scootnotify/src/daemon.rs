@@ -151,7 +151,13 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
     let mut hovered: Option<u32> = None;
     let spin_debug = std::env::var_os("SCOOTNOTIFY_SPIN_DEBUG").is_some();
     let mut spins: u64 = 0;
+    // Where a wedged loop wedges: stage counters dumped with the spin
+    // log (debug only).
+    let mut stages: [u64; 7] = [0; 7];
     loop {
+        if spin_debug {
+            stages[0] += 1;
+        }
         let (events, capped) = conn.pump();
         if conn.dead() {
             return LoopEnd::BusGone;
@@ -177,17 +183,32 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
             }
         }
         if let Some(popup) = popup.as_mut() {
+            if spin_debug {
+                stages[1] += 1;
+            }
             for event in popup.dispatch() {
                 apply_popup(conn, server, event, &mut hovered);
                 if conn.dead() {
                     return LoopEnd::BusGone;
                 }
             }
+            if spin_debug {
+                stages[2] += 1;
+            }
             popup.refresh(&server.store().ordered(), now_ms);
+        }
+        if spin_debug {
+            stages[3] += 1;
         }
         server.fire_expiries(conn);
         if let Some(popup) = popup.as_mut() {
+            if spin_debug {
+                stages[4] += 1;
+            }
             popup.draw();
+        }
+        if spin_debug {
+            stages[5] += 1;
         }
         arm_timer(&timer, server.earliest_deadline());
         if conn.dead() {
@@ -206,7 +227,7 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
                     let _ = std::fs::write(
                         "/tmp/scootnotify-spin.log",
                         format!(
-                            "200k no-poll turns (capped={capped} staged={} write={})\n",
+                            "200k no-poll turns (capped={capped} staged={} write={}) stages={stages:?}\n",
                             conn.has_staged_work(),
                             conn.want_write()
                         ),
@@ -216,6 +237,15 @@ fn run_loop(conn: &mut Conn, server: &mut Server, mut popup: Option<Popup>) -> L
             continue;
         }
         spins = 0;
+        if spin_debug {
+            stages[6] += 1;
+            if stages[0] % 5_000_000 == 0 {
+                let _ = std::fs::write(
+                    "/tmp/scootnotify-spin.log",
+                    format!("alive: tops={} stages={stages:?}\n", stages[0]),
+                );
+            }
+        }
         // The Wayland read guard: prepared before the poll, read when
         // the fd speaks, dropped unread otherwise (the documented
         // read-after-poll shape: the next turn collects it).
