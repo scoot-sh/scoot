@@ -169,6 +169,9 @@ impl Panel {
 
     /// Starts the panel on an existing session: the look layer (or any
     /// other sandbox file) lands before the open, so the panel reads it.
+    /// `SCOOTLAUNCH_TEST_FONT` overrides the typeface (a real font for
+    /// the docs screenshots); unset, the hermetic test font is used, so
+    /// CI never depends on machine fonts.
     pub fn start_on(
         session: Session,
         data_home: PathBuf,
@@ -178,6 +181,10 @@ impl Panel {
         let log = session.scratch.0.join("panel.log");
         let file = fs::File::create(&log).unwrap();
         let empty_dirs = session.scratch.0.join("empty-dirs");
+        let font = std::env::var_os("SCOOTLAUNCH_TEST_FONT")
+            .map(PathBuf::from)
+            .filter(|path| path.is_file())
+            .unwrap_or_else(|| session.font());
         let mut command = Command::new(launch_bin());
         command
             .env("XDG_RUNTIME_DIR", &session.scratch.0)
@@ -186,7 +193,7 @@ impl Panel {
             .env_remove("WAYLAND_DEBUG")
             .env("WAYLAND_DISPLAY", &session.wayland_display)
             .arg("--font")
-            .arg(session.font())
+            .arg(font)
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
