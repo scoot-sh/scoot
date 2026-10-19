@@ -178,7 +178,7 @@ pub fn stream_to(
     let mut subscription = subscribe_to(paths, request)?;
     loop {
         match subscription.read(None) {
-            Ok(Read::Line(line)) => {
+            Ok(Outcome::Line(line)) => {
                 let dropped = line.as_bytes() == DROPPED;
                 if !each(&line) {
                     return Ok(());
@@ -190,9 +190,9 @@ pub fn stream_to(
             }
             // A clean end between lines (see `stream`): resubscribe and
             // query after any end.
-            Ok(Read::Eof) => return Ok(()),
+            Ok(Outcome::Eof) => return Ok(()),
             // Unreachable: no timeout was set. A clean end either way.
-            Ok(Read::Timeout) => return Ok(()),
+            Ok(Outcome::Timeout) => return Ok(()),
             Err(error) => return Err(error),
         }
     }
@@ -206,7 +206,7 @@ pub struct Subscription {
 }
 
 /// What one [`Subscription::read`] found.
-pub enum Read {
+pub enum Outcome {
     /// One whole line, newline included.
     Line(String),
     /// The timeout lapsed with nothing read.
@@ -219,7 +219,7 @@ impl Subscription {
     /// Reads one line, waiting at most `timeout` (`None` waits forever).
     /// A cut line is [`Error::Cut`]; a `dropped` line is returned like any
     /// other, and the caller ends the wait as missed events.
-    pub fn read(&mut self, timeout: Option<Duration>) -> Result<Read, Error> {
+    pub fn read(&mut self, timeout: Option<Duration>) -> Result<Outcome, Error> {
         let io_error = |error| Error::Io {
             socket: self.socket.clone(),
             error,
@@ -233,7 +233,7 @@ impl Subscription {
         let mut line = String::new();
         // One line, bounded: a daemon gone wrong cannot fill memory.
         match (&mut self.reader).take(MAX_REPLY).read_line(&mut line) {
-            Ok(0) => return Ok(Read::Eof),
+            Ok(0) => return Ok(Outcome::Eof),
             Ok(_) => {}
             Err(error)
                 if matches!(
@@ -241,7 +241,7 @@ impl Subscription {
                     io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
                 ) =>
             {
-                return Ok(Read::Timeout);
+                return Ok(Outcome::Timeout);
             }
             Err(error)
                 if matches!(
@@ -253,7 +253,7 @@ impl Subscription {
                 return if !line.is_empty() {
                     Err(Error::Cut)
                 } else {
-                    Ok(Read::Eof)
+                    Ok(Outcome::Eof)
                 };
             }
             Err(error) => return Err(io_error(error)),
@@ -266,7 +266,7 @@ impl Subscription {
                 Error::Cut
             });
         }
-        Ok(Read::Line(line))
+        Ok(Outcome::Line(line))
     }
 }
 
@@ -303,7 +303,7 @@ pub fn subscribe_to(paths: &Paths, request: &Request<'_>) -> Result<Subscription
     };
     // The reply, bounded: without it there is no subscription.
     match subscription.read(Some(TIMEOUT)) {
-        Ok(Read::Line(line)) => {
+        Ok(Outcome::Line(line)) => {
             let reply: serde_json::Value =
                 serde_json::from_str(&line).map_err(|e| Error::BadReply(e.to_string()))?;
             if reply["type"] == "error" {
@@ -317,7 +317,7 @@ pub fn subscribe_to(paths: &Paths, request: &Request<'_>) -> Result<Subscription
             }
             Ok(subscription)
         }
-        Ok(Read::Eof | Read::Timeout) => Err(Error::NoReply),
+        Ok(Outcome::Eof | Outcome::Timeout) => Err(Error::NoReply),
         Err(error) => Err(error),
     }
 }

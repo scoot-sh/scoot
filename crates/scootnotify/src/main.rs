@@ -274,7 +274,7 @@ fn wait(app: Option<&str>, summary: Option<&str>, timeout_secs: u64) -> i32 {
                 warn(format_args!("scootnotify: {error}"));
                 return 1;
             }
-            Ok(client::Read::Timeout) => {
+            Ok(client::Outcome::Timeout) => {
                 warn(format_args!(
                     "scootnotify: timed out after {timeout_secs}s with no matching notification"
                 ));
@@ -282,13 +282,13 @@ fn wait(app: Option<&str>, summary: Option<&str>, timeout_secs: u64) -> i32 {
             }
             // The daemon closed the subscription, and events may have
             // been missed.
-            Ok(client::Read::Eof) => {
+            Ok(client::Outcome::Eof) => {
                 warn(format_args!(
                     "scootnotify: the daemon closed the subscription before anything matched"
                 ));
                 return 1;
             }
-            Ok(client::Read::Line(line)) => {
+            Ok(client::Outcome::Line(line)) => {
                 if line.as_bytes() == scootnotify::control::protocol::DROPPED {
                     warn(format_args!(
                         "scootnotify: the daemon dropped this subscription: events may have been \
