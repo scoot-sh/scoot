@@ -50,3 +50,11 @@ run the site build and snippet gates.
 ## Docs (same PR)
 
 This ticket is the docs work. Each fix cites the commit that changed the behavior.
+
+## Added 2026-10-19 (after #679)
+
+- The panel screenshots on `scootlaunch/panel.md` use solid red and blue fixture squares for icons.
+  They are accurate but plain next to the looks. Recapture with a couple of designed fixture icons
+  (still generated in the test harness) so the docs show what the panel looks like with real apps.
+- The entry's focus ring starts right of the entry icon; check the ring and icon spacing look
+  deliberate at 1x and 1.5x.
