@@ -56,8 +56,8 @@ The control socket, DND, rules, history, the bar.
 
 ## Resolution
 
-Shipped in the `feat(scootnotify)` popups PR: the card stack on one
-on-demand `overlay` layer surface, pointer actions with the token
+Shipped in PR #683 (`feat/notify-popups` branch): the card stack on
+one on-demand `overlay` layer surface, pointer actions with the token
 first, frame-callback presentation, hover and input-idle pauses, null
 or named outputs with hotplug, `notify.toml` placement/timeout keys,
 and the `notify.toml` look layer with the re-theme path (`msg
