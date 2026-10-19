@@ -351,7 +351,8 @@ fn pixels_per_card_state() {
         shot().at(x0 + 180, y0 + 1) == rgb(URGENT)
     });
 
-    // Actions: the button outline draws `focus`.
+    // Actions: a button's left outline draws a vertical `focus` run
+    // (rings and bars run horizontally, so a tall run is a button).
     let _ = notify(
         &mut client,
         &mut server,
@@ -366,11 +367,23 @@ fn pixels_per_card_state() {
         103,
     );
     wait_shown(&mut server, &log, "the action buttons", || {
-        shot().at(x0 + 12, y0 + 120) == rgb(FOCUS)
-            || shot().at(x0 + 100, y0 + 140) == rgb(FOCUS)
+        let pixels = session.scoot_screenshot(1);
+        let mut run = 0;
+        for y in y0 + 10..y0 + 400 {
+            if pixels.at(x0 + 12, y) == rgb(FOCUS) {
+                run += 1;
+                if run >= 8 {
+                    return true;
+                }
+            } else {
+                run = 0;
+            }
+        }
+        false
     });
 
-    // Progress: the `value` fill draws `selection` (accent by default).
+    // Progress: the `value` fill draws `selection` (accent by default)
+    // below the top ring, above the older cards.
     let _ = notify(
         &mut client,
         &mut server,
@@ -385,8 +398,10 @@ fn pixels_per_card_state() {
         104,
     );
     wait_shown(&mut server, &log, "the progress bar", || {
-        let pixels = shot();
-        (0..360u32).any(|dx| pixels.at(x0 + dx, y0 + 200) == rgb(FOCUS))
+        let pixels = session.scoot_screenshot(1);
+        (y0 + 10..y0 + 85).any(|y| {
+            (0..360u32).any(|dx| pixels.at(x0 + dx, y) == rgb(FOCUS))
+        })
     });
 
     // Low: the `border` ring over the same fill.

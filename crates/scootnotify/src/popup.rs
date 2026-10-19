@@ -132,6 +132,15 @@ pub struct App {
     live: Option<LayerLive>,
     configured_size: Option<Size>,
     content_size: Option<Size>,
+    /// The size last passed to `set_size`: the surface converges on the
+    /// content without re-asking every draw (a clamped compositor would
+    /// otherwise storm configures).
+    sized_to: Option<Size>,
+    /// A draw skipped for lack of a free buffer: the next release
+    /// retries it. Releases otherwise never dirty the surface (every
+    /// commit would release, which would redraw, which would commit:
+    /// a busy loop at full CPU).
+    draw_skipped: bool,
     stack: Stack,
     icons: HashMap<u32, IconBits>,
     urgencies: HashMap<u32, Urgency>,
@@ -184,6 +193,8 @@ impl App {
             live: None,
             configured_size: None,
             content_size: None,
+            sized_to: None,
+            draw_skipped: false,
             stack: Stack {
                 width: 0,
                 height: 0,
@@ -290,6 +301,8 @@ impl App {
             live.destroy();
         }
         self.configured_size = None;
+        self.sized_to = None;
+        self.draw_skipped = false;
     }
 
     /// Hides an emptied stack: no surface, no buffers, no input region.
@@ -354,25 +367,21 @@ impl App {
     /// Draws the stack into a pooled buffer and commits it, requesting a
     /// frame callback for cards this commit first contains.
     fn draw(&mut self, qh: &QueueHandle<Self>) {
+        // No surface, nothing to draw on.
+        if self.live.is_none() {
+            return;
+        }
         // No pixels before the first configure: attaching a buffer
         // before acking the initial configure is a protocol error, and
         // the compositor kills the client for it. The configure sets
         // `dirty`, so the very next turn draws.
-        if self.live.is_some() && self.configured_size.is_none() {
+        if self.configured_size.is_none() {
             return;
         }
-        let content = self.content_size;
-        let size = match self.configured_size {
-            None => content,
-            Some(configured) => {
-                let Size { width: cw, height: ch } =
-                    content.unwrap_or(Size { width: self.config.width_px, height: 1 });
-                Some(Size {
-                    width: if configured.width == 0 { cw } else { configured.width },
-                    height: if configured.height == 0 { ch } else { configured.height },
-                })
-            }
-        };
+        // The content sizes the surface (the compositor echoes explicit
+        // sizes back, so resolving 0-axes against the configured size
+        // would pin the first card's size forever as the stack grows).
+        let size = self.content_size.or(self.configured_size);
         match self.demand.plan(size, self.dirty) {
             Plan::Draw(frame) => {
                 if self.draw_frame(frame, qh) {
@@ -417,7 +426,14 @@ impl App {
         };
         let slot = match self.buffers.take(&shm, qh, dims, wl_shm::Format::Argb8888, ()) {
             Ok(Some(slot)) => slot,
-            Ok(None) => return false,
+            // Both buffers held: the next release retries (and only
+            // then — releases never dirty an up-to-date surface, or
+            // every commit's release would redraw into the next commit
+            // at full CPU).
+            Ok(None) => {
+                self.draw_skipped = true;
+                return false;
+            }
             Err(error) => {
                 warn(format_args!("scootnotify: cannot draw the stack: {error}"));
                 return false;
@@ -447,10 +463,15 @@ impl App {
         let Some(live) = self.live.as_mut() else {
             return false;
         };
-        if self.content_size.is_some_and(|content| {
-            content.width != frame.size.width || content.height != frame.size.height
-        }) {
-            live.set_size(frame.size.width, frame.size.height);
+        // The content sizes the surface: ask once per size (a clamped
+        // compositor answers its own size, and re-asking every draw
+        // would storm configures). The size rides the same commit as
+        // the pixels, so they apply together.
+        if self.content_size.is_some() && self.content_size != self.sized_to {
+            if let Some(content) = self.content_size {
+                live.set_size(content.width.max(1), content.height.max(1));
+                self.sized_to = Some(content);
+            }
         }
         live.surface().attach(Some(slot.buffer()), 0, 0);
         // Full damage, every draw: the bar's shape (exact buffer rect).
@@ -470,6 +491,7 @@ impl App {
         live.surface().commit();
         slot.mark_committed();
         self.demand.drew(frame);
+        self.draw_skipped = false;
         self.closed_retried = false;
         true
     }
@@ -1089,7 +1111,13 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for App {
     ) {
         if let wl_buffer::Event::Release = event {
             app.buffers.released(buffer);
-            app.dirty = true;
+            // A skipped draw retries on the next release. Any other
+            // release frees its slot and nothing more: dirtying here
+            // would redraw every commit's release into the next commit
+            // at full CPU.
+            if app.draw_skipped {
+                app.dirty = true;
+            }
         }
     }
 }
