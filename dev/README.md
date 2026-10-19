@@ -32,7 +32,7 @@ daemon and the bar (a build of either stops at scootbg-mem's "run on
 Linux only"):
 
 ```sh
-cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --exclude scoot-dbus --exclude scootnotify --all-targets
+cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --exclude scoot-dbus --exclude scootnotify --exclude scootlaunch --all-targets
 ```
 
 That is what the macOS CI job runs: the compositor crate with its Linux

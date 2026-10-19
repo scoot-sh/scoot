@@ -349,15 +349,18 @@ jobs:
                   scootnotify=true ;;
                 # The shared drawing crate (crates/scootui): scootbar's
                 # canvas, text, theme, popups and icons, fanning out to
-                # every consumer (today scootbar alone; tomorrow
-                # scootnotify, scootlaunch and scootgreet, per
+                # every consumer (scootbar and scootlaunch: the panel
+                # types through its entry and list, maps its on-demand
+                # surfaces and decodes its seat keyboard; scootnotify and
+                # scootgreet join as their tickets land, per
                 # dev/design/shell-apps.md). Its manifest also runs the
                 # Linux job, as scootbar's does.
                 crates/scootui/Cargo.toml)
                   scoot=true
                   scootbar=true ;;
                 crates/scootui/*)
-                  scootbar=true ;;
+                  scootbar=true
+                  scootlaunch=true ;;
                 # The leaf both scootui and scoot-dbus depend on
                 # (crates/scoot-rt): `print` and `runtime_dir`, fanning out
                 # to both sets, today scootbar, scootlaunch and scootnotify.
@@ -385,13 +388,17 @@ jobs:
                 # The look format crate (crates/scoot-look): its own job
                 # below. scootbar reads its allowlists and the compositor
                 # reads its look layer, so its files fan out to the
-                # scootbar and scoot jobs too; the workspace manifests
+                # scootbar and scoot jobs too; scootlaunch reads its
+                # allowlist, grammar and state dir for the panel's look
+                # layer (and renders its fragment), so they fan out to
+                # the scootlaunch job as well; the workspace manifests
                 # catch it through the catch-all, which also sets look=true.
                 crates/scoot-look/*)
                   look=true
                   scoot=true
                   macos=true
-                  scootbar=true ;;
+                  scootbar=true
+                  scootlaunch=true ;;
                 # The shipped looks (looks/): the scoot-look test over the
                 # directory validates and renders every look there, which
                 # is the gate behind the theming page's "a check renders
@@ -1175,17 +1182,19 @@ jobs:
 
       # `--all-targets` so the tests and the CLI's own test targets are
       # type-checked too, not just the library and binary. The wallpaper
-      # daemon, the bar, the notification daemon and the shared drawing
-      # and D-Bus crates never run on a Mac, and do not build there
-      # (scootbg-mem's, scootui's and scoot-dbus's `compile_error!` say
-      # so), so they are left out, with scootbg-mem: this checks scoot
+      # daemon, the bar, the notification daemon, the launcher and the
+      # shared drawing and D-Bus crates never run on a Mac, and do not
+      # build there (scootbg-mem's, scootui's and scoot-dbus's
+      # `compile_error!` say so; scootlaunch speaks layer-shell through
+      # scootui, so it is Linux-only the same way), so they are left
+      # out, with scootbg-mem: this checks scoot
       # (its Linux halves cfg'd out: a Mac `scoot` is the `scoot msg`
       # client), the client library, scoot-ipc, scoot-core and scoot-rt
       # (which builds anywhere). The same command on a Mac is in
       # dev/README.md.
       - name: cargo check
         shell: nix develop --command bash -euo pipefail {0}
-        run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --exclude scoot-dbus --exclude scootnotify --all-targets
+        run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --exclude scoot-dbus --exclude scootnotify --exclude scootlaunch --all-targets
 
       # The client half has to run, not just compile, on a Mac: `scoot msg
       # --help` needs no display and no compositor.
@@ -1804,10 +1813,14 @@ jobs:
 
   # scootlaunch's desktop entry index (crates/scootlaunch/): the parser,
   # the Exec expander, ids and precedence, locale order, show/hide, the
-  # cache, and `scootlaunch --list [--all] [--json]`. Runs when the
-  # crate changes, when scoot-rt changes (its one workspace
-  # dependency), on the catch-all, and on every push to main; fail open
-  # like the other jobs (only an explicit `false` skips).
+  # cache, and `scootlaunch --list [--all] [--json]`; plus the panel (the
+  # overlay exclusive-keyboard surface with the entry and the
+  # virtualized list, the single-instance toggle and the look layer) and
+  # the `launch.toml` fragment the look layer renders for it. Runs when
+  # the crate changes, when scoot-rt, scootui or scoot-look changes (its
+  # workspace dependencies), on the catch-all, and on every push to
+  # main; fail open like the other jobs (only an explicit `false`
+  # skips).
   scootlaunch:
     name: scootlaunch (launcher index)
     needs: changes
@@ -1852,36 +1865,51 @@ jobs:
         run: cargo clippy -p scootlaunch --all-targets -- -D warnings
 
       # Both runners, for the reason the Linux job gives: nextest isolates
-      # each test in its own process, `cargo test` shares one.
+      # each test in its own process, `cargo test` shares one. The panel
+      # integration tests drive the real binary under a headless scoot
+      # they start themselves, so this job builds it first; and
+      # `SCOOTLAUNCH_REQUIRE_SCOOT` turns their skips into failures, so
+      # this job cannot go green by skipping.
       - name: cargo nextest and cargo test
         shell: nix develop --command bash -euo pipefail {0}
+        env:
+          SCOOTLAUNCH_REQUIRE_SCOOT: "1"
         run: |
+          cargo build -p scoot -p scootlaunch
           cargo nextest run -p scootlaunch --no-fail-fast
           cargo test -p scootlaunch
 
-      # No C beyond what std links, as for scootbg: no `libc` crate in the
-      # normal dependency tree (rustix on its `linux_raw` backend), and no
-      # shared library beyond glibc and libgcc_s. `cargo tree` resolves the
-      # host target, the one this binary ships for.
+      # No `libc` crate past the `xkbcommon` bindings' own FFI (rustix
+      # stays on its `linux_raw` backend): `libc` may only enter through
+      # `xkbcommon`, the accepted C library below. The release binary
+      # links glibc, libgcc_s and libxkbcommon (the seat keyboard's
+      # reference implementation, decided in
+      # dev/design/shell-apps.md; the `.so` already ships with a scoot
+      # desktop, and the app carries it in `buildInputs`), and nothing
+      # else: no libwayland (wayland-client is pure Rust), no libEGL.
+      # `cargo tree` resolves the host target, the one this binary
+      # ships for.
       - name: No libc crate, and what the release binary links
         shell: nix develop --command bash -euo pipefail {0}
         run: |
-          if cargo tree -p scootlaunch -e normal --prefix none | grep -q '^libc '; then
-            echo "::error title=scootlaunch depends on the libc crate::find the path with: cargo tree -p scootlaunch -e normal -i libc"
-            cargo tree -p scootlaunch -e normal -i libc
+          libc_via=$(cargo tree -p scootlaunch -e normal -i libc --prefix none | awk '{ print $1 }')
+          echo "$libc_via"
+          bad=$(echo "$libc_via" | grep -vE '^(libc|xkbcommon|scootui|scootlaunch)$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error title=scootlaunch reaches the libc crate past xkbcommon::$bad"
             exit 1
           fi
-          echo "ok: no libc crate in scootlaunch's normal dependency tree"
+          echo "ok: the libc crate enters only through xkbcommon"
           # Weighed alone, never in a --workspace build (feature unification).
           RUSTFLAGS="-D warnings" cargo build --release -p scootlaunch
           echo "release binary: $(stat -c %s target/release/scootlaunch) bytes (stripped)"
           ldd target/release/scootlaunch
-          extra=$(ldd target/release/scootlaunch | awk '{ print $1 }' | grep -vE '^(linux-vdso|libc\.so|libm\.so|libgcc_s\.so|/)' || true)
+          extra=$(ldd target/release/scootlaunch | awk '{ print $1 }' | grep -vE '^(linux-vdso|libc\.so|libm\.so|libgcc_s\.so|libxkbcommon\.so|/)' || true)
           if [ -n "$extra" ]; then
-            echo "::error title=scootlaunch links a library beyond std's::$(echo "$extra" | tr '\n' ' ')"
+            echo "::error title=scootlaunch links a library beyond std's and libxkbcommon::$(echo "$extra" | tr '\n' ' ')"
             exit 1
           fi
-          echo "ok: links only what std links"
+          echo "ok: links only what std links, plus libxkbcommon"
 
       # The fuzz targets (crates/scootlaunch/fuzz, its own workspace, which no
       # step above compiles) for a fixed budget: a fixed number of runs from
