@@ -79,8 +79,9 @@ fn run(argv: &[String]) -> i32 {
 }
 
 /// `--check [--config PATH]`: validates the panel's config file and
-/// exits, without a compositor (0 valid, 2 refused). A missing file is
-/// the defaults, and valid.
+/// exits, without a compositor (0 valid, 1 refused, as the bar's and the
+/// notification daemon's `--check`). A missing file is the defaults, and
+/// valid.
 fn cmd_check(config: Option<&str>) -> i32 {
     let path = config
         .map(PathBuf::from)
@@ -98,7 +99,7 @@ fn cmd_check(config: Option<&str>) -> i32 {
                 "scootlaunch: cannot read {}: {error}",
                 path.display()
             ));
-            2
+            1
         }
         Ok(bytes) => match config::parse(&bytes) {
             Ok(_) => {
@@ -107,7 +108,7 @@ fn cmd_check(config: Option<&str>) -> i32 {
             }
             Err(error) => {
                 warn(format_args!("scootlaunch: {error}"));
-                2
+                1
             }
         },
     }

@@ -82,8 +82,8 @@ pub struct Options {
 }
 
 /// Opens the panel and runs it to a pick or a dismiss: 0 for a printed
-/// id or run text, 1 for a dismiss or a runtime failure, 2 for a bad
-/// invocation or config.
+/// id or run text, 1 for a dismiss, a runtime failure or a bad file
+/// (the flags were fine, as the bar's), 2 for a bad invocation.
 pub fn open(opts: &Options) -> i32 {
     // The toggle first: a live panel is told to close, and this
     // invocation exits without needing a font, an index or a
@@ -110,7 +110,7 @@ pub fn open(opts: &Options) -> i32 {
             Ok(config) => config,
             Err(error) => {
                 warn(format_args!("scootlaunch: {error}"));
-                return 2;
+                return 1;
             }
         },
         None => {
@@ -124,13 +124,13 @@ pub fn open(opts: &Options) -> i32 {
                         "scootlaunch: cannot read {}: {error}",
                         path.display()
                     ));
-                    return 2;
+                    return 1;
                 }
                 Ok(bytes) => match crate::config::parse(&bytes) {
                     Ok(config) => config,
                     Err(error) => {
                         warn(format_args!("scootlaunch: {error}"));
-                        return 2;
+                        return 1;
                     }
                 },
             }
