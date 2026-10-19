@@ -14,7 +14,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use scoot_dbus::conn::{self, Conn, Event};
-use scoot_dbus::proto::{Reader, Writer};
+use scoot_dbus::proto::{self, Reader, Writer};
 use scoot_dbus::testdaemon::{Daemon, until};
 use scootnotify::control::client;
 use scootnotify::control::paths::Paths;
@@ -217,6 +217,52 @@ fn list_cards(runtime: &tempfile::TempDir) -> Vec<serde_json::Value> {
         .clone()
 }
 
+/// Subscribes `client` to the server's signals, barriered so the rule
+/// is installed before the test triggers anything. (As `bus_tests.rs`:
+/// without a match rule the bus delivers no signals.)
+fn watch_signals(client: &mut Conn) {
+    let mut rule = Writer::new();
+    rule.str("type='signal',interface='org.freedesktop.Notifications'");
+    client
+        .call(
+            conn::BUS_NAME,
+            conn::BUS_PATH,
+            conn::BUS_INTERFACE,
+            "AddMatch",
+            "s",
+            &rule.take_body().unwrap(),
+            proto::flag::NO_REPLY_EXPECTED,
+            0,
+        )
+        .unwrap();
+    // The barrier: the bus installs one connection's calls in order, so
+    // the reply below proves the rule is live.
+    bus_info(client, 8901);
+}
+
+/// One `GetServerInformation` round trip (also the match-rule barrier).
+fn bus_info(client: &mut Conn, token: u64) {
+    client
+        .call(
+            BUS_NAME,
+            OBJECT,
+            INTERFACE,
+            "GetServerInformation",
+            "",
+            &[],
+            0,
+            token,
+        )
+        .unwrap();
+    let Event::Reply { .. } = until(
+        client,
+        |event| matches!(event, Event::Reply { token: got, .. } if *got == token),
+    )
+    else {
+        unreachable!()
+    };
+}
+
 /// Drains `client` until an `ActionInvoked` for `id` arrives: its action
 /// key. Times out loudly instead of hanging the suite.
 fn wait_invoked(client: &mut Conn, id: u32) -> String {
@@ -345,6 +391,7 @@ fn dismiss_and_invoke_end_to_end() {
     let mut server = spawn_server(&bus, &runtime);
     let mut client = connect(&bus);
     wait_serving(&mut client, &mut server);
+    watch_signals(&mut client);
 
     let id = notify(
         &mut client,
@@ -407,6 +454,7 @@ fn invoke_emits_action_invoked_on_the_bus() {
     let mut server = spawn_server(&bus, &runtime);
     let mut client = connect(&bus);
     wait_serving(&mut client, &mut server);
+    watch_signals(&mut client);
 
     let id = notify(
         &mut client,
