@@ -502,7 +502,18 @@ fn subscribe_streams_notify_and_close() {
         "Download complete",
         &["default", "Open"],
     );
-    let event = read_line(&mut reader);
+    let event = loop {
+        // The serving probe's expiry close (its 1 ms card) may overtake
+        // our notify under load: anything but our card is skipped, never
+        // asserted on.
+        let event = read_line(&mut reader);
+        let parsed: serde_json::Value = serde_json::from_str(&event).unwrap();
+        if parsed.get("type") == Some(&serde_json::Value::from("notify"))
+            && parsed["notification"]["summary"] == "Download complete"
+        {
+            break event;
+        }
+    };
     assert!(
         event.contains("\"notify\"") && event.contains("Download complete"),
         "{event}"
@@ -510,10 +521,16 @@ fn subscribe_streams_notify_and_close() {
 
     let out = msg(&runtime, &["dismiss", &id.to_string()]);
     assert!(out.status.success());
-    let event = read_line(&mut reader);
-    let parsed: serde_json::Value = serde_json::from_str(&event).unwrap();
+    // Likewise, the close for our card.
+    let parsed = loop {
+        let event = read_line(&mut reader);
+        let parsed: serde_json::Value = serde_json::from_str(&event).unwrap();
+        if parsed.get("type") == Some(&serde_json::Value::from("close")) && parsed["id"] == id
+        {
+            break parsed;
+        }
+    };
     assert_eq!(parsed["type"], "close");
-    assert_eq!(parsed["id"], id);
     assert_eq!(parsed["reason"], "dismissed");
 
     kill(server);
