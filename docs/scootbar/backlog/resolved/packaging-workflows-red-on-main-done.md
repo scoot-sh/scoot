@@ -1,9 +1,10 @@
 ---
 title: "packaging: deb/rpm/arch workflows fail on main (spec version lag, deb smoke fonts)"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-20"
 ---
 
 # packaging: deb, rpm and arch workflows fail on main
@@ -19,3 +20,22 @@ Filed 2026-10-19 from the independent review of PR #682 (dispatched on its branc
 ## Docs (same PR)
 
 No user-visible docs change; say so in the PR.
+
+## Done (2026-10-20, PR #693)
+
+All three green on the `ci/release-hardening` branch (versions synced
+to 0.3.1 by `scripts/sync-packaging-versions` itself):
+
+- deb (amd64 + arm64): https://github.com/scoot-sh/scoot/actions/runs/39380985545
+- rpm (Fedora 43 + openSUSE Tumbleweed): https://github.com/scoot-sh/scoot/actions/runs/39380988577
+- arch (all eight PKGBUILDs): https://github.com/scoot-sh/scoot/actions/runs/39396791467
+
+Beyond the ticket's two items, the gate surfaced and the PR fixes:
+Nerd fonts installed in all proof containers (the ticket's first
+option); the looks stage gated off in deb/rpm proof containers
+(`SMOKE_SKIP_LOOKS`: bookworm foot 1.13 and Fedora foot both refuse
+the rendered `initial-color-theme`); a `rpmlint` spelling error on
+`systemd` in the new scootlaunch description reworded; and a
+pre-existing Arch link failure (`undefined symbol: gbm_*`, red since
+#588) fixed by linking the stub object by path plus `!lto` in the
+PKGBUILDs (makepkg's `-flto=auto` bytecode + lld + liblto_plugin).
