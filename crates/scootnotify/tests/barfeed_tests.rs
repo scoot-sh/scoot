@@ -315,7 +315,8 @@ fn wait_bar_serving(session: &Session, bar: &Path, child: &mut Child) {
 
 /// Spins until the daemon answers `msg version`: spawning returns
 /// before it owns the name. Fails fast when the child died.
-fn wait_serving(session: &Session, notify: &mut Child) {    let start = Instant::now();
+fn wait_serving(session: &Session, notify: &mut Child) {
+    let start = Instant::now();
     loop {
         let mut command = Command::new(notify_bin());
         command
