@@ -45,24 +45,22 @@ fn main() {
     // scanout feature, so the `--no-default-features` minimal build compiles
     // no C at all (and needs no C compiler).
     //
-    // As-needed, by path, in a link group: a bare static archive only
-    // satisfies symbols that are undefined at the point the linker
-    // reaches it under `--as-needed`, so its position in rustc's link
-    // line decides whether the GBM symbols resolve -- and nothing
-    // contracts that position. Arch's toolchain orders it where nothing
-    // is pending yet, and the link dies on undefined `gbm_*` (seen on
-    // arch.yml while the ubuntu and nix links stayed green). Re-listing
-    // the archive inside `--start-group/--end-group` rescans it for
-    // still-pending symbols wherever the group lands; both references
-    // stay as-needed pulls of one single-object archive, so whichever
-    // fires first defines the symbols and the other takes nothing --
-    // unlike `--whole-archive`, which extracts unconditionally and
-    // duplicates what the plain pull already took. Raw link args (not a
-    // second `rustc-link-lib`: rustc refuses one library under two
-    // modifiers), Linux-gated like the compile itself, for both the bfd
-    // and lld linkers. `cc`'s own plain `static=gbm` stays on the line
-    // beside them; under `--as-needed` it resolves nothing and emits
-    // nothing. The ldd gate in CI (`nix develop` Linux job) still proves
+    // Linked as an object, by path: the stub must be in the final binary
+    // wherever the toolchain puts it, with no DT_NEEDED entry. A static
+    // archive cannot promise that: under `--as-needed` an archive only
+    // satisfies symbols undefined where the linker reaches it, so its
+    // position in rustc's link line decides -- and nothing contracts
+    // that position. Arch's toolchain orders it where nothing is
+    // pending yet, and the link dies on undefined `gbm_*` (seen on
+    // arch.yml while the ubuntu and nix links stayed green); wrapping
+    // it in `--whole-archive` is no better, duplicating what the plain
+    // pull already took on the toolchains where the position cooperates.
+    // A bare object file is unconditional: the linker always takes it,
+    // from any position, exactly once. Compiled with the same flags
+    // `compile()` would use (same `cc` compiler object, only `-c -o`
+    // added), then passed as a plain input -- never a `-l`, so there is
+    // no modifier for rustc to collide and no archive for `--as-needed`
+    // to drop. The ldd gate in CI (`nix develop` Linux job) still proves
     // no DT_NEEDED libgbm on every change.
     //
     // Linux-only like the libinput block above (the stub is meaningless
@@ -71,11 +69,21 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux")
         && std::env::var("CARGO_FEATURE_GPU_SCANOUT").is_ok()
     {
-        cc::Build::new().file("gbm-stub/gbm_stub.c").compile("gbm");
         let out = std::env::var("OUT_DIR").expect("OUT_DIR is set for build scripts");
-        let archive = std::path::Path::new(&out).join("libgbm.a");
-        println!("cargo:rustc-link-arg=-Wl,--start-group");
-        println!("cargo:rustc-link-arg={}", archive.display());
-        println!("cargo:rustc-link-arg=-Wl,--end-group");
+        let object = std::path::Path::new(&out).join("gbm_stub.o");
+        let compiler = cc::Build::new()
+            .file("gbm-stub/gbm_stub.c")
+            .try_get_compiler()
+            .expect("a C compiler for the gbm stub");
+        let status = compiler
+            .to_command()
+            .arg("-c")
+            .arg("gbm-stub/gbm_stub.c")
+            .arg("-o")
+            .arg(&object)
+            .status()
+            .expect("could not run the C compiler for the gbm stub");
+        assert!(status.success(), "the gbm stub did not compile");
+        println!("cargo:rustc-link-arg={}", object.display());
     }
 }

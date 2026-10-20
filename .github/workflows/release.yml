@@ -726,6 +726,18 @@ jobs:
       # system libraries, the launcher's keyboard one) and one DejaVu
       # font for the bar's --check, which loads a font exactly as a
       # start does. No toolchain, no -dev packages.
+      # Each binary on a bare Ubuntu and a bare Debian container: the
+      # stock image plus the documented runtime libraries (scoot's five
+      # system libraries, the launcher's keyboard one) and one DejaVu
+      # font for the bar's --check, which loads a font exactly as a
+      # start does. No toolchain, no -dev packages.
+      #
+      # The loop covers the binaries the release holds (found by name),
+      # not a fixed list: an old release predates newer binaries
+      # (v0.3.1 has no scootlaunch), and a new one may add more. A
+      # release missing a binary it should hold still fails loudly --
+      # one step earlier, at SHA256SUMS, which lists every published
+      # file.
       - name: Each binary reports the release and passes its check
         env:
           VERIFY_VERSION: ${{ needs.resolve.outputs.version }}
@@ -740,25 +752,36 @@ jobs:
               "$image" bash -euo pipefail -c '
               apt-get update -qq
               apt-get install -y -qq libseat1 libinput10 libxkbcommon0 libudev1 libpixman-1-0 fonts-dejavu-core
-              for bin in scoot scootbg scootbar scootlaunch; do
-                f="/rel/${bin}-${VERIFY_VERSION}-${VERIFY_ARCH}"
-                test -f "$f" || { echo "::error title=Missing release binary::$f was not downloaded."; exit 1; }
+              count=0
+              for f in /rel/*-"$VERIFY_ARCH"; do
+                base="$(basename "$f")"
                 out=$("$f" --version)
                 echo "$out"
                 case "$out" in
                   *"$VERIFY_VERSION"*) ;;
-                  *) echo "::error title=$bin --version is not $VERIFY_VERSION::got: $out"; exit 1 ;;
+                  *) echo "::error title=$base --version is not $VERIFY_VERSION::got: $out"; exit 1 ;;
                 esac
+                case "$base" in
+                  scootbar-*)
+                    "$f" daemon --check \
+                      || { echo "::error title=$base daemon --check failed::the bar does not validate its built-in defaults."; exit 1; }
+                    echo "ok: $base daemon --check prints ok" ;;
+                  scootlaunch-*)
+                    "$f" --check \
+                      || { echo "::error title=$base --check failed::the launcher does not validate its built-in defaults."; exit 1; }
+                    echo "ok: $base --check passes" ;;
+                  scootbg-*)
+                    echo "ok: $base reports $VERIFY_VERSION (--version is its whole probe)" ;;
+                  scoot-*)
+                    "$f" --print-default-config > /dev/null \
+                      || { echo "::error title=$base --print-default-config failed::the compositor binary does not render its default config."; exit 1; }
+                    echo "ok: $base renders its default config" ;;
+                  *)
+                    echo "ok: $base reports $VERIFY_VERSION (no deeper probe known)" ;;
+                esac
+                count=$((count + 1))
               done
-              echo "ok: every --version names $VERIFY_VERSION"
-              /rel/scoot-"$VERIFY_VERSION"-"$VERIFY_ARCH" --print-default-config > /dev/null \
-                || { echo "::error title=scoot --print-default-config failed::the compositor binary does not render its default config."; exit 1; }
-              echo "ok: scoot renders its default config"
-              /rel/scootbar-"$VERIFY_VERSION"-"$VERIFY_ARCH" daemon --check \
-                || { echo "::error title=scootbar daemon --check failed::the bar does not validate its built-in defaults."; exit 1; }
-              echo "ok: scootbar daemon --check prints ok"
-              /rel/scootlaunch-"$VERIFY_VERSION"-"$VERIFY_ARCH" --check \
-                || { echo "::error title=scootlaunch --check failed::the launcher does not validate its built-in defaults."; exit 1; }
-              echo "ok: scootlaunch --check passes"
+              test "$count" -gt 0 || { echo "::error title=No binaries downloaded for $VERIFY_ARCH::nothing matched."; exit 1; }
+              echo "ok: every --version names $VERIFY_VERSION ($count binaries on $image)"
               '
           done
