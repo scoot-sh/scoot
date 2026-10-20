@@ -344,11 +344,21 @@ fn decode_entities(text: &str) -> String {
                 continue;
             }
         }
-        // ASCII cuts (`&` scans) keep the boundary; the lossy fallback
-        // covers a cut mid-character, which cannot happen here.
-        let next = (at + 1).min(bytes.len());
-        out.push_str(&String::from_utf8_lossy(&bytes[at..next]));
-        at = next;
+        // A non-entity byte: the whole char rides. Cutting a
+        // multi-byte char would lossy each byte into its own U+FFFD
+        // and grow the text past its input (the fuzz target's shrink
+        // pin caught exactly that). `at` is always a boundary: it
+        // starts at one, entities consume ASCII only, and chars land
+        // on the next one — the `get` below says so rather than
+        // assuming it.
+        let Some(rest) = text.get(at..) else {
+            break;
+        };
+        let Some(char) = rest.chars().next() else {
+            break;
+        };
+        out.push(char);
+        at += char.len_utf8();
     }
     out
 }

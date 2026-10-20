@@ -53,6 +53,15 @@ fn img_drops_with_its_alt_kept() {
     assert_eq!(plain(&parse("a<img alt=\"A &amp; B\">c")), "aA & Bc");
 }
 
+/// A multi-byte char in `alt` rides whole: the old byte-at-a-time walk
+/// lossy each byte into its own U+FFFD and grew the text past its input
+/// (the fuzzer's shrink pin caught it).
+#[test]
+fn alt_keeps_multibyte_chars_whole() {
+    assert_eq!(plain(&parse("a<img alt=\"ȝ\">c")), "aȝc");
+    assert!(fuzz_check("<img alt=\"ȝȝȝȝȝȝȝȝ\">".as_bytes()));
+}
+
 #[test]
 fn entities_decode() {
     assert_eq!(
