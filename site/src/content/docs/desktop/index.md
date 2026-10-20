@@ -536,18 +536,28 @@ them changes. scootnotify itself already runs — it owns the bus name,
 shows popup cards, holds do-not-disturb, keeps a history ring with
 restore and matches `[[rule]]` tables, with `scootnotify msg` for list,
 history, dnd, dismiss, invoke and wait (see [scootnotify](../scootnotify/)) —
-but it has no Nix module
-or distro packaging yet, so the profile still ships mako and the bar
-feed still reads mako.
+and the profile flips to it with one switch:
+
+```nix title="configuration.nix and home.nix"
+programs.scoot.desktop.notifications.daemon = "scootnotify";
+```
+
+With it, mako and the feed script go away, the three binds and the
+bar's click move onto `scootnotify msg`, and
+`programs.scootnotify.settings` holds the daemon's own file (see
+[scootnotify](../scootnotify/#nix)). The default stays `"mako"`:
+nothing changes unless the line names `"scootnotify"`. A non-empty
+`notifications.settings` beside the new daemon warns at eval, since
+mako's flat dialect does not carry over.
 
 Every value is an option, applied on rebuild/switch (the units restart
 into the new config; no re-login):
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `desktop.notifications.enable` | bool | `true` with the profile | run mako plus the bar feed |
-| `desktop.notifications.daemon` | enum (`"mako"`) | `"mako"` | the daemon behind `enable` (a future scootnotify widens this without renaming anything) |
-| `desktop.notifications.settings` | attrset of string | `{ }` | extra mako lines over the generated ones (a value here wins per key, rendered verbatim) |
+| `desktop.notifications.enable` | bool | `true` with the profile | run the daemon behind `daemon` plus the bar feed |
+| `desktop.notifications.daemon` | enum (`"mako"`, `"scootnotify"`) | `"mako"` | the daemon behind `enable` (`scootnotify` draws its own cards from the look and pushes the feed itself — see [scootnotify](../scootnotify/)) |
+| `desktop.notifications.settings` | attrset of string | `{ }` | extra mako lines over the generated ones (a value here wins per key, rendered verbatim; read only with `daemon = "mako"`) |
 | `desktop.notifications.bar.icons.idle` | string: empty or one glyph | `"○"` | the bar's static icon while idle; `""` shows nothing while idle |
 | `desktop.notifications.bar.icons.unread` | string: empty or one glyph | `"●"` | the icon the feed sends beside the unread count |
 | `desktop.notifications.bar.icons.dnd` | string: empty or one glyph | `"☾"` | the icon the feed sends while do-not-disturb is on |
@@ -555,22 +565,30 @@ into the new config; no re-login):
 
 Troubleshooting, by symptom:
 
-- *No popups at all.* Check the unit: `systemctl --user status mako` —
-  and that D-Bus knows it: `busctl --user list | grep -F
-  Notifications` should name mako's owner.
+- *No popups at all.* Check the unit: `systemctl --user status mako`
+  (or `scootnotify` with the opt-in) — and that D-Bus knows it:
+  `busctl --user list | grep -F Notifications` should name the
+  daemon's owner.
 - *Popups vanish under fullscreen.* Something set `layer` back to
   `top`: read `~/.config/mako/config` (the generated file), the first
   content line is the layer.
 - *The bar shows nothing.* The module needs placing (the one line
   above), the bar needs the `push` feature, and the feed needs running:
-  `systemctl --user status scoot-notify-sync`.
+  `systemctl --user status scoot-notify-sync` (mako) — with the opt-in
+  the daemon pushes itself, so check `scootnotify` instead.
 - *DND is stuck on.* `makoctl mode` lists the modes; toggle it back:
-  `makoctl mode -r do-not-disturb`.
+  `makoctl mode -r do-not-disturb` (or `scootnotify msg dnd off` with
+  the opt-in).
 - *A popup stayed up for hours.* That is mako's default (no timeout):
   `makoctl dismiss -a` clears them all into history, or set one:
   `notifications.settings.default-timeout = "10000";` (milliseconds).
 - *Two daemons fight over popups.* Another notifier owns the bus name
   instead: only one can. Turn this one off or uninstall the other.
+- *scootnotify exits as soon as it starts.* The name is taken (mako
+  still running): the journal names the owner and the exit status is
+  3. Stop the other daemon (`systemctl --user stop mako`) and remove
+  its D-Bus activation file, or it comes back on the next
+  notification.
 - *A custom state icon shows as a box.* The glyph is in neither the
   bar's font nor its fallbacks: add the symbol font to
   `bar.fallback-fonts` (see the scootbar Fonts section).

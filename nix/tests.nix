@@ -73,6 +73,19 @@
 #   profile's opt-in (`desktop.launcher.daemon = "scootlaunch"`) puts
 #   the same derivation behind the launcher and every menu with no
 #   color flags.
+# - scootnotify (docs/scootbar/backlog/notify-nix.md): the overlay
+#   provides `pkgs.scootnotify` on Linux, the flake's own build; on
+#   Darwin neither the overlay nor `packages` has one; the module
+#   renders only the user's `settings` (no look layer) and runs the
+#   daemon as a `Type=dbus` user unit that reloads (never restarts) on
+#   a config change, with `RestartPreventExitStatus=3` and the D-Bus
+#   activation file; and the profile's opt-in
+#   (`desktop.notifications.daemon = "scootnotify"`) puts the flake's
+#   build behind the slot on both sides (like the launcher's
+#   lesson: every consumer default follows the toggle), moves the
+#   three binds and the bar's on-click onto `scootnotify msg`, drops
+#   mako and the feed script, and warns on a mako-shaped
+#   `notifications.settings`.
 # - Stylix as a source of a look (`programs.scoot.stylix`, on by
 #   default): with Stylix present and a render binary on hand the catalog
 #   gains a synthesized look named `stylix` (the sixteen base16 slots,
@@ -1254,6 +1267,20 @@ let
           mainProgram = "scootlaunch";
         };
       });
+  # A stand-in `scootnotify` for the opt-in evaluations: named like the
+  # real package, so `lib.getExe` resolves the binary the scripts and
+  # the bar click name.
+  fakeNotifyScoot =
+    (pkgs.runCommand "scootnotify" { } ''
+      mkdir -p $out/bin
+      echo '#!/bin/sh' > $out/bin/scootnotify
+      chmod +x $out/bin/scootnotify
+    '').overrideAttrs
+      (old: {
+        meta = (old.meta or { }) // {
+          mainProgram = "scootnotify";
+        };
+      });
   # A stand-in fcitx5 addon (a CJK engine beside the core): a tiny
   # derivation, so the input-method `addons` pins stay hermetic (no
   # real engine in the check closure) on every platform.
@@ -1662,6 +1689,21 @@ let
     desktop.enable = true;
     look = null;
     desktop.launcher.daemon = "scootlaunch";
+  };
+  # The notify opt-in through the overlay: the daemon switch with the
+  # flake's own scootnotify as the default package (nothing explicit),
+  # on both sides.
+  hmOverlaidNotify = evalHomeWith ./modules/home.nix overlaid {
+    enable = true;
+    desktop.enable = true;
+    look = null;
+    desktop.notifications.daemon = "scootnotify";
+  };
+  osOverlaidNotify = evalNixosWithRealLook [ ./modules/nixos.nix ] overlaid {
+    enable = true;
+    desktop.enable = true;
+    look = null;
+    desktop.notifications.daemon = "scootnotify";
   };
   darwinOverlaid = darwinPkgs.appendOverlays [ flake.overlays.default ];
   # `lib.hasInfix` over strings that name store paths: the check is of
@@ -2419,6 +2461,43 @@ let
         desktop.notifications.enable = true;
         desktop.notifications.daemon = "bogus-daemon";
       }).config.programs.scoot.desktop.notifications.daemon;
+
+  # ...opted into scootnotify: the slot on, the daemon switched, the
+  # package explicit (the pinned nixpkgs has no scootnotify: the
+  # flake's own build is the default only with the overlay, pinned
+  # with `overlaid` below). Without the overlay the switch is refused
+  # loudly (no daemon to run); the binds below still render, so the
+  # switch itself is pinned here too.
+  hmNotifScoot = evalHome {
+    enable = true;
+    desktop.enable = true;
+    look = "music-desk";
+    desktop.notifications.daemon = "scootnotify";
+  };
+  hmNotifScootPkg = evalHome {
+    enable = true;
+    desktop.enable = true;
+    look = "music-desk";
+    desktop.notifications.daemon = "scootnotify";
+    desktop.notifications.package = fakeNotifyScoot;
+  };
+  # ...with the scootnotify module beside it (nothing explicit but the
+  # package): the opt-in enables the daemon at `mkDefault`, the binds
+  # name it by absolute path, and its unit runs while mako's half
+  # stays down.
+  hmNotifScootFull =
+    evalHomeModules
+      [
+        ./modules/scootnotify-home.nix
+        { programs.scootnotify.package = fakeNotifyScoot; }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        look = "music-desk";
+        desktop.notifications.daemon = "scootnotify";
+        desktop.notifications.package = fakeNotifyScoot;
+      };
 
   # A fake notification toolchain for the feed's behavior tests: stub
   # `makoctl`, `busctl` and `scootbar`, scripted at RUN time through
@@ -5376,6 +5455,25 @@ let
     desktop.enable = true;
     desktop.notifications.package = null;
   };
+  # ...opted into scootnotify: the slot on, the daemon switched. The
+  # package follows the daemon on this side too -- with the overlay
+  # below it is the flake's own build; without it the switch is
+  # refused loudly, like the home-manager side.
+  osNotifScoot = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    look = null;
+    desktop.notifications.daemon = "scootnotify";
+  };
+  osNotifScootPkg = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    look = null;
+    desktop.notifications.daemon = "scootnotify";
+    desktop.notifications.package = fakeNotifyScoot;
+  };
   # ...with an empty lock action, and a quote-carrying one (each
   # refused at eval on this side as well).
   osLockCmdEmpty = evalNixos {
@@ -5572,6 +5670,20 @@ let
     wallpaper.package = fakeBg;
     desktop.enable = true;
     look = "music-desk";
+  } { package = fakeBar; };
+  # ...opted into scootnotify: the same feed module, the click on
+  # `scootnotify msg dnd toggle` (pinned by content in `_notifPins`).
+  # The package is explicit (the pinned nixpkgs has no scootnotify),
+  # so the feed module renders; without the module beside it the
+  # click names the daemon by bare name.
+  hmDeskBarNotifScoot = evalHomeDesktop {
+    enable = true;
+    package = fakePkg;
+    wallpaper.package = fakeBg;
+    desktop.enable = true;
+    look = "music-desk";
+    desktop.notifications.daemon = "scootnotify";
+    desktop.notifications.package = fakeNotifyScoot;
   } { package = fakeBar; };
   # ...with the daemon off: no feed module (the bar is entirely the
   # user's, the push table absent).
@@ -6818,6 +6930,51 @@ let
         assert osOverlaid.config.programs.scoot.desktop.capture.menuPackage.drvPath == pkgs.fuzzel.drvPath;
         true
       )
+      # The overlay carries the flake's own scootnotify...
+      (
+        assert overlaid.scootnotify.drvPath == built.scootnotify.drvPath;
+        true
+      )
+      (
+        assert lib.getExe built.scootnotify == "${built.scootnotify}/bin/scootnotify";
+        true
+      )
+      # ...and what the pure modules default to, with the notify daemon
+      # opted in: the flake's own build behind the slot on both sides
+      # (the OS-side default follows the daemon, the #681 lesson: no
+      # consumer keeps pointing at mako), with every assertion holding.
+      (
+        assert allAssertionsHold hmOverlaidNotify.config;
+        true
+      )
+      (
+        assert
+          hmOverlaidNotify.config.programs.scoot.desktop.notifications.package.drvPath
+          == built.scootnotify.drvPath;
+        true
+      )
+      (
+        assert allAssertionsHold osOverlaidNotify.config;
+        true
+      )
+      (
+        assert
+          osOverlaidNotify.config.programs.scoot.desktop.notifications.package.drvPath
+          == built.scootnotify.drvPath;
+        true
+      )
+      (
+        assert lib.any (
+          p: p.drvPath == built.scootnotify.drvPath
+        ) osOverlaidNotify.config.environment.systemPackages;
+        true
+      )
+      # Without the opt-in both sides stay on the lean mako (the default
+      # daemon), on the same derivation either side alone installs.
+      (
+        assert osOverlaid.config.programs.scoot.desktop.notifications.package.drvPath == leanMako.drvPath;
+        true
+      )
       # scootbar's Cargo features are `.override` arguments that reach the
       # cargo hook: the default build names none (the crate's default,
       # the clock), and a build without modules turns the defaults off.
@@ -6928,11 +7085,19 @@ let
         true
       )
       (
+        assert !(darwinOverlaid ? scootnotify);
+        true
+      )
+      (
         assert !(flake.packages.aarch64-darwin ? scootbar || flake.packages.aarch64-darwin ? scootbar-demo);
         true
       )
       (
         assert !(flake.packages.aarch64-darwin ? scootlaunch);
+        true
+      )
+      (
+        assert !(flake.packages.aarch64-darwin ? scootnotify);
         true
       )
       (
@@ -9568,9 +9733,105 @@ let
       true
     )
     # ...and an unknown daemon, an enum type error (verified by hand
-    # to name the one valid value).
+    # to name the two valid values).
     (
       assert !hmNotifDaemonBogus.success;
+      true
+    )
+
+    # Opted into scootnotify: the slot runs, the daemon switched...
+    (
+      assert hmNotifScootPkg.config.programs.scoot.desktop.notifications.daemon == "scootnotify";
+      true
+    )
+    (
+      assert allAssertionsHold hmNotifScootPkg.config;
+      true
+    )
+    # ...with no mako half left (no unit, no feed script, no mako
+    # config: the two daemons never double-feed -- mako owning the
+    # name makes scootnotify exit 3)...
+    (
+      assert !(hmNotifScootPkg.config.systemd.user.services ? mako);
+      true
+    )
+    (
+      assert !(hmNotifScootPkg.config.systemd.user.services ? scoot-notify-sync);
+      true
+    )
+    (
+      assert !(hmNotifScootPkg.config.xdg.configFile ? "mako/config");
+      true
+    )
+    # ...the three binds on `scootnotify msg` (dismiss, DND toggle,
+    # restore: the bare names without the module beside it)...
+    (
+      assert
+        hmNotifScootPkg.config.programs.scoot.settings.binds."super+n" == "spawn scootnotify msg dismiss";
+      true
+    )
+    (
+      assert
+        hmNotifScootPkg.config.programs.scoot.settings.binds."super+shift+n"
+        == "spawn scootnotify msg dnd toggle";
+      true
+    )
+    (
+      assert
+        hmNotifScootPkg.config.programs.scoot.settings.binds."super+ctrl+n"
+        == "spawn scootnotify msg restore";
+      true
+    )
+    # ...the module beside it enabling the daemon at `mkDefault`,
+    # naming it by absolute path in the binds, and running its own
+    # unit while mako's half stays down...
+    (
+      assert hmNotifScootFull.config.programs.scootnotify.enable;
+      true
+    )
+    (
+      assert allAssertionsHold hmNotifScootFull.config;
+      true
+    )
+    (
+      assert
+        hmNotifScootFull.config.programs.scoot.settings.binds."super+n"
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss";
+      true
+    )
+    (
+      assert
+        hmNotifScootFull.config.programs.scoot.settings.binds."super+shift+n"
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dnd toggle";
+      true
+    )
+    (
+      assert
+        hmNotifScootFull.config.programs.scoot.settings.binds."super+ctrl+n"
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg restore";
+      true
+    )
+    (
+      assert hmNotifScootFull.config.systemd.user.services ? scootnotify;
+      true
+    )
+    (
+      assert !(hmNotifScootFull.config.systemd.user.services ? mako);
+      true
+    )
+    (
+      assert !(hmNotifScootFull.config.systemd.user.services ? scoot-notify-sync);
+      true
+    )
+    # ...and without the overlay the switch is refused loudly (the
+    # pinned nixpkgs has no scootnotify: the flake's own build is the
+    # default only with the overlay, pinned below).
+    (
+      assert builtins.length (failing hmNotifScoot.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "notifications.package is null" (builtins.head (failing hmNotifScoot.config));
       true
     )
 
@@ -9606,6 +9867,35 @@ let
       assert lib.hasInfix "notifications.package is null" (builtins.head (failing osNotifNoPkg.config));
       true
     )
+    # Opted into scootnotify on this side too: the package follows the
+    # daemon (no second copy: the same derivation the home-manager
+    # side installs)...
+    (
+      assert
+        osNotifScootPkg.config.programs.scoot.desktop.notifications.package.drvPath
+        == fakeNotifyScoot.drvPath;
+      true
+    )
+    (
+      assert lib.any (
+        p: p.drvPath == fakeNotifyScoot.drvPath
+      ) osNotifScootPkg.config.environment.systemPackages;
+      true
+    )
+    (
+      assert allAssertionsHold osNotifScootPkg.config;
+      true
+    )
+    # ...and without the overlay the switch is refused loudly here as
+    # well.
+    (
+      assert builtins.length (failing osNotifScoot.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "notifications.package is null" (builtins.head (failing osNotifScoot.config));
+      true
+    )
 
     # With the bar module: the feed's `push` module is defined, with
     # the DND toggle as its click (the daemon's own command, by
@@ -9621,6 +9911,23 @@ let
           "mode"
           "-t"
           "do-not-disturb"
+        ];
+      true
+    )
+    # ...and opted into scootnotify the click toggles DND through the
+    # daemon's own command instead (the bar module unchanged otherwise:
+    # its own assertions hold with the daemon switched).
+    (
+      assert allAssertionsHold hmDeskBarNotifScoot.config;
+      true
+    )
+    (
+      assert
+        hmDeskBarNotifScoot.config.programs.scootbar.settings.push.notifications.on-click.exec == [
+          "scootnotify"
+          "msg"
+          "dnd"
+          "toggle"
         ];
       true
     )
@@ -13657,6 +13964,20 @@ let
     # ...while the bar feed stays unwritten (no daemon, no toggle).
     (
       assert (hmDeskBarNotif.config.programs.scootbar.settings.push or { }) == { };
+      true
+    )
+    # ...and the opt-in degrades the same way (no daemon build off
+    # Linux: null, refused loudly).
+    (
+      assert hmNotifScoot.config.programs.scoot.desktop.notifications.daemon == "scootnotify";
+      true
+    )
+    (
+      assert hmNotifScoot.config.programs.scoot.desktop.notifications.package == null;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "notifications.package is null" m) (failing hmNotifScoot.config);
       true
     )
   ];

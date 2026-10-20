@@ -123,3 +123,63 @@ landed with the control socket: `msg dnd`, `msg history`,
 `msg restore` and the rules are in the [CLI reference](./cli.md) and
 [Configure](./configure.md). The bar feed pushes DND and the unread
 count to the bar; see [the bar feed](./configure.md#the-bar-feed).
+
+## Nix
+
+Two modules, one switch. `programs.scootnotify` manages the
+daemon's own file; `programs.scoot.desktop.notifications.daemon`
+picks the daemon behind the keymap's binds and the bar module. The
+look reaches the cards as a runtime layer: a value you set still
+wins per key. Stylix reaches it only as the `stylix` look — there is
+no Stylix switch.
+
+| Option | Type / default | Example | Reload |
+|---|---|---|---|
+| `programs.scootnotify.enable` | bool, `false` (`true` with the profile opt-in below) | `true` | rebuild or switch |
+| `programs.scootnotify.package` | package or null, the flake's build | `inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scootnotify` | rebuild or switch |
+| `programs.scootnotify.features` | list of strings or null, `null` (the daemon is one build today) | `[ ]` | rebuild or switch |
+| `programs.scootnotify.settings` | TOML table, `{ }` | `{ max_visible = 5; dnd_allows_critical = false; }` | in place (`msg reload`; never a restart) |
+| `programs.scootnotify.systemd.enable` | bool, `true` | `false` to start `scootnotify daemon` some other way | rebuild or switch |
+
+The file lands at `scoot/notify.toml` under `$XDG_CONFIG_HOME`
+(home-manager) or `/etc/scoot/notify.toml` (NixOS) and holds
+only these settings, verbatim. The keys are the daemon's own
+(`max_visible`, `dnd_allows_critical`, timeouts, rules — see
+[Configure](./configure.md)); anything else is refused by name —
+`daemon --check` says which. An empty file is the built-in defaults.
+
+The opt-in, beside the profile:
+
+```nix title="configuration.nix and home.nix"
+programs.scoot.desktop.notifications.daemon = "scootnotify";
+```
+
+With it, `scootnotify.service` owns the bus name as a `Type=dbus`
+user unit, a new config reloads it in place (cards, history and DND
+survive; a restart would drop them), and a taken name stops the unit
+instead of restart-looping (exit 3). The three binds and the bar's
+on-click move onto `scootnotify msg`; mako, its config and the feed
+script go away. To manage the file beside the switch, also import
+the module (`scoot.homeModules.scootnotify`,
+`scoot.nixosModules.scootnotify` on the system side): the daemon
+switch alone runs the flake's build with no file. To go back, drop
+the line (or set `"mako"`) and switch again. The default stays
+`"mako"`: nothing changes unless the line names `"scootnotify"`.
+
+`desktop.notifications.settings` does not carry over: it is mako's
+flat dialect, and a non-empty one beside the new daemon warns at
+eval, naming `programs.scootnotify.settings` instead.
+
+> **Symptom:** the unit starts and stops at once, exit 3.
+>
+> The bus name is taken — mako (or dunst, or swaync) still runs.
+> Stop it (`systemctl --user stop mako`) and remove its D-Bus
+> activation file, or the bus activates it again on the next
+> notification.
+
+> **Symptom:** switching back leaves no daemon at all.
+>
+> The daemon switch alone does not re-enable mako's file: with
+> `daemon = "mako"` the profile's mako half runs again on the next
+> switch. Dropped notifications between the two switches are gone —
+> history is in memory, never on disk.

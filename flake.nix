@@ -68,6 +68,8 @@
         (builtins.fromTOML (builtins.readFile ./crates/scootbar/Cargo.toml)).package.description;
       scootlaunchDescription =
         (builtins.fromTOML (builtins.readFile ./crates/scootlaunch/Cargo.toml)).package.description;
+      scootnotifyDescription =
+        (builtins.fromTOML (builtins.readFile ./crates/scootnotify/Cargo.toml)).package.description;
     in
     {
       # `nix build` / `nix run`, for getting the binaries without a dev shell.
@@ -572,6 +574,26 @@
             description = scootlaunchDescription;
           };
 
+          # The notification daemon, the same shape as the bar (Linux
+          # only, one binary, nothing linked beyond what std links, no
+          # font in its closure), in its own file so that its Cargo
+          # features are `callPackage` arguments and a different build
+          # is an `.override` (see nix/scootnotify.nix). Shares the
+          # base dependency artifact (see `mkDeps`).
+          scootnotify = pkgs.callPackage ./nix/scootnotify.nix {
+            inherit version;
+            inherit craneLib;
+            inherit (craneCommon)
+              src
+              cargoLock
+              outputHashes
+              strictDeps
+              doCheck
+              ;
+            cargoArtifacts = depsBase;
+            description = scootnotifyDescription;
+          };
+
           # One compositor build: `scoot` above, over the dependency artifact
           # compiled with the same default features (see `mkDeps`). The
           # CPU-only minimal build is cargo-only
@@ -592,7 +614,12 @@
           docs-site = pkgs.callPackage ./nix/docs-site.nix { };
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-          inherit scootbg scootbar scootlaunch;
+          inherit
+            scootbg
+            scootbar
+            scootlaunch
+            scootnotify
+            ;
           # The desktop profile's default cursor theme (Mocu white plus
           # Mocu-Black), built from the vendored SVGs scoot also draws
           # as its built-in cursors (see nix/mocu-cursor-theme.nix).
@@ -735,6 +762,7 @@
           # (it is scootbar plus a font a system's own font setup provides).
           "scootbar"
           "scootlaunch"
+          "scootnotify"
         ]) built;
 
       # `programs.scoot`: a home-manager module (per-user config file,
@@ -802,6 +830,20 @@
                 (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scootlaunch or null
               );
             };
+          # `programs.scootnotify` (nix/modules/scootnotify-home.nix):
+          # its own module, not part of `default`, so importing scoot's
+          # changes nothing about the notification daemon. The flake's
+          # build is `mkDefault`, as above; null where it does not
+          # build (Darwin), where enabling the option is then refused
+          # by name.
+          scootnotify =
+            { pkgs, ... }:
+            {
+              imports = [ ./nix/modules/scootnotify-home.nix ];
+              programs.scootnotify.package = nixpkgs.lib.mkDefault (
+                (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scootnotify or null
+              );
+            };
         };
 
       # Home-manager modules (`homeModules.*`): the only spelling. There is
@@ -844,6 +886,16 @@
               imports = [ ./nix/modules/scootlaunch-nixos.nix ];
               programs.scootlaunch.package = nixpkgs.lib.mkDefault (
                 (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scootlaunch or null
+              );
+            };
+          # `programs.scootnotify` (nix/modules/scootnotify-nixos.nix),
+          # as the home-manager one: separate from `default`.
+          scootnotify =
+            { pkgs, ... }:
+            {
+              imports = [ ./nix/modules/scootnotify-nixos.nix ];
+              programs.scootnotify.package = nixpkgs.lib.mkDefault (
+                (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scootnotify or null
               );
             };
         };
@@ -891,6 +943,17 @@
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) scootlaunch;
             homeModule = self.homeModules.scootlaunch;
             nixosModule = self.nixosModules.scootlaunch;
+          };
+          # The scootnotify modules (nix/scootnotify-tests.nix): the
+          # rendered file holds only the user's settings, the unit
+          # reloads (never restarts) on a config change, the profile
+          # switch installs the daemon both ways with mako byte-equal
+          # under the default, and the real daemon validates every
+          # rendered file with `daemon --check`.
+          scootnotify-modules = pkgs.callPackage ./nix/scootnotify-tests.nix {
+            inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) scootnotify;
+            homeModule = self.homeModules.scootnotify;
+            nixosModule = self.nixosModules.scootnotify;
           };
         }
       );

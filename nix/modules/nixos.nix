@@ -471,27 +471,33 @@ in
 
       # The notification daemon's package: the shape is in
       # `desktop.nix` (shared with the home-manager side) and the user
-      # unit that runs it is that side's (`notifications-home.nix`);
-      # this side installs it system-wide. The same package as there,
-      # so either side alone names the same daemon. Merged here for
-      # the same one-declaration reason as above. Linux-only: off
-      # Linux it defaults to null, which the assertion below refuses
-      # loudly.
+      # unit that runs it is that side's (`notifications-home.nix` for
+      # mako, `scootnotify-home.nix` for scootnotify); this side
+      # installs it system-wide. The same package as there (following
+      # `desktop.notifications.daemon` on both sides), so either side
+      # alone names the same daemon. Merged here for the same
+      # one-declaration reason as above. Linux-only: off Linux it
+      # defaults to null, which the assertion below refuses loudly.
       notifications = desktop.options.notifications // {
         package = lib.mkOption {
           type = lib.types.nullOr lib.types.package;
           default =
-            if pkgs.stdenv.hostPlatform.isLinux then
-              (if pkgs ? mako then import ./notifications-mako.nix { inherit pkgs; } else null)
+            if !pkgs.stdenv.hostPlatform.isLinux then
+              null
+            else if cfg.desktop.notifications.daemon == "scootnotify" then
+              pkgs.scootnotify or null
+            else if pkgs ? mako then
+              import ./notifications-mako.nix { inherit pkgs; }
             else
               null;
-          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then leanMako else null";
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then (leanMako for daemon mako, pkgs.scootnotify or null for daemon scootnotify) else null";
           description = ''
-            The mako package to install system-wide for the
-            notification daemon (a lean mako without the GTK stack,
-            the same default as the home-manager side -- see
-            `notifications-mako.nix`). Null installs nothing.
-            Linux-only: null off Linux.
+            The notification daemon package to install system-wide
+            (following `desktop.notifications.daemon`: a lean mako
+            without the GTK stack for `"mako"` -- see
+            `notifications-mako.nix` -- the scootnotify build for
+            `"scootnotify"`). Null installs nothing. Linux-only: null
+            off Linux.
           '';
         };
       };
@@ -1606,7 +1612,8 @@ in
           message = ''
             programs.scoot.desktop.notifications.enable is set but
             programs.scoot.desktop.notifications.package is null: set
-            it explicitly (apply the overlay, or point at a mako).
+            it explicitly (apply the overlay, or point at a daemon for
+            desktop.notifications.daemon).
           '';
         }
       ];
