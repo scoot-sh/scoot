@@ -532,7 +532,13 @@ programs.scoot.desktop.notifications.bar.icons = {
 ```
 
 A future scootnotify keeps these option names: only the daemon behind
-them changes.
+them changes. scootnotify itself already runs — it owns the bus name,
+shows popup cards, holds do-not-disturb, keeps a history ring with
+restore and matches `[[rule]]` tables, with `scootnotify msg` for list,
+history, dnd, dismiss, invoke and wait (see [scootnotify](../scootnotify/)) —
+but it has no Nix module
+or distro packaging yet, so the profile still ships mako and the bar
+feed still reads mako.
 
 Every value is an option, applied on rebuild/switch (the units restart
 into the new config; no re-login):
@@ -723,7 +729,10 @@ through scoot's own IPC, prints `beta` and exits 0 — and
 `scootlaunch --dmenu` keeps that shape, so the bar's WiFi / power /
 audio pickers swap daemons without changing a call site (see
 [the launcher entry](https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/backlog/launcher.md):
-`desktop.launcher.daemon = "scootlaunch"` flips the slot to it).
+`desktop.launcher.daemon = "scootlaunch"` flips the slot to it). With
+the switch, `Super+d` opens the scootlaunch panel — its own overlay
+exclusive-keyboard surface with ranked search, drawn from the look —
+instead of fuzzel (see [scootlaunch](../scootlaunch/)).
 
 Launched apps land in the session: fuzzel
 forks the picked entry (a `Terminal=true` entry through your

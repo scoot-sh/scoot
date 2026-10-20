@@ -36,10 +36,22 @@ pub fn desktop_with_icon(name: &str, exec: &str, icon: &str) -> String {
     format!("[Desktop Entry]\nType=Application\nName={name}\nExec={exec}\nIcon={icon}\n")
 }
 
-/// A fixture icon theme under `data_home/icons/FixtureTheme`: a solid
-/// red `alpha.png`, a solid blue `beta.svg`, and no `gamma`, so two rows
-/// draw image icons (one per decoder) and one the letter tile. Answers
-/// the theme name for the look layer's `[icons] theme`.
+/// A fixture icon theme under `data_home/icons/FixtureTheme`: a terminal
+/// `alpha.png` (a warm-orange square with a white `>_` mark), a browser
+/// `beta.svg` (a blue disc with a white ring), and no `gamma`, so two
+/// rows draw image icons (one per decoder) and one the letter tile.
+/// Answers the theme name for the look layer's `[icons] theme`.
+///
+/// The icons are small designed marks rather than solid squares, so the
+/// docs screenshots show what the panel looks like with real apps — but
+/// every pixel is generated below (rect fills for the PNG, two SVG
+/// elements), so the committed PNGs stay reproducible from this helper
+/// alone.
+///
+/// The tests count the icons' exact palette colors over the rows: the
+/// orange and white of the terminal mark, the blue and white of the
+/// browser disc. Opaque interiors read back exact over any row fill, so
+/// the counts hold on the selected row as well as plain ones.
 ///
 /// Run the panel tests with `SCOOTLAUNCH_SHOTS` set to regenerate the
 /// docs screenshots from this same fixture (see `icons_docs_one` in
@@ -50,31 +62,84 @@ pub fn fixture_icon_theme(data_home: &std::path::Path) -> String {
     let theme = data_home.join("icons").join("FixtureTheme");
     let dir = theme.join("48x48").join("apps");
     fs::create_dir_all(&dir).unwrap();
-    // Solid opaque red, 48x48: the panel blends it over the row, so an
-    // image row reads back exact red pixels.
-    let mut buf = Vec::new();
-    let mut encoder = png::Encoder::new(&mut buf, 48, 48);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header().unwrap();
-    let mut red = Vec::with_capacity(48 * 48 * 4);
-    for _ in 0..48 * 48 {
-        red.extend_from_slice(&[255, 0, 0, 255]);
-    }
-    writer.write_image_data(&red).unwrap();
-    drop(writer);
-    fs::write(dir.join("alpha.png"), &buf).unwrap();
-    fs::write(
-        dir.join("beta.svg"),
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"48\" height=\"48\"><rect width=\"48\" height=\"48\" fill=\"#0000ff\"/></svg>",
-    )
-    .unwrap();
+    fs::write(dir.join("alpha.png"), terminal_png()).unwrap();
+    fs::write(dir.join("beta.svg"), browser_svg()).unwrap();
     fs::write(
         theme.join("index.theme"),
         "[Icon Theme]\nName=FixtureTheme\nDirectories=48x48/apps\n\n[48x48/apps]\nSize=48\nType=Fixed\n",
     )
     .unwrap();
     "FixtureTheme".to_string()
+}
+
+/// The terminal mark's palette, as exact RGB triples the tests count.
+#[allow(dead_code)]
+pub const TERMINAL_ORANGE: [u8; 3] = [224, 106, 44];
+/// The browser disc's palette, as exact RGB triples the tests count.
+#[allow(dead_code)]
+pub const BROWSER_BLUE: [u8; 3] = [59, 120, 231];
+/// The glyph white shared by both marks.
+#[allow(dead_code)]
+pub const MARK_WHITE: [u8; 3] = [255, 255, 255];
+
+/// A 48x48 RGBA terminal icon: a warm-orange square with a white `>_`
+/// prompt mark drawn from rects. Fully opaque, so the resampled rows
+/// read back mostly exact pixels in either look.
+#[allow(dead_code)]
+fn terminal_png() -> Vec<u8> {
+    const SIDE: usize = 48;
+    let mut px = vec![0u8; SIDE * SIDE * 4];
+    let orange = [
+        TERMINAL_ORANGE[0],
+        TERMINAL_ORANGE[1],
+        TERMINAL_ORANGE[2],
+        255,
+    ];
+    for chunk in px.chunks_exact_mut(4) {
+        chunk.copy_from_slice(&orange);
+    }
+    // The `>` chevron: five 6x6 steps down and back up.
+    let white = [MARK_WHITE[0], MARK_WHITE[1], MARK_WHITE[2], 255];
+    for (x, y) in [(14, 12), (19, 17), (24, 22), (19, 27), (14, 32)] {
+        fill_rect(&mut px, SIDE, x, y, 6, 6, white);
+    }
+    // The `_` underscore.
+    fill_rect(&mut px, SIDE, 14, 39, 17, 5, white);
+    let mut buf = Vec::new();
+    let mut encoder = png::Encoder::new(&mut buf, SIDE as u32, SIDE as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&px).unwrap();
+    drop(writer);
+    buf
+}
+
+/// Fills one rect of the RGBA buffer, clipped to the square.
+#[allow(dead_code)]
+fn fill_rect(px: &mut [u8], side: usize, x: i32, y: i32, w: i32, h: i32, color: [u8; 4]) {
+    for yy in y..y + h {
+        for xx in x..x + w {
+            if xx < 0 || yy < 0 || xx >= side as i32 || yy >= side as i32 {
+                continue;
+            }
+            let at = (yy as usize * side + xx as usize) * 4;
+            px[at..at + 4].copy_from_slice(&color);
+        }
+    }
+}
+
+/// A 48x48 browser icon: a blue disc on transparency with a white ring,
+/// as two SVG elements (rasterized through `resvg` like any theme SVG).
+#[allow(dead_code)]
+fn browser_svg() -> String {
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"48\" height=\"48\">\
+         <circle cx=\"24\" cy=\"24\" r=\"19\" fill=\"#{:02x}{:02x}{:02x}\"/>\
+         <circle cx=\"24\" cy=\"24\" r=\"10\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"5\"/>\
+         </svg>",
+        BROWSER_BLUE[0], BROWSER_BLUE[1], BROWSER_BLUE[2]
+    )
 }
 
 /// A session with a fixture applications tree: `apps` holds

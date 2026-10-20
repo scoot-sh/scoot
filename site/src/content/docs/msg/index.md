@@ -40,8 +40,9 @@ every platform -- on a Mac `scoot` is client-only -- so a Mac can drive a compos
 
 **Window focus and keyboard focus are separate.** `scoot msg windows`'
 `focused` flag, the focus ring and `scoot msg action focus-*` all mean the
-*window*. A layer surface holding the keyboard (a launcher like `fuzzel` or
-`wofi`, a bar's search field) never appears there — `windows` reports
+*window*. A layer surface holding the keyboard (the scootlaunch panel
+with its exclusive keyboard, a `fuzzel` or `wofi` menu, a bar's search
+field) never appears there — `windows` reports
 where focus returns once that surface goes away. While a launcher is up,
 `type` and `key` go to the launcher, while `windows` still names the window
 behind it. No IPC request reports a layer surface.

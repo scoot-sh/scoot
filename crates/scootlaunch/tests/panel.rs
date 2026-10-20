@@ -18,8 +18,9 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use harness::{
-    Panel, desktop, desktop_with_icon, fixture_icon_theme, launch_bin, rgb, session_with_apps,
-    session_with_stubs, wait_for, wait_marker,
+    BROWSER_BLUE, MARK_WHITE, Panel, TERMINAL_ORANGE, desktop, desktop_with_icon,
+    fixture_icon_theme, launch_bin, rgb, session_with_apps, session_with_stubs, wait_for,
+    wait_marker,
 };
 
 fn refs<'a>(bodies: &'a [(&'a str, String)]) -> Vec<(&'a str, &'a str)> {
@@ -412,7 +413,7 @@ fn golden_one(name: &str) {
 /// The icon column draws, per shipped look: a headless panel over the
 /// fixture icon theme (a PNG icon, an SVG icon, a tile fallback), a
 /// query typed, and the icon column's pixels counted over the rows.
-/// The red PNG square, the blue SVG square and the accent tile must
+/// The terminal PNG mark, the browser SVG disc and the accent tile must
 /// each show; neutering `draw_icon` (returning early) leaves the column
 /// at row background and fails all three counts, so the icon draw path
 /// has pixel coverage per decoder.
@@ -486,24 +487,31 @@ fn icons_docs_one(name: &str) {
     let side = (em.round().max(1.0) as u32).min(row_h.saturating_sub(2).max(1));
     let icon_x = x0 + 10 + (em * 0.5).round().clamp(0.0, 64.0) as u32;
     let list_y = y0 + 10 + row_h + 4;
-    // All three rows match "a" — Alpha (red PNG image), Beta (blue SVG
-    // image), Gamma (letter tile) — in match order, so count over the
-    // column: each decoder's square and the tile must show. Each rect
-    // grows 1 px per side: `find_panel` steps by 2, so its box can sit
-    // 1 px off the true border, while only icons paint these colors.
-    let mut red = 0u32;
-    let mut blue = 0u32;
+    // All three rows match "a": Alpha (terminal PNG mark), Beta
+    // (browser SVG disc), Gamma (letter tile). Count each decoder's
+    // colors over all three rows — the rank order among equal matches
+    // is not positional — while only icons paint these colors. Each
+    // rect grows 1 px per side: `find_panel` steps by 2, so its box can
+    // sit 1 px off the true border.
+    // The marks are two-tone (glyph white over the shape color, shared
+    // white counted for both). The opaque PNG square reads back mostly
+    // exact, so its bound is half the square; the SVG disc is drawn over
+    // transparency and its ring is thin after resampling, so its bound
+    // is an eighth — both well above the zero a neutered `draw_icon`
+    // leaves.
+    let mut terminal = 0u32;
+    let mut browser = 0u32;
     let mut tile = 0u32;
     for row in 0..3 {
         let y = list_y + row * row_h + row_h.saturating_sub(side) / 2;
         for x in icon_x.saturating_sub(1)..icon_x + side + 1 {
             for yy in y.saturating_sub(1)..y + side + 1 {
                 let pixel = shot.at(x, yy);
-                if pixel == [255, 0, 0] {
-                    red += 1;
+                if pixel == TERMINAL_ORANGE || pixel == MARK_WHITE {
+                    terminal += 1;
                 }
-                if pixel == [0, 0, 255] {
-                    blue += 1;
+                if pixel == BROWSER_BLUE || pixel == MARK_WHITE {
+                    browser += 1;
                 }
                 if pixel == accent {
                     tile += 1;
@@ -512,12 +520,12 @@ fn icons_docs_one(name: &str) {
         }
     }
     assert!(
-        red >= side * side,
-        "{name}: {red} red PNG icon pixels for one {side}px image row"
+        terminal >= side * side / 2,
+        "{name}: {terminal} terminal PNG icon pixels for one {side}px image row"
     );
     assert!(
-        blue >= side * side,
-        "{name}: {blue} blue SVG icon pixels for one {side}px image row"
+        browser >= side * side / 8,
+        "{name}: {browser} browser SVG icon pixels for one {side}px image row"
     );
     assert!(
         tile >= side * side / 2,

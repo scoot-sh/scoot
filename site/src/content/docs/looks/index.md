@@ -78,6 +78,8 @@ prints one name per line, for scripting.
 the state link, reloads each running app's look layer in order (the
 compositor first, then every bar of the session), and signals the
 third-party daemons (mako, fcitx5, the OSD and night-light units).
+scootlaunch needs no reload (it reads `launch.toml` at every open) and
+scootnotify re-reads `notify.toml` on `scootnotify msg reload --look`.
 Apps that are not running are skipped, never an error. With nothing
 running, only the link moves, and the next session starts on the new look. A shipped look needs its
 Nerd Fonts installed; without them `apply` refuses and changes nothing.
@@ -86,15 +88,17 @@ Two pickers drive the same command. The bar's `looks` module shows the
 active look's name and opens the catalog as a popup — one row per look,
 the active one marked with `●`, a long catalog paged — where a row click
 runs `apply` for that look ([modules](../scootbar/modules.md#looks)). From the
-keyboard, `scoot look pick` chooses a look through fuzzel and applies it,
-until scootlaunch lands:
+keyboard, `scoot look pick` chooses a look through fuzzel and applies it:
 
 ```sh
 scoot look pick                 # choose a look in fuzzel, apply it
 scoot look list --names         # names in catalog order, for scripting
 ```
 
-`pick` needs a live Wayland display plus `scoot` and `fuzzel` on PATH;
+`pick` still uses fuzzel even now that the scootlaunch panel has
+landed (overlay exclusive-keyboard surface, [its own
+panel](../scootlaunch/panel.md)): the look picker has not moved to the
+panel yet. `pick` needs a live Wayland display plus `scoot` and `fuzzel` on PATH;
 `list` needs only `scoot`. No Nix, no running session either way. A
 cancel applies nothing and prints nothing (`{"applied": null,
 "cancelled": true}` under `--json`); a missing or stale display (an
@@ -142,6 +146,7 @@ JSON](#exit-codes-and-json).
 | Input-method candidate theme (fcitx5) | Live, on apply (D-Bus reload) |
 | Night-light temperature | Live, on apply (the unit restarts) |
 | Launcher, picker and lock colors (`fuzzel.ini`, `swaylock`) | Next launch of each app |
+| Launcher panel and notification cards (`launch.toml`, `notify.toml`) | Next open of the panel; live for running scootnotify after `msg reload --look` |
 | Running terminals | Keep their palette; new terminals use the look's |
 | Cursor size in already-running apps | Next launch |
 | Login screen (ReGreet CSS, backdrop, dark setting, sans) | System build time, never live |
