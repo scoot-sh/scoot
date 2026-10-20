@@ -127,7 +127,7 @@ survives a reload, never a restart. Read it with
 
 > **Symptom:** the unread count never drops.
 > Turning DND off shows nothing retroactively. Each `restore` marks one
-> entry seen; the count is the entries never shown on screen.
+> entry seen; the count is live cards plus unseen history.
 
 ## Do not disturb
 
@@ -172,12 +172,12 @@ with class `muted` while DND is on, the count `n` with class `urgent`
 > The module is not placed, or the bar is not running: the daemon
 > says which on its stderr, once for the module, once per failed
 > change for the bar. A running bar that still shows its placeholder
-> is waiting for the next change.
+> is waiting for the next change — unless a send is owed, which lands when the bar's socket appears.
 
 > **Symptom:** the count survives dismissing everything.
 > Turning DND off shows nothing retroactively, but it reshapes the bar
 > at once (`DND n` becomes `n`). Each `restore` marks one entry seen;
-> the count is the entries never shown on screen.
+> the count is live cards plus unseen history.
 
 ## Rules
 
