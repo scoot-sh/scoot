@@ -1291,7 +1291,9 @@ EOF
     fi
     echo "ok: the preview reverted after its delay"
 }
-if [ -n "$SCOOTBG" ]; then
+if [ -n "${SMOKE_SKIP_LOOKS:-}" ]; then
+    echo "skipped: SMOKE_SKIP_LOOKS is set ($SMOKE_SKIP_LOOKS)"
+elif [ -n "$SCOOTBG" ]; then
     ( run_looks_test ) || exit 1
 else
     echo "skipped: no scootbg binary (see the binaries header above)"
