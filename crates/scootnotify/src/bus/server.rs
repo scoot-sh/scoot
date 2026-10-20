@@ -118,6 +118,10 @@ pub fn request_name(conn: &mut Conn) -> Result<(), Denied> {
 }
 
 /// One bus call to `reply`'s shape, or `Err` naming what failed.
+///
+/// Events that arrive with the reply (method calls, signals, anything
+/// else) are parked back into the connection, never discarded: the
+/// serve loop's first `pump` replays them.
 fn wait_reply(conn: &mut Conn, token: u64) -> Result<u32, Denied> {
     let denied = || Denied {
         owner: BUS_NAME.to_owned(),
@@ -130,17 +134,27 @@ fn wait_reply(conn: &mut Conn, token: u64) -> Result<u32, Denied> {
             return Err(denied());
         }
         let (events, _) = conn.pump();
+        // The reply may sit anywhere in the batch: park everything
+        // else (before and after it), never discard.
+        let mut parked = Vec::new();
+        let mut answer = None;
         for event in events {
-            if let Event::Reply {
-                token: got,
-                signature,
-                body,
-            } = event
-                && got == token
-            {
-                return proto::read_request_reply(&signature, &body).map_err(|()| denied());
+            match event {
+                Event::Reply {
+                    token: got,
+                    signature,
+                    body,
+                } if got == token => {
+                    answer = Some((signature, body));
+                }
+                event => parked.push(event),
             }
         }
+        if let Some((signature, body)) = answer {
+            conn.restash(parked);
+            return proto::read_request_reply(&signature, &body).map_err(|()| denied());
+        }
+        conn.restash(parked);
         poll_in(conn);
     }
 }
@@ -161,6 +175,8 @@ fn find_owner(conn: &mut Conn) -> Denied {
 }
 
 /// One bus string call (`GetNameOwner`): `None` when the bus errored.
+/// Like [`wait_reply`], anything arriving with the answer is parked
+/// for the serve loop's first turn, never discarded.
 fn bus_string(conn: &mut Conn, member: &str, arg: &str) -> Option<String> {
     let mut body = Writer::new();
     body.str(arg);
@@ -183,22 +199,33 @@ fn bus_string(conn: &mut Conn, member: &str, arg: &str) -> Option<String> {
             return None;
         }
         let (events, _) = conn.pump();
+        let mut parked = Vec::new();
+        let mut answer: Option<Option<String>> = None;
         for event in events {
             match event {
                 Event::Reply {
                     token: got, body, ..
                 } if got == token => {
-                    return Reader::le(&body).str().ok().map(str::to_owned);
+                    answer = Some(Reader::le(&body).str().ok().map(str::to_owned));
                 }
-                Event::CallError { token: got, .. } if got == token => return None,
-                _ => {}
+                Event::CallError { token: got, .. } if got == token => {
+                    answer = Some(None);
+                }
+                event => parked.push(event),
             }
         }
+        if let Some(answer) = answer {
+            conn.restash(parked);
+            return answer;
+        }
+        conn.restash(parked);
         poll_in(conn);
     }
 }
 
 /// One bus uint call (`GetConnectionUnixProcessID`): `None` on error.
+/// Like [`wait_reply`], anything arriving with the answer is parked
+/// for the serve loop's first turn, never discarded.
 fn bus_uint(conn: &mut Conn, member: &str, arg: &str) -> Option<u32> {
     let mut body = Writer::new();
     body.str(arg);
@@ -221,17 +248,26 @@ fn bus_uint(conn: &mut Conn, member: &str, arg: &str) -> Option<u32> {
             return None;
         }
         let (events, _) = conn.pump();
+        let mut parked = Vec::new();
+        let mut answer: Option<Option<u32>> = None;
         for event in events {
             match event {
                 Event::Reply {
                     token: got, body, ..
                 } if got == token => {
-                    return Reader::le(&body).u32().ok();
+                    answer = Some(Reader::le(&body).u32().ok());
                 }
-                Event::CallError { token: got, .. } if got == token => return None,
-                _ => {}
+                Event::CallError { token: got, .. } if got == token => {
+                    answer = Some(None);
+                }
+                event => parked.push(event),
             }
         }
+        if let Some(answer) = answer {
+            conn.restash(parked);
+            return answer;
+        }
+        conn.restash(parked);
         poll_in(conn);
     }
 }

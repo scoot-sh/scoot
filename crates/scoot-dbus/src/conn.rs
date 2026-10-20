@@ -410,6 +410,15 @@ pub struct Conn {
 }
 
 impl Conn {
+    /// Parks events back for the next [`Conn::pump`]: the name-grant
+    /// round trips park the method calls (and signals, and anything
+    /// else) that arrive with the reply here instead of discarding
+    /// them, so the serve loop's first turn replays what it would
+    /// otherwise lose silently.
+    pub fn restash(&mut self, events: Vec<Event>) {
+        self.stashed.extend(events);
+    }
+
     /// The daemon's unique name for us (`:1.42`).
     pub fn unique(&self) -> &str {
         &self.unique
@@ -1020,7 +1029,8 @@ impl Conn {
     }
 
     /// A blocking call for the set-up phase: queues the call and reads
-    /// until its reply arrives, stashing signals for the first pump.
+    /// until its reply arrives, stashing signals and method calls for
+    /// the first pump.
     /// `Err` is the error reply's name, or the set-up failure.
     pub fn roundtrip(
         &mut self,
@@ -1063,6 +1073,18 @@ impl Conn {
                     path: message.path.unwrap_or("").to_owned(),
                     interface: message.interface.unwrap_or("").to_owned(),
                     member: message.member.unwrap_or("").to_owned(),
+                    signature: message.signature.to_owned(),
+                    body: message.body.rest().to_vec(),
+                }),
+                // A call that arrives during the set-up (nothing owns a
+                // name yet, so only the scripted-bus shape reaches this)
+                // is parked for the first pump, never discarded.
+                Kind::MethodCall => self.stashed.push(Event::MethodCall {
+                    sender: message.sender.unwrap_or("").to_owned(),
+                    path: message.path.unwrap_or("").to_owned(),
+                    interface: message.interface.unwrap_or("").to_owned(),
+                    member: message.member.unwrap_or("").to_owned(),
+                    serial: message.serial,
                     signature: message.signature.to_owned(),
                     body: message.body.rest().to_vec(),
                 }),

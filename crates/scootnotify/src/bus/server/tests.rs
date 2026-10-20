@@ -15,7 +15,7 @@ use std::time::Duration;
 use scoot_dbus::conn::Conn;
 use scoot_dbus::proto::{Kind, Message, Reader, Writer, frame_at};
 
-use super::{INTERFACE, OBJECT_PATH, Server};
+use super::{INTERFACE, OBJECT_PATH, Server, request_name};
 use crate::bus::notify::NOTIFY_SIGNATURE;
 use crate::config::Config;
 use crate::model::store::IdFile;
@@ -361,4 +361,125 @@ fn a_dnd_held_notify_still_answers_its_id() {
     assert!(harness.server.store().live_ids().is_empty());
     assert_eq!(harness.server.store().history().len(), 1);
     assert_eq!(harness.server.store().unread(), 1);
+}
+
+/// A method call arriving in the same read batch as the `RequestName`
+/// grant is not lost: the scripted bus answers `Hello` with `:9.9`,
+/// then answers `RequestName` with `PRIMARY_OWNER` and in the same
+/// `write_all` forwards one `GetServerInformation` call to `:9.9`.
+/// `request_name` must report `Ok` and the call must survive into the
+/// next `pump`, where the server answers it. Without the stash this
+/// test sees zero events (the call is silently discarded and its
+/// sender hangs to its own timeout); with it, one answered call.
+#[test]
+fn a_call_arriving_with_the_name_grant_survives() {
+    use scoot_dbus::conn::Event;
+
+    let (client, peer) = UnixStream::pair().unwrap();
+    let thread = std::thread::spawn(move || {
+        let mut peer = peer;
+        peer.set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        read_until(&mut peer, b"AUTH EXTERNAL\r\n");
+        peer.write_all(b"DATA\r\n").unwrap();
+        read_until(&mut peer, b"DATA\r\n");
+        peer.write_all(b"OK 0123456789abcdef\r\n").unwrap();
+        read_until(&mut peer, b"BEGIN\r\n");
+        // Hello call.
+        let hello = read_one_frame(&mut peer);
+        let call = Message::parse(&hello).unwrap();
+        assert_eq!(call.member, Some("Hello"));
+        let mut body = Writer::new();
+        body.str(":9.9");
+        let body = body.take_body().unwrap();
+        let mut reply = Writer::new();
+        reply.begin_return_to(1, ":9.9", call.serial, "s");
+        reply.raw(&body);
+        peer.write_all(&reply.finish().unwrap()).unwrap();
+        // RequestName call: answer PRIMARY_OWNER and, in the same
+        // write, forward one GetServerInformation call to :9.9.
+        let grant = read_one_frame(&mut peer);
+        let call = Message::parse(&grant).unwrap();
+        assert_eq!(call.member, Some("RequestName"));
+        let mut grant_body = Writer::new();
+        grant_body.u32(1);
+        let grant_body = grant_body.take_body().unwrap();
+        let mut answer = Writer::new();
+        answer.begin_return(2, call.serial, "u");
+        answer.raw(&grant_body);
+        let answer = answer.finish().unwrap();
+        let mut forwarded = Writer::new();
+        forwarded.begin_call(
+            3,
+            ":9.9",
+            OBJECT_PATH,
+            INTERFACE,
+            "GetServerInformation",
+            "",
+            0,
+        );
+        let forwarded = forwarded.finish().unwrap();
+        let mut both = answer;
+        both.extend_from_slice(&forwarded);
+        peer.write_all(&both).unwrap();
+        peer
+    });
+    let mut conn = scoot_dbus::conn::setup(client).unwrap();
+    assert!(
+        request_name(&mut conn).is_ok(),
+        "the grant is PRIMARY_OWNER"
+    );
+    let peer = thread.join().unwrap();
+    peer.set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    // The grant batch's method call survives into the first turn.
+    let (events, _) = conn.pump();
+    let calls: Vec<Event> = events
+        .into_iter()
+        .filter(|event| matches!(event, Event::MethodCall { .. }))
+        .collect();
+    assert_eq!(
+        calls.len(),
+        1,
+        "the call forwarded with the grant is not discarded"
+    );
+    let Event::MethodCall {
+        sender,
+        path,
+        interface,
+        member,
+        serial,
+        signature,
+        body,
+    } = calls.into_iter().next().unwrap()
+    else {
+        unreachable!();
+    };
+    assert_eq!(member, "GetServerInformation");
+    // And the server answers it on the wire.
+    let mut server = Server::new(Config::default(), IdFile::open(None));
+    let mut harness_peer = peer;
+    let mut staged = Vec::new();
+    server.handle(
+        &mut conn, &sender, &path, &interface, &member, serial, &signature, &body, 0,
+    );
+    let (_, _) = conn.pump();
+    let frame = read_frame(&mut harness_peer, &mut staged);
+    let message = Message::parse(&frame).unwrap();
+    assert_eq!(message.signature, "ssss");
+}
+
+/// Reads one whole frame from `stream`: the scripted bus's way to take
+/// each call in turn.
+fn read_one_frame(stream: &mut UnixStream) -> Vec<u8> {
+    let mut staged = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        if let Ok(Some(len)) = frame_at(&staged) {
+            return staged.drain(..len).collect();
+        }
+        let n = stream.read(&mut chunk).unwrap();
+        assert!(n > 0, "the client talks before closing");
+        staged.extend_from_slice(&chunk[..n]);
+    }
 }
