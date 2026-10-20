@@ -21,3 +21,7 @@ Make the env read injectable (pass the value in, as the other wiring inputs are)
 ## Not in this ticket
 
 Changing how `STARSHIP_CONFIG` is interpreted for users.
+
+## Second sighting (2026-10-20)
+
+Failed again on the Linux (compositor) job on the head of #699 (no Rust changed in that PR) and passed on re-run: `missing_wiring_names_the_exact_fix_with_real_paths` under one-process `cargo test`. Two hits in three days means the fix is due.
