@@ -112,34 +112,3 @@ git_tag_enable = true
 changelog_update = true
 changelog_path = "./CHANGELOG.md"
 changelog_include = ["scootctl", "scoot-core", "scoot-ipc", "scoot-look", "scootbg", "scootbg-mem", "scootbar", "scootlaunch", "scootnotify"]
-
-# Crates that first appeared after the last tag. Every package shares the
-# one `v{{ version }}` tag, so release-plz finds `v0.3.1` as their latest
-# release, checks that tag out and fails with `cannot find package "<crate>"
-# in workspace` (the release PR job was red on every push to main from the
-# scootui extraction until these entries). A tag template no tag matches
-# makes release-plz treat a crate as never released, so it takes the
-# workspace version bump like the rest. Keep `git_tag_enable` off: the one
-# tag is the `scoot` package's. Drop an entry once a release containing its
-# crate is tagged; `scripts/check-release-plz-crates` (CI) fails when a new
-# crate has no entry here and warns about entries that are no longer needed.
-
-[[package]]
-name = "scoot-dbus"
-git_tag_name = "scoot-dbus-v{{ version }}"
-
-[[package]]
-name = "scoot-rt"
-git_tag_name = "scoot-rt-v{{ version }}"
-
-[[package]]
-name = "scootlaunch"
-git_tag_name = "scootlaunch-v{{ version }}"
-
-[[package]]
-name = "scootnotify"
-git_tag_name = "scootnotify-v{{ version }}"
-
-[[package]]
-name = "scootui"
-git_tag_name = "scootui-v{{ version }}"
