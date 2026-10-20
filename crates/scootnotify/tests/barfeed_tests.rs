@@ -220,6 +220,13 @@ fn notify_msg(session: &Session, args: &[&str]) -> String {
 
 /// One `scootbar msg query notifications`: the module's `(text, class)`.
 fn bar_module(session: &Session, bar: &Path) -> (String, String) {
+    bar_module_opt(session, bar).expect("the bar answers queries")
+}
+
+/// The query, tolerantly: `None` when the bar didn't answer well
+/// (overload, startup race). Callers polling for convergence treat it
+/// as not-yet, never as state.
+fn bar_module_opt(session: &Session, bar: &Path) -> Option<(String, String)> {
     let mut command = Command::new(bar);
     command
         .arg("msg")
@@ -231,19 +238,13 @@ fn bar_module(session: &Session, bar: &Path) -> (String, String) {
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     session.scratch.sandbox(&mut command);
-    let output = command.output().expect("the bar answers queries");
-    assert!(
-        output.status.success(),
-        "bar query failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let reply: serde_json::Value =
-        serde_json::from_slice(&output.stdout).expect("the reply is JSON");
-    let module = reply
-        .get("modules")
-        .and_then(|modules| modules.get(0))
-        .expect("one module listed");
-    (
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let reply: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    let module = reply.get("modules")?.get(0)?;
+    Some((
         module
             .get("text")
             .and_then(|text| text.as_str())
@@ -254,7 +255,7 @@ fn bar_module(session: &Session, bar: &Path) -> (String, String) {
             .and_then(|class| class.as_str())
             .unwrap_or_default()
             .to_owned(),
-    )
+    ))
 }
 
 /// Spins until `want` holds or the deadline passes: the feed pushes a
@@ -272,8 +273,9 @@ fn until_bar(session: &Session, bar: &Path, text: &str, class: &str) -> (String,
 }
 
 /// Polls the bar until it shows `(text, class)` or `budget` passes:
-/// returns the last reading either way, so callers can nudge and keep
-/// waiting instead of failing on one transient push failure.
+/// returns the last reading either way (`("?", "?")` when no query
+/// ever answered, which matches nothing), so callers can nudge and
+/// keep waiting instead of failing on one transient push failure.
 fn poll_bar(
     session: &Session,
     bar: &Path,
@@ -282,49 +284,52 @@ fn poll_bar(
     budget: Duration,
 ) -> (String, String) {
     let start = Instant::now();
+    let mut last = (String::from("?"), String::from("?"));
     loop {
-        let got = bar_module(session, bar);
-        if got.0 == text && got.1 == class {
-            return got;
+        if let Some(got) = bar_module_opt(session, bar) {
+            last = got;
+            if last.0 == text && last.1 == class {
+                return last;
+            }
         }
         if start.elapsed() >= budget {
-            return got;
+            return last;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
 }
 
-/// Waits for the bar to show `(text, class)`: up to three 10 s rounds
-/// with a net-zero nudge (an arrival closed at once) between the first
-/// two. A healthy push converges in the first round; a starved one
-/// converges through the product's own bounded retry or a later round
+/// Waits for the bar to show `want`, driving verified net-zero nudges
+/// between rounds: each nudge notifies, waits for the exact `mid`
+/// state (proving the push path alive and forcing push separation —
+/// the close goes out only after the arrival is observed on screen),
+/// closes, and rejoins the wait for `want`. Up to three 10 s rounds
 /// (the push deadline clears loaded turn periods, so any reply inside
-/// it places). The final state stays exact — nothing less passes — and
-/// each nudge returns the count exactly where it started, so rounds
-/// compose. `nudge` supplies fresh bus tokens.
+/// it places on the first attempt); the final state stays exact.
+/// `nudge` supplies fresh bus tokens.
 fn until_bar_converged(
     session: &Session,
     bar: &Path,
     client: &mut Conn,
-    text: &str,
-    class: &str,
+    mid: (&str, &str),
+    want: (&str, &str),
     nudge: &mut u64,
 ) -> (String, String) {
     for _ in 0..2 {
-        let got = poll_bar(session, bar, text, class, Duration::from_secs(10));
-        if got.0 == text && got.1 == class {
+        let got = poll_bar(session, bar, want.0, want.1, Duration::from_secs(10));
+        if got.0 == want.0 && got.1 == want.1 {
             return got;
         }
-        // One net-zero change: the count returns exactly where it
-        // started (an arrival closed at once), but the fresh push
-        // carries the current state again — past a retry-exhausted
-        // spell, a stale park, or a superseded push.
+        // One verified net-zero change: the arrival must show before
+        // the dismissal goes out, so the two pushes cannot batch into
+        // invisibility; the count returns exactly where it started.
         let id = notify(client, "nudge", *nudge);
         *nudge += 1;
+        poll_bar(session, bar, mid.0, mid.1, Duration::from_secs(10));
         close(client, id, *nudge);
         *nudge += 1;
     }
-    until_bar(session, bar, text, class)
+    until_bar(session, bar, want.0, want.1)
 }
 
 /// Spins until the bar answers queries: spawning returns before the
@@ -426,31 +431,64 @@ fn arrivals_dismissals_and_dnd_toggles_reflect_exactly() {
     );
     let mut client = connect(&bus);
     // One arrival: the count pushes. Each stage converges (nudging
-    // past a starved spell) on the exact final state — never less,
-    // never "eventually something close".
+    // past a starved spell with verified intermediate states) on the
+    // exact final state — never less, never "eventually something
+    // close".
     let mut nudge = 1000;
     let id = notify(&mut client, "a", 101);
     assert_eq!(
-        until_bar_converged(&session, &bar, &mut client, "1", "normal", &mut nudge).0,
+        until_bar_converged(
+            &session,
+            &bar,
+            &mut client,
+            ("2", "normal"),
+            ("1", "normal"),
+            &mut nudge
+        )
+        .0,
         "1"
     );
     // Its dismissal: idle again.
     close(&mut client, id, 102);
     assert_eq!(
-        until_bar_converged(&session, &bar, &mut client, "", "normal", &mut nudge).0,
+        until_bar_converged(
+            &session,
+            &bar,
+            &mut client,
+            ("1", "normal"),
+            ("", "normal"),
+            &mut nudge
+        )
+        .0,
         ""
     );
     // DND on: the next arrival holds, and the bar mutes.
     assert!(notify_msg(&session, &["dnd", "on"]).contains("\"dnd\":\"on\""));
     notify(&mut client, "b", 103);
     assert_eq!(
-        until_bar_converged(&session, &bar, &mut client, "DND 1", "muted", &mut nudge).0,
+        until_bar_converged(
+            &session,
+            &bar,
+            &mut client,
+            ("DND 2", "muted"),
+            ("DND 1", "muted"),
+            &mut nudge
+        )
+        .0,
         "DND 1"
     );
     // DND off with no new arrival: the same held card reshapes the bar.
     assert!(notify_msg(&session, &["dnd", "off"]).contains("\"dnd\":\"off\""));
     assert_eq!(
-        until_bar_converged(&session, &bar, &mut client, "1", "normal", &mut nudge).0,
+        until_bar_converged(
+            &session,
+            &bar,
+            &mut client,
+            ("2", "normal"),
+            ("1", "normal"),
+            &mut nudge
+        )
+        .0,
         "1"
     );
     kill(&mut notify_child);
