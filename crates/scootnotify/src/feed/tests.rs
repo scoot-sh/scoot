@@ -248,6 +248,7 @@ impl FakeBar {
             thread: Some(thread),
         }
     }
+}
 
 /// Serves `expect` connections on the bound `listener`, recording
 /// each `set` value and answering `reply`.
