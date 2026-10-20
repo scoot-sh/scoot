@@ -167,18 +167,20 @@ jobs:
           #
           # TEMPORARY: --no-gc-sections to test whether lld's section GC
           # is what drops the stub object (revert with the step below).
+          # TEMPORARY 2: --trace-symbol to see what lld does with the
+          # stub object and the gbm references.
           #
           # scootbg first, installed: scoot's versioned dependency on
           # it (`scootbg=$pkgver`) resolves against no repository yet,
           # so `makepkg -s` for scoot would fail to satisfy it. This is
           # the same order an AUR helper builds the chain in.
           sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
-            RUSTFLAGS="-C link-args=-Wl,--no-gc-sections" \
+            RUSTFLAGS="-C link-args=-Wl,--no-gc-sections -C link-args=-Wl,--trace-symbol=gbm_bo_create" \
             bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/scootbg' && makepkg -s --noconfirm"
           pacman -U --noconfirm "$GITHUB_WORKSPACE"/dist/scootbg-0*.pkg.tar.zst
           for p in scoot scootbar scootlaunch scoot-git scootbg-git scootbar-git scootlaunch-git; do
             sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
-              RUSTFLAGS="-C link-args=-Wl,--no-gc-sections" \
+              RUSTFLAGS="-C link-args=-Wl,--no-gc-sections -C link-args=-Wl,--trace-symbol=gbm_bo_create" \
               bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/$p' && makepkg -s --noconfirm"
           done
           ls -l "$GITHUB_WORKSPACE/dist"/*.pkg.tar.zst
