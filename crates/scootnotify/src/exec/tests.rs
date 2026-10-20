@@ -113,6 +113,55 @@ fn an_empty_argv_is_refused() {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn a_default_spawner_opens_one_pidfd_per_child() {
+    let _guard = serial();
+    // The production shape: `Default` asks for pidfds, so a running
+    // rule child costs no wakeups. The flood pin below only checks the
+    // count returns to baseline, which passes vacuously with pidfds off
+    // (nothing is ever opened) — this pin fails if the default ever
+    // stops opening pidfds, which is the load-bearing property.
+    let mut spawner = Spawner::default();
+    let before = pidfds_now();
+    for _ in 0..MAX_CHILDREN {
+        spawner
+            .spawn(&argv_request(&["sleep", "120"]))
+            .expect("slots free");
+    }
+    assert_eq!(pidfds_now(), before + MAX_CHILDREN, "one pidfd per child");
+    // No child lacks a pidfd, so the loop may sleep as long as it likes.
+    assert_eq!(spawner.poll_timeout(), None);
+    spawner.kill_all();
+    spawner.reap();
+    assert_eq!(spawner.running(), 0);
+    assert_eq!(pidfds_now(), before, "reaping closes every pidfd");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn without_pidfds_a_child_falls_back_to_polling() {
+    let _guard = serial();
+    // The old-kernel shape, reached only by struct literal (production
+    // builds on `Default`, which opens pidfds): the child is reaped on
+    // a short timeout instead of a pidfd wake.
+    let mut spawner = Spawner {
+        live: Vec::new(),
+        pidfds: false,
+    };
+    let before = pidfds_now();
+    spawner
+        .spawn(&argv_request(&["sleep", "120"]))
+        .expect("slot free");
+    assert_eq!(pidfds_now(), before, "no pidfd without pidfds");
+    assert!(spawner.poll_timeout().is_some());
+    spawner.kill_all();
+    spawner.reap();
+    assert_eq!(spawner.running(), 0);
+    assert_eq!(spawner.poll_timeout(), None);
+    assert_eq!(pidfds_now(), before);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn a_flood_leaves_fds_flat() {
     let _guard = serial();
     let mut spawner = Spawner::default();

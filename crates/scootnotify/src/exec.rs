@@ -87,12 +87,25 @@ struct Live {
     pidfd: Option<OwnedFd>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Spawner {
     live: Vec<Live>,
     /// Whether to ask for pidfds (off only in tests, to reach the
-    /// fallback).
+    /// fallback: production builds on `Default`, which leaves this on).
     pidfds: bool,
+}
+
+impl Default for Spawner {
+    /// The production shape: pidfds on, so a running rule child costs
+    /// no wakeups. Old kernels (pre-5.3) still degrade through the
+    /// existing fallback (`pidfd_open` fails, `poll_timeout` covers
+    /// the child), so no new failure mode.
+    fn default() -> Self {
+        Self {
+            live: Vec::new(),
+            pidfds: true,
+        }
+    }
 }
 
 impl Spawner {
