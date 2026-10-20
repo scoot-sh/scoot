@@ -267,6 +267,22 @@ jobs:
           export SMOKE_PREFIX=/tmp/arch-smoke-git SMOKE_REQUIRE_SCOOTBG=1
           scripts/smoke-test.sh
 
+      # TEMPORARY diagnostic for the gbm link (revert once arch is green):
+      # after a failed build, re-drive the scoot link verbosely and show
+      # exactly what gbm inputs rustc passes to the linker.
+      - name: TEMPORARY dump the scoot link line on failure
+        if: failure()
+        run: |
+          sudo -u builder env CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
+            bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/scoot/src/scoot-'* && cargo build --release --locked -p scoot -v" 2>&1 \
+            | grep -o '[^ ]*gbm[^ ]*' | sort -u | head -20 || true
+          echo "--- OUT_DIR contents ---"
+          sudo -u builder bash -c "ls '$GITHUB_WORKSPACE/.cargo-target/release/build/'" 2>/dev/null | grep scoot || true
+          for d in "$GITHUB_WORKSPACE"/.cargo-target/release/build/scoot-*/out; do
+            echo "--- $d ---"
+            sudo -u builder bash -c "ls -l '$d' | grep -i gbm || true"
+          done
+
       - name: Upload the built packages and lint logs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
