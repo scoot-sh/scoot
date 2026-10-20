@@ -748,7 +748,7 @@ jobs:
             echo "--- $image ($VERIFY_ARCH) ---"
             docker run --rm \
               -v "$dir:/rel:ro" \
-              -e VERIFY_VERSION -e VERIFY_ARCH \
+              -e VERIFY_VERSION -e VERIFY_ARCH -e IMAGE="$image" \
               "$image" bash -euo pipefail -c '
               apt-get update -qq
               apt-get install -y -qq libseat1 libinput10 libxkbcommon0 libudev1 libpixman-1-0 fonts-dejavu-core
@@ -782,6 +782,6 @@ jobs:
                 count=$((count + 1))
               done
               test "$count" -gt 0 || { echo "::error title=No binaries downloaded for $VERIFY_ARCH::nothing matched."; exit 1; }
-              echo "ok: every --version names $VERIFY_VERSION ($count binaries on $image)"
+              echo "ok: every --version names $VERIFY_VERSION ($count binaries on $IMAGE)"
               '
           done

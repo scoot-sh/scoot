@@ -60,8 +60,17 @@ fn main() {
     // `compile()` would use (same `cc` compiler object, only `-c -o`
     // added), then passed as a plain input -- never a `-l`, so there is
     // no modifier for rustc to collide and no archive for `--as-needed`
-    // to drop. The ldd gate in CI (`nix develop` Linux job) still proves
-    // no DT_NEEDED libgbm on every change.
+    // to drop.
+    //
+    // gbm-sys still emits its own plain `-lgbm` (its `#[link]`
+    // attribute), which must RESOLVE even though it must never provide:
+    // with no system libgbm anywhere the link dies on "unable to find
+    // library -lgbm" (seen on arch.yml next). So an empty libgbm.a sits
+    // beside the object, added to the search path: `-lgbm` finds the
+    // archive, pulls no member from it, emits no DT_NEEDED. Empty means
+    // the eight magic bytes and nothing else, written directly -- no
+    // archiver to locate. The ldd gate in CI (`nix develop` Linux job)
+    // still proves no DT_NEEDED libgbm on every change.
     //
     // Linux-only like the libinput block above (the stub is meaningless
     // where `backend_gbm` cannot link anyway): without the gate a macOS
@@ -70,11 +79,12 @@ fn main() {
         && std::env::var("CARGO_FEATURE_GPU_SCANOUT").is_ok()
     {
         let out = std::env::var("OUT_DIR").expect("OUT_DIR is set for build scripts");
-        let object = std::path::Path::new(&out).join("gbm_stub.o");
+        let dir = std::path::Path::new(&out);
         let compiler = cc::Build::new()
             .file("gbm-stub/gbm_stub.c")
             .try_get_compiler()
             .expect("a C compiler for the gbm stub");
+        let object = dir.join("gbm_stub.o");
         let status = compiler
             .to_command()
             .arg("-c")
@@ -85,5 +95,9 @@ fn main() {
             .expect("could not run the C compiler for the gbm stub");
         assert!(status.success(), "the gbm stub did not compile");
         println!("cargo:rustc-link-arg={}", object.display());
+        // An empty GNU archive: the magic alone, no members.
+        std::fs::write(dir.join("libgbm.a"), b"!<arch>\n")
+            .expect("could not stage the empty libgbm.a");
+        println!("cargo:rustc-link-search=native={}", dir.display());
     }
 }

@@ -193,6 +193,11 @@ jobs:
           chmod 700 /tmp/rpm-smoke-xdg
           export XDG_RUNTIME_DIR=/tmp/rpm-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
           export SMOKE_PREFIX=/tmp/rpm-smoke SMOKE_REQUIRE_SCOOTBG=1
+          # No looks stage here either (see deb.yml): `look apply`
+          # validates the rendered foot.ini with the installed foot, and
+          # the Fedora foot rejects the `initial-color-theme` the looks
+          # render (it wants 1 or 2, not dark), so the apply refuses.
+          export SMOKE_SKIP_LOOKS="fedora foot rejects initial-color-theme=dark"
           scripts/smoke-test.sh
 
       - name: Upload the built RPMs and lint logs
