@@ -260,8 +260,14 @@ fn bar_module_opt(session: &Session, bar: &Path) -> Option<(String, String)> {
 
 /// Spins until `want` holds or the deadline passes: the feed pushes a
 /// turn after the call that changed the count answers.
-fn until_bar(session: &Session, bar: &Path, text: &str, class: &str) -> (String, String) {
-    let got = poll_bar(session, bar, text, class, Duration::from_secs(10));
+fn until_bar(
+    session: &Session,
+    bar: &Path,
+    child: &mut Child,
+    text: &str,
+    class: &str,
+) -> (String, String) {
+    let got = poll_bar(session, bar, child, text, class, Duration::from_secs(10));
     assert_eq!(
         got,
         (String::from(text), String::from(class)),
@@ -276,29 +282,49 @@ fn until_bar(session: &Session, bar: &Path, text: &str, class: &str) -> (String,
 /// returns the last reading either way (`("?", "?")` when no query
 /// ever answered, which matches nothing), so callers can nudge and
 /// keep waiting instead of failing on one transient push failure.
+/// Sparse by design: one query per few seconds, never a hot loop —
+/// every iteration spawns a client process, and flooding the bar's
+/// accept backlog under load would wedge the very pushes converging
+/// is waiting for. `child` is the bar: ten unanswered queries in a row
+/// reaps it — a dead bar fails fast with its status instead of running
+/// the budget out as a mystery.
 fn poll_bar(
     session: &Session,
     bar: &Path,
+    child: &mut Child,
     text: &str,
     class: &str,
     budget: Duration,
 ) -> (String, String) {
     let start = Instant::now();
     let mut last = (String::from("?"), String::from("?"));
+    let mut deaf = 0;
     loop {
-        if let Some(got) = bar_module_opt(session, bar) {
-            last = got;
-            if last.0 == text && last.1 == class {
-                return last;
+        match bar_module_opt(session, bar) {
+            Some(got) => {
+                deaf = 0;
+                last = got;
+                if last.0 == text && last.1 == class {
+                    return last;
+                }
+            }
+            None => {
+                deaf += 1;
+                if deaf >= 10 {
+                    if let Some(status) = child.try_wait().expect("the bar reaps") {
+                        panic!(
+                            "the bar died mid-test ({status}): see scootbar.log in the scratch dir"
+                        );
+                    }
+                    eprintln!("note: the bar is alive but answered no query {deaf} times running");
+                    deaf = 0;
+                }
             }
         }
         if start.elapsed() >= budget {
             return last;
         }
-        // Gentle cadence: every iteration spawns a client process, and
-        // three tests polling hot would flood the bar's accept backlog
-        // under load faster than a starved bar drains it.
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_secs(3));
     }
 }
 
@@ -313,13 +339,14 @@ fn poll_bar(
 fn until_bar_converged(
     session: &Session,
     bar: &Path,
+    child: &mut Child,
     client: &mut Conn,
     mid: (&str, &str),
     want: (&str, &str),
     nudge: &mut u64,
 ) -> (String, String) {
     for _ in 0..2 {
-        let got = poll_bar(session, bar, want.0, want.1, Duration::from_secs(10));
+        let got = poll_bar(session, bar, child, want.0, want.1, Duration::from_secs(10));
         if got.0 == want.0 && got.1 == want.1 {
             return got;
         }
@@ -328,11 +355,11 @@ fn until_bar_converged(
         // invisibility; the count returns exactly where it started.
         let id = notify(client, "nudge", *nudge);
         *nudge += 1;
-        poll_bar(session, bar, mid.0, mid.1, Duration::from_secs(10));
+        poll_bar(session, bar, child, mid.0, mid.1, Duration::from_secs(10));
         close(client, id, *nudge);
         *nudge += 1;
     }
-    until_bar(session, bar, want.0, want.1)
+    until_bar(session, bar, child, want.0, want.1)
 }
 
 /// Spins until the bar answers queries: spawning returns before the
@@ -446,6 +473,7 @@ fn arrivals_dismissals_and_dnd_toggles_reflect_exactly() {
         until_bar_converged(
             &session,
             &bar,
+            &mut bar_child,
             &mut client,
             ("2", "normal"),
             ("1", "normal"),
@@ -460,6 +488,7 @@ fn arrivals_dismissals_and_dnd_toggles_reflect_exactly() {
         until_bar_converged(
             &session,
             &bar,
+            &mut bar_child,
             &mut client,
             ("1", "normal"),
             ("", "normal"),
@@ -475,6 +504,7 @@ fn arrivals_dismissals_and_dnd_toggles_reflect_exactly() {
         until_bar_converged(
             &session,
             &bar,
+            &mut bar_child,
             &mut client,
             ("DND 2", "muted"),
             ("DND 1", "muted"),
@@ -489,6 +519,7 @@ fn arrivals_dismissals_and_dnd_toggles_reflect_exactly() {
         until_bar_converged(
             &session,
             &bar,
+            &mut bar_child,
             &mut client,
             ("2", "normal"),
             ("1", "normal"),
@@ -519,10 +550,16 @@ fn a_bar_started_later_catches_up_on_the_next_change() {
     // so it catches up without waiting for the next change.
     let mut bar_child = spawn_bar(&session, &bar, "idle");
     wait_bar_serving(&session, &bar, &mut bar_child);
-    assert_eq!(until_bar(&session, &bar, "1", "normal").0, "1");
+    assert_eq!(
+        until_bar(&session, &bar, &mut bar_child, "1", "normal").0,
+        "1"
+    );
     // And the next change still lands exactly.
     notify(&mut client, "b", 202);
-    assert_eq!(until_bar(&session, &bar, "2", "normal").0, "2");
+    assert_eq!(
+        until_bar(&session, &bar, &mut bar_child, "2", "normal").0,
+        "2"
+    );
     kill(&mut notify_child);
     kill(&mut bar_child);
 }
@@ -602,7 +639,10 @@ fn idle_holds_no_watch_and_wakes_nothing() {
     let mut client = connect(&bus);
     // Settle one change through, so nothing is owed.
     notify(&mut client, "a", 301);
-    assert_eq!(until_bar(&session, &bar, "1", "normal").0, "1");
+    assert_eq!(
+        until_bar(&session, &bar, &mut bar_child, "1", "normal").0,
+        "1"
+    );
     let pid = notify_child.id();
     // The load-independent core: no watch fd, and the expiry timerfd
     // disarmed — so neither the feed nor an expiry can have woken the
