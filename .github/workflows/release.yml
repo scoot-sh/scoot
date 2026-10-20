@@ -652,15 +652,16 @@ jobs:
   verify:
     name: Verify the published release (${{ matrix.arch }})
     needs: [resolve, publish]
-    # needs.publish is skipped in verify-only mode (publish does not
-    # run there) and on dry runs: only a fresh publish (its `published`
-    # output below), or an explicit verify-only dispatch on a resolved
-    # tag, runs this job. (On pull requests resolve never runs, so its
-    # outputs are empty and both sides are false; on a dry run publish
-    # exits before setting `published`.)
+    # `always()` because publish is skipped in verify-only mode, and a
+    # skipped need auto-skips the dependent job without evaluating its
+    # condition. The outputs still decide: only a fresh publish (its
+    # `published` output below), or an explicit verify-only dispatch on
+    # a resolved tag, runs this job. (On pull requests resolve never
+    # runs, so its outputs are empty and both sides are false; on a dry
+    # run publish exits before setting `published`.)
     if: >-
-      needs.resolve.outputs.verify_only == 'true' ||
-      needs.publish.outputs.published == 'true'
+      always() && (needs.resolve.outputs.verify_only == 'true' ||
+        needs.publish.outputs.published == 'true')
     strategy:
       matrix:
         include:
