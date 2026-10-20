@@ -255,19 +255,23 @@ impl Feed {
 
     /// Attempts one push of `current`: updates the placement, the owed
     /// flag and the watch. Returns a line for the log on failure.
+    /// A failed change still counts as placed: the next change or the
+    /// watch retries it, so an absent bar costs one dial per change,
+    /// never one per turn.
     fn attempt(&mut self, current: State) -> Option<String> {
+        // Placed first: every arm below settles the change, and only
+        // the watch (an appearing bar) or the next change retries.
+        self.last = Some(current);
         match send_to(&self.socket_path()?, &payload(current, &self.icon_unread, &self.icon_dnd)) {
             Send::Sent => {
-                self.last = Some(current);
                 self.owed = false;
                 self.disarm();
                 None
             }
             Send::NotPlaced => {
-                // Considered placed: retrying the same payload cannot
-                // help, and the next change retries (silently). The
-                // guidance goes out once per run.
-                self.last = Some(current);
+                // Retrying the same payload cannot help, and the next
+                // change retries (silently). The guidance goes out
+                // once per run.
                 self.owed = false;
                 self.disarm();
                 if self.placed_logged {
@@ -290,13 +294,11 @@ impl Feed {
                     &payload(current, &self.icon_unread, &self.icon_dnd),
                 ) {
                     Send::Sent => {
-                        self.last = Some(current);
                         self.owed = false;
                         self.disarm();
                         None
                     }
                     Send::NotPlaced => {
-                        self.last = Some(current);
                         self.owed = false;
                         self.disarm();
                         if self.placed_logged {
@@ -314,11 +316,11 @@ impl Feed {
                 }
             }
             Send::Refused(detail) => {
-                // The bar answered with an error that is not a missing
-                // module (unreachable with our fixed shape): owed, so
-                // the next change retries, but no watch (the socket
-                // exists, so no appearance will fire).
-                self.owed = true;
+                // The bar answered an error that is not a missing
+                // module (unreachable with our fixed shape): the socket
+                // exists, so no appearance will fire, and the next
+                // change retries.
+                self.owed = false;
                 Some(format!("scootnotify: cannot reach the bar ({detail}); leaving it"))
             }
         }
@@ -435,9 +437,10 @@ enum Send {
     Sent,
     /// The bar answered an error naming the unplaced module.
     NotPlaced,
-    /// Nothing listens (or no socket path resolves): owed.
+    /// Nothing listens (or no socket path resolves).
     NoBar(String),
-    /// The bar answered another error: owed, without a watch.
+    /// The bar answered another error: settled like a placement (the
+    /// next change retries), with no watch to arm.
     Refused(String),
 }
 

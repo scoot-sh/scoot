@@ -388,7 +388,7 @@ fn not_placed_logs_once_and_counts_as_placed() {
 }
 
 #[test]
-fn other_refusals_are_owed_without_a_watch() {
+fn other_refusals_settle_until_the_next_change() {
     let (_dir, socket) = scratch_socket("refused");
     let bar = FakeBar::serve(socket.clone(), "{\"type\":\"error\",\"message\":\"boom\"}\n", 1);
     let mut store = store();
@@ -397,8 +397,10 @@ fn other_refusals_are_owed_without_a_watch() {
     shown(&mut store, ":1.1", "a");
     let line = feed.sync(&store).expect("a refused push says why");
     assert!(line.contains("boom"), "{line}");
-    assert!(feed.owed(), "owed, so the next change retries");
-    assert!(feed.poll_fd().is_none(), "the socket exists: no appearance to wait for");
+    assert!(!feed.owed(), "settled: the socket exists, so no appearance will fire");
+    assert!(feed.poll_fd().is_none());
+    // Same state again: nothing more is said or dialed.
+    assert!(feed.sync(&store).is_none());
     assert_eq!(bar.served(), 1);
 }
 
