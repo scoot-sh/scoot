@@ -663,6 +663,7 @@ jobs:
       always() && (needs.resolve.outputs.verify_only == 'true' ||
         needs.publish.outputs.published == 'true')
     strategy:
+      fail-fast: false
       matrix:
         include:
           - runner: ubuntu-latest
@@ -676,6 +677,10 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      # The `gh` calls below infer the repository from this checkout
+      # (no git history is used here).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       - name: Download the release's assets
         env:
           VERIFY_TAG: ${{ needs.resolve.outputs.tag }}
