@@ -309,7 +309,7 @@ jobs:
             stub=$(echo '"$GITHUB_WORKSPACE"'/.cargo-target/release/build/scoot-*/out/gbm_stub.o | tr " " "\n" | head -1)
             echo "stub=$stub"
             printf "extern struct gbm_bo *gbm_bo_create();\nint main(void){return gbm_bo_create()?0:1;}\n" > /tmp/stubprobe.c
-            gcc /tmp/stubprobe.c "$stub" -o /tmp/stubprobe -fuse-ld=lld -Wl,--trace 2>&1 | grep -a "gbm_stub\|stubprobe" | head -8 || true
+            gcc -v /tmp/stubprobe.c "$stub" -o /tmp/stubprobe -fuse-ld=lld 2>&1 | grep -a "collect2\|gbm_stub" | head -6 || true
           ' || true
 
       - name: Upload the built packages and lint logs
