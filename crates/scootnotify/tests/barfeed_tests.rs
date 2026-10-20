@@ -268,6 +268,9 @@ fn until_bar(
     class: &str,
 ) -> (String, String) {
     let got = poll_bar(session, bar, child, text, class, Duration::from_secs(10));
+    if got.0 != text || got.1 != class {
+        dump_logs(session);
+    }
     assert_eq!(
         got,
         (String::from(text), String::from(class)),
@@ -276,6 +279,26 @@ fn until_bar(
         got.1
     );
     got
+}
+
+/// Prints the daemon and bar log tails for a failed convergence: the
+/// children are still alive at panic time (kills are skipped on
+/// failure), so the next red run says whether pushes never started,
+/// were refused, or went unanswered — instead of another silent state.
+fn dump_logs(session: &Session) {
+    for name in ["scootnotify.log", "scootbar.log"] {
+        let path = session.scratch.0.join(name);
+        match std::fs::read_to_string(&path) {
+            Ok(log) => {
+                eprintln!("--- {name} tail ---");
+                let lines: Vec<&str> = log.lines().rev().take(80).collect();
+                for line in lines.into_iter().rev() {
+                    eprintln!("{line}");
+                }
+            }
+            Err(error) => eprintln!("--- {name} unreadable: {error}"),
+        }
+    }
 }
 
 /// Polls the bar until it shows `(text, class)` or `budget` passes:
