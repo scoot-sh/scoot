@@ -383,11 +383,12 @@ fn a_bar_started_later_catches_up_on_the_next_change() {
     wait_serving(&session);
     let mut client = connect(&bus);
     notify(&mut client, "a", 201);
-    // The bar starts later: placeholder until the next change.
+    // The bar starts later: the socket watch re-sends the owed state,
+    // so it catches up without waiting for the next change.
     let mut bar_child = spawn_bar(&session, &bar, "idle");
     wait_bar_serving(&session, &bar);
-    assert_eq!(bar_module(&session, &bar).0, "idle");
-    // The next change catches it up exactly.
+    assert_eq!(until_bar(&session, &bar, "1", "normal").0, "1");
+    // And the next change still lands exactly.
     notify(&mut client, "b", 202);
     assert_eq!(until_bar(&session, &bar, "2", "normal").0, "2");
     kill(&mut notify_child);
