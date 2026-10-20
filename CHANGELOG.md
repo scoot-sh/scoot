@@ -22,6 +22,9 @@ release, entries were dated.
 ### scootnotify
 
 - added: native DND and unread feed to the bar ([#689](https://github.com/scoot-sh/scoot/pull/689))
+- added: scootnotify ships as a release binary and as deb, rpm and Arch packages (user unit and D-Bus activation file included); `install.sh --notify` installs it and refuses while another notification daemon owns the name ([#699](https://github.com/scoot-sh/scoot/pull/699))
+- added: Nix modules for scootnotify and an opt-in `desktop.notifications.daemon = "scootnotify"` switch (default stays mako), themed from the active look ([#698](https://github.com/scoot-sh/scoot/pull/698))
+- fixed: a call sharing a read batch with the bus name grant is no longer dropped at startup ([#690](https://github.com/scoot-sh/scoot/pull/690))
 
 ## [0.4.0](https://github.com/scoot-sh/scoot/compare/v0.3.1...v0.4.0) - 2026-10-20
 
