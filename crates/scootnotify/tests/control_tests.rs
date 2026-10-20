@@ -20,6 +20,9 @@ use scootnotify::control::client;
 use scootnotify::control::paths::Paths;
 use scootnotify::control::protocol::Request;
 
+#[path = "support/mod.rs"]
+mod support;
+
 const BUS_NAME: &str = "org.freedesktop.Notifications";
 const OBJECT: &str = "/org/freedesktop/Notifications";
 const INTERFACE: &str = "org.freedesktop.Notifications";
@@ -98,82 +101,11 @@ fn control_paths(runtime: &tempfile::TempDir) -> Paths {
 }
 
 /// Pumps `client` until its `Notify` is answered: the daemon serving.
-/// (As `bus_tests.rs`: one call outstanding at a time, resending on the
-/// name-unowned error, so at most one probe card ever exists.) On
-/// timeout the panic names the server's fate (its exit code and stderr
-/// when it died, which is the startup crash; what its stderr says so
-/// far when it still runs, which is how far startup got), because a
-/// bare deadline cost a debugging round already.
+/// Shared shape (see `support`): a 1 ms transient card — the reply
+/// proves serving, the card itself is gone before any test counts
+/// live ones and never enters history.
 fn wait_serving(client: &mut Conn, server: &mut Child) {
-    let body = notify_body("Probe", 0, "p", "p", &[], 1);
-    client
-        .call(
-            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
-        )
-        .expect("the first call queues");
-    let start = Instant::now();
-    // How the wait ends, for the timeout panic: errors mean the name
-    // was genuinely unowned (the daemon never got there); silence with
-    // no errors at all means the bus never answered either way.
-    let mut errored_total = 0u64;
-    let mut events_total = 0u64;
-    loop {
-        if start.elapsed() >= Duration::from_secs(30) {
-            match server.try_wait().expect("the server reaps") {
-                Some(status) => {
-                    let mut err = String::new();
-                    if let Some(mut stderr) = server.stderr.take() {
-                        let _ = stderr.read_to_string(&mut err);
-                    }
-                    panic!("the server died at startup ({status}): {err}");
-                }
-                None => {
-                    panic!(
-                        "the server still runs but never owned the name in 30 s \
-                         ({events_total} events, {errored_total} name-unowned errors); \
-                         its stderr so far: {}",
-                        read_available(server.stderr.as_mut())
-                    );
-                }
-            }
-        }
-        // A dead-at-startup server fails here in milliseconds, not at
-        // the 30 s deadline: otherwise a startup crash reads exactly
-        // like a serving stall.
-        if let Some(status) = server.try_wait().expect("the server reaps") {
-            let mut err = String::new();
-            if let Some(mut stderr) = server.stderr.take() {
-                let _ = stderr.read_to_string(&mut err);
-            }
-            panic!("the server died at startup ({status}): {err}");
-        }
-        if client.dead() {
-            panic!("the bus died while waiting for the server");
-        }
-        let (events, _) = client.pump();
-        let mut answered = false;
-        let mut errored = false;
-        for event in events {
-            events_total += 1;
-            match event {
-                Event::Reply { token: 9000, .. } => answered = true,
-                Event::CallError { token: 9000, .. } => errored = true,
-                _ => {}
-            }
-        }
-        if answered {
-            return;
-        }
-        if errored {
-            errored_total += 1;
-            client
-                .call(
-                    BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
-                )
-                .expect("the retry queues");
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    support::wait_serving(client, server, support::LogSource::Pipe);
 }
 
 fn notify_body(
@@ -370,35 +302,6 @@ fn wait_invoked(client: &mut Conn, id: u32) -> String {
     }
 }
 
-/// Reads what the daemon's stderr holds without blocking: the daemon
-/// is still alive, so EOF never comes. Best effort (a failure to drain
-/// says so); the pipe is left nonblocking, which is fine on a path that
-/// panics right after.
-fn read_available(stderr: Option<&mut std::process::ChildStderr>) -> String {
-    use std::os::fd::AsFd as _;
-    let Some(stderr) = stderr else {
-        return String::from("(stderr already taken)");
-    };
-    let fd = stderr.as_fd();
-    let flags = match rustix::fs::fcntl_getfl(fd) {
-        Ok(flags) => flags,
-        Err(_) => return String::from("(stderr would not drain)"),
-    };
-    if rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK).is_err() {
-        return String::from("(stderr would not drain)");
-    }
-    let mut out = Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        match rustix::io::read(fd, &mut buf) {
-            Ok(0) => break,
-            Ok(n) => out.extend_from_slice(&buf[..n]),
-            Err(_) => break,
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 /// Drains `client` until a `NotificationClosed` for `id` arrives: its
 /// reason code.
 fn wait_closed(client: &mut Conn, id: u32) -> u32 {
@@ -503,9 +406,9 @@ fn dnd_holds_history_keeps_and_restore_re_shows_end_to_end() {
     let mut server = spawn_server(&bus, &runtime);
     let mut client = connect(&bus);
     wait_serving(&mut client, &mut server);
-    // The serving probe's 1 ms card may still be live or already
-    // expired: dismissing everything lands it in history exactly once,
-    // so the ring below holds only what this test puts there.
+    // The serving probe makes no card: dismissing everything is a
+    // no-op for history, so the ring below holds only what this test
+    // puts there.
     let out = msg(&runtime, &["dismiss", "--all"]);
     assert!(out.status.success());
 
@@ -528,16 +431,16 @@ fn dnd_holds_history_keeps_and_restore_re_shows_end_to_end() {
     assert_eq!(list_cards(&runtime).len(), 1);
     let _ = critical;
 
-    // History keeps the held card, unseen; the probe sits first.
+    // History keeps the held card, unseen.
     let out = msg(&runtime, &["history", "--json"]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     assert_eq!(parsed["type"], "history");
     let entries = parsed["history"].as_array().unwrap();
-    assert_eq!(entries.len(), 2);
-    assert_eq!(entries[1]["app_name"], "Mail");
-    assert_eq!(entries[1]["seen"], false);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["app_name"], "Mail");
+    assert_eq!(entries[0]["seen"], false);
     let _ = held;
 
     // Restore re-shows the held card as a new live card.
@@ -590,9 +493,9 @@ fn a_rule_exec_fires_end_to_end_and_history_false_skips() {
     let mut server = spawn_server(&bus, &runtime);
     let mut client = connect(&bus);
     wait_serving(&mut client, &mut server);
-    // The serving probe's 1 ms card may still be live or already
-    // expired: dismissing everything lands it in history exactly once,
-    // so the ring below holds only what this test puts there.
+    // The serving probe makes no card: dismissing everything is a
+    // no-op for history, so the ring below holds only what this test
+    // puts there.
     let out = msg(&runtime, &["dismiss", "--all"]);
     assert!(out.status.success());
 
@@ -606,15 +509,15 @@ fn a_rule_exec_fires_end_to_end_and_history_false_skips() {
     }
     assert!(fired.metadata().is_ok(), "the rule exec ran");
     // The hidden card is in history (hide is not history=false): the
-    // probe first, the hook newest and unseen.
+    // hook newest and unseen.
     let out = msg(&runtime, &["history", "--json"]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
     let entries = parsed["history"].as_array().unwrap();
-    assert_eq!(entries.len(), 2);
-    assert_eq!(entries[1]["app_name"], "Hook");
-    assert_eq!(entries[1]["seen"], false);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["app_name"], "Hook");
+    assert_eq!(entries[0]["seen"], false);
 
     // `history = false` keeps the match out of the ring entirely.
     notify(&mut client, "Quiet", "shh", &[]);
@@ -622,7 +525,7 @@ fn a_rule_exec_fires_end_to_end_and_history_false_skips() {
     assert!(out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).unwrap()).unwrap();
-    assert_eq!(parsed["history"].as_array().unwrap().len(), 2);
+    assert_eq!(parsed["history"].as_array().unwrap().len(), 1);
 
     kill(server);
 }
@@ -746,9 +649,9 @@ fn subscribe_streams_notify_and_close() {
         &["default", "Open"],
     );
     let event = loop {
-        // The serving probe's expiry close (its 1 ms card) may overtake
-        // our notify under load: anything but our card is skipped, never
-        // asserted on.
+        // Anything but our card is skipped, never asserted on (no
+        // probe traffic exists — the serving probe makes no card — but
+        // tolerance here costs nothing).
         let event = read_line(&mut reader);
         let parsed: serde_json::Value = serde_json::from_str(&event).unwrap();
         if parsed.get("type") == Some(&serde_json::Value::from("notify"))

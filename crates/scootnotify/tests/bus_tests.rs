@@ -18,6 +18,9 @@ use scoot_dbus::conn::{self, Conn, Event};
 use scoot_dbus::proto::{self, Reader, Writer};
 use scoot_dbus::testdaemon::{Daemon, until};
 
+#[path = "support/mod.rs"]
+mod support;
+
 // The idle-pump pin counts through this (Linux-only, like the crate
 // under test): without it the pin would read a vacuous 0 through the
 // default allocator.
@@ -75,81 +78,11 @@ fn spawn_server(daemon: &Daemon, runtime: &tempfile::TempDir) -> Child {
 }
 
 /// Pumps `client` until its `Notify` is answered: the daemon serving.
-/// One call outstanding at a time — an error (the name unowned yet)
-/// resends, a reply returns — so at most one probe card ever exists.
-/// On timeout the panic names the server's fate (its exit code and
-/// stderr when it died, which is the startup crash; what its stderr
-/// says so far when it still runs, which is how far startup got),
-/// because a bare deadline cost a debugging round already.
+/// Shared shape (see `support`): a 1 ms transient card — the reply
+/// proves serving, the card itself is gone before any test counts
+/// live ones and never enters history.
 fn wait_serving(client: &mut Conn, server: &mut Child) {
-    let start = Instant::now();
-    // A 1 ms card: the reply proves serving, the card itself is gone
-    // before any test counts live ones.
-    let body = notify_body("Probe", 0, "p", "p", &[], 1);
-    client
-        .call(
-            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
-        )
-        .expect("the first call queues");
-    loop {
-        // Thirty seconds, not ten: the suite runs eleven servers in
-        // parallel on a shared six-core box, and a contended spawn plus
-        // exec can take seconds. Unloaded it answers in a third of one.
-        if start.elapsed() >= Duration::from_secs(30) {
-            match server.try_wait().expect("the server reaps") {
-                Some(status) => {
-                    let mut err = String::new();
-                    if let Some(mut stderr) = server.stderr.take() {
-                        let _ = stderr.read_to_string(&mut err);
-                    }
-                    panic!("the server died at startup ({status}): {err}");
-                }
-                None => {
-                    panic!(
-                        "the server still runs but never owned the name in 30 s; \
-                         its stderr so far: {}",
-                        read_available(server.stderr.as_mut())
-                    );
-                }
-            }
-        }
-        // A dead-at-startup server fails here in milliseconds, not at
-        // the 30 s deadline: otherwise a startup crash reads exactly
-        // like a serving stall.
-        if let Some(status) = server.try_wait().expect("the server reaps") {
-            let mut err = String::new();
-            if let Some(mut stderr) = server.stderr.take() {
-                let _ = stderr.read_to_string(&mut err);
-            }
-            panic!("the server died at startup ({status}): {err}");
-        }
-        if client.dead() {
-            panic!("the bus died while waiting for the server");
-        }
-        let (events, _) = client.pump();
-        let mut answered = false;
-        let mut errored = false;
-        for event in events {
-            match event {
-                Event::Reply { token: 9000, .. } => answered = true,
-                Event::CallError { token: 9000, .. } => errored = true,
-                _ => {}
-            }
-        }
-        if answered {
-            return;
-        }
-        if errored {
-            // The name is unowned yet: the errored call made no card,
-            // so resending is safe.
-            client
-                .call(
-                    BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
-                )
-                .expect("a resent call queues");
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    support::wait_serving(client, server, support::LogSource::Pipe);
 }
 
 /// One `Notify` body, everything inline in one `Writer`.
@@ -251,35 +184,6 @@ fn bus_info(client: &mut Conn, token: u64) -> Vec<String> {
         out.push(reader.str().unwrap().to_owned());
     }
     out
-}
-
-/// Reads what the daemon's stderr holds without blocking: the daemon
-/// is still alive, so EOF never comes. Best effort (a failure to drain
-/// says so); the pipe is left nonblocking, which is fine on a path that
-/// panics right after.
-fn read_available(stderr: Option<&mut std::process::ChildStderr>) -> String {
-    use std::os::fd::AsFd as _;
-    let Some(stderr) = stderr else {
-        return String::from("(stderr already taken)");
-    };
-    let fd = stderr.as_fd();
-    let flags = match rustix::fs::fcntl_getfl(fd) {
-        Ok(flags) => flags,
-        Err(_) => return String::from("(stderr would not drain)"),
-    };
-    if rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK).is_err() {
-        return String::from("(stderr would not drain)");
-    }
-    let mut out = Vec::new();
-    let mut buf = [0u8; 4096];
-    loop {
-        match rustix::io::read(fd, &mut buf) {
-            Ok(0) => break,
-            Ok(n) => out.extend_from_slice(&buf[..n]),
-            Err(_) => break,
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Drains `client` until a `NotificationClosed` for `id` arrives.
