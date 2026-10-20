@@ -38,6 +38,14 @@ sha256sums=('SKIP')
 
 build() {
   cd "scoot-$pkgver"
+  # Rust 1.99 links this target with lld by default, whose strict -L
+  # ordering leaves build.rs's static libgbm stub archive unpulled (its
+  # OUT_DIR -L arrives after the -lgbm): the link fails on undefined gbm_*
+  # plus scoot_gbm_real_loaded. bfd keeps the previous order-tolerant
+  # behavior with identical output (no libgbm DT_NEEDED; the stub still
+  # forwards by dlopen, mesa stays an optdepend). Revisit when build.rs
+  # links the archive by absolute path instead of -l plus -L.
+  export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=-fuse-ld=bfd"
   cargo build --release --locked -p scoot
   cargo deny list > THIRD-PARTY-LICENSES
   "${CARGO_TARGET_DIR:-target}/release/scoot" --print-default-config > config.toml.example
