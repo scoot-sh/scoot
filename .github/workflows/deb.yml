@@ -359,12 +359,19 @@ jobs:
             # containers carry it too); same remedy.
             rm -f /etc/dpkg/dpkg.cfg.d/docker /etc/dpkg/dpkg.cfg.d/excludes
             apt-get update -qq
-            # One transaction (unlike the bookworm step's two, which stay
-            # green there): a second apt-get in this container fails
-            # with a dpkg lock-frontend EACCES on both architectures,
-            # while the first one and a single combined transaction
-            # pass.
-            apt-get install -y -qq scoot scootbg scootbar scootlaunch scootnotify fonts-dejavu-core dbus libglib2.0-bin
+            # One transaction, retried: this container sporadically
+            # fails apt with a dpkg lock-frontend EACCES (the bookworm
+            # container on the same host pool passes consistently, and
+            # the same commands pass locally, so it is the host, not
+            # the packages). Three attempts, then diagnostics for the
+            # record.
+            n=0
+            until [ $n -ge 3 ]; do
+              if apt-get install -y -qq scoot scootbg scootbar scootlaunch scootnotify fonts-dejavu-core dbus libglib2.0-bin; then break; fi
+              n=$((n + 1))
+              sleep 10
+            done
+            if [ $n -ge 3 ]; then id; ls -la /var/lib/dpkg/; exit 1; fi
             scoot --version
             scootbg --version
             scootbar --version
