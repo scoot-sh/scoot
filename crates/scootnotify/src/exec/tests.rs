@@ -2,6 +2,19 @@
 
 use super::{ExecRequest, MAX_CHILDREN, Spawner};
 
+/// Serializes the pidfd-creating tests: under `cargo test` every test
+/// shares one process, and two floods running side by side would each
+/// see the other's live pidfds. (Under nextest each test is its own
+/// process and the lock is a no-op.) A panic while held poisons the
+/// lock, so the guard recovers instead of cascading.
+static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn serial() -> std::sync::MutexGuard<'static, ()> {
+    SERIAL
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn request(program: &str) -> ExecRequest {
     argv_request(&[program])
 }
@@ -19,16 +32,27 @@ fn argv_request(argv: &[&str]) -> ExecRequest {
     }
 }
 
-/// How many fds this process holds: the flood-fds-flat pin reads it.
+/// How many pidfds this process holds: the flood pin reads this, not
+/// the whole table — another test's transient socket or file is not
+/// this spawner's leak, and under `cargo test` they share the process.
 #[cfg(target_os = "linux")]
-fn fds_now() -> usize {
-    std::fs::read_dir("/proc/self/fd")
-        .map(|entries| entries.count())
-        .unwrap_or(0)
+fn pidfds_now() -> usize {
+    let Ok(entries) = std::fs::read_dir("/proc/self/fd") else {
+        return 0;
+    };
+    entries
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            std::fs::read_link(entry.path())
+                .is_ok_and(|target| target.to_string_lossy().contains("pidfd"))
+        })
+        .count()
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn a_fifth_child_while_four_run_is_refused() {
+    let _guard = serial();
     let mut spawner = Spawner::default();
     for _ in 0..MAX_CHILDREN {
         spawner
@@ -47,6 +71,7 @@ fn a_fifth_child_while_four_run_is_refused() {
 /// succeed, leaving the refusal test failing: the pin is load-bearing.
 #[test]
 fn quick_children_free_their_slots() {
+    let _guard = serial();
     let mut spawner = Spawner::default();
     for _ in 0..8 {
         spawner.spawn(&request("true")).expect("true runs");
@@ -89,8 +114,9 @@ fn an_empty_argv_is_refused() {
 #[test]
 #[cfg(target_os = "linux")]
 fn a_flood_leaves_fds_flat() {
+    let _guard = serial();
     let mut spawner = Spawner::default();
-    let before = fds_now();
+    let before = pidfds_now();
     for _ in 0..MAX_CHILDREN {
         let _ = spawner.spawn(&argv_request(&["sleep", "120"]));
     }
@@ -98,18 +124,11 @@ fn a_flood_leaves_fds_flat() {
     assert!(error.contains("4"), "{error}");
     spawner.kill_all();
     spawner.reap();
-    // Deterministic half: every child is collected.
+    // Every child is collected, and every pidfd closed with it: an
+    // exact count, since the lock keeps the other floods out and no
+    // other test in the process opens pidfds.
     assert_eq!(spawner.running(), 0);
-    // The fd half tolerates two strays: under `cargo test` every test
-    // shares one process, and another test may hold a transient fd
-    // across this measurement (under nextest each test is its own
-    // process and the count is exact). A real leak keeps all four
-    // pidfds, which this still catches.
-    let after = fds_now();
-    assert!(
-        after <= before + 2,
-        "an exec flood costs fds: {before} -> {after}"
-    );
+    assert_eq!(pidfds_now(), before, "an exec flood costs pidfds");
     // And the freed slots serve again.
     for _ in 0..MAX_CHILDREN {
         spawner
@@ -119,11 +138,13 @@ fn a_flood_leaves_fds_flat() {
     spawner.kill_all();
     spawner.reap();
     assert_eq!(spawner.running(), 0);
+    assert_eq!(pidfds_now(), before, "a second flood costs pidfds");
 }
 
 #[test]
 #[cfg(target_os = "linux")]
 fn the_environment_carries_the_notification() {
+    let _guard = serial();
     // A hook that writes its environment to a file, then the test reads
     // the file back: the only reader of the env shape.
     let dir = std::env::temp_dir().join(format!("scootnotify-exec-{}", std::process::id()));
