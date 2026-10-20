@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::model::dnd::Dnd;
 use crate::model::store::{IdFile, Store};
 
-use super::{Feed, State, MODULE_ID, parse_reply, payload, scan_names, set_line};
+use super::{Feed, MODULE_ID, State, parse_reply, payload, scan_names, set_line};
 
 fn now() -> Instant {
     Instant::now()
@@ -61,7 +61,9 @@ fn state(dnd: Dnd, unread: usize, critical: bool) -> State {
 }
 
 fn get<'v>(value: &'v serde_json::Value, key: &str) -> &'v serde_json::Value {
-    value.get(key).unwrap_or_else(|| panic!("payload has `{key}`: {value}"))
+    value
+        .get(key)
+        .unwrap_or_else(|| panic!("payload has `{key}`: {value}"))
 }
 
 #[test]
@@ -79,7 +81,10 @@ fn unread_payload_names_normal_and_counts() {
         get(&value, "tooltip"),
         &serde_json::json!("3 notifications -- click to hold them with do-not-disturb")
     );
-    assert!(value.get("icon").is_none(), "no icon key when empty: {value}");
+    assert!(
+        value.get("icon").is_none(),
+        "no icon key when empty: {value}"
+    );
 }
 
 #[test]
@@ -98,7 +103,10 @@ fn dnd_payload_mutes_with_count() {
         get(&value, "tooltip"),
         &serde_json::json!("2 notifications held by do-not-disturb -- click to let them through")
     );
-    assert!(value.get("icon").is_none(), "no icon key when empty: {value}");
+    assert!(
+        value.get("icon").is_none(),
+        "no icon key when empty: {value}"
+    );
 }
 
 #[test]
@@ -158,10 +166,7 @@ fn replies_sort_into_sent_not_placed_or_refused() {
         parse_reply(br#"{"type":"error","message":"boom"}"#),
         super::Send::Refused(_)
     ));
-    assert!(matches!(
-        parse_reply(b"not json"),
-        super::Send::Refused(_)
-    ));
+    assert!(matches!(parse_reply(b"not json"), super::Send::Refused(_)));
     assert!(matches!(parse_reply(b""), super::Send::Refused(_)));
 }
 
@@ -220,11 +225,7 @@ impl FakeBar {
         Self::serve_on(listener, reply, expect)
     }
 
-    fn serve_on(
-        listener: UnixListener,
-        reply: &'static str,
-        expect: usize,
-    ) -> Self {
+    fn serve_on(listener: UnixListener, reply: &'static str, expect: usize) -> Self {
         let received = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&received);
         let thread = std::thread::spawn(move || serve_loop(listener, &recorded, reply, expect));
@@ -278,13 +279,17 @@ impl FakeBar {
     }
 
     fn served(mut self) -> usize {
-        self.thread.take().expect("the thread runs").join().expect("the thread joins")
+        self.thread
+            .take()
+            .expect("the thread runs")
+            .join()
+            .expect("the thread joins")
     }
 }
 
 fn scratch_socket(tag: &str) -> (tempfile::TempDir, std::path::PathBuf) {
-    let dir = tempfile::TempDir::with_prefix(format!("scootnotify-feed-{tag}"))
-        .expect("a scratch dir");
+    let dir =
+        tempfile::TempDir::with_prefix(format!("scootnotify-feed-{tag}")).expect("a scratch dir");
     let socket = dir.path().join("scootbar-test.sock");
     (dir, socket)
 }
@@ -327,9 +332,15 @@ fn dismissals_and_dnd_toggles_push_exactly() {
     assert!(feed.sync(&store).is_none());
     let received = bar.received();
     assert_eq!(received.len(), 3, "arrival, dismissal, DND toggle");
-    assert_eq!(received[0], serde_json::json!({"text": "1", "class": "normal", "tooltip": "1 notifications -- click to hold them with do-not-disturb"}));
+    assert_eq!(
+        received[0],
+        serde_json::json!({"text": "1", "class": "normal", "tooltip": "1 notifications -- click to hold them with do-not-disturb"})
+    );
     assert_eq!(received[1], serde_json::json!({"text": ""}));
-    assert_eq!(received[2], serde_json::json!({"text": "DND", "class": "muted", "tooltip": "do-not-disturb is on -- click to let notifications through"}));
+    assert_eq!(
+        received[2],
+        serde_json::json!({"text": "DND", "class": "muted", "tooltip": "do-not-disturb is on -- click to let notifications through"})
+    );
     assert_eq!(bar.served(), 3);
 }
 
@@ -376,14 +387,21 @@ fn not_placed_logs_once_and_counts_as_placed() {
 #[test]
 fn other_refusals_settle_until_the_next_change() {
     let (_dir, socket) = scratch_socket("refused");
-    let bar = FakeBar::serve(socket.clone(), "{\"type\":\"error\",\"message\":\"boom\"}\n", 1);
+    let bar = FakeBar::serve(
+        socket.clone(),
+        "{\"type\":\"error\",\"message\":\"boom\"}\n",
+        1,
+    );
     let mut store = store();
     let mut feed = Feed::for_test(socket, "", "");
     feed.baseline(&store);
     shown(&mut store, ":1.1", "a");
     let line = feed.sync(&store).expect("a refused push says why");
     assert!(line.contains("boom"), "{line}");
-    assert!(!feed.owed(), "settled: the socket exists, so no appearance will fire");
+    assert!(
+        !feed.owed(),
+        "settled: the socket exists, so no appearance will fire"
+    );
     assert!(feed.poll_fd().is_none());
     // Same state again: nothing more is said or dialed.
     assert!(feed.sync(&store).is_none());
@@ -407,7 +425,10 @@ fn a_bar_started_later_catches_up_on_the_watch() {
     let bar = FakeBar::serve(socket, "{\"type\":\"ok\"}\n", 1);
     wait_readable(&mut feed);
     let retried = feed.retry(&store);
-    assert!(retried.is_none(), "the owed send goes out on the watch: {retried:?}");
+    assert!(
+        retried.is_none(),
+        "the owed send goes out on the watch: {retried:?}"
+    );
     assert!(!feed.owed(), "the owed send went out on the watch");
     assert!(feed.poll_fd().is_none(), "the watch retires with the debt");
     assert_eq!(bar.received().len(), 1);
@@ -472,7 +493,10 @@ fn state_is_critical_for_live_or_unseen() {
     };
     assert!(State::of(&store).critical, "a live critical counts");
     store.dismiss(cid);
-    assert!(!State::of(&store).critical, "a seen dismissal stops counting");
+    assert!(
+        !State::of(&store).critical,
+        "a seen dismissal stops counting"
+    );
     store.set_dnd(Dnd::On);
     let _ = {
         let (arrival, _) = store.notify(urgent(":1.1", "c"), now(), 0);

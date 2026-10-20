@@ -20,7 +20,7 @@ fn every_key_sets() {
           width_px = 400\nmax_visible = 3\nmargin_px = 8\nanchor = \"bottom-left\"\n\
           output = \"HDMI-1\"\nbody_lines = 3\nborder_px = 1\nradius = 4\n\
           pause_when_idle_secs = 30\nbar_icon_unread = \"●\"\nbar_icon_dnd = \"☾\"\n"
-        .as_bytes(),
+            .as_bytes(),
     )
     .unwrap();
     assert_eq!(config.timeout_low_ms, 1000);

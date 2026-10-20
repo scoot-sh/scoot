@@ -107,10 +107,7 @@ pub fn payload(state: State, icon_unread: &str, icon_dnd: &str) -> serde_json::V
             }),
         );
         if !icon_dnd.is_empty() {
-            object.insert(
-                "icon".to_owned(),
-                Value::String(icon_dnd.to_owned()),
-            );
+            object.insert("icon".to_owned(), Value::String(icon_dnd.to_owned()));
         }
     } else if state.unread > 0 {
         object.insert(
@@ -119,7 +116,11 @@ pub fn payload(state: State, icon_unread: &str, icon_dnd: &str) -> serde_json::V
         );
         object.insert(
             "class".to_owned(),
-            Value::String(String::from(if state.critical { "urgent" } else { "normal" })),
+            Value::String(String::from(if state.critical {
+                "urgent"
+            } else {
+                "normal"
+            })),
         );
         object.insert(
             "tooltip".to_owned(),
@@ -129,10 +130,7 @@ pub fn payload(state: State, icon_unread: &str, icon_dnd: &str) -> serde_json::V
             )),
         );
         if !icon_unread.is_empty() {
-            object.insert(
-                "icon".to_owned(),
-                Value::String(icon_unread.to_owned()),
-            );
+            object.insert("icon".to_owned(), Value::String(icon_unread.to_owned()));
         }
     } else {
         object.insert("text".to_owned(), Value::String(String::new()));
@@ -270,7 +268,10 @@ impl Feed {
         // Placed first: every arm below settles the change, and only
         // the watch (an appearing bar) or the next change retries.
         self.last = Some(current);
-        match send_to(&self.socket_path()?, &payload(current, &self.icon_unread, &self.icon_dnd)) {
+        match send_to(
+            &self.socket_path()?,
+            &payload(current, &self.icon_unread, &self.icon_dnd),
+        ) {
             Send::Sent => {
                 self.owed = false;
                 self.disarm();
@@ -318,9 +319,9 @@ impl Feed {
                             ))
                         }
                     }
-                    Send::NoBar(_) | Send::Refused(_) => {
-                        Some(format!("scootnotify: cannot reach the bar ({detail}); leaving it"))
-                    }
+                    Send::NoBar(_) | Send::Refused(_) => Some(format!(
+                        "scootnotify: cannot reach the bar ({detail}); leaving it"
+                    )),
                 }
             }
             Send::Refused(detail) => {
@@ -329,7 +330,9 @@ impl Feed {
                 // exists, so no appearance will fire, and the next
                 // change retries.
                 self.owed = false;
-                Some(format!("scootnotify: cannot reach the bar ({detail}); leaving it"))
+                Some(format!(
+                    "scootnotify: cannot reach the bar ({detail}); leaving it"
+                ))
             }
         }
     }

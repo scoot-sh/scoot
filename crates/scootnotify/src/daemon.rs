@@ -324,9 +324,7 @@ fn run_loop(
             let _ = guard.read();
         }
         // The bar's socket may have appeared: a send owed retries.
-        if feed_watch
-            && let Some(line) = feed.retry(server.store())
-        {
+        if feed_watch && let Some(line) = feed.retry(server.store()) {
             warn(format_args!("{line}"));
         }
         if conn.dead() {

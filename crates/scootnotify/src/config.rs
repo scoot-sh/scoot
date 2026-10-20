@@ -443,9 +443,7 @@ impl Config {
                 }
             }
             if icon.chars().any(|c| c.is_control()) {
-                return Err(format!(
-                    "config refused: {key} carries a control character"
-                ));
+                return Err(format!("config refused: {key} carries a control character"));
             }
         }
         Ok(self)
