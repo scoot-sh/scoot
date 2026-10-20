@@ -572,8 +572,9 @@ fn poll_turn(
     // The feed's socket watch, only while a send is owed: a bar
     // started later wakes this poll once, and an idle daemon holds no
     // watch at all.
-    let feed_at = if let Some(watch) = feed.poll_fd() {
-        fds.push(PollFd::new(&watch, PollFlags::IN));
+    let feed_fd = feed.poll_fd().unwrap_or(bus);
+    let feed_at = if feed.poll_fd().is_some() {
+        fds.push(PollFd::new(&feed_fd, PollFlags::IN));
         Some(fds.len() - 1)
     } else {
         None

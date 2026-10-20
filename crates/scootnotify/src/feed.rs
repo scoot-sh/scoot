@@ -458,7 +458,7 @@ fn send_to(socket: &Path, payload: &serde_json::Value) -> Send {
         }
     }
     let reply = {
-        use std::io::{BufRead, BufReader};
+        use std::io::{BufRead, BufReader, Read};
         let mut reader = BufReader::new(&stream);
         let mut reply = Vec::new();
         match reader.take(MAX_REPLY).read_until(b'\n', &mut reply) {
