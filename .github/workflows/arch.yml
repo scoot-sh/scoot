@@ -281,6 +281,8 @@ jobs:
           for d in "$GITHUB_WORKSPACE"/.cargo-target/release/build/scoot-*/out; do
             echo "--- $d ---"
             sudo -u builder bash -c "ls -l '$d' | grep -i gbm || true"
+            sudo -u builder bash -c "file '$d/gbm_stub.o' || true"
+            sudo -u builder bash -c "nm -g --defined-only '$d/gbm_stub.o' | head -8 || true"
           done
 
       - name: Upload the built packages and lint logs
