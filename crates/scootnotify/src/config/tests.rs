@@ -106,10 +106,10 @@ fn out_of_range_numbers_name_their_key() {
 #[test]
 fn the_bar_icon_rows_hold() {
     assert!(parse(b"bar_icon_unread = \"\"\n").is_ok());
-    assert!(parse(b"bar_icon_unread = \"\xe2\x97\x8f\"\n").is_ok());
-    assert!(parse(b"bar_icon_dnd = \"\xe2\x98\xbe\"\n").is_ok());
+    assert!(parse("bar_icon_unread = \"●\"\n".as_bytes()).is_ok());
+    assert!(parse("bar_icon_dnd = \"☾\"\n".as_bytes()).is_ok());
     for (text, key) in [
-        ("bar_icon_unread = \"\xe2\x97\x8f\xe2\x97\x8f\"\n", "bar_icon_unread"),
+        ("bar_icon_unread = \"●●\"\n", "bar_icon_unread"),
         ("bar_icon_dnd = \"ab\"\n", "bar_icon_dnd"),
         ("bar_icon_unread = \"\\u0001\"\n", "bar_icon_unread"),
     ] {
