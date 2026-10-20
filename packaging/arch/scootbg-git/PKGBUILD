@@ -5,7 +5,7 @@
 # `scootbg`: install one or the other, never both.
 
 pkgname=scootbg-git
-pkgver=0.3.1.r0.g0000000
+pkgver=0.4.0.r0.g0000000
 pkgrel=1
 pkgdesc='Wallpaper daemon for the scoot compositor (git)'
 arch=('x86_64' 'aarch64')
@@ -15,7 +15,7 @@ depends=('glibc' 'libgcc')
 makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
 provides=('scootbg')
 conflicts=('scootbg')
-options=('!debug' '!lto')
+options=('!debug')
 source=("$pkgname::git+https://github.com/scoot-sh/scoot.git")
 sha256sums=('SKIP')
 

@@ -72,7 +72,7 @@
 # render) on bare Ubuntu and Debian containers. It never runs on
 # pull requests or dry runs. `workflow_dispatch` with `verify_only:
 # true` and a `tag` runs only resolve plus this job, from any ref, to
-# test it read-only against an existing release (e.g. v0.3.1); it
+# test it read-only against an existing release (e.g. v0.4.0); it
 # publishes and builds nothing.
 #
 # RECOVERY: re-run the failed workflow run (same tag): the gates resume
@@ -131,7 +131,6 @@ on:
       - 'scripts/sync-packaging-versions'
       - 'scripts/test_sync_packaging_versions.py'
       - 'scripts/test_release_resolve.py'
-      - 'packaging/install-nerd-fonts.sh'
   workflow_dispatch:
     inputs:
       tag:
@@ -242,7 +241,6 @@ jobs:
         run: |
           python3 scripts/test_release_resolve.py
           python3 scripts/test_sync_packaging_versions.py
-          sh -n packaging/install-nerd-fonts.sh
 
   # Parse the tag and run every refusal gate. Its outputs drive the rest
   # of the pipeline; a refusal fails the run before anything builds.
@@ -721,11 +719,6 @@ jobs:
           done
           exit "$fail"
 
-      # Each binary on a bare Ubuntu and a bare Debian container: the
-      # stock image plus the documented runtime libraries (scoot's five
-      # system libraries, the launcher's keyboard one) and one DejaVu
-      # font for the bar's --check, which loads a font exactly as a
-      # start does. No toolchain, no -dev packages.
       # Each binary on a bare Ubuntu and a bare Debian container: the
       # stock image plus the documented runtime libraries (scoot's five
       # system libraries, the launcher's keyboard one) and one DejaVu

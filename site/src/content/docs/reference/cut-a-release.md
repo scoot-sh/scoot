@@ -147,7 +147,7 @@ its attestation, and runs each binary on bare Ubuntu and Debian
 containers for both architectures. It builds and publishes nothing:
 
 ```sh
-gh workflow run release --ref main -f tag=v0.3.1 -f verify_only=true
+gh workflow run release --ref main -f tag=v0.4.0 -f verify_only=true
 ```
 
 Use it to test the verify job itself, and to re-prove an old release

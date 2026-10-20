@@ -1291,8 +1291,14 @@ EOF
     fi
     echo "ok: the preview reverted after its delay"
 }
-if [ -n "${SMOKE_SKIP_LOOKS:-}" ]; then
-    echo "skipped: SMOKE_SKIP_LOOKS is set ($SMOKE_SKIP_LOOKS)"
+if [ "${SMOKE_SKIP_LOOKS:-}" = 1 ]; then
+    # Packaging proof containers install to /usr/bin, where the system's
+    # fc-match sits beside the binary and shadows this script's PATH stub,
+    # and the Nerd families the shipped looks name have no distro package
+    # there — so the apply would refuse. The stubbed looks path stays
+    # covered in the source-tree runs; the packaging proof keeps the
+    # backend stages.
+    echo "skipped: SMOKE_SKIP_LOOKS=1 (no Nerd fonts beside the installed binaries)"
 elif [ -n "$SCOOTBG" ]; then
     ( run_looks_test ) || exit 1
 else

@@ -13,7 +13,7 @@
 # this exact file against a same-layout tarball of HEAD.
 
 pkgname=scootbar
-pkgver=0.3.1
+pkgver=0.4.0
 pkgrel=1
 pkgdesc='Status bar for the scoot compositor'
 arch=('x86_64' 'aarch64')
@@ -24,7 +24,7 @@ makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
 optdepends=('systemd: run the bar as a user unit (scootbar.service)'
             'ttf-dejavu: sans font the bar finds on its own')
 install=scootbar.install
-options=('!debug' '!lto')
+options=('!debug')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 

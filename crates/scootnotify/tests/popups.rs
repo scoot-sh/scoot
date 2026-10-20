@@ -805,10 +805,18 @@ fn empty_holds_no_surface_or_buffers() {
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    // The bar feed arms its one-shot inotify watch the moment the
+    // test's own first Notify finds no bar (the popups tests run with
+    // no bar), after the idle baseline above: the cardless
+    // GetServerInformation serving probe disturbs no count, so the
+    // baseline holds no watch while the dismissed card leaves exactly
+    // one owed watch behind. +1 is that owed watch, not a leak: any
+    // further fd (a leaked buffer or socket) still fails this assert,
+    // and the shm-mapping asserts above still pin the surface side.
     assert_eq!(
         test_support::open_fds(pid),
-        idle_fds,
-        "the card's fds return to the idle count"
+        idle_fds + 1,
+        "the card's fds return to the idle count plus the one owed bar-feed watch"
     );
     kill(server);
 }

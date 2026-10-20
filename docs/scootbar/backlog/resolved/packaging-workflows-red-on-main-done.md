@@ -17,25 +17,14 @@ Filed 2026-10-19 from the independent review of PR #682 (dispatched on its branc
 - **deb smoke:** `deb.yml` builds, lints and installs all four packages and runs `--check` on the bar and launcher, then fails in the shared smoke test applying the `vinyl-sunset` look, which needs Nerd fonts that bookworm-slim plus `fonts-dejavu-core` lack. Install the fonts in the proof containers or gate the look stage on their presence.
 - Then dispatch all three workflows and record a green run per package in this entry.
 
+## Green runs (PR #696, head 382e29af)
+
+- arch: https://github.com/scoot-sh/scoot/actions/runs/39383628499 (success)
+- rpm: https://github.com/scoot-sh/scoot/actions/runs/39383631150 (success; remaining warnings are the accepted set: 5x no-manual-page-for-binary plus no-documentation on scootbg/scootlaunch)
+- deb: https://github.com/scoot-sh/scoot/actions/runs/39383633489 (success; look stage skipped via SMOKE_SKIP_LOOKS on both arches)
+
+Fixes, all in PR #696: Arch scoot/scoot-git PKGBUILDs pin bfd (`-C link-arg=-fuse-ld=bfd`) because Rust 1.99's default lld leaves the static libgbm stub unpulled; mesa stays an optdepend (no DT_NEEDED, so no depends change). scootlaunch %description reworded off bare 'systemd' ('service scope'), no new rpmlint filter. Smoke looks gated behind SMOKE_SKIP_LOOKS in the installed-binary proofs (no distro package provides the Nerd families; /usr/bin/fc-match shadows the stub).
+
 ## Docs (same PR)
 
 No user-visible docs change; say so in the PR.
-
-## Done (2026-10-20, PR #693)
-
-All three green on the `ci/release-hardening` branch (versions synced
-to 0.3.1 by `scripts/sync-packaging-versions` itself):
-
-- deb (amd64 + arm64): https://github.com/scoot-sh/scoot/actions/runs/39380985545
-- rpm (Fedora 43 + openSUSE Tumbleweed): https://github.com/scoot-sh/scoot/actions/runs/39380988577
-- arch (all eight PKGBUILDs): https://github.com/scoot-sh/scoot/actions/runs/39396791467
-
-Beyond the ticket's two items, the gate surfaced and the PR fixes:
-Nerd fonts installed in all proof containers (the ticket's first
-option); the looks stage gated off in deb/rpm proof containers
-(`SMOKE_SKIP_LOOKS`: bookworm foot 1.13 and Fedora foot both refuse
-the rendered `initial-color-theme`); a `rpmlint` spelling error on
-`systemd` in the new scootlaunch description reworded; and a
-pre-existing Arch link failure (`undefined symbol: gbm_*`, red since
-#588) fixed by linking the stub object by path plus `!lto` in the
-PKGBUILDs (makepkg's `-flto=auto` bytecode + lld + liblto_plugin).

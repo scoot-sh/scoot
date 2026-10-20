@@ -44,9 +44,11 @@ toml = "1"
 serde.workspace = true
 # Waiting on the bus fd and the expiry timerfd through raw syscalls, no
 # `libc` crate: the same `rustix` the D-Bus client pulls in. The `process`
-# feature feeds the rule-exec spawner's pidfds (`pidfd_open`); nothing in
+# feature feeds the rule-exec spawner's pidfds (`pidfd_open`); the `net`
+# feature opens the bar feed's push socket non-blocking (`socket` plus
+# `connect` without ever waiting); nothing in
 # it links a shared library beyond what std links.
-rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "process", "time"] }
+rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "net", "process", "time"] }
 # The popup's own Wayland objects (the overlay layer surface it draws
 # on, the seat and pointer that drive it, the activation tokens and the
 # idle notifications): plain crates, as scootbar binds them, so nothing

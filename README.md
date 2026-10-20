@@ -111,9 +111,10 @@ X11 apps (with the XWayland build). [Full list](https://www.scoot.sh/scoot/proto
 
 - **The launcher as the default.** `scootlaunch` works, but new installs
   still get fuzzel until the default flips.
-- **The notification bar feed.** `scootnotify` shows popups and answers
-  `msg`, but the bar's notification module still reads mako, and there
-  is no Nix module or distro packaging for it yet.
+- **The notification bar feed.** `scootnotify` pushes the bar's
+  `notifications` module natively, but new installs still wire the bar
+  through mako (`scoot-notify-sync`, `makoctl` on-click) until the Nix
+  switch flips, and there is no distro packaging for it yet.
 - **Changing display modes from `wlr-randr` or Settings.** Read-only for
   now. Set modes in the config file.
 - **Some X11 extras.** X input methods (XIM) and X window icons.

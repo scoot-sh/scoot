@@ -179,10 +179,6 @@ jobs:
           # skip the example configs this step checks: clear it, so the
           # installed files are the whole package.
           dnf install -y --setopt=tsflags= "$GITHUB_WORKSPACE"/rpmbuild/RPMS/*/*.rpm
-          # Nerd fonts for the smoke test's looks stage: vinyl-sunset
-          # names two families no Fedora package ships, and `look
-          # apply` refuses a family fc-match resolves to a fallback.
-          sh "$GITHUB_WORKSPACE/packaging/install-nerd-fonts.sh"
           scoot --version
           scootbg --version
           scootbar --version
@@ -193,11 +189,9 @@ jobs:
           chmod 700 /tmp/rpm-smoke-xdg
           export XDG_RUNTIME_DIR=/tmp/rpm-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
           export SMOKE_PREFIX=/tmp/rpm-smoke SMOKE_REQUIRE_SCOOTBG=1
-          # No looks stage here either (see deb.yml): `look apply`
-          # validates the rendered foot.ini with the installed foot, and
-          # the Fedora foot rejects the `initial-color-theme` the looks
-          # render (it wants 1 or 2, not dark), so the apply refuses.
-          export SMOKE_SKIP_LOOKS="fedora foot rejects initial-color-theme=dark"
+          # Same Nerd-fonts gate as deb.yml: no distro package provides the
+          # shipped families, and /usr/bin/fc-match shadows the smoke stub.
+          export SMOKE_SKIP_LOOKS=1
           scripts/smoke-test.sh
 
       - name: Upload the built RPMs and lint logs
