@@ -295,7 +295,10 @@ fn poll_bar(
         if start.elapsed() >= budget {
             return last;
         }
-        std::thread::sleep(Duration::from_millis(50));
+        // Gentle cadence: every iteration spawns a client process, and
+        // three tests polling hot would flood the bar's accept backlog
+        // under load faster than a starved bar drains it.
+        std::thread::sleep(Duration::from_millis(200));
     }
 }
 
@@ -365,7 +368,9 @@ fn wait_bar_serving(session: &Session, bar: &Path, child: &mut Child) {
             start.elapsed() < Duration::from_secs(10),
             "the bar never served"
         );
-        std::thread::sleep(Duration::from_millis(50));
+        // Gentle cadence (see poll_bar): a starting bar is at its
+        // slowest, and hot queries only pile onto its backlog.
+        std::thread::sleep(Duration::from_millis(200));
     }
 }
 
@@ -398,7 +403,8 @@ fn wait_serving(session: &Session, notify: &mut Child) {
             start.elapsed() < Duration::from_secs(30),
             "the daemon never served"
         );
-        std::thread::sleep(Duration::from_millis(50));
+        // Gentle cadence (see poll_bar): same accept backlog, same reason.
+        std::thread::sleep(Duration::from_millis(200));
     }
 }
 
