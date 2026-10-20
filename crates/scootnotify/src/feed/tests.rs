@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::model::dnd::Dnd;
 use crate::model::store::{IdFile, Store};
 
-use super::{Feed, MODULE_ID, State, parse_reply, payload, scan_names, set_line};
+use super::{Feed, MODULE_ID, Outcome, State, parse_reply, payload, scan_names, set_line};
 
 fn now() -> Instant {
     Instant::now()
@@ -154,20 +154,17 @@ fn set_line_carries_the_bar_wire_shape() {
 
 #[test]
 fn replies_sort_into_sent_not_placed_or_refused() {
-    assert!(matches!(
-        parse_reply(br#"{"type":"ok"}"#),
-        super::Send::Sent
-    ));
+    assert!(matches!(parse_reply(br#"{"type":"ok"}"#), Outcome::Sent));
     assert!(matches!(
         parse_reply(br#"{"type":"error","message":"`notifications` is not placed in this bar (it shows:)"}"#),
-        super::Send::NotPlaced
+        Outcome::NotPlaced
     ));
     assert!(matches!(
         parse_reply(br#"{"type":"error","message":"boom"}"#),
-        super::Send::Refused(_)
+        Outcome::Refused(_)
     ));
-    assert!(matches!(parse_reply(b"not json"), super::Send::Refused(_)));
-    assert!(matches!(parse_reply(b""), super::Send::Refused(_)));
+    assert!(matches!(parse_reply(b"not json"), Outcome::Refused(_)));
+    assert!(matches!(parse_reply(b""), Outcome::Refused(_)));
 }
 
 #[test]
@@ -217,18 +214,69 @@ struct FakeBar {
     thread: Option<std::thread::JoinHandle<usize>>,
 }
 
+/// How a fake bar answers: at once, after a delay, or never.
+#[derive(Debug, Clone, Copy)]
+enum Answer {
+    /// Every connection gets its reply at once.
+    Immediate,
+    /// Every connection waits this long first (a slow-but-healthy bar).
+    Delayed(Duration),
+    /// Only the first connection waits (a transient stall under load).
+    FirstDelayed(Duration),
+    /// No connection ever gets a reply (a stuck bar): each is held
+    /// open to the deadline. The thread is never joined (it exits by
+    /// itself at the cap, and every nextest test is its own process).
+    Silent,
+}
+
 impl FakeBar {
     /// Binds `socket` before returning, then answers every `set` with
     /// `reply`: the first dial cannot lose a bind race.
     fn serve(socket: std::path::PathBuf, reply: &'static str, expect: usize) -> Self {
         let listener = UnixListener::bind(&socket).expect("the fake bar binds");
-        Self::serve_on(listener, reply, expect)
+        Self::serve_on(listener, reply, expect, Answer::Immediate)
     }
 
-    fn serve_on(listener: UnixListener, reply: &'static str, expect: usize) -> Self {
+    /// Like `serve`, but every reply waits `delay` first.
+    fn serve_delayed(
+        socket: std::path::PathBuf,
+        reply: &'static str,
+        expect: usize,
+        delay: Duration,
+    ) -> Self {
+        let listener = UnixListener::bind(&socket).expect("the fake bar binds");
+        Self::serve_on(listener, reply, expect, Answer::Delayed(delay))
+    }
+
+    /// Like `serve`, but only the first reply waits (`first_delay`):
+    /// a transient stall, then a healthy bar.
+    fn serve_flaky(
+        socket: std::path::PathBuf,
+        reply: &'static str,
+        expect: usize,
+        first_delay: Duration,
+    ) -> Self {
+        let listener = UnixListener::bind(&socket).expect("the fake bar binds");
+        Self::serve_on(listener, reply, expect, Answer::FirstDelayed(first_delay))
+    }
+
+    /// Binds `socket` and holds every connection open without ever
+    /// replying: a stuck bar. Never joined (see `Answer::Silent`).
+    fn serve_silent(socket: std::path::PathBuf, expect: usize) -> Self {
+        let listener = UnixListener::bind(&socket).expect("the fake bar binds");
+        Self::serve_on(listener, "", expect, Answer::Silent)
+    }
+
+    fn serve_on(
+        listener: UnixListener,
+        reply: &'static str,
+        expect: usize,
+        answer: Answer,
+    ) -> Self {
         let received = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&received);
-        let thread = std::thread::spawn(move || serve_loop(listener, &recorded, reply, expect));
+        let thread =
+            std::thread::spawn(move || serve_loop(listener, &recorded, reply, expect, answer));
         Self {
             received,
             thread: Some(thread),
@@ -237,12 +285,13 @@ impl FakeBar {
 }
 
 /// Serves `expect` connections on the bound `listener`, recording
-/// each `set` value and answering `reply`.
+/// each `set` value and answering per `answer`.
 fn serve_loop(
     listener: UnixListener,
     recorded: &Arc<Mutex<Vec<serde_json::Value>>>,
     reply: &'static str,
     expect: usize,
+    answer: Answer,
 ) -> usize {
     listener.set_nonblocking(true).expect("nonblocking");
     let start = Instant::now();
@@ -261,8 +310,24 @@ fn serve_loop(
                 {
                     recorded.lock().expect("received locks").push(value);
                 }
-                let _ = (&stream).write_all(reply.as_bytes());
-                let _ = (&stream).flush();
+                match answer {
+                    Answer::Immediate => {}
+                    Answer::Delayed(delay) => std::thread::sleep(delay),
+                    Answer::FirstDelayed(delay) if served == 1 => std::thread::sleep(delay),
+                    Answer::FirstDelayed(_) => {}
+                    Answer::Silent => {
+                        // Hold the connection open without answering, in
+                        // short sleeps so the thread still exits at the
+                        // cap once the test moved on.
+                        while start.elapsed() < Duration::from_secs(10) {
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                    }
+                }
+                if !matches!(answer, Answer::Silent) {
+                    let _ = (&stream).write_all(reply.as_bytes());
+                    let _ = (&stream).flush();
+                }
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(5));
@@ -305,10 +370,16 @@ fn baseline_sends_nothing_and_change_pushes_once() {
     assert!(feed.sync(&store).is_none());
     assert!(bar.received().is_empty());
     shown(&mut store, ":1.1", "a");
-    // One change: one push, succeeding silently.
+    // One change: one push, succeeding silently. The start never
+    // blocks; the drive below completes it the way the loop does.
     assert!(feed.sync(&store).is_none());
+    assert!(drive(&mut feed, &store, Duration::from_secs(5)).is_empty());
     assert!(!feed.owed());
     assert!(feed.poll_fd().is_none(), "no watch when nothing is owed");
+    assert!(
+        feed.poll_timeout().is_none(),
+        "no timeout when nothing is owed"
+    );
     // Same state again: no second dial.
     assert!(feed.sync(&store).is_none());
     let received = bar.received();
@@ -326,10 +397,13 @@ fn dismissals_and_dnd_toggles_push_exactly() {
     feed.baseline(&store);
     let id = shown(&mut store, ":1.1", "a");
     assert!(feed.sync(&store).is_none());
+    assert!(drive(&mut feed, &store, Duration::from_secs(5)).is_empty());
     store.dismiss(id);
     assert!(feed.sync(&store).is_none());
+    assert!(drive(&mut feed, &store, Duration::from_secs(5)).is_empty());
     store.set_dnd(Dnd::On);
     assert!(feed.sync(&store).is_none());
+    assert!(drive(&mut feed, &store, Duration::from_secs(5)).is_empty());
     let received = bar.received();
     assert_eq!(received.len(), 3, "arrival, dismissal, DND toggle");
     assert_eq!(
@@ -356,6 +430,10 @@ fn no_bar_is_owed_with_a_watch_and_stays_quiet() {
     assert!(line.contains("cannot reach the bar"), "{line}");
     assert!(feed.owed());
     assert!(feed.poll_fd().is_some(), "the watch exists only while owed");
+    assert!(
+        feed.poll_timeout().is_none(),
+        "owed-with-no-bar waits on the watch alone: zero wakeups"
+    );
     // No change: nothing more is said or dialed — the settled change
     // waits for the watch or the next change, never for a turn.
     assert!(feed.sync(&store).is_none());
@@ -374,13 +452,17 @@ fn not_placed_logs_once_and_counts_as_placed() {
     let mut feed = Feed::for_test(socket, "", "");
     feed.baseline(&store);
     shown(&mut store, ":1.1", "a");
-    let line = feed.sync(&store).expect("the guidance goes out once");
-    assert!(line.contains("no notifications module"), "{line}");
+    assert!(feed.sync(&store).is_none(), "the start never blocks");
+    let lines = drive(&mut feed, &store, Duration::from_secs(5));
+    assert_eq!(lines.len(), 1, "the guidance goes out once: {lines:?}");
+    assert!(lines[0].contains("no notifications module"), "{}", lines[0]);
     assert!(!feed.owed(), "not-placed is placed: no watch, no owed send");
     assert!(feed.poll_fd().is_none());
+    assert!(feed.poll_timeout().is_none());
     // The next change retries, but the guidance stays said.
     shown(&mut store, ":1.1", "b");
-    assert!(feed.sync(&store).is_none(), "second refusal stays silent");
+    assert!(feed.sync(&store).is_none());
+    assert!(drive(&mut feed, &store, Duration::from_secs(5)).is_empty());
     assert_eq!(bar.served(), 2);
 }
 
@@ -396,13 +478,16 @@ fn other_refusals_settle_until_the_next_change() {
     let mut feed = Feed::for_test(socket, "", "");
     feed.baseline(&store);
     shown(&mut store, ":1.1", "a");
-    let line = feed.sync(&store).expect("a refused push says why");
-    assert!(line.contains("boom"), "{line}");
+    assert!(feed.sync(&store).is_none(), "the start never blocks");
+    let lines = drive(&mut feed, &store, Duration::from_secs(5));
+    assert_eq!(lines.len(), 1, "a refused push says why: {lines:?}");
+    assert!(lines[0].contains("boom"), "{}", lines[0]);
     assert!(
         !feed.owed(),
         "settled: the socket exists, so no appearance will fire"
     );
     assert!(feed.poll_fd().is_none());
+    assert!(feed.poll_timeout().is_none());
     // Same state again: nothing more is said or dialed.
     assert!(feed.sync(&store).is_none());
     assert_eq!(bar.served(), 1);
@@ -429,10 +514,134 @@ fn a_bar_started_later_catches_up_on_the_watch() {
         retried.is_none(),
         "the owed send goes out on the watch: {retried:?}"
     );
+    assert!(drive(&mut feed, &store, Duration::from_secs(5)).is_empty());
     assert!(!feed.owed(), "the owed send went out on the watch");
     assert!(feed.poll_fd().is_none(), "the watch retires with the debt");
+    assert!(feed.poll_timeout().is_none());
     assert_eq!(bar.received().len(), 1);
     assert_eq!(bar.served(), 1);
+}
+
+#[test]
+fn slow_but_healthy_bar_converges_without_a_new_change() {
+    // Every reply waits 300 ms (inside the test deadline): a
+    // slow-but-healthy bar converges on the first attempt, with no new
+    // change and no re-dial.
+    let (_dir, socket) = scratch_socket("slowbar");
+    let bar = FakeBar::serve_delayed(
+        socket.clone(),
+        "{\"type\":\"ok\"}\n",
+        1,
+        Duration::from_millis(300),
+    );
+    let mut store = store();
+    let mut feed = Feed::for_test(socket, "", "");
+    feed.baseline(&store);
+    shown(&mut store, ":1.1", "a");
+    assert!(feed.sync(&store).is_none(), "the start never blocks");
+    assert!(drive(&mut feed, &store, Duration::from_secs(5)).is_empty());
+    assert!(!feed.owed(), "the slow reply still placed");
+    assert!(feed.poll_fd().is_none());
+    assert!(feed.poll_timeout().is_none());
+    assert_eq!(bar.received().len(), 1);
+    assert_eq!(bar.served(), 1);
+}
+
+#[test]
+fn transient_timeout_retries_while_reachable() {
+    // Only the first reply stalls past the test deadline (700 ms):
+    // that attempt fails owed, and the bounded re-dial converges
+    // without a new change. One line for the change; the re-dial is
+    // silent.
+    let (_dir, socket) = scratch_socket("flakybar");
+    let bar = FakeBar::serve_flaky(
+        socket.clone(),
+        "{\"type\":\"ok\"}\n",
+        2,
+        Duration::from_millis(700),
+    );
+    let mut store = store();
+    let mut feed = Feed::for_test(socket, "", "");
+    feed.baseline(&store);
+    shown(&mut store, ":1.1", "a");
+    assert!(feed.sync(&store).is_none(), "the start never blocks");
+    let lines = drive(&mut feed, &store, Duration::from_secs(10));
+    assert_eq!(lines.len(), 1, "one line per failed change: {lines:?}");
+    assert!(lines[0].contains("cannot reach the bar"), "{}", lines[0]);
+    assert!(!feed.owed(), "the re-dial placed the owed send");
+    assert!(feed.poll_fd().is_none());
+    assert!(feed.poll_timeout().is_none());
+    let received = bar.received();
+    assert_eq!(received.len(), 2, "both attempts carried the same state");
+    assert_eq!(received[0], received[1]);
+    assert_eq!(received[1], payload(State::of(&store), "", ""));
+    assert_eq!(bar.served(), 2);
+}
+
+#[test]
+fn silent_bar_parks_owed_then_recovers_on_rebind() {
+    // The bar accepts and never answers: every attempt times out, the
+    // bounded re-dials stay silent, and the spell parks owed on the
+    // watch alone (no timeout: nothing wakes). A rebind's CREATE event
+    // then retries the owed send, which places.
+    let (_dir, socket) = scratch_socket("silentbar");
+    let _silent = FakeBar::serve_silent(socket.clone(), 1);
+    let mut store = store();
+    let mut feed = Feed::for_test(socket.clone(), "", "");
+    feed.baseline(&store);
+    shown(&mut store, ":1.1", "a");
+    assert!(feed.sync(&store).is_none(), "the start never blocks");
+    let lines = drive(&mut feed, &store, Duration::from_secs(10));
+    assert_eq!(lines.len(), 1, "one line per failed change: {lines:?}");
+    assert!(lines[0].contains("cannot reach the bar"), "{}", lines[0]);
+    assert!(feed.owed(), "the silent bar parks owed");
+    assert!(
+        feed.poll_fd().is_some(),
+        "the watch stays armed for the rebind"
+    );
+    assert!(
+        feed.poll_timeout().is_none(),
+        "parked: the retry capped out, nothing wakes"
+    );
+    // Recovery: the stale socket file goes (as a claim would unlink
+    // it) and an answering bar binds. The watch fires, the owed send
+    // retries, and the bar shows the change with no new one.
+    std::fs::remove_file(&socket).expect("the stale socket unlinks");
+    let bar = FakeBar::serve(socket, "{\"type\":\"ok\"}\n", 1);
+    wait_readable(&mut feed);
+    assert!(feed.retry(&store).is_none());
+    assert!(drive(&mut feed, &store, Duration::from_secs(5)).is_empty());
+    assert!(!feed.owed(), "the rebind placed the owed send");
+    assert!(feed.poll_fd().is_none(), "the watch retires with the debt");
+    assert_eq!(bar.received().len(), 1);
+    assert_eq!(bar.received()[0], payload(State::of(&store), "", ""));
+    assert_eq!(bar.served(), 1);
+}
+
+#[test]
+fn sync_never_blocks_on_a_stuck_bar() {
+    // The serving path never waits on the bar: even with a stuck bar,
+    // `sync` returns at once with the push in flight (the live probe
+    // pins the real number, tens of milliseconds; this generous bound
+    // only guards against a blocking regression, which would sit out
+    // the whole deadline per attempt).
+    let (_dir, socket) = scratch_socket("stuckbar");
+    let _silent = FakeBar::serve_silent(socket.clone(), 10);
+    let mut store = store();
+    let mut feed = Feed::for_test(socket, "", "");
+    feed.baseline(&store);
+    shown(&mut store, ":1.1", "a");
+    let start = Instant::now();
+    assert!(feed.sync(&store).is_none());
+    assert!(
+        start.elapsed() < Duration::from_secs(2),
+        "sync stays off the serving path"
+    );
+    assert!(
+        feed.pending_poll().is_some(),
+        "the push waits on the poll, not on the caller"
+    );
+    assert!(feed.poll_timeout().is_some());
 }
 
 /// Spins until the feed's watch reads (the bind's CREATE event), up to
@@ -456,6 +665,59 @@ fn wait_readable(feed: &mut Feed) {
         }
     }
     panic!("the watch never fired for the late bar");
+}
+
+/// Drives the feed the way the daemon's loop does — `service`, then a
+/// poll of the pending push and the watch bounded by the feed's own
+/// timeout — until no push is in flight and no re-dial is scheduled
+/// (parked or placed), or `timeout` passes. Returns the log lines the
+/// drive produced, in order.
+fn drive(feed: &mut Feed, store: &Store, timeout: Duration) -> Vec<String> {
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+    let start = Instant::now();
+    let mut lines = Vec::new();
+    loop {
+        if let Some(line) = feed.service(store, false) {
+            lines.push(line);
+        }
+        if feed.pending_poll().is_none() && feed.poll_timeout().is_none() {
+            return lines;
+        }
+        if start.elapsed() >= timeout {
+            panic!(
+                "the feed never settled (pending: {}, timeout: {:?})",
+                feed.pending_poll().is_some(),
+                feed.poll_timeout()
+            );
+        }
+        let timeout = feed.poll_timeout().unwrap_or(Duration::from_secs(1));
+        let spec = Timespec {
+            tv_sec: timeout.as_secs() as _,
+            tv_nsec: timeout.subsec_nanos() as _,
+        };
+        // The pending push and the watch in one poll, like the
+        // daemon's: every borrow lives inside its arm.
+        match (feed.pending_poll(), feed.poll_fd()) {
+            (Some((push, interest)), Some(watch)) => {
+                let mut fds = [
+                    PollFd::new(&push, interest),
+                    PollFd::new(&watch, PollFlags::IN),
+                ];
+                let _ = poll(&mut fds, Some(&spec));
+            }
+            (Some((push, interest)), None) => {
+                let mut fds = [PollFd::new(&push, interest)];
+                let _ = poll(&mut fds, Some(&spec));
+            }
+            (None, Some(watch)) => {
+                let mut fds = [PollFd::new(&watch, PollFlags::IN)];
+                let _ = poll(&mut fds, Some(&spec));
+            }
+            // A scheduled re-dial with no fd to wait on (the watch
+            // never armed): sleep it out.
+            (None, None) => std::thread::sleep(timeout),
+        }
+    }
 }
 
 #[test]

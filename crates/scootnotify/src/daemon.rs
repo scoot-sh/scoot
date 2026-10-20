@@ -275,7 +275,9 @@ fn run_loop(
         server.fire_expiries(conn);
         // The bar feed pushes on change only: arrivals, expiries,
         // dismissals, restores and DND toggles above all landed before
-        // this, so the pushed count is the turn's.
+        // this, so the pushed count is the turn's. The start never
+        // blocks (the poll set drives the push; `service` below
+        // advances it).
         if let Some(line) = feed.sync(server.store()) {
             warn(format_args!("{line}"));
         }
@@ -323,8 +325,11 @@ fn run_loop(
         if wayland && let Some(guard) = guard {
             let _ = guard.read();
         }
-        // The bar's socket may have appeared: a send owed retries.
-        if feed_watch && let Some(line) = feed.retry(server.store()) {
+        // The bar feed advances without blocking: the in-flight push
+        // moves, a due re-dial fires, or an appeared socket retries
+        // the owed send. A stuck bar never stalls this loop: the bus
+        // was already served above, and the push waits on the poll.
+        if let Some(line) = feed.service(server.store(), feed_watch) {
             warn(format_args!("{line}"));
         }
         if conn.dead() {
@@ -517,17 +522,19 @@ fn arm_timer(timer: &rustix::fd::OwnedFd, deadline: Option<Instant>) {
 }
 
 /// Polls the bus fd, the timerfd, the Wayland fd (when there is one),
-/// the bar feed's socket watch (only while a send is owed), the
+/// the bar feed's in-flight push and socket watch (a push only while
+/// one is owed, the watch only while a send is owed), the
 /// control listener (unless it is resting after a failed accept)
 /// and its clients, and the rule-exec pidfds, with a timeout only while
-/// a stalled peer's deadline, an exec child without a pidfd, or the
-/// listener's rest lapses. Returns whether the Wayland fd spoke, and
-/// whether the feed's watch did. The feed never sets the timeout: an
-/// owed send waits on the watch fd alone, so nothing wakes at idle.
-/// A bounded poll here would be a wakeup every bound at idle; the loop
-/// only reaches this wait with nothing staged, nothing queued and the
-/// timer armed, so nothing is missed by sleeping until the fds speak (all
-/// poll level-triggered).
+/// a stalled peer's deadline, an exec child without a pidfd, the
+/// listener's rest, or the feed's push deadline or re-dial lapses.
+/// Returns whether the Wayland fd spoke, and
+/// whether the feed's watch did. The feed sets no timeout at idle or
+/// while owed-with-no-bar (the watch alone): an idle daemon sleeps
+/// until the fds speak (all poll level-triggered). While a push is in
+/// flight or a re-dial is scheduled, its deadline bounds the sleep —
+/// one wakeup per change, never a stall: the bus is served every turn
+/// meanwhile.
 #[allow(clippy::too_many_arguments)] // The loop's one poll wiring: every fd and timeout in one place.
 fn poll_turn(
     bus: BorrowedFd<'_>,
@@ -568,6 +575,18 @@ fn poll_turn(
     for conn in control.conns() {
         fds.push(PollFd::new(conn.stream(), conn.interest()));
     }
+    // The feed's in-flight push, if any: the non-blocking bar push
+    // waits here beside the bus (`OUT` while connecting or writing,
+    // `IN` while reading the reply), so a stuck bar never stalls the
+    // loop.
+    let pending = feed.pending_poll();
+    let pending_fd = pending.map(|(fd, _)| fd).unwrap_or(bus);
+    let pending_interest = pending
+        .map(|(_, interest)| interest)
+        .unwrap_or(PollFlags::empty());
+    if pending.is_some() {
+        fds.push(PollFd::new(&pending_fd, pending_interest));
+    }
     // The feed's socket watch, only while a send is owed: a bar
     // started later wakes this poll once, and an idle daemon holds no
     // watch at all.
@@ -579,14 +598,10 @@ fn poll_turn(
         None
     };
     let rest = rest_until.and_then(|until| until.checked_duration_since(Instant::now()));
-    let timeout = match (stall, server.exec_poll_timeout(), rest) {
-        (Some(left), exec, Some(rest)) => Some(left.min(exec.unwrap_or(rest)).min(rest)),
-        (Some(left), exec, None) => Some(left.min(exec.unwrap_or(left))),
-        (None, Some(exec), Some(rest)) => Some(exec.min(rest)),
-        (None, Some(exec), None) => Some(exec),
-        (None, None, Some(rest)) => Some(rest),
-        (None, None, None) => None,
-    };
+    let timeout = [stall, server.exec_poll_timeout(), rest, feed.poll_timeout()]
+        .into_iter()
+        .flatten()
+        .min();
     let timespec = timeout.map(|left| Timespec {
         tv_sec: left.as_secs() as _,
         tv_nsec: left.subsec_nanos() as _,
