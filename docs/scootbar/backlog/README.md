@@ -222,7 +222,7 @@ hits the wall:
 - [launch-toggle-race-and-socket-mode](launch-toggle-race-and-socket-mode.md)
 - [launch-ci-scootui-manifest-fanout](launch-ci-scootui-manifest-fanout.md)
 - [launch-look-selected-row-contrast](launch-look-selected-row-contrast.md)
-- [release-plz-changelog-include-shell-apps](release-plz-changelog-include-shell-apps.md)
+- [release-plz-changelog-include-shell-apps](resolved/release-plz-changelog-include-shell-apps-done.md)
 - [docs-catch-up-shell-apps](docs-catch-up-shell-apps.md)
 - [launch-spawn-detach-cwd-and-close](launch-spawn-detach-cwd-and-close.md)
 - [launch-dmenu-doc-and-pin-notes](launch-dmenu-doc-and-pin-notes.md)

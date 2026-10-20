@@ -56,7 +56,7 @@ pr_body = """
 
 Merging this PR is the release: release-plz then pushes the
 `v{{ release.next_version }}` tag, and `.github/workflows/release.yml`
-builds every binary (scoot, scootbg, scootbar) at that one version and
+builds every binary (scoot, scootbg, scootbar, scootlaunch) at that one version and
 publishes the GitHub Release.
 
 The proposed version follows the commits since the last tag (below 1.0: a
@@ -67,7 +67,7 @@ this branch.
 
 Before merging, on this branch: bump `pkgver` in the three Arch release
 PKGBUILDs (and their `.SRCINFO`) and `Version` (plus a `%changelog` entry)
-in the three RPM specs to v{{ release.next_version }}; the Arch and RPM
+in the RPM specs to v{{ release.next_version }}; the Arch and RPM
 workflows run on the tag and fail when they lag.
 {% if release.changelog %}
 ### Changes
@@ -111,7 +111,7 @@ name = "scoot"
 git_tag_enable = true
 changelog_update = true
 changelog_path = "./CHANGELOG.md"
-changelog_include = ["scootctl", "scoot-core", "scoot-ipc", "scoot-look", "scootbg", "scootbg-mem", "scootbar"]
+changelog_include = ["scootctl", "scoot-core", "scoot-ipc", "scoot-look", "scootbg", "scootbg-mem", "scootbar", "scootlaunch", "scootnotify"]
 
 # Crates that first appeared after the last tag. Every package shares the
 # one `v{{ version }}` tag, so release-plz finds `v0.3.1` as their latest
