@@ -266,6 +266,39 @@ fn until_bar(
     }
 }
 
+/// Spins until the bar answers queries: spawning returns before the
+/// daemon serves.
+fn wait_bar_serving(session: &Session, bar: &Path) {
+    let start = Instant::now();
+    loop {
+        let mut command = Command::new(bar);
+        command
+            .arg("msg")
+            .arg("query")
+            .arg("notifications")
+            .env("XDG_RUNTIME_DIR", &session.scratch.0)
+            .env("WAYLAND_DISPLAY", &session.wayland_display)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        session.scratch.sandbox(&mut command);
+        if command
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the bar never served"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Spins until the daemon answers `msg version`: spawning returns
+/// before it owns the name.
 fn wait_serving(session: &Session) {
     let start = Instant::now();
     loop {
@@ -314,6 +347,7 @@ fn arrivals_dismissals_and_dnd_toggles_reflect_exactly() {
     let mut bar_child = spawn_bar(&session, &bar, "idle");
     let mut notify_child = spawn_notify(&session, &bus);
     wait_serving(&session);
+    wait_bar_serving(&session, &bar);
     // The bar starts on its placeholder: the daemon baselined without
     // sending, so nothing pushed yet.
     assert_eq!(bar_module(&session, &bar), (String::from("idle"), String::from("normal")));
@@ -351,6 +385,7 @@ fn a_bar_started_later_catches_up_on_the_next_change() {
     notify(&mut client, "a", 201);
     // The bar starts later: placeholder until the next change.
     let mut bar_child = spawn_bar(&session, &bar, "idle");
+    wait_bar_serving(&session, &bar);
     assert_eq!(bar_module(&session, &bar).0, "idle");
     // The next change catches it up exactly.
     notify(&mut client, "b", 202);
@@ -400,6 +435,7 @@ fn idle_holds_no_watch_and_wakes_nothing() {
     let mut bar_child = spawn_bar(&session, &bar, "idle");
     let mut notify_child = spawn_notify(&session, &bus);
     wait_serving(&session);
+    wait_bar_serving(&session, &bar);
     let mut client = connect(&bus);
     // Settle one change through, so nothing is owed.
     notify(&mut client, "a", 301);
