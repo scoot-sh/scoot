@@ -75,7 +75,7 @@ jobs:
       - name: Install the build, lint and smoke tools
         run: |
           dnf install -y \
-            cargo cargo-deny dbus-daemon dbus-tools desktop-file-utils dejavu-sans-fonts foot gcc \
+            cargo cargo-deny dbus-daemon desktop-file-utils dejavu-sans-fonts foot gcc glib2 \
             diffutils ImageMagick jq libinput-devel libseat-devel libxkbcommon-devel pixman-devel \
             procps-ng rpm-build rpmdevtools rpmlint systemd-devel systemd-rpm-macros \
             wayland-devel wayland-protocols-devel wayland-utils
@@ -204,12 +204,8 @@ jobs:
             scootnotify daemon --config /usr/share/doc/scootnotify/notify.toml.example &
             daemon=\$!
             trap \"kill \$daemon 2>/dev/null || true\" EXIT
-            for i in \$(seq 1 50); do
-              if dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications >/dev/null 2>&1; then break; fi
-              sleep 0.1
-            done
-            dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications
-            dbus-send --session --print-reply --dest=org.freedesktop.Notifications /org/freedesktop/Notifications org.freedesktop.Notifications.Notify string:smoke uint32:0 string: string:hello string:world array:string: dict:string:variant: int32:-1
+            gdbus wait --session --timeout 10 org.freedesktop.Notifications
+            gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.Notify \"('smoke', uint32 0, '', 'hello', 'world', @as [], @a{sv} {}, int32 -1)\"
             out=\$(scootnotify msg list --json)
             echo \"\$out\" | grep -q hello
             echo \"ok: scootnotify serves Notify and msg list on a session bus\"
@@ -274,7 +270,7 @@ jobs:
           # nothing goes unproven.)
           zypper --non-interactive remove busybox-gawk
           zypper --non-interactive install --no-recommends \
-            cargo dbus-1-daemon dbus-1-tools dejavu-fonts gcc git libinput-devel \
+            cargo dbus-1-daemon dejavu-fonts gcc git glib2-tools libinput-devel \
             libpixman-1-0-devel libxkbcommon-devel rpm-build rpmlint \
             seatd-devel systemd-devel systemd-rpm-macros wayland-devel \
             wayland-protocols-devel
@@ -396,12 +392,8 @@ jobs:
             scootnotify daemon --config /usr/share/doc/packages/scootnotify/notify.toml.example &
             daemon=\$!
             trap \"kill \$daemon 2>/dev/null || true\" EXIT
-            for i in \$(seq 1 50); do
-              if dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications >/dev/null 2>&1; then break; fi
-              sleep 0.1
-            done
-            dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications
-            dbus-send --session --print-reply --dest=org.freedesktop.Notifications /org/freedesktop/Notifications org.freedesktop.Notifications.Notify string:smoke uint32:0 string: string:hello string:world array:string: dict:string:variant: int32:-1
+            gdbus wait --session --timeout 10 org.freedesktop.Notifications
+            gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.Notify \"('smoke', uint32 0, '', 'hello', 'world', @as [], @a{sv} {}, int32 -1)\"
             out=\$(scootnotify msg list --json)
             echo \"\$out\" | grep -q hello
             echo \"ok: scootnotify serves Notify and msg list on a session bus\"

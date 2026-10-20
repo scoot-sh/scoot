@@ -85,7 +85,7 @@ jobs:
           # --check below reads the installed files, not just the db.
           sed -i -e '/^NoExtract/d' /etc/pacman.conf
           pacman -Syu --noconfirm --needed \
-            base-devel cargo cargo-deny dbus desktop-file-utils foot git imagemagick \
+            base-devel cargo cargo-deny dbus desktop-file-utils foot git glib2 imagemagick \
             jq namcap sudo ttf-dejavu wayland wayland-protocols wayland-utils
           useradd -m builder
           echo 'builder ALL=(ALL:ALL) NOPASSWD: ALL' >/etc/sudoers.d/builder
@@ -257,12 +257,8 @@ jobs:
             scootnotify daemon --config /usr/share/doc/scootnotify/notify.toml.example &
             daemon=\$!
             trap \"kill \$daemon 2>/dev/null || true\" EXIT
-            for i in \$(seq 1 50); do
-              if dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications >/dev/null 2>&1; then break; fi
-              sleep 0.1
-            done
-            dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications
-            dbus-send --session --print-reply --dest=org.freedesktop.Notifications /org/freedesktop/Notifications org.freedesktop.Notifications.Notify string:smoke uint32:0 string: string:hello string:world array:string: dict:string:variant: int32:-1
+            gdbus wait --session --timeout 10 org.freedesktop.Notifications
+            gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.Notify \"('smoke', uint32 0, '', 'hello', 'world', @as [], @a{sv} {}, int32 -1)\"
             out=\$(scootnotify msg list --json)
             echo \"\$out\" | grep -q hello
             echo \"ok: scootnotify serves Notify and msg list on a session bus\"
@@ -296,12 +292,8 @@ jobs:
             scootnotify daemon --config /usr/share/doc/scootnotify/notify.toml.example &
             daemon=\$!
             trap \"kill \$daemon 2>/dev/null || true\" EXIT
-            for i in \$(seq 1 50); do
-              if dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications >/dev/null 2>&1; then break; fi
-              sleep 0.1
-            done
-            dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications
-            dbus-send --session --print-reply --dest=org.freedesktop.Notifications /org/freedesktop/Notifications org.freedesktop.Notifications.Notify string:smoke uint32:0 string: string:hello string:world array:string: dict:string:variant: int32:-1
+            gdbus wait --session --timeout 10 org.freedesktop.Notifications
+            gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.Notify \"('smoke', uint32 0, '', 'hello', 'world', @as [], @a{sv} {}, int32 -1)\"
             out=\$(scootnotify msg list --json)
             echo \"\$out\" | grep -q hello
             echo \"ok: scootnotify serves Notify and msg list on a session bus\"

@@ -323,7 +323,7 @@ jobs:
             # for the notification daemon below: it is headless-capable,
             # but it still needs a session bus to own its name, so its
             # --check and its Notify smoke run under dbus-run-session.
-            apt-get install -y -qq foot jq imagemagick wayland-utils fonts-dejavu-core procps dbus
+            apt-get install -y -qq foot jq imagemagick wayland-utils fonts-dejavu-core procps dbus libglib2.0-bin
             scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
             scootlaunch --check
             dbus-run-session -- scootnotify daemon --check --config /usr/share/doc/scootnotify/notify.toml.example
@@ -340,12 +340,8 @@ jobs:
               scootnotify daemon --config /usr/share/doc/scootnotify/notify.toml.example &
               daemon=\$!
               trap \"kill \$daemon 2>/dev/null || true\" EXIT
-              for i in \$(seq 1 50); do
-                if dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications >/dev/null 2>&1; then break; fi
-                sleep 0.1
-              done
-              dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications
-              dbus-send --session --print-reply --dest=org.freedesktop.Notifications /org/freedesktop/Notifications org.freedesktop.Notifications.Notify string:smoke uint32:0 string: string:hello string:world array:string: dict:string:variant: int32:-1
+              gdbus wait --session --timeout 10 org.freedesktop.Notifications
+              gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.Notify \"('smoke', uint32 0, '', 'hello', 'world', @as [], @a{sv} {}, int32 -1)\"
               out=\$(scootnotify msg list --json)
               echo \"\$out\" | grep -q hello
               echo \"ok: scootnotify serves Notify and msg list on a session bus\"
@@ -381,7 +377,7 @@ jobs:
             # Same font requirement as the bookworm --check above, plus
             # the session bus the notification daemon's --check runs
             # under there too.
-            apt-get install -y -qq fonts-dejavu-core dbus
+            apt-get install -y -qq fonts-dejavu-core dbus libglib2.0-bin
             scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
             scootlaunch --check
             dbus-run-session -- scootnotify daemon --check --config /usr/share/doc/scootnotify/notify.toml.example
