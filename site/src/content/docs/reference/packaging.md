@@ -108,6 +108,13 @@ on. The headless commands (`--list`, `--query`, `--run-id`) never call
 either library, but the loader still needs them present to start the
 binary at all.
 
+`scootnotify` links nothing past the C library, like the bar and the
+wallpaper daemon: no system library beside it (the deb allow-list and
+the rpm and Arch recipes carry no other name for it). Its cards draw
+text only with a font, but without one the daemon stays headless and
+the bus still serves — so the font rides as a suggestion (deb
+`Suggests`, rpm and Arch `optdepends`), never a dependency.
+
 ### Toolchain floor: Rust 1.88
 
 The workspace sets `rust-version = "1.88"`. Which distro releases ship

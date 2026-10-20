@@ -69,6 +69,7 @@ scoot_stub "$f/dl/v0.3.0/scoot-0.3.0-$arch" "scoot 0.3.0"
 stub "scootbg 0.3.0" "$f/dl/v0.3.0/scootbg-0.3.0-$arch"
 stub "scootbar 0.3.0" "$f/dl/v0.3.0/scootbar-0.3.0-$arch"
 stub "scootlaunch 0.3.0" "$f/dl/v0.3.0/scootlaunch-0.3.0-$arch"
+stub "scootnotify 0.3.0" "$f/dl/v0.3.0/scootnotify-0.3.0-$arch"
 # v0.2.1 ships no looks and its scoot knows no `look apply`: plain stubs,
 # so any apply attempt would show up as a missing stub-scoot-calls file
 # check below rather than a refusal.
@@ -87,6 +88,8 @@ for ref in scoot-v0.1.0 v0.3.0; do
     printf '[Unit]\n' >"$r/resources/systemd/user/scoot-shutdown.target"
     printf '[Desktop Entry]\nExec=/usr/bin/scoot-session\n' >"$r/packaging/deb/scoot.desktop"
     printf '[Unit]\nPartOf=graphical-session.target\nAfter=graphical-session.target\n[Service]\nExecStart=/usr/bin/scootbar daemon\n[Install]\nWantedBy=graphical-session.target\n' >"$r/packaging/deb/scootbar.service"
+    printf '[Unit]\nPartOf=graphical-session.target\nAfter=graphical-session.target\nStartLimitIntervalSec=0\n[Service]\nType=dbus\nBusName=org.freedesktop.Notifications\nExecStart=/usr/bin/scootnotify daemon\n[Install]\nWantedBy=graphical-session.target\n' >"$r/packaging/deb/scootnotify.service"
+    printf '[D-BUS Service]\nName=org.freedesktop.Notifications\nExec=/usr/bin/scootnotify daemon\nSystemdService=scootnotify.service\n' >"$r/packaging/deb/org.freedesktop.Notifications.service"
     for look in ginger-night moonrise music-desk radial-burst vinyl-sunset; do
         mkdir -p "$r/looks/$look" "$r/docs/examples/$look"
         # The catalog source: a small but shaped look.toml, with an
@@ -717,6 +720,108 @@ releases=file://$f/tags-unified.json run_in "$work/h-launch-sys" --launch --dry-
 unset releases
 grep -Fq "sh -s -- --system --launch" "$work/out" || { cat "$work/out"; fail "no --launch in the --system command"; }
 ok "the --system command carries --launch"
+
+# 8f. --notify installs the daemon, its user unit and its activation
+#     file, records it, stays up to date, and uninstall removes all
+#     three (disabling the unit first).
+h=$work/h-notify
+DBUS_SESSION_BUS_ADDRESS="unix:path=/nonexistent/scoot-test-bus" releases=file://$f/tags-unified.json run_in "$h" --notify || { cat "$work/out"; fail "install with --notify"; }
+unset releases
+[ "$("$h/.local/bin/scootnotify")" = "scootnotify 0.3.0" ] || fail "daemon is not the unified build"
+grep -q "^notify_tag=v0.3.0$" "$h/.local/share/scoot/install-version" || fail "record has no notify tag"
+grep -q "ExecStart=$h/.local/bin/scootnotify daemon" "$h/.config/systemd/user/scootnotify.service" || fail "scootnotify.service binary path"
+grep -q "WantedBy=scoot-session.target" "$h/.config/systemd/user/scootnotify.service" || fail "notify not bound to scoot's own session"
+if grep -q "graphical-session" "$h/.config/systemd/user/scootnotify.service"; then fail "notify would start in other desktops"; fi
+grep -Fq "Exec=$h/.local/bin/scootnotify daemon" "$h/.local/share/dbus-1/services/org.freedesktop.Notifications.service" || fail "activation file binary path"
+grep -q "SystemdService=scootnotify.service" "$h/.local/share/dbus-1/services/org.freedesktop.Notifications.service" || fail "activation file names no unit"
+grep -q "systemctl --user enable scootnotify.service" "$work/systemctl.log" || fail "notify unit not enabled"
+# An up-to-date re-run with --notify downloads nothing.
+SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl-gone" SCOOT_INSTALL_RAW_URL="file://$f/raw-gone" DBUS_SESSION_BUS_ADDRESS="unix:path=/nonexistent/scoot-test-bus" releases=file://$f/tags-unified.json run_in "$h" --notify || { cat "$work/out"; fail "up-to-date --notify re-run"; }
+export SCOOT_INSTALL_DOWNLOAD_URL="file://$f/dl" SCOOT_INSTALL_RAW_URL="file://$f/raw"
+unset releases
+grep -q "already up to date (0.3.0)" "$work/out" || fail "--notify re-run says no up-to-date"
+# A re-run without --notify is not up to date: the record names a
+# daemon this run would not install.
+DBUS_SESSION_BUS_ADDRESS="unix:path=/nonexistent/scoot-test-bus" releases=file://$f/tags-unified.json run_in "$h" || { cat "$work/out"; fail "re-run without --notify"; }
+unset releases
+grep -q "Installing scoot" "$work/out" || fail "dropping --notify still claimed up to date"
+# Uninstall disables the unit and removes the daemon, the unit and the
+# activation file (the merged manifest kept all three).
+: >"$work/systemctl.log"
+run_in "$h" --uninstall || fail "uninstall with a daemon"
+grep -q "systemctl --user disable scootnotify.service" "$work/systemctl.log" || fail "notify unit not disabled on uninstall"
+[ ! -e "$h/.local/bin/scootnotify" ] || fail "uninstall left the daemon"
+[ ! -e "$h/.config/systemd/user/scootnotify.service" ] || fail "uninstall left the notify unit"
+[ ! -e "$h/.local/share/dbus-1/services/org.freedesktop.Notifications.service" ] || fail "uninstall left the activation file"
+h=$work/h1
+ok "--notify installs, records, and uninstalls the daemon"
+
+# 8g. --notify against a per-package tag fails before writing anything:
+#     no daemon asset exists outside the unified releases.
+h=$work/h-notify-old
+if DBUS_SESSION_BUS_ADDRESS="unix:path=/nonexistent/scoot-test-bus" releases=file://$f/tags-new.json run_in "$h" --notify; then fail "--notify accepted a per-package tag"; fi
+unset releases
+grep -Fq "scootnotify-0.1.1-$arch" "$work/out" || { cat "$work/out"; fail "--notify names no missing asset"; }
+[ ! -e "$h/.local" ] || fail "--notify wrote files before failing"
+h=$work/h1
+ok "--notify refuses a release with no daemon asset"
+
+# 8h. --notify refuses while a foreign daemon owns
+#     org.freedesktop.Notifications, naming the owner, and writes
+#     nothing. The bus tools and /proc are stubbed: busctl answers the
+#     owner, the fake proc names the daemon behind that pid.
+mkdir -p "$work/fakebus" "$work/fakeproc/4242"
+printf 'mako\n' >"$work/fakeproc/4242/comm"
+# shellcheck disable=SC2016 # every $ runs in the stub, not in this file.
+printf '#!/bin/sh\nif [ "${3:-}" = org.freedesktop.Notifications ]; then echo ":1.42"; exit 0; fi\necho "u 4242"\n' >"$work/fakebus/busctl"
+chmod +x "$work/fakebus/busctl"
+h=$work/h-notify-owner
+if PATH="$work/fakebus:$PATH" SCOOT_INSTALL_PROC="$work/fakeproc" releases=file://$f/tags-unified.json run_in "$h" --notify; then
+    cat "$work/out"
+    fail "--notify installed beside a foreign daemon"
+fi
+unset releases
+grep -Fq "mako (pid 4242) owns org.freedesktop.Notifications" "$work/out" || { cat "$work/out"; fail "--notify names no owner"; }
+[ ! -e "$h/.local" ] || fail "--notify wrote files before refusing"
+h=$work/h1
+ok "--notify refuses a taken name and names its owner"
+
+# 8i. --notify proceeds when the owner is our own scootnotify (a re-run
+#     with the daemon already running).
+printf 'scootnotify\n' >"$work/fakeproc/4242/comm"
+h=$work/h-notify-self
+if ! PATH="$work/fakebus:$PATH" SCOOT_INSTALL_PROC="$work/fakeproc" releases=file://$f/tags-unified.json run_in "$h" --notify --dry-run; then
+    cat "$work/out"
+    fail "--notify refused its own daemon"
+fi
+unset releases
+if grep -q "owns org.freedesktop.Notifications" "$work/out"; then cat "$work/out"; fail "--notify refused its own daemon"; fi
+h=$work/h1
+ok "--notify keeps its own name"
+
+# 8j. --notify needs a font for its cards even with --no-bar: the
+#     report names the daemon, never the bar.
+export SCOOT_INSTALL_OS_RELEASE="$f/os-ubuntu" SCOOT_INSTALL_FONTS=/nonexistent/scoot-test-font.ttf
+if ! releases=file://$f/tags-unified.json run_in "$work/h-notify-font" --dry-run --no-bar --notify; then
+    cat "$work/out"
+    fail "dry run with --notify --no-bar"
+fi
+unset SCOOT_INSTALL_OS_RELEASE SCOOT_INSTALL_FONTS releases
+if grep -q "scootbar needs a font" "$work/out"; then
+    cat "$work/out"
+    fail "bar font line with --no-bar --notify"
+fi
+if ! grep -q "scootnotify needs a font" "$work/out"; then
+    cat "$work/out"
+    fail "no daemon font line"
+fi
+ok "--notify names the daemon's font need"
+
+# 8k. A per-user --notify run prints the --system command with --notify.
+releases=file://$f/tags-unified.json run_in "$work/h-notify-sys" --notify --dry-run || { cat "$work/out"; fail "notify dry run"; }
+unset releases
+grep -Fq "sh -s -- --system --notify" "$work/out" || { cat "$work/out"; fail "no --notify in the --system command"; }
+ok "the --system command carries --notify"
 
 # 9. A system uninstall under sudo names the invoking user's config (N3),
 #    not root's; without sudo the message is unchanged. Needs a writable

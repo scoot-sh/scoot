@@ -72,9 +72,9 @@ notes written under Unreleased.
    then re-run `scripts/sync-packaging-versions` there so the distro
    packaging follows your edit.
 2. Check the two sync commits release-plz pushed after the PR
-   (the fuzz lockfiles, then the distro packaging: `pkgver` in the four
+   (the fuzz lockfiles, then the distro packaging: `pkgver` in the five
    Arch release PKGBUILDs with their `.SRCINFO`, `Version` plus a
-   `%changelog` entry in the four RPM specs). The debs need no bump:
+   `%changelog` entry in the five RPM specs). The debs need no bump:
    they read the workspace version at build time. If a sync commit is
    missing or wrong, run the script by hand on the PR branch.
 3. Tidy the changelog section if it needs it, and let CI go green:
@@ -96,7 +96,7 @@ The run resolves the tag (`scripts/release-resolve`: the `vX.Y.Z` shape,
 the workspace version at the tagged commit, every crate inheriting it,
 on main; a release already complete is a green no-op), stages the vendored tarball and the
 SBOM once (the union of every shipped binary's locked dependencies),
-builds `scoot`, `scootbg`, `scootbar` and `scootlaunch` as portable glibc binaries for
+builds `scoot`, `scootbg`, `scootbar`, `scootlaunch` and `scootnotify` as portable glibc binaries for
 `x86_64-linux` and `aarch64-linux` (cargo `--locked --offline` from
 that staged tree in a Debian 12 container with Rust 1.97.0: glibc floor
 2.36), checks that every binary starts on the bare base, assembles
@@ -108,8 +108,8 @@ is the client library inside `scoot msg` and ships no binary of its own.
 Then the verify job downloads the release's own assets and proves them:
 every file against `SHA256SUMS` and its attestation, and each binary on
 bare Ubuntu and Debian containers (`--version` names the release, the
-bar's and the launcher's `--check`, the compositor's default-config
-render).
+bar's, the launcher's and the notification daemon's `--check`, the
+compositor's default-config render).
 
 ## Dry-run a tag
 

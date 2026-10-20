@@ -35,9 +35,10 @@ DEBIAN_REVISION = "1"
 # libc6 and libgcc-s1 arrive via dpkg-shlibdeps, not ldd (the C library
 # is not listed as a DT_NEEDED soname of its own).
 ALLOW = {
-    # The compositor links five system libraries past libc; the bar and
-    # the wallpaper daemon link nothing past it (measured: scootbg and
-    # scootbar are libc-only on the release build); the launcher links
+    # The compositor links five system libraries past libc; the bar,
+    # the wallpaper daemon and the notification daemon link nothing
+    # past it (measured: scootbg, scootbar and scootnotify are
+    # libc-only on the release build); the launcher links
     # the keyboard library (measured: libxkbcommon.so.0 beside libc on
     # the release build; its libm.so.6 rides inside libc6 on Debian, so
     # shlibdeps emits no extra name for it).
@@ -53,15 +54,17 @@ ALLOW = {
     "scootbg": {"libc6", "libgcc-s1"},
     "scootbar": {"libc6", "libgcc-s1"},
     "scootlaunch": {"libc6", "libgcc-s1", "libxkbcommon0"},
+    "scootnotify": {"libc6", "libgcc-s1"},
 }
 
-CRATE = {"scoot": "scoot", "scootbg": "scootbg", "scootbar": "scootbar", "scootlaunch": "scootlaunch"}
+CRATE = {"scoot": "scoot", "scootbg": "scootbg", "scootbar": "scootbar", "scootlaunch": "scootlaunch", "scootnotify": "scootnotify"}
 
 SHORT = {
     "scoot": "Scrolling-tiling Wayland compositor (auto CPU/GPU rendering, runs without a GPU)",
     "scootbg": "Wallpaper daemon for the scoot compositor",
     "scootbar": "Status bar for the scoot compositor",
     "scootlaunch": "Keyboard-first application launcher for the scoot compositor",
+    "scootnotify": "Notification daemon for the scoot compositor",
 }
 
 LONG = {
@@ -102,6 +105,16 @@ LONG = {
         " This package ships the launcher and the license inventory. It\n"
         " writes nothing to a user's home."
     ),
+    "scootnotify": (
+        " The notification daemon for the scoot compositor: the\n"
+        " org.freedesktop.Notifications server, its card stack, and its\n"
+        " control socket, on standard Wayland protocols, so it runs\n"
+        " against any compositor release.\n"
+        " .\n"
+        " This package ships the daemon, its systemd user unit, the\n"
+        " D-Bus activation file and a starting configuration. It\n"
+        " writes nothing to a user's home."
+    ),
 }
 
 # Extra control stanzas per package. `scoot`'s versioned `scootbg`
@@ -122,6 +135,10 @@ SUGGESTS = {
     # well-known paths, DejaVu first); the headless list and query
     # commands need none, so this stays a suggestion, not a dependency.
     "scootlaunch": "fonts-dejavu-core",
+    # The cards draw text only with a font (it probes the well-known
+    # paths, DejaVu first); without one the daemon stays headless and
+    # the bus still serves, so this stays a suggestion, not a dependency.
+    "scootnotify": "fonts-dejavu-core",
 }
 
 

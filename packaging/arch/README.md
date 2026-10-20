@@ -1,6 +1,6 @@
 # Arch Linux packages
 
-Eight PKGBUILDs, one per shipped binary in each of two lines: a release
+Ten PKGBUILDs, one per shipped binary in each of two lines: a release
 build from the tagged tarball, and a `-git` build tracking `main`. Nothing here is published anywhere: there is no AUR
 push, no tag, no release in CI or out of it. AUR submission stays a
 manual maintainer step (below).
@@ -11,21 +11,23 @@ manual maintainer step (below).
 | `scootbg/` | `scootbg` | tag `v$pkgver` | the same |
 | `scootbar/` | `scootbar` | tag `v$pkgver` | the same |
 | `scootlaunch/` | `scootlaunch` | tag `v$pkgver` | the same |
+| `scootnotify/` | `scootnotify` | tag `v$pkgver` | the same |
 | `scoot-git/` | `scoot-git` | `main` | `pkgver()`: last `v*` tag, commits since it, short hash (`0.2.1.r14.g615608c`) |
 | `scootbg-git/` | `scootbg-git` | `main` | the same scheme |
 | `scootbar-git/` | `scootbar-git` | `main` | the same scheme |
 | `scootlaunch-git/` | `scootlaunch-git` | `main` | the same scheme |
+| `scootnotify-git/` | `scootnotify-git` | `main` | the same scheme |
 
 One tag releases every binary at the repository's one version
-(docs/versioning.md), so all four release packages carry the same
+(docs/versioning.md), so all five release packages carry the same
 `pkgver`, and the `-git` `pkgver` is the binaries' own build label
 (`scoot --version` says `0.2.1+14.g615608c`). Before the first tag the
 `-git` scheme counts every commit over the workspace version. There is
 no `scootctl` package: it is the client library inside the `scoot`
 binary (`scoot msg`). `scoot` depends on exactly `scootbg=$pkgver`:
-the coupled pair installs at one version, and the bar and the launcher
-depend on no compositor package at all (standard Wayland protocols
-only).
+the coupled pair installs at one version, and the bar, the launcher
+and the notification daemon depend on no compositor package at all
+(standard Wayland protocols only).
 
 ## Dependencies, from data
 
@@ -35,8 +37,8 @@ compositor links `libinput.so.10`, `libseat.so.1`, `libudev.so.1`,
 `libpixman-1.so.0`, `libxkbcommon.so.0`, the launcher links
 `libxkbcommon.so.0` for its keyboard (plus `libm.so.6` through the SVG
 icon stack, which rides inside `glibc` everywhere, so no extra
-dependency names it), and the wallpaper daemon and
-the bar link nothing past the C library. The Arch package names:
+dependency names it), and the wallpaper daemon, the
+bar and the notification daemon link nothing past the C library. The Arch package names:
 
 - `libseat.so.1` comes from **`seatd`**, not `libseat`: Arch renamed
   the package (it `Provides: libseat.so`, `Replaces: libseat`), on
@@ -90,6 +92,13 @@ not a linked library, which a linkage linter cannot see.
 - `scootlaunch`: `/usr/bin/scootlaunch` plus its licenses (proven
   starting: `scootlaunch --check` with no config file exits 0 on the
   built-in defaults).
+- `scootnotify`: `/usr/bin/scootnotify`, the `scootnotify.service` user
+  unit (`Type=dbus` with the bus name plus `RestartPreventExitStatus=3`,
+  the same policy as `nix/modules/scootnotify-home.nix`, bound to the
+  shared `graphical-session.target` for standalone use), the D-Bus
+  activation file (`/usr/share/dbus-1/services/org.freedesktop.Notifications.service`),
+  licenses, and a starting `notify.toml.example` (proven valid:
+  `scootnotify daemon --check` prints `valid`).
 
 `options=('!debug')`
 everywhere (the auto-split `-debug` subpackages ship a build-id symlink
@@ -113,7 +122,7 @@ container image ships no ARM variant).
 opens or updates the PR); the steps below are the manual fallback when
 that sync is missing or wrong.
 
-1. In the release PR, before it merges, bump `pkgver` in all four
+1. In the release PR, before it merges, bump `pkgver` in all five
    release packages to the proposed version and regenerate `.SRCINFO`
    (run `arch.yml` by hand from the release PR; it fails if `pkgver` is
    not the workspace version).
@@ -122,7 +131,7 @@ that sync is missing or wrong.
 3. `makepkg --printsrcinfo > .SRCINFO` in each touched directory and
    commit it (CI fails when the committed file drifts).
 4. Copy each directory's contents into its AUR repo (`scoot`,
-   `scootbg`, `scootbar`, `scootlaunch`, `scoot-git`, ...) and push there by hand.
+   `scootbg`, `scootbar`, `scootlaunch`, `scootnotify`, `scoot-git`, ...) and push there by hand.
    Build `scootbg` before `scoot`: scoot's versioned dependency on it
    resolves against no repository, so it installs from the just-built
    package (CI does the same; an AUR helper builds the chain in this
@@ -138,12 +147,14 @@ is on by default and detects `mesa`/`libdrm` at run time.
 
 ## What CI proves
 
-`.github/workflows/arch.yml` builds all eight PKGBUILDs in an
+`.github/workflows/arch.yml` builds all ten PKGBUILDs in an
 `archlinux:base` container with `makepkg`, lints each PKGBUILD and
 each built package with `namcap`, installs the release set and the
 `-git` set in turn, and runs `scoot --version`, `scootbar daemon
 --check` on the shipped example, `scootlaunch --check` on the built-in
-defaults, and the headless smoke test
+defaults, `scootnotify daemon --check` on its shipped example plus a
+`Notify` smoke against the running daemon (both on a session bus), and
+the headless smoke test
 (`scripts/smoke-test.sh`) against the installed binaries. The one
 thing it cannot prove yet: the release tarball URLs, which 404 until
 the first tag is cut; until then the release PKGBUILDs build against

@@ -1,0 +1,14 @@
+post_install() {
+  echo 'scootnotify installed its user unit (scootnotify.service) and its'
+  echo 'D-Bus activation file (org.freedesktop.Notifications.service). To'
+  echo 'run the daemon as a user service: copy'
+  echo '/usr/share/doc/scootnotify/notify.toml.example to'
+  echo '~/.config/scoot/notify.toml, then systemctl --user enable --now scootnotify.'
+  echo 'Only one daemon can own org.freedesktop.Notifications: disable or'
+  echo 'remove mako, dunst or another notifier first (this package never'
+  echo 'stops another daemon for you).'
+}
+
+post_upgrade() {
+  post_install
+}

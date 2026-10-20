@@ -10,7 +10,7 @@ them from the workspace version, so the release branch is correct with
 zero manual commits:
 
 - every release PKGBUILD under `packaging/arch/` (`scoot`, `scootbg`,
-  `scootbar`, `scootlaunch`): `pkgver=<version>`;
+  `scootbar`, `scootlaunch`, `scootnotify`): `pkgver=<version>`;
 - every `-git` PKGBUILD: `pkgver=<version>.r0.g0000000` (the static base;
   the real count comes from `pkgver()` at build time, and the arch.yml
   version gate checks the static value starts with the workspace version);
@@ -24,6 +24,11 @@ zero manual commits:
 
 The Debian packages need no sync: `packaging/deb/deb-meta.py` reads the
 workspace version from the staged tree at build time.
+
+A missing packaging file is a refusal, not a skip: every package named
+by the lists above must have its PKGBUILD, `.SRCINFO` and spec on disk,
+so a deleted or forgotten recipe fails loudly instead of shipping a
+stale version.
 
 Idempotent: a second run changes nothing (a version already current is
 left alone, an existing changelog entry is not duplicated). Run by
@@ -42,8 +47,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-ARCH_PKGS = ("scoot", "scootbg", "scootbar", "scootlaunch")
-RPM_SPECS = ("scoot", "scootbg", "scootbar", "scootlaunch")
+ARCH_PKGS = ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify")
+RPM_SPECS = ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify")
 GIT_SUFFIX = ".r0.g0000000"
 SOURCE_URL = ("https://github.com/scoot-sh/scoot"
               "/archive/refs/tags/v{version}.tar.gz")
@@ -190,6 +195,21 @@ def main(argv=None):
     version = workspace_version(root)
 
     changed = []
+    # Every package named by the lists above must have its recipe files
+    # on disk: a deleted or forgotten recipe is a refusal naming it,
+    # never a skipped package shipping a stale version.
+    for pkg in ARCH_PKGS:
+        for name in ("PKGBUILD", ".SRCINFO"):
+            p = root / "packaging" / "arch" / pkg / name
+            if not p.is_file():
+                raise ValueError(f"{p}: missing recipe file for {pkg}")
+            p = root / "packaging" / "arch" / f"{pkg}-git" / name
+            if not p.is_file():
+                raise ValueError(f"{p}: missing recipe file for {pkg}-git")
+    for spec in RPM_SPECS:
+        p = root / "packaging" / "rpm" / f"{spec}.spec"
+        if not p.is_file():
+            raise ValueError(f"{p}: missing spec file for {spec}")
     for pkg in ARCH_PKGS:
         d = root / "packaging" / "arch" / pkg
         old, c = sync_release_pkgbuild(d / "PKGBUILD", version)

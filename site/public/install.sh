@@ -12,7 +12,10 @@
 #      each binary against the release's SHA256SUMS before installing it
 #      (the session files come from the same tagged commit); with
 #      --launch it also downloads scootlaunch, the application launcher
-#      (opt-in until it becomes the default)
+#      (opt-in until it becomes the default); with --notify it also
+#      downloads scootnotify, the notification daemon (opt-in until it
+#      becomes the default, and refused while another daemon owns
+#      org.freedesktop.Notifications)
 #   3. installs them and the `scoot-session` launcher into a bin directory,
 #      the session's systemd user units, and the portal config. A plain
 #      run installs for you only and adds no login-screen entry;
@@ -59,6 +62,7 @@ check=0
 force=0
 with_bar=1
 with_launch=0
+with_notify=0
 look=""
 prefix=""
 scoot_version=""
@@ -95,6 +99,11 @@ Usage: install.sh [options]
   --launch            also install scootlaunch, the keyboard-first
                       application launcher (opt-in until it becomes
                       the default)
+  --notify            also install scootnotify, the notification daemon
+                      (opt-in until it becomes the default; refused
+                      while another daemon owns
+                      org.freedesktop.Notifications, which this script
+                      never stops for you)
   --check             compare the installed version with the newest tagged
                       release (or the --version you name) and print both;
                       exit 0 if current, 10 if an update exists, 1 on
@@ -119,6 +128,7 @@ while [ $# -gt 0 ]; do
     --force) force=1 ;;
     --no-bar) with_bar=0 ;;
     --launch) with_launch=1 ;;
+    --notify) with_notify=1 ;;
     --look)
         [ $# -ge 2 ] || die "--look needs a name"
         look=$2
@@ -181,6 +191,7 @@ if [ "$system" = 1 ]; then
     bin_dir=${prefix:-/usr/local}/bin
     unit_dir=/usr/local/lib/systemd/user
     portal_dir=/etc/xdg-desktop-portal
+    activation_dir=${prefix:-/usr/local}/share/dbus-1/services
     session_file=$sys_session
     manifest=$sys_manifest
     version_file=/usr/local/share/scoot/install-version
@@ -197,6 +208,7 @@ else
     bin_dir=${prefix:-$HOME/.local}/bin
     unit_dir=$config_home/systemd/user
     portal_dir=$config_home/xdg-desktop-portal
+    activation_dir=$data_home/dbus-1/services
     session_file=""
     manifest=$data_home/scoot/install-manifest
     version_file=$data_home/scoot/install-version
@@ -257,6 +269,37 @@ have_systemd_user() {
     command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1
 }
 
+# Prints "<comm> (pid <pid>)" for the process owning
+# org.freedesktop.Notifications on this session bus, or nothing when the
+# name is free, the bus is unreachable, no owner tool exists, or the
+# owner is our own scootnotify. Never fails: the caller decides.
+# /proc is overridable the way the font list is, so the test suite can
+# point it at a scratch tree.
+notifications_owner() {
+    proc=${SCOOT_INSTALL_PROC:-/proc}
+    unique=""
+    pid=""
+    if command -v busctl >/dev/null 2>&1; then
+        unique=$(busctl --user get-name-owner org.freedesktop.Notifications 2>/dev/null) || return 0
+        [ -n "$unique" ] || return 0
+        # busctl call prints `u <pid>`: the last word is the pid.
+        pid=$(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus GetConnectionUnixProcessID s "$unique" 2>/dev/null | awk '{print $NF}') || return 0
+    elif command -v dbus-send >/dev/null 2>&1; then
+        unique=$(dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications 2>/dev/null | sed -n 's/.*string "\(.*\)".*/\1/p') || return 0
+        [ -n "$unique" ] || return 0
+        pid=$(dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetConnectionUnixProcessID string:"$unique" 2>/dev/null | sed -n 's/.*uint32 \([0-9]*\).*/\1/p') || return 0
+    else
+        return 0
+    fi
+    [ -n "$pid" ] || return 0
+    comm=$(cat "$proc/$pid/comm" 2>/dev/null) || return 0
+    [ -n "$comm" ] || return 0
+    # Our own earlier install keeps the name across re-runs: only a
+    # foreign daemon refuses.
+    if [ "$comm" = scootnotify ]; then return 0; fi
+    printf '%s (pid %s)' "$comm" "$pid"
+}
+
 # --- uninstall ------------------------------------------------------------
 
 if [ "$uninstall" = 1 ]; then
@@ -265,6 +308,9 @@ if [ "$uninstall" = 1 ]; then
     look_paths=$(grep '/share/scoot/looks/' "$manifest" || true)
     if have_systemd_user && systemctl --user is-enabled scootbar.service >/dev/null 2>&1; then
         run systemctl --user disable scootbar.service
+    fi
+    if have_systemd_user && systemctl --user is-enabled scootnotify.service >/dev/null 2>&1; then
+        run systemctl --user disable scootnotify.service
     fi
     while IFS= read -r path; do
         [ -n "$path" ] || continue
@@ -440,11 +486,14 @@ fi
 scoot_asset=scoot-$v-$arch
 bg_asset=scootbg-$v-$arch
 launch_asset=scootlaunch-$v-$arch
+notify_asset=scootnotify-$v-$arch
 source_ref=$scoot_tag
 label=$scoot_tag
 version=$v
 launch_version=""
+notify_version=""
 if [ "$with_launch" = 1 ]; then launch_version=$v; fi
+if [ "$with_notify" = 1 ]; then notify_version=$v; fi
 if [ "$with_bar" = 1 ]; then
     if [ "$unified" = 1 ]; then
         bar_asset=scootbar-$v-$arch
@@ -484,25 +533,30 @@ installed_version=""
 installed_tag=""
 installed_bar_tag=""
 installed_launch_tag=""
+installed_notify_tag=""
 installed_bin_dir=""
 if [ -f "$version_file" ]; then
     installed_version=$(sed -n 's/^version=//p' "$version_file" | head -n 1)
     installed_tag=$(sed -n 's/^tag=//p' "$version_file" | head -n 1)
     installed_bar_tag=$(sed -n 's/^bar_tag=//p' "$version_file" | head -n 1)
     installed_launch_tag=$(sed -n 's/^launch_tag=//p' "$version_file" | head -n 1)
+    installed_notify_tag=$(sed -n 's/^notify_tag=//p' "$version_file" | head -n 1)
     installed_bin_dir=$(sed -n 's/^bin_dir=//p' "$version_file" | head -n 1)
 fi
 wanted_bar_tag=""
 if [ "$with_bar" = 1 ]; then wanted_bar_tag=$bar_tag; fi
 wanted_launch_tag=""
 if [ "$with_launch" = 1 ]; then wanted_launch_tag=$scoot_tag; fi
+wanted_notify_tag=""
+if [ "$with_notify" = 1 ]; then wanted_notify_tag=$scoot_tag; fi
 up_to_date=0
-if [ -n "$installed_tag" ] && [ "$installed_tag" = "$scoot_tag" ] && [ "$installed_bar_tag" = "$wanted_bar_tag" ] && [ "$installed_launch_tag" = "$wanted_launch_tag" ] && [ "$installed_bin_dir" = "$bin_dir" ]; then
+if [ -n "$installed_tag" ] && [ "$installed_tag" = "$scoot_tag" ] && [ "$installed_bar_tag" = "$wanted_bar_tag" ] && [ "$installed_launch_tag" = "$wanted_launch_tag" ] && [ "$installed_notify_tag" = "$wanted_notify_tag" ] && [ "$installed_bin_dir" = "$bin_dir" ]; then
     up_to_date=1
     [ -f "$bin_dir/scoot" ] || up_to_date=0
     [ -f "$bin_dir/scootbg" ] || up_to_date=0
     if [ "$with_bar" = 1 ]; then [ -f "$bin_dir/scootbar" ] || up_to_date=0; fi
     if [ "$with_launch" = 1 ]; then [ -f "$bin_dir/scootlaunch" ] || up_to_date=0; fi
+    if [ "$with_notify" = 1 ]; then [ -f "$bin_dir/scootnotify" ] || up_to_date=0; fi
 fi
 
 if [ "$check" = 1 ]; then
@@ -568,10 +622,22 @@ fi
 if [ "$skip_install" = 0 ]; then
     say "Installing scoot $label for $arch into $bin_dir"
 
+    # A foreign notification daemon owns the name this daemon would
+    # take: refuse before downloading anything, naming the owner. Our
+    # own earlier install keeps the name across re-runs, and this
+    # script never stops another daemon (no kill, no disable).
+    if [ "$with_notify" = 1 ]; then
+        owner=$(notifications_owner)
+        if [ -n "$owner" ]; then
+            die "$owner owns org.freedesktop.Notifications; stop or disable it first, then re-run with --notify"
+        fi
+    fi
+
     get_asset "$scoot_tag" "$scoot_asset"
     get_asset "$scoot_tag" "$bg_asset"
     if [ "$with_bar" = 1 ]; then get_asset "$bar_tag" "$bar_asset"; fi
     if [ "$with_launch" = 1 ]; then get_asset "$scoot_tag" "$launch_asset"; fi
+    if [ "$with_notify" = 1 ]; then get_asset "$scoot_tag" "$notify_asset"; fi
 
     # The session files come from the same commit as the binaries.
     for f in resources/scoot-session resources/scoot-portals.conf \
@@ -580,6 +646,11 @@ if [ "$skip_install" = 0 ]; then
         packaging/deb/scootbar.service; do
         fetch "$RAW_URL/$source_ref/$f" "$tmp/$(basename "$f")" || die "could not download $f at $source_ref"
     done
+    if [ "$with_notify" = 1 ]; then
+        for f in packaging/deb/scootnotify.service packaging/deb/org.freedesktop.Notifications.service; do
+            fetch "$RAW_URL/$source_ref/$f" "$tmp/$(basename "$f")" || die "could not download $f at $source_ref"
+        done
+    fi
 
     sed "s|@SCOOT_BIN@|$bin_dir/scoot|g" "$tmp/scoot.service" >"$tmp/scoot.service.out"
     # The packaged unit is generic (graphical-session.target, for any
@@ -588,6 +659,15 @@ if [ "$skip_install" = 0 ]; then
     sed -e "s|^ExecStart=.*|ExecStart=$bin_dir/scootbar daemon|" \
         -e 's|graphical-session\.target|scoot-session.target|g' \
         "$tmp/scootbar.service" >"$tmp/scootbar.service.out"
+    if [ "$with_notify" = 1 ]; then
+        # Like the bar's unit above: installed here the daemon runs only
+        # inside a scoot session, never in GNOME or KDE. The activation
+        # file names the installed binary, not /usr/bin.
+        sed -e "s|^ExecStart=.*|ExecStart=$bin_dir/scootnotify daemon|" \
+            -e 's|graphical-session\.target|scoot-session.target|g' \
+            "$tmp/scootnotify.service" >"$tmp/scootnotify.service.out"
+        sed "s|^Exec=.*|Exec=$bin_dir/scootnotify daemon|" "$tmp/org.freedesktop.Notifications.service" >"$tmp/org.freedesktop.Notifications.service.out"
+    fi
     sed "s|^Exec=.*|Exec=$bin_dir/scoot-session|" "$tmp/scoot.desktop" >"$tmp/scoot.desktop.out"
 fi
 
@@ -620,6 +700,11 @@ if [ "$skip_install" = 0 ]; then
     if [ "$with_launch" = 1 ]; then
         check_ours "$bin_dir/scootlaunch"
     fi
+    if [ "$with_notify" = 1 ]; then
+        check_ours "$bin_dir/scootnotify"
+        check_ours "$unit_dir/scootnotify.service"
+        check_ours "$activation_dir/org.freedesktop.Notifications.service"
+    fi
     if [ -n "$session_file" ]; then check_ours "$session_file"; fi
 
     place "$tmp/$scoot_asset" "$bin_dir/scoot" 755
@@ -635,6 +720,11 @@ if [ "$skip_install" = 0 ]; then
     fi
     if [ "$with_launch" = 1 ]; then
         place "$tmp/$launch_asset" "$bin_dir/scootlaunch" 755
+    fi
+    if [ "$with_notify" = 1 ]; then
+        place "$tmp/$notify_asset" "$bin_dir/scootnotify" 755
+        place "$tmp/scootnotify.service.out" "$unit_dir/scootnotify.service" 644
+        place "$tmp/org.freedesktop.Notifications.service.out" "$activation_dir/org.freedesktop.Notifications.service" 644
     fi
     if [ -n "$session_file" ]; then
         place "$tmp/scoot.desktop.out" "$session_file" 644
@@ -987,6 +1077,8 @@ if [ "$dry_run" = 0 ]; then
         printf 'bar_tag=%s\n' "${wanted_bar_tag:-}"
         printf 'launch_version=%s\n' "${launch_version:-}"
         printf 'launch_tag=%s\n' "${wanted_launch_tag:-}"
+        printf 'notify_version=%s\n' "${notify_version:-}"
+        printf 'notify_tag=%s\n' "${wanted_notify_tag:-}"
         printf 'bin_dir=%s\n' "$bin_dir"
         printf 'date=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     } >"$tmp/install-version"
@@ -997,6 +1089,7 @@ fi
 if have_systemd_user; then
     run systemctl --user daemon-reload
     if [ "$with_bar" = 1 ]; then run systemctl --user enable scootbar.service; fi
+    if [ "$with_notify" = 1 ]; then run systemctl --user enable scootnotify.service; fi
 else
     note "no systemd user manager here: scoot-session will run the compositor without session units"
 fi
@@ -1028,7 +1121,7 @@ font_candidates=${SCOOT_INSTALL_FONTS:-"/usr/share/fonts/truetype/dejavu/DejaVuS
 # scootlaunch's panel probes the same paths and refuses to open without
 # one; its headless commands need none.
 need_font=0
-if [ "$with_bar" = 1 ] || [ "$with_launch" = 1 ]; then
+if [ "$with_bar" = 1 ] || [ "$with_launch" = 1 ] || [ "$with_notify" = 1 ]; then
     need_font=1
     for f in $font_candidates; do
         if [ -s "$f" ]; then
@@ -1101,6 +1194,9 @@ if [ -n "$pkgs" ]; then
         if [ "$with_launch" = 1 ]; then
             say "scootlaunch needs a font to draw its panel (none of the usual font files is usable)."
         fi
+        if [ "$with_notify" = 1 ]; then
+            say "scootnotify needs a font to draw its cards (none of the usual font files is usable)."
+        fi
     fi
     say "Non-interactive: use apt -y, dnf -y, or pacman --noconfirm."
     say "  $cmd"
@@ -1130,6 +1226,7 @@ else
     if [ -n "$look" ]; then sys_flags="$sys_flags --look $look"; fi
     if [ "$with_bar" = 0 ]; then sys_flags="$sys_flags --no-bar"; fi
     if [ "$with_launch" = 1 ]; then sys_flags="$sys_flags --launch"; fi
+    if [ "$with_notify" = 1 ]; then sys_flags="$sys_flags --notify"; fi
     say "  curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --system$sys_flags"
 fi
 say ""

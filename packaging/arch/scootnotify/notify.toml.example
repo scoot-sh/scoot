@@ -1,0 +1,26 @@
+# A starting scootnotify config. Copy it to ~/.config/scoot/notify.toml
+# and check it with `scootnotify daemon --check` (prints `valid`).
+# Every option is documented on the site
+# (https://www.scoot.sh/scootnotify/configure/); the cards draw text
+# only with a font, and without `--font` the daemon uses the first of
+# these that loads: /usr/share/fonts/TTF/DejaVuSans.ttf on Arch
+# (the `ttf-dejavu` package), or give one with `--font PATH`. Without a
+# compositor the daemon stays headless (cards wait with their clocks
+# stopped) and the bus still serves.
+width_px = 360
+max_visible = 5
+margin_px = 12
+anchor = "top-right"
+# output = "HDMI-1"
+body_lines = 5
+border_px = 2
+radius = 8
+pause_when_idle_secs = 60
+timeout_low_ms = 5000
+timeout_normal_ms = 10000
+timeout_max_ms = 3600000
+max_live = 128
+rate_per_sec = 20
+rate_burst = 40
+history_max = 64
+dnd_allows_critical = true

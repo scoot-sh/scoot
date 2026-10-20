@@ -84,6 +84,34 @@ ones: a call past the 4 MiB cap gets `LimitsExceeded`, never silence.
 
 Every flag is in the [CLI reference](./cli.md).
 
+## Install
+
+The daemon rides the [install script](../start/install/#use-it-every-day)
+with `--notify`, opt-in until it becomes the default. Unified `vX.Y.Z`
+releases carry a `scootnotify-<version>-<arch>` binary beside the rest.
+
+```sh
+curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --notify
+```
+
+The cards need a font to draw; the bus service and `--check` need none:
+
+| Distro | A font |
+|---|---|
+| Debian 12 / Ubuntu 24.04 and newer | `sudo apt install fonts-dejavu-core` |
+| Fedora 43 and newer | `sudo dnf install dejavu-sans-fonts` |
+| openSUSE Tumbleweed | `sudo zypper install dejavu-fonts` |
+| Arch | `sudo pacman -S ttf-dejavu` |
+
+Any font file works with `--font PATH` instead of the packaged one.
+The install script's missing-library report names it for your
+distro. Distro packages (deb, rpm, Arch) are recipes in `packaging/`
+so far, not published repositories. Only one daemon can own
+`org.freedesktop.Notifications`: the installer refuses while another
+one (mako, dunst, swaync) holds the name, and names it — stop or
+disable that daemon first, and keep only one daemon's unit enabled
+(the packages install the user unit and the D-Bus activation file).
+
 ## Spec conformance
 
 Against version 1.3 of the Desktop Notifications Specification:
@@ -91,7 +119,7 @@ Against version 1.3 of the Desktop Notifications Specification:
 | Item | Status |
 |---|---|
 | Bus name, object, interface (§2) | Yes, with `DO_NOT_QUEUE` ownership |
-| D-Bus activation | A service file ships in the tree; the unit and its install arrive with the Nix module |
+| D-Bus activation | A service file ships in the tree; the unit and its install arrive with the Nix module and the distro packages |
 | `GetCapabilities` (§9.1.1) | `body`, `body-markup`, `actions`, `icon-static` (not `persistence`) |
 | `Notify` (§9.1.2) | All eight arguments, bounded |
 | `CloseNotification` (§9.1.3) | Closes with reason 3; unknown ids get the empty error |

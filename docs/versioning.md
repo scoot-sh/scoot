@@ -3,8 +3,8 @@
 scoot has one version. `[workspace.package] version` in the root
 `Cargo.toml` is it, and every crate inherits it with
 `version.workspace = true`: the binaries (`scoot`, which carries
-`scoot msg`; `scootbg`; `scootbar`; later `scootnotify`, `scootlaunch`,
-`scootgreet`) and the libraries (`scootctl`, `scoot-core`, `scoot-ipc`,
+`scoot msg`; `scootbg`; `scootbar`; `scootnotify`; `scootlaunch`;
+later `scootgreet`) and the libraries (`scootctl`, `scoot-core`, `scoot-ipc`,
 `scootbg-mem`). A release is one tag, `vX.Y.Z`, that releases every binary
 at that version. There are no per-package versions or tags, and nothing is
 published to crates.io (`publish = false` stays where it is).

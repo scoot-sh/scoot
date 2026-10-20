@@ -56,7 +56,7 @@ pr_body = """
 
 Merging this PR is the release: release-plz then pushes the
 `v{{ release.next_version }}` tag, and `.github/workflows/release.yml`
-builds every binary (scoot, scootbg, scootbar, scootlaunch) at that one version and
+builds every binary (scoot, scootbg, scootbar, scootlaunch, scootnotify) at that one version and
 publishes the GitHub Release.
 
 The proposed version follows the commits since the last tag (below 1.0: a
@@ -66,9 +66,9 @@ proposal: to release a different version, edit `version` under
 this branch.
 
 Before merging, check the distro packaging on this branch:
-`scripts/sync-packaging-versions` already bumped `pkgver` in the four
+`scripts/sync-packaging-versions` already bumped `pkgver` in the five
 Arch release PKGBUILDs (and their `.SRCINFO`, including the `-git` static
-base) and `Version` (plus a `%changelog` entry) in the four RPM specs to
+base) and `Version` (plus a `%changelog` entry) in the five RPM specs to
 v{{ release.next_version }} in a follow-up commit, the way the fuzz
 lockfiles are synced; the debs read the workspace version at build time
 and need no bump. If that commit is missing or wrong, run the script by
