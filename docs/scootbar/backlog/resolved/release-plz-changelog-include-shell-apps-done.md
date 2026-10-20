@@ -1,9 +1,10 @@
 ---
 title: "release-plz: list scootlaunch and scootnotify in changelog_include"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-19"
 ---
 
 # release-plz: list scootlaunch and scootnotify in changelog_include
