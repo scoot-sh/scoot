@@ -1255,7 +1255,7 @@ or of the unread count, and only then: `{text: "DND n", class:
 "muted"}` while DND holds, `{text: "n", class: "urgent"}` with an
 unread critical (`normal` otherwise), `{text: ""}` when idle — each
 with a tooltip, and a per-update `icon` where its
-[`bar_icon_unread` / `bar_icon_dnd`](../../scootnotify/configure.md#the-bar-feed)
+[`bar_icon_unread` / `bar_icon_dnd`](../scootnotify/configure.md#the-bar-feed)
 are set. Until the first set the module shows its `placeholder`; a bar
 started later catches up on its socket appearing, with no polling on
 either side.
