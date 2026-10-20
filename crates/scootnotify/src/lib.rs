@@ -31,6 +31,7 @@ pub mod config;
 pub mod control;
 pub mod daemon;
 pub mod exec;
+pub mod feed;
 pub mod look;
 pub mod markup;
 pub mod model;

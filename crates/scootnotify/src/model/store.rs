@@ -428,6 +428,25 @@ impl Store {
         self.history.unread()
     }
 
+    /// Live cards plus unseen history: what the bar's feed counts. Live
+    /// cards show (seen or about to be); held ones wait in history
+    /// unseen. No allocation: the daemon reads this every turn.
+    pub fn feed_count(&self) -> usize {
+        self.live.len() + self.history.unread()
+    }
+
+    /// Whether any counted card is critical: live or unseen in
+    /// history. The feed's `urgent` class reads this. No allocation.
+    pub fn feed_has_critical(&self) -> bool {
+        self.live
+            .values()
+            .any(|note| note.urgency == crate::bus::hints::Urgency::Critical)
+            || self
+                .history
+                .iter()
+                .any(|entry| !entry.seen && entry.urgency == crate::bus::hints::Urgency::Critical)
+    }
+
     /// Drains the rule `exec`s the last arrival fired: the daemon
     /// spawns these. Drained every turn, so a flood cannot grow this
     /// past one turn's worth.
