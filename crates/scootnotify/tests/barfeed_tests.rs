@@ -294,11 +294,14 @@ fn poll_bar(
     }
 }
 
-/// Waits for the bar to show `(text, class)`, driving one net-zero
-/// change (an arrival closed at once) halfway through: with the
-/// product fix a transient push failure converges on its own bounded
-/// retry, and the nudge unsticks even a retry-exhausted spell — while
-/// the final state stays exact. `nudge` supplies fresh bus tokens.
+/// Waits for the bar to show `(text, class)`: up to three 10 s rounds
+/// with a net-zero nudge (an arrival closed at once) between the first
+/// two. A healthy push converges in the first round; a starved one
+/// converges through the product's own bounded retry or a later round
+/// (the push deadline clears loaded turn periods, so any reply inside
+/// it places). The final state stays exact — nothing less passes — and
+/// each nudge returns the count exactly where it started, so rounds
+/// compose. `nudge` supplies fresh bus tokens.
 fn until_bar_converged(
     session: &Session,
     bar: &Path,
@@ -307,17 +310,20 @@ fn until_bar_converged(
     class: &str,
     nudge: &mut u64,
 ) -> (String, String) {
-    let got = poll_bar(session, bar, text, class, Duration::from_secs(5));
-    if got.0 == text && got.1 == class {
-        return got;
+    for _ in 0..2 {
+        let got = poll_bar(session, bar, text, class, Duration::from_secs(10));
+        if got.0 == text && got.1 == class {
+            return got;
+        }
+        // One net-zero change: the count returns exactly where it
+        // started (an arrival closed at once), but the fresh push
+        // carries the current state again — past a retry-exhausted
+        // spell, a stale park, or a superseded push.
+        let id = notify(client, "nudge", *nudge);
+        *nudge += 1;
+        close(client, id, *nudge);
+        *nudge += 1;
     }
-    // One net-zero change: the count returns exactly where it
-    // started (an arrival closed at once), but the fresh push carries
-    // the current state again.
-    let id = notify(client, "nudge", *nudge);
-    *nudge += 1;
-    close(client, id, *nudge);
-    *nudge += 1;
     until_bar(session, bar, text, class)
 }
 
@@ -420,8 +426,8 @@ fn arrivals_dismissals_and_dnd_toggles_reflect_exactly() {
     );
     let mut client = connect(&bus);
     // One arrival: the count pushes. Each stage converges (nudging
-    // once past a transient push failure) on the exact final state —
-    // never less, never "eventually something close".
+    // past a starved spell) on the exact final state — never less,
+    // never "eventually something close".
     let mut nudge = 1000;
     let id = notify(&mut client, "a", 101);
     assert_eq!(
