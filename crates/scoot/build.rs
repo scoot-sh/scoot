@@ -52,15 +52,24 @@ fn main() {
     // position in rustc's link line decides -- and nothing contracts
     // that position. Arch's toolchain orders it where nothing is
     // pending yet, and the link dies on undefined `gbm_*` (seen on
-    // arch.yml while the ubuntu and nix links stayed green); wrapping
-    // it in `--whole-archive` is no better, duplicating what the plain
-    // pull already took on the toolchains where the position cooperates.
-    // A bare object file is unconditional: the linker always takes it,
-    // from any position, exactly once. Compiled with the same flags
+    // arch.yml while the ubuntu and nix links stayed green). A bare
+    // object file is unconditional: the linker always takes it, from
+    // any position, exactly once. Compiled with the same flags
     // `compile()` would use (same `cc` compiler object, only `-c -o`
     // added), then passed as a plain input -- never a `-l`, so there is
     // no modifier for rustc to collide and no archive for `--as-needed`
     // to drop.
+    //
+    // One `.text` section, not one per function: `cc` defaults to
+    // `-ffunction-sections`, and the per-function sections it makes are
+    // exactly what a section-garbage-collecting link drops when its own
+    // bookkeeping disagrees -- seen as every `gbm_*` (and the stub's
+    // own probe) undefined on Arch's lld despite the object sitting on
+    // the link line with global definitions. With a single `.text` any
+    // live reference keeps the whole stub, and with none live the whole
+    // object is still collected as one: collection semantics at object
+    // granularity under every section GC. (`-fno-data-sections` keeps
+    // the statics beside it for the same reason.)
     //
     // gbm-sys still emits its own plain `-lgbm` (its `#[link]`
     // attribute), which must RESOLVE even though it must never provide:
@@ -82,6 +91,8 @@ fn main() {
         let dir = std::path::Path::new(&out);
         let compiler = cc::Build::new()
             .file("gbm-stub/gbm_stub.c")
+            .flag("-fno-function-sections")
+            .flag("-fno-data-sections")
             .try_get_compiler()
             .expect("a C compiler for the gbm stub");
         let object = dir.join("gbm_stub.o");
