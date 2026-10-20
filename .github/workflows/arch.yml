@@ -253,16 +253,7 @@ jobs:
           mkdir -p /tmp/notify-smoke-home /tmp/notify-smoke-xdg
           chmod 700 /tmp/notify-smoke-xdg
           HOME=/tmp/notify-smoke-home XDG_RUNTIME_DIR=/tmp/notify-smoke-xdg \
-            dbus-run-session -- bash -euo pipefail -c "
-            scootnotify daemon --config /usr/share/doc/scootnotify/notify.toml.example &
-            daemon=\$!
-            trap \"kill \$daemon 2>/dev/null || true\" EXIT
-            gdbus wait --session --timeout 10 org.freedesktop.Notifications
-            gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.Notify \"('smoke', uint32 0, '', 'hello', 'world', @as [], @a{sv} {}, int32 -1)\"
-            out=\$(scootnotify msg list --json)
-            echo \"\$out\" | grep -q hello
-            echo \"ok: scootnotify serves Notify and msg list on a session bus\"
-          "
+            dbus-run-session -- scripts/notify-smoke.sh /usr/share/doc/scootnotify/notify.toml.example
           mkdir -p /tmp/arch-smoke-xdg
           chmod 700 /tmp/arch-smoke-xdg
           export XDG_RUNTIME_DIR=/tmp/arch-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
@@ -288,16 +279,7 @@ jobs:
           mkdir -p /tmp/notify-smoke-home /tmp/notify-smoke-xdg
           chmod 700 /tmp/notify-smoke-xdg
           HOME=/tmp/notify-smoke-home XDG_RUNTIME_DIR=/tmp/notify-smoke-xdg \
-            dbus-run-session -- bash -euo pipefail -c "
-            scootnotify daemon --config /usr/share/doc/scootnotify/notify.toml.example &
-            daemon=\$!
-            trap \"kill \$daemon 2>/dev/null || true\" EXIT
-            gdbus wait --session --timeout 10 org.freedesktop.Notifications
-            gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications --method org.freedesktop.Notifications.Notify \"('smoke', uint32 0, '', 'hello', 'world', @as [], @a{sv} {}, int32 -1)\"
-            out=\$(scootnotify msg list --json)
-            echo \"\$out\" | grep -q hello
-            echo \"ok: scootnotify serves Notify and msg list on a session bus\"
-          "
+            dbus-run-session -- scripts/notify-smoke.sh /usr/share/doc/scootnotify/notify.toml.example
           export XDG_RUNTIME_DIR=/tmp/arch-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
           export SMOKE_PREFIX=/tmp/arch-smoke-git SMOKE_REQUIRE_SCOOTBG=1
           # Same Nerd-fonts gate as above.
