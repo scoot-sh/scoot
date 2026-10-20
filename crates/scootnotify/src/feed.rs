@@ -43,6 +43,13 @@ pub const MODULE_ID: &str = "notifications";
 /// expiries behind it. The bar answers in one turn when healthy.
 const PUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Binds create the socket file before they listen: a refused dial
+/// right after creation is that race, not an absence. Retried this
+/// many times, this far apart (a 25 ms bound); anything longer is a
+/// stale socket, reported as no bar.
+const CONNECT_TRIES: usize = 5;
+const CONNECT_PAUSE: Duration = Duration::from_millis(5);
+
 /// The longest control reply read. Replies are one line (`ok` or an
 /// error); this only bounds a daemon gone wrong.
 const MAX_REPLY: u64 = 64 * 1024;
@@ -446,7 +453,7 @@ enum Send {
 
 /// Sends one `set notifications` line and reads the one-line reply.
 fn send_to(socket: &Path, payload: &serde_json::Value) -> Send {
-    let mut stream = match UnixStream::connect(socket) {
+    let mut stream = match connect(socket) {
         Ok(stream) => stream,
         Err(error) => return Send::NoBar(short_error(&error)),
     };
@@ -473,6 +480,21 @@ fn send_to(socket: &Path, payload: &serde_json::Value) -> Send {
         }
     };
     parse_reply(&reply)
+}
+
+/// Dials the bar: a refused dial retries bounded (the bind-before-
+/// listen race above), any other refusal reports at once.
+fn connect(socket: &Path) -> Result<UnixStream, std::io::Error> {
+    for _ in 0..CONNECT_TRIES {
+        match UnixStream::connect(socket) {
+            Ok(stream) => return Ok(stream),
+            Err(error) if error.kind() == std::io::ErrorKind::ConnectionRefused => {
+                std::thread::sleep(CONNECT_PAUSE);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    UnixStream::connect(socket)
 }
 
 /// The request line: the bar's protocol version, `set`, our module.
