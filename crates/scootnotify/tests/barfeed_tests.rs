@@ -258,6 +258,35 @@ fn bar_module_opt(session: &Session, bar: &Path) -> Option<(String, String)> {
     ))
 }
 
+/// Spins until the daemon reports card `id` presented (`shown` set in
+/// `msg list --json`): only a presented card dismisses to *seen*. An
+/// unpresented close counts unseen — "live cards plus unseen history"
+/// — so the bar correctly holds its count, and a dismissal stage that
+/// closes too early races the compositor's first frame (which loaded
+/// CI loses) instead of testing the push. Sixty seconds: presentation
+/// needs a compositor frame, the slowest leg on a saturated box.
+fn until_presented(session: &Session, id: u32) {
+    let start = Instant::now();
+    loop {
+        let list = notify_msg(session, &["list", "--json"]);
+        let shown = serde_json::from_str::<serde_json::Value>(&list)
+            .ok()
+            .and_then(|value| value.as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .filter(|card| card.get("id").and_then(|value| value.as_u64()) == Some(u64::from(id)))
+            .any(|card| card.get("shown").is_some_and(|shown| !shown.is_null()));
+        if shown {
+            return;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "card {id} never presented (the compositor showed no frame)"
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
 /// Spins until `want` holds or the deadline passes: the feed pushes a
 /// turn after the call that changed the count answers.
 fn until_bar(
@@ -376,8 +405,11 @@ fn until_bar_converged(
         // One verified net-zero change: the arrival must show before
         // the dismissal goes out, so the two pushes cannot batch into
         // invisibility; the count returns exactly where it started.
+        // Presented first: closing an unshown card counts unseen, which
+        // would raise the count instead of restoring it.
         let id = notify(client, "nudge", *nudge);
         *nudge += 1;
+        until_presented(session, id);
         poll_bar(session, bar, child, mid.0, mid.1, Duration::from_secs(10));
         close(client, id, *nudge);
         *nudge += 1;
@@ -505,7 +537,9 @@ fn arrivals_dismissals_and_dnd_toggles_reflect_exactly() {
         .0,
         "1"
     );
-    // Its dismissal: idle again.
+    // Its dismissal: idle again. Presented first: only a shown card
+    // dismisses to seen (see until_presented).
+    until_presented(&session, id);
     close(&mut client, id, 102);
     assert_eq!(
         until_bar_converged(
