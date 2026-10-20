@@ -12,6 +12,9 @@
 #[path = "lockclient/mod.rs"]
 mod lockclient;
 
+#[path = "support/mod.rs"]
+mod support;
+
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -133,54 +136,12 @@ fn spawn_popup(session: &Session, bus: &Daemon, config: &str) -> (Child, PathBuf
     (child, log)
 }
 
-/// Pumps `client` until its `Notify` is answered: the daemon serving.
-/// (A 1 ms card: the reply proves serving, the card itself is gone
-/// before any test counts live ones.)
+/// Pumps `client` until its `GetServerInformation` probe is answered:
+/// the daemon serving. Shared shape (see `support`): the probe makes
+/// no card, so it never disturbs a test's exact live-card or history
+/// counts, green runs and rescued runs alike.
 fn wait_serving(client: &mut Conn, server: &mut Child, log: &Path) {
-    let start = Instant::now();
-    let body = notify_body("Probe", 0, "p", "p", &[], &[], 1);
-    client
-        .call(
-            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
-        )
-        .expect("the first call queues");
-    loop {
-        if start.elapsed() >= Duration::from_secs(30) {
-            match server.try_wait().expect("the server reaps") {
-                Some(status) => {
-                    let err = std::fs::read_to_string(log).unwrap_or_default();
-                    panic!("the server died at startup ({status}): {err}");
-                }
-                None => {
-                    panic!("the server still runs but never owned the name in 30 s");
-                }
-            }
-        }
-        if client.dead() {
-            panic!("the bus died while waiting for the server");
-        }
-        let (events, _) = client.pump();
-        let mut answered = false;
-        let mut errored = false;
-        for event in events {
-            match event {
-                Event::Reply { token: 9000, .. } => answered = true,
-                Event::CallError { token: 9000, .. } => errored = true,
-                _ => {}
-            }
-        }
-        if answered {
-            return;
-        }
-        if errored {
-            client
-                .call(
-                    BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, 9000,
-                )
-                .expect("a resent call queues");
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    support::wait_serving(client, server, support::LogSource::File(log));
 }
 
 /// One `Notify` body: `actions` as key/label pairs, `bytes` as
@@ -863,7 +824,7 @@ fn no_cards_means_no_wakeups() {
     let (mut server, log) = spawn_popup(&session, &bus, "");
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
     wait_serving(&mut client, &mut server, &log);
-    // Past the probe card's 1 ms life, and settled.
+    // Settled past startup before sampling wakeups.
     std::thread::sleep(Duration::from_secs(2));
     let pid = server.id();
     let before = test_support::wakeups(pid);

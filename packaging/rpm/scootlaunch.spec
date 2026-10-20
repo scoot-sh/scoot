@@ -13,7 +13,7 @@
 # here unchanged (the same release tarball, under the same name).
 
 Name:           scootlaunch
-Version:        0.2.1
+Version:        0.4.0
 Release:        1%{?dist}
 # No -debuginfo/-debugsource subpackages: see scoot.spec.
 %global         debug_package %{nil}
@@ -29,7 +29,7 @@ BuildRequires:  libxkbcommon-devel
 scootlaunch is the keyboard-first application launcher for the scoot
 compositor, and runs standalone under any compositor speaking standard
 Wayland protocols. It ranks desktop entries as you type, launches them
-with an activation token in their own systemd scope, and also answers
+with an activation token in their own service scope, and also answers
 menu-style picks from standard input and headless list queries. A
 missing config file is the built-in defaults: check one with
 `scootlaunch --check`.
@@ -64,5 +64,8 @@ cd source
 %license source/LICENSE source/NOTICE source/THIRD-PARTY-LICENSES
 
 %changelog
+* Tue Oct 20 2026 scoot-sh <packages@scoot.sh> - 0.4.0-1
+- Built from the v0.4.0 release tag.
+
 * Mon Oct 19 2026 scoot-sh <packages@scoot.sh> - 0.2.1-1
 - First RPM: launcher plus its keyboard library, from the vendored tarball.

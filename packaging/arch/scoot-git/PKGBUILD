@@ -9,7 +9,7 @@
 # which provides `scootbg`).
 
 pkgname=scoot-git
-pkgver=0.2.1.r0.g0000000
+pkgver=0.4.0.r0.g0000000
 pkgrel=1
 pkgdesc='Scrolling-tiling Wayland compositor (auto CPU/GPU rendering, runs without a GPU) (git)'
 arch=('x86_64' 'aarch64')
@@ -46,6 +46,8 @@ pkgver() {
 
 build() {
   cd "$pkgname"
+  # Same lld-ordering pin as the release twin (see packaging/arch/scoot/PKGBUILD).
+  export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=-fuse-ld=bfd"
   cargo build --release --locked -p scoot
   cargo deny list > THIRD-PARTY-LICENSES
   "${CARGO_TARGET_DIR:-target}/release/scoot" --print-default-config > config.toml.example
