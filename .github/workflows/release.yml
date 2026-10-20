@@ -721,11 +721,12 @@ jobs:
           exit "$fail"
 
       # Each binary on a bare Ubuntu and a bare Debian container: the
-      # stock image plus the documented runtime libraries (scoot's five
-      # system libraries, the launcher's keyboard one), one DejaVu font
-      # for the bar's --check, which loads a font exactly as a start
-      # does, and a session bus for the notification daemon's
-      # `daemon --check`. No toolchain, no -dev packages.
+      # stock image plus the documented runtime libraries (five system
+      # libraries for the compositor, the keyboard one for the
+      # launcher), one DejaVu font
+      # for the bar check, which loads a font exactly as a start
+      # does, and a session bus for the notification daemon
+      # check. No toolchain, no -dev packages.
       #
       # The loop covers the binaries the release holds (found by name),
       # not a fixed list: an old release predates newer binaries

@@ -377,9 +377,9 @@ jobs:
             scootbar --version
             scootlaunch --version
             scootnotify --version
-            # The font the bar's --check needs (same requirement as the
-            # bookworm --check above), plus the session bus the
-            # notification daemon's --check runs under there too.
+            # The font the bar check needs (same requirement as the
+            # bookworm check above), plus the session bus the
+            # notification daemon check runs under there too.
             scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
             scootlaunch --check
             dbus-run-session -- scootnotify daemon --check --config /usr/share/doc/scootnotify/notify.toml.example
