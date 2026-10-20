@@ -281,6 +281,16 @@ fn run_loop(
         if let Some(line) = feed.sync(server.store()) {
             warn(format_args!("{line}"));
         }
+        // Advance the in-flight push and fire due re-dials here as
+        // well, not only after the poll below: turns that skip the
+        // poll (staged bus work or queued output, the `continue`
+        // below) must still move the feed, or a full bus outbox would
+        // wedge pushes behind it — supersedes piling up while nothing
+        // completes. Cheap when idle (a few branches, no I/O), and the
+        // watch retry still waits for the poll's verdict below.
+        if let Some(line) = feed.service(server.store(), false) {
+            warn(format_args!("{line}"));
+        }
         // The turn's control events, from the bus, the pointer and `msg`
         // alike, go to this turn's subscribers. Drained every turn, so a
         // flood cannot grow the queue past one turn's worth.
