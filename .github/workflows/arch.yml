@@ -156,6 +156,13 @@ jobs:
           sys.exit(1 if bad else 0)
           EOF
 
+      # TEMPORARY: makepkg.conf owns RUSTFLAGS (frame-pointers) and
+      # clobbers the env, so force the diagnostic flags there.
+      - name: TEMPORARY force diagnostic RUSTFLAGS through makepkg.conf
+        run: |
+          printf '%s\n' 'RUSTFLAGS="-C link-args=-Wl,--no-gc-sections -C link-args=-Wl,--trace-symbol=gbm_bo_create"' >> /etc/makepkg.conf
+          tail -1 /etc/makepkg.conf
+
       - name: makepkg all six packages (one cargo target dir for the disk budget)
         run: |
           # Passed through sudo with env: sudo's env_reset would drop
@@ -175,12 +182,12 @@ jobs:
           # so `makepkg -s` for scoot would fail to satisfy it. This is
           # the same order an AUR helper builds the chain in.
           sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
-            RUSTFLAGS="-C link-args=-Wl,--no-gc-sections -C link-args=-Wl,--trace-symbol=gbm_bo_create" \
+            NOGC_RUSTFLAGS_TMP=1 \
             bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/scootbg' && makepkg -s --noconfirm"
           pacman -U --noconfirm "$GITHUB_WORKSPACE"/dist/scootbg-0*.pkg.tar.zst
           for p in scoot scootbar scootlaunch scoot-git scootbg-git scootbar-git scootlaunch-git; do
             sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
-              RUSTFLAGS="-C link-args=-Wl,--no-gc-sections -C link-args=-Wl,--trace-symbol=gbm_bo_create" \
+              NOGC_RUSTFLAGS_TMP=1 \
               bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/$p' && makepkg -s --noconfirm"
           done
           ls -l "$GITHUB_WORKSPACE/dist"/*.pkg.tar.zst
