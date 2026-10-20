@@ -64,6 +64,17 @@
 # dispatched until they are on main, so the first dry run happens after
 # merge; until then the lint job below plus local runs are the proof.
 #
+# POST-PUBLISH VERIFICATION (`verify` job): after a real publish, each
+# arch downloads the release's own assets from GitHub, checks every file
+# against the published SHA256SUMS and its keyless build-provenance
+# attestation, and runs each binary (`--version` names the release, the
+# bar's and the launcher's `--check`, the compositor's default-config
+# render) on bare Ubuntu and Debian containers. It never runs on
+# pull requests or dry runs. `workflow_dispatch` with `verify_only:
+# true` and a `tag` runs only resolve plus this job, from any ref, to
+# test it read-only against an existing release (e.g. v0.4.0); it
+# publishes and builds nothing.
+#
 # RECOVERY: re-run the failed workflow run (same tag): the gates resume
 # an incomplete release and skip a complete one. If a published
 # release is wrong, the maintainer deletes the release and the tag and
@@ -76,7 +87,8 @@
 # PR changes (Cargo.toml, Cargo.lock, CHANGELOG.md, packaging/); a
 # dispatch with an empty `tag` runs only the lint job (release-plz.yml
 # does that on its PR's branch, whose pull_request run waits for
-# approval); a
+# approval); a dispatch with `verify_only: true` and a tag runs only
+# resolve plus the verify job (read-only: no build, no publish); a
 # push to main never reaches this workflow (no `branches: [main]`
 # trigger), and tag pushes always contain the release commit, so no
 # paths filter is needed on the tag trigger.
@@ -116,6 +128,8 @@ on:
       - 'scripts/release-notes'
       - 'scripts/workspace-version'
       - 'scripts/sync-fuzz-locks'
+      - 'scripts/sync-packaging-versions'
+      - 'scripts/test_sync_packaging_versions.py'
       - 'scripts/test_release_resolve.py'
   workflow_dispatch:
     inputs:
@@ -127,6 +141,11 @@ on:
         description: 'Build everything, publish nothing (any ref). false publishes, and only on the tag itself.'
         required: true
         default: true
+        type: boolean
+      verify_only:
+        description: 'Read-only: download the tag release and verify it (checksums, attestations, binary runs). Publishes nothing, builds nothing. Needs tag; runs from any ref.'
+        required: false
+        default: false
         type: boolean
 
 permissions:
@@ -218,8 +237,10 @@ jobs:
           print("guards ok: single-path uploads, hidden files included, no inline github/inputs/steps in run")
           EOF
 
-      - name: release tool tests (release-resolve, workspace-version, release-notes)
-        run: python3 scripts/test_release_resolve.py
+      - name: release tool tests (release-resolve, workspace-version, release-notes, packaging sync)
+        run: |
+          python3 scripts/test_release_resolve.py
+          python3 scripts/test_sync_packaging_versions.py
 
   # Parse the tag and run every refusal gate. Its outputs drive the rest
   # of the pipeline; a refusal fails the run before anything builds.
@@ -236,6 +257,7 @@ jobs:
       assets: ${{ steps.resolve.outputs.assets }}
       dry_run: ${{ steps.resolve.outputs.dry_run }}
       complete: ${{ steps.resolve.outputs.complete }}
+      verify_only: ${{ steps.resolve.outputs.verify_only }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -270,6 +292,10 @@ jobs:
           TAG_TO_RESOLVE: ${{ steps.tag.outputs.value }}
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          # A dispatch input arrives as a string ("true", not true), and
+          # is empty on push events: normalize to true/false here, once,
+          # so the jobs below compare one string output.
+          VERIFY_ONLY_INPUT: ${{ inputs.verify_only }}
         run: |
           # --complete-ok: a release that already holds every asset is not
           # an error here but a finished job (the tag push and release-plz's
@@ -284,6 +310,7 @@ jobs:
             echo "assets=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["assets"]))')"
             echo "complete=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["complete"]).lower())')"
             if [ "$EVENT_NAME" = push ]; then echo "dry_run=false"; else echo "dry_run=$DRY_RUN_INPUT"; fi
+            if [ "$VERIFY_ONLY_INPUT" = true ]; then echo "verify_only=true"; else echo "verify_only=false"; fi
           } >>"$GITHUB_OUTPUT"
           if printf '%s' "$plan" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["complete"] else 1)'; then
             echo "::notice title=Already released::$TAG_TO_RESOLVE already holds every asset; nothing to build or publish."
@@ -298,7 +325,7 @@ jobs:
   vendor:
     name: Vendored tarball + SBOM
     needs: resolve
-    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true'
+    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true' && needs.resolve.outputs.verify_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -396,7 +423,7 @@ jobs:
   build:
     name: Portable binaries (${{ matrix.arch }})
     needs: [resolve, vendor]
-    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true'
+    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true' && needs.resolve.outputs.verify_only != 'true'
     strategy:
       matrix:
         include:
@@ -498,7 +525,7 @@ jobs:
   publish:
     name: Publish the GitHub Release (or dry-run it)
     needs: [resolve, vendor, build]
-    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true'
+    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true' && needs.resolve.outputs.verify_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -507,6 +534,11 @@ jobs:
       attestations: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      # Set only by a real publish below (the dry run exits before it):
+      # the verify job's gate, which cannot use needs.publish.result
+      # (referencing a skipped job's result fails its whole condition).
+      published: ${{ steps.publish.outputs.published }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -583,6 +615,7 @@ jobs:
           subject-path: 'dist/*'
 
       - name: Publish (or print the dry-run summary)
+        id: publish
         run: |
           if [ '${{ needs.resolve.outputs.dry_run }}' = true ]; then
             echo "dry run: would publish '${{ needs.resolve.outputs.tag }}' with these files:"
@@ -597,3 +630,151 @@ jobs:
           gh release upload "$tag" dist/* --clobber
           gh release edit "$tag" --draft=false
           gh release view "$tag" --json tagName,assets --jq '{tag: .tagName, assets: [.assets[].name]}'
+          echo "published=true" >>"$GITHUB_OUTPUT"
+
+  # Post-publish proof: download the release's own assets from GitHub,
+  # check every file against the published SHA256SUMS and its keyless
+  # build-provenance attestation, and run each binary on bare distro
+  # containers. Runs after a real publish (a tag push, or a dispatch
+  # with dry_run=false on the tag itself), and on an explicit
+  # verify-only dispatch (read-only: it downloads and checks from any
+  # ref, and builds and publishes nothing). Never on pull requests and
+  # never on dry runs: there is nothing published to check.
+  #
+  # A missing or tampered file, a file with no attestation from this
+  # workflow, a --version that does not name the release version, or a
+  # failed --check fails the run with the file and the reason named.
+  # The release ships four binaries (scoot, scootbg, scootbar,
+  # scootlaunch); scootnotify ships no release binary yet, so there is
+  # nothing of it to download or run here.
+  verify:
+    name: Verify the published release (${{ matrix.arch }})
+    needs: [resolve, publish]
+    # `always()` because publish is skipped in verify-only mode, and a
+    # skipped need auto-skips the dependent job without evaluating its
+    # condition. The outputs still decide: only a fresh publish (its
+    # `published` output below), or an explicit verify-only dispatch on
+    # a resolved tag, runs this job. (On pull requests resolve never
+    # runs, so its outputs are empty and both sides are false; on a dry
+    # run publish exits before setting `published`.)
+    if: >-
+      always() && (needs.resolve.outputs.verify_only == 'true' ||
+        needs.publish.outputs.published == 'true')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64-linux
+          # Free for public repos; the same runner the release
+          # aarch64 builds already use.
+          - runner: ubuntu-24.04-arm
+            arch: aarch64-linux
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # The `gh` calls below infer the repository from this checkout
+      # (no git history is used here).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Download the release's assets
+        env:
+          VERIFY_TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/verify"
+          gh release download "$VERIFY_TAG" --dir "$RUNNER_TEMP/verify"
+          # Release assets carry no mode: make the binaries executable
+          # (content untouched, so the checksums below still prove them).
+          chmod +x "$RUNNER_TEMP"/verify/scoot*-*-linux
+          ls -l "$RUNNER_TEMP/verify"
+
+      # SHA256SUMS lists every published file, so this also proves the
+      # set is complete: a missing file fails the check by name.
+      - name: Every file matches the published SHA256SUMS
+        run: |
+          (cd "$RUNNER_TEMP/verify" && sha256sum -c SHA256SUMS)
+
+      # Keyless build provenance over every file (what the publish job
+      # attested): users check the same with `gh attestation verify
+      # <file> --owner <owner> --signer-workflow
+      # <owner>/<repo>/.github/workflows/release.yml`.
+      - name: Every file carries this workflow's attestation
+        env:
+          VERIFY_REPO: ${{ github.repository }}
+        run: |
+          owner="${VERIFY_REPO%%/*}"
+          name="${VERIFY_REPO#*/}"
+          fail=0
+          for f in "$RUNNER_TEMP"/verify/*; do
+            base="$(basename "$f")"
+            if gh attestation verify "$f" --owner "$owner" \
+              --signer-workflow "$owner/$name/.github/workflows/release.yml"; then
+              echo "ok: provenance verified for $base"
+            else
+              echo "::error title=No build provenance for $base::gh attestation verify failed: the file is missing, tampered, or was not attested by $owner/$name/.github/workflows/release.yml."
+              fail=1
+            fi
+          done
+          exit "$fail"
+
+      # Each binary on a bare Ubuntu and a bare Debian container: the
+      # stock image plus the documented runtime libraries (scoot's five
+      # system libraries, the launcher's keyboard one) and one DejaVu
+      # font for the bar's --check, which loads a font exactly as a
+      # start does. No toolchain, no -dev packages.
+      #
+      # The loop covers the binaries the release holds (found by name),
+      # not a fixed list: an old release predates newer binaries
+      # (v0.3.1 has no scootlaunch), and a new one may add more. A
+      # release missing a binary it should hold still fails loudly --
+      # one step earlier, at SHA256SUMS, which lists every published
+      # file.
+      - name: Each binary reports the release and passes its check
+        env:
+          VERIFY_VERSION: ${{ needs.resolve.outputs.version }}
+          VERIFY_ARCH: ${{ matrix.arch }}
+        run: |
+          dir="$RUNNER_TEMP/verify"
+          for image in ubuntu:24.04 debian:bookworm-slim; do
+            echo "--- $image ($VERIFY_ARCH) ---"
+            docker run --rm \
+              -v "$dir:/rel:ro" \
+              -e VERIFY_VERSION -e VERIFY_ARCH -e IMAGE="$image" \
+              "$image" bash -euo pipefail -c '
+              apt-get update -qq
+              apt-get install -y -qq libseat1 libinput10 libxkbcommon0 libudev1 libpixman-1-0 fonts-dejavu-core
+              count=0
+              for f in /rel/*-"$VERIFY_ARCH"; do
+                base="$(basename "$f")"
+                out=$("$f" --version)
+                echo "$out"
+                case "$out" in
+                  *"$VERIFY_VERSION"*) ;;
+                  *) echo "::error title=$base --version is not $VERIFY_VERSION::got: $out"; exit 1 ;;
+                esac
+                case "$base" in
+                  scootbar-*)
+                    "$f" daemon --check \
+                      || { echo "::error title=$base daemon --check failed::the bar does not validate its built-in defaults."; exit 1; }
+                    echo "ok: $base daemon --check prints ok" ;;
+                  scootlaunch-*)
+                    "$f" --check \
+                      || { echo "::error title=$base --check failed::the launcher does not validate its built-in defaults."; exit 1; }
+                    echo "ok: $base --check passes" ;;
+                  scootbg-*)
+                    echo "ok: $base reports $VERIFY_VERSION (--version is its whole probe)" ;;
+                  scoot-*)
+                    "$f" --print-default-config > /dev/null \
+                      || { echo "::error title=$base --print-default-config failed::the compositor binary does not render its default config."; exit 1; }
+                    echo "ok: $base renders its default config" ;;
+                  *)
+                    echo "ok: $base reports $VERIFY_VERSION (no deeper probe known)" ;;
+                esac
+                count=$((count + 1))
+              done
+              test "$count" -gt 0 || { echo "::error title=No binaries downloaded for $VERIFY_ARCH::nothing matched."; exit 1; }
+              echo "ok: every --version names $VERIFY_VERSION ($count binaries on $IMAGE)"
+              '
+          done

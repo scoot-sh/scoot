@@ -68,16 +68,27 @@ notes written under Unreleased.
 1. Read the PR. The proposed version follows the commits (below 1.0: a
    breaking change bumps the minor, anything else the patch). To release
    a different version, edit `version` under `[workspace.package]` in
-   `Cargo.toml` and the heading in `CHANGELOG.md` on the PR branch.
-2. On the same branch, bump the distro packaging to that version:
-   `pkgver` in the three Arch release PKGBUILDs (and their `.SRCINFO`),
-   `Version` and a `%changelog` entry in the three RPM specs. The Arch
-   and RPM workflows are manual-only (`gh workflow run`, not tag-triggered),
-   and their version-lag gate runs there (`packaging/arch/README.md`,
-   `packaging/rpm/README.md`).
-3. Tidy the changelog section if it needs it, and let CI go green.
+   `Cargo.toml` and the heading in `CHANGELOG.md` on the PR branch,
+   then re-run `scripts/sync-packaging-versions` there so the distro
+   packaging follows your edit.
+2. Check the two sync commits release-plz pushed after the PR
+   (the fuzz lockfiles, then the distro packaging: `pkgver` in the four
+   Arch release PKGBUILDs with their `.SRCINFO`, `Version` plus a
+   `%changelog` entry in the four RPM specs). The debs need no bump:
+   they read the workspace version at build time. If a sync commit is
+   missing or wrong, run the script by hand on the PR branch.
+3. Tidy the changelog section if it needs it, and let CI go green:
+   `ci.yml`, `packaging.yml`, `release.yml`'s lint job and the distro
+   packaging gate (`deb.yml`, `rpm.yml`, `arch.yml`) were all dispatched
+   on the PR branch, and the three packaging runs must be green before
+   merging. If a dispatch failed, run it yourself on the PR's
+   `release-plz-…` branch (`gh workflow run ci.yml --ref <branch>`,
+   likewise `packaging.yml`, `deb.yml`, `rpm.yml`, `arch.yml`, and
+   `release.yml` with no `tag` for its lint job), or approve the held
+   runs.
 4. Merge. release-plz pushes `vX.Y.Z`, and the release workflow builds
-   and publishes it.
+   and publishes it, then its verify job downloads the published assets
+   and runs every binary.
 
 ## What the workflow does with the tag
 
@@ -85,7 +96,7 @@ The run resolves the tag (`scripts/release-resolve`: the `vX.Y.Z` shape,
 the workspace version at the tagged commit, every crate inheriting it,
 on main; a release already complete is a green no-op), stages the vendored tarball and the
 SBOM once (the union of every shipped binary's locked dependencies),
-builds `scoot`, `scootbg` and `scootbar` as portable glibc binaries for
+builds `scoot`, `scootbg`, `scootbar` and `scootlaunch` as portable glibc binaries for
 `x86_64-linux` and `aarch64-linux` (cargo `--locked --offline` from
 that staged tree in a Debian 12 container with Rust 1.97.0: glibc floor
 2.36), checks that every binary starts on the bare base, assembles
@@ -94,6 +105,11 @@ with the `--signer-workflow` pin on the [releases](./releases.md) page),
 takes the version's `CHANGELOG.md` section as the release notes
 (`scripts/release-notes`), and publishes the GitHub Release. `scootctl`
 is the client library inside `scoot msg` and ships no binary of its own.
+Then the verify job downloads the release's own assets and proves them:
+every file against `SHA256SUMS` and its attestation, and each binary on
+bare Ubuntu and Debian containers (`--version` names the release, the
+bar's and the launcher's `--check`, the compositor's default-config
+render).
 
 ## Dry-run a tag
 
@@ -121,6 +137,21 @@ A dry run exercises the whole artifact round trip (vendor, build,
 download, assemble, checksums) but **not** the attestation or the
 release creation. If a real run fails after the build, use the recovery
 steps below before anyone downloads anything.
+
+## Verify an existing release without publishing
+
+Dispatch the workflow with `verify_only` against a tag that already has
+a release. It runs only resolve plus the verify job, from any ref: it
+downloads the tag's assets, checks every file against `SHA256SUMS` and
+its attestation, and runs each binary on bare Ubuntu and Debian
+containers for both architectures. It builds and publishes nothing:
+
+```sh
+gh workflow run release --ref main -f tag=v0.4.0 -f verify_only=true
+```
+
+Use it to test the verify job itself, and to re-prove an old release
+after a workflow change.
 
 ## When a run fails
 
@@ -158,12 +189,13 @@ either way the release runs once.
 > **Symptom:** the release PR exists but CI never ran on it.
 
 Its `pull_request` runs wait for "Approve workflows to run", because
-GITHUB_TOKEN opened it. The dispatched runs (`ci.yml`, `packaging.yml`
-and `release.yml`'s lint job) are the real checks. If the "Dispatch the
+GITHUB_TOKEN opened it. The dispatched runs (`ci.yml`, `packaging.yml`,
+`release.yml`'s lint job, and the `deb.yml`/`rpm.yml`/`arch.yml`
+packaging gate) are the real checks. If the "Dispatch the
 release PR's checks" step failed, run them yourself on the PR's
 `release-plz-…` branch (`gh workflow run ci.yml --ref <branch>`, likewise
-`packaging.yml`, and `release.yml` with no `tag`), or approve the held
-runs.
+`packaging.yml`, `deb.yml`, `rpm.yml`, `arch.yml`, and `release.yml`
+with no `tag`), or approve the held runs.
 
 ## What else the runs need
 

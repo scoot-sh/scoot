@@ -176,7 +176,9 @@ jobs:
   #                                           and nowhere else.
   #   release.yml, release-plz.yml, release-plz.toml, scripts/release-resolve,
   #   scripts/release-notes, scripts/workspace-version,
-  #   scripts/test_release_resolve.py      -> nothing here: release.yml's
+  #   scripts/sync-packaging-versions,
+  #   scripts/test_release_resolve.py,
+  #   scripts/test_sync_packaging_versions.py -> nothing here: release.yml's
   #                                           lint job owns them.
   #   packaging/deb/*                        -> nothing here: the Debian
   #                                           container workflow
@@ -289,7 +291,7 @@ jobs:
                 # The release tooling: release.yml's lint job owns it
                 # (actionlint over both release workflows, the tools'
                 # tests), so a change there alone runs nothing here.
-                .github/workflows/release.yml | .github/workflows/release-plz.yml | scripts/release-resolve | scripts/release-notes | scripts/workspace-version | scripts/sync-fuzz-locks | scripts/test_release_resolve.py) ;;
+                .github/workflows/release.yml | .github/workflows/release-plz.yml | scripts/release-resolve | scripts/release-notes | scripts/workspace-version | scripts/sync-fuzz-locks | scripts/sync-packaging-versions | scripts/test_release_resolve.py | scripts/test_sync_packaging_versions.py) ;;
                 # release-plz's config and the check that every crate newer
                 # than the last tag has its entry there (its own job; a new
                 # crate's Cargo.toml reaches the catch-all below and runs it

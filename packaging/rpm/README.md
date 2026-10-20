@@ -177,6 +177,11 @@ and what stays manual:
 
 ## Cutting a release (maintainer)
 
+`release-plz.yml` already bumped `Version` on the release PR
+(`scripts/sync-packaging-versions`, committed right after release-plz
+opens or updates the PR); the steps below are the manual fallback when
+that sync is missing or wrong.
+
 1. Nothing to rename: every release publishes
    `scoot-<version>-vendored.tar.gz`, the name each spec's `Source0`
    already downloads.

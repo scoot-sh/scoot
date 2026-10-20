@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+"""Bump the distro packaging to the workspace version.
+
+    scripts/sync-packaging-versions [--root DIR] [--date STR]
+
+The release PR bumps `[workspace.package] version`, and release-plz
+recreates the PR (a new `release-plz-*` branch) whenever the proposal
+changes, which drops any hand-bumped packaging versions. This rewrites
+them from the workspace version, so the release branch is correct with
+zero manual commits:
+
+- every release PKGBUILD under `packaging/arch/` (`scoot`, `scootbg`,
+  `scootbar`, `scootlaunch`): `pkgver=<version>`;
+- every `-git` PKGBUILD: `pkgver=<version>.r0.g0000000` (the static base;
+  the real count comes from `pkgver()` at build time, and the arch.yml
+  version gate checks the static value starts with the workspace version);
+- every `.SRCINFO` beside them: the same `pkgver`, the versioned
+  `scootbg` dependency, and the release tarball source name and URL
+  (exactly what `makepkg --printsrcinfo` would emit for the bumped
+  PKGBUILD: only those three lines carry the version);
+- every RPM spec under `packaging/rpm/`: `Version: <version>`,
+  `Release` back to `1` when the version moved, and a `%changelog`
+  entry for the new version unless one is already there.
+
+The Debian packages need no sync: `packaging/deb/deb-meta.py` reads the
+workspace version from the staged tree at build time.
+
+Idempotent: a second run changes nothing (a version already current is
+left alone, an existing changelog entry is not duplicated). Run by
+`release-plz.yml` on the release branch, the same place
+`scripts/sync-fuzz-locks` runs. Prints what changed.
+
+Stdlib only; tests in `scripts/test_sync_packaging_versions.py`.
+"""
+
+import argparse
+import re
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+ARCH_PKGS = ("scoot", "scootbg", "scootbar", "scootlaunch")
+RPM_SPECS = ("scoot", "scootbg", "scootbar", "scootlaunch")
+GIT_SUFFIX = ".r0.g0000000"
+SOURCE_URL = ("https://github.com/scoot-sh/scoot"
+              "/archive/refs/tags/v{version}.tar.gz")
+
+
+def workspace_version(root):
+    return subprocess.run([str(Path(__file__).resolve().parent
+                               / "workspace-version"),
+                           "--root", str(root)],
+                          capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+def utc_today():
+    return datetime.now(timezone.utc).strftime("%a %b %d %Y")
+
+
+def sync_release_pkgbuild(path, version):
+    """pkgver=<version>; return (old_version, changed)."""
+    text = path.read_text()
+    m = re.search(r"(?m)^pkgver=(.*)$", text)
+    if not m:
+        raise ValueError(f"{path}: no pkgver= line")
+    old = m.group(1)
+    if old == version:
+        return old, False
+    new = re.sub(r"(?m)^pkgver=.*$", f"pkgver={version}", text, count=1)
+    path.write_text(new)
+    return old, True
+
+
+def sync_git_pkgbuild(path, version):
+    """pkgver=<version>.r0.g0000000; return (old_version, changed)."""
+    text = path.read_text()
+    m = re.search(r"(?m)^pkgver=(.*)$", text)
+    if not m:
+        raise ValueError(f"{path}: no pkgver= line")
+    old = m.group(1)
+    if old.endswith(GIT_SUFFIX):
+        old = old[:-len(GIT_SUFFIX)]
+    want = version + GIT_SUFFIX
+    if m.group(1) == want:
+        return old, False
+    new = re.sub(r"(?m)^pkgver=.*$", f"pkgver={want}", text, count=1)
+    path.write_text(new)
+    return old, True
+
+
+def sync_srcinfo(path, pkg, old, version, git):
+    """Mirror the PKGBUILD bump in the generated .SRCINFO.
+
+    Only three lines carry the version (what `makepkg --printsrcinfo`
+    emits): `pkgver =`, the versioned `scootbg=` dependency (the `scoot`
+    release package only), and the release tarball `source =` name and
+    URL. Anything else is left byte-identical so the arch.yml SRCINFO
+    gate (committed file vs. printsrcinfo) stays green.
+    """
+    text = path.read_text()
+    if git:
+        want = version + GIT_SUFFIX
+        new = re.sub(r"(?m)^\tpkgver = .*$", f"\tpkgver = {want}",
+                     text, count=1)
+    else:
+        new = re.sub(r"(?m)^\tpkgver = .*$", f"\tpkgver = {version}",
+                     text, count=1)
+        new = new.replace(f"depends = scootbg={old}",
+                          f"depends = scootbg={version}")
+        new = new.replace(f"source = {pkg}-{old}.tar.gz::"
+                          f"{SOURCE_URL.format(version=old)}",
+                          f"source = {pkg}-{version}.tar.gz::"
+                          f"{SOURCE_URL.format(version=version)}")
+    if new == text:
+        # A release package whose PKGBUILD moved but whose .SRCINFO
+        # already matches (e.g. only pkgrel differs) is not an error;
+        # verify the versioned lines agree instead of rewriting blindly.
+        check_srcinfo(path, pkg, version, git)
+        return False
+    if f"{old}" in new and not git:
+        # The old version must be gone from the versioned lines (a
+        # leftover would fail the arch.yml version gate pages later).
+        for line in new.splitlines():
+            if re.match(r"^\t(pkgver =|depends = scootbg=|source = )", line) \
+                    and old in line:
+                raise ValueError(f"{path}: leftover {old} in: {line}")
+    path.write_text(new)
+    check_srcinfo(path, pkg, version, git)
+    return True
+
+
+def check_srcinfo(path, pkg, version, git):
+    text = path.read_text()
+    want = (version + GIT_SUFFIX) if git else version
+    m = re.search(r"(?m)^\tpkgver = (.*)$", text)
+    if not m or m.group(1) != want:
+        raise ValueError(f"{path}: pkgver is {m and m.group(1)}"
+                         f", want {want}")
+    if not git:
+        for line in text.splitlines():
+            if line.startswith("\tdepends = scootbg=") \
+                    and line != f"\tdepends = scootbg={version}":
+                raise ValueError(f"{path}: stale versioned dep: {line}")
+            if line.startswith(f"\tsource = {pkg}-") \
+                    and version not in line:
+                raise ValueError(f"{path}: stale source line: {line}")
+
+
+def sync_spec(path, version, date):
+    """Version:, Release:, and a %changelog entry. Return changed."""
+    text = path.read_text()
+    m = re.search(r"(?m)^(Version:\s+)(\S+)", text)
+    if not m:
+        raise ValueError(f"{path}: no Version: line")
+    old = m.group(2)
+    changed = False
+    if old != version:
+        text = re.sub(r"(?m)^(Version:\s+)\S+",
+                      lambda m: m.group(1) + version, text, count=1)
+        text = re.sub(r"(?m)^(Release:\s+)\S+",
+                      lambda m: m.group(1) + "1%{?dist}", text, count=1)
+        changed = True
+    # A %changelog entry for this version-release, unless one is there.
+    m = re.search(r"(?m)^%changelog\n", text)
+    if not m:
+        raise ValueError(f"{path}: no %changelog section")
+    section = text[m.end():]
+    if re.search(r"(?m)^\* .* - %s-1$" % re.escape(version), section):
+        if changed:
+            path.write_text(text)
+        return changed
+    entry = (f"* {date} scoot-sh <packages@scoot.sh> - {version}-1\n"
+             f"- Built from the v{version} release tag.\n\n")
+    path.write_text(text[:m.end()] + entry + section)
+    return True
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--root", default=str(ROOT))
+    ap.add_argument("--date", default=None,
+                    help="changelog date (default: today, UTC)")
+    a = ap.parse_args(argv)
+    root = Path(a.root)
+    date = a.date or utc_today()
+    version = workspace_version(root)
+
+    changed = []
+    for pkg in ARCH_PKGS:
+        d = root / "packaging" / "arch" / pkg
+        old, c = sync_release_pkgbuild(d / "PKGBUILD", version)
+        if sync_srcinfo(d / ".SRCINFO", pkg, old, version, git=False):
+            c = True
+        if c:
+            changed.append(f"packaging/arch/{pkg}: pkgver now {version}")
+        d = root / "packaging" / "arch" / f"{pkg}-git"
+        old, c = sync_git_pkgbuild(d / "PKGBUILD", version)
+        if sync_srcinfo(d / ".SRCINFO", pkg, old, version, git=True):
+            c = True
+        if c:
+            changed.append(f"packaging/arch/{pkg}-git: pkgver now "
+                           f"{version}{GIT_SUFFIX}")
+    for spec in RPM_SPECS:
+        p = root / "packaging" / "rpm" / f"{spec}.spec"
+        if sync_spec(p, version, date):
+            changed.append(f"packaging/rpm/{spec}.spec: Version now "
+                           f"{version}")
+    for line in changed:
+        print(line)
+    if not changed:
+        print(f"packaging already at {version}: nothing to do")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except ValueError as e:
+        print(f"sync-packaging-versions: refusing: {e}", file=sys.stderr)
+        sys.exit(1)
