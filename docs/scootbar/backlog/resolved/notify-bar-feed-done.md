@@ -58,8 +58,9 @@ same PR: the bar feed section in `scootnotify/configure.md` and the
   test now asserts the load-independent core (no inotify fd, disarmed
   timerfd) with a bounded switch count; F2, one transient push failure
   froze the bar until the next change — the push is now non-blocking
-  off the serving path with a 5 s deadline plus a bounded, capped
-  re-dial (1 s, 8 tries) while owed-and-reachable, so slow and
+  off the serving path with a 30 s deadline (it must clear loaded
+  turn periods, which CI showed past 5 s) plus a bounded, capped
+  re-dial (1 s, 4 tries) while owed-and-reachable, so slow and
   transient bars converge on their own; F3, a stuck bar stalled bus
   service ~3.8 s per change — the round trip now stays near baseline
   (9/4/6 ms vs 3-6 ms baseline); F4/F5, two docs lines corrected (owed

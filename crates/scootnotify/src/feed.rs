@@ -22,7 +22,7 @@
 //! unanswering. The push itself never blocks the loop: `sync` opens the
 //! socket non-blocking and queues the line, the daemon's poll set drives
 //! the in-flight push (connect, write, reply) beside the bus under a
-//! short deadline, so a stuck bar costs one fd and one wakeup per
+//! deadline that clears loaded turn periods, so a stuck bar costs one fd and one wakeup per
 //! change, never a stall of the bus service. A module that is not
 //! placed answers an error, and the daemon logs the guidance once per
 //! run. No `unwrap`, `expect` or panic on any path: every refusal
@@ -49,7 +49,16 @@ pub const MODULE_ID: &str = "notifications";
 /// a bounded spell. It never stalls the loop: the push rides the
 /// existing poll set beside the bus, so expiries, control and the bus
 /// are served every turn while it waits.
-const PUSH_DEADLINE: Duration = Duration::from_secs(5);
+///
+/// Thirty seconds, not five: the deadline must clear the loop's worst
+/// turn period under load, not its median. CI showed control-plane
+/// round trips past 5 s on loaded runners (the bus `until` allows 10 s
+/// for the same reason); a shorter deadline reaps pushes whose reply
+/// is already on its way, and no retry schedule converges while every
+/// attempt outlives the same bound. Async makes the length free: a
+/// stuck bar holds one fd and costs one wakeup, never a stall. The
+/// scale mirrors the control server's `STALL_DEADLINE`.
+const PUSH_DEADLINE: Duration = Duration::from_secs(30);
 
 /// How soon an owed-but-reachable send re-dials: a transient push
 /// failure (a past-deadline reply under load) converges on its own,
@@ -61,8 +70,10 @@ const RETRY_AFTER: Duration = Duration::from_secs(1);
 /// Timer re-dials per owed spell past the first attempt: a silent bar
 /// is retried this often, then left to the watch and the next change.
 /// Every re-dial is silent and at least `RETRY_AFTER` apart: no log,
-/// no spin.
-const RETRY_CAP: u32 = 8;
+/// no spin. Four, not more: with a 30 s deadline each cycle is half a
+/// minute, so four already covers a two-minute wedge; transients need
+/// one or two.
+const RETRY_CAP: u32 = 4;
 
 /// Grace past a refused dial before the race re-dial: binds create
 /// the socket file before they listen, so the first dial can lose
@@ -398,14 +409,16 @@ impl Feed {
     }
 
     /// Retries when the watch fired and the socket may have appeared:
-    /// pushes the current state when a send is owed. Drains the watch
-    /// either way (a level-triggered fd left unread would spin the
-    /// poll). Silent: the change's line already went out (or the
-    /// change never earned one), so a re-appearing absence must not
-    /// chatter under a file flood.
+    /// pushes the current state when a send is owed and nothing is
+    /// already scheduled. Drains the watch either way (a
+    /// level-triggered fd left unread would spin the poll). Silent: the
+    /// change's line already went out (or the change never earned one),
+    /// so a re-appearing absence must not chatter under a file flood.
+    /// A scheduled re-dial is left alone: the watch fires on any file
+    /// creation, and an unrelated one must not eat the spell's retry.
     pub fn retry(&mut self, store: &Store) -> Option<String> {
         let _ = self.socket_may_have_appeared();
-        if !self.owed || self.pending.is_some() {
+        if !self.owed || self.pending.is_some() || self.redial.is_some() {
             return None;
         }
         let current = State::of(store);
