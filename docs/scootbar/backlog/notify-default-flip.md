@@ -3,7 +3,7 @@ title: "scootnotify: make it the desktop profile's default notification daemon"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "notify-packaging"
+blocked: null
 milestone: "M7"
 ---
 
