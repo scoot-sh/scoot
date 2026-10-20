@@ -417,7 +417,8 @@ fn a_bar_started_later_catches_up_on_the_watch() {
     // The bar starts later: binding creates the socket file.
     let bar = FakeBar::serve_deferred(socket, "{\"type\":\"ok\"}\n", 1);
     wait_readable(&mut feed);
-    assert!(feed.retry(&store).is_none(), "the owed send goes out on the watch");
+    let retried = feed.retry(&store);
+    assert!(retried.is_none(), "the owed send goes out on the watch: {retried:?}");
     assert!(!feed.owed());
     assert!(feed.poll_fd().is_none(), "the watch retires with the debt");
     assert_eq!(bar.received().len(), 1);
