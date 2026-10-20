@@ -247,13 +247,14 @@ impl Feed {
     }
 
     /// Retries when the watch fired and the socket may have appeared:
-    /// pushes the current state when a send is owed. Returns a line
-    /// for the log when the retry failed. Drains the watch either way;
-    /// a drained watch with nothing owed is disarmed.
+    /// pushes the current state when a send is owed. Drains the watch
+    /// either way (a level-triggered fd left unread would spin the
+    /// poll). Attempts whenever owed, event or not: the daemon calls
+    /// this only when the watch fired, so no turn spins, and a
+    /// bind-before-listen whiff converges on the next call rather than
+    /// waiting for an event that already fired.
     pub fn retry(&mut self, store: &Store) -> Option<String> {
-        if !self.socket_may_have_appeared() {
-            return None;
-        }
+        let _ = self.socket_may_have_appeared();
         if !self.owed {
             return None;
         }

@@ -360,9 +360,10 @@ fn no_bar_is_owed_with_a_watch_and_stays_quiet() {
     assert!(line.contains("cannot reach the bar"), "{line}");
     assert!(feed.owed());
     assert!(feed.poll_fd().is_some(), "the watch exists only while owed");
-    // No change, no watch event: nothing more is said or dialed.
+    // No change: nothing more is said or dialed — the settled change
+    // waits for the watch or the next change, never for a turn.
     assert!(feed.sync(&store).is_none());
-    assert!(feed.retry(&store).is_none(), "no event, no retry");
+    assert!(feed.owed(), "still owed, still watching");
 }
 
 #[test]
@@ -417,9 +418,15 @@ fn a_bar_started_later_catches_up_on_the_watch() {
     // The bar starts later: binding creates the socket file.
     let bar = FakeBar::serve_deferred(socket, "{\"type\":\"ok\"}\n", 1);
     wait_readable(&mut feed);
-    let retried = feed.retry(&store);
-    assert!(retried.is_none(), "the owed send goes out on the watch: {retried:?}");
-    assert!(!feed.owed());
+    // The watch fired; the owed send goes out, converging past a
+    // bind-before-listen whiff (the daemon's own shape: one watch
+    // event, then owed retries).
+    let start = Instant::now();
+    while feed.owed() && start.elapsed() < Duration::from_secs(3) {
+        let retried = feed.retry(&store);
+        assert!(retried.is_none(), "a late bar owes no log line: {retried:?}");
+    }
+    assert!(!feed.owed(), "the owed send went out on the watch");
     assert!(feed.poll_fd().is_none(), "the watch retires with the debt");
     assert_eq!(bar.received().len(), 1);
     assert_eq!(bar.served(), 1);
