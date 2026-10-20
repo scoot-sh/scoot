@@ -19,7 +19,7 @@ fn every_key_sets() {
           history_max = 32\ndnd_allows_critical = false\n\
           width_px = 400\nmax_visible = 3\nmargin_px = 8\nanchor = \"bottom-left\"\n\
           output = \"HDMI-1\"\nbody_lines = 3\nborder_px = 1\nradius = 4\n\
-          pause_when_idle_secs = 30\n",
+          pause_when_idle_secs = 30\nbar_icon_unread = \"●\"\nbar_icon_dnd = \"☾\"\n",
     )
     .unwrap();
     assert_eq!(config.timeout_low_ms, 1000);
@@ -39,6 +39,8 @@ fn every_key_sets() {
     assert_eq!(config.border_px, 1);
     assert_eq!(config.radius, 4);
     assert_eq!(config.pause_when_idle_secs, 30);
+    assert_eq!(config.bar_icon_unread, "●");
+    assert_eq!(config.bar_icon_dnd, "☾");
 }
 
 #[test]
@@ -92,6 +94,24 @@ fn out_of_range_numbers_name_their_key() {
         ("border_px = 9\n", "border_px"),
         ("radius = 65\n", "radius"),
         ("pause_when_idle_secs = 3601\n", "pause_when_idle_secs"),
+    ] {
+        let error = parse(text.as_bytes()).unwrap_err();
+        assert!(error.contains(key), "{text}: {error}");
+    }
+}
+
+/// The bar-feed rows hold: empty (no per-update icon) and one glyph
+/// parse, while two glyphs or a control character are refused like the
+/// bar's own `icon` rule.
+#[test]
+fn the_bar_icon_rows_hold() {
+    assert!(parse(b"bar_icon_unread = \"\"\n").is_ok());
+    assert!(parse(b"bar_icon_unread = \"\xe2\x97\x8f\"\n").is_ok());
+    assert!(parse(b"bar_icon_dnd = \"\xe2\x98\xbe\"\n").is_ok());
+    for (text, key) in [
+        ("bar_icon_unread = \"\xe2\x97\x8f\xe2\x97\x8f\"\n", "bar_icon_unread"),
+        ("bar_icon_dnd = \"ab\"\n", "bar_icon_dnd"),
+        ("bar_icon_unread = \"\\u0001\"\n", "bar_icon_unread"),
     ] {
         let error = parse(text.as_bytes()).unwrap_err();
         assert!(error.contains(key), "{text}: {error}");

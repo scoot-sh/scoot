@@ -139,6 +139,9 @@ pub fn payload(state: State, icon_unread: &str, icon_dnd: &str) -> serde_json::V
 #[derive(Debug)]
 enum Target {
     Env,
+    /// The unit tests hand over a scratch socket, never the process
+    /// environment.
+    #[cfg_attr(not(test), allow(dead_code))]
     Fixed(PathBuf),
 }
 
@@ -459,7 +462,7 @@ fn send_to(socket: &Path, payload: &serde_json::Value) -> Send {
     }
     let reply = {
         use std::io::{BufRead, BufReader, Read};
-        let mut reader = BufReader::new(&stream);
+        let reader = BufReader::new(&stream);
         let mut reply = Vec::new();
         match reader.take(MAX_REPLY).read_until(b'\n', &mut reply) {
             Ok(_) => reply,
