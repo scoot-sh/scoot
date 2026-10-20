@@ -227,3 +227,4 @@ hits the wall:
 - [launch-spawn-detach-cwd-and-close](launch-spawn-detach-cwd-and-close.md)
 - [launch-dmenu-doc-and-pin-notes](launch-dmenu-doc-and-pin-notes.md)
 - [notify-popups-review-notes](notify-popups-review-notes.md)
+- [packaging-workflows-red-on-main](packaging-workflows-red-on-main.md)
