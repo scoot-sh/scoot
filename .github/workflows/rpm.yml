@@ -203,7 +203,7 @@ jobs:
             dbus-run-session -- bash -euo pipefail -c "
             scootnotify daemon --config /usr/share/doc/scootnotify/notify.toml.example &
             daemon=\$!
-            trap 'kill \$daemon 2>/dev/null || true' EXIT
+            trap \"kill \$daemon 2>/dev/null || true\" EXIT
             for i in \$(seq 1 50); do
               if dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications >/dev/null 2>&1; then break; fi
               sleep 0.1
@@ -212,7 +212,7 @@ jobs:
             dbus-send --session --print-reply --dest=org.freedesktop.Notifications /org/freedesktop/Notifications org.freedesktop.Notifications.Notify string:smoke uint32:0 string: string:hello string:world array:string: dict:string:variant: int32:-1
             out=\$(scootnotify msg list --json)
             echo \"\$out\" | grep -q hello
-            echo 'ok: scootnotify serves Notify and msg list on a session bus'
+            echo \"ok: scootnotify serves Notify and msg list on a session bus\"
           "
           mkdir -p /tmp/rpm-smoke-xdg
           chmod 700 /tmp/rpm-smoke-xdg
@@ -395,7 +395,7 @@ jobs:
             dbus-run-session -- bash -euo pipefail -c "
             scootnotify daemon --config /usr/share/doc/packages/scootnotify/notify.toml.example &
             daemon=\$!
-            trap 'kill \$daemon 2>/dev/null || true' EXIT
+            trap \"kill \$daemon 2>/dev/null || true\" EXIT
             for i in \$(seq 1 50); do
               if dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner string:org.freedesktop.Notifications >/dev/null 2>&1; then break; fi
               sleep 0.1
@@ -404,7 +404,7 @@ jobs:
             dbus-send --session --print-reply --dest=org.freedesktop.Notifications /org/freedesktop/Notifications org.freedesktop.Notifications.Notify string:smoke uint32:0 string: string:hello string:world array:string: dict:string:variant: int32:-1
             out=\$(scootnotify msg list --json)
             echo \"\$out\" | grep -q hello
-            echo 'ok: scootnotify serves Notify and msg list on a session bus'
+            echo \"ok: scootnotify serves Notify and msg list on a session bus\"
           "
           echo '::endgroup::'
 
