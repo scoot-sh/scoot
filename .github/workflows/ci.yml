@@ -2063,7 +2063,10 @@ jobs:
           export SCOOTBAR_TEST_SWAY="$sway/bin/sway"
           export TMPDIR="$RUNNER_TEMP/scootnotify-tmp"
           mkdir -p "$TMPDIR"
-          cargo build -p scoot -p scootnotify
+          # Plus the bar: the barfeed tests drive the real `scootbar`
+          # binary (sibling of the test binary) on the headless
+          # compositor.
+          cargo build -p scoot -p scootnotify -p scootbar
           cargo nextest run -p scootnotify --no-fail-fast
           cargo test -p scootnotify
 

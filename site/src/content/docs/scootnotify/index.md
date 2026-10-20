@@ -76,6 +76,11 @@ ones: a call past the 4 MiB cap gets `LimitsExceeded`, never silence.
   [configure page](./configure.md) lists them) and the look layer
   under it. A bad file at start runs on built-in defaults and reports
   the error; `--check` refuses loudly instead.
+- Pushes DND and the unread count to the bar's `notifications` push
+  module on change only (`DND n` muted, `n` urgent or normal, empty
+  when idle). A bar started later catches up on its socket appearing;
+  a missing module is logged once. The per-update icons are
+  `bar_icon_unread` and `bar_icon_dnd` (empty by default).
 
 Every flag is in the [CLI reference](./cli.md).
 
@@ -116,5 +121,5 @@ monochrome-fallback emoji are acceptable. There is no sound: the
 Do Not Disturb, the history ring with restore, and `[[rule]]` tables
 landed with the control socket: `msg dnd`, `msg history`,
 `msg restore` and the rules are in the [CLI reference](./cli.md) and
-[Configure](./configure.md). The bar feed is the later ticket and is
-not here yet.
+[Configure](./configure.md). The bar feed pushes DND and the unread
+count to the bar; see [the bar feed](./configure.md#the-bar-feed).

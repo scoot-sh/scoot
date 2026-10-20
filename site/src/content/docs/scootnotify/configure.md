@@ -143,6 +143,42 @@ scootnotify msg dnd toggle   # the bar's click runs this
 scootnotify msg dnd status   # or with no argument: on or off
 ```
 
+## The bar feed
+
+On every change of DND or of the unread count — an arrival, a
+dismissal, an expiry, a restore, a DND toggle — and only then, the
+daemon sends `set notifications <payload>` to the bar's control
+socket. The bar needs a `notifications` push module placed (see
+[Button, push and exec modules](../scootbar/modules.md#button-push-and-exec-modules));
+without one the daemon logs guidance once per run and leaves the bar
+alone. A bar started later shows its placeholder until the owed send
+lands when its socket appears.
+
+The payload is `{text, class, tooltip, icon?}`: `DND n` (or `DND`)
+with class `muted` while DND is on, the count `n` with class `urgent`
+(any counted card is critical) or `normal` otherwise, and `{text:
+""}` when idle. The count is live cards plus unseen history.
+
+- `bar_icon_unread`: the icon sent beside the unread count (a
+  per-update icon, so it overrides the module's static icon while
+  set). Type: empty or exactly one character. Default: `` (no icon;
+  the key stays out of the payload). Example: `bar_icon_unread =
+  "●"`. Reload: `msg reload`.
+- `bar_icon_dnd`: the icon sent while DND is on. Type: empty or
+  exactly one character. Default: `` (no icon; the key stays out of
+  the payload). Example: `bar_icon_dnd = "☾"`. Reload: `msg reload`.
+
+> **Symptom:** the bar never shows a count.
+> The module is not placed, or the bar is not running: the daemon
+> says which on its stderr, once for the module, once per failed
+> change for the bar. A running bar that still shows its placeholder
+> is waiting for the next change.
+
+> **Symptom:** the count survives dismissing everything.
+> Turning DND off shows nothing retroactively, but it reshapes the bar
+> at once (`DND n` becomes `n`). Each `restore` marks one entry seen;
+> the count is the entries never shown on screen.
+
 ## Rules
 
 `[[rule]]` tables match cards and steer them, in file order. A rule
