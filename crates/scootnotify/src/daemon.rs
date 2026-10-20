@@ -190,7 +190,8 @@ enum LoopEnd {
 /// into the server, serves the control clients (`list`, `dismiss`,
 /// `invoke`, `reload`, `subscribe`, `version`), arms one timerfd to the
 /// earliest expiry, fires what is due, broadcasts the turn's control
-/// events, and draws the stack when dirty.
+/// events, pushes the bar feed on change, and draws the stack when dirty.
+#[allow(clippy::too_many_arguments)] // The loop's one wiring: every serving half in one place.
 fn run_loop(
     conn: &mut Conn,
     server: &mut Server,
