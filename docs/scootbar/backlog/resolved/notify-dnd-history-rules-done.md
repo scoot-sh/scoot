@@ -1,10 +1,11 @@
 ---
 title: "scootnotify: do not disturb, the history ring and `restore`, `[[rule]]` with `exec`"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-19"
 ---
 
 # scootnotify: DND, history, rules
@@ -39,3 +40,28 @@ Part of this ticket's work, not a follow-up: update `site/src/content/docs/scoot
 ## Not in this ticket
 
 The bar feed.
+
+## Resolution
+
+Shipped in the `feat/notify-dnd-history-rules` PR: the DND mode (`msg
+dnd on|off|toggle|status`, criticals through while
+`dnd_allows_critical` holds), the in-memory history ring (`msg
+history`, `msg restore`, `history_max` caps, `transient` excluded,
+pixels never stored, a new card with a new id on restore), and
+`[[rule]]` matching (app, desktop entry, `class.` category prefixes,
+urgency, summary substrings; later keys win) with actions
+(`set_urgency`, `timeout_ms`, `hide`, `history = false`, per-card
+`output`, `dnd_bypass`, and `exec` under the spawner bound: argv not
+shell, own process group, pidfd reaping, at most 4 running). The
+control protocol rides at version 2 (`dnd`, `history`, `restore`,
+the `dnd` event and reply); the site `configure.md` and `cli.md`
+document every key, verb and view.
+
+Evidence (dev VM, aarch64, rustc 1.97.1): `cargo nextest run -p
+scootnotify` 217 passed and `cargo test -p scootnotify` full green on
+the opposite runner; `cargo clippy -p scootnotify --all-targets -- -D
+warnings` and `cargo fmt --check` clean; the fuzz workspace
+`cargo fetch/check --locked` clean; a 500-notify rule-`exec` flood
+held RSS 5356 to 5360 kB with fds 8 to 8. Every pin mutation-proved
+(exec bound, DND holds, history exclusion, later-wins, reap, 0600
+reservation, transient, protocol bump, zero-alloc repaint).

@@ -19,6 +19,7 @@
 use scoot_dbus::proto::Reader;
 
 use super::image::{self, Image};
+use super::notify::drop_controls;
 
 /// The most hints read from one `Notify`: the rest are skipped unread.
 pub const MAX_HINTS: usize = 64;
@@ -133,12 +134,12 @@ fn apply(hints: &mut Hints, key: &str, sig: &str, value: &mut Reader<'_>) {
         }
         "category" if sig == "s" => {
             if let Ok(text) = value.str() {
-                hints.category = cut(text, MAX_SHORT_HINT);
+                hints.category = cut(&drop_controls(text), MAX_SHORT_HINT);
             }
         }
         "desktop-entry" if sig == "s" => {
             if let Ok(text) = value.str() {
-                hints.desktop_entry = cut(text, MAX_SHORT_HINT);
+                hints.desktop_entry = cut(&drop_controls(text), MAX_SHORT_HINT);
             }
         }
         // The deprecated 1.1 spellings read as their modern twins.
@@ -151,7 +152,7 @@ fn apply(hints: &mut Hints, key: &str, sig: &str, value: &mut Reader<'_>) {
         }
         "image-path" | "image_path" if sig == "s" => {
             if let Ok(text) = value.str() {
-                hints.image_path = cut(text, MAX_PATH_HINT);
+                hints.image_path = cut(&drop_controls(text), MAX_PATH_HINT);
             }
         }
         "transient" if sig == "b" => {

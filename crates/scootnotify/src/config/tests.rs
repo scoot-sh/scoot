@@ -4,7 +4,11 @@ use super::{Config, default_path, load, parse};
 
 #[test]
 fn an_empty_file_is_the_defaults() {
-    assert_eq!(parse(b"").unwrap(), Config::default());
+    let config = parse(b"").unwrap();
+    assert_eq!(config, Config::default());
+    assert_eq!(config.history_max, 64);
+    assert!(config.dnd_allows_critical);
+    assert!(config.rule.is_empty());
 }
 
 #[test]
@@ -12,6 +16,7 @@ fn every_key_sets() {
     let config = parse(
         b"timeout_low_ms = 1000\ntimeout_normal_ms = 2000\ntimeout_max_ms = 3000\n\
           max_live = 7\nrate_per_sec = 3\nrate_burst = 9\n\
+          history_max = 32\ndnd_allows_critical = false\n\
           width_px = 400\nmax_visible = 3\nmargin_px = 8\nanchor = \"bottom-left\"\n\
           output = \"HDMI-1\"\nbody_lines = 3\nborder_px = 1\nradius = 4\n\
           pause_when_idle_secs = 30\n",
@@ -23,6 +28,8 @@ fn every_key_sets() {
     assert_eq!(config.max_live, 7);
     assert_eq!(config.rate_per_sec, 3);
     assert_eq!(config.rate_burst, 9);
+    assert_eq!(config.history_max, 32);
+    assert!(!config.dnd_allows_critical);
     assert_eq!(config.width_px, 400);
     assert_eq!(config.max_visible, 3);
     assert_eq!(config.margin_px, 8);
@@ -63,6 +70,7 @@ fn out_of_range_numbers_name_their_key() {
         ("max_live = 1025\n", "max_live"),
         ("rate_per_sec = 0\n", "rate_per_sec"),
         ("rate_burst = 1001\n", "rate_burst"),
+        ("history_max = 257\n", "history_max"),
         ("timeout_max_ms = 0\n", "timeout_max_ms"),
         (
             "timeout_low_ms = 11\ntimeout_max_ms = 10\n",
@@ -120,6 +128,82 @@ fn the_boundary_rows_hold() {
     assert!(parse(b"max_live = 1\n").is_ok());
     assert!(parse(b"max_live = 1024\n").is_ok());
     assert!(parse(b"rate_per_sec = 1000\nrate_burst = 1000\n").is_ok());
+}
+
+#[test]
+fn rules_parse_match_and_steer() {
+    let config = parse(
+        b"[[rule]]\n\
+          app_name = \"Mail\"\n\
+          category = \"email.\"\n\
+          urgency = \"critical\"\n\
+          summary_contains = \"New\"\n\
+          set_urgency = \"normal\"\n\
+          timeout_ms = 5000\n\
+          output = \"DP-1\"\n\
+          dnd_bypass = true\n\
+          exec = [\"play\", \"ding.wav\"]\n",
+    )
+    .unwrap();
+    assert_eq!(config.rule.len(), 1);
+    let rule = &config.rule[0];
+    assert_eq!(rule.app_name.as_deref(), Some("Mail"));
+    assert_eq!(rule.category.as_deref(), Some("email."));
+    assert!(matches!(rule.urgency, Some(super::RuleUrgency::Critical)));
+    assert_eq!(rule.summary_contains.as_deref(), Some("New"));
+    assert!(matches!(rule.set_urgency, Some(super::RuleUrgency::Normal)));
+    assert_eq!(rule.timeout_ms, Some(5000));
+    assert_eq!(rule.output.as_deref(), Some("DP-1"));
+    assert!(rule.dnd_bypass);
+    assert!(!rule.hide);
+    assert!(rule.history);
+    assert_eq!(
+        rule.exec.as_deref(),
+        Some(&["play".to_owned(), "ding.wav".to_owned()][..])
+    );
+}
+
+#[test]
+fn rules_refuse_loudly() {
+    // A 33rd rule is one too many.
+    let mut many = String::new();
+    for _ in 0..33 {
+        many.push_str("[[rule]]\napp_name = \"a\"\n");
+    }
+    let error = parse(many.as_bytes()).unwrap_err();
+    assert!(error.contains("33"), "{error}");
+    for (text, key) in [
+        ("[[rule]]\nurgency = \"loud\"\n", "urgency"),
+        ("[[rule]]\nset_urgency = \"loud\"\n", "set_urgency"),
+        ("[[rule]]\ntimeout_ms = 86400001\n", "timeout_ms"),
+        ("[[rule]]\noutput = \"\"\n", "output"),
+        ("[[rule]]\nexec = []\n", "exec"),
+        ("[[rule]]\nexec = [\"ok\", \"\"]\n", "exec"),
+        ("[[rule]]\napp_name = \"\"\n", "app_name"),
+        ("[[rule]]\nbogus = 1\n", "bogus"),
+    ] {
+        let error = parse(text.as_bytes()).unwrap_err();
+        assert!(error.contains(key), "{text}: {error}");
+    }
+    // NUL in a match string is refused, not spawned or matched.
+    let error = parse(b"[[rule]]\napp_name = \"a\x00b\"\n").unwrap_err();
+    assert!(error.contains("app_name"), "{error}");
+}
+
+/// A hostile config parses or refuses without a panic: long words and
+/// the table cap bound it.
+#[test]
+fn hostile_rules_are_bounded() {
+    let long = "[[rule]]\napp_name = \"".to_owned() + &"a".repeat(129) + "\"\n";
+    assert!(parse(long.as_bytes()).is_err());
+    let mut capped = String::new();
+    for _ in 0..32 {
+        capped.push_str("[[rule]]\napp_name = \"a\"\n");
+    }
+    assert_eq!(parse(capped.as_bytes()).unwrap().rule.len(), 32);
+    // History's own boundary rows hold: 0 keeps none, 256 keeps most.
+    assert!(parse(b"history_max = 0\n").is_ok());
+    assert!(parse(b"history_max = 256\n").is_ok());
 }
 
 #[test]

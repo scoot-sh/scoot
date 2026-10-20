@@ -387,3 +387,267 @@ fn id_blocks_persist_across_an_open() {
     assert_eq!(ephemeral.allocate(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn the_id_file_is_owner_only_and_leaves_no_temp_behind() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("scootnotify-ids-own-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("scootnotify-test.ids");
+    let _ = IdFile::open(Some(path.clone()));
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "the reservation is owner-only");
+    // Atomic write: the temp file is renamed, never left behind, and the
+    // target always parses.
+    let leftovers: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter(|entry| {
+            entry
+                .as_ref()
+                .is_ok_and(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
+        })
+        .collect();
+    assert!(leftovers.is_empty(), "no temp reservation files linger");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.trim().parse::<u64>().is_ok(), "the file always parses");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Reverting the open mode to the default (umask) leaves the owner-only
+/// pin failing: the 0600 is load-bearing, not incidental.
+#[test]
+fn dnd_holds_normal_cards_unseen_while_criticals_show() {
+    use super::super::dnd::Dnd;
+    let mut store = store();
+    store.set_dnd(Dnd::On);
+    let start = now();
+    let (arrival, _) = store.notify(incoming(":1.1", "a"), start, 0);
+    assert!(matches!(arrival, Arrival::Held { .. }));
+    assert!(store.live_ids().is_empty());
+    assert_eq!(store.history().len(), 1);
+    assert_eq!(store.unread(), 1);
+    // A critical still shows while DND holds.
+    let (arrival, _) = store.notify(urgent(":1.1", "b", Urgency::Critical), start, 0);
+    assert!(matches!(arrival, Arrival::Shown { .. }));
+    // Turning DND off shows nothing retroactively: the held card stays
+    // in history, and only new cards show.
+    store.set_dnd(Dnd::Off);
+    assert!(store.live_ids().len() == 1);
+    assert_eq!(store.unread(), 1);
+    // A transient card held by DND still answers its id, but never
+    // enters history.
+    store.set_dnd(Dnd::On);
+    let mut transient_in = incoming(":1.1", "c");
+    transient_in.hints.transient = true;
+    let before = store.history().len();
+    let (arrival, _) = store.notify(transient_in, now(), 0);
+    assert!(matches!(arrival, Arrival::Held { .. }));
+    assert_eq!(store.history().len(), before);
+}
+
+#[test]
+fn a_rule_hide_holds_and_history_false_skips() {
+    use crate::config::Rule;
+    let mut store = Store::new(
+        Config {
+            rule: vec![Rule {
+                app_name: Some("Quiet".to_owned()),
+                hide: true,
+                ..Rule::default()
+            }],
+            ..Config::default()
+        },
+        IdFile::open(None),
+    );
+    let start = now();
+    let (arrival, _) = store.notify(incoming(":1.1", "Quiet"), start, 0);
+    assert!(matches!(arrival, Arrival::Held { .. }));
+    assert_eq!(store.history().len(), 1);
+    // Another rule keeps its matches out of history entirely.
+    let mut store = Store::new(
+        Config {
+            rule: vec![Rule {
+                app_name: Some("Quiet".to_owned()),
+                hide: true,
+                history: false,
+                ..Rule::default()
+            }],
+            ..Config::default()
+        },
+        IdFile::open(None),
+    );
+    let (arrival, _) = store.notify(incoming(":1.1", "Quiet"), start, 0);
+    assert!(matches!(arrival, Arrival::Held { .. }));
+    assert!(store.history().is_empty());
+    // `history = false` without `hide`: the card shows, but its close
+    // leaves nothing behind.
+    let mut store = Store::new(
+        Config {
+            rule: vec![Rule {
+                app_name: Some("Loud".to_owned()),
+                history: false,
+                ..Rule::default()
+            }],
+            ..Config::default()
+        },
+        IdFile::open(None),
+    );
+    let (arrival, _) = store.notify(incoming(":1.1", "Loud"), start, 0);
+    let Arrival::Shown { id, .. } = arrival else {
+        panic!("shows");
+    };
+    store.presented(id, start, 0);
+    store.dismiss(id);
+    assert!(store.history().is_empty());
+}
+
+#[test]
+fn rule_execs_queue_for_fresh_and_held_never_for_replace_or_bucket() {
+    use crate::config::Rule;
+    let rule = Rule {
+        exec: Some(vec!["/bin/true".to_owned()]),
+        ..Rule::default()
+    };
+    // Fresh: one exec queued.
+    let mut store = Store::new(
+        Config {
+            rule: vec![rule.clone()],
+            ..Config::default()
+        },
+        IdFile::open(None),
+    );
+    let start = now();
+    let (arrival, _) = store.notify(incoming(":1.1", "a"), start, 0);
+    let Arrival::Shown { id, .. } = arrival else {
+        panic!("shows");
+    };
+    assert_eq!(store.take_execs().len(), 1);
+    // A replace never rings the hook.
+    let mut update = incoming(":1.1", "a");
+    update.replaces_id = id;
+    let (arrival, _) = store.notify(update, start, 0);
+    assert!(matches!(arrival, Arrival::Shown { replaced: true, .. }));
+    assert!(store.take_execs().is_empty());
+    // A hidden card still fires its hook (sound instead of a card).
+    let mut held = Store::new(
+        Config {
+            rule: vec![
+                Rule {
+                    app_name: Some("Quiet".to_owned()),
+                    hide: true,
+                    ..Rule::default()
+                },
+                rule,
+            ],
+            ..Config::default()
+        },
+        IdFile::open(None),
+    );
+    let (arrival, _) = held.notify(incoming(":1.1", "Quiet"), start, 0);
+    assert!(matches!(arrival, Arrival::Held { .. }));
+    assert_eq!(held.take_execs().len(), 1);
+    // Past the bucket: counted, kept, never an exec.
+    let mut flooded = Store::new(
+        Config {
+            rate_per_sec: 1,
+            rate_burst: 1,
+            rule: vec![Rule {
+                exec: Some(vec!["/bin/true".to_owned()]),
+                ..Rule::default()
+            }],
+            ..Config::default()
+        },
+        IdFile::open(None),
+    );
+    let (arrival, _) = flooded.notify(incoming(":1.7", "Flood"), start, 0);
+    assert!(matches!(arrival, Arrival::Shown { .. }));
+    assert_eq!(flooded.take_execs().len(), 1);
+    let (arrival, _) = flooded.notify(incoming(":1.7", "Flood"), start, 0);
+    assert!(matches!(arrival, Arrival::Suppressed { .. }));
+    assert!(flooded.take_execs().is_empty());
+}
+
+#[test]
+fn a_replace_applies_the_rule_overrides_without_hiding() {
+    use crate::config::{Rule, RuleUrgency};
+    let mut store = Store::new(
+        Config {
+            rule: vec![Rule {
+                app_name: Some("Mail".to_owned()),
+                set_urgency: Some(RuleUrgency::Critical),
+                timeout_ms: Some(1000),
+                hide: true,
+                ..Rule::default()
+            }],
+            ..Config::default()
+        },
+        IdFile::open(None),
+    );
+    let start = now();
+    // Fresh: hidden (the rule says so).
+    let (arrival, _) = store.notify(incoming(":1.1", "Other"), start, 0);
+    assert!(matches!(arrival, Arrival::Shown { .. }));
+    // A replace on the live card swaps in place — never held — with the
+    // rule's urgency and timeout steering the swapped content.
+    let id = match arrival {
+        Arrival::Shown { id, .. } => id,
+        _ => unreachable!(),
+    };
+    let mut update = incoming(":1.1", "Mail");
+    update.replaces_id = id;
+    let (arrival, evicted) = store.notify(update, start, 0);
+    assert_eq!(arrival, Arrival::Shown { id, replaced: true });
+    assert_eq!(evicted, None);
+    let note = store.get(id).unwrap();
+    assert_eq!(note.urgency, Urgency::Critical);
+    assert_eq!(note.timeout_ms, Some(1000));
+}
+
+#[test]
+fn restore_re_shows_the_newest_with_a_new_id() {
+    let mut store = store();
+    let start = now();
+    let a = shown(&mut store, ":1.1", "a");
+    let b = shown(&mut store, ":1.1", "b");
+    // Two live cards, nothing closed: history is empty, restore refuses.
+    assert!(store.history().is_empty());
+    assert!(store.restore(start, 0).is_none());
+    store.dismiss(a);
+    store.dismiss(b);
+    assert_eq!(store.history().len(), 2);
+    let (id, evicted) = store.restore(start, 0).expect("history is kept");
+    assert_eq!(evicted, None);
+    assert_ne!(id, b);
+    assert_eq!(store.get(id).unwrap().app_name, "b");
+    // The restored card presents and expires normally.
+    store.presented(id, start, 0);
+    assert_eq!(
+        store.expired(start + Duration::from_millis(10_000)).len(),
+        1
+    );
+}
+
+#[test]
+fn set_config_truncates_history_and_keeps_dnd() {
+    use super::super::dnd::Dnd;
+    let mut store = store();
+    for _ in 0..3 {
+        let id = shown(&mut store, ":1.1", "a");
+        store.dismiss(id);
+    }
+    assert_eq!(store.history().len(), 3);
+    store.set_dnd(Dnd::On);
+    store.set_config(Config {
+        history_max: 2,
+        ..Config::default()
+    });
+    assert_eq!(store.history().len(), 2);
+    assert_eq!(store.dnd(), Dnd::On);
+    // A zero cap drops everything.
+    store.set_config(Config {
+        history_max: 0,
+        ..Config::default()
+    });
+    assert!(store.history().is_empty());
+}

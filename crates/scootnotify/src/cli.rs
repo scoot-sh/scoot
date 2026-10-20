@@ -7,7 +7,7 @@
 //! owned (the unit's `RestartPreventExitStatus=3` turns that into a
 //! stopped unit, never a restart loop).
 
-use crate::control::protocol::EventKind;
+use crate::control::protocol::{DndMode, EventKind};
 
 /// What `daemon` and `msg` run with: everything the usage below promises.
 #[derive(Debug, PartialEq, Eq)]
@@ -39,6 +39,12 @@ pub enum Command {
 pub enum Msg {
     /// The live notifications: human lines, or the raw JSON with `--json`.
     List { json: bool },
+    /// The history ring: human lines, or the raw JSON with `--json`.
+    History { json: bool },
+    /// Read the DND mode (`status`, or no argument), or steer it.
+    Dnd { mode: Option<DndModeCli> },
+    /// Re-show the newest history entry as a new card.
+    Restore,
     /// Close one card, or every live card with `--all`, as a click would.
     Dismiss { id: Option<u32>, all: bool },
     /// Run a card's action as a click would (`default` when absent).
@@ -63,16 +69,52 @@ pub enum Msg {
 /// download to finish, short enough that a forgotten wait does not linger.
 pub const DEFAULT_WAIT_TIMEOUT_SECS: u64 = 30;
 
+/// How one `msg dnd` steers the mode: `status` (and no argument) reads
+/// it, the rest set or flip it. The protocol's absent-`mode` reads too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DndModeCli {
+    On,
+    Off,
+    Toggle,
+    Status,
+}
+
+impl DndModeCli {
+    /// Parses the word after `msg dnd`.
+    pub fn parse(word: &str) -> Option<Self> {
+        match word {
+            "on" => Some(Self::On),
+            "off" => Some(Self::Off),
+            "toggle" => Some(Self::Toggle),
+            "status" => Some(Self::Status),
+            _ => None,
+        }
+    }
+
+    /// The protocol's steering for this word (`None` reads).
+    pub fn wire(self) -> Option<DndMode> {
+        match self {
+            Self::On => Some(DndMode::On),
+            Self::Off => Some(DndMode::Off),
+            Self::Toggle => Some(DndMode::Toggle),
+            Self::Status => None,
+        }
+    }
+}
+
 /// The usage both `--help` and the misuse refusal print.
 pub const HELP: &str = "scootnotify: the notification daemon\n\
     \n\
     Usage:\n\
     \tscootnotify daemon [--check] [--config PATH] [--font PATH]\n\
     \tscootnotify msg list [--json]\n\
+    \tscootnotify msg history [--json]\n\
+    \tscootnotify msg dnd [on|off|toggle|status]\n\
+    \tscootnotify msg restore\n\
     \tscootnotify msg dismiss [ID | --all]\n\
     \tscootnotify msg invoke ID [ACTION]\n\
     \tscootnotify msg reload [--look]\n\
-    \tscootnotify msg subscribe [notify] [close] [invoke]\n\
+    \tscootnotify msg subscribe [notify] [close] [invoke] [dnd]\n\
     \tscootnotify msg wait [--app APP] [--summary-contains TEXT] [--timeout SECS]\n\
     \tscootnotify msg version\n\
     \tscootnotify --help\n\
@@ -80,8 +122,8 @@ pub const HELP: &str = "scootnotify: the notification daemon\n\
     \n\
     Commands:\n\
     \tdaemon\t\town org.freedesktop.Notifications and serve it\n\
-    \tmsg\t\task the running daemon: list, dismiss, invoke, reload,\n\
-    \t\t\tsubscribe, wait, version\n\
+    \tmsg\t\task the running daemon: list, history, dnd, restore,\n\
+    \t\t\tdismiss, invoke, reload, subscribe, wait, version\n\
     \n\
     Flags:\n\
     \t--check\t\tvalidate the config file and exit (0 valid, 1 refused)\n\
@@ -95,7 +137,8 @@ pub const HELP: &str = "scootnotify: the notification daemon\n\
     substring of its summary), prints its JSON, and exits 0; on `--timeout`\n\
     (30 s when absent) it exits 1. `msg subscribe` prints the `subscribed`\n\
     reply and then one JSON event per line until the daemon closes the\n\
-    connection.\n\
+    connection. `msg dnd` with no argument reads the mode; `msg history`\n\
+    lists the ring, unseen entries marked with a `*`.\n\
     \n\
     Exit statuses: 0 done, 1 failed, 2 misused, 3 the name is already owned.\n\
     The full reference is in the scootnotify section of the docs site.\n";
@@ -167,7 +210,9 @@ pub fn parse_args(argv: &[String]) -> Result<Args, String> {
 /// Parses the words after `msg`.
 fn parse_msg(words: &[String]) -> Result<Msg, String> {
     let command = words.first().map(String::as_str).ok_or_else(|| {
-        String::from("a msg command is required (they are: list, dismiss, invoke, reload, subscribe, wait, version)")
+        String::from(
+            "a msg command is required (they are: list, history, dnd, restore, dismiss, invoke, reload, subscribe, wait, version)",
+        )
     })?;
     let rest = &words[1..];
     match command {
@@ -183,6 +228,40 @@ fn parse_msg(words: &[String]) -> Result<Msg, String> {
                 }
             }
             Ok(Msg::List { json })
+        }
+        "history" => {
+            let mut json = false;
+            for word in rest {
+                if word == "--json" {
+                    json = true;
+                } else {
+                    return Err(format!(
+                        "unknown flag '{word}' for `msg history` (it takes: --json)"
+                    ));
+                }
+            }
+            Ok(Msg::History { json })
+        }
+        "dnd" => match rest {
+            [] => Ok(Msg::Dnd { mode: None }),
+            [word] => match DndModeCli::parse(word) {
+                Some(DndModeCli::Status) => Ok(Msg::Dnd { mode: None }),
+                Some(mode) => Ok(Msg::Dnd { mode: Some(mode) }),
+                None => Err(format!(
+                    "`msg dnd` takes on, off, toggle or status (or nothing to read), not '{word}'"
+                )),
+            },
+            _ => Err(String::from(
+                "`msg dnd` takes at most one of on, off, toggle or status",
+            )),
+        },
+        "restore" => {
+            if let Some(word) = rest.first() {
+                return Err(format!(
+                    "unknown argument '{word}' for `msg restore` (it takes none)"
+                ));
+            }
+            Ok(Msg::Restore)
         }
         "dismiss" => {
             let mut id = None;
@@ -276,7 +355,7 @@ fn parse_msg(words: &[String]) -> Result<Msg, String> {
             Ok(Msg::Version)
         }
         _ => Err(format!(
-            "unknown msg command '{command}' (they are: list, dismiss, invoke, reload, subscribe, wait, version)"
+            "unknown msg command '{command}' (they are: list, history, dnd, restore, dismiss, invoke, reload, subscribe, wait, version)"
         )),
     }
 }

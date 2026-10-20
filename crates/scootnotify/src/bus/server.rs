@@ -29,6 +29,8 @@ use scoot_dbus::proto::{self, Reader, Writer, request, request_reply};
 use crate::bus::notify::{self, NOTIFY_SIGNATURE};
 use crate::config::Config;
 use crate::control::protocol::{self, EventKind};
+use crate::exec::{ExecRequest, Spawner};
+use crate::model::dnd::Dnd;
 use crate::model::store::{Closure, IdFile, Store};
 
 /// The bus name, object and interface: the spec's §2 service.
@@ -293,6 +295,10 @@ pub struct Server {
     /// subscribed control connections. Drained every turn, so a flood
     /// cannot grow this past one turn's worth.
     control: Vec<ControlEvent>,
+    /// A rule's `exec` children, bounded at 4 and reaped by pidfd: the
+    /// daemon loop polls [`Spawner::sources`] and calls
+    /// [`Spawner::reap`].
+    exec: Spawner,
 }
 
 /// One queued control event: the subscriber kind it goes to, and the
@@ -310,6 +316,7 @@ impl Server {
             apps: HashMap::new(),
             present_on_arrival: true,
             control: Vec::new(),
+            exec: Spawner::default(),
         }
     }
 
@@ -319,6 +326,58 @@ impl Server {
         std::mem::take(&mut self.control)
     }
 
+    /// Drains the rule `exec`s the last turn fired: the daemon loop
+    /// spawns these.
+    pub fn take_execs(&mut self) -> Vec<ExecRequest> {
+        self.store.take_execs()
+    }
+
+    /// Spawns one rule `exec`: argv not shell, its own process group,
+    /// reaped by pidfd, at most 4 running. `Err` is a line for the log.
+    pub fn spawn_exec(&mut self, request: &ExecRequest) -> Result<(), String> {
+        self.exec.spawn(request)
+    }
+
+    /// Reaps the rule `exec` children that exited.
+    pub fn reap_exec(&mut self) {
+        self.exec.reap();
+    }
+
+    /// Every running rule child's pidfd, for the poll set.
+    pub fn exec_sources<'fd>(&'fd self, fds: &mut [rustix::event::PollFd<'fd>], len: &mut usize) {
+        self.exec.sources(fds, len);
+    }
+
+    /// How long the loop may sleep while an exec child without a pidfd
+    /// runs; `None` otherwise.
+    pub fn exec_poll_timeout(&self) -> Option<std::time::Duration> {
+        self.exec.poll_timeout()
+    }
+
+    /// The DND mode.
+    pub fn dnd(&self) -> Dnd {
+        self.store.dnd()
+    }
+
+    /// Sets the DND mode, queueing its event when it changed.
+    pub fn set_dnd(&mut self, dnd: Dnd) -> bool {
+        if !self.store.set_dnd(dnd) {
+            return false;
+        }
+        let mut line = Vec::new();
+        protocol::write_event(
+            &mut line,
+            &protocol::Event::Dnd {
+                dnd: self.store.dnd().name(),
+            },
+        );
+        self.control.push(ControlEvent {
+            kind: EventKind::Dnd,
+            line,
+        });
+        true
+    }
+
     /// Queues a `notify` event for `id`'s arrival, shown as `list` shows
     /// it. Nothing is queued when the id is already gone (it cannot be:
     /// the caller just stored it).
@@ -326,7 +385,7 @@ impl Server {
         let Some(note) = self.store.get(id) else {
             return;
         };
-        let output = self.store.output_name();
+        let output = self.store.output_for(note);
         let mut line = Vec::new();
         protocol::write_event(
             &mut line,
@@ -487,6 +546,7 @@ impl Server {
                 }
                 let id = match arrival {
                     crate::model::store::Arrival::Shown { id, .. } => id,
+                    crate::model::store::Arrival::Held { id } => id,
                     crate::model::store::Arrival::Suppressed { id } => id,
                 };
                 let mut reply = Writer::new();
@@ -633,6 +693,24 @@ impl Server {
             }
         }
         out
+    }
+
+    /// Re-shows the newest history entry as a new card with a new id
+    /// (`msg restore`), presenting at once where headless. Returns the
+    /// new id, or `None` when history is empty. Like a fresh arrival it
+    /// queues the `notify` event and any eviction's close.
+    pub fn restore_and_signal(&mut self, conn: &mut Conn, now_ms: u64) -> Option<u32> {
+        let now = Instant::now();
+        let (id, evicted) = self.store.restore(now, now_ms)?;
+        if self.present_on_arrival {
+            self.store.presented(id, now, now_ms);
+        }
+        self.push_notify(id, now, now_ms);
+        if let Some(closure) = evicted {
+            self.signal_closed(conn, closure);
+            self.push_close(closure);
+        }
+        Some(id)
     }
 
     /// The earliest running deadline: the timerfd arms to this.

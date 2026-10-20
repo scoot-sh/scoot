@@ -107,6 +107,15 @@ fn run_msg(msg: cli::Msg) -> i32 {
     match msg {
         cli::Msg::List { json: true } => send(&Request::List, true),
         cli::Msg::List { json: false } => list_human(),
+        cli::Msg::History { json: true } => send(&Request::History, true),
+        cli::Msg::History { json: false } => history_human(),
+        cli::Msg::Dnd { mode } => send(
+            &Request::Dnd {
+                mode: mode.and_then(|mode| mode.wire()),
+            },
+            true,
+        ),
+        cli::Msg::Restore => send(&Request::Restore, false),
         cli::Msg::Dismiss { id, all } => send(&Request::Dismiss { id, all }, false),
         cli::Msg::Invoke { id, action } => send(
             &Request::Invoke {
@@ -176,7 +185,7 @@ fn list_human() -> i32 {
     };
     let mut out = String::new();
     for card in cards {
-        // `list` speaks protocol 1, where every key below is always
+        // `list` speaks protocol 2, where every key below is always
         // present; a missing one is a loud error, not a panic and not a
         // blank line.
         let (Some(id), Some(urgency), Some(app), Some(summary)) = (
@@ -191,6 +200,56 @@ fn list_human() -> i32 {
             return 1;
         };
         out.push_str(&format!("{id} [{urgency}] {app}: {summary}\n"));
+    }
+    match print(out.as_str()) {
+        Ok(()) => 0,
+        Err(_) => 1,
+    }
+}
+
+/// `history` for a human: one line per ring entry, unseen first with a
+/// `*` mark. The stable view is `--json`; this is ink for a terminal.
+fn history_human() -> i32 {
+    let reply = match client::send(&Request::History) {
+        Ok(reply) => reply,
+        Err(error) => {
+            warn(format_args!("scootnotify: {error}"));
+            return 1;
+        }
+    };
+    let parsed: serde_json::Value = match serde_json::from_str(&reply) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            warn(format_args!(
+                "scootnotify: unreadable reply from the daemon: {error}"
+            ));
+            return 1;
+        }
+    };
+    let Some(entries) = parsed.get("history").and_then(|entries| entries.as_array()) else {
+        warn(format_args!(
+            "scootnotify: unreadable reply from the daemon: no `history`"
+        ));
+        return 1;
+    };
+    let mut out = String::new();
+    for entry in entries {
+        // `history` speaks protocol 2, where every key below is always
+        // present; a missing one is a loud error, not a panic and not a
+        // blank line.
+        let (Some(urgency), Some(app), Some(summary), Some(seen)) = (
+            entry.get("urgency").and_then(|urgency| urgency.as_str()),
+            entry.get("app_name").and_then(|app| app.as_str()),
+            entry.get("summary").and_then(|summary| summary.as_str()),
+            entry.get("seen").and_then(|seen| seen.as_bool()),
+        ) else {
+            warn(format_args!(
+                "scootnotify: unreadable reply from the daemon: an entry is misshapen"
+            ));
+            return 1;
+        };
+        let mark = if seen { " " } else { "*" };
+        out.push_str(&format!("{mark} [{urgency}] {app}: {summary}\n"));
     }
     match print(out.as_str()) {
         Ok(()) => 0,

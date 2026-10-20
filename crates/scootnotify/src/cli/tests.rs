@@ -165,8 +165,71 @@ fn msg_subscribe_names_kinds_or_takes_them_all() {
             events: vec![EventKind::Close]
         })
     );
-    let error = parse(&["scootnotify", "msg", "subscribe", "dnd"]).unwrap_err();
-    assert!(error.contains("dnd"), "{error}");
+    assert_eq!(
+        parse(&["scootnotify", "msg", "subscribe", "dnd"])
+            .unwrap()
+            .command,
+        Command::Msg(Msg::Subscribe {
+            events: vec![EventKind::Dnd]
+        })
+    );
+    let error = parse(&["scootnotify", "msg", "subscribe", "bogus"]).unwrap_err();
+    assert!(error.contains("bogus"), "{error}");
+}
+
+#[test]
+fn msg_dnd_reads_or_steers() {
+    use super::DndModeCli;
+    assert_eq!(
+        parse(&["scootnotify", "msg", "dnd"]).unwrap().command,
+        Command::Msg(Msg::Dnd { mode: None })
+    );
+    assert_eq!(
+        parse(&["scootnotify", "msg", "dnd", "status"])
+            .unwrap()
+            .command,
+        Command::Msg(Msg::Dnd { mode: None })
+    );
+    assert_eq!(
+        parse(&["scootnotify", "msg", "dnd", "on"]).unwrap().command,
+        Command::Msg(Msg::Dnd {
+            mode: Some(DndModeCli::On)
+        })
+    );
+    assert_eq!(
+        parse(&["scootnotify", "msg", "dnd", "toggle"])
+            .unwrap()
+            .command,
+        Command::Msg(Msg::Dnd {
+            mode: Some(DndModeCli::Toggle)
+        })
+    );
+    assert!(parse(&["scootnotify", "msg", "dnd", "loud"]).is_err());
+    assert!(parse(&["scootnotify", "msg", "dnd", "on", "off"]).is_err());
+}
+
+#[test]
+fn msg_history_defaults_to_human_and_json_is_a_flag() {
+    assert_eq!(
+        parse(&["scootnotify", "msg", "history"]).unwrap().command,
+        Command::Msg(Msg::History { json: false })
+    );
+    assert_eq!(
+        parse(&["scootnotify", "msg", "history", "--json"])
+            .unwrap()
+            .command,
+        Command::Msg(Msg::History { json: true })
+    );
+    assert!(parse(&["scootnotify", "msg", "history", "--all"]).is_err());
+}
+
+#[test]
+fn msg_restore_takes_no_arguments() {
+    assert_eq!(
+        parse(&["scootnotify", "msg", "restore"]).unwrap().command,
+        Command::Msg(Msg::Restore)
+    );
+    assert!(parse(&["scootnotify", "msg", "restore", "1"]).is_err());
 }
 
 #[test]
@@ -222,6 +285,6 @@ fn msg_without_a_command_is_a_misuse() {
 
 #[test]
 fn an_unknown_msg_command_names_itself() {
-    let error = parse(&["scootnotify", "msg", "history"]).unwrap_err();
-    assert!(error.contains("history"), "{error}");
+    let error = parse(&["scootnotify", "msg", "wat"]).unwrap_err();
+    assert!(error.contains("wat"), "{error}");
 }
