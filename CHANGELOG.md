@@ -17,6 +17,33 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.5.0](https://github.com/scoot-sh/scoot/compare/v0.4.0...v0.5.0) - 2026-10-20
+
+### scootlaunch
+
+- added: desktop entry index, Exec expansion and --list --json ([#663](https://github.com/scoot-sh/scoot/pull/663))
+- added: fuzzy matching and frecency, --query --json ([#664](https://github.com/scoot-sh/scoot/pull/664))
+- added: overlay exclusive-keyboard panel with entry, list, toggle and look layer ([#674](https://github.com/scoot-sh/scoot/pull/674))
+- added: launch picks with token, scope, fallback and DBusActivatable ([#676](https://github.com/scoot-sh/scoot/pull/676))
+- added: dmenu and run modes ([#678](https://github.com/scoot-sh/scoot/pull/678))
+- added: --run-id headless launch with agent JSON schema ([#680](https://github.com/scoot-sh/scoot/pull/680))
+- added: icon-theme lookup with PNG first, SVG via resvg ([#679](https://github.com/scoot-sh/scoot/pull/679))
+
+### scootnotify
+
+- added: cards, the stack, lock and idle rules, outputs, the look layer ([#683](https://github.com/scoot-sh/scoot/pull/683))
+- added: the control socket, msg, JSON, subscribe and wait, scoped reload ([#684](https://github.com/scoot-sh/scoot/pull/684))
+- added: [**breaking**] do not disturb, the history ring and restore, [[rule]] with exec ([#685](https://github.com/scoot-sh/scoot/pull/685))
+- fixed: keep calls that arrive with the name grant ([#690](https://github.com/scoot-sh/scoot/pull/690))
+
+### scootnotify,scoot-dbus
+
+- added: the notification server and its model, headless ([#668](https://github.com/scoot-sh/scoot/pull/668))
+
+### scootui
+
+- fixed: inset entry, list and selector text half an em from the edge ([#677](https://github.com/scoot-sh/scoot/pull/677))
+
 ## [0.4.0](https://github.com/scoot-sh/scoot/compare/v0.3.1...v0.4.0) - 2026-10-20
 
 ### scoot-dbus,scootbar
