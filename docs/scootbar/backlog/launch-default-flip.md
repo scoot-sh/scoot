@@ -3,7 +3,7 @@ title: "scootlaunch: make it the desktop profile's default launcher and picker"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "launch-packaging"
+blocked: null
 milestone: "M7"
 ---
 

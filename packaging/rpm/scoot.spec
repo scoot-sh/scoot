@@ -18,7 +18,7 @@
 # Source0 is the vendored tarball every release publishes under this exact
 # name: release.yml runs `scripts/vendor-release.sh --label <version>`, so
 # the asset is `scoot-<version>-vendored.tar.gz` (one tarball for all
-# three specs). No release is cut yet, so the URL 404s; until it exists CI
+# four specs). No release is cut yet, so the URL 404s; until it exists CI
 # builds this exact file against a staged tarball of HEAD placed under the
 # same name (see .github/workflows/rpm.yml).
 

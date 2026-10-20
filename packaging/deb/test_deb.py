@@ -30,7 +30,7 @@ def fake_source(version):
         '[workspace]\nmembers = ["crates/*"]\n\n'
         f'[workspace.package]\nversion = "{version}"\nedition = "2024"\n\n'
         '[workspace.dependencies]\nserde = { version = "1" }\n')
-    for crate in ("scoot", "scootbg", "scootbar"):
+    for crate in ("scoot", "scootbg", "scootbar", "scootlaunch"):
         cdir = d / "crates" / crate
         cdir.mkdir(parents=True)
         (cdir / "Cargo.toml").write_text(
@@ -42,7 +42,7 @@ class ControlTest(unittest.TestCase):
     def test_versions_read_the_workspace_version(self):
         p = run_meta("versions", "--source", str(fake_source("0.4.2")))
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertEqual(p.stdout, "scoot 0.4.2\nscootbar 0.4.2\nscootbg 0.4.2\n")
+        self.assertEqual(p.stdout, "scoot 0.4.2\nscootbar 0.4.2\nscootbg 0.4.2\nscootlaunch 0.4.2\n")
 
     def test_versions_of_this_tree_agree(self):
         p = run_meta("versions", "--source", str(REPO))
@@ -112,8 +112,24 @@ class ControlTest(unittest.TestCase):
         self.assertIn("Architecture: arm64", p.stdout)
         self.assertIn("Suggests: fonts-dejavu-core", p.stdout)
 
+    def test_launch_control_suggests_a_font(self):
+        # The panel refuses to open with no font (unlike the bar, which
+        # draws a plain one), but the headless commands need none, so
+        # the font stays a suggestion, not a dependency.
+        p = run_meta(
+            "control", "--package", "scootlaunch", "--source", str(REPO),
+            "--arch", "amd64", "--depends", "libc6",
+        )
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("Package: scootlaunch", p.stdout)
+        self.assertIn("Suggests: fonts-dejavu-core", p.stdout)
+        self.assertIn("Depends: libc6", p.stdout)
+        self.assertNotIn("fonts-dejavu-core", [
+            line for line in p.stdout.splitlines()
+            if line.startswith("Depends:")][0])
+
     def test_every_control_names_compositor_not_window_manager(self):
-        for package in ("scoot", "scootbg", "scootbar"):
+        for package in ("scoot", "scootbg", "scootbar", "scootlaunch"):
             p = run_meta(
                 "control", "--package", package, "--source", str(REPO),
                 "--arch", "amd64", "--depends", "libc6",
@@ -145,6 +161,10 @@ class ShlibdepsTest(unittest.TestCase):
         "libseat1 (>= 0.4.0), libudev1 (>= 183), libxkbcommon0 (>= 0.8.0)"
     )
     BAR_SHLIBS = "shlibs:Depends=libc6 (>= 2.36), libgcc-s1 (>= 3.0)"
+    LAUNCH_SHLIBS = (
+        "shlibs:Depends=libc6 (>= 2.36), libgcc-s1 (>= 3.0), "
+        "libxkbcommon0 (>= 0.8.0)"
+    )
 
     def test_compositor_shlibdeps_passes_verbatim(self):
         p = run_meta("check-shlibdeps", "--package", "scoot", self.SCOOT_SHLIBS)
@@ -154,6 +174,20 @@ class ShlibdepsTest(unittest.TestCase):
     def test_bar_shlibdeps_passes(self):
         p = run_meta("check-shlibdeps", "--package", "scootbar", self.BAR_SHLIBS)
         self.assertEqual(p.returncode, 0, p.stderr)
+
+    def test_launch_shlibdeps_passes_with_only_the_keyboard_library(self):
+        # The panel links libxkbcommon past libc and nothing else: the
+        # keyboard library passes, a compositor library fails.
+        p = run_meta("check-shlibdeps", "--package", "scootlaunch", self.LAUNCH_SHLIBS)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("libxkbcommon0 (>= 0.8.0)", p.stdout)
+
+    def test_launch_must_not_link_the_compositor_stack(self):
+        p = run_meta(
+            "check-shlibdeps", "--package", "scootlaunch",
+            self.LAUNCH_SHLIBS + ", libinput10 (>= 1.9.0)",
+        )
+        self.assertNotEqual(p.returncode, 0)
 
     def test_a_new_library_is_a_loud_refusal(self):
         # A dependency outside the ldd-derived table (a renamed package,

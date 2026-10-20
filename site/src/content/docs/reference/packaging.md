@@ -95,6 +95,19 @@ run-time `Suggests`, never `Depends`) — checked against trixie's own
 `Contents-amd64.gz`;
 other distros map the same sonames through their own file search.
 
+`scootlaunch` links two system libraries past the C library:
+`libxkbcommon.so.0` for its panel keyboard and `libm.so.6` (through
+the default-on SVG icon stack; a release build's `NEEDED` is
+`libxkbcommon.so.0`, `libgcc_s.so.1`, `libm.so.6`, `libc.so.6`,
+re-measured 2026-10-19 on aarch64 at 2167544 bytes stripped).
+`libm.so.6` ships inside the C library package everywhere, so the
+packaging delta is still one name: `libxkbcommon.so.0` resolves to
+`libxkbcommon0` on Debian, Ubuntu and openSUSE and to `libxkbcommon`
+on Fedora and Arch — the name each of the four package recipes depends
+on. The headless commands (`--list`, `--query`, `--run-id`) never call
+either library, but the loader still needs them present to start the
+binary at all.
+
 ### Toolchain floor: Rust 1.88
 
 The workspace sets `rust-version = "1.88"`. Which distro releases ship

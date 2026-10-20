@@ -5,7 +5,7 @@ description: "Get a scoot release, know which file is which, and verify it: chec
 
 Every release is one tag, `vX.Y.Z` (`v0.2.1`), and holds every binary
 at that one version: the compositor with `scoot msg`, the wallpaper
-daemon and the bar. The [release workflow](#where-releases-come-from)
+daemon, the bar and the launcher. The [release workflow](#where-releases-come-from)
 builds and publishes it, nothing by hand. If you are deciding whether
 versions work together, read [Versions and
 compatibility](./versions.md) first.
@@ -20,6 +20,7 @@ A release holds one set of files per architecture (`x86_64-linux`,
 | `scoot-<version>-<arch>` | The compositor (plus the `scoot msg` client, the only client) |
 | `scootbg-<version>-<arch>` | The wallpaper daemon |
 | `scootbar-<version>-<arch>` | The status bar |
+| `scootlaunch-<version>-<arch>` | The application launcher |
 | `scoot-<version>-vendored.tar.gz` | The exact tagged tree plus `vendor/` (every dependency), `.cargo/config.toml`, `THIRD-PARTY-LICENSES` and `OFFLINE-BUILD.txt` |
 | `sbom-scoot-<version>.cyclonedx.json` | The locked dependencies of every shipped binary (their union), CycloneDX 1.3 |
 | `SHA256SUMS` | The checksum of every file above |
@@ -62,6 +63,7 @@ above every 0.2.x tag.
 ## Run them on your distro
 
 The bar and the wallpaper daemon need nothing but a C library. The
+launcher needs `libxkbcommon` beside it. The
 compositor needs five system libraries beside it — the `ldd`-derived
 list, not a guess:
 

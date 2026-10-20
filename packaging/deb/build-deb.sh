@@ -1,5 +1,5 @@
 #!/bin/sh
-# build-deb.sh: build the three scoot .debs from a source tree.
+# build-deb.sh: build the four scoot .debs from a source tree.
 #
 # Usage: packaging/deb/build-deb.sh --source DIR --out DIR [--revision N]
 #                                   [--upstream-suffix +git<YYYYMMDD>.<commit>]
@@ -94,7 +94,7 @@ mkdir -p "$OUT" "$STAGE_ROOT"
 # source tree's own target/ otherwise.
 BINDIR="${CARGO_TARGET_DIR:-$SOURCE/target}/release"
 
-for pkg in scoot scootbg scootbar; do
+for pkg in scoot scootbg scootbar scootlaunch; do
     echo "--- $pkg: cargo build --release --locked --offline -p $pkg"
     (cd "$SOURCE" && cargo build --release --locked --offline -p "$pkg")
 

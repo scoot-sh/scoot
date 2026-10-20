@@ -1,0 +1,52 @@
+# scootlaunch-git: the keyboard-first application launcher, tracking main.
+#
+# The `-git` twin of `scootlaunch` (packaging/arch/scootlaunch/PKGBUILD):
+# same files and dependencies, built from the tip of main. Conflicts with
+# `scootlaunch`: install one or the other, never both.
+
+pkgname=scootlaunch-git
+pkgver=0.2.1.r0.g0000000
+pkgrel=1
+pkgdesc='Keyboard-first application launcher for the scoot compositor (git)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/scoot-sh/scoot'
+license=('MIT')
+depends=('glibc' 'libgcc' 'libxkbcommon')
+makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
+optdepends=('ttf-dejavu: sans font the panel finds on its own')
+provides=('scootlaunch')
+conflicts=('scootlaunch')
+options=('!debug')
+source=("$pkgname::git+https://github.com/scoot-sh/scoot.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$pkgname"
+  # The binaries' own label in pacman's spelling: `scoot --version` saying
+  # 0.2.0+14.g615608c is pkgver 0.2.0.r14.g615608c (the last v* release
+  # tag, the commits since it, the commit; docs/versioning.md). Before
+  # the first tag: the workspace version and every commit.
+  local desc
+  if desc=$(git describe --long --tags --abbrev=7 --match 'v[0-9]*' --exclude 'v*-*' 2>/dev/null); then
+    printf '%s' "$desc" | sed 's/^v//;s/-\([0-9]*\)-g\([0-9a-f]*\)$/.r\1.g\2/'
+  else
+    printf '%s.r%s.g%s' \
+      "$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" \
+      "$(git rev-list --count HEAD)" \
+      "$(git rev-parse --short=7 HEAD)"
+  fi
+}
+
+build() {
+  cd "$pkgname"
+  cargo build --release --locked -p scootlaunch
+  cargo deny list > THIRD-PARTY-LICENSES
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 "${CARGO_TARGET_DIR:-target}/release/scootlaunch" "$pkgdir/usr/bin/scootlaunch"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+  install -Dm644 THIRD-PARTY-LICENSES "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-LICENSES"
+}

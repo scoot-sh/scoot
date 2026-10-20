@@ -6,7 +6,7 @@ workflow runs before it builds anything.
                              [--no-github] [--complete-ok] [--json]
 
 One tag, `vX.Y.Z`, releases every binary (scoot, which carries `scoot
-msg`; scootbg; scootbar) at the repository's one version
+msg`; scootbg; scootbar; scootlaunch) at the repository's one version
 (docs/versioning.md). The resolve refuses -- exit 2, nothing built,
 nothing published -- when:
 
@@ -47,7 +47,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # Every binary the repository ships. A crate without a binary (scootctl,
 # the client library inside `scoot msg`; the internal libraries) carries
 # the same version but has nothing of its own to release.
-BINARIES = ("scoot", "scootbg", "scootbar")
+BINARIES = ("scoot", "scootbg", "scootbar", "scootlaunch")
 ARCHES = ("x86_64-linux", "aarch64-linux")
 
 TAG_RE = re.compile(r"^v(\d+\.\d+\.\d+)$")

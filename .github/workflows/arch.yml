@@ -1,11 +1,12 @@
 # scoot Arch packages: the PKGBUILDs (release and `-git`) for scoot,
-# scootbg and scootbar (docs/backlog/resolved/arch-package-done.md).
+# scootbg, scootbar and scootlaunch (docs/backlog/resolved/arch-package-done.md).
 #
-# WHAT IT DOES: builds all six PKGBUILDs under `packaging/arch/` in an
+# WHAT IT DOES: builds all eight PKGBUILDs under `packaging/arch/` in an
 # Arch container with `makepkg`, lints each PKGBUILD and each built
-# package with `namcap`, installs the release trio and the `-git` trio
+# package with `namcap`, installs the release set and the `-git` set
 # in turn, and runs `scoot --version`, the bar's `--check` on its
-# shipped example config, and the headless smoke test
+# shipped example config, the launcher's `--check` on the built-in
+# defaults, and the headless smoke test
 # (`scripts/smoke-test.sh`) against the installed binaries. That is the
 # ticket's proof the packages work.
 #
@@ -49,7 +50,7 @@ jobs:
     name: makepkg + namcap + install + smoke (x86_64)
     runs-on: ubuntu-latest
     container: archlinux:base
-    # Six release-profile workspace builds, each from its own srcdir
+    # Eight release-profile workspace builds, each from its own srcdir
     # (cargo fingerprints by path, so they share the registry but not
     # compiled deps), plus two headless smoke runs.
     timeout-minutes: 90
@@ -100,11 +101,11 @@ jobs:
 
       - name: The committed .SRCINFO matches makepkg --printsrcinfo
         run: |
-          for p in scoot scootbg scootbar scoot-git scootbg-git scootbar-git; do
+          for p in scoot scootbg scootbar scootlaunch scoot-git scootbg-git scootbar-git scootlaunch-git; do
             sudo -u builder bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/$p' && makepkg --printsrcinfo" | diff - "packaging/arch/$p/.SRCINFO" \
               || { echo "::error title=.SRCINFO drift in $p::run makepkg --printsrcinfo > .SRCINFO there and commit it."; exit 1; }
           done
-          echo "ok: all six .SRCINFO files match"
+          echo "ok: all eight .SRCINFO files match"
 
       # The release PKGBUILDs point at tag tarballs that do not exist
       # until the first release is cut. Stage same-layout tarballs of
@@ -116,15 +117,15 @@ jobs:
       # check the committed files, not the substitutions.
       - name: Stage the HEAD tarballs and point the PKGBUILDs at them
         run: |
-          # One tag (`v$pkgver`) for all three: GitHub's tarball of a
+          # One tag (`v$pkgver`) for all four: GitHub's tarball of a
           # `v`-prefixed tag unpacks to `scoot-<version>/` (the `v` is
           # dropped), which is the directory the PKGBUILDs `cd` into.
           ver=$(sed -n 's/^pkgver=//p' packaging/arch/scoot/PKGBUILD)
           git archive HEAD --prefix "scoot-$ver/" -o .test-tarballs/scoot-test.tar.gz
           sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/v\$pkgver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scoot-test.tar.gz|" \
-            packaging/arch/scoot/PKGBUILD packaging/arch/scootbg/PKGBUILD packaging/arch/scootbar/PKGBUILD
+            packaging/arch/scoot/PKGBUILD packaging/arch/scootbg/PKGBUILD packaging/arch/scootbar/PKGBUILD packaging/arch/scootlaunch/PKGBUILD
           sed -i "s|git+https://github.com/scoot-sh/scoot\.git|git+file://$GITHUB_WORKSPACE#commit=$GITHUB_SHA|" \
-            packaging/arch/scoot-git/PKGBUILD packaging/arch/scootbg-git/PKGBUILD packaging/arch/scootbar-git/PKGBUILD
+            packaging/arch/scoot-git/PKGBUILD packaging/arch/scootbg-git/PKGBUILD packaging/arch/scootbar-git/PKGBUILD packaging/arch/scootlaunch-git/PKGBUILD
           # Loud if a substitution missed: an unrewritten URL would
           # otherwise fail pages later as a 404 (release) or build the
           # wrong tree (git).
@@ -145,7 +146,7 @@ jobs:
           crate_ver = subprocess.run(["scripts/workspace-version"], check=True,
                                      capture_output=True, text=True).stdout.strip()
           bad = False
-          for pkg in ("scoot", "scootbg", "scootbar"):
+          for pkg in ("scoot", "scootbg", "scootbar", "scootlaunch"):
               for suffix in ("", "-git"):
                   text = open(f"packaging/arch/{pkg}{suffix}/PKGBUILD").read()
                   pkgver = re.search(r'^pkgver=(.*)$', text, re.M).group(1)
@@ -171,7 +172,7 @@ jobs:
           sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
             bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/scootbg' && makepkg -s --noconfirm"
           pacman -U --noconfirm "$GITHUB_WORKSPACE"/dist/scootbg-0*.pkg.tar.zst
-          for p in scoot scootbar scoot-git scootbg-git scootbar-git; do
+          for p in scoot scootbar scootlaunch scoot-git scootbg-git scootbar-git scootlaunch-git; do
             sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
               bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/$p' && makepkg -s --noconfirm"
           done
@@ -225,33 +226,38 @@ jobs:
             exit 1
           fi
 
-      # Twice: the release trio, then the -git trio (they conflict, so
+      # Twice: the release set, then the -git set (they conflict, so
       # one set is removed before the other installs). Each round runs
       # the ticket's proof against the installed binaries: every
       # --version, the bar's --check on its shipped example (which
-      # needs the Arch font path, hence ttf-dejavu above), and the
+      # needs the Arch font path, hence ttf-dejavu above), the
+      # launcher's --check on the built-in defaults, and the
       # headless smoke test with the installed scoot and scootbg.
-      - name: Install the release trio and prove it
+      - name: Install the release set and prove it
         run: |
-          pacman -U --noconfirm dist/scoot-0*.pkg.tar.zst dist/scootbg-0*.pkg.tar.zst dist/scootbar-0*.pkg.tar.zst
+          pacman -U --noconfirm dist/scoot-0*.pkg.tar.zst dist/scootbg-0*.pkg.tar.zst dist/scootbar-0*.pkg.tar.zst dist/scootlaunch-0*.pkg.tar.zst
           scoot --version
           scootbg --version
           scootbar --version
+          scootlaunch --version
           scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
+          scootlaunch --check
           mkdir -p /tmp/arch-smoke-xdg
           chmod 700 /tmp/arch-smoke-xdg
           export XDG_RUNTIME_DIR=/tmp/arch-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
           export SMOKE_PREFIX=/tmp/arch-smoke-release SMOKE_REQUIRE_SCOOTBG=1
           scripts/smoke-test.sh
 
-      - name: Swap to the -git trio and prove it
+      - name: Swap to the -git set and prove it
         run: |
-          pacman -Rns --noconfirm scoot scootbg scootbar
-          pacman -U --noconfirm dist/scoot-git-*.pkg.tar.zst dist/scootbg-git-*.pkg.tar.zst dist/scootbar-git-*.pkg.tar.zst
+          pacman -Rns --noconfirm scoot scootbg scootbar scootlaunch
+          pacman -U --noconfirm dist/scoot-git-*.pkg.tar.zst dist/scootbg-git-*.pkg.tar.zst dist/scootbar-git-*.pkg.tar.zst dist/scootlaunch-git-*.pkg.tar.zst
           scoot --version
           scootbg --version
           scootbar --version
+          scootlaunch --version
           scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
+          scootlaunch --check
           export XDG_RUNTIME_DIR=/tmp/arch-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
           export SMOKE_PREFIX=/tmp/arch-smoke-git SMOKE_REQUIRE_SCOOTBG=1
           scripts/smoke-test.sh

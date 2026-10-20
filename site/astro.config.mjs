@@ -196,6 +196,7 @@ export default defineConfig({
           label: 'scootlaunch',
           items: [
             { label: 'Overview', slug: 'scootlaunch' },
+            { label: 'The panel', slug: 'scootlaunch/panel' },
             { label: 'CLI reference', slug: 'scootlaunch/cli' },
           ],
         },
