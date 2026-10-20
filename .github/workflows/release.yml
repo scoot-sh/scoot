@@ -689,7 +689,7 @@ jobs:
           gh release download "$VERIFY_TAG" --dir "$RUNNER_TEMP/verify"
           # Release assets carry no mode: make the binaries executable
           # (content untouched, so the checksums below still prove them).
-          chmod +x "$RUNNER_TEMP"/verify/scoot-*-linux
+          chmod +x "$RUNNER_TEMP"/verify/scoot*-*-linux
           ls -l "$RUNNER_TEMP/verify"
 
       # SHA256SUMS lists every published file, so this also proves the

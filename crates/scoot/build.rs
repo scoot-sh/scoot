@@ -45,19 +45,21 @@ fn main() {
     // scanout feature, so the `--no-default-features` minimal build compiles
     // no C at all (and needs no C compiler).
     //
-    // `+whole-archive` (not a bare `static=`): a bare static archive only
-    // satisfies symbols that are undefined at the point the linker reaches
-    // it under `--as-needed`, so its position in rustc's link line decides
+    // `+whole-archive`, by path: a bare static archive only satisfies
+    // symbols that are undefined at the point the linker reaches it
+    // under `--as-needed`, so its position in rustc's link line decides
     // whether the GBM symbols resolve -- and nothing contracts that
     // position. Arch's toolchain orders it where nothing is pending yet,
     // and the link dies on undefined `gbm_*` (seen on arch.yml while the
-    // ubuntu and nix links stayed green). Whole-archive pulls every stub
-    // object wherever the archive lands, still with no DT_NEEDED (static
-    // objects, not a shared library). `cc` also emits its own plain
-    // `static=gbm` for the same archive; the second pull finds every
-    // symbol already defined and takes nothing, so the pair is harmless.
-    // The ldd gate in CI (`nix develop` Linux job) still proves no
-    // DT_NEEDED libgbm on every change.
+    // ubuntu and nix links stayed green). Wrapping the archive pulls
+    // every stub object wherever it lands, still with no DT_NEEDED
+    // (static objects, not a shared library). Raw link args (not a
+    // second `rustc-link-lib`: rustc refuses one library under two
+    // modifiers), Linux-gated like the compile itself, for both the bfd
+    // and lld linkers. `cc`'s own plain `static=gbm` stays on the line
+    // beside them; under `--as-needed` it resolves nothing and emits
+    // nothing. The ldd gate in CI (`nix develop` Linux job) still proves
+    // no DT_NEEDED libgbm on every change.
     //
     // Linux-only like the libinput block above (the stub is meaningless
     // where `backend_gbm` cannot link anyway): without the gate a macOS
@@ -66,6 +68,10 @@ fn main() {
         && std::env::var("CARGO_FEATURE_GPU_SCANOUT").is_ok()
     {
         cc::Build::new().file("gbm-stub/gbm_stub.c").compile("gbm");
-        println!("cargo:rustc-link-lib=static:+whole-archive=gbm");
+        let out = std::env::var("OUT_DIR").expect("OUT_DIR is set for build scripts");
+        let archive = std::path::Path::new(&out).join("libgbm.a");
+        println!("cargo:rustc-link-arg=-Wl,--whole-archive");
+        println!("cargo:rustc-link-arg={}", archive.display());
+        println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
     }
 }
