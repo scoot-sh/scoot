@@ -536,6 +536,11 @@ jobs:
       attestations: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      # Set only by a real publish below (the dry run exits before it):
+      # the verify job's gate, which cannot use needs.publish.result
+      # (referencing a skipped job's result fails its whole condition).
+      published: ${{ steps.publish.outputs.published }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -612,6 +617,7 @@ jobs:
           subject-path: 'dist/*'
 
       - name: Publish (or print the dry-run summary)
+        id: publish
         run: |
           if [ '${{ needs.resolve.outputs.dry_run }}' = true ]; then
             echo "dry run: would publish '${{ needs.resolve.outputs.tag }}' with these files:"
@@ -626,30 +632,7 @@ jobs:
           gh release upload "$tag" dist/* --clobber
           gh release edit "$tag" --draft=false
           gh release view "$tag" --json tagName,assets --jq '{tag: .tagName, assets: [.assets[].name]}'
-
-  # TEMPORARY DEBUG (removed before merge): print the values the verify
-  # gate sees.
-  debug-inputs:
-    name: Debug the verify gate values
-    needs: [resolve, publish]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - run: |
-          echo "event=${EVENT_NAME}"
-          echo "resolve_result=${RESOLVE_RESULT}"
-          echo "publish_result=${PUBLISH_RESULT}"
-          echo "verify_only=[${VERIFY_ONLY_OUT}]"
-          echo "dry_run=[${DRY_RUN_OUT}]"
-          echo "complete=[${COMPLETE_OUT}]"
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          RESOLVE_RESULT: ${{ needs.resolve.result }}
-          PUBLISH_RESULT: ${{ needs.publish.result }}
-          VERIFY_ONLY_OUT: ${{ needs.resolve.outputs.verify_only }}
-          DRY_RUN_OUT: ${{ needs.resolve.outputs.dry_run }}
-          COMPLETE_OUT: ${{ needs.resolve.outputs.complete }}
+          echo "published=true" >>"$GITHUB_OUTPUT"
 
   # Post-publish proof: download the release's own assets from GitHub,
   # check every file against the published SHA256SUMS and its keyless
@@ -670,13 +653,14 @@ jobs:
     name: Verify the published release (${{ matrix.arch }})
     needs: [resolve, publish]
     # needs.publish is skipped in verify-only mode (publish does not
-    # run there): only a fresh publish, or an explicit verify-only
-    # dispatch on a resolved tag, runs this job. (On pull requests
-    # resolve never runs, so its outputs are empty and both sides are
-    # false; on a dry run publish never succeeds.)
+    # run there) and on dry runs: only a fresh publish (its `published`
+    # output below), or an explicit verify-only dispatch on a resolved
+    # tag, runs this job. (On pull requests resolve never runs, so its
+    # outputs are empty and both sides are false; on a dry run publish
+    # exits before setting `published`.)
     if: >-
       needs.resolve.outputs.verify_only == 'true' ||
-      (needs.publish.result == 'success' && needs.resolve.outputs.dry_run != 'true')
+      needs.publish.outputs.published == 'true'
     strategy:
       matrix:
         include:
