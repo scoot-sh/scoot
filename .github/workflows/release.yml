@@ -627,6 +627,30 @@ jobs:
           gh release edit "$tag" --draft=false
           gh release view "$tag" --json tagName,assets --jq '{tag: .tagName, assets: [.assets[].name]}'
 
+  # TEMPORARY DEBUG (removed before merge): print the values the verify
+  # gate sees.
+  debug-inputs:
+    name: Debug the verify gate values
+    needs: [resolve, publish]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "event=${EVENT_NAME}"
+          echo "resolve_result=${RESOLVE_RESULT}"
+          echo "publish_result=${PUBLISH_RESULT}"
+          echo "verify_only=[${VERIFY_ONLY_OUT}]"
+          echo "dry_run=[${DRY_RUN_OUT}]"
+          echo "complete=[${COMPLETE_OUT}]"
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RESOLVE_RESULT: ${{ needs.resolve.result }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          VERIFY_ONLY_OUT: ${{ needs.resolve.outputs.verify_only }}
+          DRY_RUN_OUT: ${{ needs.resolve.outputs.dry_run }}
+          COMPLETE_OUT: ${{ needs.resolve.outputs.complete }}
+
   # Post-publish proof: download the release's own assets from GitHub,
   # check every file against the published SHA256SUMS and its keyless
   # build-provenance attestation, and run each binary on bare distro
