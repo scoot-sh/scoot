@@ -108,6 +108,11 @@ container image ships no ARM variant).
 
 ## Cutting a release (maintainer)
 
+`release-plz.yml` already bumped `pkgver` on the release PR
+(`scripts/sync-packaging-versions`, committed right after release-plz
+opens or updates the PR); the steps below are the manual fallback when
+that sync is missing or wrong.
+
 1. In the release PR, before it merges, bump `pkgver` in all four
    release packages to the proposed version and regenerate `.SRCINFO`
    (run `arch.yml` by hand from the release PR; it fails if `pkgver` is

@@ -65,10 +65,19 @@ proposal: to release a different version, edit `version` under
 `[workspace.package]` in `Cargo.toml` and the heading in `CHANGELOG.md` on
 this branch.
 
-Before merging, on this branch: bump `pkgver` in the three Arch release
-PKGBUILDs (and their `.SRCINFO`) and `Version` (plus a `%changelog` entry)
-in the RPM specs to v{{ release.next_version }}; the Arch and RPM
-workflows run on the tag and fail when they lag.
+Before merging, check the distro packaging on this branch:
+`scripts/sync-packaging-versions` already bumped `pkgver` in the four
+Arch release PKGBUILDs (and their `.SRCINFO`, including the `-git` static
+base) and `Version` (plus a `%changelog` entry) in the four RPM specs to
+v{{ release.next_version }} in a follow-up commit, the way the fuzz
+lockfiles are synced; the debs read the workspace version at build time
+and need no bump. If that commit is missing or wrong, run the script by
+hand. The deb, RPM and Arch workflows run on this branch as the
+packaging gate and fail when the packaging lags: all three must be green
+before merging. After the tag publishes, release.yml's verify job
+downloads the assets and runs every binary; test it any time with a
+`verify_only` dispatch against an existing tag (the cut-a-release page
+has the commands).
 {% if release.changelog %}
 ### Changes
 

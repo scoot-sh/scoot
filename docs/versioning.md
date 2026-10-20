@@ -120,7 +120,10 @@ release-plz creates the `vX.Y.Z` tag and then starts
 (`scripts/release-resolve`), builds every binary, and publishes the one
 GitHub Release with the vendored source tarball, portable binaries for both
 architectures, an SBOM, checksums, provenance, and the version's
-`CHANGELOG.md` section as its notes (`scripts/release-notes`).
+`CHANGELOG.md` section as its notes (`scripts/release-notes`). After
+publishing, the same workflow's verify job downloads the release's own
+assets and proves them (checksums, attestations, every binary runs on
+bare Ubuntu and Debian containers).
 
 **No secret is involved.** release-plz runs on the workflow's own
 `GITHUB_TOKEN`. GitHub starts no workflow for an event that token causes,
@@ -132,6 +135,16 @@ So `release-plz.yml` dispatches the next step itself:
 
 - After creating the tag, it runs `release.yml` on it (`--ref vX.Y.Z`,
   `dry_run=false`).
+- After opening or updating the release PR, it syncs what release-plz
+  does not bump onto the PR's branch (each in its own commit, before the
+  checks run): `scripts/sync-fuzz-locks` for the fuzz crates'
+  lockfiles, and `scripts/sync-packaging-versions` for the distro
+  packaging (`Version` plus a `%changelog` entry in the four RPM specs,
+  `pkgver` in the four Arch release PKGBUILDs and the `-git` static
+  base, with every `.SRCINFO`). Both are idempotent, so a recreated PR
+  converges with zero manual commits. The debs need no sync:
+  `packaging/deb/deb-meta.py` reads the workspace version at build
+  time.
 - After opening or updating the release PR, it runs the PR's checks on
   the PR's branch: `ci.yml`, `packaging.yml` (vendoring, licenses,
   advisories) and `release.yml` with no `tag`, which runs only its lint job
@@ -141,6 +154,14 @@ So `release-plz.yml` dispatches the next step itself:
   This was measured on #586: the run's `pull_requests` listed the PR. The
   PR's own `pull_request` runs still appear, held until a maintainer presses
   "Approve workflows to run".
+  - The distro packaging gate runs the same way: `deb.yml`, `rpm.yml`
+    and `arch.yml` are manual-only (they never run on pull requests or
+    pushes), so release-plz dispatches all three on the PR's branch.
+    They build from the branch head, where the sync above already
+    matched the versions, so their version gates pass there and a lag
+    can no longer reach a tag. If a dispatch fails, run them by hand
+    (`gh workflow run deb.yml --ref <branch>`, likewise `rpm.yml` and
+    `arch.yml`).
   - **One caveat, also measured on #586.** When a `pull_request` run of
     `ci.yml` exists for the same commit, the PR's check list (the merge box,
     `gh pr checks`) shows one entry per check name, and it shows the
@@ -164,13 +185,15 @@ releases once. A dispatch that would publish must run on the tag itself:
 from a branch it is refused before anything builds, and only a dry run is
 allowed there.
 
-The release PR is also where the distro packaging moves: bump `pkgver`
-in the Arch release PKGBUILDs (with `.SRCINFO`) and `Version` in the RPM
-specs to the proposed version before merging. The Arch, Debian and RPM
-workflows are manual-only (`workflow_dispatch`): run each by hand before
-shipping a package, and their gates fail when the packaging lags
-the workspace version. Checksums are filled in once the tag's tarball
-exists. The site's
+The release PR is also where the distro packaging moves, and it moves
+by itself: `release-plz.yml` commits the version sync
+(`scripts/sync-packaging-versions`) onto the PR's branch right after
+release-plz opens or updates it, then dispatches `deb.yml`, `rpm.yml`
+and `arch.yml` there as the packaging gate. Check the sync commit and
+the three green runs before merging; if the sync is missing or wrong,
+run the script by hand on the branch. The Arch, Debian and RPM
+workflows stay manual-only otherwise (`workflow_dispatch`): run each by
+hand before shipping a package. The site's
 [cut a release](https://www.scoot.sh/reference/cut-a-release/) page has the
 steps.
 

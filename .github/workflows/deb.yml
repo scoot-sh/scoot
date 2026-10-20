@@ -317,6 +317,10 @@ jobs:
             # refuses without one. procps too: the smoke test finds its
             # client with pgrep, and slim images do not ship it.
             apt-get install -y -qq foot jq imagemagick wayland-utils fonts-dejavu-core procps
+            # Nerd fonts for the smoke-test looks stage: vinyl-sunset
+            # names two families no Debian package ships, and `look
+            # apply` refuses a family fc-match resolves to a fallback.
+            sh /ws/packaging/install-nerd-fonts.sh
             scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
             scootlaunch --check
             mkdir -p /tmp/deb-smoke-xdg

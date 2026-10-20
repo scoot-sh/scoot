@@ -236,6 +236,11 @@ jobs:
       - name: Install the release set and prove it
         run: |
           pacman -U --noconfirm dist/scoot-0*.pkg.tar.zst dist/scootbg-0*.pkg.tar.zst dist/scootbar-0*.pkg.tar.zst dist/scootlaunch-0*.pkg.tar.zst
+          # Nerd fonts for the smoke test's looks stage: vinyl-sunset
+          # names two families no Arch package ships, and `look apply`
+          # refuses a family fc-match resolves to a fallback. Once per
+          # container: the -git round below shares this filesystem.
+          sh "$GITHUB_WORKSPACE/packaging/install-nerd-fonts.sh"
           scoot --version
           scootbg --version
           scootbar --version

@@ -179,6 +179,10 @@ jobs:
           # skip the example configs this step checks: clear it, so the
           # installed files are the whole package.
           dnf install -y --setopt=tsflags= "$GITHUB_WORKSPACE"/rpmbuild/RPMS/*/*.rpm
+          # Nerd fonts for the smoke test's looks stage: vinyl-sunset
+          # names two families no Fedora package ships, and `look
+          # apply` refuses a family fc-match resolves to a fallback.
+          sh "$GITHUB_WORKSPACE/packaging/install-nerd-fonts.sh"
           scoot --version
           scootbg --version
           scootbar --version

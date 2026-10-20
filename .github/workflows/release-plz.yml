@@ -7,9 +7,13 @@
 #   `[workspace.package] version` and writes that version's CHANGELOG.md
 #   section from the commits since the last `vX.Y.Z` tag. Nothing is
 #   released until the maintainer merges it, and the maintainer may edit
-#   the version in the PR first. Then it dispatches the PR's checks on
-#   its branch (see THE TOKEN): ci.yml, packaging.yml (vendoring and the
-#   dependency gates) and release.yml's lint job (an empty `tag`).
+#   the version in the PR first. Then it syncs what release-plz does not
+#   bump (the fuzz lockfiles, the distro packaging versions) onto the PR
+#   branch and dispatches the PR's checks on it (see THE TOKEN): ci.yml,
+#   packaging.yml (vendoring and the dependency gates), release.yml's
+#   lint job (an empty `tag`), and the distro packaging gate (deb.yml,
+#   rpm.yml, arch.yml, whose version gates pass there because the sync
+#   already matched the versions).
 # - `release` notices when the push IS that PR's merge and creates the
 #   `vX.Y.Z` tag (only that: `git_release_enable = false`, no crates.io),
 #   then dispatches release.yml on that tag, which builds and publishes
@@ -181,6 +185,38 @@ jobs:
               push --quiet origin "HEAD:$branch"
           fi
 
+      # The distro packaging tracks the same version (the RPM specs with
+      # their %changelog, the Arch release and -git PKGBUILDs with their
+      # .SRCINFO; the debs read the workspace version at build time and
+      # need no sync). release-plz recreates the PR on a new branch
+      # whenever the proposal changes, which drops any hand-bumped
+      # versions, so sync them here the same way, before the checks are
+      # dispatched. Idempotent: a recreated PR converges (a version
+      # already current is left alone, an existing changelog entry is
+      # not duplicated).
+      - name: Sync the distro packaging versions on the release branch
+        if: steps.gate.outputs.run == 'true' && steps.release-plz.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.release-plz.outputs.pr }}
+          REPO: ${{ github.repository }}
+        run: |
+          branch=$(printf '%s' "$PR" | jq -r '.head_branch // empty')
+          case "$branch" in
+            release-plz-*) ;;
+            *) echo "::error title=Unexpected branch::release-plz reported '$branch'"; exit 1 ;;
+          esac
+          git fetch --quiet origin "$branch"
+          git checkout --quiet -B "$branch" FETCH_HEAD
+          scripts/sync-packaging-versions
+          if [ -n "$(git status --porcelain)" ]; then
+            git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com \
+              commit --quiet -am "chore: sync the distro packaging versions to the release version"
+            auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+              push --quiet origin "HEAD:$branch"
+          fi
+
       # The PR's own `pull_request` runs wait for a maintainer's approval
       # (GITHUB_TOKEN opened or updated it), so run CI on its branch head
       # now. `prs_created` is "true" whenever release-plz opened OR updated
@@ -204,4 +240,13 @@ jobs:
           # No tag (the input defaults to empty): release.yml's lint job only (actionlint, guards,
           # the release tool tests against the bumped manifests).
           gh workflow run release.yml --repo "$REPO" --ref "$branch"
-          echo "::notice title=Checks dispatched::ci, packaging and release lint on $branch ($(printf '%s' "$PR" | jq -r .html_url))"
+          # The distro packaging gate: deb.yml, rpm.yml and arch.yml are
+          # manual-only (they never run on pull requests or pushes), so a
+          # release PR would otherwise merge with red packaging. They
+          # build from the branch head, where the sync step above already
+          # matched the versions, so their version gates pass there and a
+          # lag can no longer reach a tag.
+          gh workflow run deb.yml --repo "$REPO" --ref "$branch"
+          gh workflow run rpm.yml --repo "$REPO" --ref "$branch"
+          gh workflow run arch.yml --repo "$REPO" --ref "$branch"
+          echo "::notice title=Checks dispatched::ci, packaging, release lint, deb, rpm and arch on $branch ($(printf '%s' "$PR" | jq -r .html_url))"
