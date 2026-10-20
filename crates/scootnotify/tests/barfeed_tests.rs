@@ -277,8 +277,9 @@ fn until_bar(session: &Session, bar: &Path, text: &str, class: &str) -> (String,
 }
 
 /// Spins until the bar answers queries: spawning returns before the
-/// daemon serves.
-fn wait_bar_serving(session: &Session, bar: &Path) {
+/// daemon serves. Fails fast when the child died (its log names why),
+/// instead of timing out on a crash.
+fn wait_bar_serving(session: &Session, bar: &Path, child: &mut Child) {
     let start = Instant::now();
     loop {
         let mut command = Command::new(bar);
@@ -299,6 +300,11 @@ fn wait_bar_serving(session: &Session, bar: &Path) {
         {
             return;
         }
+        // A dead child never serves: fail on its status now, with the
+        // log path, not at the deadline.
+        if let Some(status) = child.try_wait().expect("the bar reaps") {
+            panic!("the bar died at startup ({status}): see scootbar.log in the scratch dir");
+        }
         assert!(
             start.elapsed() < Duration::from_secs(10),
             "the bar never served"
@@ -308,9 +314,8 @@ fn wait_bar_serving(session: &Session, bar: &Path) {
 }
 
 /// Spins until the daemon answers `msg version`: spawning returns
-/// before it owns the name.
-fn wait_serving(session: &Session) {
-    let start = Instant::now();
+/// before it owns the name. Fails fast when the child died.
+fn wait_serving(session: &Session, notify: &mut Child) {    let start = Instant::now();
     loop {
         let mut command = Command::new(notify_bin());
         command
@@ -328,6 +333,9 @@ fn wait_serving(session: &Session) {
             .unwrap_or(false)
         {
             return;
+        }
+        if let Some(status) = notify.try_wait().expect("the daemon reaps") {
+            panic!("the daemon died at startup ({status}): see scootnotify.log in the scratch dir");
         }
         assert!(
             start.elapsed() < Duration::from_secs(30),
@@ -356,8 +364,8 @@ fn arrivals_dismissals_and_dnd_toggles_reflect_exactly() {
     };
     let mut bar_child = spawn_bar(&session, &bar, "idle");
     let mut notify_child = spawn_notify(&session, &bus);
-    wait_serving(&session);
-    wait_bar_serving(&session, &bar);
+    wait_serving(&session, &mut notify_child);
+    wait_bar_serving(&session, &bar, &mut bar_child);
     // The bar starts on its placeholder: the daemon baselined without
     // sending, so nothing pushed yet.
     assert_eq!(
@@ -393,13 +401,13 @@ fn a_bar_started_later_catches_up_on_the_next_change() {
     };
     // No bar: the daemon owes its first change.
     let mut notify_child = spawn_notify(&session, &bus);
-    wait_serving(&session);
+    wait_serving(&session, &mut notify_child);
     let mut client = connect(&bus);
     notify(&mut client, "a", 201);
     // The bar starts later: the socket watch re-sends the owed state,
     // so it catches up without waiting for the next change.
     let mut bar_child = spawn_bar(&session, &bar, "idle");
-    wait_bar_serving(&session, &bar);
+    wait_bar_serving(&session, &bar, &mut bar_child);
     assert_eq!(until_bar(&session, &bar, "1", "normal").0, "1");
     // And the next change still lands exactly.
     notify(&mut client, "b", 202);
@@ -447,8 +455,8 @@ fn idle_holds_no_watch_and_wakes_nothing() {
     };
     let mut bar_child = spawn_bar(&session, &bar, "idle");
     let mut notify_child = spawn_notify(&session, &bus);
-    wait_serving(&session);
-    wait_bar_serving(&session, &bar);
+    wait_serving(&session, &mut notify_child);
+    wait_bar_serving(&session, &bar, &mut bar_child);
     let mut client = connect(&bus);
     // Settle one change through, so nothing is owed.
     notify(&mut client, "a", 301);
