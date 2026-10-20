@@ -271,7 +271,7 @@ fn until_presented(session: &Session, id: u32) {
         let list = notify_msg(session, &["list", "--json"]);
         let shown = serde_json::from_str::<serde_json::Value>(&list)
             .ok()
-            .and_then(|value| value.as_array().cloned())
+            .and_then(|value| value.get("notifications")?.as_array().cloned())
             .unwrap_or_default()
             .iter()
             .filter(|card| card.get("id").and_then(|value| value.as_u64()) == Some(u64::from(id)))
@@ -279,10 +279,10 @@ fn until_presented(session: &Session, id: u32) {
         if shown {
             return;
         }
-        assert!(
-            start.elapsed() < Duration::from_secs(60),
-            "card {id} never presented (the compositor showed no frame)"
-        );
+        if start.elapsed() >= Duration::from_secs(60) {
+            dump_logs(session);
+            panic!("card {id} never presented (the compositor showed no frame)");
+        }
         std::thread::sleep(Duration::from_millis(200));
     }
 }
@@ -310,12 +310,11 @@ fn until_bar(
     got
 }
 
-/// Prints the daemon and bar log tails for a failed convergence: the
-/// children are still alive at panic time (kills are skipped on
-/// failure), so the next red run says whether pushes never started,
-/// were refused, or went unanswered — instead of another silent state.
+/// Prints the session's logs for a failed wait: the children are still
+/// alive at panic time (kills are skipped on failure), so the next red
+/// run carries the evidence instead of another silent assert.
 fn dump_logs(session: &Session) {
-    for name in ["scootnotify.log", "scootbar.log"] {
+    for name in ["scootnotify.log", "scootbar.log", "compositor.log"] {
         let path = session.scratch.0.join(name);
         match std::fs::read_to_string(&path) {
             Ok(log) => {
@@ -327,6 +326,26 @@ fn dump_logs(session: &Session) {
             }
             Err(error) => eprintln!("--- {name} unreadable: {error}"),
         }
+    }
+    eprintln!("--- msg list --json ---");
+    // Tolerant on purpose: the dump must not panic over the panic.
+    let mut command = Command::new(notify_bin());
+    command
+        .arg("msg")
+        .arg("list")
+        .arg("--json")
+        .env("XDG_RUNTIME_DIR", &session.scratch.0)
+        .env("WAYLAND_DISPLAY", &session.wayland_display)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    session.scratch.sandbox(&mut command);
+    match command.output() {
+        Ok(output) if output.status.success() => {
+            eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+        }
+        Ok(output) => eprintln!("<msg list failed: {}>", output.status),
+        Err(error) => eprintln!("<msg list never ran: {error}>"),
     }
 }
 
