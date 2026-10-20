@@ -30,7 +30,8 @@ pub fn default_path() -> PathBuf {
 /// per-sender bucket of 20 per second bursting to 40; a 360 px card
 /// stack at the top right with a 12 px margin, at most 5 cards, bodies
 /// wrapped to 5 lines, expiry paused after 60 s without input; a history
-/// ring of 64, critical cards showing through DND, and no rules.
+/// ring of 64, critical cards showing through DND, no per-update bar
+/// icons (empty), and no rules.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
@@ -84,6 +85,16 @@ pub struct Config {
     /// playing video does not count as presence. Someone who walked
     /// away comes back to their notifications.
     pub pause_when_idle_secs: u32,
+    /// The icon the bar feed sends beside the unread count (a
+    /// per-update icon, so it overrides the module's static icon while
+    /// set). Empty sends none, leaving the key out of the payload.
+    /// Exactly one character when set: the bar refuses anything else.
+    pub bar_icon_unread: String,
+    /// The icon the bar feed sends while do-not-disturb is on (a
+    /// per-update icon, so it overrides the module's static icon while
+    /// set). Empty sends none, leaving the key out of the payload.
+    /// Exactly one character when set: the bar refuses anything else.
+    pub bar_icon_dnd: String,
 }
 
 /// The screen corner the stack anchors to: the layer-shell anchor.
@@ -280,6 +291,8 @@ impl Default for Config {
             border_px: 2,
             radius: 8,
             pause_when_idle_secs: 60,
+            bar_icon_unread: String::new(),
+            bar_icon_dnd: String::new(),
         }
     }
 }
@@ -415,6 +428,25 @@ impl Config {
                 "config refused: pause_when_idle_secs is {} (0 to 3600)",
                 self.pause_when_idle_secs
             ));
+        }
+        for (key, icon) in [
+            ("bar_icon_unread", &self.bar_icon_unread),
+            ("bar_icon_dnd", &self.bar_icon_dnd),
+        ] {
+            let mut chars = icon.chars();
+            match (chars.next(), chars.next()) {
+                (None, _) | (Some(_), None) => {}
+                _ => {
+                    return Err(format!(
+                        "config refused: {key} is not exactly one character (empty or one glyph)"
+                    ));
+                }
+            }
+            if icon.chars().any(|c| c.is_control()) {
+                return Err(format!(
+                    "config refused: {key} carries a control character"
+                ));
+            }
         }
         Ok(self)
     }

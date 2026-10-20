@@ -26,6 +26,7 @@ use scootui::control::{Claim, Server as ControlServer};
 use crate::bus::server::{self, Server};
 use crate::config::{self, Config};
 use crate::control::respond::{AppliedReload, Responder};
+use crate::feed::Feed;
 use crate::look::{self};
 use crate::model::store::IdFile;
 use crate::popup::{self, Popup};
@@ -117,6 +118,11 @@ pub fn serve(config_path: Option<&str>, font_path: Option<&str>) -> i32 {
     };
     let ids = IdFile::open(ids_path());
     let mut server = Server::new(config.clone(), ids);
+    // The bar feed baselines without sending: the startup state counts
+    // as placed, so the first push waits for the first change (a bar
+    // started later shows its placeholder until then).
+    let mut feed = Feed::new(&config);
+    feed.baseline(server.store());
     // A compositor means popups (presentation on the frame callback);
     // none means headless (arrival is display). Either way the bus
     // serves: cards without a surface wait with their clocks stopped.
@@ -138,6 +144,7 @@ pub fn serve(config_path: Option<&str>, font_path: Option<&str>) -> i32 {
         claim.listener(),
         &path,
         look_state.as_ref(),
+        &mut feed,
     ) {
         LoopEnd::BusGone => {
             warn(format_args!("scootnotify: the bus went away"));
@@ -192,6 +199,7 @@ fn run_loop(
     listener: &UnixListener,
     config_path: &PathBuf,
     look_state: Option<&PathBuf>,
+    feed: &mut Feed,
 ) -> LoopEnd {
     let timer = match timerfd() {
         Some(timer) => timer,
@@ -249,7 +257,7 @@ fn run_loop(
             &mut rest_until,
         );
         if let Some(applied) = applied {
-            apply_reload(&mut popup, applied);
+            apply_reload(&mut popup, feed, applied);
         }
         // Rule `exec`s fire here: spawn what the turn queued (bus and
         // control alike), then reap what exited. A spawn refusal is a
@@ -264,6 +272,12 @@ fn run_loop(
             popup.refresh(&server.store().ordered(), now_ms);
         }
         server.fire_expiries(conn);
+        // The bar feed pushes on change only: arrivals, expiries,
+        // dismissals, restores and DND toggles above all landed before
+        // this, so the pushed count is the turn's.
+        if let Some(line) = feed.sync(server.store()) {
+            warn(format_args!("{line}"));
+        }
         // The turn's control events, from the bus, the pointer and `msg`
         // alike, go to this turn's subscribers. Drained every turn, so a
         // flood cannot grow the queue past one turn's worth.
@@ -293,7 +307,7 @@ fn run_loop(
         // the fd speaks, dropped unread otherwise (the documented
         // read-after-poll shape: the next turn collects it).
         let guard = popup.as_ref().and_then(|popup| popup.prepare_read());
-        let wayland = poll_turn(
+        let (wayland, feed_watch) = poll_turn(
             conn.as_fd(),
             timer.as_fd(),
             popup.as_ref().map(|popup| popup.fd()),
@@ -302,10 +316,17 @@ fn run_loop(
             rest_until,
             control.stall_timeout(&mut stall_anchor),
             server,
+            feed,
         );
         drain_timer(&timer);
         if wayland && let Some(guard) = guard {
             let _ = guard.read();
+        }
+        // The bar's socket may have appeared: a send owed retries.
+        if feed_watch
+            && let Some(line) = feed.retry(server.store())
+        {
+            warn(format_args!("{line}"));
         }
         if conn.dead() {
             return LoopEnd::BusGone;
@@ -367,9 +388,12 @@ fn serve_control(
 /// re-themes, under the live cards. Infallible: the request half already
 /// validated everything, so a refused file or fragment never reaches
 /// here. The warnings go to the log, as at startup.
-fn apply_reload(popup: &mut Option<Popup>, applied: AppliedReload) {
+fn apply_reload(popup: &mut Option<Popup>, feed: &mut Feed, applied: AppliedReload) {
     for note in &applied.notes {
         warn(format_args!("scootnotify: note: {note}"));
+    }
+    if let Some(config) = applied.config.as_ref() {
+        feed.set_icons(config);
     }
     if let Some(popup) = popup.as_mut() {
         if let Some(config) = applied.config {
@@ -494,10 +518,13 @@ fn arm_timer(timer: &rustix::fd::OwnedFd, deadline: Option<Instant>) {
 }
 
 /// Polls the bus fd, the timerfd, the Wayland fd (when there is one),
-/// the control listener (unless it is resting after a failed accept)
+/// the bar feed's socket watch (only while a send is owed), the
+/// control listener (unless it is resting after a failed accept)
 /// and its clients, and the rule-exec pidfds, with a timeout only while
 /// a stalled peer's deadline, an exec child without a pidfd, or the
-/// listener's rest lapses. Returns whether the Wayland fd spoke.
+/// listener's rest lapses. Returns whether the Wayland fd spoke, and
+/// whether the feed's watch did. The feed never sets the timeout: an
+/// owed send waits on the watch fd alone, so nothing wakes at idle.
 /// A bounded poll here would be a wakeup every bound at idle; the loop
 /// only reaches this wait with nothing staged, nothing queued and the
 /// timer armed, so nothing is missed by sleeping until the fds speak (all
@@ -512,7 +539,8 @@ fn poll_turn(
     rest_until: Option<Instant>,
     stall: Option<Duration>,
     server: &Server,
-) -> bool {
+    feed: &Feed,
+) -> (bool, bool) {
     use rustix::event::{PollFd, PollFlags, Timespec, poll};
     let mut fds = Vec::with_capacity(8 + control.conns().len());
     fds.push(PollFd::new(&bus, PollFlags::IN));
@@ -541,6 +569,15 @@ fn poll_turn(
     for conn in control.conns() {
         fds.push(PollFd::new(conn.stream(), conn.interest()));
     }
+    // The feed's socket watch, only while a send is owed: a bar
+    // started later wakes this poll once, and an idle daemon holds no
+    // watch at all.
+    let feed_at = if let Some(watch) = feed.poll_fd() {
+        fds.push(PollFd::new(&watch, PollFlags::IN));
+        Some(fds.len() - 1)
+    } else {
+        None
+    };
     let rest = rest_until.and_then(|until| until.checked_duration_since(Instant::now()));
     let timeout = match (stall, server.exec_poll_timeout(), rest) {
         (Some(left), exec, Some(rest)) => Some(left.min(exec.unwrap_or(rest)).min(rest)),
@@ -555,7 +592,10 @@ fn poll_turn(
         tv_nsec: left.subsec_nanos() as _,
     });
     let _ = poll(&mut fds, timespec.as_ref());
-    wayland_at.is_some_and(|at| !fds[at].revents().is_empty())
+    (
+        wayland_at.is_some_and(|at| !fds[at].revents().is_empty()),
+        feed_at.is_some_and(|at| !fds[at].revents().is_empty()),
+    )
 }
 
 /// Reads a fired timerfd back to disarmed: edge-triggered peace.
