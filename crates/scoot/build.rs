@@ -45,15 +45,19 @@ fn main() {
     // scanout feature, so the `--no-default-features` minimal build compiles
     // no C at all (and needs no C compiler).
     //
-    // `cc` compiles the stub into OUT_DIR and links it statically (its
-    // `static=gbm` arrives alongside gbm-sys's plain `-lgbm`; with the
-    // linker's default --as-needed the archive resolves the GBM symbols
-    // and no DT_NEEDED is emitted -- verified both with and without a
-    // system libgbm present). Ordering assumption, recorded for the debugger
-    // of a future `ldd`-gate failure: `static=gbm` must precede the plain
-    // `-lgbm` under `--as-needed`, and nothing in cargo/rustc contracts that
-    // order. A flipped order fails loudly -- a `DT_NEEDED libgbm` the gate
-    // catches (the archive simply goes unpulled) -- never silently.
+    // `+whole-archive` (not a bare `static=`): a bare static archive only
+    // satisfies symbols that are undefined at the point the linker reaches
+    // it under `--as-needed`, so its position in rustc's link line decides
+    // whether the GBM symbols resolve -- and nothing contracts that
+    // position. Arch's toolchain orders it where nothing is pending yet,
+    // and the link dies on undefined `gbm_*` (seen on arch.yml while the
+    // ubuntu and nix links stayed green). Whole-archive pulls every stub
+    // object wherever the archive lands, still with no DT_NEEDED (static
+    // objects, not a shared library). `cc` also emits its own plain
+    // `static=gbm` for the same archive; the second pull finds every
+    // symbol already defined and takes nothing, so the pair is harmless.
+    // The ldd gate in CI (`nix develop` Linux job) still proves no
+    // DT_NEEDED libgbm on every change.
     //
     // Linux-only like the libinput block above (the stub is meaningless
     // where `backend_gbm` cannot link anyway): without the gate a macOS
@@ -62,5 +66,6 @@ fn main() {
         && std::env::var("CARGO_FEATURE_GPU_SCANOUT").is_ok()
     {
         cc::Build::new().file("gbm-stub/gbm_stub.c").compile("gbm");
+        println!("cargo:rustc-link-lib=static:+whole-archive=gbm");
     }
 }
