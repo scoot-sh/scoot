@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.4.1](https://github.com/scoot-sh/scoot/compare/v0.4.0...v0.4.1) - 2026-10-20
+
+### scootnotify
+
+- added: native DND and unread feed to the bar ([#689](https://github.com/scoot-sh/scoot/pull/689))
+
 ## [0.4.0](https://github.com/scoot-sh/scoot/compare/v0.3.1...v0.4.0) - 2026-10-20
 
 ### scoot-dbus,scootbar
