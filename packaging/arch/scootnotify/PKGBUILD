@@ -15,7 +15,7 @@
 # this exact file against a same-layout tarball of HEAD.
 
 pkgname=scootnotify
-pkgver=0.4.0
+pkgver=0.4.1
 pkgrel=1
 pkgdesc='Notification daemon for the scoot compositor'
 arch=('x86_64' 'aarch64')
