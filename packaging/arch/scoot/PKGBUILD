@@ -38,6 +38,9 @@ sha256sums=('SKIP')
 
 build() {
   cd "scoot-$pkgver"
+  # TEMPORARY diagnostic (revert with the arch.yml TEMP steps): prove
+  # RUSTFLAGS reach cargo and trace what lld does with the stub.
+  export RUSTFLAGS="-C link-args=-Wl,--no-gc-sections -C link-args=-Wl,--trace-symbol=gbm_bo_create"
   cargo build --release --locked -p scoot
   cargo deny list > THIRD-PARTY-LICENSES
   "${CARGO_TARGET_DIR:-target}/release/scoot" --print-default-config > config.toml.example
