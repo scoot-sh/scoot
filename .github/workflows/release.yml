@@ -259,6 +259,7 @@ jobs:
       assets: ${{ steps.resolve.outputs.assets }}
       dry_run: ${{ steps.resolve.outputs.dry_run }}
       complete: ${{ steps.resolve.outputs.complete }}
+      verify_only: ${{ steps.resolve.outputs.verify_only }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -293,6 +294,10 @@ jobs:
           TAG_TO_RESOLVE: ${{ steps.tag.outputs.value }}
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          # A dispatch input arrives as a string ("true", not true), and
+          # is empty on push events: normalize to true/false here, once,
+          # so the jobs below compare one string output.
+          VERIFY_ONLY_INPUT: ${{ inputs.verify_only }}
         run: |
           # --complete-ok: a release that already holds every asset is not
           # an error here but a finished job (the tag push and release-plz's
@@ -307,6 +312,7 @@ jobs:
             echo "assets=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["assets"]))')"
             echo "complete=$(printf '%s' "$plan" | python3 -c 'import json,sys; print(str(json.load(sys.stdin)["complete"]).lower())')"
             if [ "$EVENT_NAME" = push ]; then echo "dry_run=false"; else echo "dry_run=$DRY_RUN_INPUT"; fi
+            if [ "$VERIFY_ONLY_INPUT" = true ]; then echo "verify_only=true"; else echo "verify_only=false"; fi
           } >>"$GITHUB_OUTPUT"
           if printf '%s' "$plan" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["complete"] else 1)'; then
             echo "::notice title=Already released::$TAG_TO_RESOLVE already holds every asset; nothing to build or publish."
@@ -321,7 +327,7 @@ jobs:
   vendor:
     name: Vendored tarball + SBOM
     needs: resolve
-    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true' && inputs.verify_only != true
+    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true' && needs.resolve.outputs.verify_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -419,7 +425,7 @@ jobs:
   build:
     name: Portable binaries (${{ matrix.arch }})
     needs: [resolve, vendor]
-    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true' && inputs.verify_only != true
+    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true' && needs.resolve.outputs.verify_only != 'true'
     strategy:
       matrix:
         include:
@@ -521,7 +527,7 @@ jobs:
   publish:
     name: Publish the GitHub Release (or dry-run it)
     needs: [resolve, vendor, build]
-    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true' && inputs.verify_only != true
+    if: github.event_name != 'pull_request' && needs.resolve.outputs.complete != 'true' && needs.resolve.outputs.verify_only != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -645,8 +651,8 @@ jobs:
     # resolved tag, runs this job.
     if: >-
       github.event_name != 'pull_request' && needs.resolve.result == 'success' &&
-      (inputs.verify_only == true ||
-        (inputs.verify_only != true && needs.publish.result == 'success' &&
+      (needs.resolve.outputs.verify_only == 'true' ||
+        (needs.resolve.outputs.verify_only != 'true' && needs.publish.result == 'success' &&
           needs.resolve.outputs.dry_run != 'true'))
     strategy:
       matrix:
