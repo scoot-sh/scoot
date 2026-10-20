@@ -70,7 +70,9 @@ fn bar_or_skip(session: &Session) -> Option<PathBuf> {
             std::env::var_os(REQUIRE_SCOOT).is_none(),
             "{REQUIRE_SCOOT} is set but there is no scootbar binary beside the test binary"
         );
-        eprintln!("skipped: no scootbar binary (build -p scootbar, or set {REQUIRE_SCOOT}=1 to fail)");
+        eprintln!(
+            "skipped: no scootbar binary (build -p scootbar, or set {REQUIRE_SCOOT}=1 to fail)"
+        );
     }
     let _ = session;
     bar
@@ -102,7 +104,9 @@ fn notify_body(app: &str, replaces: u32, summary: &str, body_text: &str, expire:
 fn notify(client: &mut Conn, app: &str, token: u64) -> u32 {
     let body = notify_body(app, 0, "s", "b", 0);
     client
-        .call(BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token)
+        .call(
+            BUS_NAME, OBJECT, INTERFACE, "Notify", NOTIFY_SIG, &body, 0, token,
+        )
         .expect("the call queues");
     let Event::Reply {
         signature, body, ..
@@ -123,7 +127,16 @@ fn close(client: &mut Conn, id: u32, token: u64) {
     out.u32(id);
     let body = out.take_body().unwrap();
     client
-        .call(BUS_NAME, OBJECT, INTERFACE, "CloseNotification", "u", &body, 0, token)
+        .call(
+            BUS_NAME,
+            OBJECT,
+            INTERFACE,
+            "CloseNotification",
+            "u",
+            &body,
+            0,
+            token,
+        )
         .expect("the call queues");
     let _ = until(
         client,
@@ -138,7 +151,9 @@ fn spawn_bar(session: &Session, bar: &Path, placeholder: &str) -> Child {
     std::fs::create_dir_all(&config).unwrap();
     std::fs::write(
         config.join("bar.toml"),
-        format!("center = [\"notifications\"]\n[push.notifications]\nplaceholder = \"{placeholder}\"\n"),
+        format!(
+            "center = [\"notifications\"]\n[push.notifications]\nplaceholder = \"{placeholder}\"\n"
+        ),
     )
     .unwrap();
     // The daemon reads its own bar.toml (never the machine's): the
@@ -244,12 +259,7 @@ fn bar_module(session: &Session, bar: &Path) -> (String, String) {
 
 /// Spins until `want` holds or the deadline passes: the feed pushes a
 /// turn after the call that changed the count answers.
-fn until_bar(
-    session: &Session,
-    bar: &Path,
-    text: &str,
-    class: &str,
-) -> (String, String) {
+fn until_bar(session: &Session, bar: &Path, text: &str, class: &str) -> (String, String) {
     let start = Instant::now();
     loop {
         let got = bar_module(session, bar);
@@ -350,7 +360,10 @@ fn arrivals_dismissals_and_dnd_toggles_reflect_exactly() {
     wait_bar_serving(&session, &bar);
     // The bar starts on its placeholder: the daemon baselined without
     // sending, so nothing pushed yet.
-    assert_eq!(bar_module(&session, &bar), (String::from("idle"), String::from("normal")));
+    assert_eq!(
+        bar_module(&session, &bar),
+        (String::from("idle"), String::from("normal"))
+    );
     let mut client = connect(&bus);
     // One arrival: the count pushes.
     let id = notify(&mut client, "a", 101);
@@ -398,8 +411,7 @@ fn a_bar_started_later_catches_up_on_the_next_change() {
 /// Context switches of `pid`, voluntary and involuntary: a daemon
 /// that truly sleeps holds both steady.
 fn switches(pid: u32) -> (u64, u64) {
-    let status =
-        std::fs::read_to_string(format!("/proc/{pid}/status")).expect("status reads");
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).expect("status reads");
     let mut voluntary = 0;
     let mut involuntary = 0;
     for line in status.lines() {
