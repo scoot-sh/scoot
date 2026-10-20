@@ -45,15 +45,19 @@ fn main() {
     // scanout feature, so the `--no-default-features` minimal build compiles
     // no C at all (and needs no C compiler).
     //
-    // `+whole-archive`, by path: a bare static archive only satisfies
-    // symbols that are undefined at the point the linker reaches it
-    // under `--as-needed`, so its position in rustc's link line decides
-    // whether the GBM symbols resolve -- and nothing contracts that
-    // position. Arch's toolchain orders it where nothing is pending yet,
-    // and the link dies on undefined `gbm_*` (seen on arch.yml while the
-    // ubuntu and nix links stayed green). Wrapping the archive pulls
-    // every stub object wherever it lands, still with no DT_NEEDED
-    // (static objects, not a shared library). Raw link args (not a
+    // As-needed, by path, in a link group: a bare static archive only
+    // satisfies symbols that are undefined at the point the linker
+    // reaches it under `--as-needed`, so its position in rustc's link
+    // line decides whether the GBM symbols resolve -- and nothing
+    // contracts that position. Arch's toolchain orders it where nothing
+    // is pending yet, and the link dies on undefined `gbm_*` (seen on
+    // arch.yml while the ubuntu and nix links stayed green). Re-listing
+    // the archive inside `--start-group/--end-group` rescans it for
+    // still-pending symbols wherever the group lands; both references
+    // stay as-needed pulls of one single-object archive, so whichever
+    // fires first defines the symbols and the other takes nothing --
+    // unlike `--whole-archive`, which extracts unconditionally and
+    // duplicates what the plain pull already took. Raw link args (not a
     // second `rustc-link-lib`: rustc refuses one library under two
     // modifiers), Linux-gated like the compile itself, for both the bfd
     // and lld linkers. `cc`'s own plain `static=gbm` stays on the line
@@ -70,8 +74,8 @@ fn main() {
         cc::Build::new().file("gbm-stub/gbm_stub.c").compile("gbm");
         let out = std::env::var("OUT_DIR").expect("OUT_DIR is set for build scripts");
         let archive = std::path::Path::new(&out).join("libgbm.a");
-        println!("cargo:rustc-link-arg=-Wl,--whole-archive");
+        println!("cargo:rustc-link-arg=-Wl,--start-group");
         println!("cargo:rustc-link-arg={}", archive.display());
-        println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
+        println!("cargo:rustc-link-arg=-Wl,--end-group");
     }
 }
