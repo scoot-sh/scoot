@@ -17,6 +17,49 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.4.0](https://github.com/scoot-sh/scoot/compare/v0.3.1...v0.4.0) - 2026-10-20
+
+### scoot-dbus,scootbar
+
+- changed: extract the hand-rolled D-Bus client ([#665](https://github.com/scoot-sh/scoot/pull/665))
+
+### scootlaunch
+
+- added: desktop entry index, Exec expansion and --list --json ([#663](https://github.com/scoot-sh/scoot/pull/663))
+- added: fuzzy matching and frecency, --query --json ([#664](https://github.com/scoot-sh/scoot/pull/664))
+- added: launch picks with token, scope, fallback and DBusActivatable ([#676](https://github.com/scoot-sh/scoot/pull/676))
+- added: dmenu and run modes ([#678](https://github.com/scoot-sh/scoot/pull/678))
+- added: --run-id headless launch with agent JSON schema ([#680](https://github.com/scoot-sh/scoot/pull/680))
+- added: icon-theme lookup with PNG first, SVG via resvg ([#679](https://github.com/scoot-sh/scoot/pull/679))
+- added: overlay exclusive-keyboard panel with entry, list, toggle and look layer ([#674](https://github.com/scoot-sh/scoot/pull/674))
+
+### scootnotify
+
+- added: the control socket, msg, JSON, subscribe and wait, scoped reload ([#684](https://github.com/scoot-sh/scoot/pull/684))
+- added: [**breaking**] do not disturb, the history ring and restore, [[rule]] with exec ([#685](https://github.com/scoot-sh/scoot/pull/685))
+- added: cards, the stack, lock and idle rules, outputs, the look layer ([#683](https://github.com/scoot-sh/scoot/pull/683))
+
+### scootnotify,scoot-dbus
+
+- added: the notification server and its model, headless ([#668](https://github.com/scoot-sh/scoot/pull/668))
+
+### scootui
+
+- fixed: inset entry, list and selector text half an em from the edge ([#677](https://github.com/scoot-sh/scoot/pull/677))
+
+### scootui,scoot-rt,scootbar
+
+- changed: extract drawing half ([#662](https://github.com/scoot-sh/scoot/pull/662))
+
+### scootui,scootbar
+
+- changed: extract Wayland scaffolding (move only) ([#666](https://github.com/scoot-sh/scoot/pull/666))
+- changed: extract control socket server half (move only) ([#669](https://github.com/scoot-sh/scoot/pull/669))
+
+### scootui,scootbg-mem
+
+- added: on-demand surfaces for popups, panels and the greeter ([#671](https://github.com/scoot-sh/scoot/pull/671))
+
 ## [0.3.1](https://github.com/scoot-sh/scoot/compare/v0.3.0...v0.3.1) - 2026-10-18
 
 ### looks
