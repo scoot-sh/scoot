@@ -17,6 +17,14 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.4.1](https://github.com/scoot-sh/scoot/compare/v0.4.0...v0.4.1) - 2026-10-20
+
+### scootnotify
+
+- added: native DND and unread feed to the bar ([#689](https://github.com/scoot-sh/scoot/pull/689))
+- added: scootnotify ships as a release binary and as deb, rpm and Arch packages (user unit and D-Bus activation file included); `install.sh --notify` installs it and refuses while another notification daemon owns the name ([#699](https://github.com/scoot-sh/scoot/pull/699))
+- added: Nix modules for scootnotify and an opt-in `desktop.notifications.daemon = "scootnotify"` switch (default stays mako), themed from the active look ([#698](https://github.com/scoot-sh/scoot/pull/698))
+
 ## [0.4.0](https://github.com/scoot-sh/scoot/compare/v0.3.1...v0.4.0) - 2026-10-20
 
 ### scoot-dbus,scootbar
@@ -37,7 +45,6 @@ release, entries were dated.
 
 - added: the control socket, msg, JSON, subscribe and wait, scoped reload ([#684](https://github.com/scoot-sh/scoot/pull/684))
 - added: [**breaking**] do not disturb, the history ring and restore, [[rule]] with exec ([#685](https://github.com/scoot-sh/scoot/pull/685))
-- fixed: keep calls that arrive with the name grant ([#690](https://github.com/scoot-sh/scoot/pull/690))
 - added: cards, the stack, lock and idle rules, outputs, the look layer ([#683](https://github.com/scoot-sh/scoot/pull/683))
 
 ### scootnotify,scoot-dbus
