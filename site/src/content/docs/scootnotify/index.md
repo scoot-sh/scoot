@@ -60,6 +60,18 @@ ones: a call past the 4 MiB cap gets `LimitsExceeded`, never silence.
   `Notify` still gets its id, but the card is counted unshown. At
   most 128 cards are live; past that the oldest non-critical one
   closes with reason 4 (the oldest card if all are critical).
+- Holds do-not-disturb: while on, new cards skip the screen for
+  history, except criticals (while `dnd_allows_critical` holds, the
+  default) and cards a rule lets through.
+  `msg dnd on|off|toggle|status` steers it; turning it off shows
+  nothing retroactively.
+- Keeps a bounded history ring (64 entries by default): every shown
+  card lands there, and so does every card that skipped the screen.
+  `msg history` lists it, `msg restore` re-shows the newest entry as
+  a new card, even under DND.
+- Matches `[[rule]]` tables against cards, in file order: hide a card
+  straight to history, keep one out of history, let one through DND,
+  or run an `exec` (argv, own process group, at most 4 running).
 - Reads `$XDG_CONFIG_HOME/scoot/notify.toml` (every key optional; the
   [configure page](./configure.md) lists them) and the look layer
   under it. A bad file at start runs on built-in defaults and reports
@@ -92,8 +104,8 @@ Against version 1.3 of the Desktop Notifications Specification:
 | `image-data` (§5.2) | Validated, downscaled to 128 px at arrival |
 | Hints (§8) | Urgency, category, `desktop-entry`, `image-data`/`image_data`, `image-path`/`image_path`, `transient`, `resident` and `value` read, `suppress-sound` accepted and ignored; sound, position and `action-icons` ignored; `x-` skipped unread |
 | `transient` (§8) | Kept for history (never enters it) |
-| Categories (§6) | Stored; rules and JSON consume them in the control ticket |
-| `desktop-entry` (§8) | Stored; rules and JSON consume it in the control ticket |
+| Categories (§6) | Stored; `[[rule]]` tables match on them ([configure](./configure.md)), JSON carries them |
+| `desktop-entry` (§8) | Stored; rules match on it, JSON carries it |
 
 Popups draw at scale 1 in v1: on a HiDPI output the compositor
 upscales the buffer (right size, softer text). Arabic, Hebrew and
@@ -101,5 +113,8 @@ Devanagari draw wrong until shaping lands; Latin, Cyrillic, CJK and
 monochrome-fallback emoji are acceptable. There is no sound: the
 `sound` capability is not advertised.
 
-The control socket, Do Not Disturb, rules, history and the bar feed
-are later tickets and are not here yet.
+Do Not Disturb, the history ring with restore, and `[[rule]]` tables
+landed with the control socket: `msg dnd`, `msg history`,
+`msg restore` and the rules are in the [CLI reference](./cli.md) and
+[Configure](./configure.md). The bar feed is the later ticket and is
+not here yet.

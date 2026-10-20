@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: "Every scootnotify command and flag: daemon, --check, --config, --font, and msg (list, dismiss, invoke, reload, subscribe, wait, version)."
+description: "Every scootnotify command and flag: daemon, --check, --config, --font, and msg (list, history, dnd, restore, dismiss, invoke, reload, subscribe, wait, version)."
 ---
 
 Every `scootnotify` command and flag, and how it behaves at the

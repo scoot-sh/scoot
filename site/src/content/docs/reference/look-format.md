@@ -19,6 +19,7 @@ ls ~/.local/share/scoot/user-looks/moonrise/
 ```
 
 A rendered look is the output of a build: `scoot.toml`, `bar.toml`,
+`launch.toml`, `notify.toml`, `greet.toml`,
 `gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`, `qt/scoot-look.conf`,
 `foot.ini` (only when the look has `[terminal]`), `fuzzel.ini`,
 `swaylock`, `render.json`, the
@@ -226,6 +227,22 @@ read out of the file at launch, swaylock as the file's lines first
 with the user's lines after (later lines win). The user's own keys
 always survive a swap; the look only fills the colors.
 
+`launch.toml` carries the launcher panel's look: the thirteen shell-app
+color roles as a `[colors]` table, the look's UI family as `font`, its
+popup size as `font-size`, the popups opacity as `opacity`, the shape
+radius as `radius`, and the icon theme as `[icons] theme`. `notify.toml`
+carries the same thirteen roles and dotless keys for the notification
+cards. An `[apps.scootlaunch]` (or `[apps.scootnotify]`) `colors.*` key
+replaces the derived role, and a dotless key (`font`, `font-size`,
+`opacity`, `radius`) replaces the top-level value, so each is emitted
+once. scootlaunch reads its fragment at every open; scootnotify reads
+its own at start and on `msg reload --look`. `greet.toml` carries the
+login screen's look, read at system build time only. `scoot look
+validate` and `scoot look build` (and the underlying `scoot-look
+validate` / `scoot-look build`) render and check all three beside the
+first-party fragments: a refused `[apps.scootlaunch]` key fails the
+build the same way a bad bar key does.
+
 `render.json` names the source, its hash and the resolved inputs
 (font files, wallpaper path). The inputs come from the
 environment: the tool resolves font files and the wallpaper's
@@ -272,7 +289,8 @@ minimal bar builds); `--catalog DIR` resolves font files and the
 wallpaper against that tree instead of the live directories. `build`
 writes `scoot.toml`, `bar.toml`, `gtk/gtk-3.0.css`, `gtk/gtk-4.0.css`,
 `qt/scoot-look.conf`, `foot.ini` (only when the look has
-`[terminal]`), `fuzzel.ini`, `swaylock`, `render.json`, the daemon leaves and the
+`[terminal]`), `fuzzel.ini`, `swaylock`, `launch.toml`, `notify.toml`,
+`greet.toml`, `render.json`, the daemon leaves and the
 terminal static leaves into the output dir
 (never through a symlink, and never beside files it did not write). Both
 read `look.toml` only through a regular file opened without blocking:
