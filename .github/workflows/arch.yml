@@ -309,14 +309,7 @@ jobs:
             stub=$(echo '"$GITHUB_WORKSPACE"'/.cargo-target/release/build/scoot-*/out/gbm_stub.o | tr " " "\n" | head -1)
             echo "stub=$stub"
             printf "extern struct gbm_bo *gbm_bo_create();\nint main(void){return gbm_bo_create()?0:1;}\n" > /tmp/stubprobe.c
-            for flags in "-fuse-ld=lld -Wl,--as-needed -Wl,--gc-sections -pie" "-fuse-ld=lld -Wl,--as-needed -pie" "-fuse-ld=lld -Wl,--gc-sections -pie" "-fuse-ld=lld -Wl,--as-needed -Wl,--gc-sections" "-fuse-ld=lld"; do
-              # shellcheck disable=SC2086
-              if gcc /tmp/stubprobe.c "$stub" -o /tmp/stubprobe $flags >/tmp/link.log 2>&1; then
-                echo "LINK OK: $flags"
-              else
-                echo "LINK FAILED: $flags"
-              fi
-            done
+            gcc /tmp/stubprobe.c "$stub" -o /tmp/stubprobe -fuse-ld=lld -Wl,--trace 2>&1 | grep -a "gbm_stub\|stubprobe" | head -8 || true
           ' || true
 
       - name: Upload the built packages and lint logs
