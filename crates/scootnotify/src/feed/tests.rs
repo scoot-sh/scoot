@@ -220,21 +220,6 @@ impl FakeBar {
         Self::serve_on(listener, reply, expect)
     }
 
-    /// Spawns the bind itself, for the late bar: binding creates the
-    /// socket file the feed's watch waits for.
-    fn serve_deferred(socket: std::path::PathBuf, reply: &'static str, expect: usize) -> Self {
-        let received = Arc::new(Mutex::new(Vec::new()));
-        let recorded = Arc::clone(&received);
-        let thread = std::thread::spawn(move || {
-            let listener = UnixListener::bind(&socket).expect("the fake bar binds");
-            serve_loop(listener, &recorded, reply, expect)
-        });
-        Self {
-            received,
-            thread: Some(thread),
-        }
-    }
-
     fn serve_on(
         listener: UnixListener,
         reply: &'static str,
@@ -415,18 +400,14 @@ fn a_bar_started_later_catches_up_on_the_watch() {
     assert!(feed.sync(&store).is_some(), "nothing listens yet");
     assert!(feed.owed());
     assert!(feed.poll_fd().is_some());
-    // The bar starts later: binding creates the socket file.
-    let bar = FakeBar::serve_deferred(socket, "{\"type\":\"ok\"}\n", 1);
+    // The bar starts later: binding creates the socket file the
+    // watch waits for. Bound in this thread: `bind` returns listening,
+    // so the owed retry cannot lose a bind-before-listen race here
+    // (production covers that race with its bounded connect retry).
+    let bar = FakeBar::serve(socket, "{\"type\":\"ok\"}\n", 1);
     wait_readable(&mut feed);
-    // The watch fired; the owed send goes out, converging past a
-    // bind-before-listen whiff (the daemon's own shape: one watch
-    // event, then owed retries).
-    let start = Instant::now();
-    while feed.owed() && start.elapsed() < Duration::from_secs(3) {
-        // Intermediate rounds may still refuse mid-race; the loop,
-        // like the daemon's watch, converges past it.
-        let _ = feed.retry(&store);
-    }
+    let retried = feed.retry(&store);
+    assert!(retried.is_none(), "the owed send goes out on the watch: {retried:?}");
     assert!(!feed.owed(), "the owed send went out on the watch");
     assert!(feed.poll_fd().is_none(), "the watch retires with the debt");
     assert_eq!(bar.received().len(), 1);
