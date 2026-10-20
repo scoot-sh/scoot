@@ -139,8 +139,8 @@ So `release-plz.yml` dispatches the next step itself:
   does not bump onto the PR's branch (each in its own commit, before the
   checks run): `scripts/sync-fuzz-locks` for the fuzz crates'
   lockfiles, and `scripts/sync-packaging-versions` for the distro
-  packaging (`Version` plus a `%changelog` entry in the four RPM specs,
-  `pkgver` in the four Arch release PKGBUILDs and the `-git` static
+  packaging (`Version` plus a `%changelog` entry in the five RPM specs,
+  `pkgver` in the five Arch release PKGBUILDs and the `-git` static
   base, with every `.SRCINFO`). Both are idempotent, so a recreated PR
   converges with zero manual commits. The debs need no sync:
   `packaging/deb/deb-meta.py` reads the workspace version at build
