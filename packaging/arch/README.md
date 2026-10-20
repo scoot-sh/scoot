@@ -91,10 +91,17 @@ not a linked library, which a linkage linter cannot see.
   starting: `scootlaunch --check` with no config file exits 0 on the
   built-in defaults).
 
-`options=('!debug')`
-everywhere (the auto-split `-debug` subpackages ship a build-id symlink
-into the main package that a per-package lint reads as dangling, and
-carry no value for AUR users), and the `-git` packages install their
+`options=('!debug' '!lto')`
+everywhere: `!debug` because the auto-split `-debug` subpackages ship a
+build-id symlink into the main package that a per-package lint reads as
+dangling, and carry no value for AUR users; `!lto` because makepkg's
+default `CFLAGS` carry `-flto=auto`, which bakes GCC LTO bytecode into
+the compositor's static libgbm stub (`crates/scoot/build.rs`) that
+`ld.lld` plus GCC's `liblto_plugin` then drops as undefined `gbm_*`
+(the plugin claims bytecode files and mishandles them under lld, while
+bfd consumes them fine -- which is also why the Fedora RPM builds never
+saw it). Rust's own `lto = "fat"` is untouched: only the C compile
+drops LTO, exactly what `!lto` scopes. The `-git` packages install their
 licenses under their own name (`/usr/share/licenses/scoot-git/`, where
 namcap requires them) while their docs follow the provided name
 (`/usr/share/doc/scoot/`).

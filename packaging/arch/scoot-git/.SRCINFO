@@ -27,6 +27,7 @@ pkgbase = scoot-git
 	provides = scoot
 	conflicts = scoot
 	options = !debug
+	options = !lto
 	source = scoot-git::git+https://github.com/scoot-sh/scoot.git
 	sha256sums = SKIP
 

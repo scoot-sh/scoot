@@ -156,13 +156,6 @@ jobs:
           sys.exit(1 if bad else 0)
           EOF
 
-      # TEMPORARY: makepkg.conf owns RUSTFLAGS (frame-pointers) and
-      # clobbers the env, so force the diagnostic flags there.
-      - name: TEMPORARY force diagnostic RUSTFLAGS through makepkg.conf
-        run: |
-          printf '%s\n' 'RUSTFLAGS="-C link-args=-Wl,--no-gc-sections -C link-args=-Wl,--trace-symbol=gbm_bo_create"' >> /etc/makepkg.conf
-          tail -1 /etc/makepkg.conf
-
       - name: makepkg all six packages (one cargo target dir for the disk budget)
         run: |
           # Passed through sudo with env: sudo's env_reset would drop
@@ -172,22 +165,15 @@ jobs:
           # absolute path, so nothing is shared between them but the
           # registry in the builder's home).
           #
-          # TEMPORARY: --no-gc-sections to test whether lld's section GC
-          # is what drops the stub object (revert with the step below).
-          # TEMPORARY 2: --trace-symbol to see what lld does with the
-          # stub object and the gbm references.
-          #
           # scootbg first, installed: scoot's versioned dependency on
           # it (`scootbg=$pkgver`) resolves against no repository yet,
           # so `makepkg -s` for scoot would fail to satisfy it. This is
           # the same order an AUR helper builds the chain in.
           sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
-            NOGC_RUSTFLAGS_TMP=1 \
             bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/scootbg' && makepkg -s --noconfirm"
           pacman -U --noconfirm "$GITHUB_WORKSPACE"/dist/scootbg-0*.pkg.tar.zst
           for p in scoot scootbar scootlaunch scoot-git scootbg-git scootbar-git scootlaunch-git; do
             sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
-              NOGC_RUSTFLAGS_TMP=1 \
               bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/$p' && makepkg -s --noconfirm"
           done
           ls -l "$GITHUB_WORKSPACE/dist"/*.pkg.tar.zst
@@ -280,38 +266,6 @@ jobs:
           export XDG_RUNTIME_DIR=/tmp/arch-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
           export SMOKE_PREFIX=/tmp/arch-smoke-git SMOKE_REQUIRE_SCOOTBG=1
           scripts/smoke-test.sh
-
-      # TEMPORARY diagnostic for the gbm link (revert once arch is green):
-      # after a failed build, re-drive the scoot link verbosely and show
-      # exactly what gbm inputs rustc passes to the linker.
-      - name: TEMPORARY dump the scoot link line on failure
-        if: failure()
-        run: |
-          sudo -u builder env CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
-            bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/scoot/src/scoot-'* && cargo build --release --locked -p scoot -v" 2>&1 \
-            | grep -o '[^ ]*gbm[^ ]*' | sort -u | head -20 || true
-          echo "--- OUT_DIR contents ---"
-          sudo -u builder bash -c "ls '$GITHUB_WORKSPACE/.cargo-target/release/build/'" 2>/dev/null | grep scoot || true
-          for d in "$GITHUB_WORKSPACE"/.cargo-target/release/build/scoot-*/out; do
-            echo "--- $d ---"
-            sudo -u builder bash -c "ls -l '$d' | grep -i gbm || true"
-            sudo -u builder bash -c "file '$d/gbm_stub.o' || true"
-            sudo -u builder bash -c "nm -g --defined-only '$d/gbm_stub.o' | head -8 || true"
-            sudo -u builder bash -c "readelf -S '$d/gbm_stub.o' | grep -c '\.text' || true"
-          done
-          echo "--- env seen by makepkg builds ---"
-          echo "CFLAGS=${CFLAGS:-<unset>}"
-          grep -E "^(CFLAGS|CXXFLAGS|LDFLAGS|RUSTFLAGS)=" /etc/makepkg.conf 2>/dev/null || true
-          # TEMPORARY: minimal gcc repro of the stub link, no cargo.
-          # (Bisecting which linker flag drops the stub object.)
-          echo "--- minimal stub link repro ---"
-          sudo -u builder bash -c '
-            stub=$(echo '"$GITHUB_WORKSPACE"'/.cargo-target/release/build/scoot-*/out/gbm_stub.o | tr " " "\n" | head -1)
-            echo "stub=$stub"
-            printf "extern struct gbm_bo *gbm_bo_create();\nint main(void){return gbm_bo_create()?0:1;}\n" > /tmp/stubprobe.c
-            readelf -S "$stub" | head -30 || true
-            gcc /tmp/stubprobe.c "$stub" -o /tmp/stubprobe -fuse-ld=lld -fno-use-linker-plugin 2>&1 | head -4 && echo "NOLUGIN LINK OK" || echo "NOLUGIN LINK FAILED"
-          ' || true
 
       - name: Upload the built packages and lint logs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

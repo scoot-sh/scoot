@@ -15,7 +15,7 @@ depends=('glibc' 'libgcc')
 makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
 provides=('scootbg')
 conflicts=('scootbg')
-options=('!debug')
+options=('!debug' '!lto')
 source=("$pkgname::git+https://github.com/scoot-sh/scoot.git")
 sha256sums=('SKIP')
 

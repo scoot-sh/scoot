@@ -24,7 +24,7 @@ makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
 optdepends=('systemd: run the bar as a user unit (scootbar.service)'
             'ttf-dejavu: sans font the bar finds on its own')
 install=scootbar.install
-options=('!debug')
+options=('!debug' '!lto')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 

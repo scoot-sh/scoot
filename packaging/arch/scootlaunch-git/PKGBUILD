@@ -16,7 +16,7 @@ makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
 optdepends=('ttf-dejavu: sans font the panel finds on its own')
 provides=('scootlaunch')
 conflicts=('scootlaunch')
-options=('!debug')
+options=('!debug' '!lto')
 source=("$pkgname::git+https://github.com/scoot-sh/scoot.git")
 sha256sums=('SKIP')
 

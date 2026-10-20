@@ -23,7 +23,7 @@ optdepends=('mesa: GPU scanout tier at run time (auto-detected, no rebuild neede
 provides=('scoot')
 conflicts=('scoot')
 install=scoot.install
-options=('!debug')
+options=('!debug' '!lto')
 source=("$pkgname::git+https://github.com/scoot-sh/scoot.git")
 sha256sums=('SKIP')
 
