@@ -139,7 +139,7 @@ that stops reading is dropped past 30 s. Requests are one JSON object
 per line carrying the protocol they speak:
 
 ```sh
-printf '{"protocol":1,"type":"list"}\n' | socat - UNIX-CONNECT:"$XDG_RUNTIME_DIR/scootnotify-$WAYLAND_DISPLAY.sock"
+printf '{"protocol":2,"type":"list"}\n' | socat - UNIX-CONNECT:"$XDG_RUNTIME_DIR/scootnotify-$WAYLAND_DISPLAY.sock"
 ```
 
 A request whose `protocol` is not `2` is refused with a mismatch

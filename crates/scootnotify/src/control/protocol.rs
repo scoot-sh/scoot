@@ -3,7 +3,7 @@
 //! A request names the protocol it speaks and what it asks for:
 //!
 //! ```text
-//! {"protocol":1,"type":"list"}
+//! {"protocol":2,"type":"list"}
 //! ```
 //!
 //! and gets exactly one reply line, an object tagged by `type`:
@@ -54,9 +54,9 @@ use crate::model::store::{CloseReason, Notification};
 /// Bumped whenever a wire change would make an old client or daemon
 /// misread a new one. Compatibility rides on this number, never on the
 /// crate version. 2 adds `dnd`, `history` and `restore` (with the `dnd`
-/// event and reply): a version-1 client asking a version-2 daemon gets
-/// its old replies byte-identical, and a version mismatch is refused by
-/// name either way.
+/// event and reply): a version-1 client asking a version-2 daemon is
+/// refused with a mismatch error, as is any speaker the daemon does
+/// not match — nothing is ever misread as something else.
 pub const PROTOCOL_VERSION: u32 = 2;
 
 /// What a client can ask for.
