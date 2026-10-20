@@ -275,7 +275,9 @@ enum Phase {
 /// A scheduled re-dial while owed.
 enum Redial {
     /// The bind-listen race grace: one silent re-dial past a refused
-    /// dial, at `RACE_AFTER`. A second refusal is a stale socket.
+    /// dial, at `RACE_AFTER`. A second refusal retries bounded like
+    /// any reachable failure (a slow bind, a full accept backlog, or
+    /// a stale socket — the socket exists either way).
     Race(Instant),
     /// The bounded retry while the bar stays reachable but
     /// unanswering, at `retry_after`. Capped by `retry_cap`, then the
@@ -465,7 +467,10 @@ impl Feed {
         let current = State::of(store);
         self.last = Some(current);
         if race {
-            return self.start(current, true, true);
+            // Only the spell's first race speaks (it follows the loud
+            // sync directly); later ones follow silent retries, so one
+            // change still costs one line however many attempts it takes.
+            return self.start(current, self.retries == 0, true);
         }
         if !(self.owed && self.reachable) {
             return None;
@@ -533,7 +538,21 @@ impl Feed {
                 self.arm();
                 // The bar may be mid-bind (the socket file lands before
                 // it listens): one silent grace re-dial closes that
-                // race, and its outcome is the reported one.
+                // race, and its outcome is the reported one. But a race
+                // re-dial reports here too — refused dials resolve
+                // synchronously, never through a pending — so it must
+                // fall through to the bounded retry like any reachable
+                // failure, or the grace would reschedule itself forever.
+                if race {
+                    self.reachable = true;
+                    self.redial = Some(Redial::Retry(Instant::now() + self.retry_after));
+                    if loud {
+                        return Some(String::from(
+                            "scootnotify: cannot reach the bar (connection refused); retrying while owed",
+                        ));
+                    }
+                    return None;
+                }
                 self.redial = Some(Redial::Race(Instant::now() + RACE_AFTER));
                 return None;
             }
@@ -693,15 +712,20 @@ impl Feed {
             Outcome::Stale => {
                 self.pending = None;
                 self.owed = true;
-                self.reachable = false;
                 self.arm();
                 if race {
-                    // The grace re-dial refused too: a stale socket. It
-                    // parks on the watch (a rebind recreates the file).
-                    self.redial = None;
-                    Some(String::from(
-                        "scootnotify: cannot reach the bar (connection refused); leaving it",
-                    ))
+                    // The grace re-dial refused too: a stale socket, or
+                    // a live bar whose accept backlog is full under load
+                    // (the socket exists either way). Retry bounded
+                    // while owed — a rebind fires the watch, a drained
+                    // backlog takes the re-dial — then park.
+                    self.reachable = true;
+                    self.redial = Some(Redial::Retry(Instant::now() + self.retry_after));
+                    loud.then(|| {
+                        String::from(
+                            "scootnotify: cannot reach the bar (connection refused); retrying while owed",
+                        )
+                    })
                 } else {
                     self.redial = Some(Redial::Race(Instant::now() + RACE_AFTER));
                     None

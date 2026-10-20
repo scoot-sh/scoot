@@ -619,6 +619,34 @@ fn silent_bar_parks_owed_then_recovers_on_rebind() {
 }
 
 #[test]
+fn refused_socket_retries_bounded_then_parks() {
+    // A socket file with nobody listening (a stale bar): every dial
+    // refuses. The race grace and the bounded timer retry past it —
+    // a backlog-full bar under load recovers the same way — then the
+    // spell parks owed on the watch. One line for the change.
+    let (_dir, socket) = scratch_socket("stalebar");
+    let stale = UnixListener::bind(&socket).expect("the stale file binds");
+    std::mem::drop(stale);
+    let mut store = store();
+    let mut feed = Feed::for_test(socket, "", "");
+    feed.baseline(&store);
+    shown(&mut store, ":1.1", "a");
+    assert!(feed.sync(&store).is_none(), "the start never blocks");
+    let lines = drive(&mut feed, &store, Duration::from_secs(10));
+    assert_eq!(lines.len(), 1, "one line per failed change: {lines:?}");
+    assert!(lines[0].contains("connection refused"), "{}", lines[0]);
+    assert!(feed.owed(), "the stale socket parks owed");
+    assert!(
+        feed.poll_fd().is_some(),
+        "the watch stays armed for the rebind"
+    );
+    assert!(
+        feed.poll_timeout().is_none(),
+        "parked: the retry capped out, nothing wakes"
+    );
+}
+
+#[test]
 fn sync_never_blocks_on_a_stuck_bar() {
     // The serving path never waits on the bar: even with a stuck bar,
     // `sync` returns at once with the push in flight (the live probe
