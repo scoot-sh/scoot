@@ -303,12 +303,20 @@ jobs:
           echo "CFLAGS=${CFLAGS:-<unset>}"
           grep -E "^(CFLAGS|CXXFLAGS|LDFLAGS|RUSTFLAGS)=" /etc/makepkg.conf 2>/dev/null || true
           # TEMPORARY: minimal gcc repro of the stub link, no cargo.
+          # (Bisecting which linker flag drops the stub object.)
           echo "--- minimal stub link repro ---"
           sudo -u builder bash -c '
             stub=$(echo '"$GITHUB_WORKSPACE"'/.cargo-target/release/build/scoot-*/out/gbm_stub.o | tr " " "\n" | head -1)
             echo "stub=$stub"
             printf "extern struct gbm_bo *gbm_bo_create();\nint main(void){return gbm_bo_create()?0:1;}\n" > /tmp/stubprobe.c
-            gcc /tmp/stubprobe.c "$stub" -o /tmp/stubprobe -fuse-ld=lld -Wl,--as-needed -Wl,--gc-sections -pie && echo "MINIMAL LINK OK" || echo "MINIMAL LINK FAILED"
+            for flags in "-fuse-ld=lld -Wl,--as-needed -Wl,--gc-sections -pie" "-fuse-ld=lld -Wl,--as-needed -pie" "-fuse-ld=lld -Wl,--gc-sections -pie" "-fuse-ld=lld -Wl,--as-needed -Wl,--gc-sections" "-fuse-ld=lld"; do
+              # shellcheck disable=SC2086
+              if gcc /tmp/stubprobe.c "$stub" -o /tmp/stubprobe $flags >/tmp/link.log 2>&1; then
+                echo "LINK OK: $flags"
+              else
+                echo "LINK FAILED: $flags"
+              fi
+            done
           ' || true
 
       - name: Upload the built packages and lint logs
