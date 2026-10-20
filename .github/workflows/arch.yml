@@ -283,7 +283,11 @@ jobs:
             sudo -u builder bash -c "ls -l '$d' | grep -i gbm || true"
             sudo -u builder bash -c "file '$d/gbm_stub.o' || true"
             sudo -u builder bash -c "nm -g --defined-only '$d/gbm_stub.o' | head -8 || true"
+            sudo -u builder bash -c "readelf -S '$d/gbm_stub.o' | grep -c '\.text' || true"
           done
+          echo "--- env seen by makepkg builds ---"
+          echo "CFLAGS=${CFLAGS:-<unset>}"
+          grep -E "^(CFLAGS|CXXFLAGS|LDFLAGS|RUSTFLAGS)=" /etc/makepkg.conf 2>/dev/null || true
 
       - name: Upload the built packages and lint logs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
