@@ -2,13 +2,17 @@
 //! pumps a bus client until its `GetServerInformation` probe is answered.
 //!
 //! The probe deliberately makes no card. An earlier shape probed with
-//! a 1 ms `Notify`, but under parallel-startup contention the session
-//! bus sometimes consumes a probe sent to an already-owned name
-//! without ever forwarding or erroring it (measured on the dev VM:
-//! the client flushed — `want_write` false over 5000+ pumps — the
-//! kernel queues drained, the daemon owned the name and served
-//! independent clients while the probe never reached its handler), and
-//! any `Notify` resend for it risks a second live card landing inside
+//! a 1 ms `Notify`, but under parallel-startup contention a probe sent
+//! to an already-owned name sometimes goes unanswered without ever
+//! erroring (measured on the dev VM: the client flushed — `want_write`
+//! false over 5000+ pumps — the kernel queues drained, the daemon
+//! owned the name and served independent clients while the probe never
+//! reached its handler). One proven cause was daemon-side: a call
+//! arriving in the same read batch as the `RequestName` grant was
+//! discarded by the name round trip (now stashed and replayed — see
+//! `bus::server::request_name` and the grant-batch pin in
+//! `bus::server::tests`); genuine bus loss under contention remains
+//! possible too. And any `Notify` resend for it risks a second live card landing inside
 //! a test's exact live-card count (or a missing history entry breaking
 //! its exact history count). `GetServerInformation` is answered by the
 //! same daemon on the same name — proving the same serving — with no
@@ -18,7 +22,9 @@
 //! Two resends, for two different silences. An error (the name unowned
 //! yet) resends at once: the daemon simply got there later than the
 //! probe. Silence with no error resends after [`PROBE_RESEND_AFTER`]:
-//! the bus ate the probe, so ask again. A single all-or-nothing probe
+//! the probe was lost on the way (genuine bus loss under contention,
+//! or — before the grant-batch stash — discarded with the name grant
+//! inside the daemon itself), so ask again. A single all-or-nothing probe
 //! would turn that one lost message into a 30 s failure; the resends
 //! ride through it, and the suites' own `Notify` calls (with their
 //! loud timeouts) still exercise the notification path seconds later.
@@ -147,8 +153,8 @@ pub fn wait_serving_budget(
             return;
         }
         if errored || last_sent.elapsed() >= resend_after {
-            // Unowned yet, or silent while owned (the probe was lost
-            // below the daemon — see the module docs): ask again. The
+            // Unowned yet, or silent while owned (the probe was lost on
+            // the way — see the module docs): ask again. The
             // probe makes no card, so a merely-delayed first probe can
             // never disturb a count. Green runs never reach the
             // silence half of this.

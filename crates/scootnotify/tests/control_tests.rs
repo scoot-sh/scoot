@@ -100,10 +100,10 @@ fn control_paths(runtime: &tempfile::TempDir) -> Paths {
     }
 }
 
-/// Pumps `client` until its `Notify` is answered: the daemon serving.
-/// Shared shape (see `support`): a 1 ms transient card — the reply
-/// proves serving, the card itself is gone before any test counts
-/// live ones and never enters history.
+/// Pumps `client` until its `GetServerInformation` probe is answered:
+/// the daemon serving. Shared shape (see `support`): the probe makes
+/// no card, so it never disturbs a test's exact live-card or history
+/// counts, green runs and rescued runs alike.
 fn wait_serving(client: &mut Conn, server: &mut Child) {
     support::wait_serving(client, server, support::LogSource::Pipe);
 }

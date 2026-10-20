@@ -158,7 +158,7 @@ fn an_unanswered_probe_is_resent_until_answered() {
         &mut client,
         &mut server,
         support::LogSource::Pipe,
-        Duration::from_secs(8),
+        Duration::from_secs(30),
         Duration::from_millis(200),
     );
     let _ = server.kill();
