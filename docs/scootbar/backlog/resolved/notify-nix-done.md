@@ -1,10 +1,11 @@
 ---
 title: "scootnotify: Nix modules, the look layer, the opt-in desktop profile switch"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "M7"
+resolved: "2026-10-20"
 ---
 
 # scootnotify: Nix and the look layer
@@ -58,3 +59,36 @@ Part of this ticket's work, not a follow-up: update `site/src/content/docs/start
 ## Not in this ticket
 
 Flipping the default (`notify-default-flip`); distro packages; the contract's own tickets.
+
+## Resolution (2026-10-20, PR #698)
+
+Landed as designed: `programs.scootnotify` (home-manager and NixOS
+modules plus the shared options, the flake's own `scootnotify`
+package with no Cargo features today, overlay, module wrappers and
+the `scootnotify-modules` check) renders only the user's `settings`
+into `notify.toml`; `desktop.notifications.daemon` widens to
+`mako|scootnotify` with the default staying `mako`. The user unit is
+`Type=dbus` owning `org.freedesktop.Notifications`, reloads (never
+restarts) on a config change, and stops instead of restart-looping on
+the taken-name exit 3; the D-Bus activation file names the same
+binary. With the opt-in, both package defaults follow the daemon
+(the #681 lesson), mako and `scoot-notify-sync` stand down, the three
+binds and the bar's on-click move onto `scootnotify msg`, and a
+mako-shaped `notifications.settings` warns naming
+`programs.scootnotify.settings`. Stylix reaches it only as the
+`stylix` look.
+
+Evidence: `nix eval` of the `scootnotify-modules` and `scoot-modules`
+check drvPaths for aarch64-linux and x86_64-linux green on the Mac;
+`nix build .#checks.aarch64-linux.scootnotify-modules`,
+`.#checks.aarch64-linux.scoot-modules`, `.#checks.aarch64-linux.scootbar-modules`,
+`.#checks.aarch64-darwin.scoot-modules` and `.#docs-site` green;
+`nix fmt -- --check` clean; the full CI matrix green on the exact
+head (run 39401007329, all 18 checks). Mutation-proved: reverting
+`RestartPreventExitStatus` fails the unit pin; reverting the NixOS
+package default fails the opt-in default pin. One deviation: no M2
+real-login proof (no M2 access from here; the reload-keeps-cards
+semantics are covered by the daemon's own control-socket tests) —
+flagged for the reviewer/maintainer. Not run: the dev VM beyond
+reachability (disk constraints per the ticket); all Linux builds ran
+on the remote builder.

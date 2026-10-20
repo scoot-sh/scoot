@@ -68,12 +68,18 @@ let
   # Each `or` keeps this evaluating with the scoot module absent or
   # older than the notifications slot. The daemon behind it is the
   # only half that changes when scootnotify replaces mako (the module
-  # id, the feed and the toggle stay); the toggle below names mako's
-  # own command, so a future daemon brings its own.
+  # id, the feed and the toggle stay); the toggle below names the
+  # daemon's own command per `daemon`.
   notifProfile = (desktopProfile.notifications or { });
   notifOn = (notifProfile.enable or false);
   notifDaemon = (notifProfile.daemon or "mako");
   notifPkg = (notifProfile.package or null);
+  # This daemon's build, when its module is imported beside this one
+  # (the `or { }` keeps this evaluating without it, the way the bar
+  # half reads the profile). The click calls it by absolute path then;
+  # otherwise by name from PATH, tolerating a missing daemon.
+  scootNotifyPkg = (config.programs.scootnotify or { }).finalPackage or null;
+  scootNotifyBin = if scootNotifyPkg != null then lib.getExe scootNotifyPkg else "scootnotify";
   # The per-state icons (`desktop.notifications.bar.icons` in the scoot
   # modules). Only `idle` is read here (the push module's static icon,
   # shown until the first update and whenever an update names none);
@@ -93,7 +99,11 @@ let
     }
     // (notifProfile.bar.icons or { });
   notifPushNeeded =
-    profileOn && profileManagesBar && notifOn && notifPkg != null && notifDaemon == "mako";
+    profileOn
+    && profileManagesBar
+    && notifOn
+    && notifPkg != null
+    && (notifDaemon == "mako" || notifDaemon == "scootnotify");
 
   # The WiFi and Bluetooth pickers (`programs.scoot.desktop.apps` in
   # the scoot modules, home-manager side: only that side builds the
@@ -330,10 +340,11 @@ in
     })
 
     # The notification daemon's bar half: the `push` module its feed
-    # writes (DND state and the unread count -- see
-    # `nix/modules/notifications-home.nix`), with a click toggling
-    # do-not-disturb through the daemon's own command, by absolute
-    # path, so it works whatever is on PATH. Each leaf a priority
+    # writes (DND state and the unread count -- with mako through
+    # `scoot-notify-sync`, with scootnotify through the daemon's own
+    # push: see `nix/modules/notifications-home.nix`), with a click
+    # toggling do-not-disturb through the daemon's own command, by
+    # absolute path, so it works whatever is on PATH. Each leaf a priority
     # below the user's: a value set in `settings` wins
     # per key. Placement stays yours (the
     # module is defined, not placed -- add `"notifications"` to a list
@@ -348,12 +359,21 @@ in
       programs.scootbar.settings.push.notifications = {
         icon = lib.mkIf (notifIcons.idle != "") (lib.mkOptionDefault notifIcons.idle);
         on-click = lib.mkOptionDefault {
-          exec = [
-            "${lib.getExe' notifPkg "makoctl"}"
-            "mode"
-            "-t"
-            "do-not-disturb"
-          ];
+          exec =
+            if notifDaemon == "scootnotify" then
+              [
+                scootNotifyBin
+                "msg"
+                "dnd"
+                "toggle"
+              ]
+            else
+              [
+                "${lib.getExe' notifPkg "makoctl"}"
+                "mode"
+                "-t"
+                "do-not-disturb"
+              ];
         };
       };
     })

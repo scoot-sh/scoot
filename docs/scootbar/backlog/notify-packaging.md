@@ -3,7 +3,7 @@ title: "scootnotify: deb, rpm and Arch packages, install.sh, site section"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "notify-nix"
+blocked: null
 milestone: "M7"
 ---
 

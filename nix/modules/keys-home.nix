@@ -57,6 +57,18 @@ let
       lib.getExe' cfg.desktop.notifications.package "makoctl"
     else
       "makoctl";
+  # The notification daemon's control command: with
+  # `desktop.notifications.daemon = "scootnotify"` the binds run
+  # `scootnotify msg` (dismiss, DND toggle, restore) instead of
+  # `makoctl`. The absolute path when the scootnotify module beside
+  # this one names its build, bare name from PATH otherwise (same
+  # fail-quiet contract as the other slot tools above).
+  isScootNotify = cfg.desktop.notifications.daemon == "scootnotify";
+  scootNotifyBin =
+    let
+      pkg = (config.programs.scootnotify or { }).finalPackage or null;
+    in
+    if pkg != null then lib.getExe pkg else "scootnotify";
 
   # The clipboard picker's tools: absolute when the clipboard child
   # names packages, bare otherwise (same fail-quiet contract as above).
@@ -407,9 +419,15 @@ let
         launcher = "spawn ${launcherScript}/bin/scoot-launcher";
         launcherRun = "spawn ${launcherScript}/bin/scoot-launcher --list-executables-in-path";
         clipboard = "spawn ${clipboardPick}/bin/scoot-clipboard-pick";
-        notifDismiss = "spawn ${makoctl} dismiss";
-        notifDnd = "spawn ${makoctl} mode -t do-not-disturb";
-        notifHistory = "spawn ${makoctl} restore";
+        notifDismiss =
+          if isScootNotify then "spawn ${scootNotifyBin} msg dismiss" else "spawn ${makoctl} dismiss";
+        notifDnd =
+          if isScootNotify then
+            "spawn ${scootNotifyBin} msg dnd toggle"
+          else
+            "spawn ${makoctl} mode -t do-not-disturb";
+        notifHistory =
+          if isScootNotify then "spawn ${scootNotifyBin} msg restore" else "spawn ${makoctl} restore";
         powerProfile = "spawn ${powerProfileScript}/bin/scoot-power-profile cycle";
         captureOutput = "spawn ${captureOutput}/bin/scoot-capture-output";
         captureRegion = "spawn ${captureRegion}/bin/scoot-capture-region";

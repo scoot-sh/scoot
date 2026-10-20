@@ -3,7 +3,7 @@ title: "`scootnotify`: the notification daemon (epic)"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "notify-fullscreen-hold-spike, notify-nix, notify-packaging, notify-default-flip"
+blocked: "notify-fullscreen-hold-spike, notify-packaging, notify-default-flip"
 milestone: "M7"
 ---
 
@@ -28,7 +28,7 @@ Children, in order (each `blocked` names its predecessors):
 2. [notify-server](notify-server.md): the D-Bus server and model.
 3. [notify-popups](resolved/notify-popups-done.md): cards, stack, lock and idle rules, the look layer.
 4. [notify-control](resolved/notify-control-done.md), then [notify-dnd-history-rules](resolved/notify-dnd-history-rules-done.md).
-5. [notify-bar-feed](resolved/notify-bar-feed-done.md), then [notify-nix](notify-nix.md),
+5. [notify-bar-feed](resolved/notify-bar-feed-done.md), then [notify-nix](resolved/notify-nix-done.md),
    [notify-packaging](notify-packaging.md) and [notify-default-flip](notify-default-flip.md).
 
 Experiment: [notify-fullscreen-hold-spike](notify-fullscreen-hold-spike.md).
