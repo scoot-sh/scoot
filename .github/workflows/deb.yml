@@ -359,16 +359,20 @@ jobs:
             # containers carry it too); same remedy.
             rm -f /etc/dpkg/dpkg.cfg.d/docker /etc/dpkg/dpkg.cfg.d/excludes
             apt-get update -qq
-            apt-get install -y -qq scoot scootbg scootbar scootlaunch scootnotify
+            # One transaction (unlike the bookworm step's two, which stay
+            # green there): a second apt-get in this container fails
+            # with a dpkg lock-frontend EACCES on both architectures,
+            # while the first one and a single combined transaction
+            # pass.
+            apt-get install -y -qq scoot scootbg scootbar scootlaunch scootnotify fonts-dejavu-core dbus libglib2.0-bin
             scoot --version
             scootbg --version
             scootbar --version
             scootlaunch --version
             scootnotify --version
-            # Same font requirement as the bookworm --check above, plus
-            # the session bus the notification daemon's --check runs
-            # under there too.
-            apt-get install -y -qq fonts-dejavu-core dbus libglib2.0-bin
+            # The font the bar's --check needs (same requirement as the
+            # bookworm --check above), plus the session bus the
+            # notification daemon's --check runs under there too.
             scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
             scootlaunch --check
             dbus-run-session -- scootnotify daemon --check --config /usr/share/doc/scootnotify/notify.toml.example
