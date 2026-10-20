@@ -286,7 +286,7 @@ If you used `--system`, log out and pick **scoot** on your login screen.
   and no login-screen entry. Start a session from a text console with
   `scoot-session`. To get the login-screen entry later, run the
   `--system` command the script prints at the end (it carries your
-  `--look` and `--no-bar` flags).
+  `--look`, `--no-bar`, `--launch` and `--notify` flags).
 - The two installs coexist: each keeps its own files and record, and a
   `--system` run never touches the per-user copy. But the per-user copy
   may shadow the system one for you (`~/.local/bin` is often first on
@@ -324,6 +324,13 @@ If you used `--system`, log out and pick **scoot** on your login screen.
   [launcher](../../scootlaunch/) (opt-in until it becomes the default).
   Its panel needs `libxkbcommon` and a font beside it; the script's
   missing-library report names both for your distro.
+- `--notify` also installs `scootnotify`, the notification
+  [daemon](../../scootnotify/) (opt-in until it becomes the default).
+  Only one daemon can own `org.freedesktop.Notifications`: the script
+  refuses while another one (mako, dunst) holds the name, and names
+  it — stop or disable that daemon first. Its cards need a font beside
+  the binary; the script's missing-library report names it for your
+  distro.
 
 Read the script before you run it:
 [install.sh](https://www.scoot.sh/install.sh). Every option:

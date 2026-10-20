@@ -133,7 +133,7 @@ class ResolveTests(unittest.TestCase):
         r = w.resolve("v0.2.0", gh_stub=GH_ABSENT)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("version=0.2.0", r.stdout)
-        self.assertIn("binaries=scoot scootbg scootbar scootlaunch", r.stdout)
+        self.assertIn("binaries=scoot scootbg scootbar scootlaunch scootnotify", r.stdout)
 
     def test_a_bar_only_change_still_releases_every_binary(self):
         # One version: a release is the whole suite, whatever moved.
@@ -144,7 +144,7 @@ class ResolveTests(unittest.TestCase):
         r = w.resolve("v0.2.0", "--json", gh_stub=GH_ABSENT)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(r.stdout)["binaries"],
-                         ["scoot", "scootbg", "scootbar", "scootlaunch"])
+                         ["scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"])
 
     def test_json_output_names_expected_assets(self):
         w = World()
@@ -155,7 +155,7 @@ class ResolveTests(unittest.TestCase):
         got = json.loads(r.stdout)
         self.assertEqual(got["tag"], "v0.2.0")
         self.assertEqual(got["version"], "0.2.0")
-        for binary in ("scoot", "scootbg", "scootbar", "scootlaunch"):
+        for binary in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"):
             for arch in ("x86_64-linux", "aarch64-linux"):
                 self.assertIn(f"{binary}-0.2.0-{arch}", got["assets"])
         self.assertIn("SHA256SUMS", got["assets"])
@@ -166,7 +166,7 @@ class ResolveTests(unittest.TestCase):
                             for n in got["assets"]),
                         got["assets"])
         # 4 binaries x 2 arches, the tarball, the SBOM, the checksums.
-        self.assertEqual(len(got["assets"]), 11, got["assets"])
+        self.assertEqual(len(got["assets"]), 13, got["assets"])
 
     def test_bad_tag_shape_refused(self):
         w = World()

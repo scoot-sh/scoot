@@ -1,5 +1,5 @@
 #!/bin/sh
-# build-deb.sh: build the four scoot .debs from a source tree.
+# build-deb.sh: build the five scoot .debs from a source tree.
 #
 # Usage: packaging/deb/build-deb.sh --source DIR --out DIR [--revision N]
 #                                   [--upstream-suffix +git<YYYYMMDD>.<commit>]
@@ -94,7 +94,7 @@ mkdir -p "$OUT" "$STAGE_ROOT"
 # source tree's own target/ otherwise.
 BINDIR="${CARGO_TARGET_DIR:-$SOURCE/target}/release"
 
-for pkg in scoot scootbg scootbar scootlaunch; do
+for pkg in scoot scootbg scootbar scootlaunch scootnotify; do
     echo "--- $pkg: cargo build --release --locked --offline -p $pkg"
     (cd "$SOURCE" && cargo build --release --locked --offline -p "$pkg")
 
@@ -126,6 +126,11 @@ for pkg in scoot scootbg scootbar scootlaunch; do
             install -Dm644 "$HERE/scootbar.service" "$STAGE/usr/lib/systemd/user/scootbar.service"
             install -m644 "$HERE/bar.toml.example" "$STAGE/usr/share/doc/scootbar/bar.toml.example"
             install -m644 "$HERE/README.Debian.scootbar" "$STAGE/usr/share/doc/scootbar/README.Debian"
+            ;;
+        scootnotify)
+            install -Dm644 "$HERE/scootnotify.service" "$STAGE/usr/lib/systemd/user/scootnotify.service"
+            install -Dm644 "$HERE/org.freedesktop.Notifications.service" "$STAGE/usr/share/dbus-1/services/org.freedesktop.Notifications.service"
+            install -m644 "$HERE/notify.toml.example" "$STAGE/usr/share/doc/scootnotify/notify.toml.example"
             ;;
     esac
 

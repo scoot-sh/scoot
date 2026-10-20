@@ -1,0 +1,34 @@
+# `scootnotify.service`: the notification daemon inside the user session (standalone shape).
+#
+# The same policy as the Nix home-manager module
+# (`nix/modules/scootnotify-home.nix`): `Restart=on-failure` brings the
+# daemon back after a crash, `RestartPreventExitStatus=3` turns a taken
+# name into a stopped unit instead of a restart loop (a restart would
+# spin against the owner until the burst limit), and
+# `StartLimitIntervalSec=0` keeps those retries unending. Bound to the
+# shared `graphical-session.target` (not scoot's own session target:
+# this unit ships for any compositor running the daemon standalone).
+# `Type=dbus` with the bus name starts the unit on activation and marks
+# it started once the daemon owns `org.freedesktop.Notifications`, and
+# `ExecReload` re-reads the config in place (never a restart: a restart
+# drops the cards and the history). Unlike the Nix module there is no
+# `ExecCondition` on `WAYLAND_DISPLAY`: the daemon is headless-capable
+# (cards wait with their clocks stopped and the bus still serves), so a
+# start without a display still serves.
+[Unit]
+Description=scootnotify notification daemon (desktop.notifications)
+PartOf=graphical-session.target
+After=graphical-session.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=dbus
+BusName=org.freedesktop.Notifications
+ExecStart=/usr/bin/scootnotify daemon
+ExecReload=/usr/bin/scootnotify msg reload
+Restart=on-failure
+RestartSec=1
+RestartPreventExitStatus=3
+
+[Install]
+WantedBy=graphical-session.target

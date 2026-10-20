@@ -1,0 +1,48 @@
+# scootnotify: the notification daemon (release build).
+#
+# Built from the same release tag as every package here (`v$pkgver`):
+# one tag, one version for every binary (docs/versioning.md). The
+# daemon links nothing past the C library, so it carries no
+# system-library dependencies; it speaks standard Wayland protocols,
+# so it needs no versioned dependency on any compositor package. The
+# systemd user unit restarts it on failure (`Restart=on-failure`, plus
+# `RestartPreventExitStatus=3` so a taken name stops the unit instead
+# of restarting against its owner, the same policy as the Nix
+# home-manager module in nix/modules/scootnotify-home.nix).
+#
+# No tag is cut yet, so `sha256sums` is SKIP until the first release;
+# `updpkgsums` fills it then (see packaging/arch/README.md). CI builds
+# this exact file against a same-layout tarball of HEAD.
+
+pkgname=scootnotify
+pkgver=0.4.0
+pkgrel=1
+pkgdesc='Notification daemon for the scoot compositor'
+arch=('x86_64' 'aarch64')
+url='https://github.com/scoot-sh/scoot'
+license=('MIT')
+depends=('glibc' 'libgcc')
+makedepends=('cargo' 'cargo-deny' 'git' 'wayland' 'wayland-protocols')
+optdepends=('systemd: run the daemon as a user unit (scootnotify.service)'
+            'ttf-dejavu: sans font the cards find on their own')
+install=scootnotify.install
+options=('!debug')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "scoot-$pkgver"
+  cargo build --release --locked -p scootnotify
+  cargo deny list > THIRD-PARTY-LICENSES
+}
+
+package() {
+  cd "scoot-$pkgver"
+  install -Dm755 "${CARGO_TARGET_DIR:-target}/release/scootnotify" "$pkgdir/usr/bin/scootnotify"
+  install -Dm644 packaging/arch/scootnotify/scootnotify.service "$pkgdir/usr/lib/systemd/user/scootnotify.service"
+  install -Dm644 packaging/arch/scootnotify/org.freedesktop.Notifications.service "$pkgdir/usr/share/dbus-1/services/org.freedesktop.Notifications.service"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+  install -Dm644 THIRD-PARTY-LICENSES "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-LICENSES"
+  install -Dm644 packaging/arch/scootnotify/notify.toml.example "$pkgdir/usr/share/doc/$pkgname/notify.toml.example"
+}

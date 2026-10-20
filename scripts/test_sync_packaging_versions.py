@@ -64,7 +64,7 @@ class World:
         (self.root / "Cargo.toml").write_text(
             '[workspace.package]\nversion = "%s"\n' % workspace)
         arch = self.root / "packaging" / "arch"
-        for pkg in ("scoot", "scootbg", "scootbar", "scootlaunch"):
+        for pkg in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"):
             depends = ("depends=('glibc' \"scootbg=$pkgver\")"
                        if pkg == "scoot" else "depends=('glibc')")
             dep = ("\tdepends = scootbg=OLDVER\n" if pkg == "scoot" else "")
@@ -88,7 +88,7 @@ class World:
                 .replace("OLDVER", packaged))
         rpm = self.root / "packaging" / "rpm"
         rpm.mkdir(parents=True)
-        for spec in ("scoot", "scootbg", "scootbar", "scootlaunch"):
+        for spec in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"):
             (rpm / f"{spec}.spec").write_text(
                 SPEC.replace("OLDVER", packaged))
 
@@ -165,6 +165,24 @@ class SyncPackagingVersionsTests(unittest.TestCase):
             self.assertIn("nothing to do", r.stdout)
         finally:
             w.close()
+
+    def test_a_missing_recipe_is_a_loud_refusal(self):
+        # A deleted or forgotten recipe fails loudly naming it, instead
+        # of shipping a stale version for the package the lists name.
+        import shutil
+        shutil.rmtree(self.w.root / "packaging" / "arch" / "scootnotify")
+        r = self.w.run()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("refusing", r.stderr)
+        self.assertIn("scootnotify", r.stderr)
+
+    def test_a_missing_spec_is_a_loud_refusal(self):
+        spec = self.w.root / "packaging" / "rpm" / "scootnotify.spec"
+        spec.unlink()
+        r = self.w.run()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("refusing", r.stderr)
+        self.assertIn("scootnotify.spec", r.stderr)
 
     def test_release_is_reset_only_when_the_version_moves(self):
         spec = self.w.root / "packaging" / "rpm" / "scoot.spec"

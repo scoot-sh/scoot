@@ -1,6 +1,6 @@
 # RPM packages (Fedora and openSUSE)
 
-Four spec files, one per shipped binary, built from the vendored-sources
+Five spec files, one per shipped binary, built from the vendored-sources
 tarball (`scripts/vendor-release.sh`: the tagged tree plus `vendor/`,
 `.cargo/config.toml` and `THIRD-PARTY-LICENSES`, so the build is offline).
 Nothing here is published anywhere: there is no COPR project, no repo, no
@@ -12,21 +12,24 @@ tag, no release in CI or out of it.
 | `scootbg.spec` | `scootbg` | `v$Version` | the same |
 | `scootbar.spec` | `scootbar` | `v$Version` | the same |
 | `scootlaunch.spec` | `scootlaunch` | `v$Version` | the same |
+| `scootnotify.spec` | `scootnotify` | `v$Version` | the same |
 
 One tag releases every binary at the repository's one version
-(docs/versioning.md), so all four specs carry the same `Version` and
+(docs/versioning.md), so all five specs carry the same `Version` and
 the same release tarball. There is no `scootctl` package: it is the
 client library inside the `scoot` binary (`scoot msg`). `scoot` requires exactly `scootbg=$Version-$Release`:
-the coupled pair installs at one version, and the bar and the launcher
+the coupled pair installs at one version, and the bar, the launcher
+and the notification daemon
 require no compositor package at all (standard Wayland protocols only).
 
 Why a hand-written spec and not `cargo-generate-rpm`: the generated file would need the same hand edits anyway
 (the session entry, the session user units, the portal selection, the
-bar's user unit, the license set including the
+bar's user unit, the notification daemon's user unit and activation
+file, the license set including the
 deny-generated inventory, the vendored offline build, the versioned
 `scootbg` requirement). The spec is the whole package definition; what
 `cargo-generate-rpm` would contribute (the file list, the soname
-requirements) is four binaries RPM derives on its own.
+requirements) is five binaries RPM derives on its own.
 
 ## Dependencies, from data
 
@@ -36,8 +39,8 @@ compositor links `libinput.so.10`, `libseat.so.1`, `libudev.so.1`,
 `libpixman-1.so.0`, `libxkbcommon.so.0`, the launcher links
 `libxkbcommon.so.0` for its keyboard (plus `libm.so.6` through the SVG
 icon stack, which rides inside the C library package everywhere, so no
-extra requirement names it), and the wallpaper daemon and the
-bar link nothing past the C library. Runtime requirements for those
+extra requirement names it), and the wallpaper daemon, the
+bar and the notification daemon link nothing past the C library. Runtime requirements for those
 sonames are auto-generated from the binaries at build time, so only the
 `-devel` names below are written in the specs. Verified 2026-10-08
 against each distro's own metadata (`dnf repoquery --whatprovides` on
@@ -74,7 +77,10 @@ Notes:
   `dejavu-sans-fonts` on Fedora, `dejavu-fonts` on openSUSE (each
   provides a path the bar's fallback list already probes:
   `crates/scootbar/src/font.rs`). The launcher's `--check` needs none:
-  with no config file it validates the built-in defaults.
+  with no config file it validates the built-in defaults. The
+  notification daemon's cards need a font to draw (the same fallback
+  list, `crates/scootui/src/font.rs`), but `daemon --check` validates
+  the config file without one.
 
 ## Installed files
 
@@ -106,6 +112,14 @@ Notes:
 - `scootlaunch`: `/usr/bin/scootlaunch` plus its licenses (in `%check`
   and again after install: `--version`, and `--check` with no config
   file, which validates the built-in defaults).
+- `scootnotify`: `/usr/bin/scootnotify`, the `scootnotify.service`
+  user unit (`Restart=on-failure` plus `RestartPreventExitStatus=3`,
+  the same policy as `nix/modules/scootnotify-home.nix`, with the
+  `%systemd_user_post`/`%systemd_user_preun` scriptlets), the D-Bus
+  activation file (`%{_datadir}/dbus-1/services/org.freedesktop.Notifications.service`),
+  licenses, and a starting `notify.toml.example` (proven valid:
+  `scootnotify daemon --check` prints `valid`, in `%check` and again
+  after install, on a session bus).
 - `%check` in every spec runs only headless-safe probes (`--version`,
   `--print-default-config`, `daemon --check`): the headless smoke test
   needs a runtime, so it runs after install in CI, not in the build.
@@ -113,7 +127,7 @@ Notes:
   `strip = true`): with `debug_package %{nil}` no find-debuginfo run
   strips them, and an unstripped build would ship its symtab.
 - Accepted `rpmlint` warnings (errors are zero): `no-manual-page-for-binary`
-  on all five entry points (the project ships no man pages yet, for any
+  on all six entry points (the project ships no man pages yet, for any
   distro) and `no-documentation` on `scootbg` (its config surface is the
   `[wallpaper]` section documented in the `scoot` package's example, so it
   deliberately ships no `%doc` of its own) and on `scootlaunch` (its
@@ -185,7 +199,7 @@ that sync is missing or wrong.
 1. Nothing to rename: every release publishes
    `scoot-<version>-vendored.tar.gz`, the name each spec's `Source0`
    already downloads.
-2. In the release PR, before it merges, bump `Version` in all four
+2. In the release PR, before it merges, bump `Version` in all five
    specs to the proposed version, reset `Release` to `1` and add a
    `%changelog` entry (run `rpm.yml` by hand from the release PR; it
    fails if `Version` is not the workspace version).
@@ -200,11 +214,14 @@ that sync is missing or wrong.
 
 `.github/workflows/rpm.yml` stages the vendored tarball from HEAD with
 `scripts/vendor-release.sh` in a Fedora 43 and a Tumbleweed container,
-builds all four specs with `rpmbuild -ba` in each, lints every built RPM
+builds all five specs with `rpmbuild -ba` in each, lints every built RPM
 with `rpmlint`, installs the set, and runs `scoot --version`,
 `scootbg --version`, `scootbar --version`, `scootlaunch --version`,
+`scootnotify --version`,
 `scootbar daemon --check` on
 the shipped example, `scootlaunch --check` on the built-in defaults,
+`scootnotify daemon --check` on its shipped example plus a `Notify`
+smoke against the running daemon (both on a session bus),
 and — in the Fedora container only — the headless smoke test
 (`scripts/smoke-test.sh`) against the installed binaries. The
 `desktop-file-validate` gate on the session entry also runs in the

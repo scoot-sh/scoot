@@ -1,12 +1,14 @@
-# scoot RPM packages: the spec files for scoot, scootbg, scootbar and
-# scootlaunch (docs/backlog/resolved/rpm-package-done.md).
+# scoot RPM packages: the spec files for scoot, scootbg, scootbar,
+# scootlaunch and scootnotify (docs/backlog/resolved/rpm-package-done.md).
 #
 # WHAT IT DOES: stages the vendored-sources tarball with
-# scripts/vendor-release.sh, builds all four specs under `packaging/rpm/`
+# scripts/vendor-release.sh, builds all five specs under `packaging/rpm/`
 # with `rpmbuild -ba` in a Fedora 43 and an openSUSE Tumbleweed container,
 # lints each spec and each built RPM with `rpmlint`, installs the set,
 # and runs `scoot --version`, the bar's `--check` on its shipped example,
-# the launcher's `--check` on the built-in defaults,
+# the launcher's `--check` on the built-in defaults, the notification
+# daemon's `daemon --check` on its shipped example plus a `Notify` smoke
+# against the running daemon (both on a session bus),
 # and — in the Fedora container, which is what the ticket's "done when"
 # names — the headless smoke test (`scripts/smoke-test.sh`) against the
 # installed binaries. That is the ticket's proof the packages work.
@@ -73,7 +75,7 @@ jobs:
       - name: Install the build, lint and smoke tools
         run: |
           dnf install -y \
-            cargo cargo-deny desktop-file-utils dejavu-sans-fonts foot gcc \
+            cargo cargo-deny dbus-daemon desktop-file-utils dejavu-sans-fonts foot gcc glib2 \
             diffutils ImageMagick jq libinput-devel libseat-devel libxkbcommon-devel pixman-devel \
             procps-ng rpm-build rpmdevtools rpmlint systemd-devel systemd-rpm-macros \
             wayland-devel wayland-protocols-devel wayland-utils
@@ -105,7 +107,7 @@ jobs:
           import re, subprocess
           crate_ver = subprocess.run(["scripts/workspace-version"], check=True,
                                      capture_output=True, text=True).stdout.strip()
-          for spec in ("scoot", "scootbg", "scootbar", "scootlaunch"):
+          for spec in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"):
               text = open(f"packaging/rpm/{spec}.spec").read()
               spec_ver = re.search(r'^Version:\s+(.*)$', text, re.M).group(1).strip()
               status = "ok" if spec_ver == crate_ver else "MISMATCH"
@@ -118,9 +120,9 @@ jobs:
             "$GITHUB_WORKSPACE/rpmbuild/SOURCES/scoot-$ver-vendored.tar.gz"
           ls -l "$GITHUB_WORKSPACE/rpmbuild/SOURCES"
 
-      - name: rpmbuild all four specs
+      - name: rpmbuild all five specs
         run: |
-          for s in scoot scootbg scootbar scootlaunch; do
+          for s in scoot scootbg scootbar scootlaunch scootnotify; do
             rpmbuild -ba --define "_topdir $GITHUB_WORKSPACE/rpmbuild" "packaging/rpm/$s.spec"
           done
           find "$GITHUB_WORKSPACE/rpmbuild/RPMS" "$GITHUB_WORKSPACE/rpmbuild/SRPMS" -name '*.rpm' | sort
@@ -171,7 +173,9 @@ jobs:
 
       # The ticket's proof against the installed binaries: every
       # --version, the bar's --check on its shipped example, the
-      # launcher's --check on the built-in defaults, and the
+      # launcher's --check on the built-in defaults, the notification
+      # daemon's `daemon --check` on its shipped example plus a `Notify`
+      # smoke against the running daemon (both on a session bus), and the
       # headless smoke test with the installed scoot and scootbg.
       - name: Install the set and prove it
         run: |
@@ -183,8 +187,20 @@ jobs:
           scootbg --version
           scootbar --version
           scootlaunch --version
+          scootnotify --version
           scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
           scootlaunch --check
+          dbus-run-session -- scootnotify daemon --check --config /usr/share/doc/scootnotify/notify.toml.example
+          # The daemon on a session bus: it starts headless (no
+          # compositor in this container), serves Notify, and answers
+          # msg list. Own temp HOME and runtime dir, so the control
+          # socket and the id file land nowhere shared; the daemon is
+          # killed by PID on exit below (never by pattern).
+          rm -rf /tmp/notify-smoke-home /tmp/notify-smoke-xdg
+          mkdir -p /tmp/notify-smoke-home /tmp/notify-smoke-xdg
+          chmod 700 /tmp/notify-smoke-xdg
+          HOME=/tmp/notify-smoke-home XDG_RUNTIME_DIR=/tmp/notify-smoke-xdg \
+            dbus-run-session -- scripts/notify-smoke.sh /usr/share/doc/scootnotify/notify.toml.example
           mkdir -p /tmp/rpm-smoke-xdg
           chmod 700 /tmp/rpm-smoke-xdg
           export XDG_RUNTIME_DIR=/tmp/rpm-smoke-xdg SCOOT=/usr/bin/scoot SCOOTBG=/usr/bin/scootbg
@@ -210,7 +226,7 @@ jobs:
     name: rpmbuild + rpmlint + install (openSUSE Tumbleweed, x86_64)
     runs-on: ubuntu-latest
     container: opensuse/tumbleweed:latest
-    # Same four builds against the same staged tarball, proving the
+    # Same five builds against the same staged tarball, proving the
     # specs' SUSE conditionals. No smoke test here: the ticket's "done
     # when" names the Fedora container for it, and the bar --check plus
     # --version runs below prove the installed set starts.
@@ -245,7 +261,7 @@ jobs:
           # nothing goes unproven.)
           zypper --non-interactive remove busybox-gawk
           zypper --non-interactive install --no-recommends \
-            cargo dejavu-fonts gcc git libinput-devel \
+            cargo dbus-1-daemon dejavu-fonts gcc git glib2-tools libinput-devel \
             libpixman-1-0-devel libxkbcommon-devel rpm-build rpmlint \
             seatd-devel systemd-devel systemd-rpm-macros wayland-devel \
             wayland-protocols-devel
@@ -282,7 +298,7 @@ jobs:
           import re, subprocess
           crate_ver = subprocess.run(["scripts/workspace-version"], check=True,
                                      capture_output=True, text=True).stdout.strip()
-          for spec in ("scoot", "scootbg", "scootbar", "scootlaunch"):
+          for spec in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"):
               text = open(f"packaging/rpm/{spec}.spec").read()
               spec_ver = re.search(r'^Version:\s+(.*)$', text, re.M).group(1).strip()
               status = "ok" if spec_ver == crate_ver else "MISMATCH"
@@ -295,8 +311,8 @@ jobs:
           ls -l "$GITHUB_WORKSPACE/rpmbuild/SOURCES"
           echo '::endgroup::'
 
-          echo '::group::rpmbuild all four specs'
-          for s in scoot scootbg scootbar scootlaunch; do
+          echo '::group::rpmbuild all five specs'
+          for s in scoot scootbg scootbar scootlaunch scootnotify; do
             rpmbuild -ba --define "_topdir $GITHUB_WORKSPACE/rpmbuild" "packaging/rpm/$s.spec"
           done
           find "$GITHUB_WORKSPACE/rpmbuild/RPMS" "$GITHUB_WORKSPACE/rpmbuild/SRPMS" -name '*.rpm' | sort
@@ -348,10 +364,22 @@ jobs:
           scootbg --version
           scootbar --version
           scootlaunch --version
+          scootnotify --version
           # %doc lands under /usr/share/doc/packages/ on SUSE (not
           # /usr/share/doc/ as on Fedora).
           scootbar daemon --check --config /usr/share/doc/packages/scootbar/bar.toml.example
           scootlaunch --check
+          dbus-run-session -- scootnotify daemon --check --config /usr/share/doc/packages/scootnotify/notify.toml.example
+          # The daemon on a session bus: it starts headless (no
+          # compositor in this container), serves Notify, and answers
+          # msg list. Own temp HOME and runtime dir, so the control
+          # socket and the id file land nowhere shared; the daemon is
+          # killed by PID on exit below (never by pattern).
+          rm -rf /tmp/notify-smoke-home /tmp/notify-smoke-xdg
+          mkdir -p /tmp/notify-smoke-home /tmp/notify-smoke-xdg
+          chmod 700 /tmp/notify-smoke-xdg
+          HOME=/tmp/notify-smoke-home XDG_RUNTIME_DIR=/tmp/notify-smoke-xdg \
+            dbus-run-session -- scripts/notify-smoke.sh /usr/share/doc/packages/scootnotify/notify.toml.example
           echo '::endgroup::'
 
       - name: Upload the built RPMs and lint logs
