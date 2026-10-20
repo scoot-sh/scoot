@@ -14,12 +14,13 @@ fn an_empty_file_is_the_defaults() {
 #[test]
 fn every_key_sets() {
     let config = parse(
-        b"timeout_low_ms = 1000\ntimeout_normal_ms = 2000\ntimeout_max_ms = 3000\n\
+        "timeout_low_ms = 1000\ntimeout_normal_ms = 2000\ntimeout_max_ms = 3000\n\
           max_live = 7\nrate_per_sec = 3\nrate_burst = 9\n\
           history_max = 32\ndnd_allows_critical = false\n\
           width_px = 400\nmax_visible = 3\nmargin_px = 8\nanchor = \"bottom-left\"\n\
           output = \"HDMI-1\"\nbody_lines = 3\nborder_px = 1\nradius = 4\n\
-          pause_when_idle_secs = 30\nbar_icon_unread = \"●\"\nbar_icon_dnd = \"☾\"\n",
+          pause_when_idle_secs = 30\nbar_icon_unread = \"●\"\nbar_icon_dnd = \"☾\"\n"
+        .as_bytes(),
     )
     .unwrap();
     assert_eq!(config.timeout_low_ms, 1000);
