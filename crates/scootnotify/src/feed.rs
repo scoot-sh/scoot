@@ -484,6 +484,7 @@ fn set_line(payload: &serde_json::Value) -> Vec<u8> {
     if serde_json::to_writer(&mut line, payload).is_err() {
         line.extend_from_slice(b"null");
     }
+    line.push(b'}');
     line.push(b'\n');
     line
 }

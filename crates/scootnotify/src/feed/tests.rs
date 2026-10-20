@@ -192,6 +192,7 @@ fn scan_names_matches_whole_names_only() {
 }
 
 /// One inotify event for `name` (cookie 0, no mask semantics needed).
+/// Events pack with no padding, as the kernel emits them.
 fn push_event(buf: &mut Vec<u8>, name: &str) {
     let bytes = name.as_bytes();
     let len = bytes.len() + 1;
@@ -201,9 +202,6 @@ fn push_event(buf: &mut Vec<u8>, name: &str) {
     buf.extend_from_slice(&(len as u32).to_ne_bytes());
     buf.extend_from_slice(bytes);
     buf.push(0);
-    while buf.len() % 16 != 0 {
-        buf.push(0);
-    }
 }
 
 /// A fake bar: binds `socket`, answers every `set` with `reply`, and
@@ -215,40 +213,21 @@ struct FakeBar {
 }
 
 impl FakeBar {
+    /// Binds `socket` before returning, then answers every `set` with
+    /// `reply`: the first dial cannot lose a bind race.
     fn serve(socket: std::path::PathBuf, reply: &'static str, expect: usize) -> Self {
+        let listener = UnixListener::bind(&socket).expect("the fake bar binds");
+        Self::serve_on(listener, reply, expect)
+    }
+
+    /// Spawns the bind itself, for the late bar: binding creates the
+    /// socket file the feed's watch waits for.
+    fn serve_deferred(socket: std::path::PathBuf, reply: &'static str, expect: usize) -> Self {
         let received = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&received);
         let thread = std::thread::spawn(move || {
             let listener = UnixListener::bind(&socket).expect("the fake bar binds");
-            listener.set_nonblocking(true).expect("nonblocking");
-            let start = Instant::now();
-            let mut served = 0;
-            while served < expect && start.elapsed() < Duration::from_secs(10) {
-                match listener.accept() {
-                    Ok((stream, _)) => {
-                        served += 1;
-                        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-                        let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
-                        let mut reader = BufReader::new(&stream);
-                        let mut line = String::new();
-                        if reader.read_line(&mut line).is_ok()
-                            && let Ok(request) = serde_json::from_str::<serde_json::Value>(&line)
-                            && let Some(value) = request.get("value").cloned()
-                        {
-                            recorded.lock().expect("received locks").push(value);
-                        }
-                        let _ = (&stream).write_all(reply.as_bytes());
-                        let _ = (&stream).flush();
-                    }
-                    Err(error)
-                        if error.kind() == std::io::ErrorKind::WouldBlock =>
-                    {
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                    Err(_) => break,
-                }
-            }
-            served
+            serve_loop(listener, &recorded, reply, expect)
         });
         Self {
             received,
@@ -256,6 +235,58 @@ impl FakeBar {
         }
     }
 
+    fn serve_on(
+        listener: UnixListener,
+        reply: &'static str,
+        expect: usize,
+    ) -> Self {
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&received);
+        let thread = std::thread::spawn(move || serve_loop(listener, &recorded, reply, expect));
+        Self {
+            received,
+            thread: Some(thread),
+        }
+    }
+
+/// Serves `expect` connections on the bound `listener`, recording
+/// each `set` value and answering `reply`.
+fn serve_loop(
+    listener: UnixListener,
+    recorded: &Arc<Mutex<Vec<serde_json::Value>>>,
+    reply: &'static str,
+    expect: usize,
+) -> usize {
+    listener.set_nonblocking(true).expect("nonblocking");
+    let start = Instant::now();
+    let mut served = 0;
+    while served < expect && start.elapsed() < Duration::from_secs(10) {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                served += 1;
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+                let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+                let mut reader = BufReader::new(&stream);
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_ok()
+                    && let Ok(request) = serde_json::from_str::<serde_json::Value>(&line)
+                    && let Some(value) = request.get("value").cloned()
+                {
+                    recorded.lock().expect("received locks").push(value);
+                }
+                let _ = (&stream).write_all(reply.as_bytes());
+                let _ = (&stream).flush();
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(_) => break,
+        }
+    }
+    served
+}
+
+impl FakeBar {
     fn received(&self) -> Vec<serde_json::Value> {
         self.received.lock().expect("received locks").clone()
     }
@@ -381,7 +412,7 @@ fn a_bar_started_later_catches_up_on_the_watch() {
     assert!(feed.owed());
     assert!(feed.poll_fd().is_some());
     // The bar starts later: binding creates the socket file.
-    let bar = FakeBar::serve(socket, "{\"type\":\"ok\"}\n", 1);
+    let bar = FakeBar::serve_deferred(socket, "{\"type\":\"ok\"}\n", 1);
     wait_readable(&mut feed);
     assert!(feed.retry(&store).is_none(), "the owed send goes out on the watch");
     assert!(!feed.owed());
