@@ -12,7 +12,8 @@
 #      each binary against the release's SHA256SUMS before installing it
 #      (the session files come from the same tagged commit); with
 #      --launch it also downloads scootlaunch, the application launcher
-#      (opt-in until it becomes the default); with --notify it also
+#      (the default menu behind `Super+d` on Nix setups, the binary
+#      for hand-written ones); with --notify it also
 #      downloads scootnotify, the notification daemon (opt-in until it
 #      becomes the default, and refused while another daemon owns
 #      org.freedesktop.Notifications)
@@ -97,8 +98,8 @@ Usage: install.sh [options]
                       retired once releases share one vV tag: use --version)
   --no-bar            skip scootbar
   --launch            also install scootlaunch, the keyboard-first
-                      application launcher (opt-in until it becomes
-                      the default)
+                      application launcher (the default menu behind
+                      `Super+d` on Nix setups)
   --notify            also install scootnotify, the notification daemon
                       (opt-in until it becomes the default; refused
                       while another daemon owns

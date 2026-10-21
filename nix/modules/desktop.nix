@@ -91,12 +91,12 @@ let
     launcherRun = {
       combo = "ctrl+alt+space";
       slot = "launcher";
-      blurb = "run mode (PATH executables beside apps)";
+      blurb = "run mode (PATH executables only)";
     };
     clipboard = {
       combo = "super+v";
       slot = "clipboard";
-      blurb = "clipboard picker (`cliphist` through `fuzzel`, `scootlaunch` under the opt-in)";
+      blurb = "clipboard picker (`cliphist` through the launcher's dmenu menu)";
     };
     notifDismiss = {
       combo = "super+n";
@@ -136,12 +136,12 @@ let
     network = {
       combo = "super+w";
       slot = "apps.network";
-      blurb = "WiFi picker (`scoot-network-pick` through `fuzzel`, `scootlaunch` under the opt-in)";
+      blurb = "WiFi picker (`scoot-network-pick` through the launcher's dmenu menu)";
     };
     bluetooth = {
       combo = "super+b";
       slot = "apps.bluetooth";
-      blurb = "Bluetooth picker (`scoot-bluetooth-pick` through `fuzzel`, `scootlaunch` under the opt-in)";
+      blurb = "Bluetooth picker (`scoot-bluetooth-pick` through the launcher's dmenu menu)";
     };
   };
   # Whether a notification state icon is shaped like the bar takes
@@ -517,7 +517,7 @@ in
     # by the `desktop-launcher` child: the launcher on the keymap's
     # `Super+d` (drun: XDG apps from the user's and the system's
     # `XDG_DATA_DIRS`) and `Ctrl+Alt+Space` (run: PATH executables
-    # beside apps), on the `overlay` layer (so it opens above
+    # over scootlaunch's own panel), on the `overlay` layer (so it opens above
     # fullscreen windows) with exclusive keyboard, themed by the look.
     #
     # On with the profile (still individually disable-able); without
@@ -542,16 +542,21 @@ in
           "fuzzel"
           "scootlaunch"
         ];
-        default = "fuzzel";
+        default = "scootlaunch";
         description = ''
-          The program behind `enable`. `fuzzel` (layer-shell `overlay`
-          native, no toolkit, fastest cold start of the maintained set
-          -- see site/src/content/docs/desktop/index.md#launcher for the
-          measured pick) or `scootlaunch` (the keyboard-first launcher:
-          its own panel over the same index, the look's own file instead
-          of CLI color flags, and the pickers and choosers through its
-          `--dmenu` -- see site/src/content/docs/scootlaunch/index.md).
-          The option and the binds stay as they are either way.
+          The program behind `enable`. `scootlaunch` (the keyboard-first
+          launcher: its own panel over the same index, the look's own
+          file instead of CLI color flags, and the pickers and choosers
+          through its `--dmenu` -- see
+          site/src/content/docs/scootlaunch/index.md) or `fuzzel`
+          (layer-shell `overlay` native, no toolkit -- one line back:
+          `desktop.launcher.daemon = "fuzzel"` restores the previous
+          menu, its flags and its frecency cache). The option and the
+          binds stay as they are either way. Dismissing the menu exits
+          1 under scootlaunch against 2 under fuzzel's dmenu, and the
+          run bind lists PATH executables alone under scootlaunch
+          against apps beside executables under fuzzel -- see
+          site/src/content/docs/desktop/index.md#launcher.
         '';
       };
     };
@@ -582,7 +587,7 @@ in
 
       # Which output picker xdpw asks before each cast (its
       # `chooser_type`): `fuzzel` lists every output as a dmenu menu
-      # through the profile's fuzzel (the same `--dmenu` contract the
+      # through the profile's menu (the same `--dmenu` contract the
       # clipboard picker and the launcher speak, themed by the look),
       # `slurp` picks by clicking a screen (xdpw's own `simple`
       # shape), `none` casts `outputName` (or any output) with no
@@ -597,10 +602,10 @@ in
         example = "slurp";
         description = ''
           The output chooser before each screencast. `fuzzel` (a dmenu
-          list of outputs -- the name stays `fuzzel` but runs
-          scootlaunch under the opt-in), `slurp` (click a screen), or
-          `none` (no picker: cast `outputName`, or any output when
-          that is null).
+          list of outputs -- the name stays `fuzzel` but runs the
+          launcher's menu behind `desktop.launcher.daemon`), `slurp`
+          (click a screen), or `none` (no picker: cast `outputName`,
+          or any output when that is null).
         '';
       };
 

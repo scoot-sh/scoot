@@ -15,10 +15,10 @@
 # - `enable = false` manages nothing; a null package is refused by name;
 # - `features` reaches the build as `buildNoDefaultFeatures` +
 #   `buildFeatures` and an empty list builds without SVG;
-# - the desktop profile's opt-in (`desktop.launcher.daemon =
-#   "scootlaunch"`, through a stub of that option subtree) enables this
-#   launcher at `mkDefault` (an explicit value still wins), while the
-#   fuzzel default leaves it alone;
+# - the desktop profile (`desktop.launcher.daemon = "scootlaunch"` by
+#   default, through a stub of that option subtree) enables this
+#   launcher at `mkDefault` (an explicit value still wins), while
+#   `daemon = "fuzzel"` leaves it alone;
 # - there is no unit and no Stylix switch (the launcher holds nothing
 #   when closed; Stylix reaches it only as the `stylix` look);
 # - every `--dmenu` flag every Nix call site passes is in scootlaunch's
@@ -99,7 +99,7 @@ let
     {
       enable ? false,
       launcher ? true,
-      daemon ? "fuzzel",
+      daemon ? "scootlaunch",
     }:
     {
       options.programs.scoot.desktop.enable = lib.mkOption {
@@ -213,10 +213,19 @@ let
   };
   os = evalNixos { enable = true; };
   osOff = evalNixos { };
-  # The profile opt-in: daemon scootlaunch with the launcher slot on.
+  # The profile default: daemon scootlaunch with the launcher slot on.
   optIn = evalHomeProfile {
     enable = true;
     daemon = "scootlaunch";
+  } { };
+  # The same, through the stub default (no daemon spelled out).
+  defaultOn = evalHomeProfile {
+    enable = true;
+  } { };
+  # The escape hatch: daemon fuzzel leaves this launcher alone.
+  optOut = evalHomeProfile {
+    enable = true;
+    daemon = "fuzzel";
   } { };
   optInDisabled =
     evalHomeProfile
@@ -363,9 +372,10 @@ let
       !(plain.config ? systemd.programs) && plain.config.systemd or { } == { };
     "no Stylix switch: Stylix reaches it only as the stylix look" =
       !(settingsOf plain ? stylix) && !(plain.config.programs.scootlaunch ? stylix);
-    "the fuzzel default leaves this launcher alone" =
-      !(optInProfileOff.config.programs.scootlaunch.enable or false) && settingsOf optInProfileOff == { };
-    "the opt-in enables this launcher at mkDefault" = optIn.config.programs.scootlaunch.enable;
+    "daemon fuzzel leaves this launcher alone" =
+      !(optOut.config.programs.scootlaunch.enable or false) && settingsOf optOut == { };
+    "the profile default enables this launcher at mkDefault" =
+      optIn.config.programs.scootlaunch.enable && defaultOn.config.programs.scootlaunch.enable;
     "an explicit disable still wins over the opt-in" =
       !optInDisabled.config.programs.scootlaunch.enable;
     "the opt-in needs the launcher slot on" =

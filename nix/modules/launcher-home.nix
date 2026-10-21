@@ -1,4 +1,4 @@
-# `programs.scoot.desktop.launcher` for home-manager: the fuzzel
+# `programs.scoot.desktop.launcher` for home-manager: the menu
 # package behind the keymap's launcher binds. The option shapes live in
 # `./desktop.nix` (shared with the NixOS side); the `package` default
 # lives here because only this side has `pkgs`. See docs/nix.md
@@ -7,9 +7,10 @@
 # The launcher itself is a wrapper script beside the binds
 # (`keys-home.nix` owns it the way it owns the clipboard picker and the
 # capture scripts: the script needs the keymap's bind context): this
-# side installs the package it runs, which is the one fuzzel the
-# clipboard picker already themes (same derivation, same flags -- see
-# `fuzzel-theme.nix`), so the slot adds no second copy.
+# side installs the package it runs, which is the one menu the
+# clipboard picker already themes (same derivation -- see
+# `fuzzel-theme.nix` for the fuzzel shape, the look layer for the
+# scootlaunch shape), so the slot adds no second copy.
 {
   config,
   lib,
@@ -48,8 +49,9 @@ in
         The launcher package to run the keymap's binds from (must
         speak fuzzel's flags and `--dmenu`: the bar's future pickers
         call that contract, which scootlaunch keeps for the supported
-        set). Follows `desktop.launcher.daemon` (fuzzel or scootlaunch).
-        Null installs nothing. Linux-only: null off Linux.
+        set). Follows `desktop.launcher.daemon` (scootlaunch by
+        default, fuzzel one line away). Null installs nothing.
+        Linux-only: null off Linux.
       '';
     };
   };
@@ -66,7 +68,8 @@ in
           message = ''
             programs.scoot.desktop.launcher.enable is set but
             programs.scoot.desktop.launcher.package is null: set it
-            explicitly (apply the overlay, or point at a fuzzel).
+            explicitly (apply the overlay, or point at a scootlaunch
+            or fuzzel).
           '';
         }
       ];
