@@ -779,9 +779,21 @@
       homeModules =
         let
           hmWrapper =
-            { pkgs, ... }:
+            { pkgs, config, ... }:
             let
               built = self.packages.${pkgs.stdenv.hostPlatform.system} or { };
+              # The launcher's menu behind `desktop.launcher.daemon`,
+              # but only while it names scootlaunch (the default): the
+              # flake's own build on every menu default that follows the
+              # daemon, null where it does not build (Darwin). With
+              # `daemon = "fuzzel"` no definition lands here and the pure
+              # module's nixpkgs fuzzel stands -- the one-line escape
+              # hatch keeps working for flake consumers too. Without
+              # either the slots refuse loudly naming the fix, the way
+              # every Linux-only tool does.
+              scootlaunchMenu = nixpkgs.lib.mkIf (
+                config.programs.scoot.desktop.launcher.daemon == "scootlaunch"
+              ) (nixpkgs.lib.mkDefault (built.scootlaunch or null));
             in
             {
               imports = [ ./nix/modules/home.nix ];
@@ -799,6 +811,11 @@
               # scootbg is Linux-only: null elsewhere (and on Darwin a
               # `[wallpaper]` renders as written, for the Linux box).
               programs.scoot.wallpaper.package = nixpkgs.lib.mkDefault (built.scootbg or null);
+              programs.scoot.desktop.launcher.package = scootlaunchMenu;
+              programs.scoot.desktop.clipboard.menuPackage = scootlaunchMenu;
+              programs.scoot.desktop.apps.network.menuPackage = scootlaunchMenu;
+              programs.scoot.desktop.apps.bluetooth.menuPackage = scootlaunchMenu;
+              programs.scoot.desktop.capture.menuPackage = scootlaunchMenu;
             };
         in
         {
@@ -852,9 +869,17 @@
       nixosModules =
         let
           osWrapper =
-            { pkgs, ... }:
+            { pkgs, config, ... }:
             let
               built = self.packages.${pkgs.stdenv.hostPlatform.system} or { };
+              # The launcher's menu behind `desktop.launcher.daemon`,
+              # but only while it names scootlaunch (the default): the
+              # flake's own build on every menu default that follows the
+              # daemon. With `daemon = "fuzzel"` no definition lands here
+              # and the pure module's nixpkgs fuzzel stands.
+              scootlaunchMenu = nixpkgs.lib.mkIf (
+                config.programs.scoot.desktop.launcher.daemon == "scootlaunch"
+              ) (nixpkgs.lib.mkDefault (built.scootlaunch or null));
             in
             {
               imports = [ ./nix/modules/nixos.nix ];
@@ -863,6 +888,11 @@
               # `scoot-look` build, beside `package` above.
               programs.scoot.lookPackage = nixpkgs.lib.mkDefault (built.scoot-look or null);
               programs.scoot.wallpaper.package = nixpkgs.lib.mkDefault (built.scootbg or null);
+              programs.scoot.desktop.launcher.package = scootlaunchMenu;
+              programs.scoot.desktop.clipboard.menuPackage = scootlaunchMenu;
+              programs.scoot.desktop.apps.network.menuPackage = scootlaunchMenu;
+              programs.scoot.desktop.apps.bluetooth.menuPackage = scootlaunchMenu;
+              programs.scoot.desktop.capture.menuPackage = scootlaunchMenu;
             };
         in
         {

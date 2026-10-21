@@ -53,7 +53,7 @@ the list is diagnosed there too.
 ## Install
 
 The launcher rides the [install script](../start/install/#use-it-every-day)
-with `--launch`, opt-in until it becomes the default. Unified `vX.Y.Z`
+with `--launch`. Unified `vX.Y.Z`
 releases carry a `scootlaunch-<version>-<arch>` binary beside the rest.
 
 ```sh
@@ -78,15 +78,15 @@ so far, not published repositories.
 ## Nix
 
 Two modules, one switch. `programs.scootlaunch` manages the
-launcher's own file; `programs.scoot.desktop.launcher.daemon` picks
-the menu behind the keymap's binds. The look reaches the panel as a
+launcher's own file; the desktop profile already runs the launcher
+behind the keymap's binds. The look reaches the panel as a
 runtime layer: a value you set still wins per key. Stylix reaches it
 only as the `stylix` look — there is no Stylix switch and no unit
 here (nothing runs when the panel is closed).
 
 | Option | Type / default | Example | Reload |
 |---|---|---|---|
-| `programs.scootlaunch.enable` | bool, `false` (`true` with the profile opt-in below) | `true` | rebuild or switch |
+| `programs.scootlaunch.enable` | bool, `false` (`true` with the profile) | `true` | rebuild or switch |
 | `programs.scootlaunch.package` | package or null, the flake's build | `inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scootlaunch` | rebuild or switch |
 | `programs.scootlaunch.features` | list of strings or null, `null` (default features: SVG icons on) | `[ ]` builds without SVG icons | rebuild or switch |
 | `programs.scootlaunch.settings` | TOML table, `{ }` | `{ width_em = 50; rows = 12; }` | next open (the file is read whole at every open) |
@@ -97,10 +97,12 @@ only these settings, verbatim. The keys are the launcher's own
 (`font`, `width_em`, `rows`); anything else is refused by name —
 `--check` says which. An empty file is the built-in defaults.
 
-The opt-in, beside the profile:
+The profile runs scootlaunch behind `Super+d` (drun) and
+`Ctrl+Alt+Space` (run), and the clipboard picker, the WiFi/Bluetooth
+pickers and the screencast chooser through its `--dmenu`:
 
 ```nix title="configuration.nix and home.nix"
-programs.scoot.desktop.launcher.daemon = "scootlaunch";
+programs.scoot.desktop.launcher.daemon = "scootlaunch";  # the default; drop the line
 ```
 
 With it, `scoot-launcher` execs `scootlaunch` with no color flags,
@@ -108,7 +110,7 @@ and the clipboard picker, the WiFi/Bluetooth pickers and the
 screencast chooser run it through `--dmenu` the same way. To manage
 the file beside the switch, also import the module
 (`scoot.homeModules.scootlaunch`, `scoot.nixosModules.scootlaunch`
-on the system side): the daemon switch alone runs the flake's build
+on the system side): the profile runs the flake's build
 with no file. The keys, the panel and the look layer are in [The
 panel](./panel.md).
 
@@ -118,9 +120,8 @@ that menu unthemed (no color flags travel with it), while daemon
 `fuzzel` with a scootlaunch menu stays themed (it accepts the same
 flags as overrides).
 
-To go back, drop the line (or set `"fuzzel"`) and switch again. The
-default stays `"fuzzel"`: nothing changes unless the line names
-`scootlaunch`.
+To go back, set `daemon = "fuzzel"` and switch again — see
+[Migrating from fuzzel](../desktop/#migrating-from-fuzzel).
 
 > **Symptom:** the menu ignores your `fuzzel.ini` font settings.
 >

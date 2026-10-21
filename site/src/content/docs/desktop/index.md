@@ -654,7 +654,7 @@ into the new config; no re-login):
 | `desktop.clipboard.enable` | bool | `true` with the profile | keep history (two watcher units), `wl-copy`/`wl-paste` on `PATH`, the picker bind |
 | `desktop.clipboard.maxItems` | int (at least 1) | `100` | history entries kept, oldest dropped first |
 | `desktop.clipboard.dbPath` | string or null | `null` (cliphist's default) | history db path: absolute, letters, digits and `._/+@-` only; anything else fails evaluation |
-| `desktop.theme.targets.clipboard.enable` | bool | `true` | theme the picker from the look; `false` keeps fuzzel's own style |
+| `desktop.theme.targets.clipboard.enable` | bool | `true` | theme the picker from the look; `false` keeps the menu's own style |
 
 Troubleshooting, by symptom:
 
@@ -665,7 +665,7 @@ Troubleshooting, by symptom:
   `-primary-store`), then `cliphist list`.
 - *`Super+v` opens nothing.* The slot renders that bind only with
   `clipboard.enable` beside the keymap (both on with the profile).
-  Then check the menu: `fuzzel --dmenu` from a terminal — with an
+  Then check the menu: `scootlaunch --dmenu` from a terminal — with an
   empty history it exits at once, which is the picker staying quiet,
   not an error.
 - *Escape clears my clipboard.* It does not: a cancelled pick exits
@@ -673,7 +673,7 @@ Troubleshooting, by symptom:
   manager runs beside this one — only one watcher per selection
   should run.
 - *A password is in the history.* The offering app did not set the
-  hint: delete it (`cliphist list | fuzzel --dmenu | cliphist
+  hint: delete it (`cliphist list | scootlaunch --dmenu | cliphist
   delete`, or `wipe` for all of it) and tell the app to set it.
 - *Copies made while locked are in the history.* The store entry's
   probe failed open: check `scoot-clipboard-store` and the
@@ -692,7 +692,7 @@ profile on, two binds open one menu:
 programs.scoot.desktop = {
   enable = true;
   # The menu on Super+d lists XDG apps, most-launched first;
-  # Ctrl+Alt+Space adds PATH executables beside them:
+  # Ctrl+Alt+Space lists PATH executables on their own panel:
   # launcher.enable = false;  # no menu at all on this box
 };
 ```
@@ -701,21 +701,19 @@ What runs: `Super+d` spawns `scoot-launcher` (drun: every XDG app —
 the user's `~/.local/share/applications` plus the system's
 `XDG_DATA_DIRS`, most-launched first), `Ctrl+Alt+Space` spawns the
 same script with `--list-executables-in-path` (run: PATH executables
-beside the apps). The menu draws on the **`overlay`** layer with
-exclusive keyboard — above fullscreen windows (fuzzel's own default
-is `top`, which hides under fullscreen), taking every key while open. There is no daemon, no unit, no
+on their own panel). The menu draws on the **`overlay`** layer with
+exclusive keyboard — above fullscreen windows, taking every key while
+open. There is no daemon, no unit, no
 config file: the launcher holds nothing when closed (no process, no
-memory — verified below). The ranking lives in fuzzel's own cache
-(`$XDG_CACHE_HOME/fuzzel`); a second press while it is open does nothing (fuzzel holds
-a per-display lock and refuses a second instance).
+memory — verified below). The ranking lives in scootlaunch's own history
+(`$XDG_STATE_HOME/scootlaunch/history`); a second press while it is open
+dismisses it, so one bind toggles.
 
 The menu follows the look: background and text, selection and border
-from its palette (the exact flags are pinned in `nix/tests.nix` —
-the same seven leaves the clipboard picker carries, one menu one
-palette), a value you set in fuzzel's own config (`fuzzel.ini`: font,
-lines, and everything these flags leave alone) winning per key as
-usual, `theme.targets.launcher.enable = false` dropping the themed
-flags while the rest follows the look. In music-desk paper and ink:
+from its palette, through the look layer at every open (a value you set in
+your own `launch.toml` — font, width, rows — winning per key as
+usual, `theme.targets.launcher.enable = false` leaving the whole look
+out while the rest follows it). In music-desk paper and ink:
 
 ![The launcher over the session: the app list in music-desk paper and ink](../../../assets/launcher-music-desk.png)
 
@@ -724,35 +722,36 @@ captured from a real session through scoot's own IPC screenshot path):
 
 ![The launcher over the session: the app list in moonrise](../../../assets/launcher-moonrise.png)
 
-Why fuzzel, measured at the pinned rev (`8ce4ef6`, `aarch64-linux`:
-full closures by `nix path-info --closure-size`, marginals as new
-store paths over the profile's own tools, cold start as exec to first
-mapped frame under a headless scoot on the M2, screenshot-diff poll
-at ~10 ms, three runs each; RSS as VmRSS while the menu is mapped):
-
-| Tool | Version | Full closure | New over profile | Cold first frame | RSS open | Why / why not |
-|---|---|---|---|---|---|---|
-| fuzzel | 1.14.1 | 152.4 MiB | 41.7 MiB (4 paths) alone, **0 with the clipboard** (the picker already ships this exact derivation — the launcher adds one wrapper script) | 57 / 50 / 52 ms | ~22 MB | the pick: layer-shell native, no toolkit, sub-60 ms cold, nothing held when closed |
-| wofi | 1.5.3 | 342.3 MiB | 67.4 MiB (16 paths) | 135 / 80 / 73 ms | ~44 MB | heavier than fuzzel and GTK-based, slowest cold start of the set |
-| tofi | 0.9.1 | 113.0 MiB | 0.2 MiB (1 path) | 62 / 41 / 46 ms | ~26 MB | lighter alone — passed over for the reuse: a second menu tool would theme, document and maintain twice for no saving once fuzzel ships for the picker |
-| bemenu | 0.6.23 | 117.4 MiB | 0.6 MiB (2 paths: itself plus libxinerama) | 57 / 33 / 36 ms | ~18 MB | same call as tofi |
+Why scootlaunch, measured against fuzzel 1.14.1 on the M2
+(`dev/benchmarks/launcher-ab-2026-10.md`, N=30 per cell, release
+binaries, same session): tied inside the method floor up to 1000
+entries, clearly faster at 5000 (101–102 vs 184 ms median
+launch-to-first-frame), keystroke-to-frame flat at ~25 ms while
+fuzzel climbs to 53 ms at 5000, a third of the memory (8.7 vs
+18.0 MB PSS at 5000), zero idle cost and zero resident cost on both
+sides. Ranking agrees on the winner for all 10 probes.
 
 The dmenu contract is the slot's other half, and the reason the
 clipboard picker already speaks it: lines on stdin, the selection on
-stdout (`fuzzel --dmenu`, with `--no-run-if-empty` staying quiet on
+stdout, with `--no-run-if-empty` staying quiet on
 an empty history and `--only-match` refusing custom entries — the
-pickers' flags). Proven live, not just documented: `printf
-'alpha\nbeta\ngamma\n' | fuzzel --dmenu`, the filter and Return driven
-through scoot's own IPC, prints `beta` and exits 0 — and
-`scootlaunch --dmenu` keeps that shape, so the bar's WiFi / power /
-audio pickers swap daemons without changing a call site (see
-[the launcher entry](https://github.com/scoot-sh/scoot/tree/main/docs/scootbar/backlog/launcher.md):
-`desktop.launcher.daemon = "scootlaunch"` flips the slot to it). With
-the switch, `Super+d` opens the scootlaunch panel — its own overlay
-exclusive-keyboard surface with ranked search, drawn from the look —
-instead of fuzzel (see [scootlaunch](../scootlaunch/)).
+pickers' flags. Proven live, not just documented: `printf
+'alpha\nbeta\ngamma\n' | scootlaunch --dmenu`, the filter and Return driven
+through scoot's own IPC, prints `beta` and exits 0. The clipboard
+picker, the WiFi/Bluetooth pickers and the screencast chooser run the
+same switch through its `--dmenu`, and the bar's WiFi / power /
+audio pickers swap daemons without changing a call site. Two
+script-visible differences from fuzzel's dmenu, both handled inside
+the slot's scripts (a cancel exits 0 from every picker either way):
 
-Launched apps land in the session: fuzzel
+- Dismissing the menu exits 1. Fuzzel's dmenu exits 2 there (its app
+  mode exits 0). A script that keys on fuzzel's 2 breaks under the
+  default — treat any nonzero exit as a dismiss.
+- The run bind lists PATH executables on their own panel. Fuzzel's
+  `--list-executables-in-path` adds them beside the apps. The flag
+  spelling is the same behind both binds; what it lists is not.
+
+Launched apps land in the session: scootlaunch
 forks the picked entry (a `Terminal=true` entry through your
 terminal) and exits, and the window maps and takes focus through the
 usual activation path. Over the session lock the binds never fire at
@@ -766,10 +765,28 @@ re-render into `[binds]`; no re-login, `scoot msg reload` is enough):
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `desktop.launcher.enable` | bool | `true` with the profile | the package on PATH and both binds bound (drun on `Super+d`, run on `Ctrl+Alt+Space`) |
-| `desktop.launcher.daemon` | enum (`"fuzzel"`, `"scootlaunch"`) | `"fuzzel"` | the program behind `enable` (`scootlaunch` draws its own panel from the look and runs the pickers through its `--dmenu` — see [scootlaunch](../scootlaunch/)) |
-| `desktop.launcher.package` | package or null | fuzzel (Linux-only: null off Linux) | point at your own fuzzel build; null with the switch on fails evaluation naming it |
-| `desktop.theme.targets.launcher.enable` | bool | `true` | theme the menu from the look (background and text, selection and border); `false` keeps fuzzel's own style |
+| `desktop.launcher.daemon` | enum (`"scootlaunch"`, `"fuzzel"`) | `"scootlaunch"` | the program behind `enable` (`fuzzel` is one line back: its color flags, its frecency cache, its additive run list — see [Migrating from fuzzel](#migrating-from-fuzzel)) |
+| `desktop.launcher.package` | package or null | scootlaunch (Linux-only: null off Linux) | point at your own scootlaunch build; null with the switch on fails evaluation naming it |
+| `desktop.theme.targets.launcher.enable` | bool | `true` | theme the menu from the look (background and text, selection and border); `false` leaves the menu's own style standing |
 | `desktop.keys.binds.launcher.enable` / `.launcherRun.enable` | bool | `true` | bind the drun / run menu (`false` leaves that combo unbound) |
+
+### Migrating from fuzzel
+
+One line restores the previous menu:
+
+```nix title="configuration.nix and home.nix"
+programs.scoot.desktop.launcher.daemon = "fuzzel";
+```
+
+What changes back with it: the menu reads `fuzzel.ini` again (font,
+lines, borders — scootlaunch never reads that file; it takes `font`,
+`width_em`, `rows` from `programs.scootlaunch.settings` instead),
+the look's seven colors travel as CLI flags again, frecency comes
+from `$XDG_CACHE_HOME/fuzzel` instead of
+`$XDG_STATE_HOME/scootlaunch/history`, a dismiss exits 2 from dmenu
+instead of 1, and the run bind lists apps beside PATH executables
+instead of executables alone. The binds, the wrapper name
+(`scoot-launcher`) and every picker stay as they are.
 
 Troubleshooting, by symptom:
 
@@ -777,25 +794,22 @@ Troubleshooting, by symptom:
   those binds only with `launcher.enable` beside the keymap (both on
   with the profile); either off leaves the combo unbound. Then check
   the binary: `scoot-launcher` from a terminal — outside the session
-  it still lists apps (it is just fuzzel with flags), so a failure
-  there names fuzzel's own cause (no compositor to map on, a broken
-  `fuzzel.ini`).
-- *The menu lists no apps.* fuzzel found no `.desktop` files: it
+  it still lists apps, so a failure there names the cause (no
+  compositor to map on, a bad `launch.toml` — `scootlaunch --check`
+  says which).
+- *The menu lists no apps.* scootlaunch found no `.desktop` files: it
   searches the `applications` subdirectory of `XDG_DATA_HOME` and
   `XDG_DATA_DIRS`. Inside the session both are set (try `echo
   $XDG_DATA_DIRS` in a terminal); over ssh they may be empty.
 - *The wrong app keeps winning.* The
-  most-launched sorts first. Reset it by clearing the cache
-  (`rm ~/.cache/fuzzel` with the menu closed), or turn it off for one
-  class of invocation with `--cache=/dev/null`.
-- *My `fuzzel.ini` font is ignored.* Only the seven color
-  leaves travel as CLI flags (which beat the file, as CLI does) —
-  font, lines, borders and everything else still come from your
-  config. A color set in both places loses to the look (or to
-  `theme.targets.launcher.enable = false`, which drops the flags and
-  leaves the whole file standing).
+  most-launched sorts first. Reset it by deleting the history
+  (`rm ~/.local/state/scootlaunch/history` with the menu closed).
+- *My `launch.toml` font is ignored.* The file is read whole at every
+  open — a bad file refuses loudly instead (`scootlaunch --check`
+  names the key). With no file the first well-known font file wins;
+  install DejaVu or set `font` to a file you have.
 - *Two menus stack.* They cannot from these binds: the second press
-  finds fuzzel's per-display lock and exits. A second menu means a
+  dismisses the open panel. A second menu means a
   second launcher (another menu tool running beside this one): turn
   this one off (`launcher.enable = false`) or uninstall the other.
 
@@ -844,9 +858,9 @@ look's ring and accent (slurp's own style without a look, or with
 `theme.targets.capture.enable = false`).
 
 Before each cast, xdpw asks *which screen*: a dmenu list of every
-output through the profile's fuzzel — the same `--dmenu` contract
-the clipboard picker and the launcher speak, themed from the same
-seven look roles, so the three menus read as one. The list, not a
+output through the profile's menu — the same `--dmenu` contract
+the clipboard picker and the launcher speak, themed from the look,
+so the three menus read as one. The list, not a
 click, is the default on purpose: in a Meet flow the call lives on
 one screen while the thing to share is on the other, and a menu
 names outputs from the keyboard where a click-picker needs the
@@ -880,7 +894,7 @@ file and the binds re-render; no re-login):
 | `desktop.capture.chooser` | enum (`"fuzzel"`, `"slurp"`, `"none"`) | `"fuzzel"` | the output picker before each cast (dmenu list, click a screen, or no picker) |
 | `desktop.capture.outputName` | string or null | `null` (any output) | the output `chooser = "none"` casts (a connector name, e.g. `"eDP-1"`); read only with `chooser = "none"` |
 | `desktop.capture.maxFps` | int (at least 0) | `30` | most frames per second on a cast; `0` means no limit |
-| `desktop.capture.grimPackage` / `.slurpPackage` / `.menuPackage` / `.wlClipboardPackage` | package or null | grim / slurp / fuzzel / wl-clipboard (Linux-only: null off Linux) | point at your own builds; null with the switch on fails evaluation naming it (grim below 1.5.0 and the wlr backend below 0.8.4 fail the same way) |
+| `desktop.capture.grimPackage` / `.slurpPackage` / `.menuPackage` / `.wlClipboardPackage` | package or null | grim / slurp / scootlaunch / wl-clipboard (Linux-only: null off Linux) | point at your own builds; null with the switch on fails evaluation naming it (grim below 1.5.0 and the wlr backend below 0.8.4 fail the same way) |
 | `desktop.capture.portalWlrPackage` / `.portalGtkPackage` | package or null | xdg-desktop-portal-wlr / -gtk (NixOS side; Linux-only: null off Linux) | the backends themselves; null with the switch on fails evaluation naming it |
 | `desktop.theme.targets.capture.enable` | bool | `true` | theme the chooser and the region picker from the look; `false` keeps their own style |
 | `desktop.keys.binds.captureOutput.enable` / `.captureRegion.enable` / `.captureClipboard.enable` | bool | `true` | bind that screenshot (`false` leaves its combo unbound) |
@@ -1544,7 +1558,7 @@ bar's own scan), and a click on the bluetooth module (the whole
 power, which would drop a Bluetooth keyboard with one stray click, so
 the profile rebinds the picker in its place (the module's own default click is the power toggle). The bluetooth module's
 `menu` action (`scootbar msg invoke bluetooth menu`) opens the picker
-fed the bar's device list. Both are fuzzel menus through the
+fed the bar's device list. Both are dmenu menus through the
 [launcher's dmenu contract](#launcher), themed like it, and both are
 scripts over the stock CLIs (`nmcli`, `bluetoothctl`): nothing runs
 between picks.
@@ -1649,10 +1663,10 @@ re-render into `[binds]`, so `scoot msg reload` is enough):
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `desktop.apps.network.enable` | bool | `true` with the profile | `nmcli` and the picker on `PATH`, `Super+w` bound, the bar's network module opening the picker |
-| `desktop.apps.network.cliPackage` / `.menuPackage` | package or null | networkmanager / fuzzel (Linux-only: null off Linux) | point at your own builds (the menu is the launcher's fuzzel, one derivation) |
+| `desktop.apps.network.cliPackage` / `.menuPackage` | package or null | networkmanager / scootlaunch (Linux-only: null off Linux) | point at your own builds (the menu is the launcher's own, one derivation) |
 | `desktop.apps.bluetooth.enable` | bool | `true` with the profile | `bluetoothctl` and the picker on `PATH`, `Super+b` bound, a click on the bar's bluetooth module (and its `menu` action) opening the picker |
-| `desktop.apps.bluetooth.cliPackage` / `.menuPackage` | package or null | bluez / fuzzel (Linux-only: null off Linux) | same |
-| `desktop.theme.targets.network.enable` / `.bluetooth.enable` | bool | `true` | theme the picker from the look; `false` keeps fuzzel's own style |
+| `desktop.apps.bluetooth.cliPackage` / `.menuPackage` | package or null | bluez / scootlaunch (Linux-only: null off Linux) | same |
+| `desktop.theme.targets.network.enable` / `.bluetooth.enable` | bool | `true` | theme the picker from the look; `false` keeps the menu's own style |
 | `desktop.keys.binds.network.enable` / `.bluetooth.enable` | bool | `true` | bind `Super+w` / `Super+b` (`false` leaves that combo unbound) |
 
 The bar half needs the bar module imported and the module built in
@@ -1704,8 +1718,8 @@ tools scoot does not ship, so they live in the profile.
 | `XF86AudioMicMute` | default source mute toggle | PipeWire running |
 | `XF86AudioPlay` / `Pause` / `Stop` / `Next` / `Prev` | play-pause / pause / stop / next / previous | a player speaking MPRIS |
 | `Super+Escape` | lock (through logind) | the locker |
-| `Super+d` | launcher (XDG apps) | `launcher.enable` (fuzzel drun) |
-| `Ctrl+Alt+Space` | run mode (PATH executables beside apps) | `launcher.enable` (fuzzel `--list-executables-in-path`) |
+| `Super+d` | launcher (XDG apps) | `launcher.enable` (scootlaunch panel) |
+| `Ctrl+Alt+Space` | run mode (PATH executables alone) | `launcher.enable` (scootlaunch `--run`) |
 | `Super+v` | clipboard picker | `clipboard.enable` |
 | `Super+n` | dismiss visible notifications | `notifications.enable` |
 | `Super+Shift+n` | do-not-disturb toggle | `notifications.enable` |
@@ -1726,8 +1740,8 @@ hardware keysym and every `Super` combo above has no overlap with the
 compositor defaults, including `Super+Shift+e` (quit) and
 `Super+Space` (float focus).
 
-Why these two combos: `Super+d` is the launcher in niri and in
-fuzzel's own documentation, and `Super+Space` — the other candidate —
+Why these two combos: `Super+d` is the launcher in niri, and
+`Super+Space` — the other candidate —
 already moves focus between floating windows and the strip, so taking
 it would rename a shipped default out from under existing users.
 `Ctrl+Alt+Space` keeps the run menu on the combo the old `wofi`
@@ -2557,11 +2571,11 @@ child, so those children fill bodies without renaming options:
 
 | Slot | Type | Default | Child |
 |---|---|---|---|
-| `desktop.launcher.enable` (+ `daemon`) | bool (+ enum, package) | `true` ([Launcher](#launcher): fuzzel on `Super+d` and `Ctrl+Alt+Space`, overlay layer, themed, nothing held when closed) | launcher (fuzzel now, scootlaunch later) |
+| `desktop.launcher.enable` (+ `daemon`) | bool (+ enum, package) | `true` ([Launcher](#launcher): scootlaunch on `Super+d` and `Ctrl+Alt+Space`, overlay layer, themed, nothing held when closed) | launcher (scootlaunch; fuzzel one line away) |
 | `desktop.capture.enable` | bool + packages | `true` ([Screenshots and screen sharing](#screenshots-and-screen-sharing): portal backends, PipeWire, grim + slurp, the output chooser) |
 | `desktop.auth.enable` / `desktop.secrets.enable` | bool + packages | `true` ([Privilege prompts and the keyring](#privilege-prompts-and-the-keyring): polkit-gnome agent spawned by the session leader, gnome-keyring D-Bus activated with one unlock per login) | polkit agent + keyring |
 | `desktop.audio.enable` | bool + package | `true` ([Sound, brightness keys and the on-screen display](#sound-brightness-keys-and-the-on-screen-display): PipeWire with WirePlumber, the OSD on `overlay`, the binds through its scripts) |
-| `desktop.clipboard.enable` (+ `maxItems`, `dbPath`, three packages) | bool (+ int, path, packages) | `true` ([Clipboard](#clipboard): history kept, picker bound, wiped at lock) | clipboard persistence + history (lean cliphist + wl-clipboard + fuzzel) |
+| `desktop.clipboard.enable` (+ `maxItems`, `dbPath`, three packages) | bool (+ int, path, packages) | `true` ([Clipboard](#clipboard): history kept, picker bound, wiped at lock) | clipboard persistence + history (lean cliphist + wl-clipboard + the launcher's menu) |
 | `desktop.nightlight.enable` | bool + package | `true` ([Night light](#night-light): wlsunset on the manual schedule, gammastep for location mode, themed by the look) | night light (wlsunset now, gammastep beside it; a future scoot-native keeps the names) |
 | `desktop.power.enable` | bool + package | `false` (opt-in, never with the profile — [Power](#power): profiles on `Super+p`, lid/low-battery suspend, charge limit) | power profiles, suspend, charge limit |
 | `desktop.theme.enable` | bool + package | `false` | GTK/Qt theme, dark mode |

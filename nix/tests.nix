@@ -70,9 +70,9 @@
 #   Darwin neither the overlay nor `packages` has one; its Cargo
 #   features reach the build through `.override` the same way; the
 #   module renders only the user's `settings` (no look layer); and the
-#   profile's opt-in (`desktop.launcher.daemon = "scootlaunch"`) puts
-#   the same derivation behind the launcher and every menu with no
-#   color flags.
+#   profile runs it by default (`desktop.launcher.daemon =
+#   "scootlaunch"`) behind the launcher and every menu with no
+#   color flags (`daemon = "fuzzel"` stays one line away).
 # - scootnotify (docs/scootbar/backlog/notify-nix.md): the overlay
 #   provides `pkgs.scootnotify` on Linux, the flake's own build; on
 #   Darwin neither the overlay nor `packages` has one; the module
@@ -155,18 +155,19 @@
 #   profile -- a lean cliphist watched by `wl-paste` (one watcher per
 #   selection, into one history), `wl-copy`/`wl-paste` on PATH, the
 #   history picker on the keymap's `Super+v` (cliphist through
-#   fuzzel's dmenu mode, themed by the look unless
+#   the launcher's dmenu menu, themed by the look unless
 #   `theme.targets.clipboard.enable` opts out) and the history wiped
 #   on the idle policy's lock lines; a null tool, a zero `maxItems`
 #   and a non-absolute or shell-special `dbPath` each fail eval;
 #   the launcher (`desktop-launcher` child) runs with the profile --
-#   the daemon behind `launcher.daemon` (`fuzzel` by default,
-#   `scootlaunch` opted in) on the keymap's `Super+d` (drun: XDG apps)
-#   and `Ctrl+Alt+Space` (run: PATH executables beside apps) through
+#   the daemon behind `launcher.daemon` (`scootlaunch` by default,
+#   `fuzzel` one line away) on the keymap's `Super+d` (drun: XDG apps)
+#   and `Ctrl+Alt+Space` (run: PATH executables over scootlaunch's own
+#   panel) through
 #   one wrapper script, on the `overlay` layer (above fullscreen) with
 #   exclusive keyboard, themed by the look unless
 #   `theme.targets.launcher.enable` opts out, holding nothing when
-#   closed; with `scootlaunch` the same derivation sits behind the
+#   closed; the same derivation sits behind the
 #   launcher and every menu (no color flags: the look arrives through
 #   the layer); a null package and an unknown `daemon` each fail eval;
 #   the capture stack (`desktop-capture` child) runs with the
@@ -177,8 +178,8 @@
 #   plus `slurp` for the keymap's three screenshot binds (`Print`
 #   every output to file, `Shift+Print` a region to file,
 #   `Ctrl+Print` a region to the clipboard), and the output chooser
-#   xdpw asks before each cast (a dmenu list through fuzzel by
-#   default, click-to-pick through slurp or no picker on a fixed
+#   xdpw asks before each cast (a dmenu list through the launcher's
+#   menu by default, click-to-pick through slurp or no picker on a fixed
 #   output, themed by the look unless
 #   `theme.targets.capture.enable` opts out); a null tool, a
 #   too-old backend or grim, a negative frame cap and an empty
@@ -822,6 +823,20 @@ let
       default = false;
     };
   };
+  # The package set the pure-module evaluations below resolve against:
+  # the pinned nixpkgs carries no scootlaunch (the flake's own build
+  # reaches users through the overlay or the flake wrappers), so the
+  # launcher default's package -- and every menu default following the
+  # daemon -- would resolve to null and refuse loudly there. The test
+  # set layers the same stand-in the scootlaunch evaluations already
+  # use, so the pure modules resolve the default the way a nixpkgs
+  # shipping scootlaunch would. Two paths stay pinned against other
+  # sets: the no-overlay refusal (null, failing loudly) against raw
+  # `pkgs` once below, and the flake's real build through `overlaid`
+  # and the flake wrappers.
+  testPkgs = pkgs.appendOverlays [
+    (final: prev: { scootlaunch = fakeLaunchScoot; })
+  ];
   evalHomeModules =
     extra: cfg:
     lib.evalModules {
@@ -841,7 +856,9 @@ let
         })
       ]
       ++ extra;
-      specialArgs = { inherit pkgs; };
+      specialArgs = {
+        pkgs = testPkgs;
+      };
     };
   evalHome = evalHomeModules [ ];
 
@@ -1153,7 +1170,9 @@ let
           // cfg;
         })
       ];
-      specialArgs = { inherit pkgs; };
+      specialArgs = {
+        pkgs = testPkgs;
+      };
     };
 
   # The pure NixOS module with `pkgs` as given. Every configuration
@@ -1203,11 +1222,11 @@ let
         modulesPath = "${pkgs'.path}/nixos/modules";
       };
     };
-  evalNixosBare = evalNixosWith [ ./modules/nixos.nix ] pkgs;
+  evalNixosBare = evalNixosWith [ ./modules/nixos.nix ] testPkgs;
   evalNixos = evalNixosWith [
     ./modules/nixos.nix
     { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
-  ] pkgs;
+  ] testPkgs;
 
   # Like `evalHomeStylix` for the NixOS side: the full Stylix stub
   # beside the NixOS module (the greeter's regreet surroundings ride
@@ -1230,8 +1249,8 @@ let
         })
       ];
       specialArgs = {
-        pkgs = pkgs;
-        modulesPath = "${pkgs.path}/nixos/modules";
+        pkgs = testPkgs;
+        modulesPath = "${testPkgs.path}/nixos/modules";
       };
     };
 
@@ -1263,6 +1282,8 @@ let
       chmod +x $out/bin/scootlaunch
     '').overrideAttrs
       (old: {
+        pname = "scootlaunch";
+        __intentionallyOverridingVersion = true;
         meta = (old.meta or { }) // {
           mainProgram = "scootlaunch";
         };
@@ -1855,8 +1876,8 @@ let
         ({ config, ... }: { programs.scoot = cfg; } // extra)
       ];
       specialArgs = {
-        pkgs = pkgs;
-        modulesPath = "${pkgs.path}/nixos/modules";
+        pkgs = testPkgs;
+        modulesPath = "${testPkgs.path}/nixos/modules";
       };
     };
   # What a real configuration provides too: nixpkgs' regreet module
@@ -2571,7 +2592,15 @@ let
     desktop.enable = true;
     look = "music-desk";
   };
-  # ...without a look: the slot runs unthemed (fuzzel's own colors --
+  # ...on the fuzzel escape hatch (music-desk, like `hmClip`): the
+  # fuzzel-shape picker the content checks read.
+  hmClipFuzzel = evalHome {
+    enable = true;
+    desktop.enable = true;
+    look = "music-desk";
+    desktop.launcher.daemon = "fuzzel";
+  };
+  # ...without a look: the slot runs unthemed (the menu's own style --
   # pinned by content below).
   hmClipNoLook = evalHome {
     enable = true;
@@ -2610,7 +2639,7 @@ let
     desktop.clipboard.maxItems = 250;
     desktop.clipboard.dbPath = "/home/scoot-test/.cache/cliphist-test/db";
   };
-  # ...opted out of picker theming (the look leaves fuzzel alone).
+  # ...opted out of picker theming (the look leaves the menu alone).
   hmClipTargetOff = evalHome {
     enable = true;
     desktop.enable = true;
@@ -2623,6 +2652,7 @@ let
     enable = true;
     desktop.enable = true;
     look = "radial-burst";
+    desktop.launcher.daemon = "fuzzel";
   };
   # Refusals: the slot with each tool missing (pinned by message in
   # `_clipPins`)...
@@ -2715,7 +2745,15 @@ let
     desktop.enable = true;
     look = "music-desk";
   };
-  # ...without a look: the slots run unthemed (fuzzel's own colors --
+  # ...on the fuzzel escape hatch (music-desk, like `hmApps`): the
+  # fuzzel-shape pickers the content checks read.
+  hmAppsFuzzel = evalHome {
+    enable = true;
+    desktop.enable = true;
+    look = "music-desk";
+    desktop.launcher.daemon = "fuzzel";
+  };
+  # ...without a look: the slots run unthemed (the menus' own style --
   # pinned by content below).
   hmAppsNoLook = evalHome {
     enable = true;
@@ -2761,7 +2799,7 @@ let
     desktop.apps.bluetooth.enable = true;
     desktop.automount.enable = true;
   };
-  # ...opted out of picker theming (the look leaves fuzzel alone).
+  # ...opted out of picker theming (the look leaves the menu alone).
   hmAppsTargetOff = evalHome {
     enable = true;
     desktop.enable = true;
@@ -3057,6 +3095,7 @@ let
   hmAppsNetStubThemed = evalHome {
     enable = true;
     look = "music-desk";
+    desktop.launcher.daemon = "fuzzel";
     desktop.apps.network.enable = true;
     desktop.apps.network.cliPackage = appsStubs;
     desktop.apps.network.menuPackage = appsStubs;
@@ -3076,9 +3115,9 @@ let
     ps.pyyaml
   ]);
   # The themed pickers (music-desk roles as fuzzel CLI colors, opaque
-  # -- pinned by content below).
-  appsNetPickThemed = slotScriptBin hmApps "scoot-network-pick";
-  appsBluePickThemed = slotScriptBin hmApps "scoot-bluetooth-pick";
+  # -- pinned by content below, from the escape-hatch evaluation).
+  appsNetPickThemed = slotScriptBin hmAppsFuzzel "scoot-network-pick";
+  appsBluePickThemed = slotScriptBin hmAppsFuzzel "scoot-bluetooth-pick";
   appsNetPickNoLook = slotScriptBin hmAppsNoLook "scoot-network-pick";
   appsBluePickTargetOff = slotScriptBin hmAppsTargetOff "scoot-bluetooth-pick";
 
@@ -3300,6 +3339,7 @@ let
     enable = true;
     desktop.enable = true;
     look = null;
+    desktop.launcher.daemon = "fuzzel";
   };
   # ...the slot off (the profile turns it on, like the idle policy;
   # the switch back off disables just its half).
@@ -3320,28 +3360,33 @@ let
     desktop.enable = true;
     look = "music-desk";
     desktop.theme.targets.launcher.enable = false;
+    desktop.launcher.daemon = "fuzzel";
   };
   # ...one per remaining look: the themed flags pinned by content
-  # below (music-desk rides on `hmLaunch`).
+  # below (music-desk rides on `hmLaunchFuzzel`).
   hmLaunchLookVinyl = evalHome {
     enable = true;
     desktop.enable = true;
     look = "vinyl-sunset";
+    desktop.launcher.daemon = "fuzzel";
   };
   hmLaunchLookBurst = evalHome {
     enable = true;
     desktop.enable = true;
     look = "radial-burst";
+    desktop.launcher.daemon = "fuzzel";
   };
   hmLaunchLookMoon = evalHome {
     enable = true;
     desktop.enable = true;
     look = "moonrise";
+    desktop.launcher.daemon = "fuzzel";
   };
   hmLaunchLookGinger = evalHome {
     enable = true;
     desktop.enable = true;
     look = "ginger-night";
+    desktop.launcher.daemon = "fuzzel";
   };
   # Refusals: the slot with no launcher to run it (pinned by message
   # in `_launchPins`)...
@@ -3361,12 +3406,24 @@ let
         desktop.launcher.daemon = "bogus-daemon";
       }).config.programs.scoot.desktop.launcher.daemon;
 
+  # ...opted back into fuzzel: the one-line escape hatch (music-desk,
+  # like `hmLaunch`, nothing explicit but the daemon). Stock nixpkgs
+  # fuzzel behind the slot and every menu, byte-identical to the
+  # pre-flip default -- the fuzzel content pins below read from here.
+  hmLaunchFuzzel = evalHome {
+    enable = true;
+    desktop.enable = true;
+    look = "music-desk";
+    desktop.launcher.daemon = "fuzzel";
+  };
+
   # ...opted into scootlaunch: the daemon switch with the look behind
   # it (music-desk, like `hmLaunch`). The launcher package is explicit
-  # (the pinned nixpkgs has no scootlaunch: the flake's own build is
-  # the default only with the overlay, pinned with `overlaid` below);
-  # every menu default follows the daemon on its own, so the same
-  # explicit derivation stands in for each here.
+  # (the pinned nixpkgs has no scootlaunch of its own: the test set
+  # layers the same stand-in, and the flake's own build is the default
+  # with the overlay, pinned with `overlaid` below); every menu
+  # default follows the daemon on its own, so the same explicit
+  # derivation stands in for each here.
   hmLaunchScoot = evalHome {
     enable = true;
     desktop.enable = true;
@@ -3377,6 +3434,16 @@ let
     desktop.apps.network.menuPackage = fakeLaunchScoot;
     desktop.apps.bluetooth.menuPackage = fakeLaunchScoot;
     desktop.capture.menuPackage = fakeLaunchScoot;
+  };
+
+  # ...the profile on against raw nixpkgs (no scootlaunch stand-in, no
+  # overlay, no wrapper): the launcher default's package and every menu
+  # following it are null, and the slots refuse loudly instead of
+  # installing nothing silently.
+  hmLaunchNoOverlay = evalHomeWith ./modules/home.nix pkgs {
+    enable = true;
+    desktop.enable = true;
+    look = null;
   };
 
   # --- launcher system evaluations ---
@@ -3408,12 +3475,21 @@ let
     desktop.enable = true;
     look = "music-desk";
   };
+  # ...on the fuzzel escape hatch (music-desk, like `hmCapture`): the
+  # fuzzel-shape chooser the content checks read.
+  hmCaptureFuzzel = evalHome {
+    enable = true;
+    desktop.enable = true;
+    look = "music-desk";
+    desktop.launcher.daemon = "fuzzel";
+  };
   # ...without a look: the slot runs unthemed (fuzzel's and slurp's
   # own colors -- pinned by content below).
   hmCaptureNoLook = evalHome {
     enable = true;
     desktop.enable = true;
     look = null;
+    desktop.launcher.daemon = "fuzzel";
   };
   # ...the slot off (the profile turns it on; the switch back off
   # disables just its half: no tools, no chooser file, no binds).
@@ -4134,7 +4210,7 @@ let
         { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
         { services.logind.settings.Login.HandleLidSwitch = "ignore"; }
       ]
-      pkgs
+      testPkgs
       {
         enable = true;
         package = fakePkg;
@@ -4171,7 +4247,7 @@ let
         { services.power-profiles-daemon.enable = false; }
         { services.upower.enable = false; }
       ]
-      pkgs
+      testPkgs
       {
         enable = true;
         package = fakePkg;
@@ -5302,7 +5378,7 @@ let
         { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
         (autologinAlice false)
       ]
-      pkgs
+      testPkgs
       {
         enable = true;
         package = fakePkg;
@@ -5315,7 +5391,7 @@ let
         { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
         (autologinAlice true)
       ]
-      pkgs
+      testPkgs
       {
         enable = true;
         package = fakePkg;
@@ -5328,7 +5404,7 @@ let
         { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
         { services.getty.autologinUser = "alice"; }
       ]
-      pkgs
+      testPkgs
       {
         enable = true;
         package = fakePkg;
@@ -5343,7 +5419,7 @@ let
         { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
         (autologinAlice null)
       ]
-      pkgs
+      testPkgs
       {
         enable = true;
         package = fakePkg;
@@ -5359,7 +5435,7 @@ let
           services.displayManager.autoLogin.user = "alice";
         }
       ]
-      pkgs
+      testPkgs
       {
         enable = true;
         package = fakePkg;
@@ -5411,7 +5487,7 @@ let
         { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
         { services.logind.settings.Login.HandleLidSwitchDocked = "ignore"; }
       ]
-      pkgs
+      testPkgs
       {
         enable = true;
         package = fakePkg;
@@ -5522,7 +5598,9 @@ let
         })
       ]
       ++ extra;
-      specialArgs = { inherit pkgs; };
+      specialArgs = {
+        pkgs = testPkgs;
+      };
     };
   evalHomeDesktop = evalHomeDesktopWith [ ];
   evalNixosDesktopWith =
@@ -5545,8 +5623,8 @@ let
       ]
       ++ extra;
       specialArgs = {
-        pkgs = pkgs;
-        modulesPath = "${pkgs.path}/nixos/modules";
+        pkgs = testPkgs;
+        modulesPath = "${testPkgs.path}/nixos/modules";
       };
     };
   evalNixosDesktop = evalNixosDesktopWith [ ];
@@ -6909,25 +6987,28 @@ let
         ) osOverlaidScoot.config.environment.systemPackages;
         true
       )
-      # Without the opt-in every OS-side menu stays fuzzel (the default
-      # daemon), on the same derivation both sides install.
+      # By default every OS-side menu is the flake's scootlaunch (the
+      # default daemon), on the same derivation both sides install.
       (
         assert
-          osOverlaid.config.programs.scoot.desktop.clipboard.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+          osOverlaid.config.programs.scoot.desktop.clipboard.menuPackage.drvPath == built.scootlaunch.drvPath;
         true
       )
       (
         assert
-          osOverlaid.config.programs.scoot.desktop.apps.network.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+          osOverlaid.config.programs.scoot.desktop.apps.network.menuPackage.drvPath
+          == built.scootlaunch.drvPath;
         true
       )
       (
         assert
-          osOverlaid.config.programs.scoot.desktop.apps.bluetooth.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+          osOverlaid.config.programs.scoot.desktop.apps.bluetooth.menuPackage.drvPath
+          == built.scootlaunch.drvPath;
         true
       )
       (
-        assert osOverlaid.config.programs.scoot.desktop.capture.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+        assert
+          osOverlaid.config.programs.scoot.desktop.capture.menuPackage.drvPath == built.scootlaunch.drvPath;
         true
       )
       # The overlay carries the flake's own scootnotify...
@@ -7244,16 +7325,16 @@ let
   idleClipBoundsConf = hmClipBounds.config.xdg.configFile."swayidle/config".source;
   clipEntry = clipEntryOf hmClip "scoot-clipboard-store";
   clipBoundsEntry = clipEntryOf hmClipBounds "scoot-clipboard-store";
-  clipPickerThemed = slotScriptBin hmClip "scoot-clipboard-pick";
+  clipPickerThemed = slotScriptBin hmClipFuzzel "scoot-clipboard-pick";
   clipBoundsPicker = slotScriptBin hmClipBounds "scoot-clipboard-pick";
   clipPickerNoLook = slotScriptBin hmClipNoLook "scoot-clipboard-pick";
   clipPickerTargetOff = slotScriptBin hmClipTargetOff "scoot-clipboard-pick";
   clipPickerBurst = slotScriptBin hmClipLookBurst "scoot-clipboard-pick";
   # The launcher slot's generated file: the wrapper script as the
-  # keymap runs it -- themed (music-desk), lookless, opt-out and one
-  # per remaining look (vinyl-sunset, radial-burst, moonrise) the
-  # content checks read.
-  launchThemed = slotScriptBin hmLaunch "scoot-launcher";
+  # keymap runs it -- themed (music-desk) from the escape-hatch
+  # evaluation, lookless, opt-out and one per remaining look
+  # (vinyl-sunset, radial-burst, moonrise) the content checks read.
+  launchThemed = slotScriptBin hmLaunchFuzzel "scoot-launcher";
   launchNoLook = slotScriptBin hmLaunchNoLook "scoot-launcher";
   launchTargetOff = slotScriptBin hmLaunchTargetOff "scoot-launcher";
   launchVinyl = slotScriptBin hmLaunchLookVinyl "scoot-launcher";
@@ -7263,7 +7344,7 @@ let
   # slurp picker, no picker on a named output and on any output --
   # plus the keymap's three screenshot scripts as their binds run
   # them.
-  captureThemed = hmCapture.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source;
+  captureThemed = hmCaptureFuzzel.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source;
   captureNoLook = hmCaptureNoLook.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source;
   captureTargetOff = hmCaptureTargetOff.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source;
   captureSlurp = hmCaptureSlurp.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source;
@@ -7711,14 +7792,14 @@ let
       assert hmDesk.config.programs.scoot.desktop.theme.targets.clipboard.enable;
       true
     )
-    # ...the launcher on with the profile (fuzzel behind the keymap's
-    # binds, themed unless opted out)...
+    # ...the launcher on with the profile (scootlaunch behind the
+    # keymap's binds, themed unless opted out)...
     (
       assert hmDesk.config.programs.scoot.desktop.launcher.enable;
       true
     )
     (
-      assert hmDesk.config.programs.scoot.desktop.launcher.daemon == "fuzzel";
+      assert hmDesk.config.programs.scoot.desktop.launcher.daemon == "scootlaunch";
       true
     )
     (
@@ -7952,7 +8033,7 @@ let
       # `brightnessctl` twice is one package, not two tools: the
       # idle policy's dim tool and the keymap's brightness tool are
       # the same derivation, each declared beside its own binds (and
-      # `fuzzel` five times the same way: the clipboard picker's
+      # `scootlaunch` five times the same way: the clipboard picker's
       # menu, the launcher package, the capture chooser's menu and
       # both pickers' menus --
       # and `wl-clipboard` twice: the clipboard slot's tools and the
@@ -7970,13 +8051,13 @@ let
           leanMako
           leanClip
           pkgs.wl-clipboard
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmDeskLookMusic "scoot-clipboard-pick")
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmDeskLookMusic "scoot-launcher")
           pkgs.grim
           pkgs.slurp
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.wl-clipboard
           (slotScriptDrv hmDeskLookMusic "scoot-capture-output")
           (slotScriptDrv hmDeskLookMusic "scoot-capture-region")
@@ -7993,10 +8074,10 @@ let
           pkgs.foot
           pkgs.xdg-utils
           pkgs.networkmanager
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmDeskLookMusic "scoot-network-pick")
           pkgs.bluez
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmDeskLookMusic "scoot-bluetooth-pick")
           pkgs.udiskie
           pkgs.brightnessctl
@@ -9013,7 +9094,7 @@ let
     # client, the theme's seven -- no scoot package
     # set here, so nothing else -- plus the keymap's brightness,
     # volume and media tools; `brightnessctl` serves two features, so
-    # it appears twice, and `fuzzel` five (the clipboard picker, the
+    # it appears twice, and `scootlaunch` five (the clipboard picker, the
     # launcher, the capture chooser and both pickers' menus).
     (
       assert builtins.length hmIdle.config.home.packages == 48;
@@ -9031,13 +9112,13 @@ let
           leanMako
           leanClip
           pkgs.wl-clipboard
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmIdle "scoot-clipboard-pick")
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmIdle "scoot-launcher")
           pkgs.grim
           pkgs.slurp
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.wl-clipboard
           (slotScriptDrv hmIdle "scoot-capture-output")
           (slotScriptDrv hmIdle "scoot-capture-region")
@@ -9054,10 +9135,10 @@ let
           pkgs.foot
           pkgs.xdg-utils
           pkgs.networkmanager
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmIdle "scoot-network-pick")
           pkgs.bluez
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmIdle "scoot-bluetooth-pick")
           pkgs.udiskie
           pkgs.brightnessctl
@@ -9130,13 +9211,13 @@ let
           leanMako
           leanClip
           pkgs.wl-clipboard
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmIdleOff "scoot-clipboard-pick")
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmIdleOff "scoot-launcher")
           pkgs.grim
           pkgs.slurp
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.wl-clipboard
           (slotScriptDrv hmIdleOff "scoot-capture-output")
           (slotScriptDrv hmIdleOff "scoot-capture-region")
@@ -9153,10 +9234,10 @@ let
           pkgs.foot
           pkgs.xdg-utils
           pkgs.networkmanager
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmIdleOff "scoot-network-pick")
           pkgs.bluez
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmIdleOff "scoot-bluetooth-pick")
           pkgs.udiskie
           pkgs.brightnessctl
@@ -9347,15 +9428,15 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
-          pkgs.fuzzel
+          fakeLaunchScoot
           leanClip
           pkgs.wl-clipboard
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.xdg-desktop-portal-wlr
           pkgs.xdg-desktop-portal-gtk
           pkgs.grim
           pkgs.slurp
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.wob
           pkgs.pipewire
           pkgs.wlsunset
@@ -9364,9 +9445,9 @@ let
           pkgs.libsecret
           pkgs.foot
           pkgs.networkmanager
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.bluez
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.udiskie
           pkgs.brightnessctl
           pkgs.wireplumber
@@ -9410,15 +9491,15 @@ let
           fakePkg
           fakeBg
           leanMako
-          pkgs.fuzzel
+          fakeLaunchScoot
           leanClip
           pkgs.wl-clipboard
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.xdg-desktop-portal-wlr
           pkgs.xdg-desktop-portal-gtk
           pkgs.grim
           pkgs.slurp
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.wob
           pkgs.pipewire
           pkgs.wlsunset
@@ -9427,9 +9508,9 @@ let
           pkgs.libsecret
           pkgs.foot
           pkgs.networkmanager
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.bluez
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.udiskie
           pkgs.brightnessctl
           pkgs.wireplumber
@@ -9459,15 +9540,15 @@ let
           pkgs.wlopm
           pkgs.sway-audio-idle-inhibit
           leanMako
-          pkgs.fuzzel
+          fakeLaunchScoot
           leanClip
           pkgs.wl-clipboard
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.xdg-desktop-portal-wlr
           pkgs.xdg-desktop-portal-gtk
           pkgs.grim
           pkgs.slurp
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.wob
           pkgs.pipewire
           pkgs.wlsunset
@@ -9476,9 +9557,9 @@ let
           pkgs.libsecret
           pkgs.foot
           pkgs.networkmanager
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.bluez
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.udiskie
           pkgs.brightnessctl
           pkgs.wireplumber
@@ -10109,7 +10190,8 @@ let
       true
     )
     (
-      assert hmClip.config.programs.scoot.desktop.clipboard.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+      assert
+        hmClip.config.programs.scoot.desktop.clipboard.menuPackage.drvPath == fakeLaunchScoot.drvPath;
       true
     )
     # ...and the NixOS side defaults to the same three derivations
@@ -10125,7 +10207,8 @@ let
       true
     )
     (
-      assert osClip.config.programs.scoot.desktop.clipboard.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+      assert
+        osClip.config.programs.scoot.desktop.clipboard.menuPackage.drvPath == fakeLaunchScoot.drvPath;
       true
     )
     (
@@ -10201,7 +10284,7 @@ let
       true
     )
     # Without a look the slot runs unthemed (the units and the tools are
-    # still there; the picker keeps fuzzel's own colors -- pinned by
+    # still there; the picker keeps its own style -- pinned by
     # content below).
     (
       assert allAssertionsHold hmClipNoLook.config;
@@ -10244,10 +10327,10 @@ let
       assert !(lib.any (p: (p.pname or "") == "wl-clipboard") hmClipCaptureOff.config.home.packages);
       true
     )
-    # ...fuzzel stays: the launcher slot (on with the profile) runs
-    # the same derivation.
+    # ...scootlaunch stays: the launcher slot (on with the profile)
+    # runs the same derivation.
     (
-      assert lib.any (p: (p.pname or "") == "fuzzel") hmClipOff.config.home.packages;
+      assert lib.any (p: (p.pname or "") == "scootlaunch") hmClipOff.config.home.packages;
       true
     )
     (
@@ -10410,7 +10493,7 @@ let
       true
     )
     (
-      assert lib.any (p: (p.pname or "") == "fuzzel") osClip.config.environment.systemPackages;
+      assert lib.any (p: (p.pname or "") == "scootlaunch") osClip.config.environment.systemPackages;
       true
     )
     (
@@ -10431,10 +10514,10 @@ let
         !(lib.any (p: (p.pname or "") == "wl-clipboard") osClipOff.config.environment.systemPackages);
       true
     )
-    # ...fuzzel stays: the launcher slot (on with the profile) runs
-    # the same derivation.
+    # ...scootlaunch stays: the launcher slot (on with the profile)
+    # runs the same derivation.
     (
-      assert lib.any (p: (p.pname or "") == "fuzzel") osClipOff.config.environment.systemPackages;
+      assert lib.any (p: (p.pname or "") == "scootlaunch") osClipOff.config.environment.systemPackages;
       true
     )
     # ...and each refusal naming its tool on this side as well.
@@ -10534,7 +10617,7 @@ let
       true
     )
     # ...the pickers' tools stock from nixpkgs, each menu the one
-    # fuzzel the launcher already themes (same derivation, no second
+    # scootlaunch the launcher already runs (same derivation, no second
     # copy)...
     (
       assert
@@ -10542,7 +10625,8 @@ let
       true
     )
     (
-      assert hmApps.config.programs.scoot.desktop.apps.network.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+      assert
+        hmApps.config.programs.scoot.desktop.apps.network.menuPackage.drvPath == fakeLaunchScoot.drvPath;
       true
     )
     (
@@ -10551,7 +10635,7 @@ let
     )
     (
       assert
-        hmApps.config.programs.scoot.desktop.apps.bluetooth.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+        hmApps.config.programs.scoot.desktop.apps.bluetooth.menuPackage.drvPath == fakeLaunchScoot.drvPath;
       true
     )
     # ...the automounter stock too, trayless behind its unit (wanted
@@ -11199,14 +11283,14 @@ let
       true
     )
     (
-      assert hmLaunch.config.programs.scoot.desktop.launcher.daemon == "fuzzel";
+      assert hmLaunch.config.programs.scoot.desktop.launcher.daemon == "scootlaunch";
       true
     )
-    # ...running stock nixpkgs fuzzel (the same derivation the
-    # clipboard picker themes: one fuzzel, no second copy -- the same
+    # ...running the launcher default (the same derivation the
+    # clipboard picker runs: one menu, no second copy -- the same
     # `drvPath` on both sides, so a divergent package fails here)...
     (
-      assert hmLaunch.config.programs.scoot.desktop.launcher.package.drvPath == pkgs.fuzzel.drvPath;
+      assert hmLaunch.config.programs.scoot.desktop.launcher.package.drvPath == fakeLaunchScoot.drvPath;
       true
     )
     (
@@ -11216,12 +11300,12 @@ let
       true
     )
     (
-      assert osLaunch.config.programs.scoot.desktop.launcher.package.drvPath == pkgs.fuzzel.drvPath;
+      assert osLaunch.config.programs.scoot.desktop.launcher.package.drvPath == fakeLaunchScoot.drvPath;
       true
     )
     # ...installed beside the profile's own (NixOS: system-wide)...
     (
-      assert lib.any (p: (p.pname or "") == "fuzzel") hmLaunch.config.home.packages;
+      assert lib.any (p: (p.pname or "") == "scootlaunch") hmLaunch.config.home.packages;
       true
     )
     (
@@ -11229,7 +11313,7 @@ let
       true
     )
     (
-      assert lib.any (p: (p.pname or "") == "fuzzel") osLaunch.config.environment.systemPackages;
+      assert lib.any (p: (p.pname or "") == "scootlaunch") osLaunch.config.environment.systemPackages;
       true
     )
     # ...both binds through the wrapper script (drun by default, PATH
@@ -11247,7 +11331,7 @@ let
       true
     )
     # Without a look the slot runs unthemed (the binary and the binds
-    # are still there; the launcher keeps fuzzel's own colors --
+    # are still there; the launcher keeps its own style --
     # pinned by content below).
     (
       assert allAssertionsHold hmLaunchNoLook.config;
@@ -11275,11 +11359,11 @@ let
       assert !(hmLaunchOff.config.programs.scoot.settings.binds ? "ctrl+alt+space");
       true
     )
-    # ...fuzzel stays: the clipboard picker (on with the profile) runs
-    # the same derivation -- but the launcher script leaves with the
-    # slot.
+    # ...scootlaunch stays: the clipboard picker (on with the profile)
+    # runs the same derivation -- but the launcher script leaves with
+    # the slot.
     (
-      assert lib.any (p: (p.pname or "") == "fuzzel") hmLaunchOff.config.home.packages;
+      assert lib.any (p: (p.pname or "") == "scootlaunch") hmLaunchOff.config.home.packages;
       true
     )
     (
@@ -11294,10 +11378,10 @@ let
       assert allAssertionsHold osLaunchOff.config;
       true
     )
-    # ...fuzzel stays system-wide too: the clipboard slot (on with the
-    # profile) installs the same derivation.
+    # ...scootlaunch stays system-wide too: the clipboard slot (on with
+    # the profile) installs the same derivation.
     (
-      assert lib.any (p: (p.pname or "") == "fuzzel") osLaunchOff.config.environment.systemPackages;
+      assert lib.any (p: (p.pname or "") == "scootlaunch") osLaunchOff.config.environment.systemPackages;
       true
     )
     # Standalone (no profile): the binary on PATH, unthemed, no binds
@@ -11307,7 +11391,7 @@ let
       true
     )
     (
-      assert lib.any (p: (p.pname or "") == "fuzzel") hmLaunchStandalone.config.home.packages;
+      assert lib.any (p: (p.pname or "") == "scootlaunch") hmLaunchStandalone.config.home.packages;
       true
     )
     (
@@ -11360,10 +11444,11 @@ let
       assert !hmLaunchDaemonBogus.success;
       true
     )
-    # The opt-in (`desktop.launcher.daemon = "scootlaunch"`): the slot
-    # runs, every assertion holds, and the same derivation sits behind
-    # the launcher and every menu (launcher, clipboard, both pickers,
-    # the capture chooser) -- one menu, no second copy.
+    # The explicit switch (`desktop.launcher.daemon = "scootlaunch"`,
+    # the default spelled out): the slot runs, every assertion holds,
+    # and the same derivation sits behind the launcher and every menu
+    # (launcher, clipboard, both pickers, the capture chooser) -- one
+    # menu, no second copy.
     (
       assert allAssertionsHold hmLaunchScoot.config;
       true
@@ -11418,6 +11503,86 @@ let
       assert
         hmLaunchScoot.config.programs.scoot.settings.binds."ctrl+alt+space"
         == "spawn ${slotScriptBin hmLaunchScoot "scoot-launcher"} --list-executables-in-path";
+      true
+    )
+    # The escape hatch (`desktop.launcher.daemon = "fuzzel"`, nothing
+    # else): stock nixpkgs fuzzel behind the slot and every menu, every
+    # assertion holding -- the pre-flip default, byte-identical (the
+    # content checks below read the fuzzel-shape scripts from here).
+    (
+      assert allAssertionsHold hmLaunchFuzzel.config;
+      true
+    )
+    (
+      assert hmLaunchFuzzel.config.programs.scoot.desktop.launcher.daemon == "fuzzel";
+      true
+    )
+    (
+      assert hmLaunchFuzzel.config.programs.scoot.desktop.launcher.package.drvPath == pkgs.fuzzel.drvPath;
+      true
+    )
+    (
+      assert
+        hmLaunchFuzzel.config.programs.scoot.desktop.clipboard.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+      true
+    )
+    (
+      assert
+        hmLaunchFuzzel.config.programs.scoot.desktop.apps.network.menuPackage.drvPath
+        == pkgs.fuzzel.drvPath;
+      true
+    )
+    (
+      assert
+        hmLaunchFuzzel.config.programs.scoot.desktop.apps.bluetooth.menuPackage.drvPath
+        == pkgs.fuzzel.drvPath;
+      true
+    )
+    (
+      assert
+        hmLaunchFuzzel.config.programs.scoot.desktop.capture.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "fuzzel") hmLaunchFuzzel.config.home.packages;
+      true
+    )
+    # Without the overlay (raw nixpkgs, no scootlaunch of its own) the
+    # launcher default resolves to nothing: the package and every menu
+    # following it are null, and the slots refuse loudly naming the fix
+    # (apply the overlay, the flake wrapper, or point at a menu).
+    (
+      assert hmLaunchNoOverlay.config.programs.scoot.desktop.launcher.daemon == "scootlaunch";
+      true
+    )
+    (
+      assert hmLaunchNoOverlay.config.programs.scoot.desktop.launcher.package == null;
+      true
+    )
+    (
+      assert hmLaunchNoOverlay.config.programs.scoot.desktop.clipboard.menuPackage == null;
+      true
+    )
+    (
+      assert hmLaunchNoOverlay.config.programs.scoot.desktop.apps.network.menuPackage == null;
+      true
+    )
+    (
+      assert hmLaunchNoOverlay.config.programs.scoot.desktop.apps.bluetooth.menuPackage == null;
+      true
+    )
+    (
+      assert hmLaunchNoOverlay.config.programs.scoot.desktop.capture.menuPackage == null;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "launcher.package is null" m) (failing hmLaunchNoOverlay.config);
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "clipboard.menuPackage is null" m) (
+        failing hmLaunchNoOverlay.config
+      );
       true
     )
   ];
@@ -11504,7 +11669,8 @@ let
       true
     )
     (
-      assert hmCapture.config.programs.scoot.desktop.capture.menuPackage.drvPath == pkgs.fuzzel.drvPath;
+      assert
+        hmCapture.config.programs.scoot.desktop.capture.menuPackage.drvPath == fakeLaunchScoot.drvPath;
       true
     )
     (
@@ -14797,13 +14963,13 @@ let
           leanMako
           leanClip
           pkgs.wl-clipboard
-          pkgs.fuzzel
-          pkgs.fuzzel
+          fakeLaunchScoot
+          fakeLaunchScoot
           (slotScriptDrv hmKeys "scoot-clipboard-pick")
           (slotScriptDrv hmKeys "scoot-launcher")
           pkgs.grim
           pkgs.slurp
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.wl-clipboard
           (slotScriptDrv hmKeys "scoot-capture-output")
           (slotScriptDrv hmKeys "scoot-capture-region")
@@ -14820,10 +14986,10 @@ let
           pkgs.foot
           pkgs.xdg-utils
           pkgs.networkmanager
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmKeys "scoot-network-pick")
           pkgs.bluez
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmKeys "scoot-bluetooth-pick")
           pkgs.udiskie
           pkgs.brightnessctl
@@ -15038,13 +15204,13 @@ let
           (slotScriptDrv hmKeysOff "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           leanMako
-          pkgs.fuzzel
+          fakeLaunchScoot
           leanClip
           pkgs.wl-clipboard
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.grim
           pkgs.slurp
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.wl-clipboard
           pkgs.wob
           (slotScriptDrv hmKeysOff "scoot-osd")
@@ -15058,10 +15224,10 @@ let
           pkgs.foot
           pkgs.xdg-utils
           pkgs.networkmanager
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmKeysOff "scoot-network-pick")
           pkgs.bluez
-          pkgs.fuzzel
+          fakeLaunchScoot
           (slotScriptDrv hmKeysOff "scoot-bluetooth-pick")
           pkgs.udiskie
         ];
@@ -15087,15 +15253,15 @@ let
           pkgs.swaylock
           pkgs.sway-audio-idle-inhibit
           leanMako
-          pkgs.fuzzel
+          fakeLaunchScoot
           leanClip
           pkgs.wl-clipboard
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.xdg-desktop-portal-wlr
           pkgs.xdg-desktop-portal-gtk
           pkgs.grim
           pkgs.slurp
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.wob
           pkgs.pipewire
           pkgs.wlsunset
@@ -15104,9 +15270,9 @@ let
           pkgs.libsecret
           pkgs.foot
           pkgs.networkmanager
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.bluez
-          pkgs.fuzzel
+          fakeLaunchScoot
           pkgs.udiskie
         ];
       true
@@ -17253,10 +17419,11 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F "lock '${idleClipOffLocker}'" ${idleClipOffConf}
     echo "ok: with the slot off the lock lines stay wipe-free"
 
-    # 16b. The picker, music-desk: the look's roles as fuzzel colors
-    #      (opaque `rrggbbaa`), the dmenu contract flags, the lock
-    #      probe, and the byte-exact restore (temp file, never command
-    #      substitution -- which would strip trailing newlines).
+    # 16b. The picker on the fuzzel escape hatch, music-desk: the look's
+    #      roles as fuzzel colors (opaque `rrggbbaa`), the dmenu contract
+    #      flags, the lock probe, and the byte-exact restore (temp file,
+    #      never command substitution -- which would strip trailing
+    #      newlines).
     grep -F -q -- "--background-color=FCFBFBff" ${clipPickerThemed}
     grep -F -q -- "--text-color=1A2032ff" ${clipPickerThemed}
     grep -F -q -- "--border-color=3D579Aff" ${clipPickerThemed}
@@ -17282,7 +17449,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q "clipboard_unlocked" ${clipPickerNoLook}
     if grep -q -- "--background-color=" ${clipPickerTargetOff}; then echo "themed flag present with theming off" >&2; exit 1; fi
     grep -F -q "clipboard_unlocked" ${clipPickerTargetOff}
-    echo "ok: opting out (or no look) leaves fuzzel unthemed but guarded"
+    echo "ok: opting out (or no look) leaves the menu unthemed but guarded"
 
     # 16c2. radial-burst: no `hover` in its bar palette, so the match
     #       highlight falls back to the accent (blue `31a9e5`).
@@ -17443,8 +17610,8 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     ' ${hmDocsDesktopToml}
     echo "ok: documented home-manager desktop leaves the compositor config alone"
 
-    # 19. Launcher slot content: the wrapper script runs this
-    #     profile's fuzzel by absolute store path (the one fuzzel the
+    # 19. Launcher slot content on the fuzzel escape hatch: the wrapper
+    #     script runs that fuzzel by absolute store path (the one fuzzel the
     #     picker themes: same derivation, no second copy), on the
     #     `overlay` layer (above fullscreen -- fuzzel's own default is
     #     `top`, which the compositor hides under a fullscreen window),
@@ -17492,10 +17659,13 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "${pkgs.fuzzel}/bin/fuzzel --layer=overlay" ${launchTargetOff}
     echo "ok: opting out (or no look) leaves fuzzel unthemed but layered"
 
-    # 19e. The opt-in (`desktop.launcher.daemon = "scootlaunch"`): the
-    #      wrapper execs scootlaunch on the overlay layer with no color
-    #      flags (the look arrives through the layer), passing extra
-    #      args through for the run bind -- and no fuzzel remains.
+    # 19e. The default (`desktop.launcher.daemon = "scootlaunch"`,
+    #      spelled out or not): the wrapper execs scootlaunch on the
+    #      overlay layer with no color flags (the look arrives through
+    #      the layer), passing extra args through for the run bind --
+    #      and no fuzzel remains. The profile default renders
+    #      byte-identical to the explicit switch (the same store path
+    #      out of `slotScriptBin`, not just the same shape).
     grep -F -q -- "${fakeLaunchScoot}/bin/scootlaunch --layer=overlay" ${launchScoot}
     grep -F -q -- '"$@"' ${launchScoot}
     if grep -q -- "--background-color=" ${launchScoot}; then echo "color flag in the scootlaunch wrapper" >&2; exit 1; fi
@@ -17520,7 +17690,15 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- '[ "$SCOOTLAUNCH" = "1" ]' ${bluePickScoot}
     grep -F -q -- "THEME='''" ${netPickScoot}
     grep -F -q -- "THEME='''" ${bluePickScoot}
-    echo "ok: the opt-in runs the launcher and every menu through scootlaunch, unflagged"
+    echo "ok: the switch runs the launcher and every menu through scootlaunch, unflagged"
+    # The profile default renders the same scripts (byte-identical
+    # store paths: the same derivation text, not just the same shape).
+    [ "${slotScriptBin hmLaunch "scoot-launcher"}" = "${launchScoot}" ]
+    [ "${slotScriptBin hmLaunch "scoot-clipboard-pick"}" = "${clipPickerScoot}" ]
+    [ "${slotScriptBin hmApps "scoot-network-pick"}" = "${netPickScoot}" ]
+    [ "${slotScriptBin hmApps "scoot-bluetooth-pick"}" = "${bluePickScoot}" ]
+    [ "${hmCapture.config.xdg.configFile."xdg-desktop-portal-wlr/scoot".source}" = "${captureScoot}" ]
+    echo "ok: the profile default renders byte-identical to the explicit switch"
 
     ${lib.optionalString isLinux ''
       # 19d. The user's own fuzzel config survives a swap: with a live
@@ -17557,13 +17735,13 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       echo "ok: the user's [main] survives a swap, the live colors arrive as flags"
     ''}
 
-    # 20. Capture slot content: the per-desktop chooser file xdpw
-    #     reads first -- a dmenu ask through a wrapper script (a bare
-    #     store path: xdpw's inih config reader cuts 200+ character
-    #     lines mid-flag, so the theme travels inside the script,
-    #     where no line limit applies), capped at 30 fps, with no
-    #     fixed output beside a picker. The script runs this
-    #     profile's fuzzel by absolute store path, themed by the look
+    # 20. Capture slot content on the fuzzel escape hatch: the per-desktop
+    #     chooser file xdpw reads first -- a dmenu ask through a wrapper
+    #     script (a bare store path: xdpw's inih config reader cuts 200+
+    #     character lines mid-flag, so the theme travels inside the
+    #     script, where no line limit applies), capped at 30 fps, with
+    #     no fixed output beside a picker. The script runs that fuzzel
+    #     by absolute store path, themed by the look
     #     (music-desk roles as fuzzel colors, opaque -- the same
     #     seven leaves the launcher carries, one menu one palette).
     grep -F -q -- "[screencast]" ${captureThemed}
@@ -17597,7 +17775,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -q -- "${pkgs.slurp}/bin/slurp" ${captureRegionNoLook}
     echo "ok: opting out (or no look) leaves the chooser and the region picker unthemed"
 
-    # 20e. The opt-in: the chooser through scootlaunch's dmenu with no
+    # 20e. The default: the chooser through scootlaunch's dmenu with no
     #      color flags (the look arrives through the layer), still
     #      capped at 30 fps with no fixed output beside the picker.
     grep -F -q -- "[screencast]" ${captureScoot}
@@ -17609,7 +17787,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     if grep -q -- "--background-color=" "''${chooserScoot}"; then echo "color flag in the scootlaunch chooser" >&2; exit 1; fi
     if grep -q "scoot_fuzzel_look_flags" "''${chooserScoot}"; then echo "fuzzel look helper in the scootlaunch chooser" >&2; exit 1; fi
     if grep -q "fuzzel" "''${chooserScoot}"; then echo "fuzzel in the scootlaunch chooser" >&2; exit 1; fi
-    echo "ok: the opt-in chooser is a scootlaunch dmenu list at 30 fps"
+    echo "ok: the default chooser is a scootlaunch dmenu list at 30 fps"
 
     # 20c. The slurp picker instead: xdpw's own click-to-pick shape
     #      (its man page's example line), the look on its border and
@@ -18358,14 +18536,15 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
   ''}
 
     ${lib.optionalString isLinux ''
-      # 23. Apps slot content: the pickers carry the look (music-desk
-      #     roles as fuzzel CLI colors, opaque), the dmenu contract
-      #     flags, the keyring and the audio row (the profile turns the
-      #     audio slot on); lookless and opted out carry no themed flag
-      #     at all; the automounter, judged by udiskie's own matcher
-      #     under the rules its unit runs with, mounts USB drives (an
-      #     encrypted one's unlocked filesystem included) and leaves the
-      #     machine's own disks alone.
+      # 23. Apps slot content on the fuzzel escape hatch: the pickers
+      #     carry the look (music-desk roles as fuzzel CLI colors,
+      #     opaque), the dmenu contract flags, the keyring and the
+      #     audio row (the profile turns the audio slot on); lookless
+      #     and opted out carry no themed flag at all; the automounter,
+      #     judged by udiskie's own matcher under the rules its unit
+      #     runs with, mounts USB drives (an encrypted one's unlocked
+      #     filesystem included) and leaves the machine's own disks
+      #     alone.
       grep -F -q -- "--background-color=FCFBFBff" ${appsNetPickThemed}
       grep -F -q -- "--text-color=1A2032ff" ${appsNetPickThemed}
       grep -F -q -- "--border-color=3D579Aff" ${appsNetPickThemed}
