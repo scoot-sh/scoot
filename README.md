@@ -100,7 +100,7 @@ looks (black, light, dark, warm, chill) are on
 | `scoot` | The compositor, plus `scoot msg`, its control client |
 | `scootbar` | A status bar: workspaces, clock, sound, network, battery, tray. It also works on sway, niri and Hyprland. |
 | `scootbg` | A wallpaper daemon. Set `[wallpaper]` in the config and scoot starts it. |
-| `scootlaunch` | An application launcher: an overlay panel with ranked search, plus dmenu and run modes. Opt-in behind the same binds (`install.sh --launch`, or `programs.scoot.desktop.launcher.daemon = "scootlaunch"` on Nix). [Docs](https://www.scoot.sh/scootlaunch/) |
+| `scootlaunch` | The default application launcher: an overlay panel with ranked search, plus dmenu and run modes. On Nix it is the default (`launcher.daemon = "fuzzel"` keeps fuzzel); elsewhere `install.sh --launch`. [Docs](https://www.scoot.sh/scootlaunch/) |
 | `scootnotify` | A notification server: it owns `org.freedesktop.Notifications` and shows popup cards, with do-not-disturb, a history ring with restore, `[[rule]]` tables, and `scootnotify msg` for list, history, dnd, dismiss, invoke, reload, subscribe and wait. No Nix module or distro packaging yet: run the binary beside your session. [Docs](https://www.scoot.sh/scootnotify/) |
 
 Standard Wayland protocols mean the usual tools work: other bars,
@@ -109,8 +109,6 @@ X11 apps (with the XWayland build). [Full list](https://www.scoot.sh/scoot/proto
 
 ## Not yet
 
-- **The launcher as the default.** `scootlaunch` works, but new installs
-  still get fuzzel until the default flips.
 - **The notification bar feed.** `scootnotify` pushes the bar's
   `notifications` module natively, but new installs still wire the bar
   through mako (`scoot-notify-sync`, `makoctl` on-click) until the Nix
