@@ -72,6 +72,11 @@ pub struct WiringInput<'a> {
     pub config_home: Option<&'a Path>,
     /// The user's data home (`None` when no home resolves).
     pub data_home: Option<&'a Path>,
+    /// The starship config location (`STARSHIP_CONFIG` when set and
+    /// non-empty, else `None`): threaded in like every other path, so no
+    /// check ever reads the process environment (a concurrent `cargo test`
+    /// shares one process; an env read races a sibling test's write).
+    pub starship_config: Option<&'a Path>,
 }
 
 /// Checks every one-time wiring step for the active look. Read-only.
@@ -104,20 +109,23 @@ pub fn check_wiring(input: &WiringInput<'_>) -> Vec<WiringItem> {
     items
 }
 
+/// What [`resolve_input`] resolved: the recorded choice, the rendered
+/// directory the link points at, the config and data homes (either may be
+/// missing), and the starship config location (`STARSHIP_CONFIG` when set
+/// and non-empty).
+pub type ResolvedInput = (
+    Record,
+    std::path::PathBuf,
+    Option<std::path::PathBuf>,
+    Option<std::path::PathBuf>,
+    Option<std::path::PathBuf>,
+);
 /// Resolves the live environment (state, record, link, config and data
-/// homes) into a [`WiringInput`]. Refuses when no look is applied yet or
-/// the link points nowhere.
-pub fn resolve_input(
-    state_dir: &Path,
-) -> Result<
-    (
-        Record,
-        std::path::PathBuf,
-        Option<std::path::PathBuf>,
-        Option<std::path::PathBuf>,
-    ),
-    String,
-> {
+/// homes, the starship config location) into a [`WiringInput`]. Refuses
+/// when no look is applied yet or the link points nowhere. The single
+/// process-environment read lives here (production only); tests construct
+/// [`WiringInput`] directly and never touch the environment.
+pub fn resolve_input(state_dir: &Path) -> Result<ResolvedInput, String> {
     let record = match read_record(state_dir) {
         RecordRead::Present(record) => record,
         RecordRead::Missing => {
@@ -145,7 +153,10 @@ pub fn resolve_input(
         let home = std::env::var_os("HOME");
         data_home(xdg.as_deref(), home.as_deref())
     };
-    Ok((record, rendered, config, data))
+    let starship = std::env::var_os("STARSHIP_CONFIG")
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from);
+    Ok((record, rendered, config, data, starship))
 }
 
 fn absent(app: &'static str, detail: &str) -> WiringItem {
@@ -396,10 +407,7 @@ fn btop_item(input: &WiringInput<'_>, link_look: &Path) -> WiringItem {
 
 fn starship_item(input: &WiringInput<'_>, link_look: &Path) -> WiringItem {
     let fragment = link_look.join("apps/starship.toml");
-    if let Some(pointed) = std::env::var_os("STARSHIP_CONFIG")
-        .filter(|v| !v.is_empty())
-        .map(std::path::PathBuf::from)
-    {
+    if let Some(pointed) = input.starship_config {
         return WiringItem {
             app: "starship",
             status: WiringStatus::Wired,
