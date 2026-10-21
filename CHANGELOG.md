@@ -17,6 +17,18 @@ release, entries were dated.
 
 ## Unreleased
 
+### Breaking: notifications default to scootnotify
+
+`programs.scoot.desktop.notifications.daemon` now defaults to `scootnotify`:
+the keymap's three binds and the bar's click sit on `scootnotify msg`, and
+there is no mako package, config or feed script unless asked for. Set
+`notifications.daemon = "mako"` to keep mako. mako's flat
+`notifications.settings` do not carry over (an eval warning names
+`programs.scootnotify.settings` instead), and a taken bus name stops the
+unit with exit 3. Direct module users on stock nixpkgs need the scootnotify
+package from this flake (`overlays.default`) or the escape hatch.
+Measurements and the migration notes: [Migrating from mako](https://www.scoot.sh/desktop/#migrating-from-mako).
+
 ### Breaking: the launcher defaults to scootlaunch
 
 `programs.scoot.desktop.launcher.daemon` now defaults to `scootlaunch`, and the

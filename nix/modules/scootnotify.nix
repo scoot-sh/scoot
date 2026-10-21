@@ -41,7 +41,7 @@ let
   # The notification slot beside this module: on with the profile
   # (still individually disable-able), standalone otherwise.
   slotOn = (desktopProfile.notifications or { }).enable or false;
-  daemonIsNotify = (desktopProfile.notifications or { }).daemon or "mako" == "scootnotify";
+  daemonIsNotify = (desktopProfile.notifications or { }).daemon or "scootnotify" == "scootnotify";
   # The slot's mako-shaped settings: flat `key = value` lines for mako's
   # own config dialect. They do not carry over to this daemon (whose file
   # is the user's `settings` here, below): a non-empty one beside the new

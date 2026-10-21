@@ -87,7 +87,7 @@ Every flag is in the [CLI reference](./cli.md).
 ## Install
 
 The daemon rides the [install script](../start/install/#use-it-every-day)
-with `--notify`, opt-in until it becomes the default. Unified `vX.Y.Z`
+with `--notify`. Unified `vX.Y.Z`
 releases carry a `scootnotify-<version>-<arch>` binary beside the rest.
 
 ```sh
@@ -163,7 +163,7 @@ no Stylix switch.
 
 | Option | Type / default | Example | Reload |
 |---|---|---|---|
-| `programs.scootnotify.enable` | bool, `false` (`true` with the profile opt-in below) | `true` | rebuild or switch |
+| `programs.scootnotify.enable` | bool, `false` (`true` with the profile) | `true` | rebuild or switch |
 | `programs.scootnotify.package` | package or null, the flake's build | `inputs.scoot.packages.${pkgs.stdenv.hostPlatform.system}.scootnotify` | rebuild or switch |
 | `programs.scootnotify.features` | list of strings or null, `null` (the daemon is one build today) | `[ ]` | rebuild or switch |
 | `programs.scootnotify.settings` | TOML table, `{ }` | `{ max_visible = 5; dnd_allows_critical = false; }` | in place (`msg reload`; never a restart) |
@@ -176,23 +176,25 @@ only these settings, verbatim. The keys are the daemon's own
 [Configure](./configure.md)); anything else is refused by name —
 `daemon --check` says which. An empty file is the built-in defaults.
 
-The opt-in, beside the profile:
+The profile runs scootnotify behind `Super+n` (dismiss),
+`Super+Shift+n` (do-not-disturb toggle) and `Super+Ctrl+n` (restore),
+and the bar's click behind `scootnotify msg dnd toggle`:
 
 ```nix title="configuration.nix and home.nix"
-programs.scoot.desktop.notifications.daemon = "scootnotify";
+programs.scoot.desktop.notifications.daemon = "scootnotify";  # the default; drop the line
 ```
 
 With it, `scootnotify.service` owns the bus name as a `Type=dbus`
 user unit, a new config reloads it in place (cards, history and DND
 survive; a restart would drop them), and a taken name stops the unit
 instead of restart-looping (exit 3). The three binds and the bar's
-on-click move onto `scootnotify msg`; mako, its config and the feed
-script go away. To manage the file beside the switch, also import
-the module (`scoot.homeModules.scootnotify`,
-`scoot.nixosModules.scootnotify` on the system side): the daemon
-switch alone runs the flake's build with no file. To go back, drop
-the line (or set `"mako"`) and switch again. The default stays
-`"mako"`: nothing changes unless the line names `"scootnotify"`.
+on-click sit on `scootnotify msg`; there is no mako package, no mako
+config and no feed script. To manage the file beside the switch,
+also import the module (`scoot.homeModules.scootnotify`,
+`scoot.nixosModules.scootnotify` on the system side): the profile
+runs the flake's build with no file. To go back to mako, set `daemon
+= "mako"` and switch again — see [Migrating from
+mako](../desktop/#migrating-from-mako).
 
 `desktop.notifications.settings` does not carry over: it is mako's
 flat dialect, and a non-empty one beside the new daemon warns at

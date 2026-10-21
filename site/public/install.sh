@@ -14,9 +14,9 @@
 #      --launch it also downloads scootlaunch, the application launcher
 #      (the default menu behind `Super+d` on Nix setups, the binary
 #      for hand-written ones); with --notify it also
-#      downloads scootnotify, the notification daemon (opt-in until it
-#      becomes the default, and refused while another daemon owns
-#      org.freedesktop.Notifications)
+#      downloads scootnotify, the notification daemon (the default
+#      daemon on Nix setups, the binary for hand-written ones, and
+#      refused while another daemon owns org.freedesktop.Notifications)
 #   3. installs them and the `scoot-session` launcher into a bin directory,
 #      the session's systemd user units, and the portal config. A plain
 #      run installs for you only and adds no login-screen entry;
@@ -101,7 +101,7 @@ Usage: install.sh [options]
                       application launcher (the default menu behind
                       `Super+d` on Nix setups)
   --notify            also install scootnotify, the notification daemon
-                      (opt-in until it becomes the default; refused
+                      (the default daemon on Nix setups; refused
                       while another daemon owns
                       org.freedesktop.Notifications, which this script
                       never stops for you)

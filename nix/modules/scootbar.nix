@@ -67,12 +67,12 @@ let
   # in the scoot modules), when those are imported beside this one.
   # Each `or` keeps this evaluating with the scoot module absent or
   # older than the notifications slot. The daemon behind it is the
-  # only half that changes when scootnotify replaces mako (the module
+  # only half that changes when mako replaces scootnotify (the module
   # id, the feed and the toggle stay); the toggle below names the
   # daemon's own command per `daemon`.
   notifProfile = (desktopProfile.notifications or { });
   notifOn = (notifProfile.enable or false);
-  notifDaemon = (notifProfile.daemon or "mako");
+  notifDaemon = (notifProfile.daemon or "scootnotify");
   notifPkg = (notifProfile.package or null);
   # This daemon's build, when its module is imported beside this one
   # (the `or { }` keeps this evaluating without it, the way the bar
