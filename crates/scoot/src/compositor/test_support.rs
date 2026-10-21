@@ -913,7 +913,7 @@ pub(crate) fn pixel(pixels: &[u8], width: i32, x: i32, y: i32) -> [u8; 4] {
 /// Whether any pixel of the frame is `color` -- position-independent, for
 /// surfaces whose exact placement the test does not pin down.
 pub(crate) fn contains(pixels: &[u8], color: [u8; 4]) -> bool {
-    pixels.chunks_exact(4).any(|pixel| pixel == color)
+    pixels.as_chunks::<4>().0.contains(&color)
 }
 
 /// Where the first `color` pixel is, scanning in row order.
@@ -924,7 +924,11 @@ pub(crate) fn contains(pixels: &[u8], color: [u8; 4]) -> bool {
 /// arithmetic in a test -- which would then pass or fail for reasons that
 /// have nothing to do with what is under test.
 pub(crate) fn find_color(pixels: &[u8], width: i32, color: [u8; 4]) -> Option<(f64, f64)> {
-    let index = pixels.chunks_exact(4).position(|pixel| pixel == color)? as i32;
+    let index = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .position(|pixel| *pixel == color)? as i32;
     Some(((index % width) as f64, (index / width) as f64))
 }
 

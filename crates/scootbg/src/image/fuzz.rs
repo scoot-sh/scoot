@@ -115,7 +115,7 @@ fn one_job(data: &[u8]) {
     // so no allocation.
     let mut sizes = [(0, 0); 3];
     let mut len = 0;
-    for pair in header[7..].chunks_exact(4).take(count) {
+    for pair in header[7..].as_chunks::<4>().0.iter().take(count) {
         let dims = (
             side(u16::from_le_bytes([pair[0], pair[1]])),
             side(u16::from_le_bytes([pair[2], pair[3]])),

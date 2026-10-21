@@ -264,7 +264,13 @@ fn the_first_paint_is_whole_and_reads_back() {
     }
     // The text is the foreground color, fully covered inside a segment.
     let fg = rgb(bar.style.theme.foreground);
-    assert!(pixels.chunks_exact(4).any(|p| [p[2], p[1], p[0]] == fg));
+    assert!(
+        pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|p| [p[2], p[1], p[0]] == fg)
+    );
 }
 
 /// One module changes and keeps its width: only its span is repainted and
@@ -349,9 +355,21 @@ fn a_class_draws_in_its_token() {
     let mut record = Record::new(1);
     bar.paint(&mut pixels, &mut record);
     let urgent = rgb(bar.style.theme.urgent);
-    assert!(pixels.chunks_exact(4).any(|p| [p[2], p[1], p[0]] == urgent));
+    assert!(
+        pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|p| [p[2], p[1], p[0]] == urgent)
+    );
     let fg = rgb(bar.style.theme.foreground);
-    assert!(!pixels.chunks_exact(4).any(|p| [p[2], p[1], p[0]] == fg));
+    assert!(
+        !pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|p| [p[2], p[1], p[0]] == fg)
+    );
 }
 
 /// No font (no modules placed): the background, and nothing else.
@@ -374,7 +392,9 @@ fn without_a_font_only_the_background() {
     let background = rgb(bar.style.theme.background);
     assert!(
         pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .all(|p| [p[2], p[1], p[0]] == background)
     );
 }

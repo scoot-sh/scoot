@@ -99,7 +99,9 @@ fn a_fractional_size_is_antialiased_and_still_legible() {
     let em = 21.0 * 2.0;
     let pixels = draw(&mut text, "3:07", em, 300, 50);
     let grays = pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[0] > 0 && p[0] < 255)
         .count();
     assert!(grays > 0, "no antialiasing at a fractional size");
@@ -123,7 +125,7 @@ fn drawing_is_clipped_to_its_span() {
         FG,
         Span { x: 40, width: 30 },
     );
-    for (i, p) in pixels.chunks_exact(4).enumerate() {
+    for (i, p) in pixels.as_chunks::<4>().0.iter().enumerate() {
         let x = i as u32 % 200;
         if !(40..70).contains(&x) {
             assert_eq!(p[0], 0, "ink at column {x}");
@@ -172,7 +174,7 @@ fn the_cache_fills_lazily_and_stays_bounded() {
     let before = text.cached();
     let pixels = draw(&mut text, "8", 2000.0, 1000, 2100);
     assert_eq!(text.cached(), before);
-    assert!(pixels.chunks_exact(4).any(|p| p[0] == 255));
+    assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[0] == 255));
 }
 
 /// `--font-size 256` at scale 2 is a 512-pixel em: its glyphs are cached,

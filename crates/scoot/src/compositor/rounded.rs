@@ -288,8 +288,10 @@ pub fn paint_ring(pixels: &mut [u8], paint: &RingPaint, color: [u8; 4]) {
             if start >= end {
                 continue;
             }
-            for pixel in
-                pixels[base + start as usize * 4..base + end as usize * 4].chunks_exact_mut(4)
+            for pixel in pixels[base + start as usize * 4..base + end as usize * 4]
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
             {
                 pixel.copy_from_slice(&color);
             }

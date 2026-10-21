@@ -228,7 +228,7 @@ impl Tz {
         let raw_types = cursor.take(counts.types * 6)?;
         let chars = cursor.take(counts.chars)?;
         let mut types = Vec::with_capacity(counts.types);
-        for raw in raw_types.chunks_exact(6) {
+        for raw in raw_types.as_chunks::<6>().0.iter() {
             let offset = be32(raw).ok_or("truncated")? as i32;
             // RFC 8536 §3.2: -2^31 is not allowed, and zic keeps offsets
             // within a day either way.

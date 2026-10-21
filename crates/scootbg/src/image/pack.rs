@@ -84,7 +84,7 @@ impl<'a> Target<'a> {
             let row = y as usize * stride;
             let span = row + rect.x as usize * 4..row + x_end as usize * 4;
             if let Some(span) = self.pixels.get_mut(span) {
-                for chunk in span.chunks_exact_mut(4) {
+                for chunk in span.as_chunks_mut::<4>().0 {
                     chunk.copy_from_slice(&pixel);
                 }
             }
@@ -178,13 +178,13 @@ impl<'a> Target<'a> {
                         .pixels
                         .get_mut(offset..offset + run * 4)
                         .ok_or(PackError)?;
-                    let pixels = dest.chunks_exact_mut(4);
+                    let pixels = dest.as_chunks_mut::<4>().0.iter_mut();
                     if dx == 1 {
-                        for (to, from) in pixels.zip(source.chunks_exact(3)) {
+                        for (to, from) in pixels.zip(source.as_chunks::<3>().0.iter()) {
                             to.copy_from_slice(&xrgb(from[0], from[1], from[2]));
                         }
                     } else {
-                        for (to, from) in pixels.zip(source.chunks_exact(3).rev()) {
+                        for (to, from) in pixels.zip(source.as_chunks::<3>().0.iter().rev()) {
                             to.copy_from_slice(&xrgb(from[0], from[1], from[2]));
                         }
                     }
@@ -204,7 +204,7 @@ impl<'a> Target<'a> {
                                 .pixels
                                 .get_mut(offset..offset + count * 4)
                                 .ok_or(PackError)?;
-                            for to in dest.chunks_exact_mut(4) {
+                            for to in dest.as_chunks_mut::<4>().0 {
                                 let at = usize::try_from(from).map_err(|_| PackError)? * 3;
                                 let p = image.rgb.get(at..at + 3).ok_or(PackError)?;
                                 to.copy_from_slice(&xrgb(p[0], p[1], p[2]));

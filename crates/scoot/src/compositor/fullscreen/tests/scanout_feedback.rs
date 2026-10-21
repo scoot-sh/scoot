@@ -112,7 +112,9 @@ impl Dispatch<zwp_linux_dmabuf_feedback_v1::ZwpLinuxDmabufFeedbackV1, Index> for
             Event::TrancheFlags { flags } => tranche.flags = flags.into(),
             Event::TrancheFormats { indices } => {
                 tranche.formats = indices
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .filter_map(|pair| {
                         let index = u16::from_ne_bytes([pair[0], pair[1]]);
                         building.table.get(usize::from(index)).copied()
@@ -149,7 +151,9 @@ fn read_table(fd: OwnedFd, size: u32) -> Vec<(u32, u64)> {
         return Vec::new();
     }
     bytes
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .filter_map(|entry| {
             Some((
                 u32::from_ne_bytes(entry[0..4].try_into().ok()?),

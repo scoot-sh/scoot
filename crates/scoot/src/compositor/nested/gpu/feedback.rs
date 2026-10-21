@@ -146,7 +146,9 @@ fn read_table(fd: &OwnedFd, size: u32) -> Option<Vec<(u32, u64)>> {
 /// there one, is ignored rather than read past.
 fn parse_table(bytes: &[u8]) -> Vec<(u32, u64)> {
     bytes
-        .chunks_exact(ENTRY_LEN)
+        .as_chunks::<ENTRY_LEN>()
+        .0
+        .iter()
         .map(|entry| {
             let (fourcc, rest) = entry.split_at(4);
             let modifier = &rest[4..];
@@ -172,7 +174,9 @@ fn indices(bytes: &[u8]) -> Option<Vec<u16>> {
     }
     Some(
         bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| u16::from_ne_bytes([pair[0], pair[1]]))
             .collect(),
     )

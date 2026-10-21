@@ -178,7 +178,12 @@ pub fn decode(bytes: &[u8]) -> Result<Image, Error> {
         return Err(Error::Png("too little image data".into()));
     }
     let mut pixels = vec![0u8; count * 4].into_boxed_slice();
-    for (out, src) in pixels.chunks_exact_mut(4).zip(data.chunks_exact(channels)) {
+    for (out, src) in pixels
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(data.chunks_exact(channels))
+    {
         let (r, g, b, a) = match *src {
             [v] => (v, v, v, 255),
             [v, a] => (v, v, v, a),

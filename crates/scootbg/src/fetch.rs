@@ -169,7 +169,10 @@ pub fn parse_sha256(text: &str) -> Result<[u8; 32], String> {
         ));
     }
     let mut out = [0u8; 32];
-    for (slot, pair) in out.iter_mut().zip(text.as_bytes().chunks_exact(2)) {
+    for (slot, pair) in out
+        .iter_mut()
+        .zip(text.as_bytes().as_chunks::<2>().0.iter())
+    {
         let high = hex(pair[0]);
         let low = hex(pair[1]);
         *slot = high << 4 | low;

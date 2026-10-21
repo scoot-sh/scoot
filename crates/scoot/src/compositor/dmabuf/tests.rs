@@ -1873,7 +1873,9 @@ fn read_format_table(fd: std::os::fd::OwnedFd, size: u32) -> Vec<(u32, u64)> {
     }
     let _ = file.as_fd();
     bytes
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .map(|entry| {
             (
                 u32::from_ne_bytes(entry[0..4].try_into().unwrap()),

@@ -113,8 +113,10 @@ fn a_2x2_image_decodes_to_the_square() {
     // Premultiplied BGRA red, opaque: every pixel reads back red.
     assert!(
         bits.pixels
-            .chunks_exact(4)
-            .all(|pixel| pixel == [0, 0, 255, 255])
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == [0, 0, 255, 255])
     );
 }
 

@@ -482,7 +482,9 @@ fn a_hovered_title_is_the_hover_token_not_the_accent() {
     // Title ink in the hover token, which differs from the accent here.
     assert!(
         pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|p| [p[2], p[1], p[0]] == [0x01, 0x02, 0x03]),
         "no hover-token ink in a hovered truncated title"
     );

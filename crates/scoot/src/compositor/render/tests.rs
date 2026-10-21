@@ -187,8 +187,10 @@ fn both_renderers_lay_the_same_frame_out_the_same_way() {
     let gpu = marker_pixels(RendererKind::Gles);
     assert_eq!(cpu.len(), gpu.len(), "both frames are the same size");
     let differing = cpu
-        .chunks_exact(4)
-        .zip(gpu.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(gpu.as_chunks::<4>().0.iter())
         .filter(|(left, right)| left != right)
         .count();
     assert_eq!(

@@ -458,8 +458,10 @@ impl Dispatch<xdg_toplevel::XdgToplevel, Index> for TestClient {
         {
             let has = |wanted: xdg_toplevel::State| {
                 states
-                    .chunks_exact(4)
-                    .filter_map(|bytes| bytes.try_into().ok().map(u32::from_ne_bytes))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|bytes| u32::from_ne_bytes(*bytes))
                     .any(|state| state == wanted as u32)
             };
             let fullscreen = has(xdg_toplevel::State::Fullscreen);

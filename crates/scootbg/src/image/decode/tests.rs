@@ -48,7 +48,7 @@ fn grey_jpeg_becomes_rgb() {
         (image.width, image.height, image.rgb.len()),
         (8, 8, 8 * 8 * 3)
     );
-    for p in image.rgb.chunks_exact(3) {
+    for p in image.rgb.as_chunks::<3>().0.iter() {
         assert!(close([p[0], p[1], p[2]], [128, 128, 128]), "{p:?}");
     }
 }

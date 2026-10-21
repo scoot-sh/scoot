@@ -529,7 +529,9 @@ fn icons_draw_from_the_cache() {
     // Opaque red, premultiplied: b and g near 0, r and a at max.
     assert!(
         pixels
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|p| p[0] < 16 && p[1] < 16 && p[2] > 200 && p[3] > 200),
         "no red icon ink"
     );
@@ -1579,7 +1581,7 @@ fn an_icon_is_drawn_at_the_device_size_a_fractional_scale_makes() {
     };
     assert!(module.custom_draw(&mut custom));
     let (mut left, mut right, mut top, mut bottom) = (u32::MAX, 0, u32::MAX, 0);
-    for (n, p) in pixels.chunks_exact(4).enumerate() {
+    for (n, p) in pixels.as_chunks::<4>().0.iter().enumerate() {
         if p[3] > 200 {
             let (x, y) = (n as u32 % 200, n as u32 / 200);
             left = left.min(x);

@@ -244,8 +244,10 @@ impl Dispatch<xdg_toplevel::XdgToplevel, SurfaceKind> for TestClient {
         } = event
         {
             client.saw_tiled |= states
-                .chunks_exact(4)
-                .filter_map(|bytes| bytes.try_into().ok().map(u32::from_ne_bytes))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|bytes| u32::from_ne_bytes(*bytes))
                 .any(|state| {
                     [
                         xdg_toplevel::State::TiledLeft,
@@ -705,10 +707,8 @@ impl Fixture {
 /// holds.
 fn census(pixels: &[u8]) -> HashMap<[u8; 4], usize> {
     let mut counts = HashMap::new();
-    for pixel in pixels.chunks_exact(4) {
-        *counts
-            .entry(pixel.try_into().expect("4 bytes"))
-            .or_insert(0) += 1;
+    for pixel in pixels.as_chunks::<4>().0.iter() {
+        *counts.entry(*pixel).or_insert(0) += 1;
     }
     counts
 }

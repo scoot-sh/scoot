@@ -151,8 +151,10 @@ fn activated() -> Vec<u32> {
 /// Decodes a `state` array: the protocol's `uint` values in host byte order.
 fn decode_states(bytes: &[u8]) -> Vec<u32> {
     bytes
-        .chunks_exact(4)
-        .map(|chunk| u32::from_ne_bytes(chunk.try_into().expect("a four-byte chunk")))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|chunk| u32::from_ne_bytes(*chunk))
         .collect()
 }
 

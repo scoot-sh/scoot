@@ -160,7 +160,7 @@ fn planes(refuse: bool) -> (CursorPlanes<FakeUpload>, Rc<RefCell<Seen>>) {
 /// image whose corner shows any offset.
 fn square() -> MemoryRenderBuffer {
     let mut pixels = vec![0u8; 24 * 24 * 4];
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0.iter_mut() {
         pixel.copy_from_slice(&[0, 0, 0xFF, 0xFF]);
     }
     pixels[..4].copy_from_slice(&[0xFF, 0, 0, 0xFF]);

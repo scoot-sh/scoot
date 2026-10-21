@@ -907,7 +907,11 @@ fn dots_are_discs_in_state_colors_with_no_digits() {
         assert_eq!(at(&pixels, (start + end) / 2, 30), color, "dot {item}");
     }
     assert!(
-        pixels.chunks_exact(4).all(|p| [p[2], p[1], p[0]] != fg),
+        pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|p| [p[2], p[1], p[0]] != fg),
         "no text ink in a dots draw"
     );
 }

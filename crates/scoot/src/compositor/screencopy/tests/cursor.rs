@@ -75,8 +75,10 @@ fn shot(fixture: &mut Fixture, cursor: bool) -> Vec<u8> {
 
 /// How many pixels differ between two frames.
 fn differing(a: &[u8], b: &[u8]) -> usize {
-    a.chunks_exact(4)
-        .zip(b.chunks_exact(4))
+    a.as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.as_chunks::<4>().0.iter())
         .filter(|(a, b)| a != b)
         .count()
 }
@@ -322,7 +324,9 @@ fn a_locked_capture_shows_the_pointer_over_the_lock_screen_and_no_window() {
     assert_is(&captured, &with, "the lock screen with the pointer");
     assert!(
         !captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
         "the region is gathered locked: no window pixel may reach it"
     );
@@ -383,7 +387,11 @@ fn an_xrgb_capture_forces_the_regions_alpha_too() {
         .frame();
     assert_eq!(outcome, Outcome::Ready);
     assert!(
-        captured.chunks_exact(4).all(|pixel| pixel[3] == 0xFF),
+        captured
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel[3] == 0xFF),
         "every alpha byte, the region's included, forced opaque"
     );
 }

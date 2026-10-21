@@ -49,7 +49,9 @@ fn stored(value: u16, width: u32, height: u32, pixel: impl Fn(u32, u32) -> [u8; 
 fn pixels(buffer: &mut scootbg_mem::ShmBuffer) -> Vec<[u8; 3]> {
     buffer
         .pixels_mut()
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|p| {
             assert_eq!(p[3], 0xff);
             [p[2], p[1], p[0]]
@@ -262,7 +264,7 @@ fn crop_in_place_keeps_exactly_the_rectangle() {
         height: 2,
     };
     crop_in_place(&mut rgb, w, h, crop).unwrap();
-    let kept: Vec<u8> = rgb.chunks_exact(3).map(|p| p[0]).collect();
+    let kept: Vec<u8> = rgb.as_chunks::<3>().0.iter().map(|p| p[0]).collect();
     assert_eq!(kept, [9, 10, 11, 16, 17, 18]);
     let mut rgb = vec![0; 7 * 5 * 3];
     for bad in [

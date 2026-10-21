@@ -1054,9 +1054,9 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     }
                 };
                 outcome = Ack::Report(Report {
-                    keyboard_focus: client.keyboard_focus.as_ref().map(&which),
+                    keyboard_focus: client.keyboard_focus.as_ref().map(which),
                     keys: client.keys,
-                    pointer_focus: client.pointer_focus.as_ref().map(&which),
+                    pointer_focus: client.pointer_focus.as_ref().map(which),
                     buttons: client.buttons,
                     closes: client.closes,
                     locked: client.locked,

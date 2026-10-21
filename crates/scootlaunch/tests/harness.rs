@@ -95,7 +95,7 @@ fn terminal_png() -> Vec<u8> {
         TERMINAL_ORANGE[2],
         255,
     ];
-    for chunk in px.chunks_exact_mut(4) {
+    for chunk in px.as_chunks_mut::<4>().0 {
         chunk.copy_from_slice(&orange);
     }
     // The `>` chevron: five 6x6 steps down and back up.

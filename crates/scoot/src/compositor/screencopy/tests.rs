@@ -295,7 +295,9 @@ fn a_capture_hands_the_client_the_frame_the_compositor_drew() {
     );
     assert!(
         captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
         "the window that was on screen has to be in the capture"
     );
@@ -318,18 +320,28 @@ fn an_xrgb_capture_is_opaque_even_over_a_translucent_background() {
 
     let framebuffer = fixture.pixels();
     assert!(
-        framebuffer.chunks_exact(4).any(|pixel| pixel[3] != 0xFF),
+        framebuffer
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] != 0xFF),
         "this test is only meaningful if the framebuffer really is translucent \
          somewhere -- `appearance()` gives the background an alpha below 1.0"
     );
     assert!(
-        captured.chunks_exact(4).all(|pixel| pixel[3] == 0xFF),
+        captured
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel[3] == 0xFF),
         "every alpha byte of an Xrgb8888 capture must be forced opaque"
     );
     assert!(
         captured
-            .chunks_exact(4)
-            .zip(framebuffer.chunks_exact(4))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(framebuffer.as_chunks::<4>().0.iter())
             .all(|(captured, drawn)| captured[..3] == drawn[..3]),
         "only the fourth byte may differ from the framebuffer"
     );
@@ -373,14 +385,20 @@ fn an_xrgb_capture_over_an_opaque_background_is_the_framebuffer_byte_for_byte() 
 
     let framebuffer = fixture.pixels();
     assert!(
-        framebuffer.chunks_exact(4).all(|pixel| pixel[3] == 0xFF),
+        framebuffer
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel[3] == 0xFF),
         "the premise this test pins: over an opaque background no framebuffer \
          pixel carries alpha -- windows composite source-over onto an opaque \
          destination, so only the clear color could have put any there"
     );
     assert!(
         captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
         "the window that was on screen has to be in the capture"
     );
@@ -416,7 +434,9 @@ fn an_xrgb_capture_is_opaque_at_a_width_the_wide_step_cannot_divide() {
         .frame();
     assert_eq!(outcome, Outcome::Ready);
     let opaque = captured
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .enumerate()
         .find(|(_, pixel)| pixel[3] != 0xFF);
     assert_eq!(
@@ -452,13 +472,17 @@ fn a_capture_while_locked_shows_the_lock_screen_and_not_the_windows() {
     assert_eq!(outcome, Outcome::Ready, "a locked session still captures");
     assert!(
         captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == LOCK_BGRA.as_slice()),
         "the lock surface has to be what the capture shows"
     );
     assert!(
         !captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
         "no pixel of the window behind the lock screen may reach a capture"
     );
@@ -497,13 +521,17 @@ fn a_capture_parked_before_a_lock_is_served_from_the_locked_frame() {
     assert_eq!(outcome, Outcome::Ready);
     assert!(
         !captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
         "a capture requested before the lock must still not carry the desktop"
     );
     assert!(
         captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == LOCK_BGRA.as_slice()),
         "and it must carry the lock screen that replaced it"
     );
@@ -547,7 +575,11 @@ fn a_capture_of_a_powered_off_output_is_failed_not_served() {
         "a capture due on a powered-off output must fail, not serve the stale framebuffer"
     );
     assert!(
-        captured.chunks_exact(4).all(|pixel| pixel == SENTINEL),
+        captured
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == SENTINEL),
         "a failed capture must write nothing -- the client keeps its own fill"
     );
 }
@@ -591,7 +623,9 @@ fn a_capture_after_power_off_then_lock_is_failed_not_served() {
     );
     assert!(
         !captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
         "no pixel of the unlocked desktop may reach a capture taken while locked"
     );
@@ -637,13 +671,17 @@ fn powering_on_under_lock_presents_the_lock_screen_first() {
     );
     assert!(
         captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == LOCK_BGRA.as_slice()),
         "the first frame after power-on under lock is the lock screen"
     );
     assert!(
         !captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
         "no pixel of the desktop the dark framebuffer held may be shown or served first"
     );
@@ -784,13 +822,17 @@ fn a_parked_capture_is_delivered_once_a_vblank_confirms_the_lock() {
     );
     assert!(
         captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == LOCK_BGRA.as_slice()),
         "and that framebuffer is the lock screen, not the parked desktop"
     );
     assert!(
         !captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
         "no pixel of the pre-blank desktop may reach a capture parked across the lock"
     );
@@ -836,7 +878,9 @@ fn a_parked_capture_is_delivered_once_the_fallback_confirms_the_lock() {
     );
     assert!(
         !captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
         "no pixel of the pre-blank desktop may reach a capture parked across the lock"
     );
@@ -1015,7 +1059,9 @@ fn parked_captures_on_two_sessions_are_all_delivered_by_one_confirm() {
         );
         assert!(
             !captured
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
             "client {client}: no pixel of the pre-blank desktop"
         );
@@ -1092,7 +1138,9 @@ fn a_parked_capture_outlives_a_locker_that_dies_mid_wait() {
     );
     assert!(
         !captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == WINDOW_BGRA.as_slice()),
         "no pixel of the pre-blank desktop may reach a capture parked across the lock"
     );
@@ -1137,7 +1185,9 @@ fn a_later_capture_waits_for_the_screen_to_change() {
     );
     assert!(
         captured
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .any(|pixel| pixel == SECOND_WINDOW_BGRA.as_slice()),
         "and it must carry the *new* frame, not the one it waited on"
     );
@@ -1175,7 +1225,11 @@ fn a_capture_lands_at_its_buffers_offset_inside_a_shared_pool() {
          offset in the pool"
     );
     assert!(
-        first.chunks_exact(4).all(|pixel| pixel == SENTINEL),
+        first
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == SENTINEL),
         "the sibling buffer at offset 0 must be byte-for-byte untouched -- a \
          capture written at the pool's start instead of the buffer's would \
          have clobbered another of the client's own buffers"
@@ -1216,7 +1270,11 @@ fn a_capture_honours_a_buffer_whose_rows_are_padded() {
             "row {y} has to land at its own stride, not packed against the last one"
         );
         assert!(
-            line[row..].chunks_exact(4).all(|pixel| pixel == SENTINEL),
+            line[row..]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == SENTINEL),
             "row {y}'s padding is not part of the image and must be left alone"
         );
     }
@@ -1260,7 +1318,11 @@ fn an_opaque_capture_honours_the_offset_and_the_stride_as_well() {
     let framebuffer = fixture.pixels();
 
     assert!(
-        sibling.chunks_exact(4).all(|pixel| pixel == SENTINEL),
+        sibling
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == SENTINEL),
         "the sibling buffer must be byte-for-byte untouched -- neither the row \
          copy nor the opacity pass may write outside the buffer it was given"
     );
@@ -1268,8 +1330,10 @@ fn an_opaque_capture_honours_the_offset_and_the_stride_as_well() {
         let line = &target[y * stride..][..stride];
         let drawn = &framebuffer[y * row..][..row];
         for (x, (captured, drawn)) in line[..row]
-            .chunks_exact(4)
-            .zip(drawn.chunks_exact(4))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(drawn.as_chunks::<4>().0.iter())
             .enumerate()
         {
             assert_eq!(
@@ -1283,7 +1347,11 @@ fn an_opaque_capture_honours_the_offset_and_the_stride_as_well() {
             );
         }
         assert!(
-            line[row..].chunks_exact(4).all(|pixel| pixel == SENTINEL),
+            line[row..]
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == SENTINEL),
             "row {y}'s padding is not part of the image -- the opacity pass must \
              stop at the pixels, not run to the stride"
         );

@@ -852,7 +852,9 @@ fn header_only_webp(alpha: bool) -> Vec<u8> {
     let pixels: Vec<u8> = if alpha {
         data
     } else {
-        data.chunks_exact(4)
+        data.as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|p| [p[0], p[1], p[2]])
             .collect()
     };

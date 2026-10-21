@@ -1149,13 +1149,13 @@ let
         fallbackUiPackage = null;
         fallbackFont = null;
       }).mkCatalog
-      {
-        looks = [
-          "ginger-night"
-          "stylix"
-        ];
-        stylix = null;
-      }
+        {
+          looks = [
+            "ginger-night"
+            "stylix"
+          ];
+          stylix = null;
+        }
     ).names
   );
 
@@ -10458,7 +10458,8 @@ let
             desktop.enable = true;
             look = "music-desk";
             desktop.notifications.bar.icons.idle = "";
-          } { package = fakeBar; }).config.programs.scootbar.settings.push.notifications ? icon
+          } { package = fakeBar; }).config.programs.scootbar.settings.push.notifications
+            ? icon
         );
       true
     )

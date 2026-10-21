@@ -383,7 +383,7 @@ fn a_rounded_fill_is_opaque_inside_and_transparent_in_the_corners() {
     let mut c = canvas(&mut pixels, w, h);
     c.clear();
     c.fill_rounded(0, 0, w, h, COLOR, &Corners::NONE);
-    assert!(pixels.chunks_exact(4).all(|p| p[3] == 255));
+    assert!(pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
 }
 
 #[test]

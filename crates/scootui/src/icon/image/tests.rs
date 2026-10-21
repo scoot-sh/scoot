@@ -199,8 +199,8 @@ fn a_solid_image_stays_solid_at_any_size() {
     let image = decode(&rgba(8, 8, |_, _| [255, 0, 0, 255])).unwrap();
     for side in [1u32, 3, 4, 8, 13, 32] {
         let out = scaled(&image, side);
-        for chunk in out.chunks_exact(4) {
-            assert_eq!(chunk, [0, 0, 255, 255], "side {side}");
+        for chunk in out.as_chunks::<4>().0.iter() {
+            assert_eq!(*chunk, [0, 0, 255, 255], "side {side}");
         }
     }
 }
@@ -251,7 +251,7 @@ fn a_transparent_pixel_does_not_fringe_its_neighbors() {
     .unwrap();
     for side in [3u32, 5, 8, 20] {
         let out = scaled(&image, side);
-        for chunk in out.chunks_exact(4) {
+        for chunk in out.as_chunks::<4>().0.iter() {
             assert!(
                 chunk[0].abs_diff(chunk[3]) <= 1 && chunk[1].abs_diff(chunk[3]) <= 1,
                 "side {side}: {chunk:?}"

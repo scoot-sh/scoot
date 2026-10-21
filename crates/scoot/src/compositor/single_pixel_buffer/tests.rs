@@ -386,7 +386,9 @@ fn an_attached_single_pixel_buffer_renders_its_color() {
         "the single-pixel buffer's color must reach the framebuffer"
     );
     let filled = pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|pixel| *pixel == RED_BGRA.as_slice())
         .count();
     assert!(
