@@ -3,7 +3,9 @@
 # into the bar's `push` module). The option shapes live in
 # `./desktop.nix` (shared with the NixOS side); the `package` default
 # lives here because only this side has `pkgs`. See site/src/content/docs/desktop/index.md#notifications
-# ("Notifications").
+# ("Notifications"). The scootnotify half lives in
+# `./scootnotify-home.nix`, imported by the profile beside this file
+# (an extra explicit import merges harmlessly).
 {
   config,
   lib,
@@ -20,8 +22,9 @@ let
   # (`scootnotify`) this file manages
   # nothing (the package default below still follows the daemon, so
   # either side alone names the same daemon): `programs.scootnotify`
-  # owns the unit, the file and the D-Bus activation, and the bar's
-  # feed is the daemon's own push, not this script.
+  # (imported by the profile beside this file) owns the unit, the file
+  # and the D-Bus activation, and the bar's feed is the daemon's own
+  # push, not this script.
   isMako = notif.daemon == "mako";
 
   # Whether the notification slot follows the live look (a look is set
@@ -327,8 +330,10 @@ in
     # store path through the keymap, which names this package). Whichever
     # daemon `daemon` names: the unit and the config under it are the
     # daemon's own half (mako's below, scootnotify's in
-    # `programs.scootnotify` beside this).
-    (lib.mkIf (notif.enable && toolsReady) {
+    # `programs.scootnotify` beside this). Skipped while the scootnotify
+    # module is enabled: it installs the same build (the profile always
+    # imports it), and installing both would list the daemon twice.
+    (lib.mkIf (notif.enable && toolsReady && !(config.programs.scootnotify.enable or false)) {
       home.packages = lib.optional (notif.package != null) notif.package;
     })
 

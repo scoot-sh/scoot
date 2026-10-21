@@ -91,7 +91,7 @@ session](../start/first-session.md) describes.
 A switch never ends your session. The running compositor keeps running
 from its old store path — even a switch that ships a new scoot build —
 and the new build takes over at the next login. Session-bound units
-whose own files changed (the bar, mako, the clipboard watchers) restart
+whose own files changed (the bar, the notification daemon, the clipboard watchers) restart
 against the still-running compositor; the display socket never moves,
 so they reattach to the same session. If the compositor itself exits
 instead — quitting, crashing, or being stopped — the session targets
@@ -131,13 +131,14 @@ step logs EPERM and does nothing).
 
 ## Which sessions start the units
 
-Every profile unit — the idle pair, mako and its bar feed, both
+Every profile unit — the idle pair, the notification daemon and its bar feed, both
 clipboard watchers, and the profile-managed bar — starts in
 `scoot-session.target`, scoot's own session scope, and stops when it
 ends. That scope is what the launcher starts past the display import,
 so the display is already in the user manager when the units start.
 No other desktop starts them: logging in to GNOME, KDE, niri or
-Hyprland with the same home-manager config leaves scoot's mako,
+Hyprland with the same home-manager config leaves scoot's notification
+daemon,
 locker policy and clipboard history stopped, instead of running
 them inside someone else's session. (A standalone bar — the bar
 module without the profile — stays a generic
@@ -551,6 +552,16 @@ One line restores the previous daemon:
 programs.scoot.desktop.notifications.daemon = "mako";
 ```
 
+Upgrading from a mako default: the switch replaces mako's unit,
+config and feed with scootnotify's unit and activation file, and the
+binds move to `scootnotify msg`. Whether home-manager stops the old
+mako user unit on that switch could not be verified offline: if mako
+is still running it keeps the bus name and the new daemon exits 3
+(the journal names the owner). If notifications go silent after the
+switch, stop the leftover explicitly (`systemctl --user stop mako`,
+or log out and back in) and check `systemctl --user status
+scootnotify`.
+
 What changes back with it: the daemon reads mako's flat config
 dialect again (`notifications.settings`: `anchor`, `layer`, timeouts —
 mako's own default layer is `top`, which hides popups under
@@ -563,7 +574,10 @@ instead of `scootnotify msg`. The bar feed returns as the
 file (`programs.scootnotify.settings`: `max_visible`, timeouts,
 `[[rule]]` tables, history ring) has no effect beside mako, and
 mako's `notifications.settings` has no effect beside scootnotify — a
-non-empty one warns at eval, naming where the values moved.
+non-empty one warns at eval, naming where the values moved. A look
+swap re-renders scootnotify's file, but the running daemon only picks
+it up after `scootnotify msg reload --look` (or a restart) — not
+live.
 
 Every value is an option, applied on rebuild/switch (the units restart
 into the new config; no re-login):
@@ -1825,7 +1839,8 @@ Troubleshooting, by symptom:
   for `Ctrl+Alt+Space` (the run bind) and for the three capture
   binds ([above](#screenshots-and-screen-sharing)) — while `Super+v` runs the clipboard
   picker ([above](#clipboard)) whenever `clipboard.enable` is on
-  beside the keymap, as does the `Super+n` family (mako's own
+  beside the keymap, as does the `Super+n` family (the notification
+  daemon's own
   commands) whenever `notifications.enable` is, and `Super+w` /
   `Super+b` ([the pickers](#wifi-and-bluetooth)) whenever
   `apps.network.enable` / `apps.bluetooth.enable` is.

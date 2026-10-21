@@ -829,6 +829,7 @@
               programs.scoot.desktop.apps.bluetooth.menuPackage = scootlaunchMenu;
               programs.scoot.desktop.capture.menuPackage = scootlaunchMenu;
               programs.scoot.desktop.notifications.package = scootnotifyDaemon;
+              programs.scootnotify.package = nixpkgs.lib.mkDefault (built.scootnotify or null);
             };
         in
         {
@@ -861,8 +862,8 @@
               );
             };
           # `programs.scootnotify` (nix/modules/scootnotify-home.nix):
-          # its own module, not part of `default`, so importing scoot's
-          # changes nothing about the notification daemon. The flake's
+          # also imported by the profile (`default`), so an explicit
+          # import beside it merges harmlessly (same file). The flake's
           # build is `mkDefault`, as above; null where it does not
           # build (Darwin), where enabling the option is then refused
           # by name.
@@ -915,6 +916,7 @@
               programs.scoot.desktop.apps.bluetooth.menuPackage = scootlaunchMenu;
               programs.scoot.desktop.capture.menuPackage = scootlaunchMenu;
               programs.scoot.desktop.notifications.package = scootnotifyDaemon;
+              programs.scootnotify.package = nixpkgs.lib.mkDefault (built.scootnotify or null);
             };
         in
         {
@@ -941,7 +943,7 @@
               );
             };
           # `programs.scootnotify` (nix/modules/scootnotify-nixos.nix),
-          # as the home-manager one: separate from `default`.
+          # as the home-manager one: also imported by the profile.
           scootnotify =
             { pkgs, ... }:
             {

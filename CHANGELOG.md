@@ -21,11 +21,22 @@ release, entries were dated.
 
 `programs.scoot.desktop.notifications.daemon` now defaults to `scootnotify`:
 the keymap's three binds and the bar's click sit on `scootnotify msg`, and
-there is no mako package, config or feed script unless asked for. Set
-`notifications.daemon = "mako"` to keep mako. mako's flat
+there is no mako package, config or feed script unless asked for. The
+profile runs the daemon with no extra import (its unit plus the
+`org.freedesktop.Notifications` activation file); an explicit
+`scoot.homeModules.scootnotify` / `scoot.nixosModules.scootnotify`
+beside it merges harmlessly, and enabling both daemons at once is
+refused at eval. Set `notifications.daemon = "mako"` to keep mako.
+Upgrading from a mako default swaps the unit, config and feed for
+scootnotify's; whether home-manager stops the old mako user unit on
+that switch could not be verified offline — if notifications go silent,
+`systemctl --user stop mako` (or log out/in) clears the leftover owner
+(the new daemon exits 3 while the name is taken). mako's flat
 `notifications.settings` do not carry over (an eval warning names
 `programs.scootnotify.settings` instead), and a taken bus name stops the
-unit with exit 3. Direct module users on stock nixpkgs need the scootnotify
+unit with exit 3. A look swap re-renders `notify.toml` but the running
+daemon only picks it up after `scootnotify msg reload --look` (or a
+restart). Direct module users on stock nixpkgs need the scootnotify
 package from this flake (`overlays.default`) or the escape hatch.
 Measurements and the migration notes: [Migrating from mako](https://www.scoot.sh/desktop/#migrating-from-mako).
 

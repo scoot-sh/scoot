@@ -224,6 +224,7 @@ in
   imports = [
     ./idle-home.nix
     ./notifications-home.nix
+    ./scootnotify-home.nix
     ./clipboard-home.nix
     ./launcher-home.nix
     ./capture-home.nix

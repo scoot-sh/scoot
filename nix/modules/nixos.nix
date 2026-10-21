@@ -325,6 +325,7 @@ in
   # hold unchanged through the profile's name for it.
   imports = [
     "${modulesPath}/services/display-managers/regreet.nix"
+    ./scootnotify-nixos.nix
     (lib.mkAliasOptionModule
       [ "programs" "scoot" "desktop" "greeter" ]
       [ "programs" "scoot" "greeter" ]
@@ -1619,8 +1620,10 @@ in
         }
       ];
 
+      # Skipped while the scootnotify module is enabled: it installs
+      # the same build system-wide (the profile always imports it).
       environment.systemPackages = lib.optional (
-        cfg.desktop.notifications.package != null
+        cfg.desktop.notifications.package != null && !(config.programs.scootnotify.enable or false)
       ) cfg.desktop.notifications.package;
     })
     # The launcher's system half: its package on PATH. The wrapper

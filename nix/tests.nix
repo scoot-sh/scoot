@@ -1149,13 +1149,13 @@ let
         fallbackUiPackage = null;
         fallbackFont = null;
       }).mkCatalog
-      {
-        looks = [
-          "ginger-night"
-          "stylix"
-        ];
-        stylix = null;
-      }
+        {
+          looks = [
+            "ginger-night"
+            "stylix"
+          ];
+          stylix = null;
+        }
     ).names
   );
 
@@ -2543,7 +2543,9 @@ let
   # ...with the scootnotify module beside it (nothing explicit but the
   # package): the profile default enables the daemon at `mkDefault`,
   # the binds name it by absolute path, and its unit runs while mako's
-  # half stays down.
+  # half stays down. The profile already imports that module, so this
+  # is a duplicate import (same file): it merges harmlessly, proving
+  # users with the old explicit import keep working.
   hmNotifScootFull =
     evalHomeModules
       [
@@ -2556,6 +2558,19 @@ let
         look = "music-desk";
         desktop.notifications.daemon = "scootnotify";
         desktop.notifications.package = fakeNotifyScoot;
+      };
+  # ...explicitly enabling scootnotify beside the mako escape hatch:
+  # refused (both daemons would fight for the bus name).
+  hmNotifBoth =
+    evalHomeModules
+      [
+        { programs.scootnotify.enable = true; }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        look = "music-desk";
+        desktop.notifications.daemon = "mako";
       };
 
   # A fake notification toolchain for the feed's behavior tests: stub
@@ -5590,6 +5605,14 @@ let
     desktop.notifications.daemon = "scootnotify";
     desktop.notifications.package = fakeNotifyScoot;
   };
+  # ...on the mako escape hatch: the scootnotify unit stays down.
+  osNotifMako = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    look = null;
+    desktop.notifications.daemon = "mako";
+  };
   # ...with an empty lock action, and a quote-carrying one (each
   # refused at eval on this side as well).
   osLockCmdEmpty = evalNixos {
@@ -8581,8 +8604,9 @@ let
       true
     )
     (
-      assert
-        osDesk.config.services.dbus.packages == [ osDesk.config.programs.scoot.desktop.secrets.package ];
+      assert lib.any (
+        p: p == osDesk.config.programs.scoot.desktop.secrets.package
+      ) osDesk.config.services.dbus.packages;
       true
     )
     (
@@ -8755,7 +8779,7 @@ let
       true
     )
     (
-      assert osDeskBarOff.config.systemd.user.services == { };
+      assert !(osDeskBarOff.config.systemd.user.services ? scootbar);
       true
     )
     (
@@ -9261,6 +9285,7 @@ let
           "scoot-displays"
           "scoot-nightlight"
           "scoot-osd"
+          "scootnotify"
         ];
       true
     )
@@ -9725,8 +9750,8 @@ let
       true
     )
     # ...with no mako half left (no unit, no feed script, no mako
-    # config: the two daemons never double-feed -- mako owning the
-    # name makes scootnotify exit 3)...
+    # config: the profile default runs scootnotify, and the module
+    # assertion forbids enabling both daemons at once)...
     (
       assert !(hmNotif.config.systemd.user.services ? mako);
       true
@@ -9739,26 +9764,56 @@ let
       assert !(hmNotif.config.xdg.configFile ? "mako/config");
       true
     )
+    # ...and the default daemon actually running: the profile imports
+    # the scootnotify module, auto-enabling it at `mkDefault`, with its
+    # unit wanted by the session scope, its ExecStart on the package,
+    # and its D-Bus activation file published...
+    (
+      assert hmNotif.config.programs.scootnotify.enable;
+      true
+    )
+    (
+      assert hmNotif.config.systemd.user.services ? scootnotify;
+      true
+    )
+    (
+      assert
+        hmNotif.config.systemd.user.services.scootnotify.Install.WantedBy == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert lib.hasInfix "/bin/scootnotify daemon"
+        hmNotif.config.systemd.user.services.scootnotify.Service.ExecStart;
+      true
+    )
+    (
+      assert hmNotif.config.xdg.dataFile ? "dbus-1/services/org.freedesktop.Notifications.service";
+      true
+    )
     # ...and the three binds on `scootnotify msg` (dismiss, DND toggle,
-    # restore: bare names without the module beside it)...
+    # restore: absolute path, the module beside it enabling the daemon)...
     (
-      assert hmNotif.config.programs.scoot.settings.binds."super+n" == "spawn scootnotify msg dismiss";
+      assert
+        hmNotif.config.programs.scoot.settings.binds."super+n"
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss";
       true
     )
     (
       assert
-        hmNotif.config.programs.scoot.settings.binds."super+shift+n" == "spawn scootnotify msg dnd toggle";
+        hmNotif.config.programs.scoot.settings.binds."super+shift+n"
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dnd toggle";
       true
     )
     (
       assert
-        hmNotif.config.programs.scoot.settings.binds."super+ctrl+n" == "spawn scootnotify msg restore";
+        hmNotif.config.programs.scoot.settings.binds."super+ctrl+n"
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg restore";
       true
     )
     # ...spelled out (`desktop.notifications.daemon = "scootnotify"`,
     # nothing else): the profile default renders byte-identical to the
     # explicit switch -- same daemon, same derivation, same binds, same
-    # absences.
+    # units.
     (
       assert allAssertionsHold hmNotifScoot.config;
       true
@@ -9793,6 +9848,20 @@ let
     )
     (
       assert !(hmNotifScoot.config.xdg.configFile ? "mako/config");
+      true
+    )
+    (
+      assert hmNotifScoot.config.programs.scootnotify.enable;
+      true
+    )
+    (
+      assert hmNotifScoot.config.systemd.user.services ? scootnotify;
+      true
+    )
+    (
+      assert
+        hmNotifScoot.config.systemd.user.services.scootnotify.Service.ExecStart
+        == hmNotif.config.systemd.user.services.scootnotify.Service.ExecStart;
       true
     )
     # The escape hatch (`desktop.notifications.daemon = "mako"`,
@@ -9899,6 +9968,20 @@ let
         hmNotifMako.config.systemd.user.services.scoot-notify-sync.Service.ExecStart;
       true
     )
+    # ...and no scootnotify half beside the escape hatch (no unit, no
+    # activation file, auto-enable off): the hatch runs mako only...
+    (
+      assert !(hmNotifMako.config.programs.scootnotify.enable or false);
+      true
+    )
+    (
+      assert !(hmNotifMako.config.systemd.user.services ? scootnotify);
+      true
+    )
+    (
+      assert !(hmNotifMako.config.xdg.dataFile ? "dbus-1/services/org.freedesktop.Notifications.service");
+      true
+    )
     # Without a look the mako escape hatch runs unthemed (the units
     # and the file are still there; mako keeps its own colors --
     # pinned by content below).
@@ -9995,8 +10078,7 @@ let
       true
     )
     # ...with no mako half left (no unit, no feed script, no mako
-    # config: the two daemons never double-feed -- mako owning the
-    # name makes scootnotify exit 3)...
+    # config: the assertion above forbids both daemons at once)...
     (
       assert !(hmNotifScootPkg.config.systemd.user.services ? mako);
       true
@@ -10009,28 +10091,44 @@ let
       assert !(hmNotifScootPkg.config.xdg.configFile ? "mako/config");
       true
     )
-    # ...the three binds on `scootnotify msg` (dismiss, DND toggle,
-    # restore: the bare names without the module beside it)...
+    # ...the profile already running the daemon unit (no extra import
+    # needed) with its activation file...
+    (
+      assert hmNotifScootPkg.config.programs.scootnotify.enable;
+      true
+    )
+    (
+      assert hmNotifScootPkg.config.systemd.user.services ? scootnotify;
+      true
+    )
     (
       assert
-        hmNotifScootPkg.config.programs.scoot.settings.binds."super+n" == "spawn scootnotify msg dismiss";
+        hmNotifScootPkg.config.xdg.dataFile ? "dbus-1/services/org.freedesktop.Notifications.service";
+      true
+    )
+    # ...the three binds on `scootnotify msg` (dismiss, DND toggle,
+    # restore: absolute path, the profile now carrying the module)...
+    (
+      assert
+        hmNotifScootPkg.config.programs.scoot.settings.binds."super+n"
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss";
       true
     )
     (
       assert
         hmNotifScootPkg.config.programs.scoot.settings.binds."super+shift+n"
-        == "spawn scootnotify msg dnd toggle";
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dnd toggle";
       true
     )
     (
       assert
         hmNotifScootPkg.config.programs.scoot.settings.binds."super+ctrl+n"
-        == "spawn scootnotify msg restore";
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg restore";
       true
     )
-    # ...the module beside it enabling the daemon at `mkDefault`,
+    # ...the duplicate module import enabling the daemon at `mkDefault`,
     # naming it by absolute path in the binds, and running its own
-    # unit while mako's half stays down...
+    # unit while mako's half stays down (same file twice merges)...
     (
       assert hmNotifScootFull.config.programs.scootnotify.enable;
       true
@@ -10069,6 +10167,16 @@ let
       assert !(hmNotifScootFull.config.systemd.user.services ? scoot-notify-sync);
       true
     )
+    # ...and enabling scootnotify explicitly beside daemon = "mako"
+    # is refused (one bus name, one owner)...
+    (
+      assert builtins.length (failing hmNotifBoth.config) == 1;
+      true
+    )
+    (
+      assert lib.any (m: lib.hasInfix "only one daemon can own" m) (failing hmNotifBoth.config);
+      true
+    )
     # Without the overlay (raw nixpkgs, no scootnotify of its own)
     # the default daemon resolves to nothing: the package is null and
     # the slot refuses loudly naming the fix (apply the overlay, the
@@ -10104,6 +10212,43 @@ let
     )
     (
       assert osNotif.config.services.displayManager.defaultSession == null;
+      true
+    )
+    # ...and the default daemon actually runs: the profile imports the
+    # scootnotify module, with its unit wanted by the session scope,
+    # its ExecStart on the package, and its D-Bus activation published...
+    (
+      assert osNotif.config.programs.scootnotify.enable;
+      true
+    )
+    (
+      assert osNotif.config.systemd.user.services ? scootnotify;
+      true
+    )
+    (
+      assert osNotif.config.systemd.user.services.scootnotify.wantedBy == [ "scoot-session.target" ];
+      true
+    )
+    (
+      assert lib.hasInfix "/bin/scootnotify daemon"
+        osNotif.config.systemd.user.services.scootnotify.serviceConfig.ExecStart;
+      true
+    )
+    (
+      assert osNotif.config.services.dbus.packages != [ ];
+      true
+    )
+    # ...on the mako escape hatch the scootnotify unit stays down...
+    (
+      assert allAssertionsHold osNotifMako.config;
+      true
+    )
+    (
+      assert !(osNotifMako.config.systemd.user.services ? scootnotify);
+      true
+    )
+    (
+      assert !(osNotifMako.config.programs.scootnotify.enable or false);
       true
     )
     # ...the daemon off: the profile's own packages only...
@@ -10164,7 +10309,7 @@ let
 
     # With the bar module: the feed's `push` module is defined, with
     # the DND toggle as its click (the default daemon's own command,
-    # by bare name without the module beside it)...
+    # by absolute path with the profile carrying the module)...
     (
       assert allAssertionsHold hmDeskBarNotif.config;
       true
@@ -10172,7 +10317,7 @@ let
     (
       assert
         hmDeskBarNotif.config.programs.scootbar.settings.push.notifications.on-click.exec == [
-          "scootnotify"
+          "${fakeNotifyScoot}/bin/scootnotify"
           "msg"
           "dnd"
           "toggle"
@@ -10213,10 +10358,9 @@ let
         ];
       true
     )
-    # ...and with the daemon spelled out but no module beside it the
-    # click stays a bare name, rendering byte-identical to the profile
-    # default (the same store path out of `configFile`, not just the
-    # same shape).
+    # ...and with the daemon spelled out the click names it by
+    # absolute path too (the profile carries the module either way),
+    # rendering byte-identical to the profile default.
     (
       assert allAssertionsHold hmDeskBarNotifScootBare.config;
       true
@@ -10224,7 +10368,7 @@ let
     (
       assert
         hmDeskBarNotifScootBare.config.programs.scootbar.settings.push.notifications.on-click.exec == [
-          "scootnotify"
+          "${fakeNotifyScoot}/bin/scootnotify"
           "msg"
           "dnd"
           "toggle"
@@ -10265,7 +10409,7 @@ let
     (
       assert
         osDeskBar.config.programs.scootbar.settings.push.notifications.on-click.exec == [
-          "scootnotify"
+          "${fakeNotifyScoot}/bin/scootnotify"
           "msg"
           "dnd"
           "toggle"
@@ -10314,7 +10458,8 @@ let
             desktop.enable = true;
             look = "music-desk";
             desktop.notifications.bar.icons.idle = "";
-          } { package = fakeBar; }).config.programs.scootbar.settings.push.notifications ? icon
+          } { package = fakeBar; }).config.programs.scootbar.settings.push.notifications
+            ? icon
         );
       true
     )
@@ -12664,8 +12809,9 @@ let
       true
     )
     (
-      assert
-        osAuth.config.services.dbus.packages == [ osAuth.config.programs.scoot.desktop.secrets.package ];
+      assert lib.any (
+        p: p == osAuth.config.programs.scoot.desktop.secrets.package
+      ) osAuth.config.services.dbus.packages;
       true
     )
     (
@@ -12682,7 +12828,9 @@ let
       true
     )
     (
-      assert osAuthOff.config.services.dbus.packages == [ ];
+      # Notifications stay on with the profile (its own switch), so its
+      # activation file remains while auth/secrets go quiet.
+      assert builtins.length osAuthOff.config.services.dbus.packages == 1;
       true
     )
     (
@@ -15155,9 +15303,9 @@ let
           "super+d" = "spawn ${slotScriptBin hmKeys "scoot-launcher"}";
           "ctrl+alt+space" = "spawn ${slotScriptBin hmKeys "scoot-launcher"} --list-executables-in-path";
           "super+v" = "spawn ${slotScriptBin hmKeys "scoot-clipboard-pick"}";
-          "super+n" = "spawn scootnotify msg dismiss";
-          "super+shift+n" = "spawn scootnotify msg dnd toggle";
-          "super+ctrl+n" = "spawn scootnotify msg restore";
+          "super+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss";
+          "super+shift+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg dnd toggle";
+          "super+ctrl+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg restore";
           "print" = "spawn ${slotScriptBin hmKeys "scoot-capture-output"}";
           "shift+print" = "spawn ${slotScriptBin hmKeys "scoot-capture-region"}";
           "ctrl+print" = "spawn ${slotScriptBin hmKeys "scoot-capture-clipboard"}";
@@ -15258,18 +15406,20 @@ let
     )
     (
       assert
-        hmKeysSlots.config.programs.scoot.settings.binds."super+n" == "spawn scootnotify msg dismiss";
+        hmKeysSlots.config.programs.scoot.settings.binds."super+n"
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss";
       true
     )
     (
       assert
         hmKeysSlots.config.programs.scoot.settings.binds."super+shift+n"
-        == "spawn scootnotify msg dnd toggle";
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dnd toggle";
       true
     )
     (
       assert
-        hmKeysSlots.config.programs.scoot.settings.binds."super+ctrl+n" == "spawn scootnotify msg restore";
+        hmKeysSlots.config.programs.scoot.settings.binds."super+ctrl+n"
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg restore";
       true
     )
     # ...and on the mako escape hatch the same three binds run makoctl
@@ -15644,12 +15794,16 @@ let
     )
     (
       assert
-        hmKeys.config.home.packages == [
+        sorted hmKeys.config.home.packages == sorted [
           fakePkg
           # scootbg installs for the catalog's wallpapers even with
           # `look = null` (a manual apply needs it; the layer is gone,
           # the images are not).
           fakeBg
+          # The notification daemon runs with the profile on every
+          # platform in the test set (the stand-in builds anywhere);
+          # on real Darwin without the overlay it stays null.
+          fakeNotifyScoot
         ];
       true
     )
@@ -15736,9 +15890,9 @@ let
             allow_when_locked = true;
           };
           "super+escape" = "spawn loginctl lock-session";
-          "super+n" = "spawn scootnotify msg dismiss";
-          "super+shift+n" = "spawn scootnotify msg dnd toggle";
-          "super+ctrl+n" = "spawn scootnotify msg restore";
+          "super+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss";
+          "super+shift+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg dnd toggle";
+          "super+ctrl+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg restore";
         };
       true
     )

@@ -189,10 +189,13 @@ user unit, a new config reloads it in place (cards, history and DND
 survive; a restart would drop them), and a taken name stops the unit
 instead of restart-looping (exit 3). The three binds and the bar's
 on-click sit on `scootnotify msg`; there is no mako package, no mako
-config and no feed script. To manage the file beside the switch,
-also import the module (`scoot.homeModules.scootnotify`,
-`scoot.nixosModules.scootnotify` on the system side): the profile
-runs the flake's build with no file. To go back to mako, set `daemon
+config and no feed script. The profile already imports the module, so
+`programs.scootnotify.settings` is managed with no extra import (an
+explicit `scoot.homeModules.scootnotify` /
+`scoot.nixosModules.scootnotify` beside it merges harmlessly). A look
+swap re-renders `notify.toml`, but the running daemon only picks it up
+after `scootnotify msg reload --look` (or a restart) — not live. To go
+back to mako, set `daemon
 = "mako"` and switch again — see [Migrating from
 mako](../desktop/#migrating-from-mako).
 

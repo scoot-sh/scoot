@@ -170,6 +170,16 @@ in
             with the features you want.
           '';
         }
+        {
+          # The profile's mako escape hatch and this daemon own the same
+          # bus name: enabling both leaves two units fighting for it
+          # (the loser exits 3, mako respawns every 2 s with no
+          # RestartPreventExitStatus). Refuse that combination loudly.
+          assertion = !(profileOn && slotOn && !daemonIsNotify);
+          message = ''
+            programs.scootnotify is enabled together with programs.scoot.desktop.notifications.daemon = "mako": only one daemon can own org.freedesktop.Notifications. Disable one (programs.scootnotify.enable = false, or drop daemon = "mako").
+          '';
+        }
       ];
     })
 
