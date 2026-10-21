@@ -44,6 +44,11 @@ default is ginger-night):
 <a href="./scoot/theming/"><img src="./looks/radial-burst-480.webp" alt="The radial-burst look: a blue-on-plum desktop" loading="lazy" decoding="async" /><span>radial-burst</span></a>
 </div>
 
+The default look running the full desktop — bar, launcher and
+notifications over two terminals:
+
+![The full scoot desktop in the ginger-night look: the bar with an unread count, two terminals, the launcher mid-search and two notification cards](../../assets/full-look.png)
+
 ## Three ways in
 
 Pick one:

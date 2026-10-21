@@ -33,6 +33,8 @@ light, a polkit agent and keyring, and GTK and Qt themed to the look.
 Power policy, the input method and the ReGreet login screen stay
 opt-in.
 
+![The full scoot desktop in the default look: the bar with an unread count, two terminals, the launcher mid-search and two notification cards over the cat-peeking wallpaper](../../../assets/full-look.png)
+
 **Your other sessions and your login screen stay.** To undo, set
 `desktop.enable = false;` on both sides and rebuild, or boot the
 previous generation.
