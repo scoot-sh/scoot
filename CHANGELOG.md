@@ -35,9 +35,8 @@ reactivated over D-Bus), `systemctl --user stop mako` (or log out/in) clears the
 (the new daemon exits 3 while the name is taken). mako's flat
 `notifications.settings` do not carry over (an eval warning names
 `programs.scootnotify.settings` instead), and a taken bus name stops the
-unit with exit 3. A look swap re-renders `notify.toml` but the running
-daemon only picks it up after `scootnotify msg reload --look` (or a
-restart). Direct module users on stock nixpkgs need the scootnotify
+unit with exit 3. A look swap re-renders `notify.toml` and `scoot look
+apply` reloads the running daemon live (cards, history and DND survive). Direct module users on stock nixpkgs need the scootnotify
 package from this flake (`overlays.default`) or the escape hatch.
 Measurements and the migration notes: [Migrating from mako](https://www.scoot.sh/desktop/#migrating-from-mako).
 

@@ -1,18 +1,28 @@
 //! The third-party daemon steps of a swap: `makoctl reload`, the fcitx5
-//! classic UI reload over D-Bus, and restarts of the OSD and night-light
-//! units (design section 4.7, ticket `look-leaves-daemons`).
+//! classic UI reload over D-Bus, restarts of the OSD and night-light
+//! units, and the scootnotify look-scoped reload (design section 4.7,
+//! tickets `look-leaves-daemons` and `notify-look-reload`).
 //!
 //! Every step here is best-effort and reported: a missing binary, a daemon
 //! that is not running, or a failed signal is a note, never a refusal.
 //! The fragments these signals activate live in the rendered look (`mako`,
-//! `wob.ini`, `fcitx5/theme.conf`, `nightlight`); the Nix side points each
-//! app at the state link, so by the time these run the link already names
-//! the new files.
+//! `notify.toml`, `wob.ini`, `fcitx5/theme.conf`, `nightlight`); the Nix
+//! side points each app at the state link, so by the time these run the
+//! link already names the new files.
 //!
 //! A private look state (a headless or `--private-look` session) runs none
 //! of them: unlike the compositor and bar reloads, which address the
 //! session's own sockets, these signals always reach the ambient session,
 //! so running them from a test would move the user's real desktop.
+//!
+//! The scootnotify reload is the control-socket equivalent of
+//! `scootnotify msg reload --look` (protocol 2, scoped to the look layer,
+//! keeping cards, history and DND): one JSON line each way over the
+//! daemon's socket, with the scope receipt checked like the bar's. A
+//! daemon that is not running is a note, never a refusal; a refusal or a
+//! stall is a loud note, never a hang (the client's 30 s bound). When the
+//! mako leaf already reloaded, the daemon is mako, so no scootnotify
+//! reload is attempted at all (the leaf already handles mako).
 //!
 //! The commands, verified against the pinned sources:
 //!
@@ -37,6 +47,7 @@
 //!   running (a swap never starts what the user never started).
 
 use std::path::Path;
+use std::time::Duration;
 
 use super::toolkit::find_on_path;
 
@@ -54,10 +65,30 @@ pub struct LeafReport {
     pub notes: Vec<String>,
 }
 
+/// How long a scootnotify reload waits on a daemon that accepted the
+/// connection but does not answer, before the swap stops waiting with a
+/// note rather than hanging with the lock held. The daemon's own client
+/// uses the same 30 s bound.
+pub(crate) const NOTIFY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The longest scootnotify reply read. Replies are one line (`ok` with its
+/// scope receipt, or `error`); this only bounds a daemon gone wrong.
+const NOTIFY_MAX_REPLY: u64 = 64 * 1024;
+
+/// The control protocol the reload speaks: a daemon speaking anything else
+/// refuses with a mismatch error, which the leaf reports loudly rather
+/// than misreading.
+const NOTIFY_PROTOCOL: u32 = 2;
+
 /// The leaf backends, so tests script the daemons.
 pub trait Leaves {
     /// `makoctl reload`.
     fn mako_reload(&self) -> Result<(), String>;
+    /// The scootnotify look-scoped reload (`msg reload --look` over its
+    /// control socket). A missing daemon is an `Err` like any other leaf
+    /// failure (a note, never a refusal); `apply_leaves` only calls it
+    /// when the mako leaf did not already reload.
+    fn notify_reload(&self) -> Result<(), String>;
     /// The fcitx5 `ReloadAddonConfig "classicui"` D-Bus call.
     fn fcitx5_reload(&self) -> Result<(), String>;
     /// `systemctl --user try-restart <unit>`.
@@ -161,6 +192,14 @@ impl Leaves for CliLeaves {
         } else {
             Err("fcitx5 `ReloadAddonConfig` failed (fcitx5 not running?)".to_owned())
         }
+    }
+
+    fn notify_reload(&self) -> Result<(), String> {
+        let socket = notify_socket_path(
+            std::env::var_os("WAYLAND_DISPLAY").as_deref(),
+            std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
+        )?;
+        notify_look_reload(&socket)
     }
 
     fn unit_try_restart(&self, unit: &str) -> Result<(), String> {
@@ -416,6 +455,158 @@ fn is_unit_absent(output: &str) -> bool {
     .any(|needle| lower.contains(needle))
 }
 
+/// The scootnotify control socket for this session: `$XDG_RUNTIME_DIR/
+/// `scootnotify-<NAME>.sock` with `NAME` from `$WAYLAND_DISPLAY` (its
+/// final component, sanitized the way the daemon names it; `wayland-0`
+/// when unset or empty). Pure over its inputs, so tests pin the paths
+/// without touching the process environment. Refuses (as a not-running
+/// note, never a hang) when no runtime dir resolves, no display name
+/// remains, or the path would not fit a Unix socket.
+pub(crate) fn notify_socket_path(
+    wayland_display: Option<&std::ffi::OsStr>,
+    runtime_dir: Option<&std::ffi::OsStr>,
+) -> Result<std::path::PathBuf, String> {
+    use std::os::unix::ffi::OsStrExt as _;
+    let dir = runtime_dir
+        .filter(|d| !d.is_empty())
+        .map(Path::new)
+        .ok_or_else(|| "no XDG_RUNTIME_DIR: no scootnotify socket".to_owned())?;
+    if !dir.is_absolute() {
+        return Err(format!(
+            "XDG_RUNTIME_DIR is not absolute: {}",
+            dir.display()
+        ));
+    }
+    // The daemon's own display-name rule (see `scootui::control::paths`):
+    // the final `/`-component, any byte outside `[A-Za-z0-9._-]` becomes
+    // `_`, so a display can neither escape the runtime dir nor miss the
+    // daemon.
+    let name = match wayland_display.filter(|v| !v.is_empty()) {
+        None => "wayland-0".to_owned(),
+        Some(display) => {
+            let bytes = display.as_bytes();
+            let last = match bytes.iter().rposition(|&b| b == b'/') {
+                Some(slash) => &bytes[slash + 1..],
+                None => bytes,
+            };
+            if last.is_empty() {
+                return Err("WAYLAND_DISPLAY has no name to derive a socket from".to_owned());
+            }
+            last.iter()
+                .map(|&b| {
+                    if b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-') {
+                        char::from(b)
+                    } else {
+                        '_'
+                    }
+                })
+                .collect()
+        }
+    };
+    let socket = dir.join(format!("scootnotify-{name}.sock"));
+    if socket.as_os_str().len() > 107 {
+        return Err(format!(
+            "the scootnotify socket path is longer than a Unix socket allows (107 bytes): {}",
+            socket.display()
+        ));
+    }
+    Ok(socket)
+}
+
+/// One look-scoped reload against the scootnotify daemon at `socket`:
+/// `Ok(())` reloaded, `Err` says why (a missing daemon, a refusal with
+/// the daemon's own message, a stall). Never hangs past [`NOTIFY_TIMEOUT`],
+/// never panics on a malformed reply.
+pub(crate) fn notify_look_reload(socket: &Path) -> Result<(), String> {
+    notify_look_reload_with_timeout(socket, NOTIFY_TIMEOUT)
+}
+
+/// [`notify_look_reload`] with an explicit wait bound (the tests' short
+/// timeout fake: a peer that accepts and never answers must read as a
+/// stall, never wedge the swap past the bound).
+pub(crate) fn notify_look_reload_with_timeout(
+    socket: &Path,
+    timeout: Duration,
+) -> Result<(), String> {
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::os::unix::net::UnixStream;
+    let mut stream = match UnixStream::connect(socket) {
+        Ok(stream) => stream,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            return Err(format!("nothing listens on {}: skipped", socket.display()));
+        }
+        Err(error) => {
+            return Err(format!(
+                "cannot reach scootnotify on {}: {error}",
+                socket.display()
+            ));
+        }
+    };
+    stream
+        .set_read_timeout(Some(timeout))
+        .and_then(|()| stream.set_write_timeout(Some(timeout)))
+        .map_err(|error| format!("cannot set a timeout on {}: {error}", socket.display()))?;
+    // The scoped reload, protocol 2: without the scope the daemon would
+    // re-read the user file too, applying half-edited keys the scope
+    // exists to skip. An old daemon answers the version it speaks with a
+    // mismatch error, which the reply arm reports loudly.
+    let request =
+        format!("{{\"protocol\":{NOTIFY_PROTOCOL},\"type\":\"reload\",\"scope\":\"look\"}}\n");
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| format!("cannot ask scootnotify on {}: {error}", socket.display()))?;
+    let mut reader = BufReader::new((&stream).take(NOTIFY_MAX_REPLY));
+    let mut line = String::new();
+    reader.read_line(&mut line).map_err(|error| {
+        format!(
+            "scootnotify on {} did not answer: {error}",
+            socket.display()
+        )
+    })?;
+    if line.is_empty() {
+        return Err(format!(
+            "scootnotify on {} closed the connection without replying: it may hold the new look",
+            socket.display()
+        ));
+    }
+    let reply: serde_json::Value = serde_json::from_str(&line).map_err(|error| {
+        format!(
+            "unreadable reply from scootnotify on {}: {error}",
+            socket.display()
+        )
+    })?;
+    match reply.get("type").and_then(|kind| kind.as_str()) {
+        Some("ok") => {
+            // The scoped reload must carry its scope receipt: a plain
+            // `ok` answers a different request. Refuse it loudly, never
+            // retry as a plain reload (which would apply pending edits).
+            match reply.get("scope").and_then(|scope| scope.as_str()) {
+                Some("look") => Ok(()),
+                _ => Err(
+                    "scootnotify answered the look reload without its scope receipt: refusing it"
+                        .to_owned(),
+                ),
+            }
+        }
+        Some("error") => {
+            let message = reply
+                .get("message")
+                .and_then(|message| message.as_str())
+                .unwrap_or("(no message)");
+            Err(format!("scootnotify refused the look reload: {message}"))
+        }
+        other => Err(format!(
+            "scootnotify answered the look reload with an unexpected reply: {}",
+            other.unwrap_or("(no type)")
+        )),
+    }
+}
+
 /// Runs the leaf steps for a swap over the rendered `merged` look.
 /// Returns who reloaded and the notes. Never fails the swap.
 pub fn apply_leaves(
@@ -431,9 +622,27 @@ pub fn apply_leaves(
         );
         return report;
     }
-    match leaves.mako_reload() {
-        Ok(()) => report.reloaded.push("mako".to_owned()),
-        Err(error) => report.notes.push(format!("mako not reloaded: {error}")),
+    let mako_active = match leaves.mako_reload() {
+        Ok(()) => {
+            report.reloaded.push("mako".to_owned());
+            true
+        }
+        Err(error) => {
+            report.notes.push(format!("mako not reloaded: {error}"));
+            false
+        }
+    };
+    // The scootnotify daemon owns the same bus name mako would: when the
+    // mako leaf already reloaded, the daemon is mako, so no scootnotify
+    // reload is attempted. Otherwise the running scootnotify (if any)
+    // re-reads its look layer here, keeping cards, history and DND.
+    if !mako_active {
+        match leaves.notify_reload() {
+            Ok(()) => report.reloaded.push("scootnotify".to_owned()),
+            Err(error) => report
+                .notes
+                .push(format!("scootnotify not reloaded: {error}")),
+        }
     }
     match leaves.fcitx5_reload() {
         Ok(()) => report.reloaded.push("fcitx5".to_owned()),
@@ -471,6 +680,7 @@ mod tests;
 #[cfg(test)]
 pub(crate) struct ScriptedLeaves {
     mako: std::cell::RefCell<Vec<Result<(), String>>>,
+    notify: std::cell::RefCell<Vec<Result<(), String>>>,
     fcitx5: std::cell::RefCell<Vec<Result<(), String>>>,
     units: std::cell::RefCell<Vec<Result<(), String>>>,
     restarted: std::cell::RefCell<Vec<String>>,
@@ -484,6 +694,12 @@ impl ScriptedLeaves {
     pub(crate) fn ok() -> Self {
         Self {
             mako: std::cell::RefCell::new(vec![Ok(())]),
+            // A mako success means the daemon is mako, so `apply_leaves`
+            // never calls the notify backend: script it failing so a stray
+            // call is loud. Tests for the notify path script mako failing.
+            notify: std::cell::RefCell::new(vec![Err(
+                "notify backend called while mako is active".to_owned(),
+            )]),
             fcitx5: std::cell::RefCell::new(vec![Ok(())]),
             units: std::cell::RefCell::new(vec![Ok(()), Ok(())]),
             restarted: std::cell::RefCell::new(Vec::new()),
@@ -496,6 +712,7 @@ impl ScriptedLeaves {
     pub(crate) fn failing() -> Self {
         Self {
             mako: std::cell::RefCell::new(vec![Err("no `makoctl` on PATH".to_owned())]),
+            notify: std::cell::RefCell::new(vec![Err("no daemon listens: skipped".to_owned())]),
             fcitx5: std::cell::RefCell::new(vec![Err("no `busctl` on PATH".to_owned())]),
             units: std::cell::RefCell::new(vec![
                 Err("no `systemctl` on PATH".to_owned()),
@@ -527,12 +744,22 @@ impl ScriptedLeaves {
         self.helix.replace(helix);
         self.btop.replace(btop);
     }
+
+    /// Scripts the next scootnotify reloads (popped per call): `Ok(())`
+    /// reloaded, `Err` fails the step into a note.
+    pub(crate) fn script_notify(&self, notify: Vec<Result<(), String>>) {
+        self.notify.replace(notify);
+    }
 }
 
 #[cfg(test)]
 impl Leaves for ScriptedLeaves {
     fn mako_reload(&self) -> Result<(), String> {
         self.mako.borrow_mut().pop().unwrap_or(Ok(()))
+    }
+
+    fn notify_reload(&self) -> Result<(), String> {
+        self.notify.borrow_mut().pop().unwrap_or(Ok(()))
     }
 
     fn fcitx5_reload(&self) -> Result<(), String> {

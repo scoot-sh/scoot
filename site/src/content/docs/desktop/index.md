@@ -577,9 +577,8 @@ file (`programs.scootnotify.settings`: `max_visible`, timeouts,
 `[[rule]]` tables, history ring) has no effect beside mako, and
 mako's `notifications.settings` has no effect beside scootnotify — a
 non-empty one warns at eval, naming where the values moved. A look
-swap re-renders scootnotify's file, but the running daemon only picks
-it up after `scootnotify msg reload --look` (or a restart) — not
-live.
+swap re-renders scootnotify's file and `scoot look apply` reloads the
+running daemon live (cards, history and DND survive).
 
 Every value is an option, applied on rebuild/switch (the units restart
 into the new config; no re-login):

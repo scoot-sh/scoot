@@ -289,8 +289,8 @@ cards:
 | Corners | `shape.radius` |
 
 > **Symptom:** the cards ignore a look swap.
-> The swap reaches the daemon through `scootnotify msg reload --look`
-> (plain `msg reload` re-reads the file too). If the look changed but
+> `scoot look apply` reloads the running daemon live (plain `msg
+> reload` re-reads the file too). If the look changed but
 > the cards did not, the fragment refused: the daemon warns per key and
 > keeps the last good look.
 

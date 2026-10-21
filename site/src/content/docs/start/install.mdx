@@ -395,9 +395,9 @@ not carry over (a non-empty one warns at eval, naming
 `programs.scootnotify.settings`, already wired by the profile (the
 separate `scoot.homeModules.scootnotify` /
 `scoot.nixosModules.scootnotify` import merges harmlessly if you
-already have it). A look swap re-renders that file, but the running
-daemon only picks it up after `scootnotify msg reload --look` (or a
-restart) — not live. To go back to mako, set
+already have it). A look swap re-renders that file and `scoot look
+apply` reloads the running daemon live (cards, history and DND
+survive). To go back to mako, set
 `programs.scoot.desktop.notifications.daemon = "mako"`
 and switch again — see [Migrating from
 mako](../../desktop/#migrating-from-mako).
