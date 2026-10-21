@@ -101,7 +101,7 @@ looks (black, light, dark, warm, chill) are on
 | `scootbar` | A status bar: workspaces, clock, sound, network, battery, tray. It also works on sway, niri and Hyprland. |
 | `scootbg` | A wallpaper daemon. Set `[wallpaper]` in the config and scoot starts it. |
 | `scootlaunch` | The default application launcher: an overlay panel with ranked search, plus dmenu and run modes. On Nix it is the default (`launcher.daemon = "fuzzel"` keeps fuzzel); elsewhere `install.sh --launch`. [Docs](https://www.scoot.sh/scootlaunch/) |
-| `scootnotify` | A notification server: it owns `org.freedesktop.Notifications` and shows popup cards, with do-not-disturb, a history ring with restore, `[[rule]]` tables, and `scootnotify msg` for list, history, dnd, dismiss, invoke, reload, subscribe and wait. No Nix module or distro packaging yet: run the binary beside your session. [Docs](https://www.scoot.sh/scootnotify/) |
+| `scootnotify` | A notification server: it owns `org.freedesktop.Notifications` and shows popup cards, with do-not-disturb, a history ring with restore, `[[rule]]` tables, and `scootnotify msg` for list, history, dnd, dismiss, invoke, reload, subscribe and wait. The default notification daemon on Nix (`desktop.notifications.daemon = "mako"` keeps mako), with deb, rpm and Arch packages and `install.sh --notify` elsewhere. [Docs](https://www.scoot.sh/scootnotify/) |
 
 Standard Wayland protocols mean the usual tools work: other bars,
 launchers, notification daemons, screen sharing, screen lockers and
@@ -109,10 +109,6 @@ X11 apps (with the XWayland build). [Full list](https://www.scoot.sh/scoot/proto
 
 ## Not yet
 
-- **The notification bar feed.** `scootnotify` pushes the bar's
-  `notifications` module natively, but new installs still wire the bar
-  through mako (`scoot-notify-sync`, `makoctl` on-click) until the Nix
-  switch flips, and there is no distro packaging for it yet.
 - **Changing display modes from `wlr-randr` or Settings.** Read-only for
   now. Set modes in the config file.
 - **Some X11 extras.** X input methods (XIM) and X window icons.

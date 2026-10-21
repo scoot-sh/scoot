@@ -554,9 +554,9 @@ programs.scoot.desktop.notifications.daemon = "mako";
 
 Upgrading from a mako default: the switch replaces mako's unit,
 config and feed with scootnotify's unit and activation file, and the
-binds move to `scootnotify msg`. Whether home-manager stops the old
-mako user unit on that switch could not be verified offline: if mako
-is still running it keeps the bus name and the new daemon exits 3
+binds move to `scootnotify msg`. With home-manager's default (`startServices = true`, sd-switch) the
+switch stops the removed mako unit. If mako is still running (`startServices` set to
+`suggest`, no user systemd at switch time, or mako reactivated over D-Bus) it keeps the bus name and the new daemon exits 3
 (the journal names the owner). If notifications go silent after the
 switch, stop the leftover explicitly (`systemctl --user stop mako`,
 or log out and back in) and check `systemctl --user status

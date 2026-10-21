@@ -28,9 +28,10 @@ profile runs the daemon with no extra import (its unit plus the
 beside it merges harmlessly, and enabling both daemons at once is
 refused at eval. Set `notifications.daemon = "mako"` to keep mako.
 Upgrading from a mako default swaps the unit, config and feed for
-scootnotify's; whether home-manager stops the old mako user unit on
-that switch could not be verified offline — if notifications go silent,
-`systemctl --user stop mako` (or log out/in) clears the leftover owner
+scootnotify's; with home-manager's default (`startServices = true`, sd-switch) the
+switch stops the removed mako unit. If notifications go silent anyway
+(`startServices` set to `suggest`, no user systemd at switch time, or mako
+reactivated over D-Bus), `systemctl --user stop mako` (or log out/in) clears the leftover owner
 (the new daemon exits 3 while the name is taken). mako's flat
 `notifications.settings` do not carry over (an eval warning names
 `programs.scootnotify.settings` instead), and a taken bus name stops the
