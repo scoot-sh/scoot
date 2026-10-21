@@ -18,10 +18,18 @@
 #   DATA (default $OUT/data) holds the synthetic entry dirs made by
 #     gen-entries.sh beside this file (100/1000/5000); SIZES overrides.
 #   FONT (default: fc-match "DejaVu Sans") is passed to scootlaunch
-#     --font; fuzzel reads the same family through fontconfig.
+#     --font. FUZZEL_FONT (default "DejaVu Sans:size=10") is passed to
+#     fuzzel --font: the same DejaVu Sans face at a comparable pixel
+#     size (scootlaunch draws its 13.0 px default, look.rs
+#     DEFAULT_FONT_SIZE_PX; fuzzel size=10 is points, so 10*96/72 =
+#     13.3 px at 96 DPI). Same face, same nominal size, neither side
+#     reading operator config.
 # Each launcher runs with XDG_DATA_HOME set to an empty dir and
 # XDG_DATA_DIRS set to ONLY the synthetic dir, so the entry count is
-# exact. Detection is screenshot-diff polling via `scoot msg
+# exact; XDG_CONFIG_HOME points at a shared empty dir, so neither
+# launcher reads the operator's real config (scootlaunch's
+# $XDG_CONFIG_HOME/scoot/launch.toml, fuzzel's fuzzel/fuzzel.ini).
+# Detection is screenshot-diff polling via `scoot msg
 # screenshot`: `windows` lists no layer-shell surfaces, so no cheaper
 # poll exists; the script first records the screenshot round-trip
 # distribution as the method's timing floor. Nothing is discarded:
@@ -39,11 +47,24 @@ SIZES=${SIZES:-"100 1000 5000"}
 DATA=${DATA:-$OUT/data}
 FONT=${FONT:-$(fc-match 'DejaVu Sans' --format='%{file}\n' 2>/dev/null || true)}
 FUZZEL=${FUZZEL:-fuzzel}
+# Same face as scootlaunch's --font, comparable pixel size: scootlaunch
+# draws its 13.0 px default; fuzzel points at 96 DPI give 13.3 px.
+FUZZEL_FONT=${FUZZEL_FONT:-"DejaVu Sans:size=10"}
 
 SCOOT=$BIN_DIR/scoot
 SCOOTLAUNCH=$BIN_DIR/scootlaunch
 RTDIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 export XDG_RUNTIME_DIR="$RTDIR"
+# Config sandbox for BOTH launchers: an empty private dir, so neither
+# reads the operator's real config (scootlaunch's
+# $XDG_CONFIG_HOME/scoot/launch.toml, fuzzel's fuzzel/fuzzel.ini).
+# XDG_CACHE_HOME keeps its cold/warm semantics per cell below.
+case "$OUT" in
+    /*) ;;
+    *) OUT="$PWD/$OUT" ;;
+esac
+mkdir -p "$OUT/config-empty"
+export XDG_CONFIG_HOME="$OUT/config-empty"
 
 mkdir -p "$OUT"
 cd "$OUT" || exit 1
@@ -62,6 +83,7 @@ cd "$OUT" || exit 1
     "$FUZZEL" --version
     echo "--- font ---"
     echo "FONT=$FONT"
+    echo "FUZZEL_FONT=$FUZZEL_FONT"
 } >meta.txt 2>&1
 cat meta.txt
 
@@ -183,7 +205,7 @@ launch_cell() {
     if [ "$launcher" = "scootlaunch" ]; then
         "$SCOOTLAUNCH" --font "$FONT" </dev/null >"$OUT/last-launch.log" 2>&1 &
     else
-        "$FUZZEL" </dev/null >"$OUT/last-launch.log" 2>&1 &
+        "$FUZZEL" --font="$FUZZEL_FONT" </dev/null >"$OUT/last-launch.log" 2>&1 &
     fi
     pid=$!
     if wait_frame "$OUT/shot.png" 200 >/dev/null; then
@@ -227,7 +249,7 @@ query_cell() {
     if [ "$launcher" = "scootlaunch" ]; then
         "$SCOOTLAUNCH" --font "$FONT" </dev/null >"$OUT/last-query.log" 2>&1 &
     else
-        "$FUZZEL" </dev/null >"$OUT/last-query.log" 2>&1 &
+        "$FUZZEL" --font="$FUZZEL_FONT" </dev/null >"$OUT/last-query.log" 2>&1 &
     fi
     pid=$!
     if ! wait_frame "$OUT/qref.png" 200 >/dev/null; then
@@ -281,7 +303,7 @@ mem_cell() {
     if [ "$launcher" = "scootlaunch" ]; then
         "$SCOOTLAUNCH" --font "$FONT" </dev/null >"$OUT/last-mem.log" 2>&1 &
     else
-        "$FUZZEL" </dev/null >"$OUT/last-mem.log" 2>&1 &
+        "$FUZZEL" --font="$FUZZEL_FONT" </dev/null >"$OUT/last-mem.log" 2>&1 &
     fi
     pid=$!
     wait_frame "$OUT/mem.png" 200 >/dev/null || true
@@ -326,7 +348,7 @@ idle_cell() {
     if [ "$launcher" = "scootlaunch" ]; then
         "$SCOOTLAUNCH" --font "$FONT" </dev/null >"$OUT/last-idle.log" 2>&1 &
     else
-        "$FUZZEL" </dev/null >"$OUT/last-idle.log" 2>&1 &
+        "$FUZZEL" --font="$FUZZEL_FONT" </dev/null >"$OUT/last-idle.log" 2>&1 &
     fi
     pid=$!
     wait_frame "$OUT/idle.png" 200 >/dev/null || true

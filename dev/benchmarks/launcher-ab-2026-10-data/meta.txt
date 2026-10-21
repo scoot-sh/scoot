@@ -1,0 +1,16 @@
+--- machine ---
+Linux nixos 7.1.13 #1-NixOS SMP PREEMPT Tue Jan  1 00:00:00 UTC 1980 aarch64 GNU/Linux
+load: 0.00 0.05 0.03 1/311 317934
+nproc: 8
+--- binaries ---
+dc0f1e4cb69e98c089dcbc8c758d45b74923bbf996f6a534b0f22417a61dd51a  /home/steve/f702-ab/scoot
+d608896f23773396a23e425031f37f2a24ed1536462f6eb30b3b235864752121  /home/steve/f702-ab/scootlaunch
+-rwxr-xr-x 1 steve users 10101160 Oct 20 23:53 /home/steve/f702-ab/scoot
+-rwxr-xr-x 1 steve users  2231024 Oct 20 23:53 /home/steve/f702-ab/scootlaunch
+scoot 0.4.1 (ipc protocol 12)
+scootlaunch 0.4.1
+/etc/profiles/per-user/steve/bin/fuzzel
+fuzzel version: 1.14.1 +cairo +png +svg(resvg) -assertions
+--- font ---
+FONT=/nix/store/f13ly25v2jxfikzb8jh364pssr6gm147-home-manager-path/share/fonts/truetype/DejaVuSans.ttf
+FUZZEL_FONT=DejaVu Sans:size=10
