@@ -48,8 +48,7 @@ run -p scootctl -p scootnotify -p scoot-look` 763/763 green on the VM
 venue, new fake-socket unit rows (good/refused/mismatch/scopeless/stall/
 no-socket) plus a real-daemon headless e2e (card survives reload and the
 apply leaf under the same pid; bad fragment refuses, daemon keeps the
-last good look), clippy `-D warnings` and `fmt --check` green. PR: (to
-be filled on push).
+last good look), clippy `-D warnings` and `fmt --check` green. PR: #711.
 
 Still open: the M2 real-login proof for the scootnotify look path, and
 the `targets.notifications` opt-out (`notify-look-target.md`, left open:
