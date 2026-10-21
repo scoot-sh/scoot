@@ -25,7 +25,7 @@ clipboard, network, bluetooth and capture menus follow it. Set
 (fuzzel: 2), and `--run` lists PATH executables only (fuzzel adds them to the app
 list). Direct module users on stock nixpkgs need the scootlaunch package from
 this flake (`overlays.default`) or the escape hatch. Measurements and the
-migration notes: [Migrating from fuzzel](https://scoot.sh/desktop/#launcher).
+migration notes: [Migrating from fuzzel](https://www.scoot.sh/desktop/#launcher).
 
 ## [0.4.1](https://github.com/scoot-sh/scoot/compare/v0.4.0...v0.4.1) - 2026-10-20
 
