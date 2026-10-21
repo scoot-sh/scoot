@@ -1,6 +1,6 @@
 pkgbase = scootlaunch-git
 	pkgdesc = Keyboard-first application launcher for the scoot compositor (git)
-	pkgver = 0.4.2.r0.g0000000
+	pkgver = 0.5.0.r0.g0000000
 	pkgrel = 1
 	url = https://github.com/scoot-sh/scoot
 	arch = x86_64

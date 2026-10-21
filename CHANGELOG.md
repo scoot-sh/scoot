@@ -17,7 +17,9 @@ release, entries were dated.
 
 ## Unreleased
 
-## [0.4.2](https://github.com/scoot-sh/scoot/compare/v0.4.1...v0.4.2) - 2026-10-21
+## [0.5.0](https://github.com/scoot-sh/scoot/compare/v0.4.1...v0.5.0) - 2026-10-21
+
+Breaking changes: the Nix defaults for the launcher and the notification daemon changed (see the two Breaking sections below); each has a one-line escape hatch.
 
 ### scootctl
 
