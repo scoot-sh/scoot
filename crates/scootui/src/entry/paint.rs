@@ -10,15 +10,15 @@
 //! - text, caret-side ink: `foreground`; placeholder and hints: `dim`;
 //! - caret bar and focus ring: `accent`, 2 device pixels;
 //! - select-all and the selected row: `accent` fill with `background` ink;
-//! - match-highlight spans: `hover` on plain rows, `urgent` on the
-//!   selected row (where `hover` would sit on the `accent` fill and
-//!   vanish: the defaults set `hover` to the `accent` value).
+//! - match-highlight spans: `hover` on plain rows; on the selected row
+//!   [`Theme::match_on_selection`] (legible `hover` when it contrasts
+//!   with the fill, else the inverted chip, else black or white).
 
 use super::line::{Entry, MASK_CHAR, PasswordEntry};
 use super::list::{List, Selector};
 use crate::paint::{Canvas, Span};
 use crate::text::Text;
-use crate::theme::Theme;
+use crate::theme::{SelectedMatch, Theme};
 
 /// Where a widget draws: top-left (`x`, `y`) in device pixels, `width`
 /// wide, each row `row_height` tall, text at `em`.
@@ -325,6 +325,9 @@ fn paint_rows<'a, 'b>(
     let clip = geo.clip();
     let metrics = text.metrics(geo.em);
     let selected = list.selected();
+    // Resolved once for the whole window: pure contrast math, no
+    // allocation, so the per-row loop stays allocation-free.
+    let on_selection = theme.match_on_selection();
     for (slot, row) in list.visible_range().enumerate() {
         let slot = slot as u32;
         let y = y0.saturating_add(slot.saturating_mul(geo.row_height));
@@ -356,8 +359,14 @@ fn paint_rows<'a, 'b>(
             base,
             clip,
         );
-        let match_color = if selected == Some(row) {
-            theme.urgent
+        let is_selected = selected == Some(row);
+        let match_ink = if is_selected {
+            match on_selection {
+                SelectedMatch::Ink(ink) => ink,
+                // The inverted chip below fills each span's box, so the
+                // ink here only matters for the non-chip arms.
+                SelectedMatch::Inverted => theme.accent,
+            }
         } else {
             theme.hover
         };
@@ -380,6 +389,18 @@ fn paint_rows<'a, 'b>(
             let at = geo
                 .text_x()
                 .saturating_add(text.measure(None, head, geo.em));
+            if is_selected && matches!(on_selection, SelectedMatch::Inverted) {
+                // The inverted chip: the row's text ink behind the span,
+                // `accent` over it. Same pair as the selected row's own
+                // text, so the highlight stays both visible and legible.
+                let wide = text.measure(None, body, geo.em);
+                canvas.fill_rect(
+                    Span { x: at, width: wide },
+                    y,
+                    y.saturating_add(geo.row_height),
+                    theme.background,
+                );
+            }
             text.draw(
                 canvas,
                 None,
@@ -387,7 +408,7 @@ fn paint_rows<'a, 'b>(
                 geo.em,
                 i64::from(at),
                 baseline,
-                match_color,
+                match_ink,
                 clip,
             );
         }
