@@ -161,9 +161,10 @@ LIST_N=$(scootnotify msg list | wc -l)
 # Launcher open mid-search: ginger-night roles as per-invocation flags.
 # Query "em" ranks Mail (matched through its keywords, so the selected
 # row carries no match spans and stays selection-text on selection) over
-# six more rows: any name-matched selection would draw the match spans
-# in urgent on the orange selection, which is unreadable in ginger-night
-# (see docs/scootbar/backlog/launch-match-on-selection-contrast.md).
+# six more rows: a name-matched selection draws its spans through
+# Theme::match_on_selection (the inverted chip in ginger-night), which
+# keeps the row legible (see
+# docs/scootbar/backlog/resolved/launch-match-on-selection-contrast-done.md).
 scootlaunch --font "$SANS_FONT" \
   --background-color 0e0e0eff --text-color f5ead6ff --border-color ff9a30ff \
   --selection-color e57f29ff --selection-text-color 0e0e0eff \
