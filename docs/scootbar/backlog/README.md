@@ -163,7 +163,7 @@ Shared foundation ([epic](extract-scootui.md)):
 [`scootnotify`: the notification daemon](scootnotify.md) (epic):
 - [Prototype: the go/no-go gate against mako](resolved/notify-prototype-done.md) (medium)
 - [The D-Bus server and model](resolved/notify-server-done.md), [popups](resolved/notify-popups-done.md), [the control interface](notify-control.md), [DND, history, rules](resolved/notify-dnd-history-rules-done.md), [the bar feed](resolved/notify-bar-feed-done.md)
-- [Nix, the look layer and the opt-in switch](resolved/notify-nix-done.md), [packaging and the site](resolved/notify-packaging-done.md), [flip the default](notify-default-flip.md)
+- [Nix, the look layer and the opt-in switch](resolved/notify-nix-done.md), [packaging and the site](resolved/notify-packaging-done.md), [flip the default](resolved/notify-default-flip-done.md); follow-ups: [scootnotify vs mako A/B](notify-ab-bench.md), [theme the daemon behind a target](notify-look-target.md), [`look apply` sends `msg reload --look`](notify-look-reload.md)
 - Experiment: [a fullscreen hold through a `top` surface](notify-fullscreen-hold-spike.md)
 
 [`scootlaunch`: the launcher](launcher.md) (epic):

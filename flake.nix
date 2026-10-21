@@ -794,6 +794,18 @@
               scootlaunchMenu = nixpkgs.lib.mkIf (
                 config.programs.scoot.desktop.launcher.daemon == "scootlaunch"
               ) (nixpkgs.lib.mkDefault (built.scootlaunch or null));
+              # The notification daemon behind
+              # `desktop.notifications.daemon`, but only while it names
+              # scootnotify (the default): the flake's own build,
+              # null where it does not build (Darwin). With
+              # `daemon = "mako"` no definition lands here and the pure
+              # module's lean mako stands -- the one-line escape hatch
+              # keeps working for flake consumers too. Without either
+              # the slot refuses loudly naming the fix, the way every
+              # Linux-only tool does.
+              scootnotifyDaemon = nixpkgs.lib.mkIf (
+                config.programs.scoot.desktop.notifications.daemon == "scootnotify"
+              ) (nixpkgs.lib.mkDefault (built.scootnotify or null));
             in
             {
               imports = [ ./nix/modules/home.nix ];
@@ -816,6 +828,8 @@
               programs.scoot.desktop.apps.network.menuPackage = scootlaunchMenu;
               programs.scoot.desktop.apps.bluetooth.menuPackage = scootlaunchMenu;
               programs.scoot.desktop.capture.menuPackage = scootlaunchMenu;
+              programs.scoot.desktop.notifications.package = scootnotifyDaemon;
+              programs.scootnotify.package = nixpkgs.lib.mkDefault (built.scootnotify or null);
             };
         in
         {
@@ -848,8 +862,8 @@
               );
             };
           # `programs.scootnotify` (nix/modules/scootnotify-home.nix):
-          # its own module, not part of `default`, so importing scoot's
-          # changes nothing about the notification daemon. The flake's
+          # also imported by the profile (`default`), so an explicit
+          # import beside it merges harmlessly (same file). The flake's
           # build is `mkDefault`, as above; null where it does not
           # build (Darwin), where enabling the option is then refused
           # by name.
@@ -880,6 +894,14 @@
               scootlaunchMenu = nixpkgs.lib.mkIf (
                 config.programs.scoot.desktop.launcher.daemon == "scootlaunch"
               ) (nixpkgs.lib.mkDefault (built.scootlaunch or null));
+              # The notification daemon behind
+              # `desktop.notifications.daemon`, but only while it names
+              # scootnotify (the default): the flake's own build. With
+              # `daemon = "mako"` no definition lands here and the pure
+              # module's lean mako stands.
+              scootnotifyDaemon = nixpkgs.lib.mkIf (
+                config.programs.scoot.desktop.notifications.daemon == "scootnotify"
+              ) (nixpkgs.lib.mkDefault (built.scootnotify or null));
             in
             {
               imports = [ ./nix/modules/nixos.nix ];
@@ -893,6 +915,8 @@
               programs.scoot.desktop.apps.network.menuPackage = scootlaunchMenu;
               programs.scoot.desktop.apps.bluetooth.menuPackage = scootlaunchMenu;
               programs.scoot.desktop.capture.menuPackage = scootlaunchMenu;
+              programs.scoot.desktop.notifications.package = scootnotifyDaemon;
+              programs.scootnotify.package = nixpkgs.lib.mkDefault (built.scootnotify or null);
             };
         in
         {
@@ -919,7 +943,7 @@
               );
             };
           # `programs.scootnotify` (nix/modules/scootnotify-nixos.nix),
-          # as the home-manager one: separate from `default`.
+          # as the home-manager one: also imported by the profile.
           scootnotify =
             { pkgs, ... }:
             {
@@ -977,8 +1001,8 @@
           # The scootnotify modules (nix/scootnotify-tests.nix): the
           # rendered file holds only the user's settings, the unit
           # reloads (never restarts) on a config change, the profile
-          # switch installs the daemon both ways with mako byte-equal
-          # under the default, and the real daemon validates every
+          # runs the daemon by default on both sides with mako one line
+          # away, and the real daemon validates every
           # rendered file with `daemon --check`.
           scootnotify-modules = pkgs.callPackage ./nix/scootnotify-tests.nix {
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) scootnotify;

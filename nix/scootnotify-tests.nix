@@ -22,10 +22,10 @@
 #   a restart loop), the WAYLAND_DISPLAY condition, and the
 #   `scoot-session.target` binding; the D-Bus activation file names the
 #   same binary with `SystemdService=scootnotify.service`;
-# - the desktop profile's opt-in (`desktop.notifications.daemon =
+# - the desktop profile's default (`desktop.notifications.daemon =
 #   "scootnotify"`, through a stub of that option subtree) enables this
-#   daemon at `mkDefault` (an explicit value still wins), while the
-#   mako default leaves it alone;
+#   daemon at `mkDefault` (an explicit value still wins), while
+#   `daemon = "mako"` leaves it alone;
 # - a non-empty mako-shaped `desktop.notifications.settings` beside the
 #   new daemon warns, naming `programs.scootnotify.settings` (the one
 #   slot option that does not survive the swap);
@@ -126,7 +126,7 @@ let
     {
       enable ? false,
       notifications ? true,
-      daemon ? "mako",
+      daemon ? "scootnotify",
       settings ? { },
     }:
     {
@@ -143,7 +143,7 @@ let
           "mako"
           "scootnotify"
         ];
-        default = "mako";
+        default = "scootnotify";
       };
       options.programs.scoot.desktop.notifications.settings = lib.mkOption {
         type = lib.types.attrsOf lib.types.str;
@@ -247,7 +247,8 @@ let
     enable = true;
     systemd.enable = false;
   };
-  # The profile opt-in: daemon scootnotify with the slot on.
+  # The profile default (daemon scootnotify with the slot on):
+  # the daemon enables at `mkDefault`.
   optIn = evalHomeProfile {
     enable = true;
     daemon = "scootnotify";
@@ -267,6 +268,14 @@ let
     daemon = "scootnotify";
   } { };
   optInProfileOff = evalHomeProfile { } { };
+  # The mako escape hatch: an explicit `daemon = "mako"` with the
+  # profile on leaves this daemon alone (no auto-enable; an explicit
+  # `programs.scootnotify.enable` still wins, the way an explicit
+  # disable wins over the profile default).
+  makoLeavesAlone = evalHomeProfile {
+    enable = true;
+    daemon = "mako";
+  } { };
   osOptIn = evalNixosProfile {
     enable = true;
     daemon = "scootnotify";
@@ -380,14 +389,17 @@ let
       && osSvc.serviceConfig.RestartPreventExitStatus == 3;
     "no Stylix switch: Stylix reaches it only as the stylix look" =
       !(settingsOf plain ? stylix) && !(plain.config.programs.scootnotify ? stylix);
-    "the mako default leaves this daemon alone" =
+    "the profile default (scootnotify) enables this daemon" = optIn.config.programs.scootnotify.enable;
+    "with the profile off the daemon stays off" =
       !(optInProfileOff.config.programs.scootnotify.enable or false) && settingsOf optInProfileOff == { };
-    "the opt-in enables this daemon at mkDefault" = optIn.config.programs.scootnotify.enable;
-    "an explicit disable still wins over the opt-in" =
+    "the mako escape hatch leaves this daemon alone" =
+      !(makoLeavesAlone.config.programs.scootnotify.enable or false);
+    "the profile default enables this daemon at mkDefault" = optIn.config.programs.scootnotify.enable;
+    "an explicit disable still wins over the profile default" =
       !optInDisabled.config.programs.scootnotify.enable;
-    "the opt-in needs the notifications slot on" =
+    "the profile default needs the notifications slot on" =
       !(optInSlotOff.config.programs.scootnotify.enable or false);
-    "the opt-in enables the NixOS half too" = osOptIn.config.programs.scootnotify.enable;
+    "the profile default enables the NixOS half too" = osOptIn.config.programs.scootnotify.enable;
     "a mako-shaped settings table beside the new daemon warns, naming the new home" =
       lib.any (lib.hasInfix "programs.scootnotify.settings") optInWarn.config.warnings;
     "the same table beside mako stays quiet" = makoSettingsQuiet.config.warnings == [ ];

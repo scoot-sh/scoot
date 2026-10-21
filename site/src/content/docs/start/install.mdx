@@ -57,11 +57,11 @@ Pick your system. The site remembers your choice.
 
 A flake with home-manager gets you the whole
 scoot desktop from one switch: the bar, wallpaper, lock, notifications
-(mako), launcher (scootlaunch), clipboard history, screenshots and screen sharing, all themed
+(scootnotify), launcher (scootlaunch), clipboard history, screenshots and screen sharing, all themed
 by one look, and rolled back together if you change your mind.
 Fuzzel stays one line away (see [Migrating from
-fuzzel](../../desktop/#migrating-from-fuzzel)); scootnotify swaps in for mako the
-same way ([one switch](#try-scootnotify)).
+fuzzel](../../desktop/#migrating-from-fuzzel)); mako stays one line
+away too ([one switch](../../desktop/#migrating-from-mako)).
 
 Three files. Change `myhost` to your host name and `alice` to your user
 name everywhere below.
@@ -327,7 +327,9 @@ If you used `--system`, log out and pick **scoot** on your login screen.
   Its panel needs `libxkbcommon` and a font beside it; the script's
   missing-library report names both for your distro.
 - `--notify` also installs `scootnotify`, the notification
-  [daemon](../../scootnotify/) (opt-in until it becomes the default).
+  [daemon](../../scootnotify/) (the default daemon on Nix setups, the
+  binary for hand-written ones, bound in [Build
+  your desktop](../compose/#any-other-linux-the-parts)).
   Only one daemon can own `org.freedesktop.Notifications`: the script
   refuses while another one (mako, dunst) holds the name, and names
   it — stop or disable that daemon first. Its cards need a font beside
@@ -381,27 +383,24 @@ fuzzel](../../desktop/#migrating-from-fuzzel).
 
 ## Try scootnotify
 
-On either Nix setup above, one switch swaps the mako daemon for
-[scootnotify](../../scootnotify/) behind the same binds and the same
-bar module:
-
-```nix title="configuration.nix and home.nix"
-programs.scoot.desktop.notifications.daemon = "scootnotify";
-```
-
-Rebuild (or switch home-manager) and send a notification:
-`notify-send hello` draws scootnotify's own card from the look
-instead of mako's. The keymap's three binds move to `scootnotify
-msg` (dismiss, DND toggle, restore), the bar's click toggles DND
-through it, and the mako package, its config and the feed script go
-away — mako's flat `notifications.settings` do not carry over (an
-eval warning names `programs.scootnotify.settings` instead). The
-daemon's own file (`max_visible`, timeouts, rules) is
-`programs.scootnotify.settings` — import
-`scoot.homeModules.scootnotify` (`scoot.nixosModules.scootnotify` on
-the system side) to manage it; the switch alone runs the flake's
-build with no file. To go back, drop the line (or set `"mako"`)
-and switch again.
+Both Nix setups above run [scootnotify](../../scootnotify/) behind the
+same binds and the same bar module out of the box: `notify-send hello`
+draws scootnotify's own card from the look. The keymap's three binds
+sit on `scootnotify msg` (dismiss, DND toggle, restore), the bar's
+click toggles DND through it, and there is no mako package, no mako
+config and no feed script — mako's flat `notifications.settings` do
+not carry over (a non-empty one warns at eval, naming
+`programs.scootnotify.settings` instead). The daemon's own file
+(`max_visible`, timeouts, rules) is
+`programs.scootnotify.settings`, already wired by the profile (the
+separate `scoot.homeModules.scootnotify` /
+`scoot.nixosModules.scootnotify` import merges harmlessly if you
+already have it). A look swap re-renders that file, but the running
+daemon only picks it up after `scootnotify msg reload --look` (or a
+restart) — not live. To go back to mako, set
+`programs.scoot.desktop.notifications.daemon = "mako"`
+and switch again — see [Migrating from
+mako](../../desktop/#migrating-from-mako).
 
 ## Check that it works
 

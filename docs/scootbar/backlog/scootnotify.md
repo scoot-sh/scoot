@@ -3,7 +3,7 @@ title: "`scootnotify`: the notification daemon (epic)"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "notify-fullscreen-hold-spike, notify-default-flip"
+blocked: "notify-fullscreen-hold-spike"
 milestone: "M7"
 ---
 

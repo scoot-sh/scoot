@@ -41,7 +41,7 @@ let
   # The notification slot beside this module: on with the profile
   # (still individually disable-able), standalone otherwise.
   slotOn = (desktopProfile.notifications or { }).enable or false;
-  daemonIsNotify = (desktopProfile.notifications or { }).daemon or "mako" == "scootnotify";
+  daemonIsNotify = (desktopProfile.notifications or { }).daemon or "scootnotify" == "scootnotify";
   # The slot's mako-shaped settings: flat `key = value` lines for mako's
   # own config dialect. They do not carry over to this daemon (whose file
   # is the user's `settings` here, below): a non-empty one beside the new
@@ -168,6 +168,16 @@ in
             (the flake's `scootnotify`, which takes buildFeatures); the given
             package has none. Leave features null, or build the package
             with the features you want.
+          '';
+        }
+        {
+          # The profile's mako escape hatch and this daemon own the same
+          # bus name: enabling both leaves two units fighting for it
+          # (the loser exits 3, mako respawns every 2 s with no
+          # RestartPreventExitStatus). Refuse that combination loudly.
+          assertion = !(profileOn && slotOn && !daemonIsNotify);
+          message = ''
+            programs.scootnotify is enabled together with programs.scoot.desktop.notifications.daemon = "mako": only one daemon can own org.freedesktop.Notifications. Disable one (programs.scootnotify.enable = false, or drop daemon = "mako").
           '';
         }
       ];

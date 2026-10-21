@@ -1,9 +1,11 @@
-# `programs.scoot.desktop.notifications` for home-manager: the mako
+# `programs.scoot.desktop.notifications` for home-manager: the daemon's
 # user unit, its config, and the bar feed (DND state and unread count
 # into the bar's `push` module). The option shapes live in
 # `./desktop.nix` (shared with the NixOS side); the `package` default
 # lives here because only this side has `pkgs`. See site/src/content/docs/desktop/index.md#notifications
-# ("Notifications").
+# ("Notifications"). The scootnotify half lives in
+# `./scootnotify-home.nix`, imported by the profile beside this file
+# (an extra explicit import merges harmlessly).
 {
   config,
   lib,
@@ -16,11 +18,13 @@ let
   notif = cfg.desktop.notifications;
 
   # The daemon behind the slot: mako's unit, config and feed below run
-  # only while it names mako. With `scootnotify` this file manages
+  # only while it names mako (the escape hatch). By default
+  # (`scootnotify`) this file manages
   # nothing (the package default below still follows the daemon, so
   # either side alone names the same daemon): `programs.scootnotify`
-  # owns the unit, the file and the D-Bus activation, and the bar's
-  # feed is the daemon's own push, not this script.
+  # (imported by the profile beside this file) owns the unit, the file
+  # and the D-Bus activation, and the bar's feed is the daemon's own
+  # push, not this script.
   isMako = notif.daemon == "mako";
 
   # Whether the notification slot follows the live look (a look is set
@@ -262,7 +266,7 @@ let
   toolsReady = notif.package != null;
   # The lean mako (no GTK stack -- see `notifications-mako.nix`),
   # shared with the NixOS side's default so either side alone names
-  # the same daemon. Guarded off Linux like the stock attribute it
+  # the same daemon with the escape hatch. Guarded off Linux like the stock attribute it
   # wraps: `pkgs.mako` refuses evaluation there.
   leanMako = import ./notifications-mako.nix { inherit pkgs; };
 in
@@ -278,8 +282,8 @@ in
     # save it (the Darwin `nix flake check` run reads every default).
     # Off Linux it defaults to null, which the assertion below
     # refuses loudly instead of installing nothing silently. Follows
-    # `desktop.notifications.daemon`: the lean mako for `"mako"`,
-    # `pkgs.scootnotify` for `"scootnotify"`.
+    # `desktop.notifications.daemon`: the scootnotify build for the
+    # default `"scootnotify"`, a lean mako for `"mako"`.
     package = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
       default =
@@ -291,14 +295,14 @@ in
           leanMako
         else
           null;
-      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then (leanMako for daemon mako, pkgs.scootnotify or null for daemon scootnotify) else null";
+      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then (pkgs.scootnotify or null for daemon scootnotify, leanMako for daemon mako) else null";
       description = ''
         The notification daemon package to run the slot from (must
         speak the daemon's flags and control command). Follows
-        `desktop.notifications.daemon`: a lean mako without the GTK
-        stack for `"mako"` (see `notifications-mako.nix`), the
-        scootnotify build for `"scootnotify"`. Null installs nothing.
-        Linux-only: null off Linux.
+        `desktop.notifications.daemon`: the scootnotify build for the
+        default `"scootnotify"`, a lean mako without the GTK
+        stack for `"mako"` (see `notifications-mako.nix`). Null installs
+        nothing. Linux-only: null off Linux.
       '';
     };
   };
@@ -322,20 +326,22 @@ in
       ];
     })
 
-    # The mako daemon: its package, its config file, and the unit that
-    # runs it. Wanted by `scoot-session.target` -- scoot's own session
-    # scope (started by the launcher past the display import, so the
-    # display is there when the daemon starts) -- never the shared
-    # `graphical-session.target`, which every other desktop reaches too
-    # and would start this daemon inside someone else's session.
-    # Retried like the bar's unit rather than conditioned (a skipped
-    # start is never retried). Named `mako.service`, after
-    # the daemon: mako ships a D-Bus activation file for
-    # `org.freedesktop.Notifications` routing through
-    # `SystemdService=mako.service`, so a `Notify` with the daemon
-    # down starts this unit instead of failing -- and the `ExecStart`
-    # below is what it runs. Only with `daemon = "mako"`.
-    (lib.mkIf (notif.enable && isMako) {
+    # The daemon's package on PATH (the binds call it by absolute
+    # store path through the keymap, which names this package). Whichever
+    # daemon `daemon` names: the unit and the config under it are the
+    # daemon's own half (mako's below, scootnotify's in
+    # `programs.scootnotify` beside this). Skipped while the scootnotify
+    # module is enabled: it installs the same build (the profile always
+    # imports it), and installing both would list the daemon twice.
+    (lib.mkIf (notif.enable && toolsReady && !(config.programs.scootnotify.enable or false)) {
+      home.packages = lib.optional (notif.package != null) notif.package;
+    })
+
+    # The bar icons both daemons feed through (one glyph or empty --
+    # the bar refuses anything else where it is drawn): refused here
+    # whatever `daemon` names, so a standalone slot with no bar module
+    # beside it still fails loudly.
+    (lib.mkIf notif.enable {
       assertions = [
         {
           # The bar takes an update icon only as exactly one glyph (or
@@ -353,13 +359,28 @@ in
           '';
         }
       ];
+    })
+
+    # The mako daemon: its package, its config file, and the unit that
+    # runs it. Wanted by `scoot-session.target` -- scoot's own session
+    # scope (started by the launcher past the display import, so the
+    # display is there when the daemon starts) -- never the shared
+    # `graphical-session.target`, which every other desktop reaches too
+    # and would start this daemon inside someone else's session.
+    # Retried like the bar's unit rather than conditioned (a skipped
+    # start is never retried). Named `mako.service`, after
+    # the daemon: mako ships a D-Bus activation file for
+    # `org.freedesktop.Notifications` routing through
+    # `SystemdService=mako.service`, so a `Notify` with the daemon
+    # down starts this unit instead of failing -- and the `ExecStart`
+    # below is what it runs. Only with `daemon = "mako"`.
+    (lib.mkIf (notif.enable && isMako) {
 
       # The bridge runs from its store path in the feed unit below,
       # not from PATH: installing it would put a second copy of the
       # package set's shape into every profile user's profile for no
       # runtime need (a manual sync is `systemctl --user restart
       # scoot-notify-sync`).
-      home.packages = lib.optional (notif.package != null) notif.package;
 
       xdg.configFile."mako/config".source = lib.mkIf toolsReady makoConfig;
 
