@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.4.2](https://github.com/scoot-sh/scoot/compare/v0.4.1...v0.4.2) - 2026-10-21
+
+### scootctl
+
+- added: look apply reloads a running scootnotify ([#711](https://github.com/scoot-sh/scoot/pull/711))
+
+### scootlaunch
+
+- fixed: readable match highlight on the selected row; per-label tiles for icon-less rows ([#709](https://github.com/scoot-sh/scoot/pull/709))
+
 ### Breaking: notifications default to scootnotify
 
 `programs.scoot.desktop.notifications.daemon` now defaults to `scootnotify`:
