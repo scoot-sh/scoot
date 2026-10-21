@@ -222,8 +222,8 @@ hits the wall:
 - [launch-toggle-race-and-socket-mode](launch-toggle-race-and-socket-mode.md)
 - [launch-ci-scootui-manifest-fanout](launch-ci-scootui-manifest-fanout.md)
 - [launch-look-selected-row-contrast](launch-look-selected-row-contrast.md)
-- [launch-match-on-selection-contrast](launch-match-on-selection-contrast.md): match spans on the selected row draw in urgent on the orange selection in ginger-night — unreadable
-- [launch-iconless-tile-cache-share](launch-iconless-tile-cache-share.md): icon-less entries share one cached tile letter (Printer drew C)
+- [launch-match-on-selection-contrast](resolved/launch-match-on-selection-contrast-done.md) (low): selected-row match spans now resolve through `Theme::match_on_selection` (readable `hover` kept, else the inverted chip) — RESOLVED 2026-10-21
+- [launch-iconless-tile-cache-share](resolved/launch-iconless-tile-cache-share-done.md) (low): letter tiles never enter the cache, so icon-less rows draw their own letters — RESOLVED 2026-10-21
 - [release-plz-changelog-include-shell-apps](resolved/release-plz-changelog-include-shell-apps-done.md)
 - [launch-spawn-detach-cwd-and-close](launch-spawn-detach-cwd-and-close.md)
 - [launch-dmenu-doc-and-pin-notes](launch-dmenu-doc-and-pin-notes.md)

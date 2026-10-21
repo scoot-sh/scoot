@@ -80,3 +80,27 @@ fn an_argb_pixel_is_premultiplied_and_opaque_is_xrgb() {
         }
     }
 }
+
+#[test]
+fn contrast_is_the_wcag_ratio() {
+    let black = Color { r: 0, g: 0, b: 0 };
+    let white = Color {
+        r: 255,
+        g: 255,
+        b: 255,
+    };
+    assert_eq!(black.contrast_ratio(white), 21.0);
+    assert_eq!(black.contrast_ratio(black), 1.0);
+    let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+    // Ginger-night's filed pair: urgent on the selection accent is 1.3:1.
+    let urgent = Color::parse("#E05A4E").unwrap();
+    let accent = Color::parse("#E57F29").unwrap();
+    assert!(close(urgent.contrast_ratio(accent), 1.2886542714786637));
+    // Symmetry and the unselected row's pair for the same look.
+    let hover = Color::parse("#FFB14B").unwrap();
+    assert!(close(
+        accent.contrast_ratio(hover),
+        hover.contrast_ratio(accent)
+    ));
+    assert!(close(hover.contrast_ratio(accent), 1.5734387324531438));
+}

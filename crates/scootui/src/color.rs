@@ -63,6 +63,27 @@ impl Color {
         let scale = |channel: u8| (u32::from(channel) * u32::from(alpha) + 127) / 255;
         u32::from(alpha) << 24 | scale(self.r) << 16 | scale(self.g) << 8 | scale(self.b)
     }
+
+    /// WCAG relative luminance (0 black, 1 white): the same formula the
+    /// look pipeline's contrast check uses, over the parsed channels.
+    pub fn luminance(self) -> f64 {
+        let channel = |byte: u8| {
+            let c = f64::from(byte) / 255.0;
+            if c <= 0.03928 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(self.r) + 0.7152 * channel(self.g) + 0.0722 * channel(self.b)
+    }
+
+    /// WCAG contrast ratio against `other` (1 identical, 21 black on
+    /// white). Pure computation, no allocation.
+    pub fn contrast_ratio(self, other: Color) -> f64 {
+        let (x, y) = (self.luminance(), other.luminance());
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
 }
 
 /// `#rrggbb`, lowercase.

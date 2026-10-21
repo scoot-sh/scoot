@@ -147,7 +147,7 @@ and is reported; a missing layer is the defaults with one warning.
 | Panel fill | `surface` (default `background`), at `opacity.popups` |
 | Input and row text | `foreground` |
 | Placeholder | `dim` |
-| Matched characters | `match` (default `hover`) |
+| Matched characters | `match` (default `hover`) on plain rows; on the selected row the `match` ink when it contrasts with the fill (at least 3:1), else the inverted chip (row-text ink behind, `accent` over it) |
 | Selected row fill / text | `selection` / `selection-text` (defaults `accent` / `background`) |
 | Panel border | `focus` (default `accent`) |
 | Caret, entry focus ring | `accent` |

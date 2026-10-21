@@ -1,9 +1,10 @@
 ---
 title: "scootlaunch icon-less entries share one cached tile letter (Printer drew C)"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-21"
 ---
 
 # scootlaunch icon-less entries share one cached tile letter (Printer drew C)
@@ -37,3 +38,16 @@ no-cache-tiles change must keep the bounds intact.
 The README hero workaround (PR #707 gives every synthetic entry a
 distinct `Icon` key, so no two visible rows share `("", side)`).
 Resolving more real icons from the theme.
+
+## Resolution
+
+Resolved 2026-10-21. `Cache::get` never caches letter tiles: rows with
+no `Icon=` return their own label's tile with no map probe and no
+allocation, and names that resolve or decode to nothing fall back per
+label the same way. Only decoded images are cached, so the
+`MAX_ENTRIES` / `MAX_BYTES` eviction bounds are intact (the entry-count
+eviction test now uses real tiny images). Regression test
+`icon_less_rows_draw_their_own_letters` opens Calculator then Printer
+(plus a shared bogus name) and asserts `C` then `P`. Draw-path timing
+for icon-less rows: 19 ns/op before, 2 ns/op after; the `paint_list`
+frame is unchanged (146.9 us vs 146.5 us, noise).

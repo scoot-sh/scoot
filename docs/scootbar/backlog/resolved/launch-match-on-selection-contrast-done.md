@@ -1,9 +1,10 @@
 ---
 title: "launcher match highlight unreadable on the selection row in ginger-night"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-21"
 ---
 
 # launcher match highlight unreadable on the selection row in ginger-night
@@ -44,3 +45,22 @@ The README hero workaround (PR #707 picks query `em`, whose top hit
 Mail matches through keywords with no name spans, so the selected row
 is plain selection-text). Changing ginger-night's urgent or accent
 hues.
+
+## Resolution
+
+Resolved 2026-10-21. The selected row no longer inks matches in
+`urgent`: `scootui`'s `paint_rows` resolves the selected-row match ink
+through `Theme::match_on_selection`, measured against the actual theme
+roles — the `hover` ink when it contrasts at least 3:1 with the
+selection fill (so a readable `--match-color` keeps meaning what its
+name says on both rows), else the inverted chip (row-text ink behind,
+`accent` over it), else black or white ink. Measured: `urgent` on
+`accent` was 1.29:1 in ginger-night (1.29-2.33 everywhere shipped);
+`hover` on `accent` is 1.0-1.61 everywhere shipped, so every shipped
+look resolves to the inverted chip (row-text on `accent` is 6.2-12.9).
+Pinned by `match_on_selection_*` unit tests over all five shipped
+palettes plus the built-in default, and the re-pinned
+`golden_list_selection_highlights` (no `urgent` in the selected row).
+Dmenu mode shares the path, so it gains the same fix. Docs in
+`site/.../scootlaunch/{panel,cli}.md`, the `look.rs` role table and
+`panel.rs apply_colors`.

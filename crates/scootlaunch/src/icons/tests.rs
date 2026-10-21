@@ -187,24 +187,58 @@ fn svg_bounds_hold() {
 }
 
 #[test]
-fn cache_evicts_on_entry_count() {
-    // 72 distinct missing keys: each is a tile (0 bytes), so only the
-    // entry count can trip the bound. Without the eviction the cache
-    // would hold all 72; with it the count stays under the cap.
-    let home = tmp();
-    let base = home.path().join("icons");
-    fs::create_dir_all(&base).expect("base");
-    let bases = vec![base];
+fn icon_less_rows_draw_their_own_letters() {
+    // The filed bug: two icon-less entries shared the single `("", side)`
+    // entry, so Printer drew Calculator's `C`. Tiles are never cached
+    // now: each row renders its own label's letter, in order, repeatedly.
     let mut cache = Cache::default();
+    let bases = vec![];
+    for _ in 0..3 {
+        let calc = cache.get("Adwaita", &bases, None, "Calculator", 16);
+        let print = cache.get("Adwaita", &bases, None, "Printer", 16);
+        assert!(matches!(calc, Icon::Tile('C')), "{calc:?}");
+        assert!(matches!(print, Icon::Tile('P')), "{print:?}");
+    }
+    // A shared unresolvable name falls back per label too, not per name.
+    for _ in 0..2 {
+        let calc = cache.get("Adwaita", &bases, Some("no-such-icon"), "Calculator", 16);
+        let print = cache.get("Adwaita", &bases, Some("no-such-icon"), "Printer", 16);
+        assert!(matches!(calc, Icon::Tile('C')), "{calc:?}");
+        assert!(matches!(print, Icon::Tile('P')), "{print:?}");
+    }
+    // Tiles never enter the map, so icon-less rows leave it empty.
+    let (entries, bytes) = cache.cached();
+    assert_eq!((entries, bytes), (0, 0));
+}
+
+#[test]
+fn cache_evicts_on_entry_count() {
+    // 72 distinct icons past the entry cap: without the eviction the
+    // cache would hold all 72; with it the count stays under the cap.
+    // Tiles are never cached, so these are real (tiny) images.
+    let home = tmp();
+    let mut files = Vec::new();
     for i in 0..(MAX_ENTRIES + 8) {
-        let missing = format!("missing-{i}");
-        let icon = cache.get("Adwaita", &bases, Some(&missing), &format!("app{i}"), 16);
-        assert!(matches!(icon, Icon::Tile(_)));
+        let file = home.path().join(format!("count{i}.png"));
+        fs::write(&file, png_bytes(2, 2)).expect("png");
+        files.push(file);
+    }
+    let bases = vec![];
+    let mut cache = Cache::default();
+    for file in &files {
+        let icon = cache.get(
+            "Adwaita",
+            &bases,
+            Some(file.to_string_lossy().as_ref()),
+            "App",
+            16,
+        );
+        assert!(matches!(icon, Icon::Image(_)), "{file:?}");
     }
     let (entries, bytes) = cache.cached();
     assert!(entries <= MAX_ENTRIES, "{entries}");
-    assert!(entries == 8, "{entries}");
-    assert_eq!(bytes, 0);
+    assert_eq!(entries, 8, "{entries}");
+    assert!(bytes <= MAX_BYTES, "{bytes}");
     assert_eq!(tile_letter("Firefox"), 'F');
     assert_eq!(tile_letter(""), '?');
     assert_eq!(tile_letter("123"), '1');

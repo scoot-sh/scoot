@@ -512,7 +512,9 @@ pub enum Icon {
 /// The process-lifetime icon cache: at most [`MAX_ENTRIES`] icons,
 /// [`MAX_BYTES`] in all. Past either the whole cache is dropped and
 /// refilled from what is drawn next. Keyed by the icon key (name or
-/// path) and the device side.
+/// path) and the device side. Only decoded images are cached: a letter
+/// tile is the row's own label, cheap to redraw, so tiles never enter
+/// the map (two icon-less rows must never share one entry).
 #[derive(Debug, Default)]
 pub struct Cache {
     entries: HashMap<(String, u32), Icon>,
@@ -524,6 +526,11 @@ impl Cache {
     /// `side` device pixels, loading and decoding on a miss. `label`
     /// supplies the tile letter when nothing loads. Only call for
     /// visible rows: every call may read and decode one file.
+    ///
+    /// Letter tiles are never cached and never allocated for: an
+    /// icon-less row returns its own label's tile straight from this
+    /// call, so the draw path allocates nothing and one row's letter
+    /// can never leak into another row.
     pub fn get(
         &mut self,
         configured: &str,
@@ -533,26 +540,30 @@ impl Cache {
         side: u32,
     ) -> Icon {
         let side = side.clamp(1, MAX_RENDER_SIDE);
-        let key = (icon.unwrap_or("").to_string(), side);
+        let Some(name) = icon.filter(|name| !name.is_empty()) else {
+            return Icon::Tile(tile_letter(label));
+        };
+        let key = (name.to_string(), side);
         if let Some(hit) = self.entries.get(&key) {
             return hit.clone();
         }
-        let loaded = icon
-            .filter(|name| !name.is_empty())
-            .and_then(|name| find_file(configured, name, side, bases))
-            .and_then(|path| decode_file(&path, side));
-        let icon = loaded
-            .map(Icon::Image)
-            .unwrap_or_else(|| Icon::Tile(tile_letter(label)));
-        let bytes = match &icon {
-            Icon::Image(decoded) => decoded.pixels.len(),
-            Icon::Tile(_) => 0,
+        let Some(decoded) =
+            find_file(configured, name, side, bases).and_then(|path| decode_file(&path, side))
+        else {
+            // A name that resolves or decodes to nothing draws the
+            // row's own tile, uncached like the nameless case: caching
+            // it under the name would hand one row's letter to every
+            // other row sharing that name, and tiles cost nothing to
+            // redraw.
+            return Icon::Tile(tile_letter(label));
         };
+        let bytes = decoded.pixels.len();
         if self.entries.len() + 1 > MAX_ENTRIES || self.bytes + bytes > MAX_BYTES {
             self.entries.clear();
             self.bytes = 0;
         }
         self.bytes += bytes;
+        let icon = Icon::Image(decoded);
         self.entries.insert(key, icon.clone());
         icon
     }

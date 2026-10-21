@@ -119,7 +119,7 @@ passes it to the bare panel too).
 | `--border-color` | panel border |
 | `--selection-color` | selected row fill |
 | `--selection-text-color` | selected row text |
-| `--match-color` | matched characters |
+| `--match-color` | matched characters (on the selected row too when it contrasts with the fill; else the inverted chip, so the row stays legible) |
 | `--prompt-color` | prompt text |
 
 Only `--background-color` may be translucent; any other color with an
