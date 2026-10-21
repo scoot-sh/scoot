@@ -206,8 +206,8 @@ let
 in
 {
   # The idle policy's user half (swayidle unit, inhibitor, locker
-  # config) and the notification daemon's user half (mako unit, its
-  # config, the bar feed): options under `programs.scoot.desktop.idle`
+  # config) and the notification daemon's user half (the active
+  # daemon's unit, its config, the bar feed): options under `programs.scoot.desktop.idle`
   # and `...notifications`, declared there. Imported here (not by
   # consumers) so the profile's user side is one import. The audio
   # slot's user half (the OSD unit, its config, the control scripts),
@@ -224,6 +224,7 @@ in
   imports = [
     ./idle-home.nix
     ./notifications-home.nix
+    ./scootnotify-home.nix
     ./clipboard-home.nix
     ./launcher-home.nix
     ./capture-home.nix

@@ -12,10 +12,11 @@
 #      each binary against the release's SHA256SUMS before installing it
 #      (the session files come from the same tagged commit); with
 #      --launch it also downloads scootlaunch, the application launcher
-#      (opt-in until it becomes the default); with --notify it also
-#      downloads scootnotify, the notification daemon (opt-in until it
-#      becomes the default, and refused while another daemon owns
-#      org.freedesktop.Notifications)
+#      (the default menu behind `Super+d` on Nix setups, the binary
+#      for hand-written ones); with --notify it also
+#      downloads scootnotify, the notification daemon (the default
+#      daemon on Nix setups, the binary for hand-written ones, and
+#      refused while another daemon owns org.freedesktop.Notifications)
 #   3. installs them and the `scoot-session` launcher into a bin directory,
 #      the session's systemd user units, and the portal config. A plain
 #      run installs for you only and adds no login-screen entry;
@@ -97,10 +98,10 @@ Usage: install.sh [options]
                       retired once releases share one vV tag: use --version)
   --no-bar            skip scootbar
   --launch            also install scootlaunch, the keyboard-first
-                      application launcher (opt-in until it becomes
-                      the default)
+                      application launcher (the default menu behind
+                      `Super+d` on Nix setups)
   --notify            also install scootnotify, the notification daemon
-                      (opt-in until it becomes the default; refused
+                      (the default daemon on Nix setups; refused
                       while another daemon owns
                       org.freedesktop.Notifications, which this script
                       never stops for you)

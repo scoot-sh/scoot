@@ -18,8 +18,8 @@ takes one config file and a few packages.
 | Compositor | `scoot` | ✓ live |
 | Status bar | `scootbar`, or any layer-shell bar (Waybar, …) | ✓ live |
 | Wallpaper | `scootbg`, started by scoot from `[wallpaper]` | ✓ live |
-| App launcher | fuzzel | `scootlaunch` (opt-in: `install.sh --launch`) |
-| Notifications | mako | `scootnotify` (opt-in: `install.sh --notify`) |
+| App launcher | scootlaunch (`install.sh --launch`), or fuzzel | ✓ live |
+| Notifications | scootnotify (`install.sh --notify`), or mako | ✓ live |
 | Idle and lock | swayidle and swaylock | `scootlock` *(planned)* |
 | Login screen | ReGreet on NixOS; your current login screen elsewhere | a scoot greeter *(planned)* |
 | Clipboard history | cliphist and wl-clipboard | — |
@@ -78,7 +78,8 @@ Every piece and every option: [The scoot desktop](../../desktop/).
 <Steps>
 
 1. Install scoot with the [Any Linux script](../install/#use-it-every-day)
-   (add `--system` to get it on your login screen). It runs the bar as a
+   (add `--system` to get it on your login screen, `--launch` for the
+   launcher below, `--notify` for notifications). It runs the bar as a
    service for you.
 
 2. Install the parts.
@@ -152,9 +153,14 @@ Every piece and every option: [The scoot desktop](../../desktop/).
    mode = "fill"
 
    [binds]
-   "super+d" = "spawn fuzzel"
+   "super+d" = "spawn scootlaunch"
    "super+escape" = "spawn swaylock -f"
    ```
+
+   Without `--launch` (no `scootlaunch` on `PATH`), bind fuzzel
+   instead: `"super+d" = "spawn fuzzel"`. A bind is one command, so
+   there is no fallback — a missing binary logs a warning and the
+   key does nothing.
 
 7. Log out and pick **scoot** on your login screen. Installed without
    `--system`? Press `Ctrl+Alt+F3`, log in, and run:
@@ -184,7 +190,7 @@ A reload starts the new `[autostart]` entries once.
 > scoot needs `scootbg` on your `PATH`. Run `command -v scootbg`. No output means `scootbg` is not installed. Install it, then run `scoot msg reload`.
 
 > **Symptom:** `Super+d` does nothing.
-> Run `fuzzel` in a scoot terminal. An error there names the cause. If fuzzel opens, read the scoot log for a warning about `[binds]`.
+> Run `scootlaunch` in a scoot terminal. An error there names the cause. If it opens, read the scoot log for a warning about `[binds]`. Bound fuzzel instead? Run `fuzzel` the same way.
 
 ### Lock the screen when you leave
 

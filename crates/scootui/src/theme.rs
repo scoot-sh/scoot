@@ -81,4 +81,49 @@ impl Theme {
             Class::Muted => self.dim,
         }
     }
+
+    /// How a match highlight reads on the selected row (the `accent`
+    /// fill): `hover` ink is only legible on some looks (ginger-night's
+    /// `#FFB14B` on `#E57F29` is 1.6:1), so the row resolves its own ink
+    /// from the measured contrast, always at least 3:1:
+    ///
+    /// - `hover` itself when it contrasts with the fill (a readable
+    ///   `--match-color` or look keeps meaning what its name says on
+    ///   both rows);
+    /// - else the inverted chip (the row's own text ink as the chip,
+    ///   `accent` as its text: the same pair the selected row already
+    ///   draws, whose ratio the look pipeline gates);
+    /// - else plain black or white ink, whichever contrasts (one always
+    ///   reaches 4.6:1, so a hostile look degrades to legible, never to
+    ///   a smear).
+    pub fn match_on_selection(&self) -> SelectedMatch {
+        const MIN: f64 = 3.0;
+        if self.hover.contrast_ratio(self.accent) >= MIN {
+            return SelectedMatch::Ink(self.hover);
+        }
+        if self.background.contrast_ratio(self.accent) >= MIN {
+            return SelectedMatch::Inverted;
+        }
+        const BLACK: Color = Color { r: 0, g: 0, b: 0 };
+        const WHITE: Color = Color {
+            r: 255,
+            g: 255,
+            b: 255,
+        };
+        if WHITE.contrast_ratio(self.accent) >= BLACK.contrast_ratio(self.accent) {
+            SelectedMatch::Ink(WHITE)
+        } else {
+            SelectedMatch::Ink(BLACK)
+        }
+    }
+}
+
+/// How [`Theme::match_on_selection`] draws one matched span on the
+/// selected row: `Ink` overdraws the span in that color on the `accent`
+/// fill; `Inverted` fills the span's box with the row's text ink
+/// (`background`) and draws the span in `accent`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectedMatch {
+    Ink(Color),
+    Inverted,
 }

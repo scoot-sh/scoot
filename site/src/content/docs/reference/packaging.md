@@ -113,7 +113,7 @@ wallpaper daemon: no system library beside it (the deb allow-list and
 the rpm and Arch recipes carry no other name for it). Its cards draw
 text only with a font, but without one the daemon stays headless and
 the bus still serves — so the font rides as a suggestion (deb
-`Suggests`, rpm and Arch `optdepends`), never a dependency.
+`Suggests`, Arch `optdepends`; the rpm names none), never a dependency.
 
 ### Toolchain floor: Rust 1.88
 

@@ -36,7 +36,7 @@ const GOLDEN_ENTRY_TEXT_CARET_MID: u64 = 6727157936884326765;
 const GOLDEN_ENTRY_SELECTED_ALL: u64 = 11087678023190917221;
 const GOLDEN_ENTRY_UNFOCUSED: u64 = 5902647548692030597;
 const GOLDEN_PASSWORD_MASKED: u64 = 15244525020742787061;
-const GOLDEN_LIST_SELECTION_HIGHLIGHTS: u64 = 5463997336095684813;
+const GOLDEN_LIST_SELECTION_HIGHLIGHTS: u64 = 5279845622247823117;
 const GOLDEN_LIST_SCROLLED: u64 = 5428548557355056837;
 const GOLDEN_SELECTOR_COLLAPSED: u64 = 3465626071466733637;
 const GOLDEN_SELECTOR_EXPANDED: u64 = 17309038250503822317;
@@ -297,10 +297,20 @@ fn golden_list_selection_highlights() {
     let hi: [(usize, &[(u32, u32)]); 2] = [(1, &spans[..]), (2, &spans[..1])];
     let (digest, theme) = paint_rows_case(&mut pixels, height, 1, 0, &hi, true);
     let canvas = Canvas::new(&mut pixels, WIDTH, height).unwrap();
-    // The selected row (slot 1) fills accent; a match span inside it
-    // inks urgent; the plain row's span inks hover.
+    // The selected row (slot 1) fills accent; its match span draws the
+    // inverted chip (the default `hover` is the `accent` value, 1:1, so
+    // the row inverts): `accent` ink inside the selected row, and no
+    // `urgent` anywhere in it. The plain row's span still inks `hover`.
     assert_eq!(canvas.at(10, 8 + ROW_H + 2), rgb(theme.accent));
     assert!(any_in(
+        &canvas,
+        8,
+        8 + ROW_H,
+        WIDTH - 8,
+        8 + ROW_H * 2,
+        rgb(theme.accent)
+    ));
+    assert!(!any_in(
         &canvas,
         8,
         8 + ROW_H,

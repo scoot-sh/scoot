@@ -71,6 +71,7 @@ fn missing_wiring_names_the_exact_fix_with_real_paths() {
         rendered: &rendered,
         config_home: Some(&config),
         data_home: Some(&data),
+        starship_config: None,
     };
     let items = check_wiring(&input);
     for app in ["foot", "mako", "fcitx5", "helix", "btop", "starship"] {
@@ -129,6 +130,7 @@ fn wired_files_report_wired() {
         rendered: &rendered,
         config_home: Some(&config),
         data_home: Some(&data),
+        starship_config: None,
     };
     let items = check_wiring(&input);
     for app in ["foot", "mako", "helix", "btop", "starship"] {
@@ -161,6 +163,7 @@ fn commented_includes_do_not_count_as_wired() {
         rendered: &rendered,
         config_home: Some(&config),
         data_home: Some(&data),
+        starship_config: None,
     };
     let items = check_wiring(&input);
     assert_eq!(status_of(&items, "foot"), WiringStatus::Missing);
@@ -183,6 +186,7 @@ fn a_leafless_look_reports_absent_never_missing() {
         rendered: &rendered,
         config_home: Some(&config),
         data_home: Some(&data),
+        starship_config: None,
     };
     let items = check_wiring(&input);
     for app in [
@@ -200,8 +204,8 @@ fn a_leafless_look_reports_absent_never_missing() {
 }
 
 #[test]
-fn starship_config_env_counts_as_wired() {
-    let root = scratch("starship-env");
+fn starship_config_injection_counts_as_wired() {
+    let root = scratch("starship-injected");
     let state = root.path().join("state");
     let rendered = root.path().join("rendered");
     let config = root.path().join("config");
@@ -211,10 +215,12 @@ fn starship_config_env_counts_as_wired() {
     std::fs::create_dir_all(rendered.join("apps")).expect("apps");
     std::fs::write(rendered.join("apps/starship.toml"), "leaf").expect("starship");
     let rec = record("moonrise", &rendered);
-    // STARSHIP_CONFIG is read from the process environment: guard it so
-    // the suite never depends on the developer's own shell.
-    let stash = std::env::var_os("STARSHIP_CONFIG");
-    unsafe { std::env::set_var("STARSHIP_CONFIG", root.path().join("starship.toml")) };
+    // Threaded in, never read from the process environment: removing the
+    // `starship_config` field (reading `STARSHIP_CONFIG` inside
+    // `starship_item` again) leaves this `Some` unread, so the item falls
+    // through to the config-home check and reports `Missing`, failing
+    // this test in a clean environment (no `STARSHIP_CONFIG` set and no
+    // `starship.toml` under the scratch config home).
     let pointed = root.path().join("starship.toml");
     std::fs::write(&pointed, "config").expect("starship config");
     let input = WiringInput {
@@ -223,11 +229,36 @@ fn starship_config_env_counts_as_wired() {
         rendered: &rendered,
         config_home: Some(&config),
         data_home: None,
+        starship_config: Some(&pointed),
     };
     let items = check_wiring(&input);
     assert_eq!(status_of(&items, "starship"), WiringStatus::Wired);
-    match stash {
-        Some(value) => unsafe { std::env::set_var("STARSHIP_CONFIG", value) },
-        None => unsafe { std::env::remove_var("STARSHIP_CONFIG") },
+    assert!(
+        detail_of(&items, "starship").contains(&pointed.display().to_string()),
+        "the detail names the injected path"
+    );
+}
+
+#[test]
+fn starship_config_none_without_a_file_is_missing() {
+    let root = scratch("starship-missing");
+    let state = root.path().join("state");
+    let rendered = root.path().join("rendered");
+    let config = root.path().join("config");
+    for dir in [&state, &rendered, &config] {
+        std::fs::create_dir_all(dir).expect("a dir");
     }
+    std::fs::create_dir_all(rendered.join("apps")).expect("apps");
+    std::fs::write(rendered.join("apps/starship.toml"), "leaf").expect("starship");
+    let rec = record("moonrise", &rendered);
+    let input = WiringInput {
+        state_dir: &state,
+        record: &rec,
+        rendered: &rendered,
+        config_home: Some(&config),
+        data_home: None,
+        starship_config: None,
+    };
+    let items = check_wiring(&input);
+    assert_eq!(status_of(&items, "starship"), WiringStatus::Missing);
 }

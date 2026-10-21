@@ -236,7 +236,8 @@ cards. An `[apps.scootlaunch]` (or `[apps.scootnotify]`) `colors.*` key
 replaces the derived role, and a dotless key (`font`, `font-size`,
 `opacity`, `radius`) replaces the top-level value, so each is emitted
 once. scootlaunch reads its fragment at every open; scootnotify reads
-its own at start and on `msg reload --look`. `greet.toml` carries the
+its own at start and on `msg reload --look` (which `scoot look apply`
+sends live). `greet.toml` carries the
 login screen's look, read at system build time only. `scoot look
 validate` and `scoot look build` (and the underlying `scoot-look
 validate` / `scoot-look build`) render and check all three beside the

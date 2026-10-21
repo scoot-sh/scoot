@@ -46,9 +46,10 @@ let
       "scootlaunch"
     else
       "fuzzel";
-  # The opt-in switch (see `desktop.nix`): with
-  # `desktop.launcher.daemon = "scootlaunch"` the binds run scootlaunch
-  # and every menu below speaks its `--dmenu`, with no color flags (the
+  # The daemon switch (see `desktop.nix`): with
+  # `desktop.launcher.daemon = "fuzzel"` the binds run fuzzel
+  # and every menu below speaks its `--dmenu` with the look's colors as
+  # CLI flags; by default they run scootlaunch with no color flags (the
   # look arrives through the runtime layer, and the user's own file wins
   # per key -- see site/src/content/docs/scootlaunch/index.md).
   isScootLaunch = cfg.desktop.launcher.daemon == "scootlaunch";
@@ -133,7 +134,8 @@ let
   # - locked: the compositor already suppresses every bind while locked;
   #   this covers a manual run (over ssh, say), refusing with a message
   #   instead of showing history behind the lock.
-  # - cancel/empty: fuzzel exits nonzero on Escape, and `--no-run-if-empty`
+  # - cancel/empty: the menu exits nonzero on Escape (1 under
+  #   scootlaunch, 2 under fuzzel's dmenu), and `--no-run-if-empty`
   #   fires on an empty history -- either must leave the clipboard alone,
   #   because `wl-copy` with empty stdin *clears* the selection.
   # - byte-exact restore: the decoded bytes travel through a temp file,

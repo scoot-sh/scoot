@@ -2646,13 +2646,14 @@ fn run_save(look: &Look, name: &str) -> Result<(), String> {
 fn run_wiring(look: &Look) -> Result<(), String> {
     use wiring::{WiringInput, check_wiring, resolve_input};
     let state_dir = resolve_state_dir(look.state.as_deref())?;
-    let (record, rendered, config, data) = resolve_input(&state_dir)?;
+    let (record, rendered, config, data, starship) = resolve_input(&state_dir)?;
     let input = WiringInput {
         state_dir: &state_dir,
         record: &record,
         rendered: &rendered,
         config_home: config.as_deref(),
         data_home: data.as_deref(),
+        starship_config: starship.as_deref(),
     };
     let items = check_wiring(&input);
     let mut notes = Vec::new();

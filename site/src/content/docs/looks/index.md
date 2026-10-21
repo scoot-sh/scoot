@@ -77,9 +77,11 @@ prints one name per line, for scripting.
 `apply NAME` renders the look, validates it, records the choice, repoints
 the state link, reloads each running app's look layer in order (the
 compositor first, then every bar of the session), and signals the
-third-party daemons (mako, fcitx5, the OSD and night-light units).
-scootlaunch needs no reload (it reads `launch.toml` at every open) and
-scootnotify re-reads `notify.toml` on `scootnotify msg reload --look`.
+third-party daemons (mako, scootnotify, fcitx5, the OSD and night-light
+units).
+scootlaunch needs no reload (it reads `launch.toml` at every open);
+`scoot look apply` reloads the running scootnotify live (`msg reload
+--look` does the same by hand).
 Apps that are not running are skipped, never an error. With nothing
 running, only the link moves, and the next session starts on the new look. A shipped look needs its
 Nerd Fonts installed; without them `apply` refuses and changes nothing.
@@ -141,12 +143,12 @@ JSON](#exit-codes-and-json).
 | Dark mode, GTK theme, icons, cursor, app font (`color-scheme`, `gtk-theme`, `icon-theme`, `cursor-theme`, `cursor-size`, `font-name`) | Live, on apply (see below) |
 | GTK `gtk.css` colors | Next launch: GTK 3 text selection plus libadwaita accent and surfaces follow; plain GTK 4 keeps its stock accent; running apps keep their palette |
 | Qt style variant and palette | Next launch of each app; under the Adwaita style QWidget apps keep Adwaita's fixed palette (see below) |
-| Notification colors (mako) | Live, on apply (D-Bus reload; `makoctl` fallback) |
+| Notification colors (mako, scootnotify) | Live, on apply (mako: D-Bus reload, `makoctl` fallback; scootnotify: look-scoped reload, cards kept) |
 | OSD colors (wob) | Live, on apply (the unit restarts) |
 | Input-method candidate theme (fcitx5) | Live, on apply (D-Bus reload) |
 | Night-light temperature | Live, on apply (the unit restarts) |
 | Launcher, picker and lock colors (`fuzzel.ini`, `swaylock`) | Next launch of each app |
-| Launcher panel and notification cards (`launch.toml`, `notify.toml`) | Next open of the panel; live for running scootnotify after `msg reload --look` |
+| Launcher panel and notification cards (`launch.toml`, `notify.toml`) | Next open of the panel; live for running scootnotify on apply |
 | Running terminals | Keep their palette; new terminals use the look's |
 | Cursor size in already-running apps | Next launch |
 | Login screen (ReGreet CSS, backdrop, dark setting, sans) | System build time, never live |

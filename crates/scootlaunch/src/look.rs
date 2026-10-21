@@ -16,7 +16,7 @@
 //! | Panel fill | `surface` (default `background`) | [`Look::surface`] |
 //! | Input and row text | `foreground` | `theme.foreground` |
 //! | Placeholder | `dim` | `theme.dim` |
-//! | Matched characters | `match` (default `hover`) | `theme.hover` |
+//! | Matched characters | `match` (default `hover`) | `theme.hover` (plain rows; the selected row resolves its own ink through [`Theme::match_on_selection`](scootui::theme::Theme::match_on_selection)) |
 //! | Selected row fill | `selection` (default `accent`) | `theme.accent` |
 //! | Selected row text | `selection-text` (default `accent-fg`, default `background`) | `theme.background` |
 //! | Panel border | `focus` (default `accent`) | [`Look::focus`] |

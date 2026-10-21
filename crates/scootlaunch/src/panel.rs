@@ -308,6 +308,11 @@ pub fn open(opts: Options) -> i32 {
 /// panel's opacity), the rest replace their roles. Only the
 /// background may be translucent (the CLI refuses any other alpha),
 /// since the panel draws those roles solid.
+///
+/// `match` lands on `hover`: plain rows draw it directly, and the
+/// selected row draws it whenever it contrasts with the fill (see
+/// [`Theme::match_on_selection`](scootui::theme::Theme::match_on_selection)),
+/// so the flag reads the same on both rows wherever it stays legible.
 fn apply_colors(look: &mut Look, colors: &ColorOverrides) {
     if let Some((color, alpha)) = colors.background {
         look.surface = color;

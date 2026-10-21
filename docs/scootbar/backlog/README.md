@@ -163,7 +163,7 @@ Shared foundation ([epic](extract-scootui.md)):
 [`scootnotify`: the notification daemon](scootnotify.md) (epic):
 - [Prototype: the go/no-go gate against mako](resolved/notify-prototype-done.md) (medium)
 - [The D-Bus server and model](resolved/notify-server-done.md), [popups](resolved/notify-popups-done.md), [the control interface](notify-control.md), [DND, history, rules](resolved/notify-dnd-history-rules-done.md), [the bar feed](resolved/notify-bar-feed-done.md)
-- [Nix, the look layer and the opt-in switch](resolved/notify-nix-done.md), [packaging and the site](resolved/notify-packaging-done.md), [flip the default](notify-default-flip.md)
+- [Nix, the look layer and the opt-in switch](resolved/notify-nix-done.md), [packaging and the site](resolved/notify-packaging-done.md), [flip the default](resolved/notify-default-flip-done.md); follow-ups: [scootnotify vs mako A/B](notify-ab-bench.md), [theme the daemon behind a target](notify-look-target.md), [`look apply` sends `msg reload --look`](resolved/notify-look-reload-done.md)
 - Experiment: [a fullscreen hold through a `top` surface](notify-fullscreen-hold-spike.md)
 
 [`scootlaunch`: the launcher](launcher.md) (epic):
@@ -173,7 +173,7 @@ Shared foundation ([epic](extract-scootui.md)):
 - [dmenu and run](launch-dmenu.md), [the agent interface](resolved/launch-agent-json-done.md)
 - [The panel](resolved/launch-ui-done.md), [launching](launch-spawn.md), [icons](resolved/launch-icons-done.md)
 - [dmenu and run](launch-dmenu.md), [the agent interface](resolved/launch-agent-json-done.md)
-- [Nix, the look layer and the opt-in switch](resolved/launch-nix-done.md), [packaging and the site](resolved/launch-packaging-done.md), [flip the default](launch-default-flip.md); later, [windows mode](launch-windows-mode.md)
+- [Nix, the look layer and the opt-in switch](resolved/launch-nix-done.md), [packaging and the site](resolved/launch-packaging-done.md), [flip the default](resolved/launch-default-flip-done.md); follow-ups: [first-open outlier](launch-first-open-outlier.md), [xdpw chooser live proof](launch-xdpw-chooser-live-proof.md); later, [windows mode](launch-windows-mode.md)
 
 [`scootgreet`: the login greeter](scootgreet.md) (epic):
 - [Baseline: measure ReGreet + cage](greet-baseline.md) (medium), then [the prototype: the go/no-go gate against a real greetd](greet-prototype.md) (medium)
@@ -222,6 +222,8 @@ hits the wall:
 - [launch-toggle-race-and-socket-mode](launch-toggle-race-and-socket-mode.md)
 - [launch-ci-scootui-manifest-fanout](launch-ci-scootui-manifest-fanout.md)
 - [launch-look-selected-row-contrast](launch-look-selected-row-contrast.md)
+- [launch-match-on-selection-contrast](resolved/launch-match-on-selection-contrast-done.md) (low): selected-row match spans now resolve through `Theme::match_on_selection` (readable `hover` kept, else the inverted chip) — RESOLVED 2026-10-21
+- [launch-iconless-tile-cache-share](resolved/launch-iconless-tile-cache-share-done.md) (low): letter tiles never enter the cache, so icon-less rows draw their own letters — RESOLVED 2026-10-21
 - [release-plz-changelog-include-shell-apps](resolved/release-plz-changelog-include-shell-apps-done.md)
 - [launch-spawn-detach-cwd-and-close](launch-spawn-detach-cwd-and-close.md)
 - [launch-dmenu-doc-and-pin-notes](launch-dmenu-doc-and-pin-notes.md)

@@ -91,27 +91,27 @@ let
     launcherRun = {
       combo = "ctrl+alt+space";
       slot = "launcher";
-      blurb = "run mode (PATH executables beside apps)";
+      blurb = "run mode (PATH executables only)";
     };
     clipboard = {
       combo = "super+v";
       slot = "clipboard";
-      blurb = "clipboard picker (`cliphist` through `fuzzel`, `scootlaunch` under the opt-in)";
+      blurb = "clipboard picker (`cliphist` through the launcher's dmenu menu)";
     };
     notifDismiss = {
       combo = "super+n";
       slot = "notifications";
-      blurb = "dismiss visible notifications (`makoctl dismiss`, `scootnotify msg dismiss` under the opt-in)";
+      blurb = "dismiss visible notifications (`scootnotify msg dismiss`, `makoctl dismiss` with the mako escape hatch)";
     };
     notifDnd = {
       combo = "super+shift+n";
       slot = "notifications";
-      blurb = "do-not-disturb toggle (`makoctl mode -t do-not-disturb`, `scootnotify msg dnd toggle` under the opt-in)";
+      blurb = "do-not-disturb toggle (`scootnotify msg dnd toggle`, `makoctl mode -t do-not-disturb` with the mako escape hatch)";
     };
     notifHistory = {
       combo = "super+ctrl+n";
       slot = "notifications";
-      blurb = "show hidden notifications (`makoctl restore`, `scootnotify msg restore` under the opt-in)";
+      blurb = "show hidden notifications (`scootnotify msg restore`, `makoctl restore` with the mako escape hatch)";
     };
     powerProfile = {
       combo = "super+p";
@@ -136,12 +136,12 @@ let
     network = {
       combo = "super+w";
       slot = "apps.network";
-      blurb = "WiFi picker (`scoot-network-pick` through `fuzzel`, `scootlaunch` under the opt-in)";
+      blurb = "WiFi picker (`scoot-network-pick` through the launcher's dmenu menu)";
     };
     bluetooth = {
       combo = "super+b";
       slot = "apps.bluetooth";
-      blurb = "Bluetooth picker (`scoot-bluetooth-pick` through `fuzzel`, `scootlaunch` under the opt-in)";
+      blurb = "Bluetooth picker (`scoot-bluetooth-pick` through the launcher's dmenu menu)";
     };
   };
   # Whether a notification state icon is shaped like the bar takes
@@ -381,9 +381,9 @@ in
         };
       };
     };
-    # mako or scootnotify behind one switch (the native-replacement
+    # scootnotify or mako behind one switch (the native-replacement
     # contract: the daemon behind `daemon` is the only visible change
-    # when scootnotify replaces it -- same `enable`, same bar module,
+    # when mako replaces scootnotify -- same `enable`, same bar module,
     # same DND toggle). Filled by the `desktop-notifications` child:
     # the daemon as a user unit bound to `scoot-session.target`, its
     # popups on the `overlay` layer (so they show above fullscreen
@@ -413,16 +413,19 @@ in
           "mako"
           "scootnotify"
         ];
-        default = "mako";
+        default = "scootnotify";
         description = ''
-          The daemon behind `enable`. `mako` (a lean build without the
-          GTK stack -- see `notifications-mako.nix`; X client libraries
-          still ride along through cairo/pango, but mako has no X11
-          backend and cannot run on X11 -- a plain-text config the look
-          themes per key) or `scootnotify` (the native daemon: its own
+          The daemon behind `enable`. `scootnotify` (the native daemon: its own
           panel over the same bus name, the look's own file instead of
           mako's dialect, and `msg` for dismiss, DND and restore -- see
-          site/src/content/docs/scootnotify/index.md). The option and
+          site/src/content/docs/scootnotify/index.md) or `mako`
+          (a lean build without the GTK stack -- see
+          `notifications-mako.nix`; X client libraries
+          still ride along through cairo/pango, but mako has no X11
+          backend and cannot run on X11 -- a plain-text config the look
+          themes per key). One line back:
+          `desktop.notifications.daemon = "mako"` restores the previous
+          daemon, its config dialect, and its `makoctl` control. The option and
           the bar module stay as they are either way.
         '';
       };
@@ -430,7 +433,8 @@ in
       # Free-form `key = value` lines for mako, merged over the
       # generated config (a value here wins per key). Rendered verbatim,
       # so a `#rrggbb` color keeps its leading `#` (mako's own format).
-      # Read only with `daemon = "mako"`: with `scootnotify` a non-empty
+      # Read only with `daemon = "mako"` (the escape hatch): with the
+      # default `scootnotify` a non-empty
       # value warns at eval (see `programs.scootnotify`), since the flat
       # dialect does not carry over. The generated do-not-disturb section
       # always renders; beside a look the critical section renders into
@@ -457,10 +461,10 @@ in
 
       # The bar face of the daemon: one icon per state in the bar's
       # `push` module (see `nix/modules/notifications-home.nix` for the
-      # feed that sends them, `nix/modules/scootbar.nix` for the static
-      # idle half). A future scootnotify keeps these names (the
-      # native-replacement contract: the daemon changes, the options do
-      # not). Each is empty (no icon for that state) or exactly one
+      # mako feed that sends them, `nix/modules/scootbar.nix` for the
+      # static idle half). The names stay the same across the daemon
+      # switch (the native-replacement contract: the daemon changes,
+      # the options do not). Each is empty (no icon for that state) or exactly one
       # glyph -- anything else fails evaluation, since the bar refuses
       # a multi-character icon per update. The defaults are all in
       # DejaVu Sans, the bar's default font, so they render with no
@@ -517,7 +521,7 @@ in
     # by the `desktop-launcher` child: the launcher on the keymap's
     # `Super+d` (drun: XDG apps from the user's and the system's
     # `XDG_DATA_DIRS`) and `Ctrl+Alt+Space` (run: PATH executables
-    # beside apps), on the `overlay` layer (so it opens above
+    # over scootlaunch's own panel), on the `overlay` layer (so it opens above
     # fullscreen windows) with exclusive keyboard, themed by the look.
     #
     # On with the profile (still individually disable-able); without
@@ -542,16 +546,21 @@ in
           "fuzzel"
           "scootlaunch"
         ];
-        default = "fuzzel";
+        default = "scootlaunch";
         description = ''
-          The program behind `enable`. `fuzzel` (layer-shell `overlay`
-          native, no toolkit, fastest cold start of the maintained set
-          -- see site/src/content/docs/desktop/index.md#launcher for the
-          measured pick) or `scootlaunch` (the keyboard-first launcher:
-          its own panel over the same index, the look's own file instead
-          of CLI color flags, and the pickers and choosers through its
-          `--dmenu` -- see site/src/content/docs/scootlaunch/index.md).
-          The option and the binds stay as they are either way.
+          The program behind `enable`. `scootlaunch` (the keyboard-first
+          launcher: its own panel over the same index, the look's own
+          file instead of CLI color flags, and the pickers and choosers
+          through its `--dmenu` -- see
+          site/src/content/docs/scootlaunch/index.md) or `fuzzel`
+          (layer-shell `overlay` native, no toolkit -- one line back:
+          `desktop.launcher.daemon = "fuzzel"` restores the previous
+          menu, its flags and its frecency cache). The option and the
+          binds stay as they are either way. Dismissing the menu exits
+          1 under scootlaunch against 2 under fuzzel's dmenu, and the
+          run bind lists PATH executables alone under scootlaunch
+          against apps beside executables under fuzzel -- see
+          site/src/content/docs/desktop/index.md#launcher.
         '';
       };
     };
@@ -582,7 +591,7 @@ in
 
       # Which output picker xdpw asks before each cast (its
       # `chooser_type`): `fuzzel` lists every output as a dmenu menu
-      # through the profile's fuzzel (the same `--dmenu` contract the
+      # through the profile's menu (the same `--dmenu` contract the
       # clipboard picker and the launcher speak, themed by the look),
       # `slurp` picks by clicking a screen (xdpw's own `simple`
       # shape), `none` casts `outputName` (or any output) with no
@@ -597,10 +606,10 @@ in
         example = "slurp";
         description = ''
           The output chooser before each screencast. `fuzzel` (a dmenu
-          list of outputs -- the name stays `fuzzel` but runs
-          scootlaunch under the opt-in), `slurp` (click a screen), or
-          `none` (no picker: cast `outputName`, or any output when
-          that is null).
+          list of outputs -- the name stays `fuzzel` but runs the
+          launcher's menu behind `desktop.launcher.daemon`), `slurp`
+          (click a screen), or `none` (no picker: cast `outputName`,
+          or any output when that is null).
         '';
       };
 
@@ -1330,10 +1339,14 @@ in
         type = lib.types.bool;
         default = true;
         description = ''
-          Theme mako from the look (popup background and text, ring
-          and urgent leaves from its palette). Set to `false` to
-          keep mako's own style (`notifications.settings` still
-          applies).
+          Theme the notification daemon from the look. Beside the mako
+          escape hatch (`desktop.notifications.daemon = "mako"`): popup
+          background and text, ring and urgent leaves from its palette.
+          Set to `false` to keep mako's own style
+          (`notifications.settings` still applies). Beside the default
+          scootnotify the look's own notify layer always applies; leaving
+          it alone is an open ticket
+          (docs/scootbar/backlog/notify-look-target.md).
         '';
       };
       targets.clipboard.enable = lib.mkOption {

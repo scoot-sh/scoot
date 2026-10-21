@@ -17,6 +17,51 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.5.0](https://github.com/scoot-sh/scoot/compare/v0.4.1...v0.5.0) - 2026-10-21
+
+Breaking changes: the Nix defaults for the launcher and the notification daemon changed (see the two Breaking sections below); each has a one-line escape hatch.
+
+### scootctl
+
+- added: look apply reloads a running scootnotify ([#711](https://github.com/scoot-sh/scoot/pull/711))
+
+### scootlaunch
+
+- fixed: readable match highlight on the selected row; per-label tiles for icon-less rows ([#709](https://github.com/scoot-sh/scoot/pull/709))
+
+### Breaking: notifications default to scootnotify
+
+`programs.scoot.desktop.notifications.daemon` now defaults to `scootnotify`:
+the keymap's three binds and the bar's click sit on `scootnotify msg`, and
+there is no mako package, config or feed script unless asked for. The
+profile runs the daemon with no extra import (its unit plus the
+`org.freedesktop.Notifications` activation file); an explicit
+`scoot.homeModules.scootnotify` / `scoot.nixosModules.scootnotify`
+beside it merges harmlessly, and enabling both daemons at once is
+refused at eval. Set `notifications.daemon = "mako"` to keep mako.
+Upgrading from a mako default swaps the unit, config and feed for
+scootnotify's; with home-manager's default (`startServices = true`, sd-switch) the
+switch stops the removed mako unit. If notifications go silent anyway
+(`startServices` set to `suggest`, no user systemd at switch time, or mako
+reactivated over D-Bus), `systemctl --user stop mako` (or log out/in) clears the leftover owner
+(the new daemon exits 3 while the name is taken). mako's flat
+`notifications.settings` do not carry over (an eval warning names
+`programs.scootnotify.settings` instead), and a taken bus name stops the
+unit with exit 3. A look swap re-renders `notify.toml` and `scoot look
+apply` reloads the running daemon live (cards, history and DND survive). Direct module users on stock nixpkgs need the scootnotify
+package from this flake (`overlays.default`) or the escape hatch.
+Measurements and the migration notes: [Migrating from mako](https://www.scoot.sh/desktop/#migrating-from-mako).
+
+### Breaking: the launcher defaults to scootlaunch
+
+`programs.scoot.desktop.launcher.daemon` now defaults to `scootlaunch`, and the
+clipboard, network, bluetooth and capture menus follow it. Set
+`launcher.daemon = "fuzzel"` to keep fuzzel. Dismissing a dmenu pick exits 1
+(fuzzel: 2), and `--run` lists PATH executables only (fuzzel adds them to the app
+list). Direct module users on stock nixpkgs need the scootlaunch package from
+this flake (`overlays.default`) or the escape hatch. Measurements and the
+migration notes: [Migrating from fuzzel](https://www.scoot.sh/desktop/#launcher).
+
 ## [0.4.1](https://github.com/scoot-sh/scoot/compare/v0.4.0...v0.4.1) - 2026-10-20
 
 ### scootnotify

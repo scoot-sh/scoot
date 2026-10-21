@@ -325,6 +325,7 @@ in
   # hold unchanged through the profile's name for it.
   imports = [
     "${modulesPath}/services/display-managers/regreet.nix"
+    ./scootnotify-nixos.nix
     (lib.mkAliasOptionModule
       [ "programs" "scoot" "desktop" "greeter" ]
       [ "programs" "scoot" "greeter" ]
@@ -475,7 +476,8 @@ in
       # mako, `scootnotify-home.nix` for scootnotify); this side
       # installs it system-wide. The same package as there (following
       # `desktop.notifications.daemon` on both sides), so either side
-      # alone names the same daemon. Merged here for the same
+      # alone names the same daemon -- scootnotify by default, the lean
+      # mako with the escape hatch. Merged here for the same
       # one-declaration reason as above. Linux-only: off Linux it
       # defaults to null, which the assertion below refuses loudly.
       notifications = desktop.options.notifications // {
@@ -490,13 +492,13 @@ in
               import ./notifications-mako.nix { inherit pkgs; }
             else
               null;
-          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then (leanMako for daemon mako, pkgs.scootnotify or null for daemon scootnotify) else null";
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then (pkgs.scootnotify or null for daemon scootnotify, leanMako for daemon mako) else null";
           description = ''
             The notification daemon package to install system-wide
-            (following `desktop.notifications.daemon`: a lean mako
+            (following `desktop.notifications.daemon`: the scootnotify
+            build for the default `"scootnotify"`, a lean mako
             without the GTK stack for `"mako"` -- see
-            `notifications-mako.nix` -- the scootnotify build for
-            `"scootnotify"`). Null installs nothing. Linux-only: null
+            `notifications-mako.nix`). Null installs nothing. Linux-only: null
             off Linux.
           '';
         };
@@ -1618,8 +1620,10 @@ in
         }
       ];
 
+      # Skipped while the scootnotify module is enabled: it installs
+      # the same build system-wide (the profile always imports it).
       environment.systemPackages = lib.optional (
-        cfg.desktop.notifications.package != null
+        cfg.desktop.notifications.package != null && !(config.programs.scootnotify.enable or false)
       ) cfg.desktop.notifications.package;
     })
     # The launcher's system half: its package on PATH. The wrapper
