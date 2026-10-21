@@ -17,6 +17,18 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.5.0](https://github.com/scoot-sh/scoot/compare/v0.4.1...v0.5.0) - 2026-10-21
+
+Breaking changes: the Nix defaults for the launcher and the notification daemon changed (see the two Breaking sections below); each has a one-line escape hatch.
+
+### scootctl
+
+- added: look apply reloads a running scootnotify ([#711](https://github.com/scoot-sh/scoot/pull/711))
+
+### scootlaunch
+
+- fixed: readable match highlight on the selected row; per-label tiles for icon-less rows ([#709](https://github.com/scoot-sh/scoot/pull/709))
+
 ### Breaking: notifications default to scootnotify
 
 `programs.scoot.desktop.notifications.daemon` now defaults to `scootnotify`:
