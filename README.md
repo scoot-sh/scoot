@@ -9,7 +9,7 @@ trailing motion lines](docs/assets/logo.png)
 that puts windows in columns on a strip that scrolls left and right. A
 new window never squeezes the others; the strip just gets longer.
 
-![scoot with the ginger-night look: a bar across the top, two terminal columns, the cat-peeking wallpaper behind](docs/assets/ginger-night-preview.png)
+![The full scoot desktop in the ginger-night look: the bar with an unread count, two terminals, the launcher mid-search and two notification cards over the cat-peeking wallpaper](docs/assets/full-look.png)
 
 ## See it now
 
