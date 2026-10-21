@@ -726,10 +726,11 @@ Why scootlaunch, measured against fuzzel 1.14.1 on the M2
 (`dev/benchmarks/launcher-ab-2026-10.md`, N=30 per cell, release
 binaries, same session): tied inside the method floor up to 1000
 entries, clearly faster at 5000 (101–102 vs 184 ms median
-launch-to-first-frame), keystroke-to-frame flat at ~25 ms while
-fuzzel climbs to 53 ms at 5000, a third of the memory (8.7 vs
-18.0 MB PSS at 5000), zero idle cost and zero resident cost on both
-sides. Ranking agrees on the winner for all 10 probes.
+launch-to-first-frame), query update flat while fuzzel climbs from 26 to
+53 ms at 5000 (scootlaunch's values sit below the measurement floor, so only the
+ranking is reliable), about half the memory (8.7 vs 18.0 MB PSS at
+5000), zero idle cost and zero resident cost on both sides. Ranking
+agrees on the winner for all 10 probes.
 
 The dmenu contract is the slot's other half, and the reason the
 clipboard picker already speaks it: lines on stdin, the selection on

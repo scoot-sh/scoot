@@ -91,7 +91,7 @@ let
     launcherRun = {
       combo = "ctrl+alt+space";
       slot = "launcher";
-      blurb = "run mode (PATH executables beside apps)";
+      blurb = "run mode (PATH executables only)";
     };
     clipboard = {
       combo = "super+v";
