@@ -222,6 +222,8 @@ hits the wall:
 - [launch-toggle-race-and-socket-mode](launch-toggle-race-and-socket-mode.md)
 - [launch-ci-scootui-manifest-fanout](launch-ci-scootui-manifest-fanout.md)
 - [launch-look-selected-row-contrast](launch-look-selected-row-contrast.md)
+- [launch-match-on-selection-contrast](launch-match-on-selection-contrast.md): match spans on the selected row draw in urgent on the orange selection in ginger-night — unreadable
+- [launch-iconless-tile-cache-share](launch-iconless-tile-cache-share.md): icon-less entries share one cached tile letter (Printer drew C)
 - [release-plz-changelog-include-shell-apps](resolved/release-plz-changelog-include-shell-apps-done.md)
 - [launch-spawn-detach-cwd-and-close](launch-spawn-detach-cwd-and-close.md)
 - [launch-dmenu-doc-and-pin-notes](launch-dmenu-doc-and-pin-notes.md)

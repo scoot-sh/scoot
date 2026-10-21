@@ -73,20 +73,26 @@ grep -q 'push.notifications' "$G/bar.toml" || { echo "full-look-shot: bar edit f
 
 # Synthetic entries: fixed bytes, real enough to rank, icons where the
 # system theme provides them (hicolor carries firefox/foot/mpv/nvim).
+# Every entry carries a distinct Icon key (real or tile-fallback): the
+# panel's icon cache keys (name, side) alone, so two icon-less entries
+# would share one tile letter.
 APPS=$RT/apps/applications; mkdir -p "$APPS"
 mke() { # id, Name, Icon?, keywords, comment
   { echo "[Desktop Entry]"; echo "Version=1.0"; echo "Type=Application"; echo "Name=$2"; [ -z "${3:-}" ] || echo "Icon=$3"; echo "Comment=$5"; echo "Keywords=$4"; echo "Exec=/bin/true"; } >"$APPS/$1.desktop"
 }
 mke terminal Terminal foot "shell;prompt;console" "Terminal emulator"
 mke firefox Firefox firefox "web;browser;internet" "Browse the web"
-mke files Files "" "files;folders;manager" "File manager"
+mke files Files files "files;folders;manager" "File manager"
 mke mediaplayer "Media Player" mpv "video;music;play" "Play media"
 mke editor "Text Editor" nvim "text;edit;code" "Edit text"
-mke calculator Calculator "" "calc;math;numbers" "Calculator"
-mke settings Settings "" "prefs;system;config" "System settings"
-mke mail Mail "" "email;inbox;post" "Mail client"
-mke scanner Scanner "" "scan;document;page" "Scan documents"
+mke calculator Calculator calc "calc;math;numbers" "Calculator"
+mke settings Settings prefs "prefs;system;config" "System settings"
+mke mail Mail mail "email;inbox;post" "Mail client"
+mke scanner Scanner scan "scan;document;page" "Scan documents"
 mke alacritty Alacritty Alacritty "gpu;terminal;fast" "Alacritty terminal"
+mke photos Photos photos "photo;image;gallery" "Photo gallery"
+mke music Music music "audio;songs;play" "Music player"
+mke notes Notes notes "notes;memo;text" "Notes"
 # Icons resolve from the system themes, linked in (the app list itself
 # stays exactly these entries: XDG_DATA_DIRS names only this dir).
 mkdir -p "$RT/apps/icons"
@@ -136,7 +142,7 @@ scootbar daemon --font "$BAR_FONT" --config "$G/bar.toml" >"$RT/bar.log" 2>&1 &
 BAR_PID=$!
 foot --config "$G/foot.ini" sh -c "printf '%b' 'guest@scoot ~/projects/demo \$ ls\nCargo.lock  Cargo.toml  README.md  crates/  looks/  scripts/\nguest@scoot ~/projects/demo \$ git status -sb\n## main...origin/main\n M scripts/full-look-shot.sh\nguest@scoot ~/projects/demo \$ git log --oneline -3\na1b2c3d docs: full-look screenshot rig\ne4f5g6h feat(scootlaunch): icon-theme lookup\nc7d8e9f fix(scootnotify): unread count on the bar feed\nguest@scoot ~/projects/demo \$ git show --stat HEAD | head -6\ncommit a1b2c3d9 (HEAD -> main)\n    docs: full-look screenshot rig\n scripts/full-look-shot.sh | 120 +++++++++++++++++++++++++\n 1 file changed, 120 insertions(+)\n'; exec sleep 300" >"$RT/foot1.log" 2>&1 &
 F1_PID=$!
-foot --config "$G/foot.ini" sh -c "printf '%b' 'guest@scoot ~ \$ scoot --version\nscoot 0.4.1 (ipc protocol 12)\nguest@scoot ~ \$ scootnotify msg list\n1 [normal] Build: Build finished\n2 [normal] Calendar: Meeting in 5 minutes\nguest@scoot ~ \$ scootlaunch --query ter --json\n[{\"id\": \"terminal\", \"name\": \"Terminal\"}, ...]\nguest@scoot ~ \$ cat notes.txt\n- launcher panel: rank Terminal over tiles\n- cards: build + calendar, normal urgency\n- bar: unread count beside the dot\n'; exec sleep 300" >"$RT/foot2.log" 2>&1 &
+foot --config "$G/foot.ini" sh -c "printf '%b' 'guest@scoot ~ \$ scoot --version\nscoot 0.4.1 (ipc protocol 12)\nguest@scoot ~ \$ scootnotify msg list\n1 [normal] Build: Build finished\n2 [normal] Calendar: Meeting in 5 minutes\nguest@scoot ~ \$ scootlaunch --query em --json\n[{\"id\": \"mail\", \"name\": \"Mail\"}, ...]\nguest@scoot ~ \$ cat notes.txt\n- launcher panel: rank Mail over tiles\n- cards: build + calendar, normal urgency\n- bar: unread count beside the dot\n'; exec sleep 300" >"$RT/foot2.log" 2>&1 &
 F2_PID=$!
 scootnotify daemon --config "$G/notify.toml" --font "$SANS_FONT" >"$RT/notify.log" 2>&1 &
 NOTIFY_PID=$!
@@ -153,6 +159,11 @@ LIST_N=$(scootnotify msg list | wc -l)
 [ "$LIST_N" -ge 2 ] || { echo "full-look-shot: want 2 live cards, have $LIST_N"; exit 1; }
 
 # Launcher open mid-search: ginger-night roles as per-invocation flags.
+# Query "em" ranks Mail (matched through its keywords, so the selected
+# row carries no match spans and stays selection-text on selection) over
+# six more rows: any name-matched selection would draw the match spans
+# in urgent on the orange selection, which is unreadable in ginger-night
+# (see docs/scootbar/backlog/launch-match-on-selection-contrast.md).
 scootlaunch --font "$SANS_FONT" \
   --background-color 0e0e0eff --text-color f5ead6ff --border-color ff9a30ff \
   --selection-color e57f29ff --selection-text-color 0e0e0eff \
@@ -160,7 +171,7 @@ scootlaunch --font "$SANS_FONT" \
 LAUNCH_PID=$!
 sleep 2
 kill -0 "$LAUNCH_PID" 2>/dev/null || { echo "full-look-shot: launcher died early"; cat "$RT/launch.log"; exit 1; }
-scoot msg type "ter"
+scoot msg type "em"
 sleep 1
 
 # Settle, park the pointer top-center over the wallpaper, take the frame.
