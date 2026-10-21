@@ -193,8 +193,9 @@ config and no feed script. The profile already imports the module, so
 `programs.scootnotify.settings` is managed with no extra import (an
 explicit `scoot.homeModules.scootnotify` /
 `scoot.nixosModules.scootnotify` beside it merges harmlessly). A look
-swap re-renders `notify.toml`, but the running daemon only picks it up
-after `scootnotify msg reload --look` (or a restart) — not live. To go
+swap re-renders `notify.toml` and `scoot look apply` reloads the
+running daemon live (cards, history and DND survive) — `scootnotify msg
+reload --look` does the same by hand. To go
 back to mako, set `daemon
 = "mako"` and switch again — see [Migrating from
 mako](../desktop/#migrating-from-mako).

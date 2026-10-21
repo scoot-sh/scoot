@@ -25,3 +25,10 @@ rustix = { version = "1", default-features = false, features = ["std", "fs", "pr
 
 [dev-dependencies]
 tempfile = "3"
+
+# The real-daemon e2e speaks the session bus through the same in-workspace
+# client the daemon uses (Notify to place a card, GetServerInformation to
+# wait until it serves): test-only, never in the shipped tool. Linux-only
+# like the daemon itself (`scoot-dbus` has no macOS build).
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+scoot-dbus.workspace = true

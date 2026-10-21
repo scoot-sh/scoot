@@ -30,4 +30,8 @@ ticket.
 
 ## Not in this ticket
 
-The `msg reload --look` leaf itself (see `notify-look-reload.md`).
+The `msg reload --look` leaf itself (landed: see
+`resolved/notify-look-reload-done.md`). This ticket keeps only the
+target-per-daemon remainder: beside scootnotify the look's notify layer
+still applies unconditionally (`targets.notifications.enable = false`
+keeps mako's style but does nothing beside the default daemon).
