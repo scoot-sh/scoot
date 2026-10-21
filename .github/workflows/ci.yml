@@ -1059,6 +1059,10 @@ jobs:
           export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
           export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
           cargo clippy -p scoot --all-targets --features xwayland -- -D warnings
+          # scootbar too: `look_apply_cli` runs the real bar beside the test's
+          # scoot, and this job restores only the cargo registry, so nothing else
+          # has built it (a cache miss on `flake.lock` surfaced that).
+          cargo build -p scootbar
           cargo nextest run -p scoot --features xwayland --no-fail-fast
           cargo test -p scoot --features xwayland
           # The binary for the smoke run below. Only the `scoot` crate itself
