@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+### Breaking: the launcher defaults to scootlaunch
+
+`programs.scoot.desktop.launcher.daemon` now defaults to `scootlaunch`, and the
+clipboard, network, bluetooth and capture menus follow it. Set
+`launcher.daemon = "fuzzel"` to keep fuzzel. Dismissing a dmenu pick exits 1
+(fuzzel: 2), and `--run` lists PATH executables only (fuzzel adds them to the app
+list). Direct module users on stock nixpkgs need the scootlaunch package from
+this flake (`overlays.default`) or the escape hatch. Measurements and the
+migration notes: [Migrating from fuzzel](https://scoot.sh/desktop/#launcher).
+
 ## [0.4.1](https://github.com/scoot-sh/scoot/compare/v0.4.0...v0.4.1) - 2026-10-20
 
 ### scootnotify
