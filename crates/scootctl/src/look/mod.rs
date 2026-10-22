@@ -24,6 +24,7 @@ pub mod foot;
 pub mod install;
 pub mod leaves;
 pub mod new;
+pub mod notify;
 pub mod pick;
 pub mod preview;
 pub mod reload;
@@ -1689,10 +1690,14 @@ fn run_apply(
     Ok(())
 }
 
-/// Runs one cycling step: resolves the neighbor in catalog order and
-/// applies it through the same transaction a named apply uses. The target
-/// is picked before the swap takes its lock, so two quick presses can land
-/// on the same look.
+/// Runs one cycling step: resolves the neighbors in catalog order and
+/// applies the first that swaps, skipping past looks that refuse (a
+/// missing font, a refused fragment) so one bad look never wedges `next`
+/// or `prev`. The targets are picked before the swap takes its lock, so
+/// two quick presses can land on the same look. A degraded swap (a font
+/// fell back, looks skipped) posts one desktop notification for the
+/// keyboard path; a clean swap stays silent; a total failure notifies
+/// too. Notifications never fail the swap.
 fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
     let catalog = discover();
     let state_dir = resolve_state_dir(look.state.as_deref())?;
@@ -1703,14 +1708,20 @@ fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
             return Err(format!("the recorded choice is corrupt: {reason}"));
         }
     };
-    let target = match step {
-        CycleStep::Next => cycle::cycle_target(&catalog, current.as_deref(), cycle::Step::Next),
-        CycleStep::Prev => cycle::cycle_target(&catalog, current.as_deref(), cycle::Step::Prev),
-        CycleStep::Random => cycle::random_target(&catalog, current.as_deref()),
+    let candidates: Vec<String> = match step {
+        CycleStep::Next => {
+            cycle::ordered_candidates(&catalog, current.as_deref(), cycle::Step::Next)
+        }
+        CycleStep::Prev => {
+            cycle::ordered_candidates(&catalog, current.as_deref(), cycle::Step::Prev)
+        }
+        CycleStep::Random => cycle::random_target(&catalog, current.as_deref())
+            .into_iter()
+            .collect(),
     };
-    let Some(target) = target else {
+    if candidates.is_empty() {
         return Err(empty_catalog_hint().to_owned());
-    };
+    }
     let options = ApplyOptions {
         lock_wait: apply::LOCK_WAIT,
         no_toolkit: false,
@@ -1723,7 +1734,130 @@ fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
         nix_claims: sync::read_nix_claims(),
         stylix_targets: sync::read_stylix_targets(),
     };
-    apply_and_print(look, &target, &options, None).map(|_| ())
+    let cache = apply::render_cache_dir()?;
+    let mut compositor = default_compositor(look);
+    let (bars, bar_notes) = bar_targets();
+    let bar_refs: Vec<&dyn reload::BarReload> = bars
+        .iter()
+        .map(|bar| bar as &dyn reload::BarReload)
+        .collect();
+    let checks = apply::ProdChecks::new();
+    let dconf = CliDconf::new();
+    let leaves = CliLeaves::new();
+    let mut skipped: Vec<String> = Vec::new();
+    for target in &candidates {
+        match apply::apply_with(
+            target,
+            &options,
+            &catalog,
+            &cache,
+            &state_dir,
+            None,
+            compositor.as_mut(),
+            &bar_refs,
+            &checks,
+            &dconf,
+            &leaves,
+        ) {
+            Ok(report) => {
+                let mut all_skipped = skipped.clone();
+                all_skipped.extend(report.skipped.iter().cloned());
+                print_cycle_report(look, &report, &all_skipped, &bar_notes)?;
+                if !all_skipped.is_empty()
+                    || report
+                        .notes
+                        .iter()
+                        .any(|note| note.contains("fallback") || note.contains("instead"))
+                {
+                    let body = notify::degraded_body(&all_skipped, &report.notes);
+                    notify::notify(&format!("look: applied {}", report.name), &body);
+                }
+                return Ok(());
+            }
+            Err(failure) => {
+                if cycle::is_lock_contention(&failure.message) {
+                    return Err(failure.to_string());
+                }
+                skipped.push(format!("{target} ({failure})"));
+            }
+        }
+    }
+    let body = if skipped.len() == 1 {
+        skipped
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "no look applied".to_owned())
+    } else {
+        format!("no look applied: {}", skipped.join("; "))
+    };
+    notify::notify("look: no look applied", &truncate(&body, 400));
+    Err(format!("no look applied: {}", skipped.join("; ")))
+}
+
+/// Truncates `text` to `max` chars with an ellipsis.
+fn truncate(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_owned();
+    }
+    let mut out = text[..max].to_owned();
+    out.push('…');
+    out
+}
+
+/// Prints one cycled swap: the report on stdout, skips and notes on stderr
+/// in human mode, the document in `--json`.
+fn print_cycle_report(
+    look: &Look,
+    report: &apply::ApplyReport,
+    skipped: &[String],
+    extra: &[String],
+) -> Result<(), String> {
+    let mut all_notes = extra.to_vec();
+    all_notes.extend(report.notes.iter().cloned());
+    let mut all_skipped = skipped.to_vec();
+    all_skipped.extend(report.skipped.iter().cloned());
+    let all_notes = dedup_notes(all_notes);
+    let all_skipped = dedup_notes(all_skipped);
+    if look.json {
+        output::print_line(
+            &serde_json::to_string_pretty(&serde_json::json!({
+                "applied": report.name,
+                "rendered": report.rendered,
+                "generation": report.generation,
+                "reloaded": report.reloaded,
+                "skipped": all_skipped,
+                "shadowed": report.shadowed,
+                "invalid": report.invalid,
+                "notes": all_notes,
+            }))
+            .unwrap_or_default(),
+        )
+        .map_err(|error| error.to_string())?;
+    } else {
+        output::print_line(&format!("applied: {}", report.name))
+            .map_err(|error| error.to_string())?;
+        if !report.reloaded.is_empty() {
+            output::print_line(&format!("reloaded: {}", report.reloaded.join(", ")))
+                .map_err(|error| error.to_string())?;
+        }
+        if report.shadowed.is_empty() {
+            output::print_line("shadowed keys: none").map_err(|error| error.to_string())?;
+        } else {
+            output::print_line(&format!("shadowed keys: {}", report.shadowed.join(", ")))
+                .map_err(|error| error.to_string())?;
+        }
+        if !report.invalid.is_empty() {
+            output::print_line(&format!("invalid user keys: {}", report.invalid.join(", ")))
+                .map_err(|error| error.to_string())?;
+        }
+        for skip in &all_skipped {
+            output::warn(format_args!("skipped: {skip}"));
+        }
+        for note in &all_notes {
+            output::warn(format_args!("note: {note}"));
+        }
+    }
+    Ok(())
 }
 
 /// Picks a look through fuzzel's dmenu and applies it: the keyboard
@@ -2007,6 +2141,10 @@ fn apply_and_print(
                     output::warn(format_args!("note: {note}"));
                 }
             }
+            if is_degraded(&report.skipped, &all_notes) {
+                let body = notify::degraded_body(&report.skipped, &all_notes);
+                notify::notify(&format!("look: applied {}", report.name), &body);
+            }
             Ok(report.preview.clone())
         }
         Err(failure) => {
@@ -2027,9 +2165,25 @@ fn apply_and_print(
                 )
                 .map_err(|error| error.to_string())?;
             }
+            notify::notify(
+                &format!("look: {name} failed"),
+                &truncate(&failure.message, 400),
+            );
             Err(failure.to_string())
         }
     }
+}
+
+/// A degraded swap worth surfacing in the UI: a font fell back or a look
+/// was skipped. Ordinary notes (a backend unchecked, an app not running)
+/// stay terminal-only so clean swaps stay silent.
+fn is_degraded(skipped: &[String], notes: &[String]) -> bool {
+    skipped.iter().any(|skip| skip.contains('('))
+        || notes.iter().any(|note| {
+            note.contains("is not installed")
+                || note.contains("fallback")
+                || note.contains("instead")
+        })
 }
 
 fn run_sync(look: &Look, no_toolkit: bool) -> Result<(), String> {

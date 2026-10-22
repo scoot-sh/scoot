@@ -114,6 +114,12 @@ the rpm and Arch recipes carry no other name for it). Its cards draw
 text only with a font, but without one the daemon stays headless and
 the bus still serves — so the font rides as a suggestion (deb
 `Suggests`, Arch `optdepends`; the rpm names none), never a dependency.
+The same holds for the look swap itself: since the fallback chain
+`apply` carries a missing family with a note instead of refusing, no
+font package needs promoting to a dependency on any channel. Bookworm
+ships no package for the Nerd families the shipped looks name
+(`fonts-firacode` is the unpatched family), so the suggestion stays
+DejaVu plus the fallback.
 
 `scoot-globalshortcuts-portal` links nothing past the C library either:
 no system library beside it, and it draws nothing, so no font even as

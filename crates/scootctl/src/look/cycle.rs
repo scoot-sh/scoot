@@ -43,17 +43,48 @@ pub enum Step {
 /// longer in the catalog, `Next` starts at the first entry and `Prev` at
 /// the last. `None` only when the catalog is empty.
 pub fn cycle_target(catalog: &Catalog, current: Option<&str>, step: Step) -> Option<String> {
-    if catalog.entries.is_empty() {
-        return None;
+    ordered_candidates(catalog, current, step)
+        .into_iter()
+        .next()
+}
+
+/// Every catalog entry in cycle order starting with the neighbor in
+/// `step`'s direction, wrapping at either end: the sequence `run_cycle`
+/// tries, skipping past looks that refuse to apply so a missing font (or
+/// any other refusal) never wedges `next`/`prev` on one press. `current`
+/// itself is excluded (cycling always moves); when it is missing or no
+/// longer in the catalog, `Next` starts at the first entry and `Prev` at
+/// the last. Empty when the catalog is empty; a one-entry catalog
+/// returns its only look.
+pub fn ordered_candidates(catalog: &Catalog, current: Option<&str>, step: Step) -> Vec<String> {
+    let n = catalog.entries.len();
+    if n == 0 {
+        return Vec::new();
     }
-    let at = current.and_then(|name| catalog.entries.iter().position(|entry| entry.name == name));
-    let index = match (at, step) {
-        (Some(at), Step::Next) => (at + 1) % catalog.entries.len(),
-        (Some(at), Step::Prev) => (at + catalog.entries.len() - 1) % catalog.entries.len(),
-        (None, Step::Next) => 0,
-        (None, Step::Prev) => catalog.entries.len() - 1,
+    if n == 1 {
+        return vec![catalog.entries[0].name.clone()];
+    }
+    let Some(at) = current.and_then(|name| catalog.entries.iter().position(|e| e.name == name))
+    else {
+        return match step {
+            Step::Next => catalog.entries.iter().map(|e| e.name.clone()).collect(),
+            Step::Prev => catalog
+                .entries
+                .iter()
+                .rev()
+                .map(|e| e.name.clone())
+                .collect(),
+        };
     };
-    Some(catalog.entries[index].name.clone())
+    let mut out = Vec::with_capacity(n - 1);
+    for offset in 1..n {
+        let index = match step {
+            Step::Next => (at + offset) % n,
+            Step::Prev => (at + n - offset % n) % n,
+        };
+        out.push(catalog.entries[index].name.clone());
+    }
+    out
 }
 
 /// One catalog entry, picked at random (`/dev/urandom`, modulo the

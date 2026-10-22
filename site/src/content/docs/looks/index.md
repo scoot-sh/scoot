@@ -53,7 +53,13 @@ stays when the catalog holds one look. `Super+Shift+T` steps to the next
 look; it does nothing while the session is locked. Each step applies
 through the same transaction as `apply`, with the same reloads and
 rollback. Two quick presses can land on the same look: each press picks
-its target before the swap takes its lock.
+its target before the swap takes its lock. A look that refuses to apply
+(a missing font is now a fallback, not a refusal — see below — but a
+refused fragment or wallpaper still refuses) is skipped, and the step
+lands on the next look that applies; the skipped looks are reported, and
+a degraded step posts one desktop notification (through `notify-send` to
+whichever daemon serves `org.freedesktop.Notifications`), since the
+shortcut's output goes nowhere. Clean steps stay silent.
 
 `apply NAME --for SECONDS` previews a look and reverts after the delay.
 The revert records the generation it reverts from: a newer `apply` before
@@ -83,8 +89,7 @@ scootlaunch needs no reload (it reads `launch.toml` at every open);
 `scoot look apply` reloads the running scootnotify live (`msg reload
 --look` does the same by hand).
 Apps that are not running are skipped, never an error. With nothing
-running, only the link moves, and the next session starts on the new look. A shipped look needs its
-Nerd Fonts installed; without them `apply` refuses and changes nothing.
+running, only the link moves, and the next session starts on the new look. A shipped look names its Nerd families (`DroidSansM Nerd Font Propo`, `FiraCode Nerd Font`) plus DejaVu Sans. A named family that is not installed no longer refuses the swap: the apply falls back through the look's other families, then fontconfig's generic sans-serif/monospace answer, with a note naming the substitution, and refuses only when no usable font file exists at all. The same fallback (and the same note) covers `validate`. On Nix the profile installs all three families and points fontconfig at them, so the fallback rarely fires there; a direct `notify-send` names a degraded swap for the shortcut path, since that output goes nowhere.
 
 Two pickers drive the same command. The bar's `looks` module shows the
 active look's name and opens the catalog as a popup — one row per look,
@@ -481,8 +486,10 @@ only runs there.
 Write a directory with a `look.toml` (see the
 [format](../reference/look-format.md)), then `scoot look validate DIR`
 and `scoot look build DIR --out OUT`. `validate` resolves, contrast-checks
-and runs the effectful checks: fonts through fontconfig (the family must
-be installed; a `[fonts.files]` path must exist), the wallpaper
+and runs the effectful checks: fonts through fontconfig (a missing named
+family falls back with a note — through the look's other families, then
+the generic answer — and refuses only with no usable font file at all;
+a `[fonts.files]` path must exist), the wallpaper
 through `scootbg check-image`, the bar fragment through the installed
 bar's own parser.
 

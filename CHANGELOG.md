@@ -26,6 +26,13 @@ release, entries were dated.
 
 - added: the GlobalShortcuts portal backend (stage 2) — `scoot-globalshortcuts-portal daemon` owns `org.freedesktop.impl.portal.desktop.scoot`, serves `org.freedesktop.impl.portal.GlobalShortcuts` v2, registers each portal session's shortcuts with the compositor and turns presses/releases into `Activated`/`Deactivated`/`ShortcutsChanged` signals. Ships with deb, rpm and Arch packages, NixOS/home-manager modules and the `scoot.portal` selection. Additive: no IPC change, so the protocol stays 13. Any same-user IPC client keeps the stage-1 primitives (register, bind, subscribe) — the backend is the same user, not a sandbox boundary.
 
+### scootctl,nix
+
+- fixed: a look whose named font family is not installed applies instead of refusing. `scoot look apply` (and `validate`) falls back through the look's other families, then fontconfig's generic sans-serif/monospace answer, with a note naming the substitution, and refuses only when no usable font file exists at all. Not breaking: the CLI, the `--json` shapes and the config schema are unchanged — a swap that used to exit 1 now exits 0 carrying a note.
+- fixed: `scoot look next`/`prev` skip past looks that still refuse and land on the next look that applies, reporting each skip; a catalog where every other look refuses no longer wedges the keypress.
+- added: a degraded or failed look swap posts one short desktop notification through the user's own notification daemon (`notify-send` to `org.freedesktop.Notifications`), so the `Super+Shift+T` keypress — whose output goes nowhere — is visible in the UI. Clean swaps stay silent; nothing new runs, and a missing service never fails the swap.
+- fixed: the Nix modules install the families the enabled looks name. Home-manager turns `fonts.fontconfig.enable` on with the fonts target so `fc-match` sees the installed Nerd faces; the NixOS module puts the bar, sans and terminal faces on the system fontconfig path (it previously carried only the greeter's sans, so `apply` refused the other two on NixOS systems without the home-manager theme). Opt out per target as before (`desktop.theme.targets.fonts.enable = false` installs nothing).
+
 ## [0.5.0](https://github.com/scoot-sh/scoot/compare/v0.4.1...v0.5.0) - 2026-10-21
 
 Breaking changes: the Nix defaults for the launcher and the notification daemon changed (see the two Breaking sections below); each has a one-line escape hatch.

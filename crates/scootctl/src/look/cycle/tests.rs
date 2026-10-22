@@ -15,8 +15,8 @@ use super::super::leaves::ScriptedLeaves;
 use super::super::reload::{BarReload, CompositorReload, ReloadError, Reloaded};
 use super::super::toolkit::Dconf;
 use super::{
-    Preview, PreviewRead, Step, clear_preview, cycle_target, keep_preview, random_target,
-    read_preview, revert_if_current, reverter_argv, unapply, write_preview,
+    Preview, PreviewRead, Step, clear_preview, cycle_target, keep_preview, ordered_candidates,
+    random_target, read_preview, revert_if_current, reverter_argv, unapply, write_preview,
 };
 use scoot_look::catalog::{Catalog, discover_ordered};
 
@@ -318,6 +318,166 @@ fn order_wraps_at_both_ends() {
     let empty = Catalog::default();
     assert_eq!(cycle_target(&empty, Some("look-a"), Step::Next), None);
     assert_eq!(cycle_target(&empty, None, Step::Prev), None);
+}
+
+#[test]
+fn ordered_candidates_skip_nothing_but_order_everything() {
+    let fixture = fixture("cycle-ordered");
+    let catalog = &fixture.catalog;
+    // Next from look-a tries look-b first; from look-b wraps to look-a.
+    // The active look itself is excluded: cycling always moves.
+    assert_eq!(
+        ordered_candidates(catalog, Some("look-a"), Step::Next),
+        vec!["look-b".to_owned()]
+    );
+    assert_eq!(
+        ordered_candidates(catalog, Some("look-b"), Step::Next),
+        vec!["look-a".to_owned()]
+    );
+    assert_eq!(
+        ordered_candidates(catalog, Some("look-a"), Step::Prev),
+        vec!["look-b".to_owned()]
+    );
+    // Unknown current starts over in step order.
+    assert_eq!(
+        ordered_candidates(catalog, Some("gone"), Step::Next),
+        vec!["look-a".to_owned(), "look-b".to_owned()]
+    );
+    assert_eq!(
+        ordered_candidates(catalog, Some("gone"), Step::Prev),
+        vec!["look-b".to_owned(), "look-a".to_owned()]
+    );
+    assert_eq!(
+        ordered_candidates(catalog, None, Step::Next),
+        vec!["look-a".to_owned(), "look-b".to_owned()]
+    );
+    // Three looks: the neighbor first, then the rest in step order.
+    let scratch = scratch("cycle-ordered-three");
+    let sources = scratch.path().join("looks");
+    write_look(&sources, "look-a", "");
+    write_look(&sources, "look-b", "");
+    let c = look_toml("look-c").replace("ring-width = 2", "ring-width = 4");
+    let cdir = sources.join("look-c");
+    std::fs::create_dir_all(&cdir).expect("a look dir");
+    std::fs::write(cdir.join("look.toml"), c).expect("a look.toml");
+    let three = discover_ordered(&[(sources, Origin::User)]);
+    assert_eq!(three.entries.len(), 3, "notes: {:?}", three.notes);
+    assert_eq!(
+        ordered_candidates(&three, Some("look-a"), Step::Next),
+        vec!["look-b".to_owned(), "look-c".to_owned()]
+    );
+    assert_eq!(
+        ordered_candidates(&three, Some("look-c"), Step::Next),
+        vec!["look-a".to_owned(), "look-b".to_owned()]
+    );
+    assert_eq!(
+        ordered_candidates(&three, Some("look-a"), Step::Prev),
+        vec!["look-c".to_owned(), "look-b".to_owned()]
+    );
+    let empty = Catalog::default();
+    assert!(ordered_candidates(&empty, Some("look-a"), Step::Next).is_empty());
+}
+
+#[test]
+fn a_refusing_neighbor_is_skipped_not_stuck() {
+    // The stuck state, reproduced: look-b's fonts refuse, so plain
+    // `cycle_target` from look-a names a look that cannot apply — every
+    // press lands on the same refusal. `ordered_candidates` plus the
+    // run_cycle loop instead land on look-c.
+    let scratch = scratch("cycle-skip");
+    let root: PathBuf = scratch.path().to_owned();
+    let sources = root.join("looks");
+    write_look(&sources, "look-a", "");
+    let mut b = look_toml("look-b");
+    b = b.replace("ring-width = 2", "ring-width = 3");
+    b = b.replace("ui = \"DejaVu Sans\"", "ui = \"ZZRefusingUI\"");
+    b = b.replace("sans = \"DejaVu Sans\"", "sans = \"ZZRefusingSans\"");
+    b = b.replace("mono = \"DejaVu Sans Mono\"", "mono = \"ZZRefusingMono\"");
+    let bdir = sources.join("look-b");
+    std::fs::create_dir_all(&bdir).expect("a look dir");
+    std::fs::write(bdir.join("look.toml"), b).expect("a look.toml");
+    let mut c = look_toml("look-c");
+    c = c.replace("ring-width = 2", "ring-width = 4");
+    let cdir = sources.join("look-c");
+    std::fs::create_dir_all(&cdir).expect("a look dir");
+    std::fs::write(cdir.join("look.toml"), c).expect("a look.toml");
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    assert_eq!(catalog.entries.len(), 3, "notes: {:?}", catalog.notes);
+    // The neighbor from look-a is the refusing look-b: the stuck press.
+    assert_eq!(
+        cycle_target(&catalog, Some("look-a"), Step::Next),
+        Some("look-b".to_owned())
+    );
+    // The skip order tries look-b first, then look-c.
+    assert_eq!(
+        ordered_candidates(&catalog, Some("look-a"), Step::Next),
+        vec!["look-b".to_owned(), "look-c".to_owned()]
+    );
+    // look-b refuses through the checks (no sibling cover, no generic),
+    // while look-a and look-c apply.
+    let cache = root.join("cache");
+    let state = root.join("state");
+    let config = root.join("config");
+    // The checks refuse only the ZZ families: look-b's fonts refuse, the
+    // others resolve.
+    struct AllZZRefuse;
+    impl Checks for AllZZRefuse {
+        fn font_file(&self, family: &str) -> Result<Availability<String>, String> {
+            if family.starts_with("ZZRefusing") {
+                return Err(format!(
+                    "font `{family}` is not installed (fc-match resolves it to `Fallback`)"
+                ));
+            }
+            Ok(Availability::Available(format!("/fonts/{family}.otf")))
+        }
+        fn wallpaper(&self, _: &Path) -> Result<Availability<()>, String> {
+            Ok(Availability::Available(()))
+        }
+        fn bar_fragment(&self, _: &Path) -> Result<Availability<()>, String> {
+            Ok(Availability::Available(()))
+        }
+        fn foot_fragment(&self, _: &Path) -> Result<Availability<()>, String> {
+            Ok(Availability::Available(()))
+        }
+    }
+    let checks = AllZZRefuse;
+    let mut compositor = FakeCompositor::not_running();
+    let bars: Vec<&dyn BarReload> = Vec::new();
+    let err = apply_with(
+        "look-b",
+        &options(),
+        &catalog,
+        &cache,
+        &state,
+        Some(&config),
+        &mut compositor,
+        &bars,
+        &checks,
+        &FakeDconf,
+        &ScriptedLeaves::failing(),
+    )
+    .expect_err("the refusing neighbor refuses");
+    assert!(
+        err.message.contains("no fallback font file exists"),
+        "{err}"
+    );
+    // Skipping it lands on look-c.
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with(
+        "look-c",
+        &options(),
+        &catalog,
+        &cache,
+        &state,
+        Some(&config),
+        &mut compositor,
+        &bars,
+        &checks,
+        &FakeDconf,
+        &ScriptedLeaves::failing(),
+    )
+    .expect("the next look past the refusal applies");
+    assert_eq!(report.name, "look-c");
 }
 
 #[test]

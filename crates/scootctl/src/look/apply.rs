@@ -170,7 +170,21 @@ pub enum Availability<T> {
 pub trait Checks {
     /// Resolves a font family to a file through fontconfig. A missing
     /// `fc-match` is [`Availability::Unavailable`]; a failing one refuses.
+    ///
+    /// A named family that is not installed refuses (instead of silently
+    /// answering fontconfig's fallback file): [`check_inputs`] turns that
+    /// refusal into a fallback with a note whenever some usable font file
+    /// exists, and refuses only when there is truly none.
     fn font_file(&self, family: &str) -> Result<Availability<String>, String>;
+    /// A usable font file without a name check: fontconfig's generic
+    /// `sans-serif` answer, then `monospace`. A missing `fc-match` (or a
+    /// config with no fonts at all) is [`Availability::Unavailable`]; this
+    /// never refuses on a name mismatch, only on a failing helper.
+    fn fallback_font_file(&self) -> Result<Availability<String>, String> {
+        Ok(Availability::Unavailable(
+            "no fallback font probed".to_owned(),
+        ))
+    }
     /// Checks an image wallpaper: `scootbg check-image` when the binary is
     /// around (byte cap, pixel cap from the header, full decode), else the
     /// byte cap alone with a note that no decode ran.
@@ -1165,43 +1179,126 @@ pub(crate) fn check_inputs(
     let mut details = Vec::new();
     // Fonts: each family through its carrier. A `[fonts.files]` entry
     // resolves inside the look directory that names it; otherwise
-    // fontconfig resolves the family name.
-    let mut ui_font_file: Option<String> = None;
-    for (key, family) in [
-        ("ui", merged.fonts.ui.as_str()),
-        ("sans", merged.fonts.sans.as_str()),
-        ("mono", merged.fonts.mono.as_str()),
-    ] {
+    // fontconfig resolves the family name. A missing named family never
+    // blocks the look on its own: it falls back through the look's other
+    // families, then fontconfig's generic answer, with a visible note, and
+    // refuses only when no usable font file exists at all.
+    let keys = ["ui", "sans", "mono"];
+    let families = [
+        merged.fonts.ui.as_str(),
+        merged.fonts.sans.as_str(),
+        merged.fonts.mono.as_str(),
+    ];
+    // The resolved file per key, or the pending (key, family, refused)
+    // triple when the named lookup did not answer a file.
+    let mut resolved: Vec<Option<String>> = Vec::new();
+    let mut pending: Vec<Option<(String, String, bool)>> = Vec::new();
+    for (key, family) in keys.iter().zip(families.iter()) {
         if let Some((dir, rel)) = carrier_file(chain, key) {
             match contained_file(&dir, &rel) {
                 Ok(path) => {
                     details.push(format!("font {key} `{family}`: {}", path.display()));
-                    if key == "ui" {
-                        match path_to_string(&path) {
-                            Ok(text) => ui_font_file = Some(text),
-                            Err(error) => validation
+                    match path_to_string(&path) {
+                        Ok(text) => {
+                            resolved.push(Some(text));
+                            pending.push(None);
+                        }
+                        Err(error) => {
+                            validation
                                 .errors
-                                .push(format!("font `{family}` ({key}): {error}")),
+                                .push(format!("font `{family}` ({key}): {error}"));
+                            resolved.push(None);
+                            pending.push(None);
                         }
                     }
                 }
-                Err(error) => validation
-                    .errors
-                    .push(format!("font `{family}` ({key}): {error}")),
+                Err(error) => {
+                    validation
+                        .errors
+                        .push(format!("font `{family}` ({key}): {error}"));
+                    resolved.push(None);
+                    pending.push(None);
+                }
             }
             continue;
         }
         match checks.font_file(family) {
             Ok(Availability::Available(path)) => {
                 details.push(format!("font {key} `{family}`: {path}"));
-                if key == "ui" {
-                    ui_font_file = Some(path);
-                }
+                resolved.push(Some(path));
+                pending.push(None);
             }
-            Ok(Availability::Unavailable(note)) => validation.notes.push(note),
-            Err(refusal) => validation.errors.push(refusal),
+            Ok(Availability::Unavailable(note)) => {
+                resolved.push(None);
+                pending.push(Some(((*key).to_owned(), (*family).to_owned(), false)));
+                validation.notes.push(note);
+            }
+            Err(refusal) => {
+                resolved.push(None);
+                pending.push(Some(((*key).to_owned(), (*family).to_owned(), true)));
+                // The refusal becomes a fallback note below when some
+                // usable file exists; it stays a refusal only when none
+                // does. Keep it aside until then.
+                validation.notes.push(format!("{refusal} (falling back)"));
+            }
         }
     }
+    // Anything the named lookups resolved covers a missing sibling: the
+    // first available file in ui/sans/mono order.
+    let cover = resolved.iter().flatten().next().cloned();
+    // Fontconfig's generic answer, probed once: sans-serif, then monospace.
+    let mut generic: Option<String> = None;
+    let mut generic_note: Option<String> = None;
+    if pending.iter().any(|slot| slot.is_some()) && cover.is_none() {
+        match checks.fallback_font_file() {
+            Ok(Availability::Available(path)) => {
+                generic = Some(path.clone());
+                generic_note = Some(format!("fontconfig fallback: {path}"));
+            }
+            Ok(Availability::Unavailable(note)) => {
+                generic_note = Some(note);
+            }
+            Err(error) => {
+                generic_note = Some(error);
+            }
+        }
+    }
+    for (index, slot) in pending.iter().enumerate() {
+        let Some((key, family, was_refusal)) = slot else {
+            continue;
+        };
+        if let Some(path) = cover.clone() {
+            details.push(format!(
+                "font {key} `{family}`: {path} (fallback from the look's other families)"
+            ));
+            validation.notes.push(format!(
+                "font {key} `{family}` is not installed: using another of the look's families ({path}) instead"
+            ));
+            resolved[index] = Some(path);
+        } else if let Some(path) = generic.clone() {
+            details.push(format!(
+                "font {key} `{family}`: {path} (fontconfig fallback)"
+            ));
+            validation.notes.push(format!(
+                "font {key} `{family}` is not installed: using {path} instead"
+            ));
+            resolved[index] = Some(path);
+        } else if *was_refusal {
+            // Truly no usable font file: drop the aside "(falling back)"
+            // note and record the refusal.
+            validation.notes.pop();
+            validation.errors.push(format!(
+                "font `{family}` ({key}) is not installed and no fallback font file exists{}",
+                generic_note
+                    .as_deref()
+                    .map(|note| format!(" ({note})"))
+                    .unwrap_or_default()
+            ));
+        }
+        // An unchecked backend (no `fc-match`) keeps the old shape: the
+        // note is already pushed, and the look applies without a file.
+    }
+    let ui_font_file: Option<String> = resolved.first().cloned().flatten();
     // Wallpaper: an image resolves inside the look directory that names
     // it (the unit is inherited whole, so that directory is the chain's
     // last entry with a `[wallpaper]` table); a color needs no path.
@@ -3966,6 +4063,30 @@ impl Checks for ProdChecks {
             ));
         }
         Ok(Availability::Available(path))
+    }
+
+    fn fallback_font_file(&self) -> Result<Availability<String>, String> {
+        let Some(fc_match) = &self.fc_match else {
+            return Ok(Availability::Unavailable(
+                "no `fc-match` on PATH: font files unchecked".to_owned(),
+            ));
+        };
+        for query in ["sans-serif", "monospace"] {
+            let out = run_with_timeout(fc_match, &["--format=%{file}\n", query])?;
+            if !out.status.success() {
+                continue;
+            }
+            let path = String::from_utf8(out.stdout)
+                .map_err(|_| format!("fallback font `{query}`: fc-match answered non-UTF-8"))?;
+            let path = path.trim().to_owned();
+            if path.is_empty() {
+                continue;
+            }
+            return Ok(Availability::Available(path));
+        }
+        Ok(Availability::Unavailable(
+            "fontconfig answered no fallback font file (no fonts installed?)".to_owned(),
+        ))
     }
 
     fn wallpaper(&self, path: &Path) -> Result<Availability<()>, String> {
