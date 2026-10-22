@@ -53,11 +53,11 @@ let
           options.source = lib.mkOption { type = lib.types.path; };
         }
       );
-      default = [ ];
+      default = { };
     };
     options.systemd.user.services = lib.mkOption {
       type = lib.types.attrsOf lib.types.raw;
-      default = [ ];
+      default = { };
     };
   };
   nixosStubs = {
@@ -67,7 +67,7 @@ let
     };
     options.systemd.user.services = lib.mkOption {
       type = lib.types.attrsOf lib.types.raw;
-      default = [ ];
+      default = { };
     };
     options.services.dbus.packages = lib.mkOption {
       type = lib.types.listOf lib.types.package;
