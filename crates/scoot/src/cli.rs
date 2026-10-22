@@ -47,7 +47,7 @@ CONFIG:
     a flag given replaces the file's value for its own option. Sections:
 
     [layout] [appearance] [output] [[outputs]] [renderer] [tty] [xwayland]
-    [binds] [autostart] [floating] [[window_rule]] [wallpaper]
+    [binds] [global_shortcuts] [autostart] [floating] [[window_rule]] [wallpaper]
 
     `scoot --print-default-config` prints a starting file generated from the
     compositor's own live defaults; with `--write` it places the file (never
@@ -398,6 +398,7 @@ fn json_value() -> serde_json::Value {
             serde_json::Value::from("[tty]"),
             serde_json::Value::from("[xwayland]"),
             serde_json::Value::from("[binds]"),
+            serde_json::Value::from("[global_shortcuts]"),
             serde_json::Value::from("[autostart]"),
             serde_json::Value::from("[floating]"),
             serde_json::Value::from("[[window_rule]]"),

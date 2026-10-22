@@ -151,7 +151,7 @@ pub const REQUESTS: &[RequestDoc] = &[
     RequestDoc {
         verb: "subscribe",
         syntax: "subscribe [EVENT...]",
-        description: "stream events (output, keyboard, workspace, lock, look; default: output) until killed",
+        description: "stream events (output, keyboard, workspace, lock, look, global-shortcut; default: output)",
         example: "scoot msg subscribe workspace",
         reply: "`{\"type\":\"subscribed\",...}`, then one event per line, e.g. `{\"type\":\"output_added\",...}`",
     },
@@ -168,6 +168,34 @@ pub const REQUESTS: &[RequestDoc] = &[
         description: "the catalog, the active look and the session's state directory",
         example: "scoot msg looks",
         reply: "`{\"type\":\"looks\",...}`",
+    },
+    RequestDoc {
+        verb: "shortcut-register",
+        syntax: "shortcut-register APP_ID SHORTCUT_ID [--trigger COMBO] [--description TEXT]",
+        description: "register a portal global shortcut (the trigger is a hint only; the user binds the chord)",
+        example: "scoot msg shortcut-register org.obs-studio toggle-record --trigger super+ctrl+r",
+        reply: "`{\"type\":\"shortcuts\",\"shortcuts\":[...]}`",
+    },
+    RequestDoc {
+        verb: "shortcut-unregister",
+        syntax: "shortcut-unregister APP_ID SHORTCUT_ID",
+        description: "remove one global-shortcut registration",
+        example: "scoot msg shortcut-unregister org.obs-studio toggle-record",
+        reply: "`{\"type\":\"shortcuts\",\"shortcuts\":[...]}`",
+    },
+    RequestDoc {
+        verb: "shortcuts",
+        syntax: "shortcuts",
+        description: "list every registered global shortcut with its user binding and conflict state",
+        example: "scoot msg shortcuts",
+        reply: "`{\"type\":\"shortcuts\",\"shortcuts\":[...]}`",
+    },
+    RequestDoc {
+        verb: "shortcut-bind",
+        syntax: "shortcut-bind APP_ID SHORTCUT_ID COMBO|reset",
+        description: "bind a registered shortcut to a user chord (or reset it to unbound)",
+        example: "scoot msg shortcut-bind org.obs-studio toggle-record super+ctrl+r",
+        reply: "`{\"type\":\"shortcuts\",\"shortcuts\":[...]}`",
     },
 ];
 

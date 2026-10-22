@@ -898,6 +898,7 @@ impl Connection {
         } else {
             // The wayland-side flush this used to do per request is now done once
             // per wakeup, by `step`, for every request it served.
+            state.current_conn = self.conn;
             self.answer(&state.handle_request(request))
         }
     }

@@ -311,6 +311,32 @@ pub struct SkippedBind {
     pub reason: String,
 }
 
+/// One registered portal global shortcut: what
+/// [`Response::Shortcuts`] lists, one row per `(app_id, shortcut_id)`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShortcutInfo {
+    /// The registering app's id (`org.obs-studio`).
+    pub app_id: String,
+    /// The app's shortcut id within that app (`toggle-record`).
+    pub shortcut_id: String,
+    /// The app's human description, if it gave one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The app's preferred trigger hint, if it gave one. Never auto-bound:
+    /// the user assigns the chord via config or `ShortcutBind`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferred_trigger: Option<String>,
+    /// The user-assigned chord in canonical spelling (`super+ctrl+r`),
+    /// if bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bound: Option<String>,
+    /// True when `bound` equals a live compositor combo and so never
+    /// fires (compositor wins), or when another registration won the grab
+    /// for the same chord. Stays listed so the backend can show it.
+    #[serde(default)]
+    pub conflicted: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
@@ -565,6 +591,52 @@ pub enum Response {
         active: Option<String>,
         state_dir: String,
     },
+    /// The answer to `ShortcutRegister` / `ShortcutUnregister` /
+    /// `Shortcuts` / `ShortcutBind`: every registered shortcut with its
+    /// user binding and conflict state. Sorted by `(app_id, shortcut_id)`.
+    ///
+    /// A new variant, so this moves `PROTOCOL_VERSION` 12 → 13 (see that
+    /// constant's doc): an older client handed one would fail its decode,
+    /// which can only happen to a client new enough to have asked. An
+    /// older server meets the new request tags with an ordinary `Error`,
+    /// like any unknown request tag.
+    Shortcuts {
+        shortcuts: Vec<ShortcutInfo>,
+    },
+    /// One portal global shortcut pressed: sent only to connections
+    /// subscribed to [`EventKind::GlobalShortcut`]. What the stage-2
+    /// backend turns into the portal `Activated` signal. `timestamp_ms`
+    /// is the compositor clock at press intercept time.
+    ///
+    /// A new variant, sharing the 12 → 13 `PROTOCOL_VERSION` move with
+    /// `Shortcuts` above: an older client handed one would fail its
+    /// decode, which can only happen to a client new enough to have
+    /// subscribed.
+    ShortcutActivated {
+        app_id: String,
+        shortcut_id: String,
+        timestamp_ms: u32,
+    },
+    /// One portal global shortcut released: sent only to connections
+    /// subscribed to [`EventKind::GlobalShortcut`]. What the stage-2
+    /// backend turns into the portal `Deactivated` signal.
+    ///
+    /// A new variant, sharing the 12 → 13 `PROTOCOL_VERSION` move with
+    /// `Shortcuts` above.
+    ShortcutDeactivated {
+        app_id: String,
+        shortcut_id: String,
+        timestamp_ms: u32,
+    },
+    /// The registered set changed (register, unregister, bind, unbind,
+    /// reload, registrant disconnect): sent only to connections
+    /// subscribed to [`EventKind::GlobalShortcut`]. What the stage-2
+    /// backend turns into the portal `ShortcutsChanged` signal (re-list
+    /// with `Shortcuts` for the new state).
+    ///
+    /// A new variant, sharing the 12 → 13 `PROTOCOL_VERSION` move with
+    /// `Shortcuts` above.
+    ShortcutsChanged,
     Error {
         message: String,
     },

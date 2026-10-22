@@ -23,12 +23,13 @@
 //! These need a writable `$XDG_RUNTIME_DIR` for the same reason the other
 //! compositor tests do.
 
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{Receiver, Sender};
+use std::time::Duration;
 
 use scoot_core::Action;
-use scoot_ipc::PointerButton;
+use scoot_ipc::{EventKind, PointerButton, Request, Response, decode};
 use smithay::input::keyboard::{Keysym, xkb};
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use wayland_client::protocol::{
@@ -2198,6 +2199,231 @@ fn virtual_german_z_matches_the_seat_z_bind() {
     assert!(
         is_fullscreen(&fixture),
         "a German-remote Super+z must run the seat Super+z bind"
+    );
+}
+
+/// Registers one portal global shortcut as `conn` and binds it to `combo`,
+/// through the same IPC the stage-2 backend will drive.
+fn register_global(fixture: &mut Fixture, conn: u64, app: &str, id: &str, combo: &str) {
+    fixture.state.current_conn = conn;
+    match fixture.state.handle_request(Request::ShortcutRegister {
+        app_id: app.into(),
+        shortcut_id: id.into(),
+        preferred_trigger: None,
+        description: None,
+    }) {
+        scoot_ipc::Response::Shortcuts { .. } => {}
+        other => panic!("register answers Shortcuts, got {other:?}"),
+    }
+    fixture.state.current_conn = 0;
+    let keys = combo.parse().expect("a parsable chord");
+    match fixture.state.handle_request(Request::ShortcutBind {
+        app_id: app.into(),
+        shortcut_id: id.into(),
+        combo: Some(keys),
+    }) {
+        scoot_ipc::Response::Shortcuts { .. } => {}
+        other => panic!("bind answers Shortcuts, got {other:?}"),
+    }
+}
+
+/// Subscribes a fresh socket-pair connection to the global-shortcut event
+/// kind. The reader carries a timeout, so a missing event fails instead of
+/// hanging the suite.
+fn subscribe_global(state: &mut super::super::State) -> BufReader<UnixStream> {
+    let (server, client) = UnixStream::pair().expect("a socket pair");
+    let response = state.subscribe(21, server, vec![EventKind::GlobalShortcut]);
+    assert!(
+        matches!(response, Response::Subscribed { .. }),
+        "subscribing answers subscribed, got {response:?}"
+    );
+    client
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .expect("a read timeout, so a missing event fails instead of hanging the suite");
+    BufReader::new(client)
+}
+
+/// The next message the server sent: one subscribed event.
+fn next_global_event(reader: &mut BufReader<UnixStream>) -> scoot_ipc::Response {
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .expect("the event arrived within the timeout");
+    decode(&line).expect("a decodable event")
+}
+
+/// Asserts the server sent nothing: the socket must be unreadable right
+/// now. Runs the stream non-blocking for the check, then restores blocking
+/// (and its timeout) for whatever the test reads next.
+fn assert_global_silent(reader: &mut BufReader<UnixStream>) {
+    reader
+        .get_mut()
+        .set_nonblocking(true)
+        .expect("non-blocking for the silence check");
+    let mut line = String::new();
+    let result = reader.read_line(&mut line);
+    reader
+        .get_mut()
+        .set_nonblocking(false)
+        .expect("blocking again afterwards");
+    match result {
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+        _ => panic!("expected silence, got {result:?} line {line:?}"),
+    }
+}
+
+#[test]
+fn virtual_global_shortcut_fires_when_binds_on_and_survives_a_focus_change() {
+    // The mirror of `virtual_bind_fires_when_binds_on` for stage-1 global
+    // shortcuts: a virtual Super+Ctrl+r press emits `Activated` and its
+    // release `Deactivated`, the client never sees the `r` key, and a
+    // compositor focus move between press and release (Super+h, which the
+    // client never sees either) still routes the release to the pair --
+    // even across the focus change the press did not cause but another
+    // chord did.
+    let mut fixture = Fixture::with_binds();
+    register_global(&mut fixture, 7, "org.example", "toggle", "super+ctrl+r");
+    fixture.run(Step::Bind);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::MapWindow);
+    let focused = fixture.state.focus;
+    fixture.run(Step::CreateKeyboard);
+    fixture.run(Step::UploadKeymap {
+        layout: "us".to_owned(),
+    });
+    let mut reader = subscribe_global(&mut fixture.state);
+    fixture.take_log();
+    press_chord(
+        &mut fixture,
+        "us",
+        &[("Super_L", true), ("Control_L", true), ("r", true)],
+    );
+    match next_global_event(&mut reader) {
+        scoot_ipc::Response::ShortcutActivated {
+            app_id,
+            shortcut_id,
+            ..
+        } => {
+            assert_eq!(app_id, "org.example");
+            assert_eq!(shortcut_id, "toggle");
+        }
+        other => panic!("the press emits Activated, got {other:?}"),
+    }
+    // A compositor focus move mid-hold: Control_L is released first so the
+    // `h` press carries exactly Super (the `super+h` focus bind), not
+    // Super+Ctrl+h (which nothing binds).
+    press_chord(&mut fixture, "us", &[("Control_L", false)]);
+    press_chord(&mut fixture, "us", &[("h", true), ("h", false)]);
+    assert_ne!(
+        fixture.state.focus, focused,
+        "a virtual Super+h must move focus with binds on"
+    );
+    press_chord(&mut fixture, "us", &[("r", false), ("Super_L", false)]);
+    match next_global_event(&mut reader) {
+        scoot_ipc::Response::ShortcutDeactivated {
+            app_id,
+            shortcut_id,
+            ..
+        } => {
+            assert_eq!(app_id, "org.example");
+            assert_eq!(shortcut_id, "toggle");
+        }
+        other => panic!("the release emits Deactivated, got {other:?}"),
+    }
+    assert_global_silent(&mut reader);
+    assert_eq!(
+        fixture.take_log(),
+        [
+            Seen::Key {
+                code: seat_evdev(&fixture, "Super_L"),
+                pressed: true
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "Control_L"),
+                pressed: true
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "Control_L"),
+                pressed: false
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "Super_L"),
+                pressed: false
+            },
+        ],
+        "the intercepted r press+release and h press+release must not reach the client"
+    );
+    assert!(
+        fixture.state.virtual_suppressed.is_empty(),
+        "the intercepted release must clear the suppression entry"
+    );
+}
+
+#[test]
+fn virtual_global_shortcut_forwards_whole_when_binds_off() {
+    // Default-off is inert as well as safe: the same chord as above is
+    // forwarded whole -- the client hears every key -- and sends no
+    // shortcut events.
+    let mut fixture = Fixture::enabled();
+    assert!(
+        !fixture.state.virtual_input_binds,
+        "the harness default must match the config default (off)"
+    );
+    register_global(&mut fixture, 7, "org.example", "toggle", "super+ctrl+r");
+    fixture.run(Step::Bind);
+    fixture.run(Step::MapWindow);
+    fixture.run(Step::CreateKeyboard);
+    fixture.run(Step::UploadKeymap {
+        layout: "us".to_owned(),
+    });
+    let mut reader = subscribe_global(&mut fixture.state);
+    fixture.take_log();
+    press_chord(
+        &mut fixture,
+        "us",
+        &[
+            ("Super_L", true),
+            ("Control_L", true),
+            ("r", true),
+            ("r", false),
+            ("Control_L", false),
+            ("Super_L", false),
+        ],
+    );
+    assert_global_silent(&mut reader);
+    assert_eq!(
+        fixture.take_log(),
+        [
+            Seen::Key {
+                code: seat_evdev(&fixture, "Super_L"),
+                pressed: true
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "Control_L"),
+                pressed: true
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "r"),
+                pressed: true
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "r"),
+                pressed: false
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "Control_L"),
+                pressed: false
+            },
+            Seen::Key {
+                code: seat_evdev(&fixture, "Super_L"),
+                pressed: false
+            },
+        ],
+        "the whole chord must reach the client with binds off"
+    );
+    assert!(
+        fixture.state.virtual_suppressed.is_empty(),
+        "nothing intercepted means nothing suppressed"
     );
 }
 

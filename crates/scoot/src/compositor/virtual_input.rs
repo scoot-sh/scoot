@@ -1087,7 +1087,13 @@ fn virtual_filter(
         // and never gated on the lock (a sweep release must swallow even
         // under lock) or the flag (restart-only: it cannot have flipped
         // mid-hold, and swallowing must not depend on it if it ever could).
-        if data.virtual_suppressed.remove(&seat_code) {
+        if let Some(fired) = data.virtual_suppressed.remove(&seat_code) {
+            if let Some((app_id, shortcut_id)) = fired {
+                // The press fired a portal global shortcut: close the pair
+                // with the press-time identity, even if an unregister or
+                // disconnect dropped the registration mid-hold.
+                data.emit_shortcut_deactivated(app_id, shortcut_id, data.millis());
+            }
             return FilterResult::Intercept(());
         }
         return FilterResult::Forward;
@@ -1102,8 +1108,33 @@ fn virtual_filter(
     let Some(&keysym) = handle.raw_syms().first() else {
         return FilterResult::Forward;
     };
-    let Some((bound, flags)) = data.keybindings.match_key(keysym, mods.into()) else {
-        return FilterResult::Forward;
+    let mods = super::keybindings::Modifiers::from(mods);
+    let Some((bound, flags)) = data.keybindings.match_key(keysym, mods) else {
+        // Portal global shortcuts, stage 1: after compositor binds miss,
+        // before forwarding -- the same ordering as the physical path
+        // (`input::key`), under the same `[virtual_input] binds` flag as
+        // compositor binds (the flag gate above already passed, and the
+        // locked gate below still applies). Nothing allocates on this
+        // path unless a shortcut fires: one hash lookup on a stack key,
+        // then (only on a match) one insert plus one encode per
+        // subscriber. A virtual hold has no repeat lifecycle, so a
+        // shortcut fires exactly once, like a virtual bind.
+        if data.session_lock.is_locked() {
+            return FilterResult::Forward;
+        }
+        let Some(hit) = data.global_shortcuts.match_key(keysym, mods) else {
+            return FilterResult::Forward;
+        };
+        // Re-checked at fire time: a reload may have added a compositor
+        // bind since this chord was assigned (see `global_shadowed`).
+        if data.global_shadowed(mods, keysym) {
+            return FilterResult::Forward;
+        }
+        let (app_id, shortcut_id) = (hit.app_id.clone(), hit.shortcut_id.clone());
+        data.virtual_suppressed
+            .insert(seat_code, Some((app_id.clone(), shortcut_id.clone())));
+        data.emit_shortcut_activated(app_id, shortcut_id, data.millis());
+        return FilterResult::Intercept(());
     };
     // Absolute, like the drop in `virtual_key`: a virtual key never runs a
     // bind while locked -- not even an `allow_when_locked` spawn. Forward
@@ -1119,7 +1150,8 @@ fn virtual_filter(
     // Smithay runs this filter only on transitions (the first source to
     // press, the last to release), so two virtual keyboards holding one
     // key share the one entry and the bind still fires exactly once.
-    data.virtual_suppressed.insert(seat_code);
+    // `None`: a compositor bind fired, so the release reports nothing.
+    data.virtual_suppressed.insert(seat_code, None);
     match bound {
         Bound::Action(action) => {
             data.act_bind(action, flags.allow_when_locked);

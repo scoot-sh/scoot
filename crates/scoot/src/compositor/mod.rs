@@ -27,6 +27,7 @@ mod foreign_toplevel;
 mod foreign_toplevel_management;
 mod fullscreen;
 mod gamma_control;
+mod global_shortcuts;
 mod handlers;
 pub(crate) mod headless;
 mod idle;
@@ -314,6 +315,10 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // Which config binds were skipped, with their reasons: what `scoot msg
     // binds` lists beside the live rows (see `binds.rs`).
     state.skipped_binds = loaded.skipped_binds;
+    // `[global_shortcuts]`: the user-assigned chords; entries bind as apps
+    // register their ids (see `global_shortcuts.rs`).
+    state.global_shortcuts = loaded.global_shortcuts;
+    state.global_shortcuts.apply_config();
     // Before any output exists: `headless::create_output` decides each
     // output's scale from these by name, the primary's included -- and
     // `headless_size` below sizes the outputs the file leaves unplaced.

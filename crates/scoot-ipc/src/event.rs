@@ -98,6 +98,12 @@ pub enum EventKind {
     /// `render.json`), once per change. Read-only: nothing over IPC
     /// selects a look (a swap is a state-dir link move plus a reload).
     Look,
+    /// A portal global shortcut fired or changed: what tells a portal
+    /// backend (stage 2) to emit `Activated`/`Deactivated`/
+    /// `ShortcutsChanged` on `org.freedesktop.portal.GlobalShortcuts`.
+    /// Compositor binds always win over these; a shadowed chord stays
+    /// listed but never fires (see `dev/design/global-shortcuts.md`).
+    GlobalShortcut,
 }
 
 /// An output was removed: its workspaces were adopted onto a remaining
@@ -311,4 +317,20 @@ pub struct WorkspaceSnapshot {
     pub active: usize,
     /// One entry per workspace, in order: how many windows sit on it.
     pub counts: Vec<usize>,
+}
+
+/// One portal global-shortcut press or release: what
+/// [`EventKind::GlobalShortcut`] subscriptions carry, and what the portal
+/// backend turns into `Activated`/`Deactivated`. `timestamp_ms` is the
+/// compositor clock (`State::millis`) at intercept time, the same clock
+/// `InputTime` uses.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShortcutEvent {
+    /// The registering app's id (`org.obs-studio`).
+    pub app_id: String,
+    /// The app's shortcut id within that app (`toggle-record`).
+    pub shortcut_id: String,
+    /// Milliseconds since session start, at press (activated) or release
+    /// (deactivated) intercept time.
+    pub timestamp_ms: u32,
 }

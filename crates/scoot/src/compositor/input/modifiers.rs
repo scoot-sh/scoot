@@ -106,7 +106,7 @@ pub(super) enum Untypable {
 /// and [`super::State::press`] one per distinct [`scoot_ipc::Modifier`], of
 /// which there are four.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct HeldKeys {
+pub(crate) struct HeldKeys {
     codes: [Keycode; REAL_MODIFIERS],
     len: usize,
 }

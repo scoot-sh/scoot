@@ -69,6 +69,7 @@ use smithay::input::keyboard::{Keysym, xkb};
 use crate::cli::{RendererRequest, renamed_renderer};
 
 use super::decorations::{Appearance, Color};
+use super::global_shortcuts::{GlobalShortcuts, parse_global_key};
 use super::input::keysym_named;
 use super::keybindings::{BindFlags, Bound, Keybindings, Modifiers};
 use super::output_config::{OutputEntries, OutputEntryConfig};
@@ -530,6 +531,14 @@ struct FileConfig {
     // run the session on defaults.
     #[serde(default)]
     binds: HashMap<String, toml::Value>,
+    /// `[global_shortcuts]`: user-assigned chords for portal global
+    /// shortcuts, keyed `app-id:shortcut-id` (see
+    /// `dev/design/global-shortcuts.md`). Values are combo strings in the
+    /// same spelling as `[binds]` keys; `"none"` clears. The app's
+    /// `preferred_trigger` never auto-binds: only this table (or
+    /// `ShortcutBind` IPC) assigns a chord.
+    #[serde(default)]
+    global_shortcuts: HashMap<String, String>,
 }
 
 /// What loading a config file (or using defaults) produces: always a
@@ -543,6 +552,11 @@ pub struct LoadedConfig {
     /// warns about per entry, and what `scoot msg binds` lists beside the
     /// live rows. Empty when every entry applied.
     pub skipped_binds: Vec<scoot_ipc::SkippedBind>,
+    /// `[global_shortcuts]`: the user-assigned chords for portal global
+    /// shortcuts, with bad keys reported in `skipped`. Entries start
+    /// unbound until an app registers the id; the chords then apply (see
+    /// `global_shortcuts.rs`).
+    pub global_shortcuts: GlobalShortcuts,
     pub appearance: Appearance,
     /// The resolved `[output] scale`, already clamped (or the default 1.0):
     /// the session default every output without an `[[outputs]]` entry of
@@ -646,6 +660,7 @@ impl LoadedConfig {
             config: Config::default(),
             keybindings: Keybindings::default(),
             skipped_binds: Vec::new(),
+            global_shortcuts: GlobalShortcuts::new(),
             appearance: Appearance::default(),
             scale: 1.0,
             outputs: OutputEntries::default(),
@@ -738,6 +753,7 @@ impl LoadedConfig {
         };
         let autostart = file.autostart.unwrap_or_default().into_actions();
         let (keybindings, skipped_binds) = keybindings_for(&file.binds, vt);
+        let global_shortcuts = global_shortcuts_for(&file.global_shortcuts);
         let (floating_modifier, invalid_floating_modifier) =
             match drag_modifier(file.floating.as_ref()) {
                 Ok(modifier) => (modifier, None),
@@ -762,6 +778,7 @@ impl LoadedConfig {
                 config,
                 keybindings,
                 skipped_binds,
+                global_shortcuts,
                 appearance,
                 scale,
                 outputs,
@@ -1535,6 +1552,39 @@ pub fn enforce_vt_binds(table: &mut Keybindings) {
              VT-switch binding, which must always work as the recovery path"
         );
     }
+}
+
+/// Builds the `[global_shortcuts]` table a config file describes: the raw
+/// chords filed by `(app_id, shortcut_id)`, with malformed keys reported
+/// in `skipped`. Bad combos are *not* refused here: they are reported when
+/// `GlobalShortcuts::apply_config` resolves them, so a reload re-reports
+/// them the same way.
+pub fn global_shortcuts_for(raw: &HashMap<String, String>) -> GlobalShortcuts {
+    let mut table = GlobalShortcuts::new();
+    let mut keys: Vec<&String> = raw.keys().collect();
+    keys.sort();
+    for key in keys {
+        let combo = &raw[key];
+        match parse_global_key(key) {
+            Some((app_id, shortcut_id)) => {
+                table.config.insert((app_id, shortcut_id), combo.clone());
+            }
+            None => {
+                tracing::warn!(
+                    bind = %key,
+                    "skipping a [global_shortcuts] entry whose key is not `app-id:shortcut-id`"
+                );
+                let skipped = scoot_ipc::SkippedBind {
+                    bind: key.clone(),
+                    value: combo.clone(),
+                    reason: "the key is not `app-id:shortcut-id`".to_owned(),
+                };
+                table.key_errors.push(skipped.clone());
+                table.skipped.push(skipped);
+            }
+        }
+    }
+    table
 }
 
 /// Whether `(mods, keysym)` is one of `--tty`'s `Ctrl+Alt+F1..F12`

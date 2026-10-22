@@ -18,6 +18,7 @@ use super::*;
 
 mod actions;
 mod binds;
+mod global_shortcuts;
 mod keyboard;
 mod lock;
 mod targeted;

@@ -4,8 +4,8 @@
 use scoot_ipc::{
     Action, BindRow, EventKind, Horizontal, KeyboardLayout, LookEntry, OutputAdded, OutputChanged,
     OutputRemoved, OutputRestored, OutputSnapshot, OutputTarget, PROTOCOL_VERSION, PointerButton,
-    Rect, ReloadScope, Request, Response, SCREENSHOT_CURSOR_DEFAULT, Screenshot, SkippedBind,
-    WindowSnapshot, WorkspaceSnapshot, decode, encode,
+    Rect, ReloadScope, Request, Response, SCREENSHOT_CURSOR_DEFAULT, Screenshot, ShortcutInfo,
+    SkippedBind, WindowSnapshot, WorkspaceSnapshot, decode, encode,
 };
 use serde_json::{Value, json};
 fn json_of<T: serde::Serialize>(value: &T) -> Value {
@@ -488,8 +488,8 @@ fn a_reload_report_round_trips_with_both_lists() {
 #[test]
 fn reworded_reload_refusals_are_payload_not_wire_format() {
     assert_eq!(
-        PROTOCOL_VERSION, 12,
-        "the look IPC moved the protocol 11 → 12"
+        PROTOCOL_VERSION, 13,
+        "the look IPC moved the protocol 11 → 12 (and the global shortcuts 12 → 13)"
     );
     let response = Response::Reloaded {
         applied: vec!["autostart.commands".into()],
@@ -579,6 +579,30 @@ fn every_request_round_trips_on_one_line() {
         Request::OutputScale {
             output: OutputTarget::Name("DP-1".into()),
             scale: None,
+        },
+        Request::ShortcutRegister {
+            app_id: "org.obs-studio".into(),
+            shortcut_id: "toggle-record".into(),
+            preferred_trigger: Some("super+ctrl+r".into()),
+            description: Some("toggle recording".into()),
+        },
+        Request::ShortcutUnregister {
+            app_id: "org.obs-studio".into(),
+            shortcut_id: "toggle-record".into(),
+        },
+        Request::Shortcuts,
+        Request::ShortcutBind {
+            app_id: "org.obs-studio".into(),
+            shortcut_id: "toggle-record".into(),
+            combo: Some("super+ctrl+r".parse().unwrap()),
+        },
+        Request::ShortcutBind {
+            app_id: "org.obs-studio".into(),
+            shortcut_id: "toggle-record".into(),
+            combo: None,
+        },
+        Request::Subscribe {
+            events: vec![EventKind::GlobalShortcut],
         },
     ];
     for request in requests {
@@ -1222,8 +1246,8 @@ fn an_output_changed_event_round_trips_with_the_new_mode() {
 #[test]
 fn an_output_added_event_round_trips_and_moved_the_protocol() {
     assert_eq!(
-        PROTOCOL_VERSION, 12,
-        "the output-added event moved the protocol 9 → 10 (and the look-layer event 10 → 11, the look IPC 11 → 12)"
+        PROTOCOL_VERSION, 13,
+        "the output-added event moved the protocol 9 → 10 (and the look-layer event 10 → 11, the look IPC 11 → 12, the global shortcuts 12 → 13)"
     );
     let response = Response::OutputAdded(OutputAdded {
         output: 3,
@@ -1361,8 +1385,8 @@ fn a_locked_query_round_trips_with_the_live_state() {
 #[test]
 fn a_binds_query_round_trips_rows_and_skipped() {
     assert_eq!(
-        PROTOCOL_VERSION, 12,
-        "the binds reply moved the protocol 8 → 9 (and the output-added event 9 → 10, the look-layer event 10 → 11, the look IPC 11 → 12)"
+        PROTOCOL_VERSION, 13,
+        "the binds reply moved the protocol 8 → 9 (and the output-added event 9 → 10, the look-layer event 10 → 11, the look IPC 11 → 12, the global shortcuts 12 → 13)"
     );
     let request = Request::Binds;
     assert_eq!(json_of(&request), json!({ "type": "binds" }));
@@ -1495,8 +1519,8 @@ fn a_lock_changed_event_round_trips_for_both_transitions() {
 #[test]
 fn a_look_changed_event_round_trips_and_moved_the_protocol() {
     assert_eq!(
-        PROTOCOL_VERSION, 12,
-        "the look-layer event moved the protocol 10 → 11 (and the look IPC 11 → 12)"
+        PROTOCOL_VERSION, 13,
+        "the look-layer event moved the protocol 10 → 11 (and the look IPC 11 → 12, the global shortcuts 12 → 13)"
     );
     let request = Request::Subscribe {
         events: vec![EventKind::Look],
@@ -1539,8 +1563,8 @@ fn a_look_changed_event_round_trips_and_moved_the_protocol() {
 #[test]
 fn a_look_apply_round_trips_and_moved_the_protocol() {
     assert_eq!(
-        PROTOCOL_VERSION, 12,
-        "the look IPC moved the protocol 11 → 12"
+        PROTOCOL_VERSION, 13,
+        "the look IPC moved the protocol 11 → 12 (and the global shortcuts 12 → 13)"
     );
     let request = Request::LookApply {
         name: "moonrise".into(),
@@ -1600,8 +1624,8 @@ fn a_look_apply_round_trips_and_moved_the_protocol() {
 #[test]
 fn a_looks_query_round_trips_catalog_active_and_state_dir() {
     assert_eq!(
-        PROTOCOL_VERSION, 12,
-        "the look IPC moved the protocol 11 → 12"
+        PROTOCOL_VERSION, 13,
+        "the look IPC moved the protocol 11 → 12 (and the global shortcuts 12 → 13)"
     );
     let request = Request::Looks;
     assert_eq!(json_of(&request), json!({ "type": "looks" }));
@@ -1804,5 +1828,150 @@ fn a_scoped_reload_against_an_older_server_is_an_error_never_a_plain_reload() {
         serde_json::from_str::<OldRequest>(r#"{"type":"reload","scope":"look"}"#).unwrap(),
         OldRequest::Reload,
         "a scope field would have degraded to a plain reload on an older server"
+    );
+}
+
+/// Portal global shortcuts, stage 1: four new request tags with one new
+/// list reply, plus three new event replies on the new `GlobalShortcut`
+/// kind. New variants, so they moved the protocol 12 → 13: an older
+/// client handed one would fail its decode, which can only happen to a
+/// client new enough to have asked or subscribed.
+#[test]
+fn global_shortcut_requests_and_events_round_trip_and_moved_the_protocol() {
+    assert_eq!(
+        PROTOCOL_VERSION, 13,
+        "the global shortcuts moved the protocol 12 → 13"
+    );
+    let register = Request::ShortcutRegister {
+        app_id: "org.obs-studio".into(),
+        shortcut_id: "toggle-record".into(),
+        preferred_trigger: Some("super+ctrl+r".into()),
+        description: Some("toggle recording".into()),
+    };
+    assert_eq!(
+        json_of(&register),
+        json!({
+            "type": "shortcut_register",
+            "app_id": "org.obs-studio",
+            "shortcut_id": "toggle-record",
+            "preferred_trigger": "super+ctrl+r",
+            "description": "toggle recording",
+        })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&register).unwrap()).unwrap(),
+        register
+    );
+
+    let bind = Request::ShortcutBind {
+        app_id: "org.obs-studio".into(),
+        shortcut_id: "toggle-record".into(),
+        combo: Some("super+ctrl+r".parse().unwrap()),
+    };
+    assert_eq!(
+        json_of(&bind),
+        json!({
+            "type": "shortcut_bind",
+            "app_id": "org.obs-studio",
+            "shortcut_id": "toggle-record",
+            "combo": "super+ctrl+r",
+        })
+    );
+    assert_eq!(decode::<Request>(&encode(&bind).unwrap()).unwrap(), bind);
+
+    let unbind = Request::ShortcutBind {
+        app_id: "org.obs-studio".into(),
+        shortcut_id: "toggle-record".into(),
+        combo: None,
+    };
+    assert_eq!(
+        json_of(&unbind),
+        json!({
+            "type": "shortcut_bind",
+            "app_id": "org.obs-studio",
+            "shortcut_id": "toggle-record",
+            "combo": null,
+        })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&unbind).unwrap()).unwrap(),
+        unbind
+    );
+
+    let response = Response::Shortcuts {
+        shortcuts: vec![ShortcutInfo {
+            app_id: "org.obs-studio".into(),
+            shortcut_id: "toggle-record".into(),
+            description: Some("toggle recording".into()),
+            preferred_trigger: Some("super+ctrl+r".into()),
+            bound: Some("super+ctrl+r".into()),
+            conflicted: false,
+        }],
+    };
+    assert_eq!(
+        json_of(&response),
+        json!({
+            "type": "shortcuts",
+            "shortcuts": [{
+                "app_id": "org.obs-studio",
+                "shortcut_id": "toggle-record",
+                "description": "toggle recording",
+                "preferred_trigger": "super+ctrl+r",
+                "bound": "super+ctrl+r",
+                "conflicted": false,
+            }],
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&response).unwrap()).unwrap(),
+        response
+    );
+
+    let activated = Response::ShortcutActivated {
+        app_id: "org.obs-studio".into(),
+        shortcut_id: "toggle-record".into(),
+        timestamp_ms: 4242,
+    };
+    assert_eq!(
+        json_of(&activated),
+        json!({
+            "type": "shortcut_activated",
+            "app_id": "org.obs-studio",
+            "shortcut_id": "toggle-record",
+            "timestamp_ms": 4242,
+        })
+    );
+    assert_eq!(
+        decode::<Response>(&encode(&activated).unwrap()).unwrap(),
+        activated
+    );
+
+    let deactivated = Response::ShortcutDeactivated {
+        app_id: "org.obs-studio".into(),
+        shortcut_id: "toggle-record".into(),
+        timestamp_ms: 4300,
+    };
+    assert_eq!(
+        decode::<Response>(&encode(&deactivated).unwrap()).unwrap(),
+        deactivated
+    );
+
+    let changed = Response::ShortcutsChanged;
+    assert_eq!(json_of(&changed), json!({ "type": "shortcuts_changed" }));
+    assert_eq!(
+        decode::<Response>(&encode(&changed).unwrap()).unwrap(),
+        changed
+    );
+
+    let subscribe = Request::Subscribe {
+        events: vec![EventKind::GlobalShortcut],
+    };
+    assert_eq!(
+        json_of(&subscribe),
+        json!({ "type": "subscribe", "events": ["global_shortcut"] })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&subscribe).unwrap()).unwrap(),
+        subscribe
     );
 }
