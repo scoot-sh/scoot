@@ -1794,12 +1794,17 @@ fn run_cycle(look: &Look, step: CycleStep) -> Result<(), String> {
     Err(format!("no look applied: {}", skipped.join("; ")))
 }
 
-/// Truncates `text` to `max` chars with an ellipsis.
-fn truncate(text: &str, max: usize) -> String {
+/// Truncates `text` to at most `max` bytes, cut at a character boundary
+/// (never inside a multibyte one), with an ellipsis.
+pub(crate) fn truncate(text: &str, max: usize) -> String {
     if text.len() <= max {
         return text.to_owned();
     }
-    let mut out = text[..max].to_owned();
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut out = text[..end].to_owned();
     out.push('…');
     out
 }

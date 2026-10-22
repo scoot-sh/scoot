@@ -730,3 +730,21 @@ fn flag_shaped_names_refuse_as_usage_errors() {
         })
     );
 }
+
+#[test]
+fn truncate_never_cuts_inside_a_multibyte_character() {
+    // 399 ASCII bytes, then a 3-byte character straddling byte 400.
+    let text = format!("{}文tail", "a".repeat(399));
+    let cut = super::truncate(&text, 400);
+    assert_eq!(cut, format!("{}…", "a".repeat(399)));
+    // Short text and an exact fit pass through untouched.
+    assert_eq!(super::truncate("abc", 3), "abc");
+}
+
+#[test]
+fn a_degraded_body_over_the_cap_is_cut_on_a_boundary() {
+    let notes = vec![format!("{}文{}", "a".repeat(399), "b".repeat(50))];
+    let body = super::notify::degraded_body(&[], &notes);
+    assert!(body.ends_with('…'));
+    assert!(body.len() <= 400 + '…'.len_utf8());
+}

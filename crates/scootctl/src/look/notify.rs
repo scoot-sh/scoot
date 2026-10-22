@@ -73,11 +73,6 @@ pub fn degraded_body(skipped: &[String], notes: &[String]) -> String {
     for note in notes {
         parts.push(note.clone());
     }
-    let mut body = parts.join("; ");
     const MAX: usize = 400;
-    if body.len() > MAX {
-        body.truncate(MAX);
-        body.push('…');
-    }
-    body
+    super::truncate(&parts.join("; "), MAX)
 }
