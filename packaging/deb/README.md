@@ -14,14 +14,16 @@ step.
 | `scootbar` | tag `v$ver` | the same |
 | `scootlaunch` | tag `v$ver` | the same |
 | `scootnotify` | tag `v$ver` | the same |
+| `scoot-globalshortcuts-portal` | tag `v$ver` | the same |
 
 One tag releases every binary at the repository's one version
 (docs/versioning.md), and `deb-meta.py` reads it from the root
 `Cargo.toml`. There is no `scootctl` package: it is the client library
 inside the `scoot` binary (`scoot msg`). `scoot` depends on exactly `scootbg (= $ver)`:
-the coupled pair installs at one version, and the bar, the launcher
-and the notification daemon depend on no compositor package at all
-(standard Wayland protocols only).
+the coupled pair installs at one version, and the bar, the launcher,
+the notification daemon and the portal backend depend on no compositor
+package at all (standard Wayland protocols and the compositor's IPC
+socket only).
 
 ## Why `dpkg-deb`, not `cargo-deb`
 
@@ -128,6 +130,13 @@ asserted in CI, so one build runs on trixie, noble and newer.
   licenses, inventory,
   notice, a changelog, and a starting `notify.toml.example`
   (proven valid: `scootnotify daemon --check` prints `valid`).
+- `scoot-globalshortcuts-portal`: `/usr/bin/scoot-globalshortcuts-portal`,
+  the `scoot-globalshortcuts-portal.service` user unit (`Type=dbus`
+  with the bus name plus `RestartPreventExitStatus=3`, the same policy
+  as `nix/modules/scoot-globalshortcuts-portal-home.nix`), the D-Bus
+  activation file and the portal file
+  (`/usr/share/xdg-desktop-portal/portals/scoot.portal`), licenses,
+  inventory, notice and a changelog.
 
 Lintian posture: no errors; two standing warnings, explained rather
 than overridden -- `no-manual-page` on each binary (the binaries'
@@ -234,7 +243,7 @@ the repository stays maintainer-run until the key exists.
 
 `.github/workflows/deb.yml` stages the vendored tree
 (`scripts/vendor-release.sh`, the same entry point the release job
-uses), builds all five `.deb`s `--release --locked --offline` in a
+uses), builds all six `.deb`s `--release --locked --offline` in a
 `debian:bookworm-slim` container with the pinned toolchain on each
 architecture, derives and allow-list-checks `Depends`, lints with
 `lintian`, builds the unsigned repository index, and installs from it
@@ -244,6 +253,6 @@ launcher's `--check` on the defaults, the notification daemon's
 `daemon --check` on its shipped example (plus a `Notify` smoke
 against it on a session bus), and the
 headless smoke test (`scripts/smoke-test.sh`) against the installed
-binaries. What it cannot prove yet: the signature itself (there is no
+binaries (plus `scoot-globalshortcuts-portal --version`). What it cannot prove yet: the signature itself (there is no
 key) and the release-tarball URLs (there is no source URL at all --
 the script builds a source directory, so nothing 404s).

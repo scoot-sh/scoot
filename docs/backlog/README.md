@@ -269,7 +269,7 @@ falsify. Read `flexwm` there as `scoot`.
   mouse having to move; recognition is one branch plus one typemap probe,
   zero new state
 - [`ext-workspace-v1` `urgent` state bit](./protocols/ext-workspace-urgent-state.md) — low, filed 2026-09-29 (scootbar planning); needs a policy decision first, since an xdg-activation request always focuses today
-- [Portal global-shortcuts backend (stage 2)](./protocols/global-shortcuts-portal-backend.md) — medium, filed 2026-10-22 (W43): the scoot-owned `impl.portal.GlobalShortcuts` v2 backend over the stage-1 compositor grab, with `.portal` file, packaging, Nix wiring and live proof against a real portal client
+- [Portal global-shortcuts backend (stage 2)](./resolved/global-shortcuts-portal-backend-done.md) — RESOLVED 2026-10-22: `scoot-globalshortcuts-portal` serves `impl.portal.GlobalShortcuts` v2 over the stage-1 grab, with `.portal` file, packaging, Nix wiring and live proof (Activated/Deactivated with timestamps, heal across a compositor restart)
 - [Deferred: hyprland-global-shortcuts-v1 and xx-hotkey-v1](./protocols/global-shortcuts-deferred-wayland.md) — low, filed 2026-10-22 (W43): the two protocol paths not taken, and what would make either worthwhile; revisit once the portal backend exists
 - [Turn screens off when idle (`wlr-output-power-management`)](./resolved/output-power-management-done.md) — RESOLVED 2026-10-04 (daily-drive: idle Asahi laptop keeps both panels lit; agent IPC half included)
 - [Smaller/general protocol gaps (bundled)](./resolved/protocol-gaps-general-bundle-done.md) — every item resolved; archived 2026-10-12

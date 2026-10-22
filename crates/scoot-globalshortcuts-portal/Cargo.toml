@@ -1,0 +1,31 @@
+[package]
+name = "scoot-globalshortcuts-portal"
+description = "Portal backend for global shortcuts: implements org.freedesktop.impl.portal.GlobalShortcuts v2 over the compositor's stage-1 IPC"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Linux only, like scootnotify: it serves a session-bus name and talks to
+# the compositor over its Unix socket, and never runs on a Mac.
+
+[dependencies]
+# The shared D-Bus client: the wire, the connection with its per-message
+# cap and the LimitsExceeded reply, and the reconnect lifecycle.
+scoot-dbus.workspace = true
+# Panic-free printing behind the binary's own name, shared with the
+# other shell apps instead of another copy.
+scoot-rt.workspace = true
+# The stage-1 wire: requests, replies and the global-shortcut events.
+scoot-ipc.workspace = true
+serde_json.workspace = true
+# poll(2) and the retry timerfd through raw syscalls, no `libc` crate:
+# the same `rustix` the D-Bus client pulls in.
+rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "time"] }
+
+[dev-dependencies]
+scoot-dbus.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"

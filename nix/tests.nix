@@ -87,6 +87,10 @@
 #   mako and the feed script, keeps `daemon = "mako"` one line away,
 #   and warns on a mako-shaped
 #   `notifications.settings`.
+# - the GlobalShortcuts portal backend (`programs.scoot-globalshortcuts-portal`,
+#   checked in nix/scoot-globalshortcuts-portal-tests.nix): the overlay
+#   provides `pkgs.scoot-globalshortcuts-portal` on Linux, the flake's
+#   own build; on Darwin neither the overlay nor `packages` has one.
 # - Stylix as a source of a look (`programs.scoot.stylix`, on by
 #   default): with Stylix present and a render binary on hand the catalog
 #   gains a synthesized look named `stylix` (the sixteen base16 slots,
@@ -7110,6 +7114,17 @@ let
         assert lib.getExe built.scootnotify == "${built.scootnotify}/bin/scootnotify";
         true
       )
+      # ...the flake's own portal backend, the same shape...
+      (
+        assert overlaid.scoot-globalshortcuts-portal.drvPath == built.scoot-globalshortcuts-portal.drvPath;
+        true
+      )
+      (
+        assert
+          lib.getExe built.scoot-globalshortcuts-portal
+          == "${built.scoot-globalshortcuts-portal}/bin/scoot-globalshortcuts-portal";
+        true
+      )
       # ...and what the pure modules default to, with the notify daemon
       # opted in: the flake's own build behind the slot on both sides
       # (the OS-side default follows the daemon, the #681 lesson: no
@@ -7262,6 +7277,10 @@ let
         true
       )
       (
+        assert !(darwinOverlaid ? scoot-globalshortcuts-portal);
+        true
+      )
+      (
         assert !(flake.packages.aarch64-darwin ? scootbar || flake.packages.aarch64-darwin ? scootbar-demo);
         true
       )
@@ -7271,6 +7290,10 @@ let
       )
       (
         assert !(flake.packages.aarch64-darwin ? scootnotify);
+        true
+      )
+      (
+        assert !(flake.packages.aarch64-darwin ? scoot-globalshortcuts-portal);
         true
       )
       (

@@ -10,7 +10,8 @@ them from the workspace version, so the release branch is correct with
 zero manual commits:
 
 - every release PKGBUILD under `packaging/arch/` (`scoot`, `scootbg`,
-  `scootbar`, `scootlaunch`, `scootnotify`): `pkgver=<version>`;
+  `scootbar`, `scootlaunch`, `scootnotify`,
+  `scoot-globalshortcuts-portal`): `pkgver=<version>`;
 - every `-git` PKGBUILD: `pkgver=<version>.r0.g0000000` (the static base;
   the real count comes from `pkgver()` at build time, and the arch.yml
   version gate checks the static value starts with the workspace version);
@@ -47,8 +48,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-ARCH_PKGS = ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify")
-RPM_SPECS = ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify")
+ARCH_PKGS = ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify", "scoot-globalshortcuts-portal")
+RPM_SPECS = ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify", "scoot-globalshortcuts-portal")
 GIT_SUFFIX = ".r0.g0000000"
 SOURCE_URL = ("https://github.com/scoot-sh/scoot"
               "/archive/refs/tags/v{version}.tar.gz")

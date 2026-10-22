@@ -107,7 +107,7 @@ jobs:
           import re, subprocess
           crate_ver = subprocess.run(["scripts/workspace-version"], check=True,
                                      capture_output=True, text=True).stdout.strip()
-          for spec in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"):
+          for spec in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify", "scoot-globalshortcuts-portal"):
               text = open(f"packaging/rpm/{spec}.spec").read()
               spec_ver = re.search(r'^Version:\s+(.*)$', text, re.M).group(1).strip()
               status = "ok" if spec_ver == crate_ver else "MISMATCH"
@@ -122,7 +122,7 @@ jobs:
 
       - name: rpmbuild all five specs
         run: |
-          for s in scoot scootbg scootbar scootlaunch scootnotify; do
+          for s in scoot scootbg scootbar scootlaunch scootnotify scoot-globalshortcuts-portal; do
             rpmbuild -ba --define "_topdir $GITHUB_WORKSPACE/rpmbuild" "packaging/rpm/$s.spec"
           done
           find "$GITHUB_WORKSPACE/rpmbuild/RPMS" "$GITHUB_WORKSPACE/rpmbuild/SRPMS" -name '*.rpm' | sort
@@ -188,6 +188,7 @@ jobs:
           scootbar --version
           scootlaunch --version
           scootnotify --version
+          scoot-globalshortcuts-portal --version
           scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
           scootlaunch --check
           dbus-run-session -- scootnotify daemon --check --config /usr/share/doc/scootnotify/notify.toml.example
@@ -298,7 +299,7 @@ jobs:
           import re, subprocess
           crate_ver = subprocess.run(["scripts/workspace-version"], check=True,
                                      capture_output=True, text=True).stdout.strip()
-          for spec in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"):
+          for spec in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify", "scoot-globalshortcuts-portal"):
               text = open(f"packaging/rpm/{spec}.spec").read()
               spec_ver = re.search(r'^Version:\s+(.*)$', text, re.M).group(1).strip()
               status = "ok" if spec_ver == crate_ver else "MISMATCH"
@@ -312,7 +313,7 @@ jobs:
           echo '::endgroup::'
 
           echo '::group::rpmbuild all five specs'
-          for s in scoot scootbg scootbar scootlaunch scootnotify; do
+          for s in scoot scootbg scootbar scootlaunch scootnotify scoot-globalshortcuts-portal; do
             rpmbuild -ba --define "_topdir $GITHUB_WORKSPACE/rpmbuild" "packaging/rpm/$s.spec"
           done
           find "$GITHUB_WORKSPACE/rpmbuild/RPMS" "$GITHUB_WORKSPACE/rpmbuild/SRPMS" -name '*.rpm' | sort
@@ -365,6 +366,7 @@ jobs:
           scootbar --version
           scootlaunch --version
           scootnotify --version
+          scoot-globalshortcuts-portal --version
           # %doc lands under /usr/share/doc/packages/ on SUSE (not
           # /usr/share/doc/ as on Fedora).
           scootbar daemon --check --config /usr/share/doc/packages/scootbar/bar.toml.example

@@ -117,10 +117,12 @@ jobs:
   #   crates/scoot-dbus/                 -> scootbar=true as well (the
   #                                           client's first consumer),
   #                                           scootnotify=true (the server,
-  #                                           below) and scootlaunch=true
+  #                                           below), scootlaunch=true
   #                                           (the scope move and the
-  #                                           application activation); no
-  #                                           always-run job)
+  #                                           application activation) and
+  #                                           portal=true (the portal
+  #                                           backend, below);
+  #                                           no always-run job)
   #   crates/scootlaunch/                -> scootlaunch=true (scootlaunch
   #                                           job: fmt, clippy, both test
   #                                           runners, the fuzz targets for
@@ -134,6 +136,14 @@ jobs:
   #                                           their budget, and the no-libc
   #                                           plus release-links gates).
   #                                           crates/scoot-dbus/* and
+  #                                           crates/scoot-rt/* fan out to
+  #                                           it too. No always-run job.
+  #   crates/scoot-globalshortcuts-portal/ -> portal=true (portal job:
+  #                                           fmt, clippy, both test
+  #                                           runners, and the no-libc
+  #                                           plus release-links gates).
+  #                                           crates/scoot-dbus/*,
+  #                                           crates/scoot-ipc/* and
   #                                           crates/scoot-rt/* fan out to
   #                                           it too. No always-run job.
   #   resources/scoot-session, resources/systemd/*,
@@ -194,7 +204,8 @@ jobs:
   #   crates/scoot-ipc/                    -> scootbar and scootbg too: the
   #                                           shared help pieces (plus the
   #                                           `quit` request scootbar's
-  #                                           tests pin)
+  #                                           tests pin), and portal too:
+  #                                           the backend registers over it
   #   either scoot or scootbar             -> the scootbar-on-scoot
   #                                           integration job
   #
@@ -221,6 +232,7 @@ jobs:
       scootbar: ${{ steps.classify.outputs.scootbar }}
       scootlaunch: ${{ steps.classify.outputs.scootlaunch }}
       scootnotify: ${{ steps.classify.outputs.scootnotify }}
+      portal: ${{ steps.classify.outputs.portal }}
       look: ${{ steps.classify.outputs.look }}
       backlog: ${{ steps.classify.outputs.backlog }}
       release-config: ${{ steps.classify.outputs.release_config }}
@@ -243,6 +255,7 @@ jobs:
           scootbar=true
           scootlaunch=true
           scootnotify=true
+          portal=true
           look=true
           backlog=true
           release_config=true
@@ -256,6 +269,7 @@ jobs:
             scootbar=false
             scootlaunch=false
             scootnotify=false
+            portal=false
             look=false
             backlog=false
             release_config=false
@@ -320,7 +334,8 @@ jobs:
                   scoot=true
                   macos=true
                   scootbg=true
-                  scootbar=true ;;
+                  scootbar=true
+                  portal=true ;;
                 # flake.nix takes the package description from this
                 # manifest, which the Linux job's `nix flake check` reads.
                 crates/scootbg/Cargo.toml)
@@ -352,6 +367,14 @@ jobs:
                 # which also runs this job. Nothing else fans out to it.
                 crates/scootnotify/*)
                   scootnotify=true ;;
+                # The GlobalShortcuts portal backend
+                # (crates/scoot-globalshortcuts-portal): its own job
+                # below, gated on this output. It serves over scoot-dbus
+                # and talks to the compositor over scoot-ipc (above); the
+                # workspace manifests catch it through the catch-all,
+                # which also runs this job. Nothing else fans out to it.
+                crates/scoot-globalshortcuts-portal/*)
+                  portal=true ;;
                 # The shared drawing crate (crates/scootui): scootbar's
                 # canvas, text, theme, popups and icons, fanning out to
                 # every consumer (scootbar and scootlaunch: the panel
@@ -371,16 +394,19 @@ jobs:
                   scootnotify=true ;;
                 # The leaf both scootui and scoot-dbus depend on
                 # (crates/scoot-rt): `print` and `runtime_dir`, fanning out
-                # to both sets, today scootbar, scootlaunch and scootnotify.
+                # to both sets, today scootbar, scootlaunch, scootnotify
+                # and portal.
                 crates/scoot-rt/Cargo.toml)
                   scoot=true
                   scootbar=true
                   scootlaunch=true
-                  scootnotify=true ;;
+                  scootnotify=true
+                  portal=true ;;
                 crates/scoot-rt/*)
                   scootbar=true
                   scootlaunch=true
-                  scootnotify=true ;;
+                  scootnotify=true
+                  portal=true ;;
                 # The shared D-Bus client (crates/scoot-dbus): scootbar's
                 # `conn`, `proto` and `link` plus the `mpris` and `bluez`
                 # readers, fanning out to every consumer (scootbar,
@@ -391,11 +417,13 @@ jobs:
                   scoot=true
                   scootbar=true
                   scootnotify=true
-                  scootlaunch=true ;;
+                  scootlaunch=true
+                  portal=true ;;
                 crates/scoot-dbus/*)
                   scootbar=true
                   scootnotify=true
-                  scootlaunch=true ;;
+                  scootlaunch=true
+                  portal=true ;;
                 # The look format crate (crates/scoot-look): its own job
                 # below. scootbar reads its allowlists and the compositor
                 # reads its look layer, so its files fan out to the
@@ -451,7 +479,7 @@ jobs:
               esac
             done <<<"$changed"
           fi
-          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar scootlaunch=$scootlaunch scootnotify=$scootnotify look=$look backlog=$backlog release_config=$release_config docs_site=$docs_site session=$session"
+          echo "scoot=$scoot macos=$macos scootbg=$scootbg scootbar=$scootbar scootlaunch=$scootlaunch scootnotify=$scootnotify portal=$portal look=$look backlog=$backlog release_config=$release_config docs_site=$docs_site session=$session"
           {
             echo "scoot=$scoot"
             echo "macos=$macos"
@@ -459,6 +487,7 @@ jobs:
             echo "scootbar=$scootbar"
             echo "scootlaunch=$scootlaunch"
             echo "scootnotify=$scootnotify"
+            echo "portal=$portal"
             echo "look=$look"
             echo "backlog=$backlog"
             echo "release_config=$release_config"
@@ -1214,7 +1243,7 @@ jobs:
       # dev/README.md.
       - name: cargo check
         shell: nix develop --command bash -euo pipefail {0}
-        run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --exclude scoot-dbus --exclude scootnotify --exclude scootlaunch --all-targets
+        run: cargo check --workspace --exclude scootbar --exclude scootbg --exclude scootbg-mem --exclude scootui --exclude scoot-dbus --exclude scootnotify --exclude scootlaunch --exclude scoot-globalshortcuts-portal --all-targets
 
       # The client half has to run, not just compile, on a Mac: `scoot msg
       # --help` needs no display and no compositor.
@@ -2140,6 +2169,108 @@ jobs:
           run notify -runs=250000 -max_len=100000
           run markup -runs=500000 -max_len=4096
           run image-data -runs=500000 -max_len=300000
+
+      - name: Save the cargo cache
+        # Same condition as the Linux job's save; see the comment there.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  # The GlobalShortcuts portal backend
+  # (crates/scoot-globalshortcuts-portal/): the backend bus name, the
+  # four methods and the three signals, the session table and the
+  # compositor reconnect. Runs when the crate changes, when scoot-dbus,
+  # scoot-ipc or scoot-rt change (its three workspace dependencies), on
+  # the catch-all, and on every push to main; fail open like the other
+  # jobs (only an explicit `false` skips).
+  portal:
+    name: portal (GlobalShortcuts backend)
+    needs: changes
+    # Fail open, as above.
+    if: ${{ !cancelled() && needs.changes.outputs.portal != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # Its own cache, for the reason the scootbg job gives: this job
+      # never builds Smithay, so sharing the Linux job's (gigabytes of
+      # it) would cost more to restore than it saves.
+      - name: Restore the cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: portal-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            portal-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            portal-cargo-
+
+      - name: cargo fmt
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo fmt --check -p scoot-globalshortcuts-portal
+
+      # The backend is `#![forbid(unsafe_code)]`, which rustc enforces.
+      - name: cargo clippy
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo clippy -p scoot-globalshortcuts-portal --all-targets -- -D warnings
+
+      # Both runners, for the reason the Linux job gives: nextest isolates
+      # each test in its own process, `cargo test` shares one. The bus
+      # integration test starts a private `dbus-daemon` and drives the
+      # real backend binary; without one it would skip quietly.
+      - name: cargo nextest and cargo test
+        shell: nix develop --command bash -euo pipefail {0}
+        env:
+          SCOOT_PORTAL_REQUIRE_DBUS_DAEMON: "1"
+        run: |
+          # `dbus-daemon` from the pinned nixpkgs for this step only, as
+          # in the scootbar job: the dev shell is every job's, and a tool
+          # one job's tests start does not belong in all of them.
+          dbus=$(nix build --inputs-from . 'nixpkgs#dbus^out' --no-link --print-out-paths)
+          test -x "$dbus/bin/dbus-daemon"
+          export PATH="$dbus/bin:$PATH"
+          cargo nextest run -p scoot-globalshortcuts-portal --no-fail-fast
+          cargo test -p scoot-globalshortcuts-portal
+
+      # No C beyond what std links, as for scootnotify: no `libc` crate in the
+      # normal dependency tree (rustix on its `linux_raw` backend), and no
+      # shared library beyond glibc and libgcc_s. `cargo tree` resolves the
+      # host target, the one this binary ships for.
+      - name: No libc crate, and what the release binary links
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          if cargo tree -p scoot-globalshortcuts-portal -e normal --prefix none | grep -q '^libc '; then
+            echo "::error title=scoot-globalshortcuts-portal depends on the libc crate::find the path with: cargo tree -p scoot-globalshortcuts-portal -e normal -i libc"
+            cargo tree -p scoot-globalshortcuts-portal -e normal -i libc
+            exit 1
+          fi
+          echo "ok: no libc crate in scoot-globalshortcuts-portal's normal dependency tree"
+          # Weighed alone, never in a --workspace build (feature unification).
+          RUSTFLAGS="-D warnings" cargo build --release -p scoot-globalshortcuts-portal
+          echo "release binary: $(stat -c %s target/release/scoot-globalshortcuts-portal) bytes (stripped)"
+          ldd target/release/scoot-globalshortcuts-portal
+          extra=$(ldd target/release/scoot-globalshortcuts-portal | awk '{ print $1 }' | grep -vE '^(linux-vdso|libc\.so|libm\.so|libgcc_s\.so|/)' || true)
+          if [ -n "$extra" ]; then
+            echo "::error title=scoot-globalshortcuts-portal links a library beyond std's::$(echo "$extra" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "ok: links only what std links"
 
       - name: Save the cargo cache
         # Same condition as the Linux job's save; see the comment there.

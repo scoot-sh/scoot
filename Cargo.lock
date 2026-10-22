@@ -1008,6 +1008,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "scoot-globalshortcuts-portal"
+version = "0.5.0"
+dependencies = [
+ "rustix 1.1.4",
+ "scoot-dbus",
+ "scoot-ipc",
+ "scoot-rt",
+ "serde_json",
+]
+
+[[package]]
 name = "scoot-ipc"
 version = "0.5.0"
 dependencies = [

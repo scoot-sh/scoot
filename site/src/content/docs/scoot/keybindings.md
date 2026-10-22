@@ -280,5 +280,37 @@ ordinary error and nothing is stored. The caps also bound the
 IPC line). Re-registering an id you already own is an upsert and never
 counts against the count caps. `shortcut-bind` and `shortcut-unregister`
 check the id exists but not that the caller owns it: any same-user
-connection can bind or drop any registration (the portal backend, stage
-2, will restrict that to the owning session).
+connection can bind or drop any registration, and any same-user
+connection can subscribe to `global-shortcut` and receive presses. The
+portal backend does not change that: it is the same user, not a sandbox
+boundary (an IPC client can already inject keystrokes and screenshots,
+so these primitives grant nothing new).
+
+### Portal backend
+
+Portal clients (OBS, chat apps) do not speak scoot IPC -- they speak
+`org.freedesktop.portal.GlobalShortcuts`. That side is served by
+`scoot-globalshortcuts-portal`, which owns
+`org.freedesktop.impl.portal.desktop.scoot` and turns the compositor's
+`shortcut_activated` / `shortcut_deactivated` / `shortcuts_changed`
+events into the portal's `Activated` / `Deactivated` /
+`ShortcutsChanged` signals. Install it, then bind as above; the app's
+`BindShortcuts` call registers its shortcuts and your chord arrives as
+the trigger.
+
+```sh
+# Nix (standalone; not part of the desktop profile)
+programs.scoot-globalshortcuts-portal.enable = true
+# Elsewhere: the deb, rpm and Arch packages ship the backend with its
+# user unit, D-Bus activation file and portal file
+scoot-globalshortcuts-portal --version
+```
+
+Rules, in one place: one portal session holds one app's shortcuts, and
+a session's shortcuts die with it -- closing the session or killing the
+app unregisters what the backend registered for it. If the compositor
+restarts, the backend re-registers what it remembers (your chords come
+back from `[global_shortcuts]`) and tells clients to re-list. Asking
+for the shortcut configuration UI (`ConfigureShortcuts`) is an
+acknowledged no-op: assignment lives in your config file, so edit it
+and the backend picks the change up on the next reload.

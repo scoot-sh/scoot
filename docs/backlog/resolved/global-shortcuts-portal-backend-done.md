@@ -1,9 +1,10 @@
 ---
 title: "Portal global-shortcuts backend (stage 2: impl.portal.GlobalShortcuts v2)"
-status: "open"
-area: "protocols"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-22"
 ---
 
 # Portal global-shortcuts backend (stage 2: impl.portal.GlobalShortcuts v2)
@@ -59,3 +60,27 @@ services; xdp-wlr has none.
 
 Stage 1 (landed). The deferred Wayland protocols (separate ticket):
 `hyprland-global-shortcuts-v1`, `xx-hotkey-v1`.
+
+## Resolution (2026-10-22)
+
+Landed as `scoot-globalshortcuts-portal`: CreateSession/BindShortcuts/
+ListShortcuts/ConfigureShortcuts (no-op) plus Activated/Deactivated/
+ShortcutsChanged, over `scoot-dbus`, with one persistent IPC connection
+(the compositor drops registrations with their connection, so one-shot
+connections cannot hold them) and a subscription thread that wakes the
+D-Bus loop through an eventfd and heals (re-register + re-list) when the
+compositor restarts. Sessions are sender-bound (a second sender's bind
+on the handle is refused; app death drops its sessions); ConfigureShortcuts
+is an acknowledged no-op (assignment lives in `[global_shortcuts]`).
+Security stays as stage 1 documented it: any same-user IPC client keeps
+the register/bind/subscribe primitives -- blessing one registrant would
+break the stage-1 tests, and an IPC client can already inject keystrokes,
+so the backend is the same user, not a sandbox boundary. Live proof on
+the dev VM (headless compositor + private bus + minimal D-Bus client):
+bind answers 0 with the config chord, `scoot msg key` with foot focused
+yields Activated/Deactivated with compositor timestamps, and a compositor
+restart heals (re-registered, ShortcutsChanged, press fires again). Not
+proven: a real xdg-desktop-portal routing to the backend (no xdp in the
+test envs) and OBS end-to-end. Unit + bus-integration tests ride in the
+crate (`portal_bus.rs` on a private `dbus-daemon`); the `portal` CI job
+runs fmt/clippy/both runners plus the no-libc gate.

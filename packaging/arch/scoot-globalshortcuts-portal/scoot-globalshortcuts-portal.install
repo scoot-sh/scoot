@@ -1,0 +1,15 @@
+post_install() {
+  echo 'scoot-globalshortcuts-portal installed its user unit'
+  echo '(scoot-globalshortcuts-portal.service), its D-Bus activation file'
+  echo '(org.freedesktop.impl.portal.desktop.scoot.service) and its'
+  echo 'portal file (scoot.portal). To run the backend as a user service:'
+  echo 'systemctl --user enable --now scoot-globalshortcuts-portal.'
+  echo 'Only one backend can own'
+  echo 'org.freedesktop.impl.portal.desktop.scoot: disable or remove any'
+  echo 'other GlobalShortcuts backend first (this package never stops'
+  echo 'another daemon for you).'
+}
+
+post_upgrade() {
+  post_install
+}

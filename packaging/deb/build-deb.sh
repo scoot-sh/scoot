@@ -94,7 +94,7 @@ mkdir -p "$OUT" "$STAGE_ROOT"
 # source tree's own target/ otherwise.
 BINDIR="${CARGO_TARGET_DIR:-$SOURCE/target}/release"
 
-for pkg in scoot scootbg scootbar scootlaunch scootnotify; do
+for pkg in scoot scootbg scootbar scootlaunch scootnotify scoot-globalshortcuts-portal; do
     echo "--- $pkg: cargo build --release --locked --offline -p $pkg"
     (cd "$SOURCE" && cargo build --release --locked --offline -p "$pkg")
 
@@ -131,6 +131,11 @@ for pkg in scoot scootbg scootbar scootlaunch scootnotify; do
             install -Dm644 "$HERE/scootnotify.service" "$STAGE/usr/lib/systemd/user/scootnotify.service"
             install -Dm644 "$HERE/org.freedesktop.Notifications.service" "$STAGE/usr/share/dbus-1/services/org.freedesktop.Notifications.service"
             install -m644 "$HERE/notify.toml.example" "$STAGE/usr/share/doc/scootnotify/notify.toml.example"
+            ;;
+        scoot-globalshortcuts-portal)
+            install -Dm644 "$HERE/scoot-globalshortcuts-portal.service" "$STAGE/usr/lib/systemd/user/scoot-globalshortcuts-portal.service"
+            install -Dm644 "$HERE/org.freedesktop.impl.portal.desktop.scoot.service" "$STAGE/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.scoot.service"
+            install -Dm644 "$HERE/scoot-globalshortcuts-portal.portal" "$STAGE/usr/share/xdg-desktop-portal/portals/scoot.portal"
             ;;
     esac
 

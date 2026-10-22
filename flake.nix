@@ -70,6 +70,9 @@
         (builtins.fromTOML (builtins.readFile ./crates/scootlaunch/Cargo.toml)).package.description;
       scootnotifyDescription =
         (builtins.fromTOML (builtins.readFile ./crates/scootnotify/Cargo.toml)).package.description;
+      portalDescription =
+        (builtins.fromTOML (builtins.readFile ./crates/scoot-globalshortcuts-portal/Cargo.toml))
+        .package.description;
     in
     {
       # `nix build` / `nix run`, for getting the binaries without a dev shell.
@@ -594,6 +597,27 @@
             description = scootnotifyDescription;
           };
 
+          # The GlobalShortcuts portal backend, the same shape as the
+          # notification daemon (Linux only, one binary, nothing linked
+          # beyond what std links), in its own file so that its Cargo
+          # features are `callPackage` arguments and a different build
+          # is an `.override`
+          # (see nix/scoot-globalshortcuts-portal.nix). Shares the
+          # base dependency artifact (see `mkDeps`).
+          scoot-globalshortcuts-portal = pkgs.callPackage ./nix/scoot-globalshortcuts-portal.nix {
+            inherit version;
+            inherit craneLib;
+            inherit (craneCommon)
+              src
+              cargoLock
+              outputHashes
+              strictDeps
+              doCheck
+              ;
+            cargoArtifacts = depsBase;
+            description = portalDescription;
+          };
+
           # One compositor build: `scoot` above, over the dependency artifact
           # compiled with the same default features (see `mkDeps`). The
           # CPU-only minimal build is cargo-only
@@ -619,6 +643,7 @@
             scootbar
             scootlaunch
             scootnotify
+            scoot-globalshortcuts-portal
             ;
           # The desktop profile's default cursor theme (Mocu white plus
           # Mocu-Black), built from the vendored SVGs scoot also draws
@@ -763,6 +788,7 @@
           "scootbar"
           "scootlaunch"
           "scootnotify"
+          "scoot-globalshortcuts-portal"
         ]) built;
 
       # `programs.scoot`: a home-manager module (per-user config file,
@@ -875,6 +901,19 @@
                 (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scootnotify or null
               );
             };
+          # `programs.scoot-globalshortcuts-portal`
+          # (nix/modules/scoot-globalshortcuts-portal-home.nix): its own
+          # module, not part of `default`. The flake's build is
+          # `mkDefault`, as above; null where it does not build
+          # (Darwin), where enabling the option is then refused by name.
+          scoot-globalshortcuts-portal =
+            { pkgs, ... }:
+            {
+              imports = [ ./nix/modules/scoot-globalshortcuts-portal-home.nix ];
+              programs.scoot-globalshortcuts-portal.package = nixpkgs.lib.mkDefault (
+                (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scoot-globalshortcuts-portal or null
+              );
+            };
         };
 
       # Home-manager modules (`homeModules.*`): the only spelling. There is
@@ -952,6 +991,17 @@
                 (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scootnotify or null
               );
             };
+          # `programs.scoot-globalshortcuts-portal`
+          # (nix/modules/scoot-globalshortcuts-portal-nixos.nix), as the
+          # home-manager one: separate from `default`.
+          scoot-globalshortcuts-portal =
+            { pkgs, ... }:
+            {
+              imports = [ ./nix/modules/scoot-globalshortcuts-portal-nixos.nix ];
+              programs.scoot-globalshortcuts-portal.package = nixpkgs.lib.mkDefault (
+                (self.packages.${pkgs.stdenv.hostPlatform.system} or { }).scoot-globalshortcuts-portal or null
+              );
+            };
         };
 
       # Hermetic module checks (see nix/tests.nix): standalone
@@ -1008,6 +1058,16 @@
             inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) scootnotify;
             homeModule = self.homeModules.scootnotify;
             nixosModule = self.nixosModules.scootnotify;
+          };
+          # The portal backend modules
+          # (nix/scoot-globalshortcuts-portal-tests.nix): the unit is a
+          # `Type=dbus` service owning the backend bus name with the
+          # D-Bus activation file and the `.portal` file beside it, on
+          # both sides.
+          portal-modules = pkgs.callPackage ./nix/scoot-globalshortcuts-portal-tests.nix {
+            portal = self.packages.${pkgs.stdenv.hostPlatform.system}.scoot-globalshortcuts-portal;
+            homeModule = self.homeModules.scoot-globalshortcuts-portal;
+            nixosModule = self.nixosModules.scoot-globalshortcuts-portal;
           };
         }
       );

@@ -30,7 +30,7 @@ def fake_source(version):
         '[workspace]\nmembers = ["crates/*"]\n\n'
         f'[workspace.package]\nversion = "{version}"\nedition = "2024"\n\n'
         '[workspace.dependencies]\nserde = { version = "1" }\n')
-    for crate in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"):
+    for crate in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify", "scoot-globalshortcuts-portal"):
         cdir = d / "crates" / crate
         cdir.mkdir(parents=True)
         (cdir / "Cargo.toml").write_text(
@@ -42,7 +42,7 @@ class ControlTest(unittest.TestCase):
     def test_versions_read_the_workspace_version(self):
         p = run_meta("versions", "--source", str(fake_source("0.4.2")))
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertEqual(p.stdout, "scoot 0.4.2\nscootbar 0.4.2\nscootbg 0.4.2\nscootlaunch 0.4.2\nscootnotify 0.4.2\n")
+        self.assertEqual(p.stdout, "scoot 0.4.2\nscoot-globalshortcuts-portal 0.4.2\nscootbar 0.4.2\nscootbg 0.4.2\nscootlaunch 0.4.2\nscootnotify 0.4.2\n")
 
     def test_versions_of_this_tree_agree(self):
         p = run_meta("versions", "--source", str(REPO))
@@ -142,7 +142,7 @@ class ControlTest(unittest.TestCase):
             if line.startswith("Depends:")][0])
 
     def test_every_control_names_compositor_not_window_manager(self):
-        for package in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"):
+        for package in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify", "scoot-globalshortcuts-portal"):
             p = run_meta(
                 "control", "--package", package, "--source", str(REPO),
                 "--arch", "amd64", "--depends", "libc6",
@@ -175,6 +175,7 @@ class ShlibdepsTest(unittest.TestCase):
     )
     BAR_SHLIBS = "shlibs:Depends=libc6 (>= 2.36), libgcc-s1 (>= 3.0)"
     NOTIFY_SHLIBS = "shlibs:Depends=libc6 (>= 2.36), libgcc-s1 (>= 3.0)"
+    PORTAL_SHLIBS = "shlibs:Depends=libc6 (>= 2.36), libgcc-s1 (>= 3.0)"
     LAUNCH_SHLIBS = (
         "shlibs:Depends=libc6 (>= 2.36), libgcc-s1 (>= 3.0), "
         "libxkbcommon0 (>= 0.8.0)"
@@ -226,6 +227,20 @@ class ShlibdepsTest(unittest.TestCase):
             p = run_meta(
                 "check-shlibdeps", "--package", "scootnotify",
                 self.NOTIFY_SHLIBS + ", " + extra,
+            )
+            self.assertNotEqual(p.returncode, 0, extra)
+
+    def test_portal_shlibdeps_passes_libc_only(self):
+        # The portal backend links nothing past the C library, like the
+        # notification daemon.
+        p = run_meta("check-shlibdeps", "--package", "scoot-globalshortcuts-portal", self.PORTAL_SHLIBS)
+        self.assertEqual(p.returncode, 0, p.stderr)
+
+    def test_portal_must_not_link_the_compositor_or_keyboard_stack(self):
+        for extra in ("libinput10 (>= 1.9.0)", "libxkbcommon0 (>= 0.8.0)"):
+            p = run_meta(
+                "check-shlibdeps", "--package", "scoot-globalshortcuts-portal",
+                self.PORTAL_SHLIBS + ", " + extra,
             )
             self.assertNotEqual(p.returncode, 0, extra)
 

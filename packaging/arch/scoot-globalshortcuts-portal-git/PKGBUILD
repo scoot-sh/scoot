@@ -1,0 +1,58 @@
+# scoot-globalshortcuts-portal-git: the GlobalShortcuts portal backend, tracking main.
+#
+# The `-git` twin of `scoot-globalshortcuts-portal`
+# (packaging/arch/scoot-globalshortcuts-portal/PKGBUILD): same files and
+# dependencies, built from the tip of main. Conflicts with
+# `scoot-globalshortcuts-portal`: install one or the other, never both.
+
+pkgname=scoot-globalshortcuts-portal-git
+pkgver=0.5.0.r0.g0000000
+pkgrel=1
+pkgdesc='GlobalShortcuts portal backend for the scoot compositor (git)'
+arch=('x86_64' 'aarch64')
+url='https://github.com/scoot-sh/scoot'
+license=('MIT')
+depends=('glibc' 'libgcc')
+makedepends=('cargo' 'cargo-deny' 'git')
+optdepends=('systemd: run the backend as a user unit (scoot-globalshortcuts-portal.service)'
+            'xdg-desktop-portal: the portal that routes GlobalShortcuts to this backend')
+provides=('scoot-globalshortcuts-portal')
+conflicts=('scoot-globalshortcuts-portal')
+install=scoot-globalshortcuts-portal.install
+options=('!debug')
+source=("$pkgname::git+https://github.com/scoot-sh/scoot.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$pkgname"
+  # The binaries' own label in pacman's spelling: `scoot --version` saying
+  # 0.2.0+14.g615608c is pkgver 0.2.0.r14.g615608c (the last v* release
+  # tag, the commits since it, the commit; docs/versioning.md). Before
+  # the first tag: the workspace version and every commit.
+  local desc
+  if desc=$(git describe --long --tags --abbrev=7 --match 'v[0-9]*' --exclude 'v*-*' 2>/dev/null); then
+    printf '%s' "$desc" | sed 's/^v//;s/-\([0-9]*\)-g\([0-9a-f]*\)$/.r\1.g\2/'
+  else
+    printf '%s.r%s.g%s' \
+      "$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)" \
+      "$(git rev-list --count HEAD)" \
+      "$(git rev-parse --short=7 HEAD)"
+  fi
+}
+
+build() {
+  cd "$pkgname"
+  cargo build --release --locked -p scoot-globalshortcuts-portal
+  cargo deny list > THIRD-PARTY-LICENSES
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 "${CARGO_TARGET_DIR:-target}/release/scoot-globalshortcuts-portal" "$pkgdir/usr/bin/scoot-globalshortcuts-portal"
+  install -Dm644 packaging/arch/scoot-globalshortcuts-portal/scoot-globalshortcuts-portal.service "$pkgdir/usr/lib/systemd/user/scoot-globalshortcuts-portal.service"
+  install -Dm644 packaging/arch/scoot-globalshortcuts-portal/org.freedesktop.impl.portal.desktop.scoot.service "$pkgdir/usr/share/dbus-1/services/org.freedesktop.impl.portal.desktop.scoot.service"
+  install -Dm644 packaging/arch/scoot-globalshortcuts-portal/scoot.portal "$pkgdir/usr/share/xdg-desktop-portal/portals/scoot.portal"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
+  install -Dm644 THIRD-PARTY-LICENSES "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-LICENSES"
+}

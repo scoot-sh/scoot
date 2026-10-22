@@ -64,7 +64,7 @@ class World:
         (self.root / "Cargo.toml").write_text(
             '[workspace.package]\nversion = "%s"\n' % workspace)
         arch = self.root / "packaging" / "arch"
-        for pkg in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"):
+        for pkg in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify", "scoot-globalshortcuts-portal"):
             depends = ("depends=('glibc' \"scootbg=$pkgver\")"
                        if pkg == "scoot" else "depends=('glibc')")
             dep = ("\tdepends = scootbg=OLDVER\n" if pkg == "scoot" else "")
@@ -88,7 +88,7 @@ class World:
                 .replace("OLDVER", packaged))
         rpm = self.root / "packaging" / "rpm"
         rpm.mkdir(parents=True)
-        for spec in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"):
+        for spec in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify", "scoot-globalshortcuts-portal"):
             (rpm / f"{spec}.spec").write_text(
                 SPEC.replace("OLDVER", packaged))
 
