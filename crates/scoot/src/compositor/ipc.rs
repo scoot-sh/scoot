@@ -771,13 +771,15 @@ impl State {
                     );
                 }
                 let owner = self.current_conn;
-                self.global_shortcuts.register(
+                if let Err(message) = self.global_shortcuts.register(
                     app_id,
                     shortcut_id,
                     preferred_trigger,
                     description,
                     owner,
-                );
+                ) {
+                    return Response::error(message);
+                }
                 self.emit_shortcuts_changed();
                 self.shortcuts_response()
             }

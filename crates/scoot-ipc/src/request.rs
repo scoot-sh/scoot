@@ -320,6 +320,12 @@ pub enum Request {
     /// [`Response::Shortcuts`](crate::Response::Shortcuts) re-listing, so
     /// a backend learns the bound-or-unbound outcome in one round trip.
     ///
+    /// Bounded: at most 64 per connection and 512 compositor-wide, the
+    /// trigger at most 256 bytes and the description at most 1024 bytes;
+    /// past any of those the register is refused with an ordinary `Error`
+    /// and nothing is stored (re-registering an owned id is an upsert that
+    /// never counts against the count caps).
+    ///
     /// Additive like `Looks`: a client that never sends this tag decodes
     /// exactly as before, so no `PROTOCOL_VERSION` bump for the request
     /// half -- and an older server answers it with an ordinary `Error`.

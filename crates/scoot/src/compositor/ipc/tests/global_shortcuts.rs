@@ -336,3 +336,113 @@ fn only_global_shortcut_subscribers_hear_shortcuts_changed() {
     );
     assert_silent(&mut output);
 }
+
+/// Caps and string limits are ordinary IPC refusals: an error answer, no
+/// `ShortcutsChanged`, nothing stored.
+#[test]
+fn caps_and_string_limits_are_ordinary_ipc_refusals() {
+    use crate::compositor::global_shortcuts::{
+        MAX_DESCRIPTION_LEN, MAX_PREFERRED_TRIGGER_LEN, MAX_SHORTCUTS_PER_CONNECTION,
+        MAX_SHORTCUTS_TOTAL,
+    };
+    let mut fixture = Fixture::new();
+    let mut reader = subscribed(&mut fixture.state, 11, vec![EventKind::GlobalShortcut]);
+
+    for long in [
+        Request::ShortcutRegister {
+            app_id: "org.example".into(),
+            shortcut_id: "toggle".into(),
+            preferred_trigger: Some("x".repeat(MAX_PREFERRED_TRIGGER_LEN + 1)),
+            description: None,
+        },
+        Request::ShortcutRegister {
+            app_id: "org.example".into(),
+            shortcut_id: "toggle".into(),
+            preferred_trigger: None,
+            description: Some("y".repeat(MAX_DESCRIPTION_LEN + 1)),
+        },
+    ] {
+        let message = error(fixture.request_as(7, long));
+        assert!(message.contains("refused"), "got: {message}");
+        assert!(fixture.list().is_empty());
+        assert_silent(&mut reader);
+    }
+
+    for i in 0..MAX_SHORTCUTS_PER_CONNECTION {
+        fixture.request_as(
+            7,
+            Request::ShortcutRegister {
+                app_id: "org.example".into(),
+                shortcut_id: format!("id-{i}"),
+                preferred_trigger: None,
+                description: None,
+            },
+        );
+        assert!(matches!(
+            next_event(&mut reader),
+            Response::ShortcutsChanged
+        ));
+    }
+    let message = error(fixture.request_as(
+        7,
+        Request::ShortcutRegister {
+            app_id: "org.example".into(),
+            shortcut_id: "one-more".into(),
+            preferred_trigger: None,
+            description: None,
+        },
+    ));
+    assert!(message.contains("per connection"), "got: {message}");
+    assert_eq!(fixture.list().len(), MAX_SHORTCUTS_PER_CONNECTION);
+    assert_silent(&mut reader);
+
+    // Re-registering an owned id is an upsert, not a new registration.
+    match fixture.request_as(
+        7,
+        Request::ShortcutRegister {
+            app_id: "org.example".into(),
+            shortcut_id: "id-0".into(),
+            preferred_trigger: Some("super+r".into()),
+            description: None,
+        },
+    ) {
+        Response::Shortcuts { .. } => {}
+        other => panic!("a re-register answers Shortcuts, got {other:?}"),
+    }
+    assert!(matches!(
+        next_event(&mut reader),
+        Response::ShortcutsChanged
+    ));
+    assert_eq!(fixture.list().len(), MAX_SHORTCUTS_PER_CONNECTION);
+
+    // The global cap: fill the table directly, then one more over IPC.
+    fixture.state.global_shortcuts = Default::default();
+    for i in 0..MAX_SHORTCUTS_TOTAL {
+        fixture
+            .state
+            .global_shortcuts
+            .register(
+                format!("org.app{i}"),
+                "rec".into(),
+                None,
+                None,
+                1 + (i as u64 % 8),
+            )
+            .expect("up to the total cap");
+    }
+    let message = error(fixture.request_as(
+        9,
+        Request::ShortcutRegister {
+            app_id: "org.overflow".into(),
+            shortcut_id: "rec".into(),
+            preferred_trigger: None,
+            description: None,
+        },
+    ));
+    assert!(
+        message.contains(&MAX_SHORTCUTS_TOTAL.to_string()),
+        "got: {message}"
+    );
+    assert_eq!(fixture.list().len(), MAX_SHORTCUTS_TOTAL);
+    assert_silent(&mut reader);
+}

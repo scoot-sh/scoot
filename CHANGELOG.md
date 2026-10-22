@@ -17,9 +17,10 @@ release, entries were dated.
 
 ## Unreleased
 
-### scoot,scoot-ipc
+### scoot,scoot-ipc,scootctl
 
-- added: portal global shortcuts, stage 1 (compositor side) — apps register `(app_id, shortcut_id)` chords over IPC (`shortcut-register`, `shortcut-bind`, `shortcuts`, `shortcut-unregister`), users assign chords in the new `[global_shortcuts]` table, and presses/releases stream to `global-shortcut` subscribers as `shortcut_activated`/`shortcut_deactivated` (plus `shortcuts_changed`). Compositor binds always win, nothing fires while locked, registrations die with their connection. IPC protocol 12 → 13. The portal backend itself (stage 2) is still to come.
+- **Breaking: the IPC protocol is now 13.** The `shortcuts` reply and the `shortcut_activated`, `shortcut_deactivated` and `shortcuts_changed` tags are new `Response` variants: a client built for protocol 12 handed one fails its decode, so anything that reads the `shortcuts` reply or subscribes to `global-shortcut` must run from the same build as the session (same-build `scoot msg` always is). The request halves are additive: `shortcut-register`, `shortcut-unregister`, `shortcuts` or `shortcut-bind` sent to an older compositor answers an ordinary `error`, never a misapplied request.
+- added: portal global shortcuts, stage 1 (compositor side) — apps register `(app_id, shortcut_id)` chords over IPC (`shortcut-register`, `shortcut-bind`, `shortcuts`, `shortcut-unregister`), users assign chords in the new `[global_shortcuts]` table, and presses/releases stream to `global-shortcut` subscribers as `shortcut_activated`/`shortcut_deactivated` (plus `shortcuts_changed`). Compositor binds always win, nothing fires while locked, registrations die with their connection. The portal backend itself (stage 2) is still to come.
 
 ## [0.5.0](https://github.com/scoot-sh/scoot/compare/v0.4.1...v0.5.0) - 2026-10-21
 

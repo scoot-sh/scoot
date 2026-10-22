@@ -18,6 +18,15 @@ New module `crates/scoot/src/compositor/global_shortcuts.rs`, owned by
   `description`, `preferred_trigger: Option<String>` (raw hint, never parsed
   as authority), `bound: Option<(Modifiers, Keysym, String)>` (canonical
   combo string), `owner: u64` (IPC conn id that registered it).
+- Caps (DoS bounds, refused with an ordinary IPC error, never a
+  disconnect): at most 64 shortcuts per connection
+  (`MAX_SHORTCUTS_PER_CONNECTION`) and 512 compositor-wide
+  (`MAX_SHORTCUTS_TOTAL`); `preferred_trigger` at most 256 bytes,
+  `description` at most 1024 bytes. Re-registering an existing id is an
+  upsert and never counts against either count cap, but its new strings
+  still face the length caps. The count caps plus the per-row string caps
+  bound the `shortcuts` list reply (the fullest possible reply stays under
+  the 1 MiB IPC line).
 - Reverse index: `HashMap<(Modifiers, u32), (String, String)>` keyed on
   `(mods, keysym.raw())` (`Keysym` has no `Hash`; same keying as
   `config::apply_binds`). Hot path (`input::key_with`, per keypress) does
@@ -76,6 +85,11 @@ the event payloads (`timestamp_ms: u64`). Same clock as `InputTime`.
 
 ## Portal mapping (stage 2 contract, fixed here)
 
+- `CreateSession` -> the registering IPC connection itself: stage 1 has
+  no session object, so the connection id (`State::current_conn`) *is*
+  the session. A re-register under the same `(app_id, shortcut_id)` moves
+  that id to the newest connection; a disconnect drops every entry its
+  connection owned.
 - `BindShortcuts` -> `shortcut-register` (idempotent upsert by
   `(app_id, shortcut_id)`) + `shortcut-bind` for user-approved chords.
 - `ListShortcuts` -> `shortcuts` list reply.
@@ -96,14 +110,24 @@ conn's entries and emits `shortcuts_changed`; explicit
 `shortcut-unregister` drops one. A dead registrant's chords go quiet on
 disconnect with no stale suppressions (`global_suppressed` holds keycodes,
 cleared on release; conn drop does not need keycode sweep because releases
-still route through `key()`).
+still route through `key()`). A connection parked in `wait-idle` has
+already left the event loop (`Connection::step` returns `Step::Close`),
+so parking that connection also drops the shortcuts it registered -- while
+its waiter fd lives on in `pending_idle`. In practice one request runs per
+connection, so the pairing never matters; a client that registers and then
+parks `wait-idle` on the same connection should expect its registrations
+to go away with the park.
 
 ## Conflicts
 
 Compositor binds win: a global chord equal to a live compositor combo stays
 listed as `bound` but `conflicted: true` and never fires (re-check at fire
 time, not just bind time, so a reload that adds a compositor bind
-immediately shadows). VT-switch binds win the same way. No
+immediately shadows). VT-switch binds win the same way. Two registrations
+sharing one chord collide the same way at the global level: the reverse
+index holds one grab winner per chord, the loser stays listed but
+`conflicted: true` and never fires (computed in `snapshot`, so a re-bind
+that moves the winner flips both rows). No
 `keyboard-shortcuts-inhibit` support exists in scoot today, so global
 shortcuts ignore inhibit (documented; a future inhibit implementation
 reuses this same ordering point).
@@ -116,19 +140,29 @@ exposes `shortcut-register/unregister/bind` to any same-UID IPC client
 that in stage 1: documented as backend-primitives, not a user boundary.
 An arbitrary IPC client can already inject keystrokes and screenshots, so
 this grants nothing new. `shortcut-bind` can only bind chords to already
-registered shortcuts, never run actions directly.
+registered shortcuts, never run actions directly. `shortcut-bind` and
+`shortcut-unregister` check that the id exists but not that the caller
+owns it: any same-UID connection can bind or drop any registration. The
+portal backend (stage 2) will restrict that to the owning session; until
+then this is a same-user primitive, not a sandbox boundary.
 
 ## Edge cases
 
 - Key repeat: swallowed (no re-emit).
 - Modifiers-only: unrepresentable, refused at parse.
 - Release after focus change: intercepted via suppressed set.
-- Locked session: forwarded, no events.
-- VT switch mid-hold: release still intercepted; no event beyond the
-  press's.
-- Registrant dies mid-hold: entry cleared; a held key's release finds no
-  entry and forwards (one stray release to the lock/new focus, same as a
-  compositor rebind mid-hold today).
+- Locked session: a press while locked never fires (forwarded to the lock
+  client, no `Activated`). A release that pairs a press intercepted before
+  the lock still closes the pair: it is intercepted and emits
+  `Deactivated` for the press-time identity, even under lock (the release
+  path is routed by what the press decided, never re-gated on the lock).
+- VT switch mid-hold: the held key's release still routes through `key()`,
+  so it is still intercepted and still emits `Deactivated` for the
+  press-time identity; no second `Activated` fires for the hold.
+- Registrant dies mid-hold: entry cleared, but a held key's release still
+  closes the pair -- it is intercepted and emits `Deactivated` for the
+  press-time identity (the suppressed set, never the live table), exactly
+  like an unregister or rebind mid-hold.
 
 ## Crates / binaries / packaging
 

@@ -260,10 +260,25 @@ scoot msg subscribe global-shortcut
 ```
 
 Rules, in one place: compositor binds always win (a chord the live
-keymap holds stays listed but `conflicted` and never fires); nothing
-fires while the session is locked; key repeat never re-fires; and a
+keymap holds stays listed but `conflicted` and never fires -- and two
+registrations sharing one chord collide the same way: the loser stays
+listed but `conflicted` and never fires); nothing
+fires while the session is locked (a press while locked is forwarded, no
+`Activated`; a release pairing a pre-lock press still closes with
+`Deactivated`); key repeat never re-fires; and a
 release is always swallowed for a press that was intercepted, even
 across a focus change. Registrations die with the connection that made
 them, so a dead app's chords go quiet on disconnect. A reload
 re-resolves the file's chords against the live registrations (reported
 as `global_shortcuts`) and tells subscribers to re-list.
+
+Bounded: at most 64 shortcuts per connection and 512 compositor-wide,
+`preferred_trigger` at most 256 bytes and `description` at most 1024
+bytes -- past any of those `shortcut-register` is refused with an
+ordinary error and nothing is stored. The caps also bound the
+`shortcuts` list reply (the fullest possible reply fits under the 1 MiB
+IPC line). Re-registering an id you already own is an upsert and never
+counts against the count caps. `shortcut-bind` and `shortcut-unregister`
+check the id exists but not that the caller owns it: any same-user
+connection can bind or drop any registration (the portal backend, stage
+2, will restrict that to the owning session).

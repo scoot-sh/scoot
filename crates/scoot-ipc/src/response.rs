@@ -331,7 +331,8 @@ pub struct ShortcutInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bound: Option<String>,
     /// True when `bound` equals a live compositor combo and so never
-    /// fires (compositor wins). Stays listed so the backend can show it.
+    /// fires (compositor wins), or when another registration won the grab
+    /// for the same chord. Stays listed so the backend can show it.
     #[serde(default)]
     pub conflicted: bool,
 }
