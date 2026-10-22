@@ -175,7 +175,13 @@ fn fill_around_paints_only_the_bars() {
         },
         Color { r: 4, g: 4, b: 4 },
     );
-    assert!(pixels.chunks_exact(4).all(|p| p == [4, 4, 4, 0xff]));
+    assert!(
+        pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|p| *p == [4, 4, 4, 0xff])
+    );
 }
 
 #[test]

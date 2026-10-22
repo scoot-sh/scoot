@@ -178,7 +178,7 @@ impl Dispatch<ExtSessionLockSurfaceV1, ()> for State {
         };
         let mut shm = ShmBuffer::new(width.max(1), height.max(1)).unwrap();
         let [r, g, b] = [0x33u8, 0x66, 0x99];
-        for pixel in shm.pixels_mut().chunks_exact_mut(4) {
+        for pixel in shm.pixels_mut().as_chunks_mut::<4>().0 {
             pixel.copy_from_slice(&[b, g, r, 0xff]);
         }
         let geometry = shm.geometry();

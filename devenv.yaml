@@ -7,6 +7,6 @@
 # refuses GitHub tarball downloads). It fetches one commit either way.
 inputs:
   nixpkgs:
-    url: git+https://github.com/NixOS/nixpkgs?rev=8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe&shallow=1
+    url: git+https://github.com/NixOS/nixpkgs?rev=02c087f3fe673c9e317f206a627cb6b910336dbe&shallow=1
   devenv:
     url: git+https://github.com/cachix/devenv?ref=main&shallow=1

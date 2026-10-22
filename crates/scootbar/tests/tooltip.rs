@@ -777,7 +777,7 @@ fn under_a_click_popup_there_is_no_tooltip_and_after_it_there_is() {
     let first_run_end = xs
         .windows(2)
         .position(|w| w[1] - w[0] > 12)
-        .map_or(xs.len() - 1, |at| at);
+        .unwrap_or(xs.len() - 1);
     rig.tip = ((xs[0] + xs[first_run_end]) / 2, HEIGHT / 2);
     // The volume popup open (the grab is the click's)...
     rig.click(CENTER);

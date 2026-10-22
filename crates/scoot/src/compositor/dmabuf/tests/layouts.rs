@@ -606,8 +606,10 @@ fn every_advertised_layout_imports_and_draws() {
         }
         let pixels = fixture.render();
         let shown = pixels
-            .chunks_exact(4)
-            .filter(|pixel| color.matches(pixel))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|pixel| color.matches(*pixel))
             .count();
         let area = (SIDE * SIDE) as usize;
         assert!(
@@ -719,8 +721,10 @@ fn a_dmabuf_window_draws_across_a_resize_without_a_reimport() {
         let area = (SIDE * SIDE) as usize;
         let shown = |pixels: &[u8], color: Rgb| {
             pixels
-                .chunks_exact(4)
-                .filter(|pixel| color.matches(pixel))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .filter(|pixel| color.matches(*pixel))
                 .count()
         };
         let red = shown(&fixture.render(), RED);

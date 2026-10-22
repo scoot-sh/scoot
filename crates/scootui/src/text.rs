@@ -296,7 +296,7 @@ impl Text {
             }
             Bitmap::Premultiplied(pixels) => {
                 for (gy, row) in pixels.chunks_exact(side * 4).enumerate() {
-                    for (gx, pixel) in row.chunks_exact(4).enumerate() {
+                    for (gx, pixel) in row.as_chunks::<4>().0.iter().enumerate() {
                         let pixel = [pixel[0], pixel[1], pixel[2], pixel[3]];
                         canvas.blend_premultiplied(x + gx as i64, top + gy as i64, pixel, clip);
                     }

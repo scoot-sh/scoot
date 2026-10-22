@@ -822,7 +822,7 @@ pub fn encode_png(width: i32, height: i32, bgra: &[u8]) -> Result<Screenshot, St
     // back would still be wrong if the lengths ever disagreed -- and the
     // check above is what makes `chunks_exact` yield exactly `len` bytes.
     let mut rgba = Vec::with_capacity(len);
-    for pixel in bgra.chunks_exact(4) {
+    for pixel in bgra.as_chunks::<4>().0.iter() {
         rgba.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
     }
 
@@ -969,8 +969,10 @@ mod tests {
         // Opaque red through the BGRA-to-RGBA swizzle, RGBA byte order.
         assert!(
             pixels
-                .chunks_exact(4)
-                .all(|pixel| pixel == [0xFF, 0x00, 0x00, 0xFF]),
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == [0xFF, 0x00, 0x00, 0xFF]),
             "the swizzle put the channels in the wrong places"
         );
     }

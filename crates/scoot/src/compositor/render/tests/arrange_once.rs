@@ -125,7 +125,11 @@ fn one_arrange_per_frame_serves_every_output() {
     );
     let background = second[0..4].to_vec();
     assert!(
-        second.chunks_exact(4).all(|pixel| pixel == background),
+        second
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel.as_slice() == background.as_slice()),
         "the empty output must be pristine background, not another output's rings"
     );
     assert_ne!(
@@ -404,8 +408,10 @@ fn output_remove_and_readd_leave_the_survivor_alone() {
     let background = readded_third[0..4].to_vec();
     assert!(
         readded_third
-            .chunks_exact(4)
-            .all(|pixel| pixel == background),
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel.as_slice() == background.as_slice()),
         "the re-added output must be pristine background"
     );
 }
@@ -573,7 +579,11 @@ fn scale_reaches_only_the_gathering() {
     for (what, pixels) in [("unscaled", &plain_pixels), ("scaled", &scaled_pixels)] {
         let background = pixels[0..4].to_vec();
         assert!(
-            pixels.chunks_exact(4).any(|pixel| pixel != background),
+            pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|pixel| pixel.as_slice() != background.as_slice()),
             "{what}: the frame must draw its rings from the shared arrangement"
         );
     }

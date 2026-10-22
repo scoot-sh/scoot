@@ -117,7 +117,9 @@ fn memfd_maps(pid: u32) -> Vec<u64> {
 fn page_size() -> u64 {
     const AT_PAGESZ: u64 = 6;
     let auxv = std::fs::read("/proc/self/auxv").expect("/proc/self/auxv");
-    auxv.chunks_exact(16)
+    auxv.as_chunks::<16>()
+        .0
+        .iter()
         .find_map(|entry| {
             let key = u64::from_ne_bytes(entry[..8].try_into().unwrap());
             (key == AT_PAGESZ).then(|| u64::from_ne_bytes(entry[8..].try_into().unwrap()))

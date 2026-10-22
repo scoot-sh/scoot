@@ -1185,7 +1185,7 @@ fn draw_icon(
                 ) else {
                     continue;
                 };
-                for (col, pixel) in line.chunks_exact(4).enumerate() {
+                for (col, pixel) in line.as_chunks::<4>().0.iter().enumerate() {
                     let pixel = [pixel[0], pixel[1], pixel[2], pixel[3]];
                     canvas.blend_premultiplied(
                         x as i64 + col as i64,
@@ -1378,7 +1378,7 @@ fn chrome_scaled(
             } else {
                 surface
             };
-            let Some(chunk) = row.chunks_exact_mut(4).nth(x as usize) else {
+            let Some(chunk) = row.as_chunks_mut::<4>().0.get_mut(x as usize) else {
                 continue;
             };
             chunk.copy_from_slice(&pixel.to_le_bytes());

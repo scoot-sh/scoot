@@ -1010,7 +1010,7 @@ fn read_png(path: &Path) -> Image {
         png::ColorType::Rgba => buf,
         png::ColorType::Rgb => {
             let mut rgba = Vec::with_capacity(buf.len() / 3 * 4);
-            for rgb in buf.chunks_exact(3) {
+            for rgb in buf.as_chunks::<3>().0.iter() {
                 rgba.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 0xFF]);
             }
             rgba
@@ -1054,8 +1054,10 @@ fn diff(expected: &Image, actual: &Image) -> Diff {
     };
     for (pixel, (want_px, got_px)) in expected
         .rgba
-        .chunks_exact(4)
-        .zip(actual.rgba.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(actual.rgba.as_chunks::<4>().0.iter())
         .enumerate()
     {
         // One pixel: past tolerance when ANY channel is, so a recolor
@@ -1075,8 +1077,8 @@ fn diff(expected: &Image, actual: &Image) -> Diff {
                 (pixel as u32) % expected.width,
                 (pixel as u32) / expected.width,
             );
-            out.expected = want_px.try_into().expect("a pixel");
-            out.actual = got_px.try_into().expect("a pixel");
+            out.expected = *want_px;
+            out.actual = *got_px;
         }
     }
     out

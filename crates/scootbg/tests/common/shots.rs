@@ -217,7 +217,10 @@ fn screencopy(socket: &Path, name: &str) -> Shot {
             row
         };
         let start = (row * stride) as usize;
-        for p in bytes[start..start + (width * 4) as usize].chunks_exact(4) {
+        for p in bytes[start..start + (width * 4) as usize]
+            .as_chunks::<4>()
+            .0
+        {
             rgb.push(if swap {
                 [p[2], p[1], p[0]]
             } else {

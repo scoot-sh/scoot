@@ -491,7 +491,7 @@ impl Module for Tray {
                     let pixels: &[u8] = pixels;
                     let edge = side as usize;
                     for (gy, row) in pixels.chunks_exact(edge * 4).enumerate() {
-                        for (gx, pixel) in row.chunks_exact(4).enumerate() {
+                        for (gx, pixel) in row.as_chunks::<4>().0.iter().enumerate() {
                             let pixel = [pixel[0], pixel[1], pixel[2], pixel[3]];
                             ctx.canvas.blend_premultiplied(
                                 x + gx as i64,

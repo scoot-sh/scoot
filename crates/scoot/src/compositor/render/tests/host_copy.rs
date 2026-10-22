@@ -192,8 +192,10 @@ fn a_frame_copied_into_a_host_buffer_is_what_another_renderer_sees() {
         "the host must see the logical bottom at the bottom ({choice:?})"
     );
     let differing = captured
-        .chunks_exact(4)
-        .zip(seen.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(seen.as_chunks::<4>().0.iter())
         .filter(|(left, right)| left != right)
         .count();
     assert_eq!(

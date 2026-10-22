@@ -95,7 +95,12 @@ pub fn inside(px: f64, py: f64, subpaths: &[Vec<(f64, f64)>]) -> bool {
 /// layer -- a badge with its own rim, the spinner -- lands over the first. Both buffers are
 /// the same size; a shorter `src` composites only what it covers.
 pub fn over(dst: &mut [u8], src: &[u8]) {
-    for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+    for (d, s) in dst
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(src.as_chunks::<4>().0.iter())
+    {
         let keep = 255 - u32::from(s[3]);
         for c in 0..4 {
             // Rounded `d * keep / 255`, exact for 8-bit premultiplied data.

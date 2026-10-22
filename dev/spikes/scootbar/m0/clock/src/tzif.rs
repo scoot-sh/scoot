@@ -105,7 +105,7 @@ impl Tz {
         let traw = c.take(typ * 6)?;
         let chars = c.take(chr)?;
         let mut types = Vec::with_capacity(typ);
-        for t in traw.chunks_exact(6) {
+        for t in traw.as_chunks::<6>().0.iter() {
             let utoff = i32::from_be_bytes([t[0], t[1], t[2], t[3]]);
             if utoff == i32::MIN || !(-89999..=93599).contains(&utoff) {
                 return Err("utoff out of range");

@@ -109,8 +109,10 @@ fn gles_backend(output: &Output, (width, height): (i32, i32)) -> Backend {
 /// How many pixels of two equal-length frames differ.
 fn differing(left: &[u8], right: &[u8]) -> usize {
     assert_eq!(left.len(), right.len(), "the two frames are the same size");
-    left.chunks_exact(4)
-        .zip(right.chunks_exact(4))
+    left.as_chunks::<4>()
+        .0
+        .iter()
+        .zip(right.as_chunks::<4>().0.iter())
         .filter(|(a, b)| a != b)
         .count()
 }
@@ -357,7 +359,11 @@ fn a_resized_session_draws_what_a_new_backend_would() {
         let id = fixture.state.outputs.primary_id().expect("an output");
         let first = render_and_read(&mut fixture);
         assert!(
-            first.chunks_exact(4).any(|pixel| pixel != &first[..4]),
+            first
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|pixel| pixel != &first[..4]),
             "{renderer}: the scene draws something to compare"
         );
         let context = fixture.state.backends[&id].gles_context_for_test();

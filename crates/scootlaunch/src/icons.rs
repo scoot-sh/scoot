@@ -670,7 +670,12 @@ fn decode_svg(path: &Path, side: u32) -> Option<Decoded> {
     resvg::render(&tree, transform, &mut pixmap.as_mut());
     let data = pixmap.data();
     let mut out = vec![0u8; side as usize * side as usize * 4];
-    for (dest, src) in out.chunks_exact_mut(4).zip(data.chunks_exact(4)) {
+    for (dest, src) in out
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(data.as_chunks::<4>().0.iter())
+    {
         // tiny-skia is R,G,B,A premultiplied; the canvas takes B,G,R,A.
         dest.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
     }

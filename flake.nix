@@ -21,9 +21,9 @@
     ];
   };
 
-  # Pinned to the same nixpkgs revision as vm/, so the dev shell and the VM
-  # agree on every library and nothing is downloaded twice.
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/8ce4ef6cb6f871616146b9fe26d2a5ae594e94fe";
+  # Pinned by rev (bumped on purpose; devenv.yaml carries the same rev). vm/
+  # follows nixos-unstable through its own lock and may differ.
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe";
 
   # The Rust build library: each package below is a cheap `buildPackage`
   # over a shared `buildDepsOnly` compiled-dependencies derivation, so a

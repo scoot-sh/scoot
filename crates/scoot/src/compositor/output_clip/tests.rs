@@ -750,7 +750,11 @@ fn an_overhanging_column_is_not_drawn_on_the_neighbouring_output() {
         "the second output's ring was drawn on the first output",
     );
     assert!(
-        first.chunks_exact(4).all(|pixel| pixel == BACKGROUND_BGRA),
+        first
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| *pixel == BACKGROUND_BGRA),
         "the first output has no windows of its own, so it is background edge to edge"
     );
 

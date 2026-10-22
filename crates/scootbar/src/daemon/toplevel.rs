@@ -36,8 +36,10 @@ const FULLSCREEN: u32 = 3;
 /// Whether the `state` array carries `want`.
 fn has_state(state: &[u8], want: u32) -> bool {
     state
-        .chunks_exact(4)
-        .any(|four| u32::from_ne_bytes(four.try_into().unwrap_or([0; 4])) == want)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .any(|four| u32::from_ne_bytes(*four) == want)
 }
 
 impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for State {

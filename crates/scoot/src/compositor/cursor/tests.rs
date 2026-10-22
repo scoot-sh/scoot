@@ -905,8 +905,8 @@ impl Canvas {
     /// this tolerates an element existing -- one positioned entirely off the
     /// canvas draws nothing while still being in the list.
     fn assert_nothing_drawn(&self) {
-        for chunk in self.pixels.chunks_exact(4) {
-            assert_eq!(chunk, CLEAR_BGRA, "something was drawn on a blank frame");
+        for chunk in self.pixels.as_chunks::<4>().0.iter() {
+            assert_eq!(*chunk, CLEAR_BGRA, "something was drawn on a blank frame");
         }
     }
 }

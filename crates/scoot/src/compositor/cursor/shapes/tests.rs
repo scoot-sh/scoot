@@ -215,7 +215,7 @@ fn every_shape_draws_into_exactly_its_buffer_at_every_size() {
                 "{shape:?} at {size}px"
             );
             assert!(
-                pixels.chunks_exact(4).any(|p| p[3] > 0),
+                pixels.as_chunks::<4>().0.iter().any(|p| p[3] > 0),
                 "{shape:?} at {size}px drew nothing"
             );
         }
@@ -290,7 +290,7 @@ fn every_pixel_is_premultiplied_correctly() {
     for size in sizes() {
         for shape in Shape::ALL {
             let pixels = paint(shape, size);
-            for p in pixels.chunks_exact(4) {
+            for p in pixels.as_chunks::<4>().0.iter() {
                 assert!(
                     p[0] <= p[3] && p[1] <= p[3] && p[2] <= p[3],
                     "{shape:?} at {size}px drew {p:?}, not premultiplied"
@@ -312,8 +312,8 @@ fn a_shape_uses_the_paints_it_was_given() {
     for shape in Shape::ALL {
         let pixels = generate(shape, size, fill, stroke);
         let (mut f, mut s) = (0, 0);
-        for p in pixels.chunks_exact(4) {
-            let p: [u8; 4] = p.try_into().expect("a pixel");
+        for p in pixels.as_chunks::<4>().0.iter() {
+            let p: [u8; 4] = *p;
             f += usize::from(p == fill);
             s += usize::from(p == stroke);
             assert!(
@@ -338,7 +338,7 @@ fn a_translucent_fill_makes_the_whole_cursor_translucent() {
     for shape in Shape::ALL {
         let pixels = generate(shape, 24, fill, stroke);
         assert!(
-            pixels.chunks_exact(4).all(|p| p[3] < 0xf0),
+            pixels.as_chunks::<4>().0.iter().all(|p| p[3] < 0xf0),
             "{shape:?} drew an opaque pixel from translucent paints"
         );
     }
@@ -361,8 +361,8 @@ fn every_shape_is_distinct_and_anti_aliased() {
                 "{shape:?} and {other:?} draw the same"
             );
         }
-        let blended = pixels.chunks_exact(4).any(|p| {
-            let p: [u8; 4] = p.try_into().expect("a pixel");
+        let blended = pixels.as_chunks::<4>().0.iter().any(|p| {
+            let p: [u8; 4] = *p;
             p != FILL && p != STROKE && p != TRANSPARENT
         });
         assert!(blended, "{shape:?} has no blended pixels");

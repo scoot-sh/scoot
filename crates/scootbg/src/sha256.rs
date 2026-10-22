@@ -30,13 +30,12 @@ const H0: [u32; 8] = [
 /// The digest of `data`.
 pub fn digest(data: &[u8]) -> [u8; 32] {
     let mut state = H0;
-    let mut blocks = data.chunks_exact(64);
-    for block in &mut blocks {
+    let (blocks, tail) = data.as_chunks::<64>();
+    for block in blocks {
         compress(&mut state, block);
     }
     // The padding: a 1 bit, zeros, and the length in bits, big-endian, to
     // a whole number of blocks (one, or two if the tail leaves no room).
-    let tail = blocks.remainder();
     let mut last = [0u8; 128];
     last[..tail.len()].copy_from_slice(tail);
     last[tail.len()] = 0x80;
@@ -45,11 +44,11 @@ pub fn digest(data: &[u8]) -> [u8; 32] {
     // as the standard says the length is taken.
     let bits = (data.len() as u64).wrapping_mul(8);
     last[end - 8..end].copy_from_slice(&bits.to_be_bytes());
-    for block in last[..end].chunks_exact(64) {
+    for block in last[..end].as_chunks::<64>().0 {
         compress(&mut state, block);
     }
     let mut out = [0u8; 32];
-    for (bytes, word) in out.chunks_exact_mut(4).zip(state) {
+    for (bytes, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(state) {
         bytes.copy_from_slice(&word.to_be_bytes());
     }
     out
@@ -75,7 +74,7 @@ pub fn hex_bytes(bytes: &[u8]) -> String {
 /// One 64-byte block into `state`.
 fn compress(state: &mut [u32; 8], block: &[u8]) {
     let mut w = [0u32; 64];
-    for (word, bytes) in w.iter_mut().zip(block.chunks_exact(4)) {
+    for (word, bytes) in w.iter_mut().zip(block.as_chunks::<4>().0.iter()) {
         *word = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     }
     for i in 16..64 {

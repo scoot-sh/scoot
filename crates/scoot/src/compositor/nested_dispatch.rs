@@ -285,8 +285,10 @@ impl Dispatch<HostKeyboard, ()> for State {
             }
             wl_keyboard::Event::Enter { keys, .. } => {
                 let evdev: Vec<u32> = keys
-                    .chunks_exact(4)
-                    .filter_map(|bytes| bytes.try_into().ok().map(u32::from_ne_bytes))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|bytes| u32::from_ne_bytes(*bytes))
                     .collect();
                 state.press_held_modifiers(&evdev);
                 return;

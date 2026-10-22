@@ -444,7 +444,7 @@ fn flatten_rgba_over_fill(canvas: &[u8], rgb: &mut [u8], fill: Color) {
         let (c, a, f) = (u16::from(c), u16::from(a), u16::from(f));
         ((c * a + f * (255 - a) + 127) / 255) as u8
     };
-    for (i, px) in canvas.chunks_exact(4).enumerate() {
+    for (i, px) in canvas.as_chunks::<4>().0.iter().enumerate() {
         rgb[3 * i] = over(px[0], px[3], fill.r);
         rgb[3 * i + 1] = over(px[1], px[3], fill.g);
         rgb[3 * i + 2] = over(px[2], px[3], fill.b);

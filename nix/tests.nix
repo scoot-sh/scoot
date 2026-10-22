@@ -1149,13 +1149,13 @@ let
         fallbackUiPackage = null;
         fallbackFont = null;
       }).mkCatalog
-      {
-        looks = [
-          "ginger-night"
-          "stylix"
-        ];
-        stylix = null;
-      }
+        {
+          looks = [
+            "ginger-night"
+            "stylix"
+          ];
+          stylix = null;
+        }
     ).names
   );
 
@@ -1429,16 +1429,14 @@ let
       mode = "fill";
     };
   };
-  # ...a set without string `url` and `hash` fails loudly at eval (caught
-  # here by `tryEval`, forcing the rendered config file).
-  hmWallUrlBad =
-    builtins.tryEval
-      (evalHome {
-        enable = true;
-        settings.wallpaper.image = {
-          url = "file://${urlWallpaperFile}";
-        };
-      }).config.xdg.configFile."scoot/config.toml".source;
+  # ...a set without string `url` and `hash` fails loudly at eval (an
+  # assertion, checked below with `allAssertionsHold`).
+  hmWallUrlBad = evalHome {
+    enable = true;
+    settings.wallpaper.image = {
+      url = "file://${urlWallpaperFile}";
+    };
+  };
   # ...and a per-output `{ url, hash }` image resolves the same way: the
   # top-level string renders as written beside the fetched per-output file.
   hmWallPerOutputUrl = evalHome {
@@ -6336,7 +6334,7 @@ let
     )
     # ...and a set without string `url` and `hash` never renders.
     (
-      assert !hmWallUrlBad.success;
+      assert !(allAssertionsHold hmWallUrlBad.config);
       true
     )
     # ...and a per-output `{ url, hash }` image is fetched at build time
@@ -10458,7 +10456,8 @@ let
             desktop.enable = true;
             look = "music-desk";
             desktop.notifications.bar.icons.idle = "";
-          } { package = fakeBar; }).config.programs.scootbar.settings.push.notifications ? icon
+          } { package = fakeBar; }).config.programs.scootbar.settings.push.notifications
+            ? icon
         );
       true
     )

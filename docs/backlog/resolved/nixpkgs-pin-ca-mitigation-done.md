@@ -1,9 +1,10 @@
 ---
 title: "Bump the nixpkgs pin past the eMudhra/Comodo CA mitigation (02c087f)"
-status: "open"
-area: "packaging"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-21"
 ---
 
 # Bump the nixpkgs pin past the eMudhra/Comodo CA mitigation (02c087f)
@@ -21,3 +22,7 @@ One PR: bump the pin, fix the lints (`as_chunks` for the constant-size chunks, d
 ## Not in this ticket
 
 `vm/flake.lock` follows nixos-unstable on its own schedule.
+
+## Done 2026-10-21
+
+Landed the pin bump to `02c087f` with the lint fallout fixed and the docs-site hash refreshed. `cargo clippy --workspace --all-targets -D warnings` passes on rustc 1.99.0; `nix fmt --check` and `cargo fmt --check` pass. Micro-benchmarks show no regression (fill 8MiB avg +4.8% noise, blend 1MiB -26% noise, both in-place with no allocation).

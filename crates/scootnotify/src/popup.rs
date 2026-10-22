@@ -893,7 +893,12 @@ fn decode_icon(note: &Notification) -> Option<IconBits> {
             // Straight RGBA into premultiplied BGRA (the sample filter
             // reads premultiplied rows).
             let mut rgba = vec![0u8; src_w * src_h * 4];
-            for (dst, src) in rgba.chunks_exact_mut(4).zip(image.pixels.chunks_exact(4)) {
+            for (dst, src) in rgba
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(image.pixels.as_chunks::<4>().0.iter())
+            {
                 let a = u32::from(src[3]);
                 dst[0] = ((u32::from(src[2]) * a + 127) / 255).min(255) as u8;
                 dst[1] = ((u32::from(src[1]) * a + 127) / 255).min(255) as u8;

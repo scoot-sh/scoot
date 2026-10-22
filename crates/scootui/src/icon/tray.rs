@@ -39,7 +39,7 @@ impl TrayIcon {
         let count = width as usize * height as usize;
         let pixels = argb.get(..count * 4)?;
         let mut held = Vec::with_capacity(count * 4);
-        for quad in pixels.chunks_exact(4) {
+        for quad in pixels.as_chunks::<4>().0 {
             let (a, r, g, b) = (quad[0], quad[1], quad[2], quad[3]);
             // Rounded `c × a ÷ 255`, at most `a`.
             let premultiply = |c: u8| ((u32::from(c) * u32::from(a) + 127) / 255) as u8;

@@ -331,7 +331,9 @@ fn half_multiplier_blends_with_the_background() {
     // red nor the untouched background, and the focus ring (blue/grey) is
     // nowhere near it.
     let blended = pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|pixel| {
             let (b, g, r) = (pixel[0], pixel[1], pixel[2]);
             (80..=200).contains(&r) && g <= 25 && b <= 30

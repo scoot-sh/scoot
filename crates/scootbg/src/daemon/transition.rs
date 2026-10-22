@@ -335,7 +335,7 @@ fn start(
     let row = |color: Color| {
         let pixel = color.xrgb8888();
         let mut row = vec![0u8; dims.0 as usize * 4];
-        for chunk in row.chunks_exact_mut(4) {
+        for chunk in row.as_chunks_mut::<4>().0 {
             chunk.copy_from_slice(&pixel);
         }
         row
@@ -497,7 +497,7 @@ fn retarget(
     let fill = |color: Color| {
         let pixel = color.xrgb8888();
         let mut row = vec![0u8; dims.0 as usize * 4];
-        for chunk in row.chunks_exact_mut(4) {
+        for chunk in row.as_chunks_mut::<4>().0 {
             chunk.copy_from_slice(&pixel);
         }
         row

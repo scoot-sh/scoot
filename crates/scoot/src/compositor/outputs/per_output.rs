@@ -876,7 +876,11 @@ fn a_second_output_with_nothing_on_it_captures_blank_but_correct() {
         "nothing mapped on the second output, so no bar color may be there"
     );
     assert!(
-        second.chunks_exact(4).all(|pixel| pixel == &second[0..4]),
+        second
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|pixel| pixel == &second[0..4]),
         "a blank output is uniformly its background"
     );
     assert!(

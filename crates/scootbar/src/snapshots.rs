@@ -47,7 +47,7 @@ impl Image {
     pub fn from_xrgb(pixels: &[u8], width: u32, height: u32, gray: bool) -> Self {
         let count = width as usize * height as usize;
         let mut samples = Vec::with_capacity(count * if gray { 1 } else { 3 });
-        for (i, pixel) in pixels.chunks_exact(4).take(count).enumerate() {
+        for (i, pixel) in pixels.as_chunks::<4>().0.iter().take(count).enumerate() {
             let [b, g, r] = [pixel[0], pixel[1], pixel[2]];
             if gray {
                 assert!(
@@ -73,7 +73,13 @@ impl Image {
     /// plane cannot show that, only its alpha does.
     pub fn from_alpha(pixels: &[u8], width: u32, height: u32) -> Self {
         let count = width as usize * height as usize;
-        let samples: Vec<u8> = pixels.chunks_exact(4).take(count).map(|p| p[3]).collect();
+        let samples: Vec<u8> = pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .take(count)
+            .map(|p| p[3])
+            .collect();
         assert_eq!(samples.len(), count);
         Self {
             width,

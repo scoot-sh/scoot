@@ -141,7 +141,7 @@ impl<'a> Canvas<'a> {
             .take(self.height as usize)
         {
             if let Some(run) = row.get_mut(x0 * 4..x1 * 4) {
-                for chunk in run.chunks_exact_mut(4) {
+                for chunk in run.as_chunks_mut::<4>().0 {
                     chunk.copy_from_slice(&pixel);
                 }
             }
@@ -161,7 +161,7 @@ impl<'a> Canvas<'a> {
         let stride = self.width as usize * 4;
         for row in self.pixels.chunks_exact_mut(stride).take(y1).skip(y0) {
             if let Some(run) = row.get_mut(x0 * 4..x1 * 4) {
-                for chunk in run.chunks_exact_mut(4) {
+                for chunk in run.as_chunks_mut::<4>().0 {
                     chunk.copy_from_slice(&pixel);
                 }
             }
@@ -465,7 +465,7 @@ impl<'a> Canvas<'a> {
             let Some(run) = row.get_mut(x0 * 4..x1 * 4) else {
                 continue;
             };
-            for chunk in run.chunks_exact_mut(4) {
+            for chunk in run.as_chunks_mut::<4>().0 {
                 chunk.copy_from_slice(&pixel);
             }
             if cut == 0 || (y >= cut && y < height - cut) {

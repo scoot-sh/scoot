@@ -16,7 +16,7 @@ fn a_flat_image_stays_flat_at_every_size_and_filter() {
         ] {
             let out = scale(&flat(from.0, from.1, rgb), from, to, filter).unwrap();
             assert_eq!(out.len(), (to.0 * to.1 * 3) as usize);
-            for pixel in out.chunks_exact(3) {
+            for pixel in out.as_chunks::<3>().0.iter() {
                 for (got, want) in pixel.iter().zip(rgb) {
                     assert!(
                         got.abs_diff(want) <= 1,
@@ -115,7 +115,7 @@ fn nearest_keeps_hard_edges() {
         source.extend_from_slice(&[255, 0, 0, 255, 0, 0, 0, 0, 255, 0, 0, 255]);
     }
     let out = scale(&source, (4, 2), (8, 4), Filter::Nearest).unwrap();
-    for row in out.chunks_exact(8 * 3) {
+    for row in out.as_chunks::<{ 8 * 3 }>().0.iter() {
         assert_eq!(&row[..12], [255, 0, 0].repeat(4).as_slice());
         assert_eq!(&row[12..], [0, 0, 255].repeat(4).as_slice());
     }

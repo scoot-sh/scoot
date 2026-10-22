@@ -122,6 +122,10 @@ let
   # (`pkgs.fetchurl`, hash verified by Nix), so scootbg and the rendered
   # TOML only ever see a file. Anything else shaped as a set is a loud
   # eval error, not a TOML table scoot would refuse at startup.
+  wallpaperImageValid =
+    image:
+    !builtins.isAttrs image
+    || (image ? url && image ? hash && builtins.isString image.url && builtins.isString image.hash);
   resolveWallpaperImage =
     image:
     if builtins.isAttrs image then
@@ -570,6 +574,23 @@ in
       # defaults this still manages a (minimal, valid) config plus the
       # portals file -- both harmless. `package`'s description states
       # that null installs no binary.
+
+      assertions = [
+        {
+          assertion =
+            let
+              table = cfg.settings.wallpaper or null;
+              topOk = !(builtins.isAttrs (table.image or null)) || wallpaperImageValid table.image;
+              perOk =
+                !(builtins.isAttrs (table.output or null))
+                || lib.all (per: !(builtins.isAttrs (per.image or null)) || wallpaperImageValid per.image) (
+                  builtins.attrValues table.output
+                );
+            in
+            !(builtins.isAttrs table) || (topOk && perOk);
+          message = "programs.scoot wallpaper `image` as a set needs string `url` and `hash` (hash as SRI (`sha256-...`) or hex)";
+        }
+      ];
 
       home.packages =
         lib.optional (cfg.package != null) cfg.package
