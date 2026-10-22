@@ -154,7 +154,7 @@ jobs:
               capture_output=True, text=True, check=True,
           ).stdout
           got = dict(line.split() for line in out.splitlines())
-          assert set(got) == {"scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"}, got
+          assert set(got) == {"scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify", "scoot-globalshortcuts-portal"}, got
           assert len(set(got.values())) == 1, f"version skew in staged tree: {got}"
           print(f"staged tree: every package at {got['scoot']}")
           EOF
@@ -310,12 +310,13 @@ jobs:
             # proof restores stock dpkg behavior first.
             rm -f /etc/dpkg/dpkg.cfg.d/docker /etc/dpkg/dpkg.cfg.d/excludes
             apt-get update -qq
-            apt-get install -y -qq scoot scootbg scootbar scootlaunch scootnotify
+            apt-get install -y -qq scoot scootbg scootbar scootlaunch scootnotify scoot-globalshortcuts-portal
             scoot --version
             scootbg --version
             scootbar --version
             scootlaunch --version
             scootnotify --version
+            scoot-globalshortcuts-portal --version
             # Fonts before --check: the example names no --font, so the
             # bar probes the usual paths (DejaVu first) and --check
             # refuses without one. procps too: the smoke test finds its
@@ -367,7 +368,7 @@ jobs:
             # record.
             n=0
             until [ $n -ge 3 ]; do
-              if apt-get install -y -qq scoot scootbg scootbar scootlaunch scootnotify fonts-dejavu-core dbus libglib2.0-bin; then break; fi
+              if apt-get install -y -qq scoot scootbg scootbar scootlaunch scootnotify scoot-globalshortcuts-portal fonts-dejavu-core dbus libglib2.0-bin; then break; fi
               n=$((n + 1))
               sleep 10
             done
@@ -377,6 +378,7 @@ jobs:
             scootbar --version
             scootlaunch --version
             scootnotify --version
+            scoot-globalshortcuts-portal --version
             # The font the bar check needs (same requirement as the
             # bookworm check above), plus the session bus the
             # notification daemon check runs under there too.

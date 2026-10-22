@@ -102,6 +102,7 @@ looks (black, light, dark, warm, chill) are on
 | `scootbg` | A wallpaper daemon. Set `[wallpaper]` in the config and scoot starts it. |
 | `scootlaunch` | The default application launcher: an overlay panel with ranked search, plus dmenu and run modes. On Nix it is the default (`launcher.daemon = "fuzzel"` keeps fuzzel); elsewhere `install.sh --launch`. [Docs](https://www.scoot.sh/scootlaunch/) |
 | `scootnotify` | A notification server: it owns `org.freedesktop.Notifications` and shows popup cards, with do-not-disturb, a history ring with restore, `[[rule]]` tables, and `scootnotify msg` for list, history, dnd, dismiss, invoke, reload, subscribe and wait. The default notification daemon on Nix (`desktop.notifications.daemon = "mako"` keeps mako), with deb, rpm and Arch packages and `install.sh --notify` elsewhere. [Docs](https://www.scoot.sh/scootnotify/) |
+| `scoot-globalshortcuts-portal` | The GlobalShortcuts portal backend: it owns `org.freedesktop.impl.portal.desktop.scoot`, registers app shortcuts with the compositor over IPC, and turns presses and releases into portal signals. Media keys and push-to-talk that work while another app holds focus. |
 
 Standard Wayland protocols mean the usual tools work: other bars,
 launchers, notification daemons, screen sharing, screen lockers and

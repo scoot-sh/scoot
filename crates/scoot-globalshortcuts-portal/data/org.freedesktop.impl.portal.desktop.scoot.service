@@ -1,0 +1,8 @@
+[D-BUS Service]
+Name=org.freedesktop.impl.portal.desktop.scoot
+# Packages rewrite this to the installed binary. The desktop profile
+# never installs this file beside another GlobalShortcuts backend's:
+# with two on the bus's search path the bus activates one of them, and
+# which one is not something to rely on.
+Exec=/usr/bin/scoot-globalshortcuts-portal daemon
+SystemdService=scoot-globalshortcuts-portal.service

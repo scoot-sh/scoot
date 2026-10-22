@@ -1,8 +1,9 @@
 # scoot Arch packages: the PKGBUILDs (release and `-git`) for scoot,
-# scootbg, scootbar, scootlaunch and scootnotify
+# scootbg, scootbar, scootlaunch, scootnotify and
+# scoot-globalshortcuts-portal
 # (docs/backlog/resolved/arch-package-done.md).
 #
-# WHAT IT DOES: builds all ten PKGBUILDs under `packaging/arch/` in an
+# WHAT IT DOES: builds all twelve PKGBUILDs under `packaging/arch/` in an
 # Arch container with `makepkg`, lints each PKGBUILD and each built
 # package with `namcap`, installs the release set and the `-git` set
 # in turn, and runs `scoot --version`, the bar's `--check` on its
@@ -104,11 +105,11 @@ jobs:
 
       - name: The committed .SRCINFO matches makepkg --printsrcinfo
         run: |
-          for p in scoot scootbg scootbar scootlaunch scootnotify scoot-git scootbg-git scootbar-git scootlaunch-git scootnotify-git; do
+          for p in scoot scootbg scootbar scootlaunch scootnotify scoot-globalshortcuts-portal scoot-git scootbg-git scootbar-git scootlaunch-git scootnotify-git scoot-globalshortcuts-portal-git; do
             sudo -u builder bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/$p' && makepkg --printsrcinfo" | diff - "packaging/arch/$p/.SRCINFO" \
               || { echo "::error title=.SRCINFO drift in $p::run makepkg --printsrcinfo > .SRCINFO there and commit it."; exit 1; }
           done
-          echo "ok: all ten .SRCINFO files match"
+          echo "ok: all twelve .SRCINFO files match"
 
       # The release PKGBUILDs point at tag tarballs that do not exist
       # until the first release is cut. Stage same-layout tarballs of
@@ -126,9 +127,9 @@ jobs:
           ver=$(sed -n 's/^pkgver=//p' packaging/arch/scoot/PKGBUILD)
           git archive HEAD --prefix "scoot-$ver/" -o .test-tarballs/scoot-test.tar.gz
           sed -i "s|https://github.com/scoot-sh/scoot/archive/refs/tags/v\$pkgver\.tar\.gz|file://$GITHUB_WORKSPACE/.test-tarballs/scoot-test.tar.gz|" \
-            packaging/arch/scoot/PKGBUILD packaging/arch/scootbg/PKGBUILD packaging/arch/scootbar/PKGBUILD packaging/arch/scootlaunch/PKGBUILD packaging/arch/scootnotify/PKGBUILD
+            packaging/arch/scoot/PKGBUILD packaging/arch/scootbg/PKGBUILD packaging/arch/scootbar/PKGBUILD packaging/arch/scootlaunch/PKGBUILD packaging/arch/scootnotify/PKGBUILD packaging/arch/scoot-globalshortcuts-portal/PKGBUILD
           sed -i "s|git+https://github.com/scoot-sh/scoot\.git|git+file://$GITHUB_WORKSPACE#commit=$GITHUB_SHA|" \
-            packaging/arch/scoot-git/PKGBUILD packaging/arch/scootbg-git/PKGBUILD packaging/arch/scootbar-git/PKGBUILD packaging/arch/scootlaunch-git/PKGBUILD packaging/arch/scootnotify-git/PKGBUILD
+            packaging/arch/scoot-git/PKGBUILD packaging/arch/scootbg-git/PKGBUILD packaging/arch/scootbar-git/PKGBUILD packaging/arch/scootlaunch-git/PKGBUILD packaging/arch/scootnotify-git/PKGBUILD packaging/arch/scoot-globalshortcuts-portal-git/PKGBUILD
           # Loud if a substitution missed: an unrewritten URL would
           # otherwise fail pages later as a 404 (release) or build the
           # wrong tree (git).
@@ -149,7 +150,7 @@ jobs:
           crate_ver = subprocess.run(["scripts/workspace-version"], check=True,
                                      capture_output=True, text=True).stdout.strip()
           bad = False
-          for pkg in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify"):
+          for pkg in ("scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify", "scoot-globalshortcuts-portal"):
               for suffix in ("", "-git"):
                   text = open(f"packaging/arch/{pkg}{suffix}/PKGBUILD").read()
                   pkgver = re.search(r'^pkgver=(.*)$', text, re.M).group(1)
@@ -175,7 +176,7 @@ jobs:
           sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
             bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/scootbg' && makepkg -s --noconfirm"
           pacman -U --noconfirm "$GITHUB_WORKSPACE"/dist/scootbg-0*.pkg.tar.zst
-          for p in scoot scootbar scootlaunch scootnotify scoot-git scootbg-git scootbar-git scootlaunch-git scootnotify-git; do
+          for p in scoot scootbar scootlaunch scootnotify scoot-globalshortcuts-portal scoot-git scootbg-git scootbar-git scootlaunch-git scootnotify-git scoot-globalshortcuts-portal-git; do
             sudo -u builder env PKGDEST="$GITHUB_WORKSPACE/dist" CARGO_TARGET_DIR="$GITHUB_WORKSPACE/.cargo-target" \
               bash -c "cd '$GITHUB_WORKSPACE/packaging/arch/$p' && makepkg -s --noconfirm"
           done
@@ -240,12 +241,13 @@ jobs:
       # the headless smoke test with the installed scoot and scootbg.
       - name: Install the release set and prove it
         run: |
-          pacman -U --noconfirm dist/scoot-0*.pkg.tar.zst dist/scootbg-0*.pkg.tar.zst dist/scootbar-0*.pkg.tar.zst dist/scootlaunch-0*.pkg.tar.zst dist/scootnotify-0*.pkg.tar.zst
+          pacman -U --noconfirm dist/scoot-0*.pkg.tar.zst dist/scootbg-0*.pkg.tar.zst dist/scootbar-0*.pkg.tar.zst dist/scootlaunch-0*.pkg.tar.zst dist/scootnotify-0*.pkg.tar.zst dist/scoot-globalshortcuts-portal-0*.pkg.tar.zst
           scoot --version
           scootbg --version
           scootbar --version
           scootlaunch --version
           scootnotify --version
+          scoot-globalshortcuts-portal --version
           scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
           scootlaunch --check
           dbus-run-session -- scootnotify daemon --check --config /usr/share/doc/scootnotify/notify.toml.example
@@ -265,13 +267,14 @@ jobs:
 
       - name: Swap to the -git set and prove it
         run: |
-          pacman -Rns --noconfirm scoot scootbg scootbar scootlaunch scootnotify
-          pacman -U --noconfirm dist/scoot-git-*.pkg.tar.zst dist/scootbg-git-*.pkg.tar.zst dist/scootbar-git-*.pkg.tar.zst dist/scootlaunch-git-*.pkg.tar.zst dist/scootnotify-git-*.pkg.tar.zst
+          pacman -Rns --noconfirm scoot scootbg scootbar scootlaunch scootnotify scoot-globalshortcuts-portal
+          pacman -U --noconfirm dist/scoot-git-*.pkg.tar.zst dist/scootbg-git-*.pkg.tar.zst dist/scootbar-git-*.pkg.tar.zst dist/scootlaunch-git-*.pkg.tar.zst dist/scootnotify-git-*.pkg.tar.zst dist/scoot-globalshortcuts-portal-git-*.pkg.tar.zst
           scoot --version
           scootbg --version
           scootbar --version
           scootlaunch --version
           scootnotify --version
+          scoot-globalshortcuts-portal --version
           scootbar daemon --check --config /usr/share/doc/scootbar/bar.toml.example
           scootlaunch --check
           dbus-run-session -- scootnotify daemon --check --config /usr/share/doc/scootnotify/notify.toml.example

@@ -55,9 +55,10 @@ ALLOW = {
     "scootbar": {"libc6", "libgcc-s1"},
     "scootlaunch": {"libc6", "libgcc-s1", "libxkbcommon0"},
     "scootnotify": {"libc6", "libgcc-s1"},
+    "scoot-globalshortcuts-portal": {"libc6", "libgcc-s1"},
 }
 
-CRATE = {"scoot": "scoot", "scootbg": "scootbg", "scootbar": "scootbar", "scootlaunch": "scootlaunch", "scootnotify": "scootnotify"}
+CRATE = {"scoot": "scoot", "scootbg": "scootbg", "scootbar": "scootbar", "scootlaunch": "scootlaunch", "scootnotify": "scootnotify", "scoot-globalshortcuts-portal": "scoot-globalshortcuts-portal"}
 
 SHORT = {
     "scoot": "Scrolling-tiling Wayland compositor (auto CPU/GPU rendering, runs without a GPU)",
@@ -65,6 +66,7 @@ SHORT = {
     "scootbar": "Status bar for the scoot compositor",
     "scootlaunch": "Keyboard-first application launcher for the scoot compositor",
     "scootnotify": "Notification daemon for the scoot compositor",
+    "scoot-globalshortcuts-portal": "GlobalShortcuts portal backend for the scoot compositor",
 }
 
 LONG = {
@@ -115,6 +117,16 @@ LONG = {
         " D-Bus activation file and a starting configuration. It\n"
         " writes nothing to a user's home."
     ),
+    "scoot-globalshortcuts-portal": (
+        " The GlobalShortcuts portal backend for the scoot compositor:\n"
+        " the org.freedesktop.impl.portal.GlobalShortcuts server, which\n"
+        " registers shortcuts with the compositor over its IPC and turns\n"
+        " presses and releases into portal signals.\n"
+        " .\n"
+        " This package ships the backend, its systemd user unit, the\n"
+        " D-Bus activation file and the xdg-desktop-portal backend file.\n"
+        " It writes nothing to a user's home."
+    ),
 }
 
 # Extra control stanzas per package. `scoot`'s versioned `scootbg`
@@ -139,6 +151,8 @@ SUGGESTS = {
     # paths, DejaVu first); without one the daemon stays headless and
     # the bus still serves, so this stays a suggestion, not a dependency.
     "scootnotify": "fonts-dejavu-core",
+    # The backend draws nothing: no font needed.
+    "scoot-globalshortcuts-portal": None,
 }
 
 

@@ -1,0 +1,4 @@
+[portal]
+DBusName=org.freedesktop.impl.portal.desktop.scoot
+Interfaces=org.freedesktop.impl.portal.GlobalShortcuts;
+UseIn=scoot

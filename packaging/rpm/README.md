@@ -13,14 +13,16 @@ tag, no release in CI or out of it.
 | `scootbar.spec` | `scootbar` | `v$Version` | the same |
 | `scootlaunch.spec` | `scootlaunch` | `v$Version` | the same |
 | `scootnotify.spec` | `scootnotify` | `v$Version` | the same |
+| `scoot-globalshortcuts-portal.spec` | `scoot-globalshortcuts-portal` | `v$Version` | the same |
 
 One tag releases every binary at the repository's one version
-(docs/versioning.md), so all five specs carry the same `Version` and
+(docs/versioning.md), so all six specs carry the same `Version` and
 the same release tarball. There is no `scootctl` package: it is the
 client library inside the `scoot` binary (`scoot msg`). `scoot` requires exactly `scootbg=$Version-$Release`:
 the coupled pair installs at one version, and the bar, the launcher
-and the notification daemon
-require no compositor package at all (standard Wayland protocols only).
+and the notification daemon and the portal backend
+require no compositor package at all (standard Wayland protocols and
+the compositor's IPC socket only).
 
 Why a hand-written spec and not `cargo-generate-rpm`: the generated file would need the same hand edits anyway
 (the session entry, the session user units, the portal selection, the
@@ -120,6 +122,13 @@ Notes:
   licenses, and a starting `notify.toml.example` (proven valid:
   `scootnotify daemon --check` prints `valid`, in `%check` and again
   after install, on a session bus).
+- `scoot-globalshortcuts-portal`: `/usr/bin/scoot-globalshortcuts-portal`,
+  the `scoot-globalshortcuts-portal.service` user unit
+  (`Restart=on-failure` plus `RestartPreventExitStatus=3`, the same
+  policy as `nix/modules/scoot-globalshortcuts-portal-home.nix`, with
+  the `%systemd_user_post`/`%systemd_user_preun` scriptlets), the D-Bus
+  activation file and the portal file
+  (`%{_datadir}/xdg-desktop-portal/portals/scoot.portal`).
 - `%check` in every spec runs only headless-safe probes (`--version`,
   `--print-default-config`, `daemon --check`): the headless smoke test
   needs a runtime, so it runs after install in CI, not in the build.
@@ -199,7 +208,7 @@ that sync is missing or wrong.
 1. Nothing to rename: every release publishes
    `scoot-<version>-vendored.tar.gz`, the name each spec's `Source0`
    already downloads.
-2. In the release PR, before it merges, bump `Version` in all five
+2. In the release PR, before it merges, bump `Version` in all six
    specs to the proposed version, reset `Release` to `1` and add a
    `%changelog` entry (run `rpm.yml` by hand from the release PR; it
    fails if `Version` is not the workspace version).
@@ -214,10 +223,10 @@ that sync is missing or wrong.
 
 `.github/workflows/rpm.yml` stages the vendored tarball from HEAD with
 `scripts/vendor-release.sh` in a Fedora 43 and a Tumbleweed container,
-builds all five specs with `rpmbuild -ba` in each, lints every built RPM
+builds all six specs with `rpmbuild -ba` in each, lints every built RPM
 with `rpmlint`, installs the set, and runs `scoot --version`,
 `scootbg --version`, `scootbar --version`, `scootlaunch --version`,
-`scootnotify --version`,
+`scootnotify --version`, `scoot-globalshortcuts-portal --version`,
 `scootbar daemon --check` on
 the shipped example, `scootlaunch --check` on the built-in defaults,
 `scootnotify daemon --check` on its shipped example plus a `Notify`

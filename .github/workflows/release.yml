@@ -3,7 +3,8 @@
 #
 # WHAT IT DOES: pushing a release tag (`v0.2.0`: one tag, the
 # repository's one version) builds every binary -- scoot (with `scoot
-# msg`), scootbg, scootbar, scootlaunch and scootnotify -- and publishes a GitHub Release holding the vendored source
+# msg`), scootbg, scootbar, scootlaunch, scootnotify and
+# scoot-globalshortcuts-portal -- and publishes a GitHub Release holding the vendored source
 # tarball (`scripts/vendor-release.sh`), portable glibc binaries for
 # `x86_64-linux` and `aarch64-linux`, an SBOM (CycloneDX, cargo-cyclonedx),
 # `SHA256SUMS`, a keyless build-provenance attestation, and that
@@ -355,7 +356,8 @@ jobs:
           RESOLVE_BINARIES: ${{ needs.resolve.outputs.binaries }}
         run: |
           # Union SBOM over every shipped binary: a release ships scoot,
-          # scootbg, scootbar, scootlaunch and scootnotify, and one crate's SBOM would omit the
+          # scootbg, scootbar, scootlaunch, scootnotify and
+          # scoot-globalshortcuts-portal, and one crate's SBOM would omit the
           # others' dependencies (e.g. scootbg's image-webp/zune-*/
           # byteorder-lite decoders). cargo-cyclonedx emits crates/*/sbom.json
           # in one run (the manifest path only picks the workspace, as it
@@ -592,7 +594,7 @@ jobs:
           {
             echo "## scoot ${{ needs.resolve.outputs.version }}"
             echo
-            echo "Every binary at one version: scoot (with \`scoot msg\`), scootbg, scootbar, scootlaunch and scootnotify."
+            echo "Every binary at one version: scoot (with \`scoot msg\`), scootbg, scootbar, scootlaunch, scootnotify and scoot-globalshortcuts-portal."
             echo
             scripts/release-notes '${{ needs.resolve.outputs.version }}'
             echo
@@ -646,8 +648,8 @@ jobs:
   # A missing or tampered file, a file with no attestation from this
   # workflow, a --version that does not name the release version, or a
   # failed --check fails the run with the file and the reason named.
-  # The release ships five binaries (scoot, scootbg, scootbar,
-  # scootlaunch, scootnotify), each covered below.
+  # The release ships six binaries (scoot, scootbg, scootbar,
+  # scootlaunch, scootnotify and scoot-globalshortcuts-portal), each covered below.
   verify:
     name: Verify the published release (${{ matrix.arch }})
     needs: [resolve, publish]
@@ -726,12 +728,12 @@ jobs:
       # launcher), one DejaVu font
       # for the bar check, which loads a font exactly as a start
       # does, and a session bus for the notification daemon
-      # check. No toolchain, no -dev packages.
+      # check and the portal backend start. No toolchain, no -dev packages.
       #
       # The loop covers the binaries the release holds (found by name),
       # not a fixed list: an old release predates newer binaries
       # (v0.3.1 has no scootlaunch, and no tag before this one holds
-      # scootnotify), and a new one may add more. A
+      # scootnotify or the portal backend), and a new one may add more. A
       # release missing a binary it should hold still fails loudly --
       # one step earlier, at SHA256SUMS, which lists every published
       # file.
@@ -776,6 +778,10 @@ jobs:
                     echo "ok: $base daemon --check prints valid" ;;
                   scootbg-*)
                     echo "ok: $base reports $VERIFY_VERSION (--version is its whole probe)" ;;
+                  scoot-globalshortcuts-portal-*)
+                    "$f" --help > /dev/null \
+                      || { echo "::error title=$base --help failed::the portal backend does not print its usage."; exit 1; }
+                    echo "ok: $base prints its usage" ;;
                   scoot-*)
                     "$f" --print-default-config > /dev/null \
                       || { echo "::error title=$base --print-default-config failed::the compositor binary does not render its default config."; exit 1; }
