@@ -315,6 +315,9 @@ fn accept_under(
                 let step = connection.step(state);
                 if matches!(step, connection::Step::Close) {
                     state.drop_subscriber(connection.id());
+                    // A dead registrant's chords go quiet on disconnect
+                    // (see `global_shortcuts.rs`).
+                    state.drop_global_shortcuts_for(connection.id());
                 }
                 step
             },
@@ -747,6 +750,68 @@ impl State {
             // from local files, for a client that has no files -- answered
             // synchronously, never refused while locked.
             Request::Looks => self.request_looks(),
+            // Portal global shortcuts, stage 1 (see
+            // `dev/design/global-shortcuts.md` and
+            // `global_shortcuts.rs`). Session-level like `outputs`:
+            // answered whether or not the session is locked -- listing
+            // and managing registrations is not window management, and
+            // the grab itself never fires while locked (see `input.rs`).
+            // Registration files the entry under `current_conn` (set by
+            // `Connection::serve`), so a disconnect drops it.
+            Request::ShortcutRegister {
+                app_id,
+                shortcut_id,
+                preferred_trigger,
+                description,
+            } => {
+                if !valid_shortcut_id(&app_id, &shortcut_id) {
+                    return Response::error(
+                        "refused: app_id and shortcut_id must be non-empty, \
+                         at most 128 chars, of [a-zA-Z0-9._-]",
+                    );
+                }
+                let owner = self.current_conn;
+                self.global_shortcuts.register(
+                    app_id,
+                    shortcut_id,
+                    preferred_trigger,
+                    description,
+                    owner,
+                );
+                self.emit_shortcuts_changed();
+                self.shortcuts_response()
+            }
+            Request::ShortcutUnregister {
+                app_id,
+                shortcut_id,
+            } => {
+                if !self.global_shortcuts.unregister(&app_id, &shortcut_id) {
+                    return Response::error(format!("no such shortcut: {app_id}:{shortcut_id}"));
+                }
+                self.emit_shortcuts_changed();
+                self.shortcuts_response()
+            }
+            Request::Shortcuts => self.shortcuts_response(),
+            Request::ShortcutBind {
+                app_id,
+                shortcut_id,
+                combo,
+            } => {
+                let bind = match combo {
+                    Some(keys) => match super::global_shortcuts::resolve_combo(&keys) {
+                        Some(bind) => Some(bind),
+                        None => {
+                            return Response::error(format!("unknown key or bad combo `{keys}`"));
+                        }
+                    },
+                    None => None,
+                };
+                if !self.global_shortcuts.bind(&app_id, &shortcut_id, bind) {
+                    return Response::error(format!("no such shortcut: {app_id}:{shortcut_id}"));
+                }
+                self.emit_shortcuts_changed();
+                self.shortcuts_response()
+            }
         }
     }
 
@@ -1174,4 +1239,18 @@ fn idle_outcome(now: Instant, last_commit: Instant, wait: &PendingIdle) -> IdleO
     } else {
         IdleOutcome::StillWaiting
     }
+}
+
+/// Whether an `(app_id, shortcut_id)` pair is well-formed: non-empty, at
+/// most 128 chars each, of `[a-zA-Z0-9._-]`. The portal spec leaves id
+/// syntax to the implementation; this keeps ids log-safe, socket-safe and
+/// sortable without quoting.
+fn valid_shortcut_id(app_id: &str, shortcut_id: &str) -> bool {
+    fn ok(s: &str) -> bool {
+        !s.is_empty()
+            && s.len() <= 128
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    }
+    ok(app_id) && ok(shortcut_id)
 }

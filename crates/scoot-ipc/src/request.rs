@@ -313,4 +313,63 @@ pub enum Request {
     /// variant, which shares the same version move -- see
     /// `Response::Looks`.)
     Looks,
+    /// Register a portal global shortcut: idempotent upsert by
+    /// `(app_id, shortcut_id)`. The app's `preferred_trigger` is a hint
+    /// only (stored, listed, never auto-bound); the user binds it via
+    /// config `[global-shortcuts]` or `ShortcutBind`. Answered with
+    /// [`Response::Shortcuts`](crate::Response::Shortcuts) re-listing, so
+    /// a backend learns the bound-or-unbound outcome in one round trip.
+    ///
+    /// Additive like `Looks`: a client that never sends this tag decodes
+    /// exactly as before, so no `PROTOCOL_VERSION` bump for the request
+    /// half -- and an older server answers it with an ordinary `Error`.
+    /// (The reply half is a new `Response` variant, which is why the
+    /// version still moves -- see `Response::Shortcuts`.)
+    ShortcutRegister {
+        app_id: String,
+        shortcut_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preferred_trigger: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+    },
+    /// Remove one registration. Unknown ids are refused with an error.
+    /// Answered with [`Response::Shortcuts`](crate::Response::Shortcuts).
+    ///
+    /// Additive like `ShortcutRegister`: a client that never sends this
+    /// tag decodes exactly as before, so no `PROTOCOL_VERSION` bump for
+    /// the request half.
+    ShortcutUnregister {
+        app_id: String,
+        shortcut_id: String,
+    },
+    /// List every registered shortcut with its user binding and conflict
+    /// state. Answered with
+    /// [`Response::Shortcuts`](crate::Response::Shortcuts).
+    ///
+    /// Additive like `ShortcutRegister`: a client that never sends this
+    /// tag decodes exactly as before, so no `PROTOCOL_VERSION` bump for
+    /// the request half.
+    Shortcuts,
+    /// Bind a registered shortcut to a user chord, or clear it with
+    /// `null`. The chord uses the same `super+ctrl+r` spelling as
+    /// `Request::Key`. Binding to a chord a live compositor bind holds
+    /// stays listed but conflicted and never fires (compositor wins);
+    /// unknown ids and bad combos are refused. Answered with
+    /// [`Response::Shortcuts`](crate::Response::Shortcuts).
+    ///
+    /// A distinct `null`-for-clear shape, not a missing field: serde's
+    /// derive reads a missing `Option` as `None`, so a missing `combo`
+    /// would silently clear. `Option::deserialize` makes the field
+    /// required, the same shape as `OutputScale::scale`.
+    ///
+    /// Additive like `ShortcutRegister`: a client that never sends this
+    /// tag decodes exactly as before, so no `PROTOCOL_VERSION` bump for
+    /// the request half.
+    ShortcutBind {
+        app_id: String,
+        shortcut_id: String,
+        #[serde(deserialize_with = "Option::deserialize")]
+        combo: Option<KeyCombo>,
+    },
 }

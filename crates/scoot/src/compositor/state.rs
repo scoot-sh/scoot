@@ -59,6 +59,7 @@ use super::ext_workspace::ExtWorkspaceState;
 use super::foreign_toplevel::ForeignToplevels;
 use super::foreign_toplevel_management::ForeignToplevelManagement;
 use super::gamma_control::GammaControlState;
+use super::global_shortcuts::GlobalShortcuts;
 use super::idle;
 use super::input;
 use super::ipc::PendingIdle;
@@ -1089,6 +1090,26 @@ pub struct State {
     /// reload that changes the binds (see `reload.rs`), so the query always
     /// describes the file the table was built from.
     pub skipped_binds: Vec<scoot_ipc::SkippedBind>,
+    /// Portal global shortcuts, stage 1 (see
+    /// `dev/design/global-shortcuts.md` and `global_shortcuts.rs`):
+    /// registered `(app_id, shortcut_id)` entries with user-assigned
+    /// chords, fired from `input.rs` after compositor binds miss.
+    /// `scoot-core` stays platform-independent: this lives in `scoot`.
+    pub global_shortcuts: GlobalShortcuts,
+    /// The IPC connection currently being served (`Connection::serve`
+    /// sets this before `handle_request`): what a `ShortcutRegister`
+    /// files its entry under, so a disconnect drops it. `0` in tests,
+    /// which call `handle_request` directly.
+    pub current_conn: u64,
+    /// Keycodes a global shortcut intercepted on press, filed under the
+    /// `(app_id, shortcut_id)` they fired, so the matching release is
+    /// intercepted too -- even across a focus change the press itself
+    /// caused -- and reported as `Deactivated` for the same shortcut.
+    /// The counterpart of `suppressed_keys`, kept separate so the two
+    /// paths can never share or steal an entry. Only `input::key`
+    /// inserts or removes entries here. The per-keypress hot path never
+    /// touches this map unless a shortcut actually fires.
+    pub global_suppressed: HashMap<Keycode, (String, String)>,
     /// Pids of children [`State::spawn`] started and the reaper has not
     /// collected yet -- the *only* pids the `SIGCHLD` drain ever `waitpid`s
     /// (see `child_reaper.rs` for why `-1` would steal the unit-test binary's
@@ -1131,8 +1152,8 @@ pub struct State {
     /// and a physical press of the same seat keycode can never share (or
     /// steal) one entry -- see `virtual_input.rs`.
     pub suppressed_keys: HashSet<Keycode>,
-    /// Virtual keycodes currently held that a keybinding intercepted on press, so their matching release is intercepted too instead of forwarded to whoever has focus -- even across a focus change the bind itself caused. The virtual counterpart of [`State::suppressed_keys`], kept separate so a virtual press and a physical press of the same seat keycode can never share (or steal) one entry -- see `virtual_input.rs`. Only the virtual-key filter inserts or removes entries here, and only on transitions (Smithay runs the filter solely for the first source to press a keycode and the last to release it, absorbing the rest before the filter), so two virtual keyboards holding one key fire once and swallow once; the destroy/lock/VT teardown synthesizes releases through that same filter (never `release_source`, which bypasses it), so no entry can strand. Empty -- and never read on the physical per-keypress path -- unless `[virtual_input] binds` is on and a virtual bind has fired.
-    pub virtual_suppressed: HashSet<Keycode>,
+    /// Virtual keycodes currently held that a keybinding intercepted on press, so their matching release is intercepted too instead of forwarded to whoever has focus -- even across a focus change the bind itself caused. The virtual counterpart of [`State::suppressed_keys`], kept separate so a virtual press and a physical press of the same seat keycode can never share (or steal) one entry -- see `virtual_input.rs`. Only the virtual-key filter inserts or removes entries here, and only on transitions (Smithay runs the filter solely for the first source to press a keycode and the last to release it, absorbing the rest before the filter), so two virtual keyboards holding one key fire once and swallow once; the destroy/lock/VT teardown synthesizes releases through that same filter (never `release_source`, which bypasses it), so no entry can strand. Empty -- and never read on the physical per-keypress path -- unless `[virtual_input] binds` is on and a virtual bind has fired. The value names the portal global shortcut the press fired, if any (`None` for a compositor bind): what the matching release reports `Deactivated` for.
+    pub virtual_suppressed: HashMap<Keycode, Option<(String, String)>>,
     /// Keycodes currently held, mirroring the set Smithay keeps inside the
     /// seat keyboard so `input.rs` can tell a key that will be *delivered*
     /// from one it will absorb as a non-transition -- a distinction
@@ -1495,12 +1516,15 @@ impl State {
             interaction_serials: input::interaction::Recent::default(),
             keybindings,
             skipped_binds: Vec::new(),
+            global_shortcuts: GlobalShortcuts::new(),
+            current_conn: 0,
+            global_suppressed: HashMap::new(),
             spawned_children: HashSet::new(),
             #[cfg(feature = "xwayland")]
             reaped_spawns: Vec::new(),
             wallpaper: Default::default(),
             suppressed_keys: HashSet::new(),
-            virtual_suppressed: HashSet::new(),
+            virtual_suppressed: HashMap::new(),
             held_keys: HashSet::new(),
             bind_repeat: None,
             bind_repeat_timer_live: false,

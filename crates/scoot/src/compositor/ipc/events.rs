@@ -125,7 +125,7 @@ impl State {
     pub fn subscribe(&mut self, conn: u64, stream: UnixStream, events: Vec<EventKind>) -> Response {
         if events.is_empty() {
             return Response::error(
-                "subscribe names no event kinds; name at least one (\"output\", \"keyboard\", \"workspace\", \"lock\", \"look\"), \
+                "subscribe names no event kinds; name at least one (\"output\", \"keyboard\", \"workspace\", \"lock\", \"look\", \"global-shortcut\"), \
                  or open a connection for requests instead",
             );
         }
@@ -262,7 +262,7 @@ impl State {
     /// `line` is encoded once, outside, and cloned per subscriber -- one
     /// small allocation each, on a cold path for the output and keyboard
     /// emitters, at most once per output per tick for the workspace flush.
-    pub(super) fn emit(&mut self, kind: EventKind, line: &str) {
+    pub(crate) fn emit(&mut self, kind: EventKind, line: &str) {
         if self.subscribers.is_empty() {
             return;
         }

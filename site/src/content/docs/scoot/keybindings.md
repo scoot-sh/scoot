@@ -235,3 +235,35 @@ layer hide under it; `overlay` and the lock screen stay above.
 `Super+m` fills the usable area instead (bar visible, gaps and ring
 kept). Both restore the layout exactly on leave; moving the window, or
 focusing a window stacked in the same column, ends them.
+
+## Global shortcuts
+
+Some apps want a key that works no matter which window holds focus — a
+push-to-talk key, a record toggle. Those live outside `[binds]`: the app
+registers its shortcut over IPC, and *you* assign the chord, in
+`[global_shortcuts]` keyed by `app-id:shortcut-id`:
+
+```toml
+[global_shortcuts]
+"org.example.recorder:toggle-record" = "super+ctrl+r"
+```
+
+The app's own preferred trigger is a hint only — stored and listed, never
+auto-bound. Nothing fires until you bind it, either here or with
+`scoot msg shortcut-bind`:
+
+```sh
+scoot msg shortcuts
+scoot msg shortcut-bind org.example.recorder toggle-record super+ctrl+r
+scoot msg shortcut-bind org.example.recorder toggle-record reset
+scoot msg subscribe global-shortcut
+```
+
+Rules, in one place: compositor binds always win (a chord the live
+keymap holds stays listed but `conflicted` and never fires); nothing
+fires while the session is locked; key repeat never re-fires; and a
+release is always swallowed for a press that was intercepted, even
+across a focus change. Registrations die with the connection that made
+them, so a dead app's chords go quiet on disconnect. A reload
+re-resolves the file's chords against the live registrations (reported
+as `global_shortcuts`) and tells subscribers to re-list.

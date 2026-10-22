@@ -74,6 +74,12 @@
 //!   never consults the table mid-hold: the press records its keycode in
 //!   `suppressed_keys` (or doesn't), and the release is routed by that set,
 //!   not by what the table says now (see `input::key`).
+//! - `[global_shortcuts]`: the user-assigned chords are swapped in and
+//!   re-resolved against the live registrations (see `global_shortcuts.rs`).
+//!   Registrations survive a reload -- only the file's chords move -- and a
+//!   key held across the swap cannot wedge or drop, for the same routing
+//!   reason as `[binds]` (the press-time identity lives in
+//!   `global_suppressed`). A changed table emits `ShortcutsChanged`.
 //! - `[tty] gpu`, `[renderer] backend`, `[xwayland] enabled`,
 //!   `[virtual_input] enabled` and `[virtual_input] binds`: refused when
 //!   they differ from what the session runs, naming restart as the remedy.
@@ -275,6 +281,7 @@ mod field {
     pub const FLOATING_MODIFIER: &str = "floating.modifier";
     pub const WINDOW_RULES: &str = "window_rule";
     pub const BINDS: &str = "binds";
+    pub const GLOBAL_SHORTCUTS: &str = "global_shortcuts";
     pub const WALLPAPER: &str = "wallpaper";
     pub const WALLPAPER_COMMAND: &str = "wallpaper.command";
 }
@@ -489,6 +496,7 @@ impl State {
         self.apply_autostart_reload(fresh, &mut report);
         self.apply_floating_reload(fresh, &mut report);
         self.apply_binds_reload(fresh, &mut report);
+        self.apply_global_shortcuts_reload(fresh, &mut report);
         self.apply_wallpaper_reload(fresh, &mut report);
 
         self.finish_reload(&report);
@@ -1249,6 +1257,27 @@ impl State {
             self.cancel_bind_repeat();
             report.applied.push(field::BINDS.to_owned());
         }
+    }
+
+    /// `[global_shortcuts]`: swaps the user-assigned chord table and
+    /// re-resolves it against the live registrations (see
+    /// `global_shortcuts.rs`). Registrations survive a reload -- only the
+    /// file's chords move -- and a key held across the swap neither wedges
+    /// nor drops: release routing reads the press-time identity filed in
+    /// `global_suppressed`, never the table. Reports `global_shortcuts`
+    /// when the file's table (or its skipped list) changed; a changed
+    /// binding emits `ShortcutsChanged` so a subscribed backend re-lists.
+    fn apply_global_shortcuts_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
+        if fresh.global_shortcuts.config == self.global_shortcuts.config
+            && fresh.global_shortcuts.key_errors == self.global_shortcuts.key_errors
+        {
+            return;
+        }
+        self.global_shortcuts.config = fresh.global_shortcuts.config.clone();
+        self.global_shortcuts.key_errors = fresh.global_shortcuts.key_errors.clone();
+        self.global_shortcuts.apply_config();
+        self.emit_shortcuts_changed();
+        report.applied.push(field::GLOBAL_SHORTCUTS.to_owned());
     }
 }
 

@@ -1,14 +1,14 @@
 ---
 title: Events
-description: "Subscribe to output, keyboard, workspace, lock and look events over IPC."
+description: "Subscribe to output, keyboard, workspace, lock, look and global-shortcut events over IPC."
 ---
 
-Subscribe instead of polling: dedicate a connection to the event stream for outputs, layouts, workspaces, the session lock and the active look.
+Subscribe instead of polling: dedicate a connection to the event stream for outputs, layouts, workspaces, the session lock, the active look and portal global shortcuts.
 
 ## Events
 
 `subscribe` names the event kinds it wants (`output`, `keyboard`,
-`workspace`, `lock`, `look`;
+`workspace`, `lock`, `look`, `global-shortcut`;
 `scoot msg subscribe` with no names sends `output`; an empty
 `events` list on the raw socket is refused); the reply echoes the subscription,
 and afterwards that connection carries events until the session ends:
@@ -32,6 +32,10 @@ $ scoot msg subscribe lock
 $ scoot msg subscribe look
 {"type":"subscribed","events":["look"]}
 {"type":"look_changed","name":"moonrise","source_hash":"9f2c"}
+$ scoot msg subscribe global-shortcut
+{"type":"subscribed","events":["global_shortcut"]}
+{"type":"shortcut_activated","app_id":"org.example.recorder","shortcut_id":"toggle-record","timestamp_ms":4242}
+{"type":"shortcuts_changed"}
 ```
 
 `scoot msg subscribe` prints the answer, then one compact JSON object per
@@ -183,6 +187,19 @@ reload; a reload that changes nothing emits nothing. A fresh
 subscription starts silent — the current look is whatever the last
 `look_changed` said, or no look if none arrived yet.
 
+**`shortcut_activated` / `shortcut_deactivated`** — a portal global
+shortcut's chord was pressed / released: `app_id` and `shortcut_id`
+naming the registration, `timestamp_ms` the compositor clock at
+intercept time. Sent only to `global-shortcut` subscribers — the
+stage-2 portal backend turns them into the portal `Activated` /
+`Deactivated` signals. Compositor binds always win, so a chord the live
+keymap holds never produces these; nothing fires while locked; key
+repeat never re-fires. **`shortcuts_changed`** — the registered set
+moved (register, unregister, bind, unbind, reload, registrant
+disconnect): re-list with `shortcuts` for the new state — the stage-2
+backend turns it into the portal `ShortcutsChanged` signal. A fresh
+subscription starts silent — read `shortcuts` once for the baseline.
+
 Versioning: the subscription is IPC protocol 5 — the `subscribed`,
 `output_removed` and `output_restored` tags under the 3 → 4 bump, plus the
 `output_changed` tag under 4 → 5 — the keyboard half is protocol 6: the
@@ -193,7 +210,12 @@ and the output-added event is protocol 10: the `output_added` tag, on
 the existing `output` kind, so an `output` subscriber built against
 protocol 9 or older fails to decode it (rebuild it; `scoot msg` from the
 same build as the session is always in step) — and the look-layer event
-is protocol 11: the `look_changed` tag on the new `look` kind. A client that
+is protocol 11: the `look_changed` tag on the new `look` kind — and the
+global-shortcut requests and events are protocol 13: the
+`shortcut_register`, `shortcut_unregister`, `shortcuts` and
+`shortcut_bind` request tags with the `shortcuts` reply, plus the
+`shortcut_activated`, `shortcut_deactivated` and `shortcuts_changed`
+tags on the new `global-shortcut` kind. A client that
 never sends `subscribe` (or `keyboard`, or `locked`) never receives any of them. An unknown event kind
 in a `subscribe` is answered with an ordinary `error` like any unknown
 request tag, so an older server meets a newer subscriber with an error,

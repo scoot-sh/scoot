@@ -26,6 +26,8 @@ use super::tty::VtSwitchOutcome;
 use modifiers::{HeldKeys, KeyPlan, NamedKey, Untypable};
 
 mod compose;
+#[cfg(test)]
+mod global_tests;
 pub(super) mod interaction;
 mod modifiers;
 #[cfg(test)]
@@ -749,7 +751,13 @@ impl State {
     /// modifiers are already down. Otherwise a failure partway through would
     /// leave a modifier (e.g. Super) permanently held at the seat level,
     /// silently corrupting every keypress after it.
-    fn resolve_combo(&mut self, combo: &KeyCombo) -> Result<(Keycode, HeldKeys), String> {
+    /// `pub(super)`: the global-shortcut integration tests resolve chords
+    /// against the live keymap the same way, rather than hardcoding
+    /// evdev codes that only hold for one layout.
+    pub(super) fn resolve_combo(
+        &mut self,
+        combo: &KeyCombo,
+    ) -> Result<(Keycode, HeldKeys), String> {
         let keysym =
             keysym_named(&combo.key).ok_or_else(|| format!("unknown key `{}`", combo.key))?;
         let keyboard = self
@@ -1030,8 +1038,40 @@ impl State {
                         let Some(&keysym) = handle.raw_syms().first() else {
                             return FilterResult::Forward;
                         };
-                        let Some((bound, flags)) = data.keybindings.match_key(keysym, mods.into())
-                        else {
+                        let mods: super::keybindings::Modifiers = mods.into();
+                        let Some((bound, flags)) = data.keybindings.match_key(keysym, mods) else {
+                            // Portal global shortcuts, stage 1: after
+                            // compositor binds miss, before forwarding (see
+                            // `dev/design/global-shortcuts.md`). Compositor
+                            // binds always win; a chord the live table
+                            // holds never reaches here. With no shortcut
+                            // registered this is one length check; with
+                            // registrations it is one hash lookup on a
+                            // stack key -- and nothing allocates unless a
+                            // shortcut fires (then one insert plus one
+                            // encode per subscriber). Locked sessions
+                            // forward (no global shortcut fires from the
+                            // lock screen). Key repeat never reaches this
+                            // filter: Smithay absorbs a re-press of a held
+                            // keycode as a non-transition before running
+                            // it, so only the first press emits
+                            // `Activated`.
+                            if !data.global_shortcuts.is_empty()
+                                && !data.session_lock.is_locked()
+                                && let Some(hit) = data.global_shortcuts.match_key(keysym, mods)
+                                && !data.global_shadowed(mods, keysym)
+                            {
+                                let (app_id, shortcut_id) =
+                                    (hit.app_id.clone(), hit.shortcut_id.clone());
+                                data.global_suppressed
+                                    .insert(keycode, (app_id.clone(), shortcut_id.clone()));
+                                let timestamp_ms = data.millis();
+                                data.emit_shortcut_activated(app_id, shortcut_id, timestamp_ms);
+                                return FilterResult::Intercept(KeyOutcome {
+                                    intercepted: true,
+                                    vt_switch: None,
+                                });
+                            }
                             return FilterResult::Forward;
                         };
                         // While the session is locked, a keybinding that runs
@@ -1112,6 +1152,28 @@ impl State {
                         // alone (see `cancel_bind_repeat_for`).
                         data.cancel_bind_repeat_for(keycode);
                         if data.suppressed_keys.remove(&keycode) {
+                            FilterResult::Intercept(KeyOutcome {
+                                intercepted: true,
+                                vt_switch: None,
+                            })
+                        } else if !data.global_suppressed.is_empty()
+                            && let Some((app_id, shortcut_id)) =
+                                data.global_suppressed.remove(&keycode)
+                        {
+                            // A global shortcut's press intercepted this
+                            // keycode, so its release is intercepted too --
+                            // even across a focus change the press caused --
+                            // and reported as `Deactivated` for the same
+                            // shortcut the press fired (the identity filed
+                            // at press time, so an unregister or disconnect
+                            // between press and release still closes the
+                            // pair cleanly instead of forwarding a lone
+                            // release the new focus never pressed). The
+                            // length check first: with no global press
+                            // held this skips the lookup's hash, like the
+                            // press half's empty-registry check.
+                            let timestamp_ms = data.millis();
+                            data.emit_shortcut_deactivated(app_id, shortcut_id, timestamp_ms);
                             FilterResult::Intercept(KeyOutcome {
                                 intercepted: true,
                                 vt_switch: None,

@@ -17,6 +17,10 @@ release, entries were dated.
 
 ## Unreleased
 
+### scoot,scoot-ipc
+
+- added: portal global shortcuts, stage 1 (compositor side) — apps register `(app_id, shortcut_id)` chords over IPC (`shortcut-register`, `shortcut-bind`, `shortcuts`, `shortcut-unregister`), users assign chords in the new `[global_shortcuts]` table, and presses/releases stream to `global-shortcut` subscribers as `shortcut_activated`/`shortcut_deactivated` (plus `shortcuts_changed`). Compositor binds always win, nothing fires while locked, registrations die with their connection. IPC protocol 12 → 13. The portal backend itself (stage 2) is still to come.
+
 ## [0.5.0](https://github.com/scoot-sh/scoot/compare/v0.4.1...v0.5.0) - 2026-10-21
 
 Breaking changes: the Nix defaults for the launcher and the notification daemon changed (see the two Breaking sections below); each has a one-line escape hatch.

@@ -25,13 +25,14 @@ pub use client::Client;
 pub use codec::{decode, encode, read_message, read_message_buffered, write_message};
 pub use event::{
     EventKind, KeyboardLayout, OutputAdded, OutputChanged, OutputRemoved, OutputRestored,
-    WorkspaceSnapshot,
+    ShortcutEvent, WorkspaceSnapshot,
 };
 pub use help::{DOCS_URL, docs_tail, suggest};
 pub use key::{KeyCombo, Modifier, ParseKeyComboError};
 pub use request::{OutputTarget, PointerButton, ReloadScope, Request, SCREENSHOT_CURSOR_DEFAULT};
 pub use response::{
-    BindRow, LookEntry, OutputSnapshot, Rect, Response, Screenshot, SkippedBind, WindowSnapshot,
+    BindRow, LookEntry, OutputSnapshot, Rect, Response, Screenshot, ShortcutInfo, SkippedBind,
+    WindowSnapshot,
 };
 pub use socket::{SOCKET_ENV, socket_path};
 
@@ -105,4 +106,11 @@ pub use socket::{SOCKET_ENV, socket_path};
 /// ordinary `Error`, like any unknown tag); the reply halves are what move
 /// the version. An older server meets a newer `look-apply` client with an
 /// error, never a misapplied swap.
-pub const PROTOCOL_VERSION: u32 = 12;
+///
+/// And again 12 → 13 for portal global shortcuts, stage 1 (2026-10): four
+/// new request tags (`ShortcutRegister`, `ShortcutUnregister`, `Shortcuts`,
+/// `ShortcutBind`) with one new list reply (`Response::Shortcuts`) and
+/// three new event replies (`ShortcutActivated`, `ShortcutDeactivated`,
+/// `ShortcutsChanged` on the new `GlobalShortcut` kind), under the same
+/// rule -- only a client new enough to ask or subscribe ever receives one.
+pub const PROTOCOL_VERSION: u32 = 13;

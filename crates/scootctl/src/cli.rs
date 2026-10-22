@@ -57,12 +57,21 @@ pub const REQUESTS_HELP: &str = "\
                                     own modifiers from the active layout
     wait-idle [--quiet-ms N] [--timeout-ms N]
     subscribe [EVENT...]          stream events until killed (default: output;
-                                    known events: output, keyboard, workspace, lock, look)
+                                    known events: output, keyboard, workspace,
+                                    lock, look, global-shortcut)
     look-apply NAME                   swap the active look and wait for the
                                     swap to land (answered when the swap's
                                     child exits: `look_applied`, or `error`)
     looks                             the catalog, the active look and the
                                     session's state dir
+    shortcut-register APP_ID SHORTCUT_ID [--trigger COMBO] [--description TEXT]
+                                    register a portal global shortcut (the
+                                    trigger is a hint only; the user binds it)
+    shortcut-unregister APP_ID SHORTCUT_ID
+                                    remove one global-shortcut registration
+    shortcuts                         list every registered global shortcut
+    shortcut-bind APP_ID SHORTCUT_ID COMBO|reset
+                                    bind a registered shortcut (or reset it)
 ";
 
 /// The action grammar both clients print in their `--help`. Same single-owner
@@ -373,11 +382,19 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                     "workspace" => events.push(EventKind::Workspace),
                     "lock" => events.push(EventKind::Lock),
                     "look" => events.push(EventKind::Look),
+                    "global-shortcut" | "global_shortcut" => events.push(EventKind::GlobalShortcut),
                     other => {
                         return Err(
                             match scoot_ipc::suggest(
                                 other,
-                                ["output", "keyboard", "workspace", "lock", "look"],
+                                [
+                                    "output",
+                                    "keyboard",
+                                    "workspace",
+                                    "lock",
+                                    "look",
+                                    "global-shortcut",
+                                ],
                             ) {
                                 Some(suggestion) => Error::Hinted {
                                     kind: "event",
@@ -386,7 +403,7 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                                     topic: "help subscribe",
                                 },
                                 None => Error::Unknown(format!(
-                                    "event {other} (known events: output, keyboard, workspace, lock, look)"
+                                    "event {other} (known events: output, keyboard, workspace, lock, look, global-shortcut)"
                                 )),
                             },
                         );
@@ -435,6 +452,91 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
                 }
             }
             Request::Looks
+        }
+        "shortcut-register" => {
+            let app_id = args.next().ok_or(Error::Missing("an app id"))?;
+            let shortcut_id = args.next().ok_or(Error::Missing("a shortcut id"))?;
+            let mut preferred_trigger = None;
+            let mut description = None;
+            while let Some(flag) = args.next() {
+                match flag.as_str() {
+                    "--trigger" => {
+                        preferred_trigger = Some(
+                            args.next()
+                                .ok_or(Error::Missing("a combo after --trigger"))?,
+                        );
+                    }
+                    "--description" => {
+                        description = Some(
+                            args.next()
+                                .ok_or(Error::Missing("text after --description"))?,
+                        );
+                    }
+                    "--json" => json = true,
+                    other => {
+                        return Err(hinted(
+                            "flag",
+                            other.to_owned(),
+                            &["--trigger", "--description", "--json"],
+                            "help shortcut-register",
+                        ));
+                    }
+                }
+            }
+            Request::ShortcutRegister {
+                app_id,
+                shortcut_id,
+                preferred_trigger,
+                description,
+            }
+        }
+        "shortcut-unregister" => {
+            let app_id = args.next().ok_or(Error::Missing("an app id"))?;
+            let shortcut_id = args.next().ok_or(Error::Missing("a shortcut id"))?;
+            if let Some(extra) = args.next() {
+                return Err(Error::Unknown(extra));
+            }
+            Request::ShortcutUnregister {
+                app_id,
+                shortcut_id,
+            }
+        }
+        "shortcuts" => {
+            for flag in args.by_ref() {
+                match flag.as_str() {
+                    "--json" => json = true,
+                    other => {
+                        return Err(hinted(
+                            "flag",
+                            other.to_owned(),
+                            &["--json"],
+                            "help shortcuts",
+                        ));
+                    }
+                }
+            }
+            Request::Shortcuts
+        }
+        "shortcut-bind" => {
+            let app_id = args.next().ok_or(Error::Missing("an app id"))?;
+            let shortcut_id = args.next().ok_or(Error::Missing("a shortcut id"))?;
+            let raw = args.next().ok_or(Error::Missing("a combo or reset"))?;
+            let combo = if raw == "reset" {
+                None
+            } else {
+                Some(raw.parse().map_err(|_| Error::Invalid {
+                    what: "key combination",
+                    value: raw.clone(),
+                })?)
+            };
+            if let Some(extra) = args.next() {
+                return Err(Error::Unknown(extra));
+            }
+            Request::ShortcutBind {
+                app_id,
+                shortcut_id,
+                combo,
+            }
         }
         other => {
             return Err(hinted(
@@ -1119,6 +1221,140 @@ mod tests {
                 .any(|line| line.trim().starts_with("subscribe [EVENT...]")),
             "--help hides the subscribe verb"
         );
+    }
+
+    #[test]
+    fn subscribe_takes_the_global_shortcut_kind() {
+        assert_eq!(
+            parse_msg_args(&["subscribe", "global-shortcut"]),
+            Ok(Msg {
+                request: Request::Subscribe {
+                    events: vec![EventKind::GlobalShortcut]
+                },
+                out: None,
+                json: false,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["subscribe", "output", "global-shortcut"]),
+            Ok(Msg {
+                request: Request::Subscribe {
+                    events: vec![EventKind::Output, EventKind::GlobalShortcut]
+                },
+                out: None,
+                json: false,
+            })
+        );
+    }
+
+    #[test]
+    fn shortcut_register_takes_ids_and_optional_trigger_and_description() {
+        assert_eq!(
+            parse_msg_args(&["shortcut-register", "org.example", "toggle"]),
+            Ok(Msg {
+                request: Request::ShortcutRegister {
+                    app_id: "org.example".into(),
+                    shortcut_id: "toggle".into(),
+                    preferred_trigger: None,
+                    description: None,
+                },
+                out: None,
+                json: false,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&[
+                "shortcut-register",
+                "org.example",
+                "toggle",
+                "--trigger",
+                "super+ctrl+r",
+                "--description",
+                "toggle it",
+            ]),
+            Ok(Msg {
+                request: Request::ShortcutRegister {
+                    app_id: "org.example".into(),
+                    shortcut_id: "toggle".into(),
+                    preferred_trigger: Some("super+ctrl+r".into()),
+                    description: Some("toggle it".into()),
+                },
+                out: None,
+                json: false,
+            })
+        );
+        assert!(parse_msg_args(&["shortcut-register", "org.example"]).is_err());
+        assert!(parse_msg_args(&["shortcut-register"]).is_err());
+    }
+
+    #[test]
+    fn shortcut_unregister_takes_ids_and_nothing_else() {
+        assert_eq!(
+            parse_msg_args(&["shortcut-unregister", "org.example", "toggle"]),
+            Ok(Msg {
+                request: Request::ShortcutUnregister {
+                    app_id: "org.example".into(),
+                    shortcut_id: "toggle".into(),
+                },
+                out: None,
+                json: false,
+            })
+        );
+        assert!(parse_msg_args(&["shortcut-unregister", "org.example"]).is_err());
+        assert!(
+            parse_msg_args(&["shortcut-unregister", "org.example", "toggle", "extra"]).is_err()
+        );
+    }
+
+    #[test]
+    fn shortcuts_lists_with_optional_json() {
+        assert_eq!(
+            parse_msg_args(&["shortcuts"]),
+            Ok(Msg {
+                request: Request::Shortcuts,
+                out: None,
+                json: false,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["shortcuts", "--json"]),
+            Ok(Msg {
+                request: Request::Shortcuts,
+                out: None,
+                json: true,
+            })
+        );
+    }
+
+    #[test]
+    fn shortcut_bind_takes_a_combo_or_reset() {
+        assert_eq!(
+            parse_msg_args(&["shortcut-bind", "org.example", "toggle", "super+ctrl+r"]),
+            Ok(Msg {
+                request: Request::ShortcutBind {
+                    app_id: "org.example".into(),
+                    shortcut_id: "toggle".into(),
+                    combo: Some("super+ctrl+r".parse().unwrap()),
+                },
+                out: None,
+                json: false,
+            })
+        );
+        assert_eq!(
+            parse_msg_args(&["shortcut-bind", "org.example", "toggle", "reset"]),
+            Ok(Msg {
+                request: Request::ShortcutBind {
+                    app_id: "org.example".into(),
+                    shortcut_id: "toggle".into(),
+                    combo: None,
+                },
+                out: None,
+                json: false,
+            })
+        );
+        // A combo that cannot parse is refused at parse, like `key`'s.
+        assert!(parse_msg_args(&["shortcut-bind", "org.example", "toggle", "hyper+r"]).is_err());
+        assert!(parse_msg_args(&["shortcut-bind", "org.example"]).is_err());
     }
 
     #[test]

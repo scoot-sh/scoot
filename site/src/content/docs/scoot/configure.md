@@ -4,7 +4,7 @@ description: "The config file, live reload, autostart, and what happens when the
 ---
 
 One TOML file holds everything — layout, appearance,
-outputs, binds, floating rules, autostart, wallpaper — and most of it
+outputs, binds, global shortcuts, floating rules, autostart, wallpaper — and most of it
 re-applies live with `scoot msg reload`. No config file yet?
 `--print-default-config` writes a starting one (below).
 
@@ -13,9 +13,9 @@ re-applies live with `scoot msg reload`. No config file yet?
 `--config PATH` loads a TOML file explicitly. Without it, scoot looks
 for `$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
 `~/.config/scoot/config.toml`, and runs on built-in defaults if
-neither exists. Twelve optional tables: `[layout]`, `[appearance]`,
+neither exists. Thirteen optional tables: `[layout]`, `[appearance]`,
 `[output]`, `[[outputs]]`, `[renderer]`, `[tty]`, `[xwayland]`, `[virtual_input]`,
-`[autostart]`, `[floating]`, `[wallpaper]`, `[binds]` — plus any number of
+`[autostart]`, `[floating]`, `[wallpaper]`, `[binds]`, `[global_shortcuts]` — plus any number of
 `[[window_rule]]` entries. Every field in every table is itself
 optional and defaults independently, so a config that only sets `gap`
 leaves everything else at its built-in default.
@@ -75,7 +75,7 @@ both triggers above say exactly when.
 **Applied live:** layout (gap, column widths, default width), output
 scales and positions, `[[outputs]]` modes (a live resize per backend —
 `--nested` refuses them, the host owns the size), appearance (ring, background, corners, cursor), the whole
-`[binds]` table, new `[autostart]` spawn entries, `[floating]` and the
+`[binds]` table, the `[global_shortcuts]` chords, new `[autostart]` spawn entries, `[floating]` and the
 `[[window_rule]]`s (for windows that map after the reload), `[wallpaper]`
 (handed to scootbg again), `[xwayland] fractional`. The reply names
 each applied field:
@@ -116,7 +116,7 @@ running config untouched, and logs — never defaults, never a
 half-applied session, never an exit.
 
 Two guarantees hold across every reload: a key held across a `[binds]`
-rebuild neither wedges nor drops; and under `--tty` a reload cannot
+rebuild (or a `[global_shortcuts]` re-resolve) neither wedges nor drops; and under `--tty` a reload cannot
 strip the `Ctrl+Alt+F1..F12` VT-switch recovery bindings — they are
 layered back on last, overriding any colliding file bind with a
 warning. A reload applies while the session is locked, except new
