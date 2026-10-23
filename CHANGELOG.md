@@ -17,6 +17,24 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.0](https://github.com/scoot-sh/scoot/compare/v0.5.0...v0.6.0) - 2026-10-23
+
+### scoot,scoot-ipc,scootctl
+
+- added: [**breaking**] global shortcuts stage 1 (compositor side) ([#717](https://github.com/scoot-sh/scoot/pull/717))
+
+### scoot-globalshortcuts-portal
+
+- added: GlobalShortcuts portal backend (stage 2) ([#718](https://github.com/scoot-sh/scoot/pull/718))
+
+### scoot-look,looks
+
+- added: fade the wallpaper on shipped-look swaps ([#721](https://github.com/scoot-sh/scoot/pull/721))
+
+### scootctl,nix
+
+- fixed: fall back past missing look fonts instead of refusing ([#719](https://github.com/scoot-sh/scoot/pull/719))
+
 ### scoot,scoot-ipc,scootctl
 
 - **Breaking: the IPC protocol is now 13.** The `shortcuts` reply and the `shortcut_activated`, `shortcut_deactivated` and `shortcuts_changed` tags are new `Response` variants: a client built for protocol 12 handed one fails its decode, so anything that reads the `shortcuts` reply or subscribes to `global-shortcut` must run from the same build as the session (same-build `scoot msg` always is). The request halves are additive: `shortcut-register`, `shortcut-unregister`, `shortcuts` or `shortcut-bind` sent to an older compositor answers an ordinary `error`, never a misapplied request.
