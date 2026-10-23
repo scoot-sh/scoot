@@ -3172,6 +3172,15 @@ let
   # The automounter's command line, for udiskie's own device matcher in
   # the content checks below (`nix/apps-udiskie-rules.py`).
   appsUdiskieExec = hmApps.config.systemd.user.services.scoot-automount.Service.ExecStart;
+  # udiskie's modules for the matcher run, built without its own test
+  # phase: one of those tests (`test_keyutils`, `test_cache`) reads the
+  # kernel keyring and fails on some CI runners ("bytes length not a
+  # multiple of item size"), which failed the whole check on a package
+  # this repo only reads. The module assertions compare `pkgs.udiskie`
+  # itself, so they are unchanged.
+  appsUdiskieModules = pkgs.udiskie.overridePythonAttrs (_: {
+    doCheck = false;
+  });
   # The interpreter udiskie runs on, with what its matcher imports
   # (PyGObject for `udiskie.async_`, PyYAML for its config reader), and
   # udiskie's own modules on the path.
@@ -19060,7 +19069,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       if grep -q -- "--background-color=" ${appsBluePickTargetOff}; then echo "themed flag present with theming off (23)" >&2; exit 1; fi
       if grep -n '@[A-Z]*@' ${appsNetPickThemed} ${appsBluePickThemed} | grep -v -F '@NAME@'; then echo "a placeholder left unreplaced (23)" >&2; exit 1; fi
       GI_TYPELIB_PATH=${pkgs.glib.out}/lib/girepository-1.0:${pkgs.gobject-introspection}/lib/girepository-1.0 \
-        PYTHONPATH=${pkgs.udiskie}/${python3.sitePackages} \
+        PYTHONPATH=${appsUdiskieModules}/${python3.sitePackages} \
         ${appsUdiskiePython}/bin/python3 ${./apps-udiskie-rules.py} ${lib.escapeShellArg appsUdiskieExec}
       echo "ok: the pickers carry the look, the dmenu contract and their wiring; udiskie mounts USB (encrypted too) and loop images, never the machine's own disks"
 
