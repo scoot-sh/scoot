@@ -45,6 +45,9 @@ fn stub_fc_match_dir(scratch: &Scratch) -> PathBuf {
 # $2 is the family. Match on the field name, never the exact flag.
 fmt="$1"
 fam="$2"
+# A box with no usable font at all: nothing resolves, not even the generic
+# fallback. Only the tests that pin the refusal set this.
+[ -n "$SCOOT_STUB_NO_FONT" ] && exit 1
 case "$fam" in
   "DejaVu Sans"|"DejaVu Sans Mono"|"JetBrains Mono")
     case "$fmt" in
@@ -513,15 +516,20 @@ fn json_failure_shapes_are_documents_on_stdout() {
     // effectful refusals, and `apply` with an unknown or refused look.
     let scratch = Scratch::new("json-fail");
     let session = Session::start(&scratch);
-    // An invalid look directory: parses, but names a font that is not
-    // installed, so validation fails with errors (not a bare refusal).
+    // An invalid look directory: parses, but names fonts that are not
+    // installed. With a fallback font on the box that only degrades (see
+    // `a_missing_font_degrades_when_a_fallback_exists`), so the failure
+    // shape is pinned on a box with no font at all.
     let bad = scratch.dir.join("look-bad");
     std::fs::create_dir_all(&bad).expect("a look dir");
     let mut toml = look_toml("look-bad", 2);
     toml = toml.replace("DejaVu Sans", "ScootNoSuchFont");
     toml = toml.replace("JetBrains Mono", "ScootNoSuchFontMono");
     std::fs::write(bad.join("look.toml"), toml).expect("a look.toml");
-    let out = session.look(&["validate", &bad.to_string_lossy(), "--json"]);
+    let out = session.look_with(
+        &["validate", &bad.to_string_lossy(), "--json"],
+        &[("SCOOT_STUB_NO_FONT", "1")],
+    );
     assert_eq!(out.status.code(), Some(1), "validate fails");
     let doc: serde_json::Value =
         serde_json::from_str(&String::from_utf8(out.stdout).expect("UTF-8")).expect("a JSON doc");
@@ -545,6 +553,26 @@ fn json_failure_shapes_are_documents_on_stdout() {
         "{doc}"
     );
 }
+#[test]
+fn a_missing_font_degrades_when_a_fallback_exists() {
+    // The same look as above on a box that does have a fallback font: the
+    // missing families are noted, not refused, so a look never blocks on
+    // a font the box lacks.
+    let scratch = Scratch::new("font-degrade");
+    let session = Session::start(&scratch);
+    let bad = scratch.dir.join("look-bad");
+    std::fs::create_dir_all(&bad).expect("a look dir");
+    let mut toml = look_toml("look-bad", 2);
+    toml = toml.replace("DejaVu Sans", "ScootNoSuchFont");
+    toml = toml.replace("JetBrains Mono", "ScootNoSuchFontMono");
+    std::fs::write(bad.join("look.toml"), toml).expect("a look.toml");
+    let out = session.look(&["validate", &bad.to_string_lossy(), "--json"]);
+    assert_eq!(out.status.code(), Some(0), "validate passes with a note");
+    let doc: serde_json::Value =
+        serde_json::from_str(&String::from_utf8(out.stdout).expect("UTF-8")).expect("a JSON doc");
+    assert_eq!(doc["valid"], true, "{doc}");
+}
+
 #[test]
 fn a_swap_applies_two_looks_through_the_scoped_reload() {
     let scratch = Scratch::new("swap");
