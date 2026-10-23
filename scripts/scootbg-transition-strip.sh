@@ -1,7 +1,8 @@
 #!/bin/sh
 # Frame strip for the transitions docs page: four frames each of a fade, a
-# wipe and a grow, from red to blue, taken from a real headless scoot
-# through scoot's own screenshot path, tiled with stdlib python3 only.
+# wipe and a grow, from red (#c03020) to blue (#2060d0), taken from a real
+# headless scoot through scoot's own screenshot path, tiled with stdlib
+# python3 only.
 #
 # Usage (on a Linux box with a built tree):
 #   scripts/scootbg-transition-strip.sh [out.png]
@@ -10,14 +11,24 @@
 # release or debug `scoot` and `scootbg` beside each other: set SCOOT_BIN
 # and SCOOTBG_BIN, or pass a target dir with both in it. Nothing here
 # touches your session: its own XDG_RUNTIME_DIR, HOME and scoot config.
+#
+# Sampling: scootbg has no paused or step mode — the eased progress comes
+# from the clock (crates/scootbg/src/transition.rs `progress`, driven in
+# crates/scootbg/src/daemon/transition.rs), so frames are sampled with
+# sleeps. Every transition uses `--easing linear` over 4000 ms and shots
+# at ~1 s, ~2 s, ~3 s and at completion (~4 s), i.e. progress ~0.25,
+# ~0.50, ~0.75 and 1.0. Daemon startup latency (tens of ms) moves each
+# sample by ~1%, which a linear easing keeps evenly spaced. The wipe runs
+# at `--angle 0` (new wallpaper in from the left edge) and the grow from
+# the center (`--position 0.5,0.5`).
 set -eu
 
-OUT="${1:-site/src/content/../assets/scootbg-transition-strip.png}"
+OUT="${1:-site/src/assets/scootbg-transition-strip.png}"
 SCOOT_BIN="${SCOOT_BIN:-target/debug/scoot}"
 SCOOTBG_BIN="${SCOOTBG_BIN:-target/debug/scootbg}"
 PYTHON3="${PYTHON3:-python3}"
 RED="#c03020"
-BLUE="#101014"
+BLUE="#2060d0"
 
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/trans-strip-XXXXXX")"
 trap 'kill "$scoot" 2>/dev/null || true; rm -rf "$scratch"' EXIT INT TERM
@@ -59,24 +70,25 @@ for i in $(seq 1 100); do
 done
 
 "$SCOOTBG_BIN" set "$RED"
+sleep 0.5
 frame=0
 for kind in fade wipe grow; do
-    #Fade the default timing, wipe from the left, grow from the center,
-    # over three seconds each.
+    # Linear easing over four seconds, sampled at quarters.
     case "$kind" in
         fade) extra="" ;;
         wipe) extra="--angle 0" ;;
         grow) extra="--position 0.5,0.5" ;;
     esac
     # shellcheck disable=SC2086
-    "$SCOOTBG_BIN" set "$BLUE" --transition "$kind" --duration-ms 3000 $extra &
+    "$SCOOTBG_BIN" set "$BLUE" --transition "$kind" --duration-ms 4000 --easing linear $extra &
     changing=$!
-    sleep 0.8; shot "f$frame"; frame=$((frame + 1))
-    sleep 0.8; shot "f$frame"; frame=$((frame + 1))
-    sleep 0.8; shot "f$frame"; frame=$((frame + 1))
+    sleep 1; shot "f$frame"; frame=$((frame + 1))
+    sleep 1; shot "f$frame"; frame=$((frame + 1))
+    sleep 1; shot "f$frame"; frame=$((frame + 1))
     wait "$changing"
     shot "f$frame"; frame=$((frame + 1))
     "$SCOOTBG_BIN" set "$RED"
+    sleep 0.5
 done
 
 "$SCOOTBG_BIN" kill
@@ -144,8 +156,8 @@ def encode(width, height, pixels):
         return struct.pack('>I', len(body)) + kind + body + struct.pack('>I', zlib.crc32(kind + body))
     return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', idat) + chunk(b'IEND', b'')
 
-# Twelve frames: four per kind (three mid-flight, one final), in capture
-# order fade, wipe, grow.
+# Twelve frames: four per kind (three mid-flight at ~0.25/0.50/0.75, one
+# final at 1.0), in capture order fade, wipe, grow.
 frames = [decode(f'{scratch}/f{i}.png') for i in range(12)]
 w, h = frames[0][0], frames[0][1]
 assert all((fw, fh) == (w, h) for fw, fh, _ in frames), 'one output, one size'
