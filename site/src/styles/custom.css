@@ -228,6 +228,10 @@ kbd {
 .looks img {
   display: block;
   width: 100%;
+  /* One tile shape, so the captions line up whatever the screenshot's own
+   * aspect ratio is. */
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
   height: auto;
   border: 1px solid var(--sl-color-gray-5);
 }
