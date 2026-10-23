@@ -45,6 +45,7 @@ size = 24
 [wallpaper]
 image = "wallpaper.png"
 mode = "fill"
+transition = "fade"
 
 [night]
 temperature = 3500

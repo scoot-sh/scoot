@@ -49,6 +49,40 @@ fn scoot_fragment() {
 }
 
 #[test]
+fn color_wallpaper_carries_no_image_keys() {
+    // `mode` and `fill` apply to an image only: scootbg refuses them
+    // beside a color (`ImageOnly`), so a color wallpaper renders `color`
+    // and `transition` alone, never `image`, `mode` or `fill`.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[wallpaper]\nimage = \"wallpaper.png\"\nmode = \"fill\"",
+        "[wallpaper]\ncolor = \"#101014\"\ntransition = \"fade\"",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("color look parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("color look resolves");
+    let frag = render_scoot(&look, &inputs()).expect("renders");
+    let parsed: toml::Value = toml::from_str(&frag).expect("fragment is TOML");
+    let wallpaper = &parsed["wallpaper"];
+    assert_eq!(
+        wallpaper["color"].as_str(),
+        Some("#101014"),
+        "color renders:\n{frag}"
+    );
+    assert_eq!(
+        wallpaper["transition"].as_str(),
+        Some("fade"),
+        "transition renders:\n{frag}"
+    );
+    for key in ["image", "mode", "fill"] {
+        assert!(
+            wallpaper.get(key).is_none(),
+            "color wallpaper renders `{key}`:\n{frag}"
+        );
+    }
+}
+
+#[test]
 fn bar_fragment() {
     let frag = render_bar(&moonrise(), &inputs()).expect("renders");
     for line in [

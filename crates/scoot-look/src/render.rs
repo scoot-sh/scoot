@@ -214,20 +214,23 @@ pub fn render_scoot(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String
                 )
             })?;
             table.insert("image".to_string(), toml_str(abs));
+            // `mode` and `fill` apply to an image only: scootbg refuses
+            // them beside a color (`ImageOnly`), so a color wallpaper
+            // carries neither, only `color` and `transition`.
+            table.insert(
+                "mode".to_string(),
+                toml_str(wallpaper.mode.map(|m| m.as_str()).unwrap_or("fill")),
+            );
+            table.insert(
+                "fill".to_string(),
+                toml_str(
+                    &wallpaper
+                        .fill
+                        .clone()
+                        .unwrap_or_else(|| p.background.clone()),
+                ),
+            );
         }
-        table.insert(
-            "mode".to_string(),
-            toml_str(wallpaper.mode.map(|m| m.as_str()).unwrap_or("fill")),
-        );
-        table.insert(
-            "fill".to_string(),
-            toml_str(
-                &wallpaper
-                    .fill
-                    .clone()
-                    .unwrap_or_else(|| p.background.clone()),
-            ),
-        );
         table.insert(
             "transition".to_string(),
             toml_str(wallpaper.transition.map(|t| t.as_str()).unwrap_or("none")),

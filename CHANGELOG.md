@@ -33,6 +33,11 @@ release, entries were dated.
 - added: a degraded or failed look swap posts one short desktop notification through the user's own notification daemon (`notify-send` to `org.freedesktop.Notifications`), so the `Super+Shift+T` keypress — whose output goes nowhere — is visible in the UI. Clean swaps stay silent; nothing new runs, and a missing service never fails the swap.
 - fixed: the Nix modules install the families the enabled looks name. Home-manager turns `fonts.fontconfig.enable` on with the fonts target so `fc-match` sees the installed Nerd faces; the NixOS module puts the bar, sans and terminal faces on the system fontconfig path (it previously carried only the greeter's sans, so `apply` refused the other two on NixOS systems without the home-manager theme). Opt out per target as before (`desktop.theme.targets.fonts.enable = false` installs nothing).
 
+### looks,scoot-look
+
+- changed: the five shipped looks fade the wallpaper on every swap (`transition = "fade"`, animating at scootbg's defaults: 500 ms, `ease-out`). Not breaking ([versioning](docs/versioning.md)): no CLI, config schema or protocol changed, and the schema default stays `none` — custom looks without a `transition` render exactly what they did, and setups without scootbg ignore the key.
+- fixed: a color wallpaper renders `color` and `transition` only. The renderer used to emit `mode` and `fill` beside a color, which scootbg refuses (`` `mode` applies to an `image`, and there is none``), so a color look's swap reported applied while the old wallpaper stayed. Image wallpapers render exactly what they did.
+
 ## [0.5.0](https://github.com/scoot-sh/scoot/compare/v0.4.1...v0.5.0) - 2026-10-21
 
 Breaking changes: the Nix defaults for the launcher and the notification daemon changed (see the two Breaking sections below); each has a one-line escape hatch.
