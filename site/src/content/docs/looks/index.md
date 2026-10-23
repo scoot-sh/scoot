@@ -144,7 +144,7 @@ JSON](#exit-codes-and-json).
 |---|---|
 | Compositor ring, background, corners, cursor | Live, on apply |
 | Bar colors, radius, opacity, fonts | Live, on apply |
-| Wallpaper image or color | Live, on apply |
+| Wallpaper image or color | Live, on apply; the five shipped looks fade over 500 ms (`transition = "fade"` in the look's `[wallpaper]`; `"none"` swaps at once) |
 | Dark mode, GTK theme, icons, cursor, app font (`color-scheme`, `gtk-theme`, `icon-theme`, `cursor-theme`, `cursor-size`, `font-name`) | Live, on apply (see below) |
 | GTK `gtk.css` colors | Next launch: GTK 3 text selection plus libadwaita accent and surfaces follow; plain GTK 4 keeps its stock accent; running apps keep their palette |
 | Qt style variant and palette | Next launch of each app; under the Adwaita style QWidget apps keep Adwaita's fixed palette (see below) |
@@ -525,6 +525,11 @@ refuses if that fails — so a later swap makes no network request.
 compositor's `[appearance]` and `[wallpaper]`, the bar's `[colors]`) as
 a source look in `user-looks/`, extending the recorded live look (apply
 one first). The save is user-authored, so it can be extended.
+
+To turn the fade off, set `transition = "none"` in the `[wallpaper]` of
+a look you author. A `[wallpaper]` section in your own `scoot.toml`
+replaces the look's whole wallpaper, image included, so it is not a way
+to drop only the fade.
 
 ## Exit codes and JSON
 
