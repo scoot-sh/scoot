@@ -19,7 +19,7 @@ Version:        0.5.0
 Release:        1%{?dist}
 # No -debuginfo/-debugsource subpackages: see scoot.spec.
 %global         debug_package %{nil}
-Summary:        GlobalShortcuts portal backend for the scoot compositor
+Summary:        GlobalShortcuts portal for the scoot compositor
 License:        MIT
 URL:            https://github.com/scoot-sh/scoot
 Source0:        https://github.com/scoot-sh/scoot/releases/download/v%{version}/scoot-%{version}-vendored.tar.gz
@@ -32,12 +32,11 @@ BuildRequires:  systemd-rpm-macros
 %endif
 
 %description
-scoot-globalshortcuts-portal is the GlobalShortcuts portal backend for
-the scoot compositor. It owns org.freedesktop.impl.portal.desktop.scoot,
-serves org.freedesktop.impl.portal.GlobalShortcuts v2, registers
-shortcuts with the compositor over scoot-ipc, and turns presses and
-releases into portal Activated/Deactivated/ShortcutsChanged signals.
-Shortcut assignment lives in the compositor's [global_shortcuts] config.
+scoot-globalshortcuts-portal lets apps ask for global shortcuts on the
+scoot compositor through the GlobalShortcuts portal. It registers each
+shortcut with the compositor and turns key presses and releases into the
+portal's Activated, Deactivated and ShortcutsChanged signals. Shortcut
+assignment lives in the compositor's [global_shortcuts] config.
 
 %prep
 # Same vendored-tarball layout as scoot.spec: ./source/, not ./Name-Version.
