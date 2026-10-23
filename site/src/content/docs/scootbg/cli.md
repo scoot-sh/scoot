@@ -1,5 +1,5 @@
 ---
-title: CLI reference
+title: scootbg CLI reference
 description: "Every scootbg command, when it returns, apply-config, query, and exit statuses."
 ---
 

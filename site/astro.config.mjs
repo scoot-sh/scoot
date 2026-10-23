@@ -112,6 +112,10 @@ export default defineConfig({
       expressiveCode: {
         themes: ['starlight-dark'],
         useStarlightUiThemeColors: true,
+        // Long commands wrap instead of scrolling sideways: on a phone the
+        // image name at the end of `docker run ...` was off-screen. Copy
+        // still copies the original single line.
+        defaultProps: { wrap: true },
       },
       // One group per app (see site/OUTLINE.md): cross-cutting Start
       // first, the scoot desktop as the primary path, then each app

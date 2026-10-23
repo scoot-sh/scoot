@@ -931,6 +931,8 @@ The scootnotify, scootlaunch and scootgreet plans ([dev/design/shell-apps.md](..
 
 ### Meta
 - [Docs migration remainder: M7 split, M8 STE pass, M9 coming-flips](./core/docs-migration-m7-m9.md)
+- [Site: scootlaunch/scootnotify break the per-app page template](./core/site-section-templates.md)
+- [Site: verify search ranking in a browser; descriptive preview alts](./core/site-search-alts-pass.md)
 - [Split the CLI out into `scootctl`](./resolved/rename-flex-family-done.md) — CLOSED 2026-09-20: the `flexwm` → `scoot` rename half landed 2026-09-18 (PR #128); the crate split landed 2026-09-20 ([record](./resolved/scootctl-split-done.md)): new `scootctl` lib+bin crate, `scoot msg` kept as a permanent alias, Darwin default is `scootctl`. A status bar stays separate.
 
 ### Not-yet removal plan (2026-09-21, macOS excluded)

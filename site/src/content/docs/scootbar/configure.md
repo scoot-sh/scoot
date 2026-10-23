@@ -1,5 +1,5 @@
 ---
-title: Configure
+title: Configure scootbar
 description: "Layout, fonts, colors, layers, outputs, hiding, margins, spacing, shape — and icons."
 ---
 
