@@ -5,7 +5,7 @@
 # `scootnotify`: install one or the other, never both.
 
 pkgname=scootnotify-git
-pkgver=0.5.0.r0.g0000000
+pkgver=0.6.0.r0.g0000000
 pkgrel=1
 pkgdesc='Notification daemon for the scoot compositor (git)'
 arch=('x86_64' 'aarch64')
