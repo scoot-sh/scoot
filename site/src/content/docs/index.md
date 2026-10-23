@@ -8,15 +8,12 @@ hero:
   image:
     html: '<picture class="hero-art"><source type="image/avif" srcset="./hero-cat-960.avif 960w, ./hero-cat-1440.avif 1440w" sizes="(max-width: 1280px) 100vw, 1280px" /><source type="image/webp" srcset="./hero-cat-960.webp 960w, ./hero-cat-1440.webp 1440w" sizes="(max-width: 1280px) 100vw, 1280px" /><img src="./hero-cat-960.jpg" fetchpriority="high" decoding="async" alt="scoot — a grumpy ginger cat swats terminal windows sideways off a black background, under a huge white scoot wordmark" /></picture>'
   actions:
-    - text: Try it now
+    - text: Try it in Docker
       link: '#try-it-now'
       icon: rocket
-    - text: Get the scoot desktop
-      link: desktop/
-      icon: download
-    - text: Install on any Linux
+    - text: Install
       link: start/install/
-      icon: right-arrow
+      icon: download
       variant: minimal
 ---
 
@@ -28,7 +25,7 @@ One command. No install, no GPU.
 docker run --rm -p 127.0.0.1:6080:6080 ghcr.io/scoot-sh/try-scoot
 ```
 
-Open `http://127.0.0.1:6080`. Click the desktop. Press `Alt+Return` for a second terminal. No Docker? [Use Nix](./start/install.md#or-in-a-window-on-linux-nix).
+Open `http://127.0.0.1:6080`. Click the desktop. Press `Alt+Return` for a second terminal. No Docker? [Use Nix](./start/install.md#or-in-a-window-on-linux-nix). To keep it: [Install](./start/install.md#use-it-every-day), including [the scoot desktop](./desktop/index.md).
 
 ## Looks
 

@@ -14,7 +14,9 @@ scootbg set ~/Pictures/city.png --transition wipe --angle 90
 scootbg set ~/Pictures/grid.png --transition grow --position 0,0 --output DP-1
 ```
 
-![Four frames of a wipe from red to blue, left to right](../../../assets/scootbg-transition-strip.png)
+![Twelve frames in three rows — fade, wipe left to right, and grow from the center — from red #c03020 to blue #2060d0](../../../assets/scootbg-transition-strip.png)
+
+*Three rows of four frames: fade, wipe (left to right), and grow (from the center), from red to blue.*
 
 While a transition runs, `query` reports it: `"transition":"fade"`
 (`"wipe"`, `"grow"`, else `null`). `set` returns once the last frame
