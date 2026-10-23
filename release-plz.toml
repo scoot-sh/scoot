@@ -121,11 +121,3 @@ git_tag_enable = true
 changelog_update = true
 changelog_path = "./CHANGELOG.md"
 changelog_include = ["scootctl", "scoot-core", "scoot-ipc", "scoot-look", "scootbg", "scootbg-mem", "scootbar", "scootlaunch", "scootnotify", "scoot-globalshortcuts-portal"]
-
-[[package]]
-name = "scoot-globalshortcuts-portal"
-# New since the last tag: without its own tag template release-plz
-# looks it up in the last release's checkout, where it does not exist.
-# Drop this entry in the first release PR that contains the crate (see
-# docs/versioning.md and scripts/check-release-plz-crates).
-git_tag_name = "scoot-globalshortcuts-portal-v{{ version }}"
