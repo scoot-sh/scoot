@@ -1,5 +1,5 @@
 ---
-title: Configure
+title: Configure scoot
 description: "The config file, live reload, autostart, and what happens when the file is wrong."
 ---
 

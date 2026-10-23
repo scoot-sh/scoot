@@ -9,7 +9,7 @@ Every layout action and its arguments — the same grammar `scoot msg --help` pr
 
 One parser handles `scoot msg --help`, `scoot --help`, and config `[binds]` values:
 
-```
+```text
 focus-column|move-column|consume-or-expel   left|right
 focus-window|move-window                    up|down
 focus-workspace|move-window-to-workspace    up|down

@@ -1,5 +1,5 @@
 ---
-title: CLI reference
+title: scootlaunch CLI reference
 description: "Every scootlaunch command and flag that ships today: the panel, --list, --query, --run-id, --dmenu, --run, --all, --lenient, --json, --check, and the agent JSON schema."
 ---
 

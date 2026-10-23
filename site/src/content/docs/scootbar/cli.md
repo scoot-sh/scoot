@@ -1,5 +1,5 @@
 ---
-title: CLI reference
+title: scootbar CLI reference
 description: "Every scootbar command and flag, scootbar msg, the agent interface, checks and exit statuses."
 ---
 
