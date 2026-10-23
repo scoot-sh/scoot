@@ -86,7 +86,7 @@ color = "#2B3648"
 | `opacity` | `bar`, `popups`, `terminal`: 0.0 to 1.0, each default 1.0. |
 | `shape` | `radius`: 0 to 64, default 0. `ring-width`: 0 to 64, required. `ring-inactive-width`: default = `ring-width`. No `gap` in v1: gap is layout, not presentation. |
 | `cursor` | `theme`: name, required. `size`: 4 to 256, default 24. `accent`: `#rrggbb` or `"none"`, default = `focus`. `body`: optional `#rrggbb`; a look leaves it alone unless set. |
-| `wallpaper` | One unit, never merged per key: `image` or `color`, never both. `image` is a path inside the look dir, or `https://` plus a required 64-hex `sha256`. `mode`: `fill`, `fit`, `stretch`, `center` or `tile`. `fill`: default = `background`. `transition`: `none`, `fade`, `wipe` or `grow`. |
+| `wallpaper` | One unit, never merged per key: `image` or `color`, never both. `image` is a path inside the look dir, or `https://` plus a required 64-hex `sha256`. `mode`: `fill`, `fit`, `stretch`, `center` or `tile` (image only; a color wallpaper carries no `mode` or `fill`). `fill`: default = `background`. `transition`: `none`, `fade`, `wipe` or `grow` (default `none`; the five shipped looks set `fade`, which animates at scootbg's defaults: 500 ms, `ease-out`). |
 | `icons` | `theme`: name. Default `Adwaita`. |
 | `night` | `temperature`: 1000 to 10000. |
 | `apps.<app>` | Per-app overrides. Each key is the app's own dotted config key, quoted. Only allowlisted keys parse, and each key's value is checked against its kind (see below). Anything else refuses by name. `name` must match the look directory name. |

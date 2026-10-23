@@ -1595,8 +1595,9 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 /// from installed looks without `--trust`); 11 adds the launcher
 /// fragment (`launch.toml`, read at every panel open); 12 adds the
 /// notification fragment (`notify.toml`, read at daemon start and on
-/// re-theme).
-pub const RENDER_VERSION: u32 = 12;
+/// re-theme); 13 drops `mode` and `fill` from a color wallpaper (scootbg
+/// refuses them without an image), so an unchanged look re-renders.
+pub const RENDER_VERSION: u32 = 13;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
