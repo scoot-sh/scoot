@@ -2317,6 +2317,210 @@ fn a_font_refusal_refuses_before_anything_is_touched() {
 }
 
 #[test]
+fn a_missing_ui_family_falls_back_to_a_sibling_with_a_note() {
+    struct SiblingFallback {
+        sans: String,
+        mono: String,
+    }
+    impl Checks for SiblingFallback {
+        fn font_file(&self, family: &str) -> Result<Availability<String>, String> {
+            match family {
+                "DejaVu Sans" => Ok(Availability::Available(self.sans.clone())),
+                "DejaVu Sans Mono" => Ok(Availability::Available(self.mono.clone())),
+                _ => Err(format!(
+                    "font `{family}` is not installed (fc-match resolves it to `Fallback`)"
+                )),
+            }
+        }
+        fn wallpaper(&self, _: &Path) -> Result<Availability<()>, String> {
+            Ok(Availability::Available(()))
+        }
+        fn bar_fragment(&self, _: &Path) -> Result<Availability<()>, String> {
+            Ok(Availability::Available(()))
+        }
+        fn foot_fragment(&self, _: &Path) -> Result<Availability<()>, String> {
+            Ok(Availability::Available(()))
+        }
+    }
+    // A look whose ui family is missing but whose sans/mono resolve: the
+    // Nix case (DejaVu uninstalled, Nerd families present, or vice versa).
+    let scratch = scratch("font-sibling");
+    let root: PathBuf = scratch.path().to_owned();
+    let sources = root.join("looks");
+    let mut text = look_toml("look-a");
+    text = text.replace("ui = \"DejaVu Sans\"", "ui = \"ZZNoSuchUIFont\"");
+    let dir = sources.join("look-a");
+    std::fs::create_dir_all(&dir).expect("a look dir");
+    std::fs::write(dir.join("look.toml"), text).expect("a look.toml");
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    let cache = root.join("cache");
+    let state = root.join("state");
+    let config = root.join("config");
+    let checks = SiblingFallback {
+        sans: "/fonts/DejaVuSans.otf".to_owned(),
+        mono: "/fonts/DejaVuSansMono.otf".to_owned(),
+    };
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with_live(
+        "look-a",
+        &options(),
+        &catalog,
+        &cache,
+        &state,
+        Some(&config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
+    )
+    .expect("a missing ui family falls back, never refuses");
+    assert_eq!(report.name, "look-a");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("ZZNoSuchUIFont")
+                && note.contains("another of the look's families")),
+        "fallback note names the missing family: {:?}",
+        report.notes
+    );
+    assert!(state.join("look.json").is_file());
+}
+
+#[test]
+fn all_missing_families_fall_back_to_fontconfig_generic() {
+    struct GenericFallback {
+        path: String,
+    }
+    impl Checks for GenericFallback {
+        fn font_file(&self, family: &str) -> Result<Availability<String>, String> {
+            Err(format!(
+                "font `{family}` is not installed (fc-match resolves it to `Fallback`)"
+            ))
+        }
+        fn fallback_font_file(&self) -> Result<Availability<String>, String> {
+            Ok(Availability::Available(self.path.clone()))
+        }
+        fn wallpaper(&self, _: &Path) -> Result<Availability<()>, String> {
+            Ok(Availability::Available(()))
+        }
+        fn bar_fragment(&self, _: &Path) -> Result<Availability<()>, String> {
+            Ok(Availability::Available(()))
+        }
+        fn foot_fragment(&self, _: &Path) -> Result<Availability<()>, String> {
+            Ok(Availability::Available(()))
+        }
+    }
+    // Every named family missing (a bare Nix box with no DejaVu): the
+    // generic fontconfig answer carries the apply with a note.
+    let scratch = scratch("font-generic");
+    let root: PathBuf = scratch.path().to_owned();
+    let sources = root.join("looks");
+    let mut text = look_toml("look-a");
+    text = text.replace("ui = \"DejaVu Sans\"", "ui = \"ZZNoSuchUIFont\"");
+    text = text.replace("sans = \"DejaVu Sans\"", "sans = \"ZZNoSuchSans\"");
+    text = text.replace("mono = \"DejaVu Sans Mono\"", "mono = \"ZZNoSuchMono\"");
+    let dir = sources.join("look-a");
+    std::fs::create_dir_all(&dir).expect("a look dir");
+    std::fs::write(dir.join("look.toml"), text).expect("a look.toml");
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    let cache = root.join("cache");
+    let state = root.join("state");
+    let config = root.join("config");
+    let checks = GenericFallback {
+        path: "/fonts/generic-fallback.otf".to_owned(),
+    };
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with_live(
+        "look-a",
+        &options(),
+        &catalog,
+        &cache,
+        &state,
+        Some(&config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
+    )
+    .expect("a generic fallback carries the apply");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("/fonts/generic-fallback.otf")),
+        "generic fallback noted: {:?}",
+        report.notes
+    );
+    assert!(state.join("look.json").is_file());
+}
+
+#[test]
+fn no_usable_font_at_all_still_refuses() {
+    struct NoFonts;
+    impl Checks for NoFonts {
+        fn font_file(&self, family: &str) -> Result<Availability<String>, String> {
+            Err(format!(
+                "font `{family}` is not installed (fc-match resolves it to `Fallback`)"
+            ))
+        }
+        fn fallback_font_file(&self) -> Result<Availability<String>, String> {
+            Ok(Availability::Unavailable(
+                "fontconfig answered no fallback font file (no fonts installed?)".to_owned(),
+            ))
+        }
+        fn wallpaper(&self, _: &Path) -> Result<Availability<()>, String> {
+            Ok(Availability::Available(()))
+        }
+        fn bar_fragment(&self, _: &Path) -> Result<Availability<()>, String> {
+            Ok(Availability::Available(()))
+        }
+        fn foot_fragment(&self, _: &Path) -> Result<Availability<()>, String> {
+            Ok(Availability::Available(()))
+        }
+    }
+    let scratch = scratch("font-none");
+    let root: PathBuf = scratch.path().to_owned();
+    let sources = root.join("looks");
+    let mut text = look_toml("look-a");
+    text = text.replace("ui = \"DejaVu Sans\"", "ui = \"ZZNoSuchUIFont\"");
+    let dir = sources.join("look-a");
+    std::fs::create_dir_all(&dir).expect("a look dir");
+    std::fs::write(dir.join("look.toml"), text).expect("a look.toml");
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    let cache = root.join("cache");
+    let state = root.join("state");
+    let config = root.join("config");
+    let checks = NoFonts;
+    let mut compositor = FakeCompositor::not_running();
+    let failure = apply_with_live(
+        "look-a",
+        &options(),
+        &catalog,
+        &cache,
+        &state,
+        Some(&config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
+    )
+    .expect_err("no usable font at all refuses");
+    assert!(
+        failure.message.contains("no fallback font file exists"),
+        "{}",
+        failure.message
+    );
+    assert!(!state.join("look.json").exists());
+}
+
+#[test]
 fn relative_dirs_resolve_absolute_before_anything_is_recorded() {
     use super::absolutize;
     // A relative cache must never reach the record: the next read would
@@ -2370,7 +2574,9 @@ fn a_directory_builds_itself_never_the_catalog_collision() {
 #[test]
 fn effectful_refusals_are_structured_not_bare_errors() {
     // `validate --json` always prints a document: effectful refusals land
-    // in `errors`, only catalog failures refuse the command.
+    // in `errors`, only catalog failures refuse the command. With no
+    // usable font file at all (every family refuses, no fallback probed),
+    // the three missing families refuse structurally.
     let fixture = fixture("structured");
     let checks = FakeChecks {
         font_dir: None,
@@ -2386,7 +2592,7 @@ fn effectful_refusals_are_structured_not_bare_errors() {
         validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
     assert_eq!(validation.errors.len(), 3, "{:?}", validation.errors);
     for error in &validation.errors {
-        assert!(error.contains("resolves to nothing"), "{error}");
+        assert!(error.contains("no fallback font file exists"), "{error}");
     }
 }
 

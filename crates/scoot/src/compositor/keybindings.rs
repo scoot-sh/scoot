@@ -238,8 +238,10 @@ impl Default for Keybindings {
             // Fires once and never while locked (the default flags): a swap
             // repaints pixels the lock screen owns, so it waits for unlock.
             // The desktop visibly changes and the compositor emits its look
-            // event; a bar look-name module or a toast (with the picker and
-            // notify work) names the new look.
+            // event; a bar look-name module names the new look, and a
+            // degraded step (a font fell back, looks skipped) posts one
+            // desktop notification through the user's daemon, since this
+            // spawn's own output goes nowhere.
             (
                 SUPER_SHIFT,
                 Keysym::t,

@@ -383,6 +383,14 @@ let
       type = lib.types.listOf lib.types.package;
       default = [ ];
     };
+    # What home-manager's own fontconfig module declares (which the
+    # theme's `fonts.fontconfig.enable` default sets): the pure-module
+    # evaluations below do not import home-manager, so the leaf is
+    # stubbed here the way the other home-manager-owned options are.
+    options.fonts.fontconfig.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
     # The user's home, as home-manager computes it from the username:
     # the leaf modules link the live look fragments at absolute paths
     # under it. A stable fake, so link-target pins read clean.
@@ -13022,6 +13030,13 @@ let
       assert hmTheme.config.xdg.configFile ? "fontconfig/conf.d/10-scoot-look.conf";
       true
     )
+    # ...and fontconfig sees the installed faces (the profile turns
+    # home-manager's own fontconfig module on with the fonts target, so
+    # `fc-match` resolves the look's families instead of refusing)...
+    (
+      assert hmTheme.config.fonts.fontconfig.enable;
+      true
+    )
     (
       assert hmTheme.config.xdg.configFile ? "foot/foot.ini";
       true
@@ -13275,6 +13290,10 @@ let
     )
     (
       assert !(hmThemeFontsOff.config.xdg.configFile ? "fontconfig/conf.d/10-scoot-look.conf");
+      true
+    )
+    (
+      assert !hmThemeFontsOff.config.fonts.fontconfig.enable;
       true
     )
     (
@@ -14055,6 +14074,30 @@ let
       assert osLookCatalog.config.environment.etc."scoot/look-nix-targets".text == "";
       true
     )
+    # ...and the look's families sit on the system fontconfig path (the
+    # bar face, the sans and the terminal face — previously only the
+    # greeter's sans installed, so `apply` refused the other two on
+    # NixOS systems without the home-manager theme)...
+    (
+      assert builtins.elem osLookCatalog.config.programs.scoot.desktop.theme.fonts.uiPackage
+        osLookCatalog.config.fonts.packages;
+      true
+    )
+    (
+      assert builtins.elem osLookCatalog.config.programs.scoot.desktop.theme.fonts.sansPackage
+        osLookCatalog.config.fonts.packages;
+      true
+    )
+    (
+      assert builtins.elem osLookCatalog.config.programs.scoot.desktop.theme.fonts.monoPackage
+        osLookCatalog.config.fonts.packages;
+      true
+    )
+    # ...opting the fonts target out installs none of them...
+    (
+      assert osLookTargetsOff.config.fonts.packages == [ ];
+      true
+    )
     (
       assert allAssertionsHold osLookTargetsOff.config;
       true
@@ -14205,6 +14248,12 @@ let
     )
     (
       assert hmTheme.config.programs.scoot.desktop.theme.fonts.sansPackage == null;
+      true
+    )
+    # ...and fontconfig stays off with the packages null (nothing to
+    # point it at off Linux)...
+    (
+      assert !hmTheme.config.fonts.fontconfig.enable;
       true
     )
     (

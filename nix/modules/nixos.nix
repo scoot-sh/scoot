@@ -2697,6 +2697,23 @@ in
         ++ lib.optional (!cfg.desktop.theme.targets.fonts.enable) "fonts"
       );
     })
+    # The look's families on the system fontconfig path: the bar face, the
+    # proportional sans and the terminal face (DejaVu plus the two Nerd
+    # faces the shipped looks name). The catalog render already carries the
+    # bar face as a file, but `scoot look apply` resolves every named
+    # family through `fc-match`: with only the greeter's sans on
+    # `fonts.packages` (below) the ui/mono lookups refuse on a NixOS
+    # system without the home-manager theme. On with the desktop profile
+    # while the fonts target is on (still individually disable-able via
+    # `targets.fonts.enable = false`); an explicit `fonts.packages` adds
+    # beside this. Linux-only: every default is null off Linux, and the
+    # `!= null` guards keep a null out of the list.
+    (lib.mkIf (cfg.desktop.enable && cfg.desktop.theme.targets.fonts.enable) {
+      fonts.packages =
+        lib.optional (cfg.desktop.theme.fonts.uiPackage != null) cfg.desktop.theme.fonts.uiPackage
+        ++ lib.optional (cfg.desktop.theme.fonts.sansPackage != null) cfg.desktop.theme.fonts.sansPackage
+        ++ lib.optional (cfg.desktop.theme.fonts.monoPackage != null) cfg.desktop.theme.fonts.monoPackage;
+    })
     # The bar half lives in the bar module (`nix/modules/scootbar.nix`
     # reads this profile): a set of `programs.scootbar` here would need
     # that module imported, and a conditional set of an undeclared option

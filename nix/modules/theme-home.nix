@@ -472,6 +472,16 @@ in
   };
 
   config = lib.mkMerge [
+    # The look's fonts reach fontconfig through home-manager's fontconfig
+    # module (which links each package's `share/fonts` into
+    # `~/.local/share/fonts`, where `fc-match` reads them): without it the
+    # packages below install yet `scoot look apply` still refuses the
+    # look's families as not installed. On with the fonts target (still
+    # individually disable-able); an explicit value wins. Off Linux this
+    # stays untouched.
+    (lib.mkIf (themeOn && fontsThemed && isLinux) {
+      fonts.fontconfig.enable = lib.mkDefault true;
+    })
     # Packages, assertions and session variables for the user. Each
     # piece reads its own target, so opting one out drops its files
     # (and its package) while the rest follows the look.
