@@ -39,6 +39,7 @@ trust the cache yet: [add it](https://www.scoot.sh/start/install/#or-in-a-window
 | You want to… | Do this |
 |---|---|
 | Try it **in a browser**, with no install | `docker run` above, then open `http://127.0.0.1:6080`. [Install → Try it in your browser](https://www.scoot.sh/start/install/#try-it-in-your-browser) |
+| Try it **from a USB stick**, with no install | Boot the [live ISO](https://github.com/scoot-sh/scoot-iso): a NixOS live session with the scoot compositor, then an installer with four looks. [Install → Or boot the live ISO](https://www.scoot.sh/start/install/#or-boot-the-live-iso) |
 | Use it every day on **NixOS** | Add the flake and turn on `programs.scoot.desktop`. You get a bar, wallpaper, lock, notifications and a launcher. [Install → Use it every day](https://www.scoot.sh/start/install/#use-it-every-day) |
 | Use it every day on **Debian, Ubuntu, Fedora, openSUSE or Arch** | Packages are coming. Today, build one from this repo in a few steps. [Install](https://www.scoot.sh/start/install/#use-it-every-day) |
 | Keep it on **any Linux with Nix** | `nix profile add github:scoot-sh/scoot#scoot github:scoot-sh/scoot#scootbar github:scoot-sh/scoot#scootbg` |

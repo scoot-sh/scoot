@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""Bump a downstream checkout's scoot pin to a new release tag.
+
+    scripts/bump-downstream <checkout-dir> <tag>
+
+<checkout-dir> is a git checkout of scoot-sh/try-scoot or
+scoot-sh/scoot-iso at any ref. <tag> is a scoot release tag
+(`vX.Y.Z`, no prereleases: a `-rc.1` suffix is refused).
+
+What it updates, only where the file exists:
+- `flake.nix` and `iso/target/flake.nix`: the `scoot.url =
+  "github:scoot-sh/scoot/<tag>"` line, plus the pinned nixpkgs rev
+  (a 40-hex `github:NixOS/nixpkgs/<rev>`) synced to the nixpkgs rev
+  that tag's own `flake.lock` pins, so the ISO stays on the same
+  libraries as the compositor it ships.
+- `flake.lock` (and `iso/target/flake.lock`): `nix flake lock
+  --update-input scoot` in each directory that holds a flake.
+- `tests/patch_consistency.py` (scoot-iso only): the `SCOOT_REF`,
+  `SCOOT_REV` and `NIXPKGS_REV` constants.
+
+Idempotent: running it twice with the same tag leaves a clean tree
+the second time. It never commits; the caller commits and opens the
+PR. Network is required (tag resolve, flake inputs, nar hashes).
+"""
+
+import json
+import re
+import subprocess
+import sys
+import urllib.request
+from pathlib import Path
+
+TAG_RE = re.compile(r"^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+HEX40 = re.compile(r"[0-9a-f]{40}")
+
+
+def fail(msg):
+    print(f"bump-downstream: FAIL: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def run(*args, cwd=None):
+    r = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    if r.returncode != 0:
+        fail(f"{' '.join(args)} failed:\n{r.stderr.strip() or r.stdout.strip()}")
+    return r.stdout.strip()
+
+
+def scoot_rev_for_tag(tag):
+    out = run("git", "ls-remote", "https://github.com/scoot-sh/scoot",
+              f"refs/tags/{tag}*")
+    # Annotated tags list both the tag object and the peeled commit
+    # ("^{}" suffix): the lock pins the commit, so prefer peeled.
+    for line in out.splitlines():
+        if line.endswith("^{}"):
+            return line.split()[0]
+    cands = [l.split()[0] for l in out.splitlines() if l.strip()]
+    if not cands:
+        fail(f"tag {tag} not found on scoot-sh/scoot")
+    return cands[0]
+
+
+def scoot_nixpkgs_rev_for_tag(tag):
+    url = f"https://raw.githubusercontent.com/scoot-sh/scoot/{tag}/flake.lock"
+    try:
+        with urllib.request.urlopen(url, timeout=60) as resp:
+            lock = json.loads(resp.read().decode())
+    except Exception as e:  # noqa: BLE001 - network failure is a clean refusal
+        fail(f"could not fetch scoot flake.lock at {tag}: {e}")
+    try:
+        return lock["nodes"]["nixpkgs"]["locked"]["rev"]
+    except KeyError:
+        fail(f"scoot flake.lock at {tag} has no nodes.nixpkgs.locked.rev")
+
+
+def rewrite(path, old, new):
+    text = path.read_text()
+    if old not in text:
+        return False
+    path.write_text(text.replace(old, new))
+    return True
+
+
+def main():
+    if len(sys.argv) != 3:
+        print(__doc__.strip())
+        sys.exit(2)
+    checkout, tag = Path(sys.argv[1]), sys.argv[2]
+    if not (checkout / ".git").exists() and not (checkout / "flake.nix").exists():
+        fail(f"{checkout} is not a downstream checkout (no flake.nix)")
+    if not TAG_RE.match(tag):
+        fail(f"{tag} is not a vX.Y.Z release tag (prereleases refused)")
+    if "-" in tag:
+        fail(f"{tag} looks like a prerelease; only final tags bump downstreams")
+
+    rev = scoot_rev_for_tag(tag)
+    nixpkgs_rev = scoot_nixpkgs_rev_for_tag(tag)
+    print(f"scoot {tag} is {rev}, its nixpkgs is {nixpkgs_rev}")
+
+    # 1. flake.nix scoot tag lines (root + installer target).
+    flake_files = [checkout / "flake.nix"]
+    target_flake = checkout / "iso" / "target" / "flake.nix"
+    if target_flake.exists():
+        flake_files.append(target_flake)
+    tag_pat = re.compile(r"github:scoot-sh/scoot/v\d+\.\d+\.\d+")
+    for f in flake_files:
+        if not f.exists():
+            continue
+        text = f.read_text()
+        new_text, n = tag_pat.subn(f"github:scoot-sh/scoot/{tag}", text)
+        if n == 0:
+            fail(f"{f} has no scoot-sh/scoot/vX.Y.Z pin to bump")
+        # Sync a rev-pinned nixpkgs line to the tag's own nixpkgs rev
+        # (try-scoot tracks nixos-unstable by branch: no rev, untouched).
+        def _nixpkgs_pin(m):
+            return f"github:NixOS/nixpkgs/{nixpkgs_rev}"
+        new_text = re.sub(r"github:NixOS/nixpkgs/[0-9a-f]{40}",
+                          _nixpkgs_pin, new_text)
+        if new_text != text:
+            f.write_text(new_text)
+        print(f"updated {f.relative_to(checkout)} ({n} scoot pin(s))")
+
+    # 2. Patch-consistency constants (scoot-iso only).
+    pc = checkout / "tests" / "patch_consistency.py"
+    if pc.exists():
+        text = pc.read_text()
+        text = re.sub(r'SCOOT_REF = "v\d+\.\d+\.\d+"',
+                      f'SCOOT_REF = "{tag}"', text)
+        text = re.sub(r"SCOOT_REV = \"[0-9a-f]{40}\"",
+                      f'SCOOT_REV = "{rev}"', text)
+        text = re.sub(r'NIXPKGS_REV = "[0-9a-f]{40}"',
+                      f'NIXPKGS_REV = "{nixpkgs_rev}"', text)
+        # The prose line naming the tag's own lock ("v0.6.2's own
+        # flake.lock names this same nixpkgs rev") drifts with the bump.
+        text = re.sub(r"v\d+\.\d+\.\d+'s own\n# flake\.lock names",
+                      f"{tag}'s own\n# flake.lock names", text)
+        if text != pc.read_text():
+            pc.write_text(text)
+            print(f"updated {pc.relative_to(checkout)}")
+        else:
+            print(f"unchanged {pc.relative_to(checkout)}")
+
+    # 3. Locks: one `nix flake lock --update-input scoot` per flake
+    # directory (root, plus the installer target flake when present).
+    lock_dirs = [checkout]
+    if (checkout / "iso" / "target" / "flake.nix").exists():
+        lock_dirs.append(checkout / "iso" / "target")
+    for d in lock_dirs:
+        run("nix", "flake", "lock", "--update-input", "scoot", cwd=str(d))
+        print(f"locked {d.relative_to(checkout) if d != checkout else '.'}")
+
+    # 4. Verify: the lock revs must now name the tag's commit.
+    for d in lock_dirs:
+        lock_file = d / "flake.lock"
+        lock = json.loads(lock_file.read_text())
+        got = lock["nodes"]["scoot"]["locked"]["rev"]
+        if got != rev:
+            fail(f"{lock_file} scoot rev is {got}, want {rev}")
+    print(f"bump-downstream: ok: {checkout} now pins scoot {tag} ({rev})")
+
+
+if __name__ == "__main__":
+    main()

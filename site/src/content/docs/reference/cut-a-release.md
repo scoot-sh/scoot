@@ -197,6 +197,45 @@ release PR's checks" step failed, run them yourself on the PR's
 `packaging.yml`, `deb.yml`, `rpm.yml`, `arch.yml`, and `release.yml`
 with no `tag`), or approve the held runs.
 
+## Downstream bumps (try-scoot and scoot-iso)
+
+Every published release also bumps the two repos that pin scoot:
+[try-scoot](https://github.com/scoot-sh/try-scoot) and
+[scoot-iso](https://github.com/scoot-sh/scoot-iso). The
+[bump workflow](https://github.com/scoot-sh/scoot/blob/main/.github/workflows/bump-downstreams.yml)
+opens one PR in each repo moving its scoot pin to the new tag (the
+flake input plus the lock, and for the ISO the installer target flake
+and the patch-consistency constants). The edits run through
+`scripts/bump-downstream`, so a bump is reproducible by hand. The
+workflow never auto-merges, skips prereleases, and updates an existing
+branch or PR for the tag instead of opening a duplicate.
+
+It starts two ways: releases cut by hand reach it through its
+`release: published` trigger, and the release workflow dispatches it
+explicitly after a real publish (a release created with `GITHUB_TOKEN`
+starts no `release: published` run, so without that dispatch the
+normal release path would never bump anything). Re-run or test it by
+hand from any ref:
+
+```sh
+gh workflow run bump-downstreams.yml --ref main -f tag=v0.6.3
+```
+
+### The one secret: `DOWNSTREAM_BUMP_TOKEN`
+
+Cross-repo pushes need a token with write outside this repo, which
+`GITHUB_TOKEN` does not have. Create a fine-grained PAT (or GitHub App
+token) with contents and pull-requests write on `scoot-sh/try-scoot`
+and `scoot-sh/scoot-iso`, and store it as this repo's
+`DOWNSTREAM_BUMP_TOKEN` secret. Without it the job fails with a
+message naming the secret, and the value is never printed. A PR opened
+with this token runs each repo's CI; a PR opened with `GITHUB_TOKEN`
+would get no checks.
+
+Without the secret, or to recover a red run, bump by hand: run
+`scripts/bump-downstream` against local clones, push a
+`ci/bump-scoot-<tag>` branch in each repo, and open the PRs yourself.
+
 ## What else the runs need
 
 Release creation and provenance run on `GITHUB_TOKEN`: there is no

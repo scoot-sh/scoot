@@ -48,6 +48,40 @@ Press `Super+Return` for a second terminal; close the window to quit.
 If it compiles for minutes, your Nix does not trust the scoot cache
 yet: see [Use the binary cache](../binary-cache/).
 
+## Or boot the live ISO
+
+[scoot-iso](https://github.com/scoot-sh/scoot-iso) is a NixOS live
+and installer ISO built on the scoot compositor. Boot it from USB and you are in a
+full scoot session with no login prompt: the ginger-night look, the
+bar, Firefox, and a welcome window. The live session never locks or
+blanks the screen, and nvim is the default editor.
+
+The installer writes a flake-based system with your choice of look
+(four scoot entries on its Desktop page, moonrise selected by
+default), the ReGreet login screen, and the same nvim default. The
+installed system locks like a normal desktop.
+
+Build it with Nix, for your machine's arch (`x86_64-linux` or
+`aarch64-linux`):
+
+```sh
+nix build github:scoot-sh/scoot-iso#iso
+```
+
+Without Nix, the same build runs in Docker and the `.iso` lands in
+`./scoot-iso-out/`:
+
+```sh
+scripts/build-iso-docker.sh
+```
+
+Allow about 20 GB free and some 30 minutes on a warm cache. GitHub
+caps release assets at 2 GB: when published ISOs are available they
+ship with `SHA256SUMS` as the trust anchor, and an ISO over the cap
+ships out of band with only its checksums attached to the release.
+Flash with `dd` or a GUI writer and boot the stick in UEFI mode;
+Apple Silicon Macs need the Asahi installer instead, not this ISO.
+
 ## Use it every day
 
 Pick your system. The site remembers your choice.
@@ -450,6 +484,11 @@ deliberate avoidance of all GPU code is a cargo-only build
 build, flag and renderer rule is in [Builds and
 renderers](../../reference/builds/); what the binary cache trusts is in
 [Use the binary cache](../binary-cache/).
+
+| You want to… | Get this |
+|---|---|
+| Run scoot on your machine | `scoot` (the `auto` default covers CPU and GPU) |
+| Try without installing anything | Boot the [live ISO](#or-boot-the-live-iso) (`x86_64-linux` or `aarch64-linux`) |
 
 ## Where next
 
