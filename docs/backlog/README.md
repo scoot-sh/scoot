@@ -393,7 +393,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Stylix becomes a synthesized `stylix` look instead of a layer above the look](./resolved/look-stylix-source-done.md) (high, breaking) — RESOLVED 2026-10-16
 - [GTK, libadwaita, Qt, cursor and fonts follow a swap through dconf and the portal](./resolved/look-toolkit-live-done.md) (medium) — RESOLVED 2026-10-15
 - [Qt palette under the Adwaita style ignores the look (measured)](./packaging/qt-adwaita-palette.md) (low)
-- [Skip every udiskie keyring test, not two](./packaging/udiskie-skip-all-keyring-tests.md) (medium)
+- [Skip every udiskie keyring test, not two](./resolved/udiskie-skip-all-keyring-tests-done.md) — RESOLVED 2026-10-24: the shared udiskie default skips the whole of `test_keyutils.py` and `test_cache.py` (`TestPasswordCache` included), so Docker's default seccomp EPERM no longer fails the check
 - [Bump the nixpkgs pin past the eMudhra/Comodo CA mitigation](./resolved/nixpkgs-pin-ca-mitigation-done.md) (low) — RESOLVED 2026-10-21
 - [`apply` follows an in-dir symlink for a leaf while `build` refuses all symlinks](./packaging/look-apply-symlink-leaf.md) (low)
 - [Look leaves for mako, wob, fcitx5 and the night light](./resolved/look-leaves-daemons-done.md) (medium) — RESOLVED 2026-10-15
