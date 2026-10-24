@@ -17,6 +17,8 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.2](https://github.com/scoot-sh/scoot/compare/v0.6.1...v0.6.2) - 2026-10-24
+
 ### nix
 
 - fixed: the desktop default editor sets `EDITOR` and `VISUAL` at `mkOverride 900`, so it beats nixpkgs' `nano` default instead of conflicting with it, and merges with `programs.neovim.defaultEditor` when both name `nvim`. A value you set still wins outright. Not breaking: no CLI, config schema or protocol changed.
