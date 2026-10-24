@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.1](https://github.com/scoot-sh/scoot/compare/v0.6.0...v0.6.1) - 2026-10-24
+
+### scootctl,looks,nix
+
+- added: nvim look leaf and a desktop default-editor option ([#726](https://github.com/scoot-sh/scoot/pull/726))
+
 ### looks,scoot-look,scootctl,nix
 
 - added: a Neovim colorscheme leaf (`apps/nvim.lua`) in every shipped look that ships a Helix theme, wired everywhere the Helix leaf is: copied into the render, dropped from untrusted installs (`--trust` keeps and prints it), checked by `scoot look wiring` (link `~/.config/nvim/colors/scoot-look.lua` at the state leaf, select with `:colorscheme scoot-look`), and linked from the flake by `desktop.theme.targets.editor` (loaded, never selected; `targets.editor.nvim.enable` selects it, skipped while home-manager's `programs.neovim` owns the config). Running nvim recolors live with no signal: the colorscheme watches itself and re-sources on change. Not breaking: the new leaf and the new `--json` wiring item are additive, and the render-version bump only retires cached renders.
