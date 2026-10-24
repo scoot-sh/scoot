@@ -1,9 +1,10 @@
 ---
 title: "Skip every udiskie keyring test, not two"
-status: "open"
-area: "packaging"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-24"
 ---
 
 # Skip every udiskie keyring test, not two
@@ -44,3 +45,19 @@ with the default profile.
 ## Not in this ticket
 
 Reporting the flaky tests to nixpkgs (the maintainer decides that).
+
+## Resolution
+
+2026-10-24: widened the shared udiskie default (`nix/lib/udiskie-default.nix`)
+to `disabledTestPaths = [ "test/test_keyutils.py" "test/test_cache.py" ]`
+(keeping `disabledTests = [ "test_is_valid" ]`), so every kernel-keyring
+test is skipped: the whole of `test_keyutils.py` (`TestKeyutils`, 7 tests
+including `test_is_valid`) and the whole of `test_cache.py`
+(`TestPasswordCache`: `test_clear`, `test_invalidate`, `test_timeout`,
+`test_touch`, `test_update`, `test_is_valid`) against pinned nixpkgs
+`02c087f3` (udiskie 2.7.0). The two modules' `defaultText` and the
+`nix/tests.nix` comment follow the same list; the `defaultUdiskie` pins need
+no other change (they import the shared file). CHANGELOG Unreleased gains the
+`fix(nix)` note. Verified by running the overridden udiskie's check phase in
+a Docker container with the default seccomp profile (no `--security-opt`):
+vanilla fails with `keyctl` EPERM, overridden passes; raw output in the PR.

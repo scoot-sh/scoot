@@ -802,7 +802,7 @@ in
               (import ../lib/udiskie-default.nix { inherit pkgs; })
             else
               null;
-          defaultText = lib.literalExpression ''if pkgs.stdenv.hostPlatform.isLinux then pkgs.udiskie.overridePythonAttrs { disabledTestPaths = [ "test/test_keyutils.py" ]; disabledTests = [ "test_is_valid" ]; } else null'';
+          defaultText = lib.literalExpression ''if pkgs.stdenv.hostPlatform.isLinux then pkgs.udiskie.overridePythonAttrs { disabledTestPaths = [ "test/test_keyutils.py" "test/test_cache.py" ]; disabledTests = [ "test_is_valid" ]; } else null'';
           description = ''
             The automounter to install system-wide (udiskie, run
             trayless by the home-manager side's unit). Null installs

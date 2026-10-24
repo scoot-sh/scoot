@@ -3238,9 +3238,10 @@ let
   # the content checks below (`nix/apps-udiskie-rules.py`).
   appsUdiskieExec = hmApps.config.systemd.user.services.scoot-automount.Service.ExecStart;
   # The desktop profile's udiskie default, shared with both modules
-  # (`nix/lib/udiskie-default.nix`): udiskie with its flaky
-  # kernel-keyring tests off (`test_keyutils`, `test_cache::test_is_valid`
-  # need a working keyring and fail without one). The module pins below
+  # (`nix/lib/udiskie-default.nix`): udiskie with its
+  # kernel-keyring tests off (`test_keyutils`, `test_cache` need a
+  # working keyring and fail without one: Docker's default seccomp
+  # refuses `keyctl(2)` with EPERM). The module pins below
   # compare against this, not vanilla `pkgs.udiskie`.
   defaultUdiskie = import ./lib/udiskie-default.nix { pkgs = testPkgs; };
   # udiskie's modules for the matcher run, built without its own test
