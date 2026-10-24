@@ -8,7 +8,7 @@ members = ["crates/*"]
 # at it. The release PR (release-plz, `release-plz.toml`) is the only thing
 # that moves it. What a version means, and the protocol numbers that carry
 # compatibility instead: docs/versioning.md.
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 # Smithay's minimum; the compositor sets the floor for everything.
 rust-version = "1.88"
