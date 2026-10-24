@@ -571,6 +571,19 @@ let
       type = lib.types.attrsOf lib.types.str;
       default = { };
     };
+    # nixpkgs' own `nixos/modules/programs/environment.nix` default
+    # (`EDITOR="nano"` at `mkDefault`): the stub baseline carries it so
+    # the editor pins prove the slot beats it at `mkOverride 900`
+    # instead of conflicting with it at `mkDefault`.
+    config.environment.variables.EDITOR = lib.mkDefault "nano";
+    # nixpkgs' own `environment.sessionVariables` (what
+    # `programs.neovim.defaultEditor` sets at `mkOverride 900`): empty
+    # here like its default, so the neovim-together pin evaluates
+    # against the real shape.
+    options.environment.sessionVariables = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+    };
     # The system environment's link list
     # (`/run/current-system/sw`): the look catalog adds `share/scoot`
     # beside nixpkgs' own subpaths (a plain string list, empty here
@@ -3383,6 +3396,54 @@ let
     desktop.enable = true;
     desktop.apps.editor.default = "nvim";
   };
+  # ...a user's own `EDITOR`/`VISUAL` beside the profile's default:
+  # plain priority beats the slot's `mkOverride 900`.
+  osAppsEditorUser =
+    evalNixosWith
+      [
+        ./modules/nixos.nix
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        {
+          environment.variables.EDITOR = "user-ed";
+          environment.variables.VISUAL = "user-vis";
+        }
+      ]
+      testPkgs
+      {
+        enable = true;
+        package = fakePkg;
+        desktop.enable = true;
+        desktop.apps.editor.default = "nvim";
+      };
+  # ...`programs.neovim.defaultEditor` together with the slot's default:
+  # both name `nvim` at `mkOverride 900`, so the pair evaluates (the
+  # stub sets what nixpkgs' own neovim module sets).
+  osAppsEditorNeovim =
+    evalNixosWith
+      [
+        ./modules/nixos.nix
+        { programs.scoot.wallpaper.package = lib.mkDefault fakeBg; }
+        {
+          options.programs.neovim.enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+          };
+          options.programs.neovim.defaultEditor = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+          };
+          config.programs.neovim.enable = true;
+          config.programs.neovim.defaultEditor = true;
+          config.environment.sessionVariables.EDITOR = lib.mkOverride 900 "nvim";
+        }
+      ]
+      testPkgs
+      {
+        enable = true;
+        package = fakePkg;
+        desktop.enable = true;
+        desktop.apps.editor.default = "nvim";
+      };
   # ...the terminal off: no foot system-wide.
   osAppsTermOff = evalNixos {
     enable = true;
@@ -11384,15 +11445,20 @@ let
       );
       true
     )
-    # ...and the NixOS side defaulting to nothing (no package, no
-    # `EDITOR`), while the editor default installs system-wide and
-    # sets it...
+    # ...and the NixOS side defaulting to nothing from the slot
+    # (nixpkgs' own `nano` default standing: null changes nothing),
+    # while the editor default installs system-wide and sets it over
+    # that default...
     (
       assert osApps.config.programs.scoot.desktop.apps.editor.default == null;
       true
     )
     (
-      assert !(osApps.config.environment.variables ? EDITOR);
+      assert osApps.config.environment.variables.EDITOR == "nano";
+      true
+    )
+    (
+      assert !(osApps.config.environment.variables ? VISUAL);
       true
     )
     (
@@ -11413,6 +11479,34 @@ let
     )
     (
       assert osAppsEditor.config.environment.variables.VISUAL == "nvim";
+      true
+    )
+    # ...a user's own `EDITOR`/`VISUAL` winning outright over the
+    # slot's `mkOverride 900` (plain beats 900)...
+    (
+      assert allAssertionsHold osAppsEditorUser.config;
+      true
+    )
+    (
+      assert osAppsEditorUser.config.environment.variables.EDITOR == "user-ed";
+      true
+    )
+    (
+      assert osAppsEditorUser.config.environment.variables.VISUAL == "user-vis";
+      true
+    )
+    # ...`programs.neovim.defaultEditor` together with the slot's
+    # default: both name `nvim`, so the pair evaluates...
+    (
+      assert allAssertionsHold osAppsEditorNeovim.config;
+      true
+    )
+    (
+      assert osAppsEditorNeovim.config.environment.variables.EDITOR == "nvim";
+      true
+    )
+    (
+      assert osAppsEditorNeovim.config.environment.sessionVariables.EDITOR == "nvim";
       true
     )
     # ...home-manager's own `services.udiskie` winning: one automounter

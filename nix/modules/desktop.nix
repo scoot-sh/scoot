@@ -1632,8 +1632,11 @@ in
       # (`foot -e <editor>`, following the terminal option). Off with
       # the profile (nothing references one): set it to make `git`,
       # `xdg-open` on a text file and every `EDITOR` reader agree.
-      # Each value is a `mkDefault`, so a value you set for `EDITOR`,
-      # `VISUAL` or the text association wins outright.
+      # `EDITOR`/`VISUAL` ride at `mkOverride 900` (the priority
+      # nixpkgs' own `programs.neovim.defaultEditor` uses, beating its
+      # `nano` default and losing to a plain assignment); the text
+      # association stays at `mkDefault`, so a value you set for
+      # either wins outright.
       editor = {
         default = lib.mkOption {
           type = lib.types.nullOr (
@@ -1648,8 +1651,11 @@ in
             The default text editor: null installs and sets nothing,
             `"nvim"` (Neovim, following the look's colorscheme) or
             `"helix"`. Set: the editor installs, `EDITOR` and `VISUAL`
-            name its binary, and `text/plain` (and `text/*`) open
-            through a terminal entry running it.
+            name its binary (at `mkOverride 900`: beating nixpkgs'
+            `nano` default, losing to a plain assignment, merging with
+            `programs.neovim.defaultEditor` on the same value), and
+            `text/plain` (and `text/*`) open through a terminal entry
+            running it.
           '';
         };
       };

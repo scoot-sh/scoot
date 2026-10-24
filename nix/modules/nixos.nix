@@ -1928,10 +1928,14 @@ in
       ) cfg.desktop.apps.fileManager.package;
     })
     # The default editor's system half: the package on PATH and `EDITOR`
-    #/`VISUAL` for everything that asks (at `mkDefault`, so an explicit
-    # value still wins). The binds, the entry and the text association
-    # are the home-manager side's: without it the tool sits ready for a
-    # hand-written setup.
+    #/`VISUAL` for everything that asks (at `mkOverride 900`, so a plain
+    # value still wins). 900 is the priority nixpkgs' own
+    # `programs.neovim.defaultEditor` uses: it beats nixpkgs'
+    # `environment.nix` `EDITOR="nano"` default (at `mkDefault`), and
+    # merges with `programs.neovim.defaultEditor` when both name `nvim`
+    # instead of conflicting with it. The binds, the entry and the text
+    # association are the home-manager side's: without it the tool sits
+    # ready for a hand-written setup.
     (lib.mkIf (cfg.desktop.apps.editor.default != null) {
       assertions = [
         {
@@ -1949,8 +1953,8 @@ in
       ) cfg.desktop.apps.editor.package;
 
       environment.variables = {
-        EDITOR = lib.mkDefault (if cfg.desktop.apps.editor.default == "helix" then "hx" else "nvim");
-        VISUAL = lib.mkDefault (if cfg.desktop.apps.editor.default == "helix" then "hx" else "nvim");
+        EDITOR = lib.mkOverride 900 (if cfg.desktop.apps.editor.default == "helix" then "hx" else "nvim");
+        VISUAL = lib.mkOverride 900 (if cfg.desktop.apps.editor.default == "helix" then "hx" else "nvim");
       };
     })
     (lib.mkIf cfg.desktop.apps.network.enable {

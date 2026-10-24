@@ -426,8 +426,13 @@ in
     # The default text editor: its package on PATH, `EDITOR` and
     # `VISUAL` naming its binary, the text association answering
     # through a terminal entry running it, and the entry itself. Each
-    # value at `mkDefault`, so a value you set wins outright (a user
-    # `EDITOR`, a user text association: no conflict, no merged list).
+    # value at `mkOverride 900` (EDITOR/VISUAL) or `mkDefault` (the
+    # rest), so a value you set wins outright (a user `EDITOR`, a user
+    # text association: no conflict, no merged list). 900 beats any
+    # home-manager/nixpkgs `EDITOR` default at `mkDefault`, loses to a
+    # plain assignment, and merges with home-manager's
+    # `programs.neovim.defaultEditor` when both name `nvim` instead of
+    # conflicting with it.
     (lib.mkIf (apps.editor.default != null) {
       assertions = [
         {
@@ -445,8 +450,8 @@ in
       home.packages = lib.optional (apps.editor.package != null && !editorOwned) apps.editor.package;
 
       home.sessionVariables = {
-        EDITOR = lib.mkDefault editorBin;
-        VISUAL = lib.mkDefault editorBin;
+        EDITOR = lib.mkOverride 900 editorBin;
+        VISUAL = lib.mkOverride 900 editorBin;
       };
 
       xdg.mimeApps = {
