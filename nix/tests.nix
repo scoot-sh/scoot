@@ -2907,6 +2907,13 @@ let
     desktop.enable = true;
     desktop.automount.enable = false;
   };
+  # ...a user-set automounter package: it wins outright over the shared
+  # default (vanilla udiskie here, with its keyring tests on).
+  hmAppsUdiskieCustom = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.automount.package = pkgs.udiskie;
+  };
   # ...standalone (no profile): the terminal runs (foot on PATH,
   # `TERMINAL` set, dirs created), the pickers run unthemed, the
   # automounter runs (its unit scoped to the session target).
@@ -3230,13 +3237,17 @@ let
   # The automounter's command line, for udiskie's own device matcher in
   # the content checks below (`nix/apps-udiskie-rules.py`).
   appsUdiskieExec = hmApps.config.systemd.user.services.scoot-automount.Service.ExecStart;
+  # The desktop profile's udiskie default, shared with both modules
+  # (`nix/lib/udiskie-default.nix`): udiskie with its flaky
+  # kernel-keyring tests off (`test_keyutils`, `test_cache::test_is_valid`
+  # need a working keyring and fail without one). The module pins below
+  # compare against this, not vanilla `pkgs.udiskie`.
+  defaultUdiskie = import ./lib/udiskie-default.nix { pkgs = testPkgs; };
   # udiskie's modules for the matcher run, built without its own test
-  # phase: one of those tests (`test_keyutils`, `test_cache`) reads the
-  # kernel keyring and fails on some CI runners ("bytes length not a
-  # multiple of item size"), which failed the whole check on a package
-  # this repo only reads. The module assertions compare `pkgs.udiskie`
-  # itself, so they are unchanged.
-  appsUdiskieModules = pkgs.udiskie.overridePythonAttrs (_: {
+  # phase: the shared default above still runs the rest of the suite,
+  # which the matcher run does not need (this repo only reads the
+  # modules).
+  appsUdiskieModules = defaultUdiskie.overridePythonAttrs (_: {
     doCheck = false;
   });
   # The interpreter udiskie runs on, with what its matcher imports
@@ -3465,6 +3476,14 @@ let
     package = fakePkg;
     desktop.enable = true;
     desktop.automount.enable = false;
+  };
+  # ...a user-set automounter package: it wins outright over the shared
+  # default (vanilla udiskie here, with its keyring tests on).
+  osAppsUdiskieCustom = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.automount.package = pkgs.udiskie;
   };
   # Refusals: each tool missing (pinned by message in `_appsPins`).
   osAppsNoTerm = evalNixos {
@@ -8353,7 +8372,7 @@ let
           pkgs.bluez
           fakeLaunchScoot
           (slotScriptDrv hmDeskLookMusic "scoot-bluetooth-pick")
-          pkgs.udiskie
+          defaultUdiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -9415,7 +9434,7 @@ let
           pkgs.bluez
           fakeLaunchScoot
           (slotScriptDrv hmIdle "scoot-bluetooth-pick")
-          pkgs.udiskie
+          defaultUdiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -9514,7 +9533,7 @@ let
           pkgs.bluez
           fakeLaunchScoot
           (slotScriptDrv hmIdleOff "scoot-bluetooth-pick")
-          pkgs.udiskie
+          defaultUdiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -9725,7 +9744,7 @@ let
           fakeLaunchScoot
           pkgs.bluez
           fakeLaunchScoot
-          pkgs.udiskie
+          defaultUdiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -9789,7 +9808,7 @@ let
           fakeLaunchScoot
           pkgs.bluez
           fakeLaunchScoot
-          pkgs.udiskie
+          defaultUdiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -9838,7 +9857,7 @@ let
           fakeLaunchScoot
           pkgs.bluez
           fakeLaunchScoot
-          pkgs.udiskie
+          defaultUdiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -11187,11 +11206,12 @@ let
         hmApps.config.programs.scoot.desktop.apps.bluetooth.menuPackage.drvPath == fakeLaunchScoot.drvPath;
       true
     )
-    # ...the automounter stock too, trayless behind its unit (wanted
+    # ...the automounter stock too (the shared default, keyring tests
+    # off), trayless behind its unit (wanted
     # by the session scope, never the shared graphical target, so no
     # other desktop starts it; retried like the bar's unit)...
     (
-      assert hmApps.config.programs.scoot.desktop.automount.package.drvPath == pkgs.udiskie.drvPath;
+      assert hmApps.config.programs.scoot.desktop.automount.package.drvPath == defaultUdiskie.drvPath;
       true
     )
     (
@@ -11210,7 +11230,7 @@ let
     (
       assert
         hmApps.config.systemd.user.services.scoot-automount.Service.ExecStart
-        == "${lib.getExe' pkgs.udiskie "udiskie"} -a -n -T";
+        == "${lib.getExe' defaultUdiskie "udiskie"} -a -n -T";
       true
     )
     (
@@ -11244,7 +11264,7 @@ let
       true
     )
     (
-      assert osApps.config.programs.scoot.desktop.automount.package.drvPath == pkgs.udiskie.drvPath;
+      assert osApps.config.programs.scoot.desktop.automount.package.drvPath == defaultUdiskie.drvPath;
       true
     )
     # ...without a look: the slots run unthemed (fuzzel's own colors --
@@ -11588,6 +11608,19 @@ let
       assert !(lib.any (p: (p.pname or "") == "udiskie") hmAppsAutomountOff.config.home.packages);
       true
     )
+    # ...a user-set automounter package winning outright over the shared
+    # default (vanilla udiskie here, with its keyring tests on)...
+    (
+      assert
+        hmAppsUdiskieCustom.config.programs.scoot.desktop.automount.package.drvPath == pkgs.udiskie.drvPath;
+      true
+    )
+    (
+      assert
+        hmAppsUdiskieCustom.config.systemd.user.services.scoot-automount.Service.ExecStart
+        == "${lib.getExe' pkgs.udiskie "udiskie"} -a -n -T";
+      true
+    )
     # ...standalone (no profile): every slot runs, the unit scoped,
     # the session scope present for it...
     (
@@ -11802,6 +11835,13 @@ let
     (
       assert
         !(lib.any (p: (p.pname or "") == "udiskie") osAppsAutomountOff.config.environment.systemPackages);
+      true
+    )
+    # ...a user-set automounter package winning outright over the shared
+    # default (vanilla udiskie here, with its keyring tests on)...
+    (
+      assert
+        osAppsUdiskieCustom.config.programs.scoot.desktop.automount.package.drvPath == pkgs.udiskie.drvPath;
       true
     )
     # ...and each refusal naming its tool on this side as well.
@@ -15828,7 +15868,7 @@ let
           pkgs.bluez
           fakeLaunchScoot
           (slotScriptDrv hmKeys "scoot-bluetooth-pick")
-          pkgs.udiskie
+          defaultUdiskie
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
@@ -16092,7 +16132,7 @@ let
           pkgs.bluez
           fakeLaunchScoot
           (slotScriptDrv hmKeysOff "scoot-bluetooth-pick")
-          pkgs.udiskie
+          defaultUdiskie
         ];
       true
     )
@@ -16137,7 +16177,7 @@ let
           fakeLaunchScoot
           pkgs.bluez
           fakeLaunchScoot
-          pkgs.udiskie
+          defaultUdiskie
         ];
       true
     )

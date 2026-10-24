@@ -17,6 +17,11 @@ release, entries were dated.
 
 ## Unreleased
 
+### nix
+
+- fixed: the desktop default editor sets `EDITOR` and `VISUAL` at `mkOverride 900`, so it beats nixpkgs' `nano` default instead of conflicting with it, and merges with `programs.neovim.defaultEditor` when both name `nvim`. A value you set still wins outright. Not breaking: no CLI, config schema or protocol changed.
+- fixed: the desktop automounter default runs udiskie with its flaky kernel-keyring tests off (`test_keyutils`, `test_cache::test_is_valid`), which need a working kernel keyring and failed the build without one. The rest of the suite still runs. Point `desktop.automount.package` at your own build to run them. Not breaking: no CLI, config schema or protocol changed.
+
 ## [0.6.1](https://github.com/scoot-sh/scoot/compare/v0.6.0...v0.6.1) - 2026-10-24
 
 ### scootctl,looks,nix
