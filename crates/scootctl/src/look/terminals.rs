@@ -4,13 +4,15 @@
 //! `look-leaves-terminal`).
 //!
 //! The fragments these signals activate live in the rendered look
-//! (`apps/helix.toml`, `apps/btop.theme`, `apps/starship.toml`): static
+//! (`apps/helix.toml`, `apps/btop.theme`, `apps/starship.toml`,
+//! `apps/nvim.lua`): static
 //! leaves copied from the look, trusted looks only. Helix 25.07.1
 //! re-reads its config and theme from disk on `SIGUSR1`, btop 1.4.7 its
 //! config and theme on `SIGUSR2` (both verified against the pinned
 //! sources and live against the real binaries); starship is a new
 //! process per prompt, so the next prompt picks the leaf up with no
-//! signal at all.
+//! signal at all; Neovim re-reads its colorscheme through the leaf's
+//! own file watcher, so a swap sends it no signal either.
 //!
 //! Every step here is best-effort and reported, like the daemon leaves:
 //! a missing binary, no running process, or a failed signal is a note,
@@ -31,6 +33,7 @@ pub struct TerminalPresence {
     pub helix: bool,
     pub btop: bool,
     pub starship: bool,
+    pub nvim: bool,
 }
 
 /// Reads the presence out of a rendered look directory.
@@ -39,6 +42,7 @@ pub fn presence_in(rendered: &Path) -> TerminalPresence {
         helix: rendered.join("apps/helix.toml").is_file(),
         btop: rendered.join("apps/btop.theme").is_file(),
         starship: rendered.join("apps/starship.toml").is_file(),
+        nvim: rendered.join("apps/nvim.lua").is_file(),
     }
 }
 
@@ -104,6 +108,9 @@ pub fn apply_terminals(
             .notes
             .push(starship_setup_note(state_dir, &config_base));
     }
+    if presence.nvim {
+        report.notes.push(nvim_setup_note(state_dir, &config_base));
+    }
     report
 }
 
@@ -149,6 +156,17 @@ fn starship_setup_note(state_dir: &Path, config_base: &str) -> String {
     format!(
         "starship: the next prompt reads the look once STARSHIP_CONFIG or {config_base}/starship.toml points at {}",
         state_dir.join("look/apps/starship.toml").display()
+    )
+}
+
+/// The one-time Neovim wiring: the colorscheme file follows the state
+/// link, so running nvim recolors itself live (its own file watcher
+/// re-sources it on change, with no signal): point the fixed-name file
+/// at the leaf once and select it with `:colorscheme scoot-look`.
+fn nvim_setup_note(state_dir: &Path, config_base: &str) -> String {
+    format!(
+        "nvim: running nvim follows the look live once {config_base}/nvim/colors/scoot-look.lua points at {} with `:colorscheme scoot-look` selecting it",
+        state_dir.join("look/apps/nvim.lua").display()
     )
 }
 

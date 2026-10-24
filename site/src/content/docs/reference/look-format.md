@@ -25,8 +25,8 @@ A rendered look is the output of a build: `scoot.toml`, `bar.toml`,
 `swaylock`, `render.json`, the
 daemon leaves (`mako`, `wob.ini`, `fcitx5/theme.conf`, `nightlight` when
 the look names a temperature) and the terminal static leaves
-(`apps/helix.toml`, `apps/btop.theme`, `apps/starship.toml`, each
-only when the look carries it). It is never edited and never a source for
+(`apps/helix.toml`, `apps/nvim.lua`, `apps/btop.theme`,
+`apps/starship.toml`, each only when the look carries it). It is never edited and never a source for
 anything. The two never share a path.
 
 The catalog is the union of the source directories, in fixed order:
@@ -258,7 +258,8 @@ not a look token), `fcitx5/theme.conf` the classic UI theme,
 raw newline, `=` or section header from a look.
 The terminal static leaves are never rendered from tokens: each is
 the author's `apps/` file copied verbatim (shape-checked: size,
-text, well-formed TOML or btop theme lines), inherited through
+text, well-formed TOML, btop theme lines, or a `colors_name`-setting
+Lua colorscheme), inherited through
 `extends` unless the child names its own. Installed looks (someone
 else's) drop them without `--trust`, which prints each kept leaf
 first; every other origin keeps them.

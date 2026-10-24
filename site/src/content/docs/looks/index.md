@@ -308,23 +308,30 @@ foot start, so a swap sends no signal. `validate` and `build` check
 the fragment against foot's own parser; `build --out` writes
 `foot.ini` beside the other fragments.
 
-## Helix, btop and starship
+## Helix, Neovim, btop and starship
 
 Each shipped look with an `apps/` directory carries static leaves:
-`apps/helix.toml` (the Helix theme), `apps/btop.theme` (the btop
-theme) and `apps/starship.toml` (the prompt). `apply` copies them
-into the rendered look verbatim — they are the author's files, never
-generated from tokens — then `SIGUSR1` reaches your own `hx`
-processes (Helix re-reads its config and theme from disk) and
-`SIGUSR2` your own `btop` (it re-reads its config and theme).
-Starship is a new process per prompt, so the next prompt draws the
-look with no signal. A look without an `apps/` file renders no leaf
-for it (radial-burst ships none; music-desk ships no btop theme).
+`apps/helix.toml` (the Helix theme), `apps/nvim.lua` (the Neovim
+colorscheme), `apps/btop.theme` (the btop theme) and
+`apps/starship.toml` (the prompt). `apply` copies them into the
+rendered look verbatim — they are the author's files, never generated
+from tokens — then `SIGUSR1` reaches your own `hx` processes (Helix
+re-reads its config and theme from disk) and `SIGUSR2` your own `btop`
+(it re-reads its config and theme). Starship is a new process per
+prompt, so the next prompt draws the look with no signal. Neovim
+recolors itself live with no signal either: the colorscheme watches
+itself (and the state directory behind the look link) and re-sources
+on change, within about a second. A look without an `apps/` file
+renders no leaf for it (radial-burst ships none; music-desk ships no
+btop theme).
 
 New editors follow the look once each file is wired (one-time setup):
 `~/.config/helix/themes/scoot-look.toml` points at
 `~/.local/state/scoot/look/apps/helix.toml` with `theme =
 "scoot-look"` in `config.toml`;
+`~/.config/nvim/colors/scoot-look.lua` points at
+`~/.local/state/scoot/look/apps/nvim.lua` (select it once with
+`:colorscheme scoot-look`; running nvim then follows swaps live);
 `~/.config/btop/themes/scoot-look.theme` points at
 `~/.local/state/scoot/look/apps/btop.theme` with `color_theme =
 "scoot-look"` in `btop.conf`; `STARSHIP_CONFIG` or
@@ -336,7 +343,9 @@ wiring on every swap that carries the leaves.
   signal for one apply (the leaf still renders).
 - Installed looks (someone else's) drop these leaves: their formats
   are never generated, so a hostile file could carry anything
-  (starship custom commands run a shell). `apply`, `build` and
+  (starship custom commands run a shell, Lua runs in the editor).
+  Neovim needs no `--no-*` flag: there is no signal to skip (the
+  colorscheme watches itself). `apply`, `build` and
   `validate` take `--trust` to keep them, printing each kept leaf
   first so the reply shows what was trusted. Trust lasts one apply:
   a managed sync, cycle or revert re-renders untrusted, so the leaves
@@ -369,7 +378,7 @@ leaf for that app: nothing to do). The steps, per app:
 - wob: run the printed `wob -c ...` command.
 - fcitx5: link the theme as printed and keep `Theme=scoot-look` in
   `classicui.conf`.
-- Helix, btop, starship: point the theme files as printed (above).
+- Helix, Neovim, btop, starship: point the theme files as printed (above).
 - fuzzel, swaylock: run the printed merger commands
   ([below](#files-and-flags)).
 - night-light: read the printed `temperature=` file in your own
@@ -513,7 +522,7 @@ installs back unchanged.
 `~/.local/share/scoot/installed-looks/`: regular files only (a symlink,
 a hard link, a device, a FIFO or a socket refuses the install), only the file kinds a look
 uses (`look.toml`, `preview.png`, image wallpapers, `fonts/*.ttf|otf`,
-the five `apps/` leaves, `LICENSE*`, `COPYING*`, `README.md`), file
+the six `apps/` leaves, `LICENSE*`, `COPYING*`, `README.md`), file
 count and total size capped, `license` required. An installed look may
 not take the name of a shipped, declared or user-authored look, and it
 can be applied but never extended. Its `apps/` leaves drop unless

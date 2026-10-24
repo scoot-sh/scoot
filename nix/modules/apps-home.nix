@@ -162,17 +162,35 @@ let
   # Whether home-manager's own `programs.foot` is on (read with `or`:
   # the option is absent without that module).
   footOwned = (config.programs.foot or { }).enable or false;
+  # The default editor's binary (`hx` for Helix: the package is `helix`,
+  # the binary is not) and its terminal entry (generated: no editor
+  # ships a `foot -e` wrapper of its own).
+  editorBin = if apps.editor.default == "helix" then "hx" else "nvim";
+  editorEntry = "scoot-editor.desktop";
+  # Whether home-manager's own editor module installs the same editor:
+  # its package wins (two copies would collide in the profile the way
+  # a second foot does), while `EDITOR`/`VISUAL` and the text
+  # association still apply.
+  editorOwned =
+    (apps.editor.default == "nvim" && ((config.programs.neovim or { }).enable or false))
+    || (apps.editor.default == "helix" && ((config.programs.helix or { }).enable or false));
+  # The entry's command: the terminal option's binary wrapping the
+  # editor's (`foot -e`). Absolute when the slot knows the packages,
+  # bare names from PATH otherwise (the same fail-loud contract as
+  # every other slot tool).
+  editorExec = "${binOr "foot" apps.terminal.package} -e ${binOr editorBin apps.editor.package} %F";
   # Whether home-manager's own `services.udiskie` runs an automounter
   # (same read): two would race to mount every insert and both ask for
   # an encrypted drive's passphrase, so the slot yields to it.
   udiskieOwned = (config.services.udiskie or { }).enable or false;
 
   # Whether any file-opening app is managed (the terminal counts:
-  # `xdg-open` answers from a terminal even with no manager).
+  # `xdg-open` answers from a terminal even with no manager; the default
+  # editor counts too: its text association needs `xdg-open` on PATH).
   filesInUse = apps.terminal.enable || apps.fileManager.enable;
-  # Whether `xdg-open` must resolve (file opens, or the
-  # automounter's Browse action).
-  openInUse = filesInUse || automount.enable;
+  # Whether `xdg-open` must resolve (file opens, the default editor's
+  # text association, or the automounter's Browse action).
+  openInUse = filesInUse || automount.enable || apps.editor.default != null;
 
   # The bus probe the automounter's unit waits on: without udisks2
   # on the system bus (a home-manager-only setup without the NixOS
@@ -230,6 +248,27 @@ in
         The `.desktop` entry that opens directories (the file
         manager's own: pcmanfm ships `pcmanfm.desktop`). Read only
         with `fileManager.enable`.
+      '';
+    };
+
+    # The default editor's package, following `apps.editor.default`
+    # (null with it: nothing to install). Read only with a default
+    # set; the assertions below refuse a null loudly instead of
+    # setting `EDITOR` at a binary that is not installed.
+    editor.package = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default =
+        if apps.editor.default == "nvim" then
+          linuxPkg "neovim"
+        else if apps.editor.default == "helix" then
+          linuxPkg "helix"
+        else
+          null;
+      defaultText = lib.literalExpression "follows programs.scoot.desktop.apps.editor.default (neovim or helix) on Linux, else null";
+      description = ''
+        The default text editor to install (following
+        `apps.editor.default`: Neovim or Helix). Null installs
+        nothing. Linux-only: null off Linux.
       '';
     };
 
@@ -382,6 +421,56 @@ in
       ];
 
       home.packages = lib.optional (apps.fileManager.package != null) apps.fileManager.package;
+    })
+
+    # The default text editor: its package on PATH, `EDITOR` and
+    # `VISUAL` naming its binary, the text association answering
+    # through a terminal entry running it, and the entry itself. Each
+    # value at `mkDefault`, so a value you set wins outright (a user
+    # `EDITOR`, a user text association: no conflict, no merged list).
+    (lib.mkIf (apps.editor.default != null) {
+      assertions = [
+        {
+          assertion = apps.editor.package != null;
+          message = ''
+            programs.scoot.desktop.apps.editor.default is set but
+            programs.scoot.desktop.apps.editor.package is null: set
+            it explicitly (apply the overlay, or point at the editor).
+          '';
+        }
+      ];
+
+      # Home-manager's own editor module installs the same editor: its
+      # package wins (the way the theme yields `foot.ini` to it).
+      home.packages = lib.optional (apps.editor.package != null && !editorOwned) apps.editor.package;
+
+      home.sessionVariables = {
+        EDITOR = lib.mkDefault editorBin;
+        VISUAL = lib.mkDefault editorBin;
+      };
+
+      xdg.mimeApps = {
+        enable = lib.mkDefault true;
+        defaultApplications = {
+          # Plain text, plus the `text/*` glob for its siblings
+          # (CSV, patches, logs): the shared-mime database types them
+          # separately, and without the glob they fall through to the
+          # browsers.
+          "text/plain" = lib.mkDefault editorEntry;
+          "text/*" = lib.mkDefault editorEntry;
+        };
+      };
+
+      xdg.dataFile."applications/${editorEntry}".text = ''
+        [Desktop Entry]
+        Type=Application
+        Name=Scoot editor
+        Comment=The default text editor (${editorBin})
+        Exec=${editorExec}
+        Terminal=false
+        Categories=Utility;TextEditor;
+        MimeType=text/plain;
+      '';
     })
 
     # The shared `xdg-open` plumbing, while anything opens files (or

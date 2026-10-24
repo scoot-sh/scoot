@@ -4,7 +4,7 @@
 //! A swap renders every fragment but wires none of them into the user's
 //! own files: the launcher flags, the lock merger, the foot include, the
 //! mako include, the wob command, the fcitx5 theme link and the
-//! Helix/btop/starship pointers each need one manual step, once. This
+//! Helix/btop/starship/nvim pointers each need one manual step, once. This
 //! command checks each step for the active look and prints the exact
 //! command or line that is still missing, with real paths (never `~`).
 //! Read-only: it writes nothing, starts nothing, and signals no daemon.
@@ -103,6 +103,11 @@ pub fn check_wiring(input: &WiringInput<'_>) -> Vec<WiringItem> {
         items.push(starship_item(input, &link_look));
     } else {
         items.push(absent("starship", "the look carries no starship config"));
+    }
+    if presence.nvim {
+        items.push(nvim_item(input, &link_look));
+    } else {
+        items.push(absent("nvim", "the look carries no Neovim colorscheme"));
     }
     items.push(fuzzel_item(input, &link_look));
     items.push(swaylock_item(input, &link_look));
@@ -438,6 +443,43 @@ fn starship_item(input: &WiringInput<'_>, link_look: &Path) -> WiringItem {
                     detail: format!(
                         "point STARSHIP_CONFIG or {} at {}",
                         pointed.display(),
+                        fragment.display()
+                    ),
+                }
+            }
+        }
+    }
+}
+
+fn nvim_item(input: &WiringInput<'_>, link_look: &Path) -> WiringItem {
+    let fragment = link_look.join("apps/nvim.lua");
+    match input.config_home {
+        None => WiringItem {
+            app: "nvim",
+            status: WiringStatus::Missing,
+            detail: format!(
+                "no config home resolves (set XDG_CONFIG_HOME or HOME), then link the colorscheme at {}",
+                fragment.display()
+            ),
+        },
+        Some(config) => {
+            let theme = config.join("nvim/colors/scoot-look.lua");
+            if theme.is_file() {
+                WiringItem {
+                    app: "nvim",
+                    status: WiringStatus::Wired,
+                    detail: format!(
+                        "{} exists (`:colorscheme scoot-look` selects it)",
+                        theme.display()
+                    ),
+                }
+            } else {
+                WiringItem {
+                    app: "nvim",
+                    status: WiringStatus::Missing,
+                    detail: format!(
+                        "link {} at {} and run `:colorscheme scoot-look` to select it",
+                        theme.display(),
                         fragment.display()
                     ),
                 }

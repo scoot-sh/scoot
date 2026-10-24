@@ -1,21 +1,24 @@
 //! The terminal static leaves (ticket `look-leaves-terminal`): the look's
-//! own Helix theme, btop theme and starship config, copied verbatim from
-//! `apps/` in the source look into the rendered look.
+//! own Helix theme, btop theme, starship config and Neovim colorscheme,
+//! copied verbatim from `apps/` in the source look into the rendered look.
 //!
 //! Unlike every other fragment these are never rendered from tokens: the
 //! tool copies the author's file byte for byte. That is also why they are
 //! trust-gated: the formats are not generated, so a hostile file could
-//! carry anything (starship custom commands run a shell), and an installed
+//! carry anything (starship custom commands run a shell, Lua runs in the
+//! editor), and an installed
 //! (someone else's) look drops them unless `--trust` is given. The check
-//! here proves only shape (size, text, well-formed): presence, provenance
+//! here proves only shape (size, text, well-formed TOML for the TOML
+//! leaves, btop theme lines, a `colors_name`-setting Lua colorscheme):
+//! presence, provenance
 //! (the `extends` walk) and trust live with the callers, who own the
 //! filesystem.
 //!
 //! The file names are the design's section 8.3 (`apps/helix.toml`,
-//! `apps/btop.theme`, `apps/starship.toml`), kept as `apps/*` inside the
-//! rendered look (the fragment-names table). `apps/foot.ini` and
-//! `apps/regreet.css` are other tickets' (foot generates from
-//! `[terminal]`; the greeter is static at build time).
+//! `apps/btop.theme`, `apps/starship.toml`, `apps/nvim.lua`), kept as
+//! `apps/*` inside the rendered look (the fragment-names table).
+//! `apps/foot.ini` and `apps/regreet.css` are other tickets' (foot
+//! generates from `[terminal]`; the greeter is static at build time).
 
 use crate::grammar::GrammarError;
 
@@ -37,6 +40,11 @@ pub enum StaticKind {
     /// btop's `theme[name]="value"` lines (checked against its 1.4.7
     /// theme reader: `#` comments, `theme[` entries).
     BtopTheme,
+    /// A Neovim colorscheme: Lua source setting `colors_name` (so a
+    /// wrong file at the path refuses instead of landing silently),
+    /// with no carriage returns. The watcher block inside re-sources
+    /// the file on change; the check does not run it.
+    Lua,
 }
 
 /// Every static leaf this ticket owns, in render order.
@@ -52,6 +60,10 @@ pub const STATIC_LEAVES: &[StaticLeaf] = &[
     StaticLeaf {
         path: "apps/starship.toml",
         kind: StaticKind::Toml,
+    },
+    StaticLeaf {
+        path: "apps/nvim.lua",
+        kind: StaticKind::Lua,
     },
 ];
 
@@ -89,10 +101,30 @@ pub fn check_static_leaf(path: &str, bytes: &[u8]) -> Result<(), GrammarError> {
             })?;
         }
         StaticKind::BtopTheme => check_btop_theme(path, text)?,
+        StaticKind::Lua => check_lua_colorscheme(path, text)?,
     }
     Ok(())
 }
 
+/// Checks a Neovim colorscheme: Lua source with no carriage returns
+/// (a stray CR would land verbatim in the render) that sets
+/// `colors_name`, so a wrong file at the path refuses instead of
+/// landing as a colorscheme that never names itself.
+fn check_lua_colorscheme(path: &str, text: &str) -> Result<(), GrammarError> {
+    if text.contains('\r') {
+        return Err(GrammarError::new(
+            path,
+            "carriage returns are refused in a Neovim colorscheme",
+        ));
+    }
+    if !text.contains("colors_name") {
+        return Err(GrammarError::new(
+            path,
+            "a Neovim colorscheme sets colors_name",
+        ));
+    }
+    Ok(())
+}
 /// Checks a btop theme: blank lines and `#` comments aside, every line is
 /// `theme[<name>]=<value>` on one line, with a non-empty name and value.
 /// At least one entry is required: a comments-only file is not a theme.

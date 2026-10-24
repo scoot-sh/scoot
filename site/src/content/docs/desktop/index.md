@@ -260,7 +260,8 @@ variables only, no daemon, so the theme costs no wakeups.
 | Login screen | `desktop.theme.targets.greeter.enable` | bool | `true` | the session wallpaper behind the login card, the dark setting, the look's ReGreet CSS and font — needs `greeter.enable` too |
 | Terminal | `desktop.theme.targets.terminal.enable` | bool | `true` | the look's `foot.ini` from the flake |
 | Prompt | `desktop.theme.targets.shell.enable` | bool | `true` | the look's `starship.toml` (`radial-burst` ships none: inert there) |
-| Editor | `desktop.theme.targets.editor.enable` | bool | `true` | the look's Helix config beside its theme (`radial-burst` ships none: inert there) |
+| Editor | `desktop.theme.targets.editor.enable` | bool | `true` | the look's Helix config beside its theme (`radial-burst` ships none: inert there) — plus the look's Neovim colorscheme, linked under its fixed name and loaded on demand, never selected |
+| Editor select | `desktop.theme.targets.editor.nvim.enable` | bool | `false` | select the linked Neovim colorscheme at startup (a `plugin/` file running `colorscheme scoot-look`); off leaves the scheme loaded but unselected, and home-manager's `programs.neovim` skips the selection (select the scheme in your own init) |
 | Monitor | `desktop.theme.targets.monitor.enable` | bool | `true` | the look's btop config beside its theme (`radial-burst` ships none, `music-desk` ships no theme: inert there) |
 | Input method | `desktop.theme.targets.inputMethod.enable` | bool | `true` | a generated `scoot-look` classic-UI theme (background and text, selection and border from the look's palette) plus the `classicui.conf` naming it — needs `inputMethod.enable` too |
 | Extra GTK keys | `desktop.theme.settings` | attrs of str | `{ }` | merged over the generated `settings.ini`: a value here wins per key |
@@ -1457,6 +1458,21 @@ Without it `xdg-open` keeps working for files and links. A directory
 has no default then, and `xdg-open` falls back: to a web browser's file listing if one is installed, or "no
 method available" if not. Nothing hangs.
 
+A default text editor makes `git`, `xdg-open` on a text file and
+every `EDITOR` reader agree:
+
+```nix title="configuration.nix and home.nix"
+programs.scoot.desktop.apps.editor.default = "nvim";   # or "helix"
+```
+
+Set: the editor installs (Neovim follows the look's colorscheme),
+`EDITOR` and `VISUAL` name its binary, and `text/plain` (and
+`text/*`) opens through a generated entry running `foot -e <editor>
+%F` (the terminal option's binary). Your own `EDITOR`, `VISUAL` or
+text association wins outright over the profile's. `null` (the
+default) installs and sets nothing; a null `package` beside a set
+default fails evaluation naming it.
+
 Removable media mounts on insert: `udiskie` runs trayless as a user
 unit (`scoot-automount.service`, wanted by `scoot-session.target`)
 over the udisks2 daemon the NixOS side enables. Insert a drive and it
@@ -1543,6 +1559,8 @@ apps started after the next login):
 | `desktop.apps.fileManager.enable` | bool | `false` | the file manager on `PATH`, directories and mounts opening in it |
 | `desktop.apps.fileManager.package` | package or null | pcmanfm (Linux-only: null off Linux) | point at another file manager |
 | `desktop.apps.fileManager.desktopEntry` | string | `"pcmanfm.desktop"` | the `.desktop` entry directories open through (`"thunar.desktop"` beside a thunar `package`) |
+| `desktop.apps.editor.default` | null, `"nvim"` or `"helix"` | `null` | the default text editor: installs it, sets `EDITOR` and `VISUAL`, and answers `text/plain` (and `text/*`) through a terminal entry running it (`foot -e <editor>`, following the terminal option); null installs and sets nothing |
+| `desktop.apps.editor.package` | package or null | neovim or helix, following the default (Linux-only: null off Linux) | the default editor to install (left to home-manager's `programs.neovim`/`programs.helix` when that is on: its package wins) |
 | `desktop.automount.enable` | bool | `true` with the profile | udisks2 on the NixOS side, udiskie and its trayless unit on the home-manager side (the unit left out while home-manager's `services.udiskie` is on: its unit runs instead) |
 | `desktop.automount.package` | package or null | udiskie (Linux-only: null off Linux) | point at your own udiskie build |
 

@@ -29,7 +29,13 @@ fn presence_reads_the_render() {
             helix: true,
             btop: false,
             starship: true,
+            nvim: false,
         }
+    );
+    let (_guard, nvim_dir) = render_dir("presence-nvim", &["apps/nvim.lua"]);
+    assert!(
+        presence_in(&nvim_dir).nvim,
+        "a render carrying apps/nvim.lua reports it"
     );
 }
 
@@ -57,6 +63,25 @@ fn signals_run_and_setup_notes_follow() {
             .notes
             .iter()
             .any(|note| note.contains("scoot-look.theme")),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn nvim_carries_a_setup_note_and_no_signal() {
+    let (_guard, dir) = render_dir("nvim", &["apps/nvim.lua"]);
+    let state = PathBuf::from("/tmp/scoot-terminals-state");
+    let leaves = ScriptedLeaves::ok();
+    let report = apply_terminals(&state, &dir, &leaves, false, false, None);
+    // No signal exists for nvim: the colorscheme watches itself, so
+    // nothing is signaled and nothing reloaded.
+    assert!(leaves.signaled().is_empty(), "no signal attempted");
+    assert!(report.reloaded.is_empty(), "{report:?}");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("scoot-look.lua")),
         "{report:?}"
     );
 }

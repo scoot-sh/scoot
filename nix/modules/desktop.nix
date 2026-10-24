@@ -1509,6 +1509,19 @@ in
           module owns the same files).
         '';
       };
+      targets.editor.nvim.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Select the look's Neovim colorscheme after linking it (a
+          `plugin/scoot-look.lua` running `colorscheme scoot-look`).
+          The link itself follows `targets.editor.enable` and lands
+          selected by nothing: the colorscheme loads, never overwrites
+          your init. Enabling home-manager's `programs.neovim` skips
+          the selection (that module owns your config: select the
+          scheme in your own init instead).
+        '';
+      };
       targets.monitor.enable = lib.mkOption {
         type = lib.types.bool;
         default = true;
@@ -1610,6 +1623,33 @@ in
             toggling paired devices and power, with an audio-sink
             row through the audio slot's helper. Without it the
             keymap's Bluetooth bind stays unbound.
+          '';
+        };
+      };
+      # The default text editor: null installs and sets nothing; naming
+      # one installs it (its package beside this), sets `EDITOR` and
+      # `VISUAL`, and answers plain-text files through a terminal entry
+      # (`foot -e <editor>`, following the terminal option). Off with
+      # the profile (nothing references one): set it to make `git`,
+      # `xdg-open` on a text file and every `EDITOR` reader agree.
+      # Each value is a `mkDefault`, so a value you set for `EDITOR`,
+      # `VISUAL` or the text association wins outright.
+      editor = {
+        default = lib.mkOption {
+          type = lib.types.nullOr (
+            lib.types.enum [
+              "nvim"
+              "helix"
+            ]
+          );
+          default = null;
+          example = "nvim";
+          description = ''
+            The default text editor: null installs and sets nothing,
+            `"nvim"` (Neovim, following the look's colorscheme) or
+            `"helix"`. Set: the editor installs, `EDITOR` and `VISUAL`
+            name its binary, and `text/plain` (and `text/*`) open
+            through a terminal entry running it.
           '';
         };
       };

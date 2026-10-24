@@ -113,6 +113,14 @@ let
         btopConf = if btopNested != null then btopNested else exampleFile name "btop.conf";
         btopTheme = oneExampleFile name "btop/themes" ".theme";
         regreetCss = exampleFile name "regreet.css";
+        # The Neovim colorscheme is the look's own static leaf (not an
+        # example config: nothing configures it, the colorscheme loads
+        # as is), present where the look ships it.
+        nvim =
+          let
+            leaf = lookDir + "/${name}/apps/nvim.lua";
+          in
+          if builtins.pathExists leaf then leaf else null;
       };
       wallpaper =
         if image == null then

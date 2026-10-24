@@ -6,12 +6,14 @@ const HELIX: &str =
     "\"ui.background\" = {}\n\"ui.text\" = \"#FF0000\"\n\"ui.selection\" = \"#FF0000\"\n";
 const BTOP: &str = "# a theme\ntheme[main_fg]=\"#FF0000\"\ntheme[title]=\"#00FF00\"\n";
 const STARSHIP: &str = "add_newline = false\nformat = \"$directory$character\"\n";
+const NVIM: &str = "-- a colorscheme\nvim.g.colors_name = \"scoot-look\"\n";
 
 #[test]
 fn shipped_shapes_pass() {
     check_static_leaf("apps/helix.toml", HELIX.as_bytes()).expect("helix theme");
     check_static_leaf("apps/btop.theme", BTOP.as_bytes()).expect("btop theme");
     check_static_leaf("apps/starship.toml", STARSHIP.as_bytes()).expect("starship config");
+    check_static_leaf("apps/nvim.lua", NVIM.as_bytes()).expect("nvim colorscheme");
 }
 
 #[test]
@@ -63,9 +65,22 @@ fn btop_shape_refuses() {
 
 #[test]
 fn leaf_table_shapes() {
-    assert_eq!(STATIC_LEAVES.len(), 3);
+    assert_eq!(STATIC_LEAVES.len(), 4);
     assert!(leaf_for("apps/helix.toml").is_some());
     assert!(leaf_for("apps/btop.theme").is_some());
     assert!(leaf_for("apps/starship.toml").is_some());
+    assert!(leaf_for("apps/nvim.lua").is_some());
     assert!(leaf_for("apps/foot.ini").is_none());
+}
+
+#[test]
+fn lua_shape_refuses() {
+    // A Lua file that never names itself is not a colorscheme.
+    let error =
+        check_static_leaf("apps/nvim.lua", b"vim.cmd(\"hi clear\")\n").expect_err("no name");
+    assert!(error.to_string().contains("colors_name"), "{error}");
+    // A carriage return would land verbatim in the render.
+    let error =
+        check_static_leaf("apps/nvim.lua", b"vim.g.colors_name = \"x\"\r\n").expect_err("CR");
+    assert!(error.to_string().contains("carriage returns"), "{error}");
 }

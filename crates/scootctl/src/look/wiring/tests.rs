@@ -52,14 +52,19 @@ fn missing_wiring_names_the_exact_fix_with_real_paths() {
         std::fs::create_dir_all(dir).expect("a dir");
     }
     // A look with every leaf: foot, mako, wob, fcitx5, helix, btop,
-    // starship, fuzzel, swaylock.
+    // starship, nvim, fuzzel, swaylock.
     std::fs::write(rendered.join("foot.ini"), "leaf").expect("foot");
     std::fs::write(rendered.join("mako"), "leaf").expect("mako");
     std::fs::write(rendered.join("wob.ini"), "leaf").expect("wob");
     std::fs::create_dir_all(rendered.join("fcitx5")).expect("fcitx5 dir");
     std::fs::write(rendered.join("fcitx5/theme.conf"), "leaf").expect("fcitx5");
     std::fs::create_dir_all(rendered.join("apps")).expect("apps");
-    for leaf in ["apps/helix.toml", "apps/btop.theme", "apps/starship.toml"] {
+    for leaf in [
+        "apps/helix.toml",
+        "apps/btop.theme",
+        "apps/starship.toml",
+        "apps/nvim.lua",
+    ] {
         std::fs::write(rendered.join(leaf), "leaf").expect("a leaf");
     }
     std::fs::write(rendered.join("fuzzel.ini"), "leaf").expect("fuzzel");
@@ -74,7 +79,9 @@ fn missing_wiring_names_the_exact_fix_with_real_paths() {
         starship_config: None,
     };
     let items = check_wiring(&input);
-    for app in ["foot", "mako", "fcitx5", "helix", "btop", "starship"] {
+    for app in [
+        "foot", "mako", "fcitx5", "helix", "btop", "starship", "nvim",
+    ] {
         assert_eq!(status_of(&items, app), WiringStatus::Missing, "{app}");
         let detail = detail_of(&items, app);
         assert!(!detail.contains('~'), "a real path, not `~`: {detail}");
@@ -107,6 +114,7 @@ fn wired_files_report_wired() {
     std::fs::write(rendered.join("apps/helix.toml"), "leaf").expect("helix");
     std::fs::write(rendered.join("apps/btop.theme"), "leaf").expect("btop");
     std::fs::write(rendered.join("apps/starship.toml"), "leaf").expect("starship");
+    std::fs::write(rendered.join("apps/nvim.lua"), "leaf").expect("nvim");
     std::fs::write(rendered.join("fuzzel.ini"), "leaf").expect("fuzzel");
     std::fs::write(rendered.join("swaylock"), "leaf").expect("swaylock");
     // No fcitx5 leaf rendered: fcitx5 reports absent, never missing.
@@ -123,6 +131,8 @@ fn wired_files_report_wired() {
     std::fs::create_dir_all(config.join("btop/themes")).expect("btop dir");
     std::fs::write(config.join("btop/themes/scoot-look.theme"), "theme").expect("btop theme");
     std::fs::write(config.join("starship.toml"), "config").expect("starship");
+    std::fs::create_dir_all(config.join("nvim/colors")).expect("nvim dir");
+    std::fs::write(config.join("nvim/colors/scoot-look.lua"), "theme").expect("nvim colorscheme");
     let rec = record("moonrise", &rendered);
     let input = WiringInput {
         state_dir: &state,
@@ -133,7 +143,7 @@ fn wired_files_report_wired() {
         starship_config: None,
     };
     let items = check_wiring(&input);
-    for app in ["foot", "mako", "helix", "btop", "starship"] {
+    for app in ["foot", "mako", "helix", "btop", "starship", "nvim"] {
         assert_eq!(status_of(&items, app), WiringStatus::Wired, "{app}");
     }
     assert_eq!(status_of(&items, "fcitx5"), WiringStatus::Absent);
@@ -190,7 +200,7 @@ fn a_leafless_look_reports_absent_never_missing() {
     };
     let items = check_wiring(&input);
     for app in [
-        "foot", "mako", "wob", "fcitx5", "helix", "btop", "starship", "fuzzel", "swaylock",
+        "foot", "mako", "wob", "fcitx5", "helix", "btop", "starship", "nvim", "fuzzel", "swaylock",
     ] {
         assert_eq!(status_of(&items, app), WiringStatus::Absent, "{app}");
     }
@@ -261,4 +271,38 @@ fn starship_config_none_without_a_file_is_missing() {
     };
     let items = check_wiring(&input);
     assert_eq!(status_of(&items, "starship"), WiringStatus::Missing);
+}
+
+#[test]
+fn nvim_missing_names_the_exact_link_fix() {
+    let root = scratch("nvim-missing");
+    let state = root.path().join("state");
+    let rendered = root.path().join("rendered");
+    let config = root.path().join("config");
+    for dir in [&state, &rendered, &config] {
+        std::fs::create_dir_all(dir).expect("a dir");
+    }
+    std::fs::create_dir_all(rendered.join("apps")).expect("apps");
+    std::fs::write(rendered.join("apps/nvim.lua"), "leaf").expect("nvim");
+    let rec = record("moonrise", &rendered);
+    let input = WiringInput {
+        state_dir: &state,
+        record: &rec,
+        rendered: &rendered,
+        config_home: Some(&config),
+        data_home: None,
+        starship_config: None,
+    };
+    let items = check_wiring(&input);
+    assert_eq!(status_of(&items, "nvim"), WiringStatus::Missing);
+    let detail = detail_of(&items, "nvim");
+    assert!(!detail.contains('~'), "a real path, not `~`: {detail}");
+    assert!(
+        detail.contains("nvim/colors/scoot-look.lua"),
+        "the detail names the link path: {detail}"
+    );
+    assert!(
+        detail.contains("apps/nvim.lua"),
+        "the detail names the leaf: {detail}"
+    );
 }

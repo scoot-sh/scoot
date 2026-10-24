@@ -451,6 +451,10 @@ fn install_drops_apps_leaves_without_trust_and_keeps_them_with_it() {
         ("apps/helix.toml", b"[theme]\n" as &[u8]),
         ("apps/btop.theme", b"theme[main_bg]=\"#000000\"\n"),
         ("apps/starship.toml", b"format = \"x\"\n"),
+        (
+            "apps/nvim.lua",
+            b"vim.g.colors_name = \"scoot-look\"\n" as &[u8],
+        ),
     ];
     let src = source_look(&root.path().join("src"), "leafy", &leaves);
     let report = install_dir_into(
@@ -467,6 +471,7 @@ fn install_drops_apps_leaves_without_trust_and_keeps_them_with_it() {
         vec![
             "apps/btop.theme".to_owned(),
             "apps/helix.toml".to_owned(),
+            "apps/nvim.lua".to_owned(),
             "apps/starship.toml".to_owned(),
         ],
         "every leaf drops, sorted"
@@ -488,7 +493,7 @@ fn install_drops_apps_leaves_without_trust_and_keeps_them_with_it() {
     )
     .expect("a leafy look installs trusted");
     assert!(report.dropped.is_empty());
-    assert_eq!(report.kept.len(), 3, "kept leaves print first: {report:?}");
+    assert_eq!(report.kept.len(), 4, "kept leaves print first: {report:?}");
     for (rel, bytes) in &leaves {
         assert_eq!(
             std::fs::read(report.dir.join(rel)).expect("a kept leaf"),

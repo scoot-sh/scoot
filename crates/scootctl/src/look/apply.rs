@@ -1408,7 +1408,8 @@ fn wallpaper_image(chain: &[ChainEntry]) -> Option<(PathBuf, String, Option<Stri
 ///
 /// An installed (someone else's) look drops them without `trust`: its
 /// formats are never generated, so a hostile file could carry anything
-/// (starship custom commands run a shell). With `trust` they render and
+/// (starship custom commands run a shell, Lua runs in the editor).
+/// With `trust` they render and
 /// each prints into `notes` first, so the reply shows what was trusted.
 /// A look with no `apps/` file renders none, whatever the origin.
 pub(crate) fn static_leaf_files(
@@ -1596,8 +1597,11 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 /// fragment (`launch.toml`, read at every panel open); 12 adds the
 /// notification fragment (`notify.toml`, read at daemon start and on
 /// re-theme); 13 drops `mode` and `fill` from a color wallpaper (scootbg
-/// refuses them without an image), so an unchanged look re-renders.
-pub const RENDER_VERSION: u32 = 13;
+/// refuses them without an image), so an unchanged look re-renders; 14
+/// adds the Neovim colorscheme static leaf (`apps/nvim.lua`, dropped
+/// from installed looks without `--trust` like the other terminal
+/// leaves), so an unchanged look re-renders with it.
+pub const RENDER_VERSION: u32 = 14;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
@@ -1883,8 +1887,9 @@ fn cached_complete(
 /// `render.json` and the daemon leaves (`mako`,
 /// `wob.ini`, `fcitx5/theme.conf`, `nightlight` when the look names a
 /// temperature) and the terminal static leaves (`apps/helix.toml`,
-/// `apps/btop.theme`, `apps/starship.toml`, each only when the look
-/// carries it — and never from an installed look without `trust`),
+/// `apps/btop.theme`, `apps/starship.toml`, `apps/nvim.lua`, each only
+/// when the look carries it — and never from an installed look without
+/// `trust`),
 /// written into a fresh directory and renamed, so a reader
 /// racing the render sees the old or the new directory, never a half-written
 /// one. An existing directory with the same key is reused after its
@@ -2505,7 +2510,8 @@ pub(crate) fn complete_swap(
             }
             // The terminal leaves are best-effort too: `SIGUSR1` to the
             // user's own `hx`, `SIGUSR2` to their `btop` (each opt-out),
-            // and the starship next-prompt note. A private state runs no
+            // the starship next-prompt note and the nvim live-colorscheme
+            // note. A private state runs no
             // signal (it would reach the user's real editors).
             if merged.is_some() {
                 let terminal_report = super::terminals::apply_terminals(
@@ -3142,7 +3148,8 @@ pub fn apply_with_live(
     report.notes.extend(leaf_report.notes);
     // The terminal leaves are best-effort too: `SIGUSR1` to the user's
     // own `hx` and `SIGUSR2` to their `btop` (each opt-out, so an editor
-    // mid-flow can sit a swap out), and the starship next-prompt note.
+    // mid-flow can sit a swap out), the starship next-prompt note and
+    // the nvim live-colorscheme note.
     // A private state runs no signal (it would reach the user's real
     // editors, not the test's).
     let terminal_report = super::terminals::apply_terminals(

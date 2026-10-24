@@ -201,7 +201,7 @@ pub fn check_relative_path(field: &str, value: &str) -> Option<GrammarError> {
 }
 
 /// Suffixes the trust boundary accepts for look files (design section 8.3):
-/// `look.toml`, `preview.png`, image wallpapers, bundled fonts, the five
+/// `look.toml`, `preview.png`, image wallpapers, bundled fonts, the six
 /// named `apps/` leaves, `LICENSE*`, `COPYING*`, `README.md`.
 pub fn is_permitted_look_file(name: &str) -> bool {
     if name == "look.toml" || name == "preview.png" || name == "README.md" {

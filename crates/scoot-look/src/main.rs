@@ -21,10 +21,11 @@
 //! every declared source down in one directory and builds each look
 //! against it, so a declared look with `extends` renders at build time
 //! like any other.
-//! Both take `--trust` to keep an installed look's static terminal
-//! leaves (`apps/helix.toml`, `apps/btop.theme`, `apps/starship.toml`):
-//! without it they are dropped, with it they render and print first (to
-//! stderr, so stdout stays machine-readable).
+//! `validate` and `build` take `--trust` to keep an installed look's
+//! static terminal leaves (`apps/helix.toml`, `apps/btop.theme`,
+//! `apps/starship.toml`, `apps/nvim.lua`): without it they are dropped,
+//! with them they render and print first (to stderr, so stdout stays
+//! machine-readable).
 //! `import-base16` takes `--name` to name the look instead of the
 //! scheme's slug, `--extends` to emit a child of that look, and `--out`
 //! to write `<dir>/look.toml` (without it the `look.toml` goes to
