@@ -3742,6 +3742,7 @@ const HELIX_LEAF: &str =
     "\"ui.background\" = {}\n\"ui.text\" = \"#FF0000\"\n\"ui.selection\" = \"#FF0000\"\n";
 const BTOP_LEAF: &str = "# a theme\ntheme[main_fg]=\"#FF0000\"\n";
 const STARSHIP_LEAF: &str = "add_newline = false\nformat = \"$directory$character\"\n";
+const NVIM_LEAF: &str = "vim.g.colors_name = \"scoot-look\"\n";
 
 /// Writes `apps/` static leaves into the source look `sources/<name>`.
 fn write_static(sources: &Path, name: &str, leaves: &[(&str, &str)]) {
@@ -3756,6 +3757,7 @@ const ALL_LEAVES: &[(&str, &str)] = &[
     ("apps/helix.toml", HELIX_LEAF),
     ("apps/btop.theme", BTOP_LEAF),
     ("apps/starship.toml", STARSHIP_LEAF),
+    ("apps/nvim.lua", NVIM_LEAF),
 ];
 
 /// A fixture whose `look-a` carries static leaves, scanned as `origin`.
@@ -3835,7 +3837,8 @@ fn static_leaves_render_verbatim_and_signal() {
     );
     assert!(report.reloaded.contains(&"helix".to_owned()), "{report:?}");
     assert!(report.reloaded.contains(&"btop".to_owned()), "{report:?}");
-    // The one-time wiring for each leaf, and starship's next prompt.
+    // The one-time wiring for each leaf, starship's next prompt, and
+    // nvim's live colorscheme note (no signal: it watches itself).
     assert!(
         report
             .notes
@@ -3855,6 +3858,13 @@ fn static_leaves_render_verbatim_and_signal() {
             .notes
             .iter()
             .any(|note| note.contains("STARSHIP_CONFIG")),
+        "{report:?}"
+    );
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("scoot-look.lua")),
         "{report:?}"
     );
 }

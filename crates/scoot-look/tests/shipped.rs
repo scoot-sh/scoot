@@ -377,17 +377,35 @@ fn shipped_static_leaves_read_and_shape_check() {
     let expected: &[(&str, &[&str])] = &[
         (
             "ginger-night",
-            &["apps/helix.toml", "apps/btop.theme", "apps/starship.toml"],
+            &[
+                "apps/helix.toml",
+                "apps/btop.theme",
+                "apps/starship.toml",
+                "apps/nvim.lua",
+            ],
         ),
         (
             "moonrise",
-            &["apps/helix.toml", "apps/btop.theme", "apps/starship.toml"],
+            &[
+                "apps/helix.toml",
+                "apps/btop.theme",
+                "apps/starship.toml",
+                "apps/nvim.lua",
+            ],
         ),
-        ("music-desk", &["apps/helix.toml", "apps/starship.toml"]),
+        (
+            "music-desk",
+            &["apps/helix.toml", "apps/starship.toml", "apps/nvim.lua"],
+        ),
         ("radial-burst", &[]),
         (
             "vinyl-sunset",
-            &["apps/helix.toml", "apps/btop.theme", "apps/starship.toml"],
+            &[
+                "apps/helix.toml",
+                "apps/btop.theme",
+                "apps/starship.toml",
+                "apps/nvim.lua",
+            ],
         ),
     ];
     for (name, leaves) in expected {
@@ -411,9 +429,193 @@ fn shipped_static_leaves_read_and_shape_check() {
                         "{name}: helix leaf names no ui.selection"
                     );
                 }
+                // A Neovim colorscheme that loads: it names the scheme
+                // and carries the live-reload watcher (a file watch
+                // plus the state-dir watch behind the look link, one
+                // guarded set of handles).
+                if leaf.path == "apps/nvim.lua" {
+                    let text = String::from_utf8_lossy(&bytes);
+                    assert!(
+                        text.contains("colors_name"),
+                        "{name}: nvim leaf never names the scheme"
+                    );
+                    assert!(
+                        text.contains("new_fs_event"),
+                        "{name}: nvim leaf carries no file watcher"
+                    );
+                    assert!(
+                        text.contains("scoot_look_nvim_watching"),
+                        "{name}: nvim leaf carries no watcher guard"
+                    );
+                    // The apply-flow leg: the state dir behind the look
+                    // link (a repoint fires there, nowhere under the old
+                    // render).
+                    assert!(
+                        text.contains("SCOOT_LOOK_STATE"),
+                        "{name}: nvim leaf never watches the state dir"
+                    );
+                    // The palette is the look's own: every `#rrggbb` the
+                    // colorscheme names appears in its Helix leaf (same
+                    // hues, same roles — nothing invented, nothing
+                    // copied from another scheme).
+                    let helix_path = dir.join("apps/helix.toml");
+                    let helix = std::fs::read_to_string(&helix_path)
+                        .unwrap_or_else(|e| panic!("cannot read {}: {e}", helix_path.display()));
+                    let helix_lower = helix.to_lowercase();
+                    for (i, _) in text.match_indices('#') {
+                        let rest = &text[i + 1..];
+                        if rest.len() >= 6 && rest[..6].bytes().all(|b| b.is_ascii_hexdigit()) {
+                            let color = rest[..6].to_lowercase();
+                            assert!(
+                                helix_lower.contains(&format!("#{color}")),
+                                "{name}: nvim leaf names #{color}, absent from its helix leaf"
+                            );
+                        }
+                    }
+                }
             } else {
                 assert!(!path.exists(), "{name}: unexpected {}", path.display());
             }
         }
     }
+}
+
+/// The Neovim colorscheme recolors a running nvim with no signal: a
+/// headless server sources the shipped leaf through the real wiring (a
+/// `colors/` link into the state file, selected by name), an edit behind
+/// the look link re-sources it within the bound, and the guard keeps one
+/// set of handles across the re-source. Skips (never fails) where `nvim`
+/// is not on `PATH`; the shape checks above run everywhere.
+#[test]
+fn nvim_colorscheme_reloads_live() {
+    if !std::process::Command::new("nvim")
+        .arg("--version")
+        .output()
+        .is_ok_and(|out| out.status.success())
+    {
+        eprintln!("skipping nvim live-reload: no `nvim` on PATH");
+        return;
+    }
+    // A short scratch prefix: the control socket must fit a Unix socket
+    // path (107 bytes) under any CI TMPDIR.
+    let scratch = tempfile::Builder::new()
+        .prefix("snvim-")
+        .tempdir()
+        .expect("a scratch dir");
+    let root = scratch.path();
+    let render1 = root.join("r1");
+    let render2 = root.join("r2");
+    // Where the leaf's own state-dir watch looks: `$XDG_STATE_HOME/scoot`
+    // for the `XDG_STATE_HOME` the server below inherits.
+    let state = root.join("scoot");
+    let rtp = root.join("rtp").join("colors");
+    for dir in [&render1, &render2, &state, &rtp] {
+        std::fs::create_dir_all(dir).expect("a scratch dir");
+    }
+    let leaf = looks_dir().join("moonrise").join("apps").join("nvim.lua");
+    let bytes = std::fs::read(&leaf).expect("the shipped nvim leaf");
+    let text = String::from_utf8(bytes).expect("the leaf is UTF-8");
+    assert!(text.contains("colors_name"), "the leaf names the scheme");
+    let ink1 = text.replace("#f6eedc", "#111111");
+    let ink2 = text.replace("#f6eedc", "#222222");
+    std::fs::create_dir_all(render1.join("apps")).expect("apps dir");
+    std::fs::create_dir_all(render2.join("apps")).expect("apps dir");
+    std::fs::write(render1.join("apps").join("nvim.lua"), &ink1).expect("render 1");
+    std::fs::write(render2.join("apps").join("nvim.lua"), &ink2).expect("render 2");
+    std::os::unix::fs::symlink(&render1, state.join("look")).expect("the look link");
+    std::fs::write(state.join("look.json"), "{\"name\":\"moonrise\"}").expect("a record");
+    std::os::unix::fs::symlink(
+        state.join("look").join("apps").join("nvim.lua"),
+        rtp.join("scoot-look.lua"),
+    )
+    .expect("the colorscheme link");
+    let sock = root.join("n.sock");
+    let mut server = std::process::Command::new("nvim")
+        .args(["--headless", "-u", "NONE", "-i", "NONE"])
+        .arg("--cmd")
+        .arg(format!("set runtimepath+={}", root.join("rtp").display()))
+        .args(["-c", "colorscheme scoot-look"])
+        .arg("--listen")
+        .arg(&sock)
+        .env("XDG_STATE_HOME", root)
+        .env("HOME", root)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the headless server starts");
+
+    fn query(sock: &std::path::Path, expr: &str) -> Option<String> {
+        let out = std::process::Command::new("nvim")
+            .arg("--server")
+            .arg(sock)
+            .arg("--remote-expr")
+            .arg(expr)
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+    }
+    // The server answers once `--listen` is up; the colorscheme applies
+    // at startup, so the first good answer already carries its Normal.
+    let fg_expr =
+        "luaeval('string.format(\"%06x\", vim.api.nvim_get_hl(0, {name=\"Normal\"}).fg)')";
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while query(&sock, fg_expr).as_deref() != Some("111111") {
+        if std::time::Instant::now() >= deadline {
+            server.kill().ok();
+            panic!("the server never showed the wired colorscheme");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let handles_expr = "luaeval('vim.tbl_count(_G.scoot_look_nvim_watching.handles)')";
+    let before = query(&sock, handles_expr).expect("the watcher state reads");
+    assert!(
+        before.parse::<usize>().unwrap_or(0) >= 2,
+        "the file and its directory stay watched: {before}"
+    );
+    // The apply flow: repoint the look link behind the file (never a
+    // signal, never a restart). The state-dir watch fires, the scheme
+    // re-sources by name, the guard keeps the handle set.
+    std::fs::remove_file(state.join("look")).expect("unlink the look");
+    std::os::unix::fs::symlink(&render2, state.join("look")).expect("repoint the look");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while query(&sock, fg_expr).as_deref() != Some("222222") {
+        if std::time::Instant::now() >= deadline {
+            server.kill().ok();
+            panic!("the repoint never recolored the running nvim");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let after = query(&sock, handles_expr).expect("the watcher state reads");
+    assert_eq!(
+        before, after,
+        "re-sourcing stacks no watchers (before {before}, after {after})"
+    );
+    // The watch flow: swap the slot directory itself (rename aside,
+    // rename in), the way `scoot look watch` re-renders. The file and
+    // directory watches orphan without firing on every platform; the
+    // render-cache watch above them announces the swap.
+    let ink3 = text.replace("#f6eedc", "#333333");
+    let render_new = root.join("r-new");
+    std::fs::create_dir_all(render_new.join("apps")).expect("apps dir");
+    std::fs::write(render_new.join("apps").join("nvim.lua"), &ink3).expect("render new");
+    std::fs::rename(&render2, root.join("r-old")).expect("move the slot aside");
+    std::fs::rename(&render_new, &render2).expect("move the new slot in");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    while query(&sock, fg_expr).as_deref() != Some("333333") {
+        if std::time::Instant::now() >= deadline {
+            server.kill().ok();
+            panic!("the slot swap never recolored the running nvim");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let swapped = query(&sock, handles_expr).expect("the watcher state reads");
+    assert_eq!(
+        before, swapped,
+        "re-sourcing stacks no watchers (before {before}, after swap {swapped})"
+    );
+    server.kill().ok();
+    server.wait().ok();
 }

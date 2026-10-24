@@ -698,6 +698,31 @@ in
           };
         };
 
+        # The default editor's package, following
+        # `desktop.apps.editor.default` (null with it: nothing to
+        # install). The same derivation as the home-manager side, so
+        # either side alone names the same tool.
+        editor = desktop.options.apps.editor // {
+          package = lib.mkOption {
+            type = lib.types.nullOr lib.types.package;
+            default =
+              if !pkgs.stdenv.hostPlatform.isLinux then
+                null
+              else if cfg.desktop.apps.editor.default == "nvim" then
+                pkgs.neovim or null
+              else if cfg.desktop.apps.editor.default == "helix" then
+                pkgs.helix or null
+              else
+                null;
+            defaultText = lib.literalExpression "follows programs.scoot.desktop.apps.editor.default (neovim or helix) on Linux, else null";
+            description = ''
+              The default text editor to install system-wide (following
+              `desktop.apps.editor.default`: Neovim or Helix).
+              Null installs nothing. Linux-only: null off Linux.
+            '';
+          };
+        };
+
         network = desktop.options.apps.network // {
           cliPackage = lib.mkOption {
             type = lib.types.nullOr lib.types.package;
@@ -1901,6 +1926,32 @@ in
       environment.systemPackages = lib.optional (
         cfg.desktop.apps.fileManager.package != null
       ) cfg.desktop.apps.fileManager.package;
+    })
+    # The default editor's system half: the package on PATH and `EDITOR`
+    #/`VISUAL` for everything that asks (at `mkDefault`, so an explicit
+    # value still wins). The binds, the entry and the text association
+    # are the home-manager side's: without it the tool sits ready for a
+    # hand-written setup.
+    (lib.mkIf (cfg.desktop.apps.editor.default != null) {
+      assertions = [
+        {
+          assertion = cfg.desktop.apps.editor.package != null;
+          message = ''
+            programs.scoot.desktop.apps.editor.default is set but
+            programs.scoot.desktop.apps.editor.package is null: set
+            it explicitly (apply the overlay, or point at the editor).
+          '';
+        }
+      ];
+
+      environment.systemPackages = lib.optional (
+        cfg.desktop.apps.editor.package != null
+      ) cfg.desktop.apps.editor.package;
+
+      environment.variables = {
+        EDITOR = lib.mkDefault (if cfg.desktop.apps.editor.default == "helix" then "hx" else "nvim");
+        VISUAL = lib.mkDefault (if cfg.desktop.apps.editor.default == "helix" then "hx" else "nvim");
+      };
     })
     (lib.mkIf cfg.desktop.apps.network.enable {
       assertions = [

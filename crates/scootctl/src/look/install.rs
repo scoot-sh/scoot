@@ -8,7 +8,7 @@
 //! regular files only (a symlink, a hard link, a device, a FIFO or a
 //! socket refuses the install), only the file kinds a look uses, by name and place
 //! (`look.toml`, `preview.png`, image wallpapers, `fonts/*.ttf|otf`, the
-//! five named `apps/` leaves, `LICENSE*`, `COPYING*`, `README.md`), every
+//! six named `apps/` leaves, `LICENSE*`, `COPYING*`, `README.md`), every
 //! referenced path inside the look directory, file count and total size
 //! capped, `license` required, and the `apps/` static leaves dropped
 //! unless `--trust` (printed first).
@@ -54,21 +54,24 @@ pub const MAX_FONT_BYTES: u64 = 16 * 1024 * 1024;
 
 /// The `apps/` leaves the install gate knows, by name and place (design
 /// section 8.3): foot's config and the greeter's beside the three terminal
-/// leaves [`scoot_look::STATIC_LEAVES`] owns. Static files, copied
-/// verbatim, never rendered — which is why an installed look drops them
-/// unless `--trust` is given (starship custom commands run a shell).
+/// leaves and the Neovim colorscheme [`scoot_look::STATIC_LEAVES`] owns.
+/// Static files, copied verbatim, never rendered — which is why an
+/// installed look drops them unless `--trust` is given (starship custom
+/// commands and Lua both run code: the former a shell, the latter in the
+/// editor itself).
 pub const APPS_LEAVES: &[&str] = &[
     "apps/foot.ini",
     "apps/helix.toml",
     "apps/btop.theme",
     "apps/starship.toml",
     "apps/regreet.css",
+    "apps/nvim.lua",
 ];
 
 /// Whether `rel` (a `/`-separated path inside a look) is a file kind a look
 /// uses, in the place it uses it: `look.toml`, `preview.png`, `README.md`,
 /// `LICENSE*`/`COPYING*` and image wallpapers at the top level,
-/// `fonts/*.ttf|otf` under `fonts/`, the five named leaves under `apps/`.
+/// `fonts/*.ttf|otf` under `fonts/`, the six named leaves under `apps/`.
 /// Anything else refuses the install by name. The caller validates
 /// normalization first ([`check_relative_path`]).
 pub fn permitted_rel(rel: &str) -> bool {
@@ -250,7 +253,7 @@ fn collect_dir_into(
             // other directory, refuses by name.
             if dir != root || (rel != "fonts" && rel != "apps") {
                 return Err(format!(
-                    "refused: {rel}/ is not a file a look uses (only look.toml, preview.png, image wallpapers, fonts/*.ttf|otf, the five apps/ leaves, LICENSE*, COPYING*, README.md install)"
+                    "refused: {rel}/ is not a file a look uses (only look.toml, preview.png, image wallpapers, fonts/*.ttf|otf, the six apps/ leaves, LICENSE*, COPYING*, README.md install)"
                 ));
             }
             collect_dir_into(root, &path, files, total)?;
@@ -275,7 +278,7 @@ fn collect_dir_into(
         }
         if !permitted_rel(&rel) {
             return Err(format!(
-                "refused: {rel} is not a file a look uses (only look.toml, preview.png, image wallpapers, fonts/*.ttf|otf, the five apps/ leaves, LICENSE*, COPYING*, README.md install)"
+                "refused: {rel} is not a file a look uses (only look.toml, preview.png, image wallpapers, fonts/*.ttf|otf, the six apps/ leaves, LICENSE*, COPYING*, README.md install)"
             ));
         }
         gate_file(&rel, meta.len(), files.len(), *total)?;
@@ -430,7 +433,7 @@ fn collect_tar(path: &Path) -> Result<Vec<LookFile>, String> {
         }
         if !permitted_rel(&rel) {
             return Err(format!(
-                "refused: {rel} is not a file a look uses (only look.toml, preview.png, image wallpapers, fonts/*.ttf|otf, the five apps/ leaves, LICENSE*, COPYING*, README.md install)"
+                "refused: {rel} is not a file a look uses (only look.toml, preview.png, image wallpapers, fonts/*.ttf|otf, the six apps/ leaves, LICENSE*, COPYING*, README.md install)"
             ));
         }
         if !seen.insert(rel.clone()) {

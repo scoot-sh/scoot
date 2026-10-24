@@ -40,7 +40,10 @@ const BUILD_FILES: [&str; 15] = [
 /// Output directories holding only their named files (never followed
 /// through a symlink).
 const BUILD_DIRS: [(&str, &[&str]); 4] = [
-    ("apps", &["helix.toml", "btop.theme", "starship.toml"]),
+    (
+        "apps",
+        &["helix.toml", "btop.theme", "starship.toml", "nvim.lua"],
+    ),
     ("fcitx5", &["theme.conf"]),
     ("gtk", &["gtk-3.0.css", "gtk-4.0.css"]),
     ("qt", &["scoot-look.conf"]),

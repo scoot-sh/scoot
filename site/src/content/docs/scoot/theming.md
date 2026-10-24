@@ -68,6 +68,7 @@ newly started apps, running ones where their toolkit watches:
 | `~/.config/foot/foot.ini` | the example's own file | foot on restart |
 | `~/.config/starship.toml` | the example's own file | next prompt |
 | `~/.config/helix/config.toml` + `themes/<look>.toml` | the example's own files | Helix on restart |
+| `~/.config/nvim/colors/scoot-look.lua` (+ `plugin/scoot-look.lua` with `targets.editor.nvim.enable`) | the look's own colorscheme (loaded on demand; selected only with `nvim.enable`) | running nvim recolors live (its own file watcher); new nvim reads it at startup |
 | `~/.config/btop/btop.conf` + `themes/<look>.theme` | the example's own files | btop on restart |
 | `~/.local/share/fcitx5/themes/scoot-look/theme.conf` (needs `inputMethod.enable`) | a classic-UI theme generated from the look's palette (accent selection, background surfaces) | fcitx5 on restart (the unit restarts into a new theme) |
 | `~/.config/fcitx5/conf/classicui.conf` (needs `inputMethod.enable`) | `Theme=scoot-look` (plus `DarkTheme=scoot-look` for the portal dark path) | fcitx5 on restart |
@@ -117,7 +118,7 @@ Generated from the look's palette where the format is mechanical:
 fontconfig snippet, the ReGreet dark setting, the cursor and font
 names. Installed as the example's own static file where the palette
 is hand-tuned: `foot.ini`, `starship.toml`, the Helix config and
-theme, the btop config and theme, and `regreet.css`. A terminal
+theme, the Neovim colorscheme, the btop config and theme, and `regreet.css`. A terminal
 palette is sixteen hand-placed hues, not six bar roles projected
 wider — generating it would invent colors no one chose, so the flake
 applies the file instead of synthesizing one.

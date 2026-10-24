@@ -388,7 +388,7 @@ COMMANDS:
                 toolkit files, including the color-scheme write) for this
                 apply (the first apply with no record adopts each key
                 whatever it holds); --trust keeps an installed look's
-                Helix, btop and starship leaves (printing them first)
+                Helix, btop, starship and Neovim leaves (printing them first)
                 instead of dropping them; --no-helix and --no-btop skip
                 that app's signal for this apply (the leaf still renders);
                 --from-compositor marks the choice as compositor-driven
@@ -449,7 +449,7 @@ COMMANDS:
                 the recorded live look (apply one first)
     wiring      check the one-time non-Nix setup the active look still
                 needs (foot include, mako include, wob command, fcitx5
-                theme link, Helix/btop/starship pointers, launcher flags,
+                theme link, Helix/btop/starship/nvim pointers, launcher flags,
                 lock merger): each step reported wired, missing (with the
                 exact fix), manual (the command to run) or absent (the
                 look carries no leaf for it). Read-only; needs an applied

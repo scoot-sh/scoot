@@ -564,6 +564,13 @@ let
       type = lib.types.listOf lib.types.package;
       default = [ ];
     };
+    # The system-wide environment variables (nixpkgs' own
+    # `environment.variables`: string values, empty here like its
+    # default). The apps slot sets `EDITOR`/`VISUAL` through it.
+    options.environment.variables = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+    };
     # The system environment's link list
     # (`/run/current-system/sw`): the look catalog adds `share/scoot`
     # beside nixpkgs' own subpaths (a plain string list, empty here
@@ -2832,6 +2839,39 @@ let
     desktop.enable = true;
     desktop.apps.fileManager.enable = true;
   };
+  # ...the default editor on (Neovim: installed, `EDITOR`/`VISUAL` set,
+  # plain text answering through the terminal entry)...
+  hmAppsEditorNvim = evalHome {
+    enable = true;
+    desktop.enable = true;
+    look = "music-desk";
+    desktop.apps.editor.default = "nvim";
+  };
+  # ...the default editor as Helix (`hx` on `EDITOR`, the helix package
+  # installed)...
+  hmAppsEditorHelix = evalHome {
+    enable = true;
+    desktop.enable = true;
+    desktop.apps.editor.default = "helix";
+  };
+  # ...a user's own `EDITOR`/`VISUAL` and text association beside the
+  # profile's default: each wins outright (plain priority beats the
+  # profile's `mkDefault`, never a conflict or a merged list).
+  hmAppsEditorUser =
+    evalHomeModules
+      [
+        {
+          home.sessionVariables.EDITOR = "user-ed";
+          home.sessionVariables.VISUAL = "user-vis";
+          xdg.mimeApps.enable = true;
+          xdg.mimeApps.defaultApplications."text/plain" = "user-ed.desktop";
+        }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        desktop.apps.editor.default = "nvim";
+      };
   # ...the terminal off: no foot, no `TERMINAL`, no user dirs (the
   # file manager stays off too, so nothing opens files).
   hmAppsTermOff = evalHome {
@@ -2877,6 +2917,11 @@ let
     enable = true;
     desktop.apps.terminal.enable = true;
     desktop.apps.terminal.package = null;
+  };
+  hmAppsEditorNoPkg = evalHome {
+    enable = true;
+    desktop.apps.editor.default = "nvim";
+    desktop.apps.editor.package = null;
   };
   hmAppsNoFiles = evalHome {
     enable = true;
@@ -3330,6 +3375,13 @@ let
     package = fakePkg;
     desktop.enable = true;
     desktop.apps.fileManager.enable = true;
+  };
+  # ...the default editor on (Neovim system-wide, `EDITOR`/`VISUAL` set).
+  osAppsEditor = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    desktop.apps.editor.default = "nvim";
   };
   # ...the terminal off: no foot system-wide.
   osAppsTermOff = evalNixos {
@@ -4972,6 +5024,34 @@ let
         look = "music-desk";
       }
       { package = fakeBar; };
+  # ...selecting the look's Neovim colorscheme (off by default): the
+  # plugin file selecting `scoot-look` beside the linked colorscheme...
+  hmThemeNvimSelect = evalHome {
+    enable = true;
+    desktop.enable = true;
+    look = "music-desk";
+    desktop.theme.targets.editor.nvim.enable = true;
+  };
+  # ...home-manager's own `programs.neovim` owning the config (a stub:
+  # only `enable` is read): the colorscheme still links, but the
+  # selection stays out (that module owns the config)...
+  hmThemeNvimUpstream =
+    evalHomeModules
+      [
+        {
+          options.programs.neovim.enable = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+          };
+          config.programs.neovim.enable = true;
+        }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        look = "music-desk";
+        desktop.theme.targets.editor.nvim.enable = true;
+      };
   # ...an upstream GTK module owning `settings.ini` (its text stands,
   # ours stays out) while the css and dconf it does not own stay
   # themed -- including a dconf leaf of its own beside ours, which is
@@ -11175,6 +11255,166 @@ let
         ];
       true
     )
+    # ...the default editor unset: nothing installed, nothing set, no
+    # text association (the file manager off too, so `mimeApps` stays
+    # out entirely)...
+    (
+      assert hmApps.config.programs.scoot.desktop.apps.editor.default == null;
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "neovim") hmApps.config.home.packages);
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "helix") hmApps.config.home.packages);
+      true
+    )
+    (
+      assert !(hmApps.config.home.sessionVariables ? EDITOR);
+      true
+    )
+    (
+      assert !(hmApps.config.home.sessionVariables ? VISUAL);
+      true
+    )
+    (
+      assert !(hmApps.config.xdg.dataFile ? "applications/scoot-editor.desktop");
+      true
+    )
+    # ...the default editor on (Neovim: installed, `EDITOR`/`VISUAL`
+    # set, plain text answering through the terminal entry)...
+    (
+      assert allAssertionsHold hmAppsEditorNvim.config;
+      true
+    )
+    (
+      assert
+        hmAppsEditorNvim.config.programs.scoot.desktop.apps.editor.package.drvPath == pkgs.neovim.drvPath;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "neovim") hmAppsEditorNvim.config.home.packages;
+      true
+    )
+    (
+      assert hmAppsEditorNvim.config.home.sessionVariables.EDITOR == "nvim";
+      true
+    )
+    (
+      assert hmAppsEditorNvim.config.home.sessionVariables.VISUAL == "nvim";
+      true
+    )
+    (
+      assert hmAppsEditorNvim.config.xdg.mimeApps.enable;
+      true
+    )
+    (
+      assert
+        hmAppsEditorNvim.config.xdg.mimeApps.defaultApplications."text/plain" == [ "scoot-editor.desktop" ];
+      true
+    )
+    (
+      assert
+        hmAppsEditorNvim.config.xdg.mimeApps.defaultApplications."text/*" == [ "scoot-editor.desktop" ];
+      true
+    )
+    (
+      assert lib.hasInfix "MimeType=text/plain;"
+        hmAppsEditorNvim.config.xdg.dataFile."applications/scoot-editor.desktop".text;
+      true
+    )
+    (
+      assert lib.hasInfix "-e"
+        hmAppsEditorNvim.config.xdg.dataFile."applications/scoot-editor.desktop".text;
+      true
+    )
+    (
+      assert lib.hasInfix "%F"
+        hmAppsEditorNvim.config.xdg.dataFile."applications/scoot-editor.desktop".text;
+      true
+    )
+    # ...the default editor as Helix (`hx` on `EDITOR`, the helix
+    # package installed)...
+    (
+      assert allAssertionsHold hmAppsEditorHelix.config;
+      true
+    )
+    (
+      assert
+        hmAppsEditorHelix.config.programs.scoot.desktop.apps.editor.package.drvPath == pkgs.helix.drvPath;
+      true
+    )
+    (
+      assert hmAppsEditorHelix.config.home.sessionVariables.EDITOR == "hx";
+      true
+    )
+    (
+      assert hmAppsEditorHelix.config.home.sessionVariables.VISUAL == "hx";
+      true
+    )
+    # ...a user's own `EDITOR`/`VISUAL` and text association winning
+    # outright over the profile's default...
+    (
+      assert allAssertionsHold hmAppsEditorUser.config;
+      true
+    )
+    (
+      assert hmAppsEditorUser.config.home.sessionVariables.EDITOR == "user-ed";
+      true
+    )
+    (
+      assert hmAppsEditorUser.config.home.sessionVariables.VISUAL == "user-vis";
+      true
+    )
+    (
+      assert
+        hmAppsEditorUser.config.xdg.mimeApps.defaultApplications."text/plain" == [ "user-ed.desktop" ];
+      true
+    )
+    # ...the default set with no package refusing (pinned by message
+    # here, beside the other tool-missing refusals)...
+    (
+      assert builtins.length (failing hmAppsEditorNoPkg.config) == 1;
+      true
+    )
+    (
+      assert lib.hasInfix "apps.editor.package is null" (
+        builtins.head (failing hmAppsEditorNoPkg.config)
+      );
+      true
+    )
+    # ...and the NixOS side defaulting to nothing (no package, no
+    # `EDITOR`), while the editor default installs system-wide and
+    # sets it...
+    (
+      assert osApps.config.programs.scoot.desktop.apps.editor.default == null;
+      true
+    )
+    (
+      assert !(osApps.config.environment.variables ? EDITOR);
+      true
+    )
+    (
+      assert !(lib.any (p: (p.pname or "") == "neovim") osApps.config.environment.systemPackages);
+      true
+    )
+    (
+      assert allAssertionsHold osAppsEditor.config;
+      true
+    )
+    (
+      assert lib.any (p: (p.pname or "") == "neovim") osAppsEditor.config.environment.systemPackages;
+      true
+    )
+    (
+      assert osAppsEditor.config.environment.variables.EDITOR == "nvim";
+      true
+    )
+    (
+      assert osAppsEditor.config.environment.variables.VISUAL == "nvim";
+      true
+    )
     # ...home-manager's own `services.udiskie` winning: one automounter
     # (two would race every insert and both ask for a passphrase), so
     # no unit of ours -- but udiskie stays on PATH, since home-manager's
@@ -13075,6 +13315,50 @@ let
         ) == [ ];
       true
     )
+    # ...the look's Neovim colorscheme linked under its fixed name
+    # (loaded on demand, selected by nothing by default)...
+    (
+      assert hmTheme.config.xdg.configFile ? "nvim/colors/scoot-look.lua";
+      true
+    )
+    (
+      assert !(hmTheme.config.xdg.configFile ? "nvim/plugin/scoot-look.lua");
+      true
+    )
+    # ...selecting it (off by default): the plugin file running
+    # `colorscheme scoot-look` at startup...
+    (
+      assert allAssertionsHold hmThemeNvimSelect.config;
+      true
+    )
+    (
+      assert hmThemeNvimSelect.config.xdg.configFile ? "nvim/colors/scoot-look.lua";
+      true
+    )
+    (
+      assert hmThemeNvimSelect.config.xdg.configFile ? "nvim/plugin/scoot-look.lua";
+      true
+    )
+    (
+      assert lib.hasInfix "colorscheme scoot-look"
+        hmThemeNvimSelect.config.xdg.configFile."nvim/plugin/scoot-look.lua".text;
+      true
+    )
+    # ...home-manager's own `programs.neovim` owning the config: the
+    # colorscheme still links (your init is never touched), but the
+    # selection stays out (select the scheme in your own init)...
+    (
+      assert allAssertionsHold hmThemeNvimUpstream.config;
+      true
+    )
+    (
+      assert hmThemeNvimUpstream.config.xdg.configFile ? "nvim/colors/scoot-look.lua";
+      true
+    )
+    (
+      assert !(hmThemeNvimUpstream.config.xdg.configFile ? "nvim/plugin/scoot-look.lua");
+      true
+    )
     # ...no `GTK_THEME` force anywhere (it would make libadwaita
     # skip its own providers, leaving rendering the `gtk.css` cannot
     # reach -- `settings.ini` names the theme instead)...
@@ -13136,6 +13420,10 @@ let
     )
     (
       assert !(hmThemeBurst.config.xdg.configFile ? "helix/config.toml");
+      true
+    )
+    (
+      assert !(hmThemeBurst.config.xdg.configFile ? "nvim/colors/scoot-look.lua");
       true
     )
     (
