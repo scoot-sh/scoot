@@ -1564,7 +1564,7 @@ apps started after the next login):
 | `desktop.apps.editor.default` | null, `"nvim"` or `"helix"` | `null` | the default text editor: installs it, sets `EDITOR` and `VISUAL` (at `mkOverride 900`: beating nixpkgs' `nano` default, merging with `programs.neovim.defaultEditor`), and answers `text/plain` (and `text/*`) through a terminal entry running it (`foot -e <editor>`, following the terminal option); null installs and sets nothing |
 | `desktop.apps.editor.package` | package or null | neovim or helix, following the default (Linux-only: null off Linux) | the default editor to install (left to home-manager's `programs.neovim`/`programs.helix` when that is on: its package wins) |
 | `desktop.automount.enable` | bool | `true` with the profile | udisks2 on the NixOS side, udiskie and its trayless unit on the home-manager side (the unit left out while home-manager's `services.udiskie` is on: its unit runs instead) |
-| `desktop.automount.package` | package or null | udiskie (Linux-only: null off Linux) | point at your own udiskie build |
+| `desktop.automount.package` | package or null | udiskie with its flaky keyring tests off (Linux-only: null off Linux) | point at your own udiskie build |
 
 A null `package` beside its switch fails evaluation naming it.
 `xdg-open`, `BROWSER` and the user dirs come on with the terminal or

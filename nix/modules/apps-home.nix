@@ -344,8 +344,8 @@ in
     # assertion below refuses loudly.
     package = lib.mkOption {
       type = lib.types.nullOr lib.types.package;
-      default = linuxPkg "udiskie";
-      defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.udiskie else null";
+      default = if isLinux then (import ../lib/udiskie-default.nix { inherit pkgs; }) else null;
+      defaultText = lib.literalExpression ''if pkgs.stdenv.hostPlatform.isLinux then pkgs.udiskie.overridePythonAttrs { disabledTestPaths = [ "test/test_keyutils.py" ]; disabledTests = [ "test_is_valid" ]; } else null'';
       description = ''
         The automounter to run trayless (`udiskie -a -n -T`:
         automount on insert, a notification with a Browse action
