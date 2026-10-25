@@ -84,7 +84,8 @@
 # TRIGGERS (the CLAUDE.md rule: no always-run job; docs-only pushes
 # start nothing): tag pushes run the pipeline; `pull_request` runs only
 # the lint job and only when the release tooling changes (this file,
-# release-plz.yml and its config, the release scripts) or what a release
+# release-plz.yml, bump-downstreams.yml and its config, the release scripts
+# and the downstream-bump script) or what a release
 # PR changes (Cargo.toml, Cargo.lock, CHANGELOG.md, packaging/); a
 # dispatch with an empty `tag` runs only the lint job (release-plz.yml
 # does that on its PR's branch, whose pull_request run waits for
@@ -117,6 +118,7 @@ on:
     paths:
       - '.github/workflows/release.yml'
       - '.github/workflows/release-plz.yml'
+      - '.github/workflows/bump-downstreams.yml'
       - 'release-plz.toml'
       # What a release PR changes (the workspace version, the lockfile,
       # the changelog the notes come from, the packaging bump), so the
@@ -132,6 +134,8 @@ on:
       - 'scripts/sync-packaging-versions'
       - 'scripts/test_sync_packaging_versions.py'
       - 'scripts/test_release_resolve.py'
+      - 'scripts/bump-downstream'
+      - 'scripts/test_bump_downstream.py'
   workflow_dispatch:
     inputs:
       tag:
@@ -179,7 +183,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
 
       - name: actionlint (pinned through this repo's flake.lock)
-        run: nix shell --inputs-from . nixpkgs#actionlint --command actionlint .github/workflows/release.yml .github/workflows/release-plz.yml
+        run: nix shell --inputs-from . nixpkgs#actionlint --command actionlint .github/workflows/release.yml .github/workflows/release-plz.yml .github/workflows/bump-downstreams.yml
 
       - name: Release workflow guards (single-path artifacts, no inline context)
         run: |
@@ -238,10 +242,11 @@ jobs:
           print("guards ok: single-path uploads, hidden files included, no inline github/inputs/steps in run")
           EOF
 
-      - name: release tool tests (release-resolve, workspace-version, release-notes, packaging sync)
+      - name: release tool tests (release-resolve, workspace-version, release-notes, packaging sync, bump-downstream)
         run: |
           python3 scripts/test_release_resolve.py
           python3 scripts/test_sync_packaging_versions.py
+          python3 scripts/test_bump_downstream.py
 
   # Parse the tag and run every refusal gate. Its outputs drive the rest
   # of the pipeline; a refusal fails the run before anything builds.

@@ -46,9 +46,9 @@ def run(*args, cwd=None):
     return r.stdout.strip()
 
 
-def scoot_rev_for_tag(tag):
-    out = run("git", "ls-remote", "https://github.com/scoot-sh/scoot",
-              f"refs/tags/{tag}*")
+def scoot_rev_for_tag(tag, repo="https://github.com/scoot-sh/scoot"):
+    out = run("git", "ls-remote", repo,
+              f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}")
     # Annotated tags list both the tag object and the peeled commit
     # ("^{}" suffix): the lock pins the commit, so prefer peeled.
     for line in out.splitlines():
@@ -71,14 +71,6 @@ def scoot_nixpkgs_rev_for_tag(tag):
         return lock["nodes"]["nixpkgs"]["locked"]["rev"]
     except KeyError:
         fail(f"scoot flake.lock at {tag} has no nodes.nixpkgs.locked.rev")
-
-
-def rewrite(path, old, new):
-    text = path.read_text()
-    if old not in text:
-        return False
-    path.write_text(text.replace(old, new))
-    return True
 
 
 def main():
