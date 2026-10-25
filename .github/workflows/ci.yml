@@ -87,11 +87,16 @@ jobs:
   # ever does, say an `include_str!` of a README, narrow the pattern
   # below). The split, from docs/scootbg/backlog/resolved/crate-and-daemon-done.md:
   #
-  #   crates/scoot/, crates/scoot-core/, crates/scoot-ipc/,
-  #   crates/scootctl/, scripts/smoke-test.sh, vm/compositor-deps.nix
+  #   crates/scoot/, crates/scoot-ipc/,
+  #   crates/scootctl/, scripts/smoke-test.sh
   #                        -> scoot=true  (Linux, Linux-xwayland,
   #                           Linux-minimal, Nix-check) and
   #                           macos=true  (macOS)
+  #   crates/scoot-core/   -> scoot, macos, scootbg, scootbar and portal too:
+  #                           the leaf every parser depends on (checked by
+  #                           scripts/check-ci-filters.py from cargo metadata)
+  #   vm/compositor-deps.nix -> every Linux cargo job (it feeds nix/dev-shell.nix
+  #                           on Linux) plus macos (kept; Linux-gated, see report)
   #   crates/scootbg/, crates/scootbg-mem/ -> scootbg=true (scootbg job)
   #     except crates/scootbg/Cargo.toml    -> scoot too: flake.nix reads
   #     its description, which the `nix-check` job's `nix flake check` evaluates
@@ -116,7 +121,9 @@ jobs:
   #   crates/scootbar/, scripts/scootbar-bench/, scripts/scootbar-appearance-hw-test.sh
   #                                        -> scootbar=true (scootbar job, which
   #                                           also builds the Nix module check)
-  #   crates/scoot-dbus/                 -> scootbar=true as well (the
+  #   crates/scoot-dbus/                 -> scoot=true as well (the compositor's
+  #                                           scootctl dev-deps on Linux),
+  #                                           scootbar=true (the
   #                                           client's first consumer),
   #                                           scootnotify=true (the server,
   #                                           below), scootlaunch=true
@@ -131,7 +138,9 @@ jobs:
   #                                           their budget, and the no-libc
   #                                           plus release-links gates).
   #                                           crates/scoot-rt/* fans out to
-  #                                           it too, as it does to scootbar.
+  #                                           it too, as it does to scootbar, and both
+  #                                           also fan out to scoot and macos
+  #                                           (the compositor and client build on rt).
   #   crates/scootnotify/                -> scootnotify=true (scootnotify
   #                                           job: fmt, clippy, both test
   #                                           runners, the fuzz targets for
@@ -139,7 +148,9 @@ jobs:
   #                                           plus release-links gates).
   #                                           crates/scoot-dbus/* and
   #                                           crates/scoot-rt/* fan out to
-  #                                           it too. No always-run job.
+  #                                           it too, and both also fan out to scoot
+  #                                           (macos stays out: it excludes dbus).
+  #                                           No always-run job.
   #   crates/scoot-globalshortcuts-portal/ -> portal=true (portal job:
   #                                           fmt, clippy, both test
   #                                           runners, and the no-libc
@@ -204,8 +215,11 @@ jobs:
   #                                           runs there and nowhere else.
   #     except its Cargo.toml               -> scoot too, for the flake's
   #     read of its description, as scootbg's
-  #   crates/scootbg-mem/                  -> scootbar too: its shm buffer
-  #                                           is scootbar's
+  #   crates/scootbg-mem/                  -> scoot, scootbg, scootbar, scootlaunch,
+  #                                           scootnotify and portal too: its shm buffer
+  #                                           is scootbar's, and scoot/dbus/ui/launch/
+  #                                           notify/portal all build on it
+  #                                           (checked by scripts/check-ci-filters.py)
   #   crates/scoot-ipc/                    -> scootbar and scootbg too: the
   #                                           shared help pieces (plus the
   #                                           `quit` request scootbar's
@@ -329,9 +343,33 @@ jobs:
                 # openSUSE container workflow (rpm.yml) owns them, so a
                 # change there alone runs nothing here.
                 packaging/rpm/*) ;;
-                crates/scoot/* | crates/scoot-core/* | crates/scootctl/* | scripts/smoke-test.sh | vm/compositor-deps.nix)
+                crates/scoot/* | crates/scootctl/* | scripts/smoke-test.sh)
                   scoot=true
                   macos=true ;;
+                # vm/compositor-deps.nix feeds every Linux dev shell
+                # (nix/dev-shell.nix imports it on Linux), so a change there
+                # can affect every cargo job, not just the compositor.
+                # macos stays set (harmless; its shell is Linux-gated, listed
+                # as a question in the report rather than narrowed here).
+                vm/compositor-deps.nix)
+                  scoot=true
+                  macos=true
+                  scootbg=true
+                  scootbar=true
+                  scootlaunch=true
+                  scootnotify=true
+                  portal=true
+                  look=true ;;
+                # scoot-core is the leaf everything parses through: scoot and
+                # scootctl directly, scoot-ipc (and through it scootbg,
+                # scootbar and portal). Fans out like scoot-ipc (checked by
+                # scripts/check-ci-filters.py from cargo metadata).
+                crates/scoot-core/*)
+                  scoot=true
+                  macos=true
+                  scootbg=true
+                  scootbar=true
+                  portal=true ;;
                 # The typo guesser and docs URL behind every binary's
                 # `--help` live here: scoot and scootctl use them directly,
                 # and since help-followups so do scootbar and scootbg.
@@ -349,8 +387,12 @@ jobs:
                 crates/scootbg/*)
                   scootbg=true ;;
                 crates/scootbg-mem/*)
+                  scoot=true
                   scootbg=true
-                  scootbar=true ;;
+                  scootbar=true
+                  scootlaunch=true
+                  scootnotify=true
+                  portal=true ;;
                 # Its manifest is read at eval time by flake.nix (the
                 # package description), as scootbg's.
                 crates/scootbar/Cargo.toml)
@@ -392,6 +434,7 @@ jobs:
                 crates/scootui/Cargo.toml)
                   scoot=true
                   scootbar=true
+                  scootlaunch=true
                   scootnotify=true ;;
                 crates/scootui/*)
                   scootbar=true
@@ -403,11 +446,14 @@ jobs:
                 # and portal.
                 crates/scoot-rt/Cargo.toml)
                   scoot=true
+                  macos=true
                   scootbar=true
                   scootlaunch=true
                   scootnotify=true
                   portal=true ;;
                 crates/scoot-rt/*)
+                  scoot=true
+                  macos=true
                   scootbar=true
                   scootlaunch=true
                   scootnotify=true
@@ -425,6 +471,7 @@ jobs:
                   scootlaunch=true
                   portal=true ;;
                 crates/scoot-dbus/*)
+                  scoot=true
                   scootbar=true
                   scootnotify=true
                   scootlaunch=true
@@ -476,6 +523,7 @@ jobs:
                   scootbar=true
                   scootlaunch=true
                   scootnotify=true
+                  portal=true
                   look=true
                   backlog=true
                   release_config=true
@@ -499,6 +547,11 @@ jobs:
             echo "docs_site=$docs_site"
             echo "session=$session"
           } >>"$GITHUB_OUTPUT"
+
+      - name: The classify filter's own tests (no silent rot)
+        run: |
+          python3 scripts/test_check_ci_filters.py
+          python3 scripts/check-ci-filters.py
 
   # scripts/backlog is the swarm's claim tool and pushes to main, so its tests
   # (a throwaway bare origin and clones in a temp dir; nothing touches this repo)
@@ -1587,14 +1640,39 @@ jobs:
             target
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
-  # scootbar, the status bar (crates/scootbar): its own checks, without
-  # building the compositor, as the scootbg job does. Its compositor-backed
-  # integration tests skip here (no `scoot` binary is built in this job);
-  # they run for real in the next job.
-  scootbar:
-    name: scootbar (status bar)
+  # scootbar, the status bar (crates/scootbar): split into four parallel jobs
+  # on the same `scootbar` gate, the same pattern #745 used for the
+  # compositor: each cargo job restores the shared `scootbar-cargo-` line
+  # read-only and no job relies on a sibling's `target/` dir, so a full run
+  # costs the max of the four, not the sum (~21.5m serial in run
+  # 40230223919: module check ~5m, clippy ~3m, nextest ~7m, release ~1.3m,
+  # fuzz ~2.2m, plus restore). Only `scootbar-test` saves on main, so the
+  # repo keeps a single `scootbar-cargo-` line under the 10 GB budget.
+  # No test, matrix entry, fuzz run or check removed; REQUIRE-style envs kept.
+  scootbar-modules:
+    name: scootbar modules (nix check)
     needs: changes
-    # Fail open, as above.
+    if: ${{ !cancelled() && needs.changes.outputs.scootbar != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # The Nix modules' check (nix/scootbar-tests.nix) runs this crate's own
+      # `daemon --check` over every rendered bar.toml, so a change to the bar
+      # alone must run it: `nix flake check` is in the `nix-check` job, which a
+      # bar-only change does not start. This is also the x86_64-linux build
+      # of `packages.scootbar` and of that check (the runner is x86_64).
+      # Overlaps the cargo work in the sibling jobs instead of serialising
+      # behind it; no cargo cache needed (pure nix build).
+      - name: nix build the scootbar module check (x86_64-linux)
+        run: nix build -L --no-link .#checks.x86_64-linux.scootbar-modules
+
+  scootbar-lint:
+    name: scootbar lint (fmt, clippy, release links)
+    needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.scootbar != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1606,9 +1684,10 @@ jobs:
 
       - uses: DeterminateSystems/nix-installer-action@v23
 
-      # Its own cache, for the reason the scootbg job gives.
-      - name: Restore the cargo cache
-        id: cargo-cache
+      # Restore-only, from the shared `scootbar-cargo-` line: every dependency
+      # but the bar crates themselves comes from there. Never saved -- the
+      # test job below is the single saver, so the repo keeps one line.
+      - name: Restore the cargo cache (the scootbar line, read-only)
         uses: actions/cache/restore@v6
         with:
           path: |
@@ -1616,7 +1695,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: scootbar-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: scootbar-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
           restore-keys: |
             scootbar-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
             scootbar-cargo-
@@ -1625,13 +1704,6 @@ jobs:
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo fmt --check -p scootbar -p scootui -p scoot-rt -p scoot-dbus
 
-      # The Nix modules' check (nix/scootbar-tests.nix) runs this crate's own
-      # `daemon --check` over every rendered bar.toml, so a change to the bar
-      # alone must run it: `nix flake check` is in the `nix-check` job, which a
-      # bar-only change does not start. This is also the x86_64-linux build
-      # of `packages.scootbar` and of that check (the runner is x86_64).
-      - name: nix build the scootbar module check (x86_64-linux)
-        run: nix build -L --no-link .#checks.x86_64-linux.scootbar-modules
 
       # The benchmark harness's own logic (configs, the gates, the
       # arithmetic): the standard library only, no compositor or bar.
@@ -1641,7 +1713,7 @@ jobs:
       # scootbar's features, read from its manifest (every feature but
       # `default`: one per module, and `icon-image`, the optional PNG
       # decoder; crates/scootbar/Cargo.toml says so), for the feature
-      # matrix in the next two steps, so a new module joins the matrix
+      # matrix in the next step, so a new module joins the matrix
       # with no change here.
       - name: List scootbar's modules
         shell: nix develop --command bash -euo pipefail {0}
@@ -1689,6 +1761,74 @@ jobs:
           done
           cargo clippy -p scoot-dbus --all-targets -- -D warnings
 
+      # No C beyond what std links, as for scootbg: no `libc` crate in the
+      # normal dependency tree, and no shared library beyond glibc and
+      # libgcc_s (no libwayland, no libEGL). Shares this job's debug builds
+      # above (different profile, so no rebuild conflict).
+      - name: No libc crate, and what the release binary links
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          if cargo tree -p scootbar -e normal --prefix none | grep -q '^libc '; then
+            echo "::error title=scootbar depends on the libc crate::find the path with: cargo tree -p scootbar -e normal -i libc"
+            cargo tree -p scootbar -e normal -i libc
+            exit 1
+          fi
+          echo "ok: no libc crate in scootbar's normal dependency tree"
+          # Weighed alone, never in a --workspace build (feature unification).
+          RUSTFLAGS="-D warnings" cargo build --release -p scootbar
+          echo "release binary: $(stat -c %s target/release/scootbar) bytes (stripped)"
+          ldd target/release/scootbar
+          extra=$(ldd target/release/scootbar | awk '{ print $1 }' | grep -vE '^(linux-vdso|libc\.so|libm\.so|libgcc_s\.so|/)' || true)
+          if [ -n "$extra" ]; then
+            echo "::error title=scootbar links a library beyond std's::$(echo "$extra" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "ok: links only what std links"
+
+      # No save step, deliberately: this job's `target/` holds the same
+      # feature-rebuilt debug artifacts the test job saves, so saving it too
+      # would only buy a second multi-gigabyte cache line.
+
+  scootbar-test:
+    name: scootbar tests (nextest)
+    needs: changes
+    # Fail open, as above.
+    if: ${{ !cancelled() && needs.changes.outputs.scootbar != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # The shared line, restored here and saved on main below: the single
+      # saver for the scootbar jobs.
+      - name: Restore the cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: scootbar-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            scootbar-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            scootbar-cargo-
+
+      - name: List scootbar's modules
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          modules=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '[.packages[] | select(.name == "scootbar") | .features | keys[] | select(. != "default")] | join(" ")')
+          [ -n "$modules" ] || { echo "::error title=no scootbar modules::cargo metadata listed no features"; exit 1; }
+          echo "modules: $modules"
+          echo "SCOOTBAR_MODULES=$modules" >>"$GITHUB_ENV"
+
       # Both runners on the default build, for the reason the Linux job
       # gives. Then the unit tests of every other feature set: every module
       # at once, none, and each alone. The module contract
@@ -1705,7 +1845,7 @@ jobs:
           SCOOTBAR_REQUIRE_DBUS_DAEMON: "1"
         run: |
           # `dbus-daemon` from the pinned nixpkgs for this step only, as
-          # cargo-fuzz is below: the dev shell is every job's, and a tool
+          # cargo-fuzz is in the fuzz job: the dev shell is every job's, and a tool
           # one job's tests start does not belong in all of them. `^out`,
           # because the bare attribute prints two paths (the man output
           # too), and `$dbus/bin` would be neither.
@@ -1742,28 +1882,46 @@ jobs:
           cargo nextest run -p scoot-dbus --no-fail-fast
           cargo test -p scoot-dbus
 
-      # No C beyond what std links, as for scootbg: no `libc` crate in the
-      # normal dependency tree, and no shared library beyond glibc and
-      # libgcc_s (no libwayland, no libEGL).
-      - name: No libc crate, and what the release binary links
-        shell: nix develop --command bash -euo pipefail {0}
-        run: |
-          if cargo tree -p scootbar -e normal --prefix none | grep -q '^libc '; then
-            echo "::error title=scootbar depends on the libc crate::find the path with: cargo tree -p scootbar -e normal -i libc"
-            cargo tree -p scootbar -e normal -i libc
-            exit 1
-          fi
-          echo "ok: no libc crate in scootbar's normal dependency tree"
-          # Weighed alone, never in a --workspace build (feature unification).
-          RUSTFLAGS="-D warnings" cargo build --release -p scootbar
-          echo "release binary: $(stat -c %s target/release/scootbar) bytes (stripped)"
-          ldd target/release/scootbar
-          extra=$(ldd target/release/scootbar | awk '{ print $1 }' | grep -vE '^(linux-vdso|libc\.so|libm\.so|libgcc_s\.so|/)' || true)
-          if [ -n "$extra" ]; then
-            echo "::error title=scootbar links a library beyond std's::$(echo "$extra" | tr '\n' ' ')"
-            exit 1
-          fi
-          echo "ok: links only what std links"
+      - name: Save the cargo cache
+        # Same condition as the Linux job's save; see the comment there.
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  scootbar-fuzz:
+    name: scootbar fuzz (fixed budget)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.scootbar != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # Restore-only, from the shared line: the fuzz workspaces build into
+      # their own `target/scootbar-fuzz` dir, so nothing here is worth saving.
+      - name: Restore the cargo cache (the scootbar line, read-only)
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: scootbar-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+          restore-keys: |
+            scootbar-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            scootbar-cargo-
 
       # The fuzz targets (crates/scootbar/fuzz and crates/scoot-dbus/fuzz,
       # each its own workspace, which no step above compiles) for a fixed
@@ -1773,7 +1931,7 @@ jobs:
       # crates' parsers by `#[path]`, so a refactor that breaks those
       # includes fails here, not on the next person to fuzz. The stable
       # tests replay the same files through the same checks in every run
-      # above; this is what mutates them. Stable toolchain, no sanitizer
+      # in the test job; this is what mutates them. Stable toolchain, no sanitizer
       # (`-s none`), as the fuzz READMEs run it; cargo-fuzz from the pinned
       # nixpkgs. A finding prints its input in base64, since the runner's
       # disk is gone after the job.
@@ -1814,17 +1972,9 @@ jobs:
           cargo fetch --locked --manifest-path fuzz/Cargo.toml
           FUZZ_CRATE=scoot-dbus run dbus -runs=1000000 -max_len=70000
 
-      - name: Save the cargo cache
-        # Same condition as the Linux job's save; see the comment there.
-        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@v6
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+      # No save step, deliberately: the fuzz builds land in
+      # `target/scootbar-fuzz`, not the shared `target/`, so saving would
+      # only duplicate the test job's line.
 
   # scootbar against a live `scoot --headless` (crates/scootbar/tests/bar.rs:
   # a bar per output, its zone and margins, pixels at fractional scales and
