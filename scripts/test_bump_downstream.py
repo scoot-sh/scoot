@@ -44,7 +44,7 @@ def load():
 class World:
     """A repo with colliding tags: v0.6.2 and v0.6.20 on different commits."""
 
-    def __init__(self):
+    def __init__(self, light62=False):
         self.tmp = Path(tempfile.mkdtemp(prefix="bump-downstream-test-"))
         self.work = self.tmp / "work"
         self.work.mkdir()
@@ -56,7 +56,10 @@ class World:
         (self.work / "f").write_text("one\n")
         sh("git", "add", "f", cwd=self.work)
         sh("git", "commit", "-qm", "one", cwd=self.work)
-        sh("git", "tag", "-a", "v0.6.2", "-m", "v0.6.2", cwd=self.work)
+        if light62:
+            sh("git", "tag", "v0.6.2", cwd=self.work)
+        else:
+            sh("git", "tag", "-a", "v0.6.2", "-m", "v0.6.2", cwd=self.work)
         (self.work / "f").write_text("two\n")
         sh("git", "add", "f", cwd=self.work)
         sh("git", "commit", "-qm", "two", cwd=self.work)
@@ -77,14 +80,19 @@ class TestScootRevForTag(unittest.TestCase):
         self.assertEqual(got, w.want_62)
         self.assertNotEqual(got, w.want_620)
 
-    def test_fixture_prefix_glob_lists_both(self):
-        # Guards the fixture: the old `refs/tags/<tag>*` glob would see
-        # both tags here, so the test above is not vacuous.
-        w = World()
+    def test_lightweight_tag_beside_annotated_collider(self):
+        # The shape the old `refs/tags/<tag>*` glob got wrong: a lightweight
+        # v0.6.2 has no `^{}` line, so "first peeled ref in the listing" was
+        # v0.6.20's. Fails on the glob implementation.
+        w = World(light62=True)
         out = sh("git", "ls-remote", str(w.bare), "refs/tags/v0.6.2*",
                  cwd=w.tmp).stdout
-        self.assertIn("refs/tags/v0.6.2", out)
-        self.assertIn("refs/tags/v0.6.20", out)
+        self.assertNotIn("refs/tags/v0.6.2^{}", out)
+        self.assertIn("refs/tags/v0.6.20^{}", out)
+        mod = load()
+        got = mod.scoot_rev_for_tag("v0.6.2", repo=str(w.bare))
+        self.assertEqual(got, w.want_62)
+        self.assertNotEqual(got, w.want_620)
 
     def test_lightweight_tag_without_peel(self):
         w = World()

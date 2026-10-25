@@ -1,9 +1,10 @@
 ---
 title: "bump-downstream resolves tags via prefix glob; query the exact ref and peel"
-status: "open"
-area: "packaging"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-24"
 ---
 
 # bump-downstream resolves tags via prefix glob; query the exact ref and peel
