@@ -32,3 +32,11 @@ and `v0.6.20` tags).
 
 Live dispatch plus downstream PR plus downstream CI (needs
 `DOWNSTREAM_BUMP_TOKEN`); the ISO build itself.
+
+## Resolution
+
+2026-10-24: `scoot_rev_for_tag` now asks `git ls-remote` for
+`refs/tags/<tag>` and `refs/tags/<tag>^{}` and prefers the peel.
+`scripts/test_bump_downstream.py` runs offline against a local bare repo,
+including a lightweight `v0.6.2` beside an annotated `v0.6.20`, the shape
+the glob got wrong; release.yml's lint job runs it (scoot#738).

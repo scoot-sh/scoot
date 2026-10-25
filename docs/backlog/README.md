@@ -394,6 +394,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [GTK, libadwaita, Qt, cursor and fonts follow a swap through dconf and the portal](./resolved/look-toolkit-live-done.md) (medium) — RESOLVED 2026-10-15
 - [Qt palette under the Adwaita style ignores the look (measured)](./packaging/qt-adwaita-palette.md) (low)
 - [Skip every udiskie keyring test, not two](./resolved/udiskie-skip-all-keyring-tests-done.md) — RESOLVED 2026-10-24: the shared udiskie default skips the whole of `test_keyutils.py` and `test_cache.py` (`TestPasswordCache` included), so Docker's default seccomp EPERM no longer fails the check
+- [bump-downstream resolves tags via prefix glob; query the exact ref and peel](./resolved/bump-downstream-exact-ref-done.md) — RESOLVED 2026-10-24: the resolve queries the exact ref plus its peel, with an offline test that fails on the old glob
 - [Bump the nixpkgs pin past the eMudhra/Comodo CA mitigation](./resolved/nixpkgs-pin-ca-mitigation-done.md) (low) — RESOLVED 2026-10-21
 - [`apply` follows an in-dir symlink for a leaf while `build` refuses all symlinks](./packaging/look-apply-symlink-leaf.md) (low)
 - [Look leaves for mako, wob, fcitx5 and the night light](./resolved/look-leaves-daemons-done.md) (medium) — RESOLVED 2026-10-15
@@ -530,7 +531,6 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [Pin the fd-pressure grace conjunction's boundaries](./resolved/fd-pressure-grace-boundary-pins-done.md) — RESOLVED 2026-09-18 (pin, no behavior change): `pressure_refusal`'s pure conjunction split out as `pressure_refusal_for` and pinned at both operators and both graces (129 refused, 128 passes; either half alone passes); the ceiling record's 400 stands as "two at grace", the permitted maximum is 404
 
 ### Packaging / tooling
-- [bump-downstream resolves tags via prefix glob; query the exact ref and peel](./packaging/bump-downstream-exact-ref.md) (low, filed 2026-10-24 from the #733 review): exact ref plus peel, with an offline check
 - [Slim the scoot ISO under GitHub's 2 GB release-asset cap](./core/iso-slim-under-2gb.md) — 2.83 GiB today; start with mbrola-voices
 - [Nix package can reach neither GPU tier](./resolved/nix-gpu-tiers-done.md)
   — RESOLVED 2026-09-21 (gh #177): `packages.scoot` force-links libEGL
