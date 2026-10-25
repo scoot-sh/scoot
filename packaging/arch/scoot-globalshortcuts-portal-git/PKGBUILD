@@ -6,7 +6,7 @@
 # `scoot-globalshortcuts-portal`: install one or the other, never both.
 
 pkgname=scoot-globalshortcuts-portal-git
-pkgver=0.6.3.r0.g0000000
+pkgver=0.6.4.r0.g0000000
 pkgrel=1
 pkgdesc='GlobalShortcuts portal backend for the scoot compositor (git)'
 arch=('x86_64' 'aarch64')
