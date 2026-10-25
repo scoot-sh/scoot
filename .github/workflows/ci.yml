@@ -70,13 +70,14 @@ on:
 permissions:
   contents: read
 
-# Superseded runs are cancelled: pushing twice to a branch in a minute
+# Superseded PR runs are cancelled: pushing twice to a branch in a minute
 # should not leave two full Smithay builds competing for a runner. Keyed by
 # workflow as well as ref, so a second workflow added later cannot cancel
-# this one's runs.
+# this one's runs. Never on main: a push there is the merge itself, and
+# cancelling it would leave the branch without a full check.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # Which parts of the repository a pull request changes, so a PR that
@@ -88,11 +89,12 @@ jobs:
   #
   #   crates/scoot/, crates/scoot-core/, crates/scoot-ipc/,
   #   crates/scootctl/, scripts/smoke-test.sh, vm/compositor-deps.nix
-  #                        -> scoot=true  (Linux, Linux-features) and
+  #                        -> scoot=true  (Linux, Linux-xwayland,
+  #                           Linux-minimal, Nix-check) and
   #                           macos=true  (macOS)
   #   crates/scootbg/, crates/scootbg-mem/ -> scootbg=true (scootbg job)
   #     except crates/scootbg/Cargo.toml    -> scoot too: flake.nix reads
-  #     its description, which the Linux job's `nix flake check` evaluates
+  #     its description, which the `nix-check` job's `nix flake check` evaluates
   #
   # scootbg, scootbg-mem, scootbar and scootnotify never run on a Mac:
   # the macOS job leaves them out of its `cargo check`, and the Darwin
@@ -340,7 +342,7 @@ jobs:
                   scootbar=true
                   portal=true ;;
                 # flake.nix takes the package description from this
-                # manifest, which the Linux job's `nix flake check` reads.
+                # manifest, which the `nix-check` job's `nix flake check` reads.
                 crates/scootbg/Cargo.toml)
                   scoot=true
                   scootbg=true ;;
@@ -451,7 +453,7 @@ jobs:
                 # every look into every target and fails on a missing
                 # role". nix/looks-shipped-check.nix also reads these
                 # files and compares them to the Nix look registry; the
-                # Linux job's `nix flake check` evaluates it, so a looks/
+                # `nix-check` job's `nix flake check` evaluates it, so a looks/
                 # change runs that job too (scoot=true) as well as the
                 # look job.
                 looks/*)
@@ -594,7 +596,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@v23
 
       # The flake's own formatter over every tracked .nix file: a site-only
-      # change skips the Linux job, which is the only other place this runs.
+      # change skips the `nix-check` job, which is the only other place this runs.
       - name: nix fmt --check (all tracked .nix)
         run: |
           git ls-files -z '*.nix' | xargs -0 nix fmt -- --check
@@ -607,6 +609,37 @@ jobs:
       - name: install.sh gate (shellcheck + fake-release install, uninstall, refusals)
         run: nix shell --inputs-from . nixpkgs#shellcheck --command sh site/scripts/test-install.sh
 
+  # The flake's own outputs, evaluated once instead of twice: `linux` used
+  # to run `nix fmt`, `nix flake check` and `nix flake show --all-systems`
+  # serially before its Smithay build (5-9 min measured, the second-longest
+  # step in that job), and `macos` ran `nix flake check` again for the
+  # Darwin half. This job runs the three once, in parallel with the cargo
+  # jobs, on the same `scoot` gate that ran both: every path that set
+  # `macos` also sets `scoot` (each arm sets both; the catch-all sets all),
+  # and `flake.nix`/`flake.lock`/`nix/` fall to the catch-all, so whenever
+  # either job would have evaluated the flake, this one does.
+  nix-check:
+    name: Nix (flake check)
+    needs: changes
+    # Fail open, as above.
+    if: ${{ !cancelled() && needs.changes.outputs.scoot != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      - name: nix fmt --check (all tracked .nix)
+        run: |
+          git ls-files -z '*.nix' | xargs -0 nix fmt -- --check
+
+      - name: nix flake check
+        run: nix flake check -L
+
+      - name: nix flake show --all-systems (FlakeHub eval gate)
+        run: nix flake show --all-systems --json --no-write-lock-file > /dev/null
+
   linux:
     name: Linux (compositor)
     needs: changes
@@ -617,7 +650,8 @@ jobs:
     # 60: this job builds Smithay once (the default features, which include
     # the GPU scanout tier) and runs the
     # default suites and smoke. The xwayland and minimal rebuilds -- the
-    # reason this used to be 90 -- now run in parallel in `linux-features`.
+    # reason this used to be 90 -- now run in parallel in `linux-xwayland`
+    # and `linux-minimal`.
     timeout-minutes: 60
     env:
       CARGO_TERM_COLOR: always
@@ -678,40 +712,11 @@ jobs:
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo fmt --all --check
 
-      # The flake's own outputs -- `packages`, the `homeModules`/`nixosModules`
-      # wrappers, `checks.*.scoot-modules` -- are what a Nix consumer installs,
-      # and nothing else in this job evaluates them: `nix develop` reads only
-      # `devShells`. `nix flake check` evals every output for this system and
-      # builds and runs the module suite, so a change that breaks the packaging
-      # while `cargo build` stays green fails here (gh #173 -- proven by
-      # breaking a module option and watching this step go red while cargo
-      # stayed green; see the resolved ticket). Plain `run`, not `nix develop`:
-      # these are nix commands, not shell commands. Directly after `cargo fmt`
-      # -- the first step that realises the dev shell, so the store is warm --
-      # and before the Smithay builds below, so a broken package fails fast.
-      # `-L` is log detail, per the issue.
-      - name: nix fmt --check (all tracked .nix)
-        # `git ls-files` rather than a hand-listed set, so a new `.nix` file is
-        # covered without anyone remembering to list it; explicit paths rather
-        # than `nix fmt -- --check .` (deprecated directory form) or bare
-        # `nix fmt` (reads empty stdin and errors -- a pre-existing nixfmt
-        # quirk). Resolves to the flake's own `formatter` (pkgs.nixfmt).
-        run: |
-          git ls-files -z '*.nix' | xargs -0 nix fmt -- --check
-
-      - name: nix flake check
-        run: nix flake check -L
-
-      # FlakeHub publishes the flake by evaluating every system, and
-      # `nix flake check` above is not that: it only evals this
-      # runner's system. An eval-time read of a platform-specific
-      # derivation (gh #486: `builtins.readFile` of the generated
-      # displays.json) passes check here and still breaks the publish
-      # on a host that cannot build that platform. This step is that
-      # publish-time eval, JSON form, nothing built: it fails before
-      # merge exactly where FlakeHub failed after it.
-      - name: nix flake show --all-systems (FlakeHub eval gate)
-        run: nix flake show --all-systems --json --no-write-lock-file > /dev/null
+      # The flake's own outputs (`nix fmt`, `nix flake check`, the FlakeHub
+      # all-systems eval gate) run in the `nix-check` job, in parallel with
+      # this one instead of serially before the Smithay build -- they
+      # measured 5-9 min here and need no cargo cache. See that job for the
+      # gh #173 / gh #486 rationale.
 
       # Also a superset of the documented `-p scoot --all-targets`, for the
       # same reason: their dependencies are built here anyway.
@@ -747,8 +752,8 @@ jobs:
           # REQUIRE in the test steps turns a missing bar into a failure.
           cargo build -p scoot -p scootbg -p scootbar
           # Kept aside: the smoke test below must run this default build, and
-          # `linux-features` builds its own feature binaries from the same
-          # restored cache rather than overwriting these. scootbg too: the
+          # `linux-xwayland`/`linux-minimal` build their own feature binaries
+          # from the same restored cache rather than overwriting these. scootbg too: the
           # smoke test's [wallpaper] section runs it (it links no GPU stack
           # either way; its own job checks that).
           cp target/debug/scoot "$RUNNER_TEMP/scoot-default"
@@ -900,7 +905,7 @@ jobs:
       # on top of incremental artifacts no future run reuses (every run builds
       # different code, so incremental output costs restore/save bytes without
       # ever saving build time). The feature rebuilds now run in
-      # `linux-features`, which restores this same cache and never saves, so
+      # `linux-xwayland`/`linux-minimal`, which restore this same cache and never save, so
       # they no longer inflate what is stored; what is left to trim here is
       # `target/debug/incremental`. The `du` lines keep the next measurement
       # in the log. Same run condition as the save: this must also run when
@@ -935,27 +940,28 @@ jobs:
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # The xwayland feature (default-on) and the CPU-only minimal product,
-  # split out of `linux` so the jobs run in parallel: xwayland (clippy, both
-  # test runners with the live suites required, and the xwayland smoke run),
-  # and `--no-default-features` (clippy, both test runners, and the
-  # minimal-product gate: no libgbm in `readelf -d`, no stub symbols in
-  # `nm`, built with no C compiler on PATH, and the binary starts). Same `needs: changes` + scoot gate as `linux`, and
-  # the same `linux-cargo-` key prefix -- these *are* the `linux` job's
-  # entries, restored read-only. This job saves nothing, so the repo keeps a
-  # single `linux-cargo-` cache line (see the `linux` job's save step for why
+  # split out of `linux` so the jobs run in parallel with it, and split
+  # from each other so the two Smithay rebuilds overlap: measured 24-36
+  # min serial (the workflow's critical path), now the max of the two.
+  # xwayland (clippy, both test runners with the live suites required, and
+  # the xwayland smoke run), and `--no-default-features` (its build
+  # contract, clippy, both test runners, and the minimal smoke run). Same
+  # `needs: changes` + scoot gate as `linux`, and the same `linux-cargo-`
+  # key prefix -- these *are* the `linux` job's entries, restored
+  # read-only. These jobs save nothing, so the repo keeps a single
+  # `linux-cargo-` cache line (see the `linux` job's save step for why
   # only one line can exist under the 10 GB budget).
-  linux-features:
-    name: "Linux (features: xwayland, minimal)"
+  linux-xwayland:
+    name: "Linux (xwayland)"
     needs: changes
     # Fail open: only an explicit `false` skips, so a failed `changes` job
     # (empty output) still runs this one instead of skipping it green.
     if: ${{ !cancelled() && needs.changes.outputs.scoot != 'false' }}
     runs-on: ubuntu-latest
-    # Two Smithay rebuilds (xwayland, then minimal -- each a different
-    # feature unification) plus both suites under each and three smoke runs --
-    # less than the 90 this cost inside `linux`
-    # with three rebuilds, more than the default-only half left there.
-    timeout-minutes: 75
+    # One Smithay rebuild (xwayland unification) plus both suites and the
+    # xwayland smoke run. Previously the second half of the serial
+    # `linux-features` job alongside `--no-default-features`.
+    timeout-minutes: 45
     env:
       CARGO_TERM_COLOR: always
 
@@ -973,7 +979,7 @@ jobs:
           echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
 
       # Restore-only, from the `linux` job's entries: every dependency but
-      # Smithay and scoot (which each feature set rebuilds anyway) comes
+      # Smithay and scoot (which this feature set rebuilds anyway) comes
       # from there. Never saved -- a second cache line would push the repo
       # past GitHub's 10 GB budget (see the `linux` job's save step).
       - name: Restore the cargo cache (the linux job's, read-only)
@@ -1002,60 +1008,6 @@ jobs:
             echo "CI_EGL_LIBRARY_PATH=$LIBRARY_PATH:$mesa/lib"
             echo "CI_EGL_VENDOR_DIRS=$mesa/share/glvnd/egl_vendor.d"
           } >>"$GITHUB_ENV"
-
-      # The CPU-only minimal product (`--no-default-features`): the build
-      # for boxes (and packagers) that want no GBM code at all. Nothing else
-      # builds it, so without this gate it can rot silently -- and its
-      # contract is a conjunction, so the gate checks every clause: it
-      # builds with no C compiler available (the stub is the only C in the
-      # crate, and it is feature-gated out), `readelf -d` shows no libgbm,
-      # `nm` shows no stub symbols, and the binary starts headless.
-      #
-      # First of the two feature builds: `--no-default-features` changes
-      # the unification, so this rebuilds Smithay and `scoot`. The xwayland
-      # build below rebuilds them again, so `target/debug/scoot` ends as
-      # that one; neither escapes except through the kept-aside copies (the
-      # default build's smoke run lives in `linux` and uses that job's
-      # copies).
-      - name: Build --no-default-features, and assert the minimal product's contract
-        shell: nix develop --command bash -euo pipefail {0}
-        run: |
-          # No C compiler via `CC`: proves the minimal build needs none
-          # (build.rs compiles the stub only under `gpu-scanout`). Only `CC`
-          # is faked, never `PATH`: the `cc` crate takes its compiler from
-          # `CC`, while rustc still needs the real `cc` driver to link the
-          # build script itself -- shadowing `cc` on `PATH` breaks that link
-          # step even when no C is compiled (seen live in CI).
-          mkdir -p "$RUNNER_TEMP/no-cc"
-          printf '#!/bin/sh\necho "C compiler invoked during a --no-default-features build" >&2\nexit 1\n' >"$RUNNER_TEMP/no-cc/cc"
-          chmod +x "$RUNNER_TEMP/no-cc/cc"
-          CC="$RUNNER_TEMP/no-cc/cc" cargo build -p scoot --no-default-features
-          echo "ok: --no-default-features builds with no working C compiler"
-          cp target/debug/scoot "$RUNNER_TEMP/scoot-minimal"
-          echo "--- readelf -d target/debug/scoot (--no-default-features) ---"
-          readelf -d target/debug/scoot
-          # Scoped to NEEDED: the dev shell's RUNPATH names every buildInput
-          # lib dir, including mesa-libgbm's -- a bare `libgbm` match trips
-          # on that path (seen live on aarch64) while no entry is needed.
-          if readelf -d target/debug/scoot | grep 'NEEDED' | grep -qi 'libgbm'; then
-            echo "::error title=The minimal build references libgbm::--no-default-features must carry no GBM code at all."
-            exit 1
-          fi
-          echo "ok: --no-default-features references no libgbm"
-          # Canary symbols for the stub: one forwarded entry point plus the
-          # probe. (A broad `gbm_` match false-positives on e.g.
-          # hashbrown's `TagBM_E...` in the demangled core symbols -- seen
-          # live on aarch64 -- so the gate names its canaries, not a
-          # substring.)
-          if nm target/debug/scoot 2>/dev/null | grep -qE 'gbm_create_device|scoot_gbm_real_loaded'; then
-            echo "::error title=The minimal build carries stub symbols::--no-default-features must compile no C stub."
-            nm target/debug/scoot | grep -E 'gbm_create_device|scoot_gbm_real_loaded' || true
-            exit 1
-          fi
-          echo "ok: --no-default-features carries no stub symbols"
-          echo "note: libEGL/libGLESv2 are dlopen'd by renderer_gl and never appear in readelf for any build, so"
-          echo "      no libEGL clause is asserted here either. What guards the GPU-free path is the smoke runs:"
-          echo "      the default build's in linux (no loadable EGL) and the minimal start probe below."
 
       # The xwayland feature (on by default; the explicit `--features
       # xwayland` below is a no-op union, kept to pin the selection):
@@ -1111,21 +1063,6 @@ jobs:
           cargo build -p scootbg
           cp target/debug/scootbg "$RUNNER_TEMP/scootbg-features"
 
-      # The minimal product's test runners: the `--no-default-features`
-      # build above proved the contract clauses that are about the binary;
-      # these prove the cfg-gated code still passes the suite. The GLES
-      # tests need the same software EGL as above (the offscreen pipeline
-      # is still compiled in the minimal build -- only the GBM scanout tier
-      # is out).
-      - name: --no-default-features -- clippy, nextest and cargo test
-        shell: nix develop --command bash -euo pipefail {0}
-        run: |
-          export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
-          export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
-          cargo clippy -p scoot --all-targets --no-default-features -- -D warnings
-          cargo nextest run -p scoot --no-default-features --no-fail-fast
-          cargo test -p scoot --no-default-features
-
       # The default build's smoke run lives in `linux`, where the xwayland
       # sections take the no-binary branch (the feature is compiled in, but
       # no `Xwayland` binary is on `PATH` there). This
@@ -1159,11 +1096,142 @@ jobs:
           grep -q "XWayland is ready" "$log"
           grep -q "Xwayland. must be on PATH" "$RUNNER_TEMP/smoke-xwayland-nox.log"
 
+      # No save step, deliberately: see the job header. This job's `target/`
+      # holds feature-rebuilt Smithay that the default build cannot reuse, so
+      # saving it would only buy a second multi-gigabyte cache line.
+
+  linux-minimal:
+    name: "Linux (minimal, no default features)"
+    needs: changes
+    # Fail open: only an explicit `false` skips, so a failed `changes` job
+    # (empty output) still runs this one instead of skipping it green.
+    if: ${{ !cancelled() && needs.changes.outputs.scoot != 'false' }}
+    runs-on: ubuntu-latest
+    # The CPU-only minimal product (`--no-default-features`): one Smithay
+    # rebuild under a different unification, plus both suites and the
+    # minimal smoke run. Previously the first half of the serial
+    # `linux-features` job alongside xwayland.
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v23
+
+      # As in `linux`: the suites bind real sockets, and a runner has no
+      # `/run/user/<uid>`.
+      - name: Create XDG_RUNTIME_DIR
+        run: |
+          mkdir -p "$RUNNER_TEMP/xdg"
+          chmod 700 "$RUNNER_TEMP/xdg"
+          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
+
+      # Restore-only, from the `linux` job's entries: every dependency but
+      # Smithay and scoot (which this feature set rebuilds anyway) comes
+      # from there. Never saved -- a second cache line would push the repo
+      # past GitHub's 10 GB budget (see the `linux` job's save step).
+      - name: Restore the cargo cache (the linux job's, read-only)
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+          restore-keys: |
+            linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            linux-cargo-
+
+      # Same software EGL as the `linux` test steps: the offscreen pipeline
+      # is still compiled in the minimal build (only the GBM scanout tier
+      # is out), and its GLES tests fail rather than skip where EGL is
+      # missing. The smoke step at the end deliberately keeps running with
+      # no loadable EGL, as there.
+      - name: Resolve a software EGL for the GLES tests
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          mesa=$(nix build --inputs-from . nixpkgs#mesa --no-link --print-out-paths | head -1)
+          test -e "$mesa/share/glvnd/egl_vendor.d/50_mesa.json"
+          {
+            echo "CI_EGL_LIBRARY_PATH=$LIBRARY_PATH:$mesa/lib"
+            echo "CI_EGL_VENDOR_DIRS=$mesa/share/glvnd/egl_vendor.d"
+          } >>"$GITHUB_ENV"
+
+      # The CPU-only minimal product (`--no-default-features`): the build
+      # for boxes (and packagers) that want no GBM code at all. Nothing else
+      # builds it, so without this gate it can rot silently -- and its
+      # contract is a conjunction, so the gate checks every clause: it
+      # builds with no C compiler available (the stub is the only C in the
+      # crate, and it is feature-gated out), `readelf -d` shows no libgbm,
+      # `nm` shows no stub symbols, and the binary starts headless.
+      - name: Build --no-default-features, and assert the minimal product's contract
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          # No C compiler via `CC`: proves the minimal build needs none
+          # (build.rs compiles the stub only under `gpu-scanout`). Only `CC`
+          # is faked, never `PATH`: the `cc` crate takes its compiler from
+          # `CC`, while rustc still needs the real `cc` driver to link the
+          # build script itself -- shadowing `cc` on `PATH` breaks that link
+          # step even when no C is compiled (seen live in CI).
+          mkdir -p "$RUNNER_TEMP/no-cc"
+          printf '#!/bin/sh\necho "C compiler invoked during a --no-default-features build" >&2\nexit 1\n' >"$RUNNER_TEMP/no-cc/cc"
+          chmod +x "$RUNNER_TEMP/no-cc/cc"
+          CC="$RUNNER_TEMP/no-cc/cc" cargo build -p scoot --no-default-features
+          echo "ok: --no-default-features builds with no working C compiler"
+          cp target/debug/scoot "$RUNNER_TEMP/scoot-minimal"
+          echo "--- readelf -d target/debug/scoot (--no-default-features) ---"
+          readelf -d target/debug/scoot
+          # Scoped to NEEDED: the dev shell's RUNPATH names every buildInput
+          # lib dir, including mesa-libgbm's -- a bare `libgbm` match trips
+          # on that path (seen live on aarch64) while no entry is needed.
+          if readelf -d target/debug/scoot | grep 'NEEDED' | grep -qi 'libgbm'; then
+            echo "::error title=The minimal build references libgbm::--no-default-features must carry no GBM code at all."
+            exit 1
+          fi
+          echo "ok: --no-default-features references no libgbm"
+          # Canary symbols for the stub: one forwarded entry point plus the
+          # probe. (A broad `gbm_` match false-positives on e.g.
+          # hashbrown's `TagBM_E...` in the demangled core symbols -- seen
+          # live on aarch64 -- so the gate names its canaries, not a
+          # substring.)
+          if nm target/debug/scoot 2>/dev/null | grep -qE 'gbm_create_device|scoot_gbm_real_loaded'; then
+            echo "::error title=The minimal build carries stub symbols::--no-default-features must compile no C stub."
+            nm target/debug/scoot | grep -E 'gbm_create_device|scoot_gbm_real_loaded' || true
+            exit 1
+          fi
+          echo "ok: --no-default-features carries no stub symbols"
+          echo "note: libEGL/libGLESv2 are dlopen'd by renderer_gl and never appear in readelf for any build, so"
+          echo "      no libEGL clause is asserted here either. What guards the GPU-free path is the smoke runs:"
+          echo "      the default build's in linux (no loadable EGL) and the minimal start probe below."
+          # scootbg for the smoke run below: the daemon has no feature flag
+          # and talks to scoot only over Wayland. Built here -- not shared
+          # with the xwayland job -- because jobs share nothing but the
+          # cargo cache.
+          cargo build -p scootbg
+          cp target/debug/scootbg "$RUNNER_TEMP/scootbg-features"
+
+      # The minimal product's test runners: the build above proved the
+      # contract clauses that are about the binary; these prove the
+      # cfg-gated code still passes the suite. The GLES tests need the same
+      # software EGL as above (the offscreen pipeline is still compiled in
+      # the minimal build -- only the GBM scanout tier is out).
+      - name: --no-default-features -- clippy, nextest and cargo test
+        shell: nix develop --command bash -euo pipefail {0}
+        run: |
+          export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
+          export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
+          cargo clippy -p scoot --all-targets --no-default-features -- -D warnings
+          cargo nextest run -p scoot --no-default-features --no-fail-fast
+          cargo test -p scoot --no-default-features
+
       # The minimal product's end-to-end run: the whole script against the
       # kept-aside `--no-default-features` binary, proving the binary starts
       # and serves IPC, screenshots and clients with no GBM code in it. The
       # xwayland sections must report their honest no-feature branch here
-      # (the xwayland run above proves the real one), and `auto` must have
+      # (the xwayland job proves the real one), and `auto` must have
       # resolved to the CPU renderer with no GPU stack loadable -- the same
       # GPU-free premise the default build's run in `linux` asserts.
       - name: scripts/smoke-test.sh (--headless, --no-default-features)
@@ -1189,9 +1257,9 @@ jobs:
       # saving it would only buy a second multi-gigabyte cache line.
 
   # (No separate `gpu-scanout,xwayland` pair job anymore: the defaults now
-  # include the scanout tier, so `--features xwayland` above *is* the pair
-  # build -- its clippy, both test runners and smoke run cover the
-  # unification the old `gpu-xwayland` job existed for. The single `scoot`
+  # include the scanout tier, so `--features xwayland` in `linux-xwayland`
+  # *is* the pair build -- its clippy, both test runners and smoke run cover
+  # the unification the old `gpu-xwayland` job existed for. The single `scoot`
   # package's own full release build stays covered by `nix-build.yml`.)
 
   macos:
@@ -1254,14 +1322,10 @@ jobs:
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo run -q -p scoot -- msg --help
 
-      # The Darwin half of gh #173: `nix flake check` on Linux omits the
-      # Darwin systems (and vice versa), so the Linux job above never
-      # evaluates `packages.aarch64-darwin.*`, the Darwin `apps`, or the
-      # Darwin module checks. Same command, seconds on a warm store; the
-      # `.nix` format pin lives in the Linux job only (formatting is
-      # system-independent -- running it twice would prove nothing twice).
-      - name: nix flake check
-        run: nix flake check -L
+      # The Darwin half of gh #173 used to run here; it now runs in the
+      # `nix-check` job, which evaluates every system (Linux and Darwin)
+      # once instead of once per job. That job runs on the same `scoot`
+      # gate, which every `macos`-setting path also sets.
 
       - name: Save the cargo cache
         # Same condition as the Linux job's save -- see the comment there for
@@ -1560,7 +1624,7 @@ jobs:
 
       # The Nix modules' check (nix/scootbar-tests.nix) runs this crate's own
       # `daemon --check` over every rendered bar.toml, so a change to the bar
-      # alone must run it: `nix flake check` is in the Linux job, which a
+      # alone must run it: `nix flake check` is in the `nix-check` job, which a
       # bar-only change does not start. This is also the x86_64-linux build
       # of `packages.scootbar` and of that check (the runner is x86_64).
       - name: nix build the scootbar module check (x86_64-linux)
