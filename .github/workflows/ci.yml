@@ -184,7 +184,7 @@ jobs:
   #                                           owns its script above. A
   #                                           spec-only change runs there
   #                                           and nowhere else.
-  #   release.yml, release-plz.yml, bump-downstreams.yml, release-plz.toml,
+  #   release.yml, release-plz.yml, release-plz.toml,
   #   scripts/release-resolve,
   #   scripts/release-notes, scripts/workspace-version,
   #   scripts/sync-packaging-versions,
@@ -308,7 +308,7 @@ jobs:
                 # The release tooling: release.yml's lint job owns it
                 # (actionlint over the release workflows, the tools'
                 # tests), so a change there alone runs nothing here.
-                .github/workflows/release.yml | .github/workflows/release-plz.yml | .github/workflows/bump-downstreams.yml | scripts/release-resolve | scripts/release-notes | scripts/workspace-version | scripts/sync-fuzz-locks | scripts/sync-packaging-versions | scripts/test_release_resolve.py | scripts/test_sync_packaging_versions.py | scripts/bump-downstream | scripts/test_bump_downstream.py) ;;
+                .github/workflows/release.yml | .github/workflows/release-plz.yml | scripts/release-resolve | scripts/release-notes | scripts/workspace-version | scripts/sync-fuzz-locks | scripts/sync-packaging-versions | scripts/test_release_resolve.py | scripts/test_sync_packaging_versions.py | scripts/bump-downstream | scripts/test_bump_downstream.py) ;;
                 # release-plz's config and the check that every crate newer
                 # than the last tag has its entry there (its own job; a new
                 # crate's Cargo.toml reaches the catch-all below and runs it

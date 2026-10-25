@@ -17,6 +17,10 @@ release, entries were dated.
 
 ## Unreleased
 
+### ci,docs
+
+- changed: the scoot-side `bump-downstreams.yml` workflow and release.yml's `dispatch-downstreams` job are removed, along with the `DOWNSTREAM_BUMP_TOKEN` secret they needed. try-scoot and scoot-iso each have a manual `bump-scoot.yml` that opens the bump PR with its own `GITHUB_TOKEN` and dispatches its CI; the steps are on the cut-a-release page. Not breaking: no CLI, config schema or protocol changed.
+
 ## [0.6.4](https://github.com/scoot-sh/scoot/compare/v0.6.3...v0.6.4) - 2026-10-25
 
 ### ci,docs
