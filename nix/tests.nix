@@ -2332,7 +2332,9 @@ let
     desktop.enable = true;
     look = "music-desk";
   };
-  # ...without a look: the policy runs unthemed (swaylock's own colors).
+  # ...without a look: the policy runs on the fallback leaves (navy
+  # screen, white ring and text, blur and message still on -- pinned
+  # by content below).
   hmIdleNoLook = evalHome {
     enable = true;
     desktop.enable = true;
@@ -6963,7 +6965,9 @@ let
         assert osRealIdle.config.security.pam.services ? swaylock;
         assert osRealIdle.config.services.displayManager.defaultSession == null;
         assert lib.any (p: (p.pname or "") == "swayidle") osRealIdle.config.environment.systemPackages;
-        assert lib.any (p: (p.pname or "") == "swaylock") osRealIdle.config.environment.systemPackages;
+        assert lib.any (
+          p: (p.pname or "") == "swaylock-effects"
+        ) osRealIdle.config.environment.systemPackages;
         true
       )
       # The policy's power half in a real NixOS evaluation too: the
@@ -8052,10 +8056,10 @@ let
       assert hmDesk.config.programs.scoot.desktop.idle.offTimeout == 300;
       true
     )
-    # ...the swaylock daemon behind the lock, and the locker theme
+    # ...the swaylock-effects daemon behind the lock, and the locker theme
     # opt-out on (with the filled `theme` slot on beside it)...
     (
-      assert hmDesk.config.programs.scoot.desktop.idle.lock.daemon == "swaylock";
+      assert hmDesk.config.programs.scoot.desktop.idle.lock.daemon == "swaylock-effects";
       true
     )
     (
@@ -8339,7 +8343,7 @@ let
           pkgs.swayidle
           pkgs.brightnessctl
           pkgs.wlopm
-          pkgs.swaylock
+          pkgs.swaylock-effects
           (slotScriptDrv hmDeskLookMusic "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           fakeNotifyScoot
@@ -9401,7 +9405,7 @@ let
           pkgs.swayidle
           pkgs.brightnessctl
           pkgs.wlopm
-          pkgs.swaylock
+          pkgs.swaylock-effects
           (slotScriptDrv hmIdle "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           fakeNotifyScoot
@@ -9449,8 +9453,9 @@ let
         ];
       true
     )
-    # Without a look the policy runs unthemed (the files and units are
-    # still there; the locker keeps swaylock's own colors -- pinned by
+    # Without a look the policy runs on the fallback leaves (the
+    # files and units are still there; the locker keeps the navy
+    # screen, white ring and text, blur and message -- pinned by
     # content below).
     (
       assert allAssertionsHold hmIdleNoLook.config;
@@ -9722,7 +9727,7 @@ let
           pkgs.swayidle
           pkgs.brightnessctl
           pkgs.wlopm
-          pkgs.swaylock
+          pkgs.swaylock-effects
           pkgs.sway-audio-idle-inhibit
           fakeNotifyScoot
           fakeLaunchScoot
@@ -15835,7 +15840,7 @@ let
           pkgs.swayidle
           pkgs.brightnessctl
           pkgs.wlopm
-          pkgs.swaylock
+          pkgs.swaylock-effects
           (slotScriptDrv hmKeys "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           fakeNotifyScoot
@@ -16104,7 +16109,7 @@ let
           pkgs.swayidle
           pkgs.brightnessctl
           pkgs.wlopm
-          pkgs.swaylock
+          pkgs.swaylock-effects
           (slotScriptDrv hmKeysOff "scoot-locker")
           pkgs.sway-audio-idle-inhibit
           fakeNotifyScoot
@@ -16155,7 +16160,7 @@ let
           pkgs.swayidle
           pkgs.brightnessctl
           pkgs.wlopm
-          pkgs.swaylock
+          pkgs.swaylock-effects
           pkgs.sway-audio-idle-inhibit
           fakeNotifyScoot
           fakeLaunchScoot
@@ -17740,14 +17745,23 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
 
     # 12. Locker config, music-desk: the look's roles as swaylock leaves
     #     (screen and indicator backgrounds, active ring, accent key
-    #     highlight, ink text, urgent wrong-ring).
+    #     highlight, ink text, urgent wrong-ring), over the look's
+    #     wallpaper blurred at build time, with the always-visible
+    #     indicator and the unlock message.
     grep -F -x "color=FCFBFB" ${idleLockConf}
     grep -F -x "inside-color=FCFBFB" ${idleLockConf}
     grep -F -x "ring-color=3D579A" ${idleLockConf}
     grep -F -x "key-hl-color=3D579A" ${idleLockConf}
     grep -F -x "text-color=1A2032" ${idleLockConf}
     grep -F -x "ring-wrong-color=EE6F5E" ${idleLockConf}
-    echo "ok: locker config carries the look's colors"
+    grep -F "image=/nix/store/" ${idleLockConf}
+    grep -F -x "scaling=fill" ${idleLockConf}
+    grep -F -x "indicator" ${idleLockConf}
+    grep -F -x "indicator-radius=100" ${idleLockConf}
+    grep -F -x "indicator-thickness=10" ${idleLockConf}
+    grep -F -x "text-wrong=Wrong password. Try again." ${idleLockConf}
+    grep -F "effect-compose=50%,68%;70%x-1;center;/nix/store/" ${idleLockConf}
+    echo "ok: locker config carries the look's colors over its blurred wallpaper, the indicator and the message"
 
     # 12b. A locker setting wins per key (verbatim, leading `#` kept --
     #      swaylock's own parser strips it), and an empty string renders
@@ -17757,12 +17771,25 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F -x "color=FCFBFB" ${idleSettingsConf}
     echo "ok: locker settings win per key, flags render bare"
 
-    # 12c. Opted out (or lookless): no themed leaf at all -- with the
-    #      opt-out the settings still apply, so the locker is theirs.
-    if grep -q "^color=" ${idleTargetOffConf}; then echo "themed leaf present with theming off" >&2; exit 1; fi
+    # 12c. Opted out (or lookless): the fallback leaves stand where
+    #      the theme stood (navy screen, white ring and text -- never
+    #      the locker's white default), over the navy image, the
+    #      indicator and the message still on; with the opt-out the
+    #      settings still apply, so the locker is theirs over the
+    #      fallback.
+    grep -F -x "color=2B3648" ${idleTargetOffConf}
     grep -F -x "ring-color=#123456" ${idleTargetOffConf}
-    if grep -q "color=" ${idleNoLookConf}; then echo "themed leaf present with no look" >&2; exit 1; fi
-    echo "ok: opting out (or no look) leaves the locker unthemed"
+    grep -F "image=/nix/store/" ${idleTargetOffConf}
+    grep -F -x "scaling=fill" ${idleTargetOffConf}
+    grep -F -x "indicator" ${idleTargetOffConf}
+    grep -F -x "color=2B3648" ${idleNoLookConf}
+    grep -F -x "ring-color=FFFFFF" ${idleNoLookConf}
+    grep -F -x "text-color=FFFFFF" ${idleNoLookConf}
+    grep -F "image=/nix/store/" ${idleNoLookConf}
+    grep -F -x "scaling=fill" ${idleNoLookConf}
+    grep -F -x "indicator" ${idleNoLookConf}
+    grep -F -x "text-wrong=Wrong password. Try again." ${idleNoLookConf}
+    echo "ok: opting out (or no look) falls back to navy, still with the indicator and the message"
 
     # 12d. The locker merges the live look's colors with the user's own
     #      settings (next lock) and falls back to the generated store
@@ -17801,16 +17828,37 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       grep -F -x -q "show-failed-attempts" "$merged"
       [ "$(grep -c -F "ring-color=" "$merged")" = 2 ] || { echo "want the look and the user ring-color (12d2)"; cat "$merged"; exit 1; }
       [ "$(grep -F "ring-color=" "$merged" | tail -n 1)" = "ring-color=#123456" ] || { echo "the user ring-color is not last (12d2)"; cat "$merged"; exit 1; }
+      # The background and the prompt leaves ride along: the blurred
+      # image, the indicator and the message in the merged file too
+      # (not only the store config), and both images name real PNGs.
+      grep -F -q "image=/nix/store/" "$merged"
+      grep -F -x -q "scaling=fill" "$merged"
+      grep -F -x -q "indicator" "$merged"
+      grep -F -x -q "text-wrong=Wrong password. Try again." "$merged"
+      [ "$(grep -c -F "effect-compose=" "$merged")" = 1 ] || { echo "want one compose line (12d2)"; cat "$merged"; exit 1; }
+      image="$(grep -F "image=" "$merged" | tail -n 1 | cut -d= -f2-)"
+      compose="$(grep -F "effect-compose=" "$merged" | tail -n 1)"
+      banner="$(printf '%s' "$compose" | sed 's/.*;//')"
+      ${checkPython}/bin/python3 - "$image" "$banner" <<'PYEOF' || { echo "locker image is not a PNG (12d2)" >&2; exit 1; }
+      import struct, sys
+      for path in sys.argv[1:]:
+          with open(path, "rb") as f:
+              head = f.read(33)
+          assert head[:8] == b"\x89PNG\r\n\x1a\n", f"no PNG magic: {path}"
+          w, h = struct.unpack(">II", head[16:24])
+          assert w >= 60 and h >= 40, f"image too small: {path} {w}x{h}"
+          print(f"image ok: {path} {w}x{h}")
+      PYEOF
       # The real parser takes the merged file: it reaches the display
       # error with no complaint about any line (getopt names an
       # unrecognized one on stderr, so its absence proves every line
       # parsed), while a sectioned file is refused at parse (the
       # renderer stays section-less for a reason).
-      if env -i ${pkgs.swaylock}/bin/swaylock --config "$merged" 2>"$SWL_T/parse"; then echo "swaylock parsed nothing (12d2)" >&2; exit 1; fi
+      if env -i ${pkgs.swaylock-effects}/bin/swaylock --config "$merged" 2>"$SWL_T/parse"; then echo "swaylock parsed nothing (12d2)" >&2; exit 1; fi
       grep -q "Unable to connect to the compositor" "$SWL_T/parse" || { echo "merged file does not parse (12d2): '$(cat "$SWL_T/parse")'" >&2; exit 1; }
       if grep -q "unrecognized option" "$SWL_T/parse"; then echo "a merged line refused (12d2): '$(cat "$SWL_T/parse")'" >&2; exit 1; fi
       printf '%s\n' "[colors]" "color=AAAAAA" > "$SWL_T/bad"
-      if env -i ${pkgs.swaylock}/bin/swaylock --config "$SWL_T/bad" 2>"$SWL_T/baderr"; then echo "swaylock took a sectioned file (12d2)" >&2; exit 1; fi
+      if env -i ${pkgs.swaylock-effects}/bin/swaylock --config "$SWL_T/bad" 2>"$SWL_T/baderr"; then echo "swaylock took a sectioned file (12d2)" >&2; exit 1; fi
       grep -q "unrecognized option" "$SWL_T/baderr" || { echo "sectioned file not refused at parse (12d2): '$(cat "$SWL_T/baderr")'" >&2; exit 1; }
       # With no live look nothing merges: the store config locks as
       # before, and no runtime file appears.

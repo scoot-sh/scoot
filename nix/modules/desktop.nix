@@ -349,14 +349,22 @@ in
         };
 
         daemon = lib.mkOption {
-          type = lib.types.enum [ "swaylock" ];
-          default = "swaylock";
+          type = lib.types.enum [
+            "swaylock"
+            "swaylock-effects"
+          ];
+          default = "swaylock-effects";
           description = ''
-            The locker behind `command`. Only swaylock today (smallest
-            working closure at the pinned rev, plain-text config the
-            look themes per leaf, CPU-only like the compositor); a
-            future scootlock widens this enum, the option and the binds
-            staying as they are.
+            The locker behind `command`. `swaylock-effects` (the default:
+            stock swaylock plus image effects, same MIT license) shows
+            the look's wallpaper blurred behind the lock, keeps the
+            indicator always visible, and shows an unlock message over
+            every output; `swaylock` is one line back (the same blurred
+            screen, but its own hidden-until-you-type indicator and no
+            message -- see
+            site/src/content/docs/desktop/index.md#idle-and-lock).
+            A future scootlock widens this enum, the option and the
+            binds staying as they are.
           '';
         };
 
