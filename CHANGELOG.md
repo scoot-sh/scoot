@@ -17,6 +17,8 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.4](https://github.com/scoot-sh/scoot/compare/v0.6.3...v0.6.4) - 2026-10-25
+
 ### ci,docs
 
 - added: the ISO install path is documented, and a published release opens scoot-pin bump PRs in try-scoot and scoot-iso (needs the `DOWNSTREAM_BUMP_TOKEN` secret) ([#733](https://github.com/scoot-sh/scoot/pull/733)). Fixed the bump workflow's bad pinned action SHA ([#737](https://github.com/scoot-sh/scoot/pull/737)). Not breaking: no CLI, config schema or protocol changed.

@@ -16,7 +16,7 @@
 # this exact file against a same-layout tarball of HEAD.
 
 pkgname=scoot-globalshortcuts-portal
-pkgver=0.6.3
+pkgver=0.6.4
 pkgrel=1
 pkgdesc='GlobalShortcuts portal backend for the scoot compositor'
 arch=('x86_64' 'aarch64')
