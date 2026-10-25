@@ -17,6 +17,10 @@ release, entries were dated.
 
 ## Unreleased
 
+### ci
+
+- changed: cut the CI critical path without losing coverage: the serial `linux-features` job is split into parallel `linux-xwayland` and `linux-minimal` jobs, and the Linux flake evaluation (`nix fmt`, `nix flake check`, the FlakeHub all-systems gate) moves out of the serial `linux` job into a parallel `nix-check` job (macOS keeps its own `nix flake check` for the Darwin systems). PR cancel-in-progress no longer applies to main. Not breaking: no test, check or matrix entry removed or loosened.
+
 ### ci,docs
 
 - changed: the scoot-side `bump-downstreams.yml` workflow and release.yml's `dispatch-downstreams` job are removed, along with the `DOWNSTREAM_BUMP_TOKEN` secret they needed. try-scoot and scoot-iso each have a manual `bump-scoot.yml` that opens the bump PR with its own `GITHUB_TOKEN` and dispatches its CI; the steps are on the cut-a-release page. Not breaking: no CLI, config schema or protocol changed.
