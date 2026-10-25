@@ -19,6 +19,10 @@ release, entries were dated.
 
 ### ci
 
+- changed: edits to `docs/examples/*/{scoot.toml,bar.toml,foot.ini}` now run the scoot jobs (the shipped-looks agreement check reads them during `nix flake check`; before, such an edit ran nothing and could break main), and `vm/compositor-deps.nix` no longer runs the macOS job (its shell is Linux-gated). Not breaking: no CLI, config schema or protocol changed.
+
+### ci
+
 - changed: cut the CI critical path without losing coverage: the serial `linux-features` job is split into parallel `linux-xwayland` and `linux-minimal` jobs, and the Linux flake evaluation (`nix fmt`, `nix flake check`, the FlakeHub all-systems gate) moves out of the serial `linux` job into a parallel `nix-check` job (macOS keeps its own `nix flake check` for the Darwin systems). PR cancel-in-progress no longer applies to main. Not breaking: no test, check or matrix entry removed or loosened.
 - changed: cut the scootbar CI critical path without losing coverage: the serial `scootbar` job (~21.5m) is split into four parallel jobs on the same gate (`scootbar-modules`, `scootbar-lint`, `scootbar-test`, `scootbar-fuzz`), sharing one read-only `scootbar-cargo-` cache line, so a full run costs the slowest quarter instead of the sum. Also fixed the classify filters that skipped dependent jobs (scoot-core, scootbg-mem, scoot-rt, scoot-dbus fan-out, the scootui manifest's launch leg, and the catch-all's missing portal leg), with `scripts/check-ci-filters.py` plus a table-driven test run in the classify job so the filters cannot rot. Not breaking: no test, matrix entry, fuzz run or check removed or loosened.
 
