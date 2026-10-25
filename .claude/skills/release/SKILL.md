@@ -37,7 +37,6 @@ first red and report it; a red is a bug until a log proves otherwise.
 - Done means: tag gate, vendored tarball and SBOM, portable binaries on both
   architectures, publish, and verify on both architectures all `success`, and
   `gh release view vX.Y.Z --json assets` lists the assets (15 at v0.6.4).
-- Also check `dispatch-downstreams` and `bump-downstreams.yml` (step 4).
 
 ## 4. Bump the downstreams
 
@@ -52,8 +51,7 @@ Watch each run (`gh run list -R scoot-sh/<repo> --workflow bump-scoot.yml`).
 It runs scoot's `scripts/bump-downstream` from the tag, pushes
 `ci/bump-scoot-vX.Y.Z`, opens or updates one PR, and dispatches `ci.yml` on
 the branch. A run that finds the pin already current opens nothing and says
-so. The scoot-side `bump-downstreams.yml` is a second route that needs
-`DOWNSTREAM_BUMP_TOKEN`; ignore its red until that secret exists.
+so.
 
 ## 5. Validate and merge the downstream PRs
 

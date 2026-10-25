@@ -84,7 +84,7 @@
 # TRIGGERS (the CLAUDE.md rule: no always-run job; docs-only pushes
 # start nothing): tag pushes run the pipeline; `pull_request` runs only
 # the lint job and only when the release tooling changes (this file,
-# release-plz.yml, bump-downstreams.yml and its config, the release scripts
+# release-plz.yml and its config, the release scripts
 # and the downstream-bump script) or what a release
 # PR changes (Cargo.toml, Cargo.lock, CHANGELOG.md, packaging/); a
 # dispatch with an empty `tag` runs only the lint job (release-plz.yml
@@ -118,7 +118,6 @@ on:
     paths:
       - '.github/workflows/release.yml'
       - '.github/workflows/release-plz.yml'
-      - '.github/workflows/bump-downstreams.yml'
       - 'release-plz.toml'
       # What a release PR changes (the workspace version, the lockfile,
       # the changelog the notes come from, the packaging bump), so the
@@ -183,7 +182,7 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
 
       - name: actionlint (pinned through this repo's flake.lock)
-        run: nix shell --inputs-from . nixpkgs#actionlint --command actionlint .github/workflows/release.yml .github/workflows/release-plz.yml .github/workflows/bump-downstreams.yml
+        run: nix shell --inputs-from . nixpkgs#actionlint --command actionlint .github/workflows/release.yml .github/workflows/release-plz.yml
 
       - name: Release workflow guards (single-path artifacts, no inline context)
         run: |
@@ -640,32 +639,6 @@ jobs:
           gh release edit "$tag" --draft=false
           gh release view "$tag" --json tagName,assets --jq '{tag: .tagName, assets: [.assets[].name]}'
           echo "published=true" >>"$GITHUB_OUTPUT"
-
-  # Tell bump-downstreams.yml about a real publish. The release above
-  # is created with GITHUB_TOKEN, which starts no `release: published`
-  # run (GitHub docs, "Triggering a workflow from a workflow": events
-  # triggered by GITHUB_TOKEN create no new runs, except
-  # workflow_dispatch and repository_dispatch; release-plz.yml relies on
-  # that same exception to dispatch this workflow), so without this
-  # step the normal release path would never bump try-scoot and
-  # scoot-iso. workflow_dispatch always starts a run, so dispatch
-  # explicitly. Releases cut by hand (web UI or a PAT) still arrive via
-  # that workflow's `release: published` trigger.
-  dispatch-downstreams:
-    name: Dispatch the downstream bump
-    needs: [resolve, publish]
-    if: needs.resolve.outputs.verify_only != 'true' && needs.publish.outputs.published == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      actions: write
-    steps:
-      - env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DISPATCH_TAG: ${{ needs.resolve.outputs.tag }}
-          DISPATCH_REPO: ${{ github.repository }}
-        run: |
-          gh workflow run bump-downstreams.yml --repo "$DISPATCH_REPO" --ref main -f tag="$DISPATCH_TAG"
 
   # Post-publish proof: download the release's own assets from GitHub,
   # check every file against the published SHA256SUMS and its keyless

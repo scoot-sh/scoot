@@ -199,42 +199,28 @@ with no `tag`), or approve the held runs.
 
 ## Downstream bumps (try-scoot and scoot-iso)
 
-Every published release also bumps the two repos that pin scoot:
+Two repos pin scoot by release tag:
 [try-scoot](https://github.com/scoot-sh/try-scoot) and
-[scoot-iso](https://github.com/scoot-sh/scoot-iso). The
-[bump workflow](https://github.com/scoot-sh/scoot/blob/main/.github/workflows/bump-downstreams.yml)
-opens one PR in each repo moving its scoot pin to the new tag (the
-flake input plus the lock, and for the ISO the installer target flake
-and the patch-consistency constants). The edits run through
-`scripts/bump-downstream`, so a bump is reproducible by hand. The
-workflow never auto-merges, skips prereleases, and updates an existing
-branch or PR for the tag instead of opening a duplicate.
-
-It starts two ways: releases cut by hand reach it through its
-`release: published` trigger, and the release workflow dispatches it
-explicitly after a real publish (a release created with `GITHUB_TOKEN`
-starts no `release: published` run, so without that dispatch the
-normal release path would never bump anything). Re-run or test it by
-hand from any ref:
+[scoot-iso](https://github.com/scoot-sh/scoot-iso). After a release is
+published, bump each by running its own workflow:
 
 ```sh
-gh workflow run bump-downstreams.yml --ref main -f tag=v0.6.3
+gh workflow run bump-scoot.yml -R scoot-sh/scoot-iso -f tag=vX.Y.Z
+gh workflow run bump-scoot.yml -R scoot-sh/try-scoot -f tag=vX.Y.Z
 ```
 
-### The one secret: `DOWNSTREAM_BUMP_TOKEN`
+Each run takes `scripts/bump-downstream` from that tag of this repo,
+moves the pin (the flake input and lock, and for the ISO the installer
+target flake and the patch-consistency constants), pushes
+`ci/bump-scoot-<tag>` and opens or updates one PR. It never merges. It
+needs no secret: it uses the repo's own `GITHUB_TOKEN`.
 
-Cross-repo pushes need a token with write outside this repo, which
-`GITHUB_TOKEN` does not have. Create a fine-grained PAT (or GitHub App
-token) with contents and pull-requests write on `scoot-sh/try-scoot`
-and `scoot-sh/scoot-iso`, and store it as this repo's
-`DOWNSTREAM_BUMP_TOKEN` secret. Without it the job fails with a
-message naming the secret, and the value is never printed. A PR opened
-with this token runs each repo's CI; a PR opened with `GITHUB_TOKEN`
-would get no checks.
-
-Without the secret, or to recover a red run, bump by hand: run
-`scripts/bump-downstream` against local clones, push a
-`ci/bump-scoot-<tag>` branch in each repo, and open the PRs yourself.
+A PR opened with `GITHUB_TOKEN` starts no `pull_request` run, so the
+workflow dispatches `ci.yml` on the branch itself. Those checks attach to
+the PR's head commit but `gh pr checks` does not list them. Read them with
+`gh api repos/scoot-sh/<repo>/commits/<head-sha>/check-runs`. In
+try-scoot that run skips the `push` jobs, which only publish PR-tagged
+images. Review the lock diff, then merge once the checks are green.
 
 ## What else the runs need
 
