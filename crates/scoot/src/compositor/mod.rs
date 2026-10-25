@@ -6,6 +6,7 @@
 
 mod activation;
 mod alpha_modifier;
+pub(crate) mod animation;
 mod bind_budget;
 mod bind_repeat;
 mod binds;
@@ -476,6 +477,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     // `virtual_input.rs`); both are restart-only (see `reload.rs`).
     state.startup_virtual_input = loaded.virtual_input;
     state.virtual_input_binds = loaded.virtual_input_binds;
+    state.animation = loaded.animation;
     virtual_input::init(&mut state, loaded.virtual_input);
     if xwayland {
         #[cfg(feature = "xwayland")]

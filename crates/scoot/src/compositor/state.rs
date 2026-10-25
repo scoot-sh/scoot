@@ -160,6 +160,16 @@ pub struct State {
     /// `xwayland/scale.rs`). Unconditional -- without the `xwayland` Cargo
     /// feature nothing reads it, but the reload diff still does.
     pub xwayland_fractional: super::config::XwaylandFractional,
+    /// `[animation]`: the optional horizontal slide, disabled by default.
+    /// Read on `apply()` (whether to start/retarget slides) and on the frame
+    /// path (which curve and duration in-flight slides follow at creation;
+    /// in-flight slides keep the timing they started with).
+    pub animation: super::animation::AnimationSettings,
+    /// Windows mid-slide, pooled in place (capacity retained, finished slides
+    /// pruned, never rebuilt per frame). Empty whenever the option is off and
+    /// whenever it is on but idle, so every hot path branches once on
+    /// `is_empty` and otherwise runs the old code.
+    pub slides: Vec<super::animation::Slide>,
 
     /// The layout. Everything else here exists to serve it.
     pub world: World,
@@ -1383,6 +1393,8 @@ impl State {
             startup_virtual_input: false,
             virtual_input_binds: false,
             xwayland_fractional: super::config::XwaylandFractional::default(),
+            animation: super::animation::AnimationSettings::default(),
+            slides: Vec::new(),
             world: World::new(config),
             windows: HashMap::new(),
             next_id: 0,

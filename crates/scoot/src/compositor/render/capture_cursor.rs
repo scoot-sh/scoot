@@ -748,6 +748,7 @@ where
     } else {
         Some(state.world.arrange())
     };
+    let now = std::time::Instant::now();
     let ring = ring_elements(
         &mut state.decorations,
         &state.appearance,
@@ -756,6 +757,8 @@ where
         arrangement.as_ref(),
         &frame,
         renderer,
+        &state.slides,
+        now,
     );
     state.gather_elements_into(
         renderer,
@@ -768,6 +771,7 @@ where
         // plane can take an element out of the region being drawn.
         None,
         &mut pool.gathered,
+        now,
     );
     let by = Point::from((-region.loc.x, -region.loc.y));
     // Front to back, as the frame lists it: the cursor first (it is drawn

@@ -281,6 +281,9 @@ mod field {
     pub const FLOATING_MODIFIER: &str = "floating.modifier";
     pub const WINDOW_RULES: &str = "window_rule";
     pub const BINDS: &str = "binds";
+    pub const ANIMATION_ENABLED: &str = "animation.enabled";
+    pub const ANIMATION_DURATION: &str = "animation.duration_ms";
+    pub const ANIMATION_EASING: &str = "animation.easing";
     pub const GLOBAL_SHORTCUTS: &str = "global_shortcuts";
     pub const WALLPAPER: &str = "wallpaper";
     pub const WALLPAPER_COMMAND: &str = "wallpaper.command";
@@ -496,6 +499,7 @@ impl State {
         self.apply_autostart_reload(fresh, &mut report);
         self.apply_floating_reload(fresh, &mut report);
         self.apply_binds_reload(fresh, &mut report);
+        self.apply_animation_reload(fresh, &mut report);
         self.apply_global_shortcuts_reload(fresh, &mut report);
         self.apply_wallpaper_reload(fresh, &mut report);
 
@@ -1278,6 +1282,32 @@ impl State {
         self.global_shortcuts.apply_config();
         self.emit_shortcuts_changed();
         report.applied.push(field::GLOBAL_SHORTCUTS.to_owned());
+    }
+
+    /// `[animation]`: swaps the live setting. Disabling snaps any live
+    /// slide to its target (clears, then redraws the final frame); changing
+    /// the duration or easing only affects slides started after the reload
+    /// (in-flight slides keep the timing they started with, so nothing jumps).
+    /// Reports each changed key under its dotted name.
+    fn apply_animation_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
+        let live = self.animation;
+        let next = fresh.animation;
+        if live.enabled != next.enabled {
+            self.animation.enabled = next.enabled;
+            report.applied.push(field::ANIMATION_ENABLED.to_owned());
+            if !next.enabled && !self.slides.is_empty() {
+                self.slides.clear();
+                self.request_render();
+            }
+        }
+        if live.duration != next.duration {
+            self.animation.duration = next.duration;
+            report.applied.push(field::ANIMATION_DURATION.to_owned());
+        }
+        if live.easing != next.easing {
+            self.animation.easing = next.easing;
+            report.applied.push(field::ANIMATION_EASING.to_owned());
+        }
     }
 }
 

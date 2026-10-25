@@ -1039,6 +1039,22 @@ impl State {
             // `refresh_layer_zone` returns early when no zone moved.
             self.refresh_keyboard_focus();
         }
+        // The slide drives frames only while it runs: finished slides are
+        // pruned (capacity kept), and while any remain the dirty flag stays
+        // set so the frame timer re-arms for the next tick. When the last
+        // one lands the flag clears and the compositor idles. While locked
+        // there is nothing to slide (no windows draw), so any slide snaps.
+        if self.session_lock.is_locked() {
+            if !self.slides.is_empty() {
+                self.slides.clear();
+            }
+        } else if !self.slides.is_empty() {
+            let now = std::time::Instant::now();
+            self.prune_slides(now);
+            if self.animation_in_flight(now) {
+                self.needs_render = true;
+            }
+        }
         self.space.refresh();
         // `wl_surface.enter`/`leave` by placement, not by bounding box (see
         // `output_clip::reconcile_surface_membership`): `refresh` just told

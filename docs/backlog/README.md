@@ -417,6 +417,10 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [scootctl look wiring tests race on `STARSHIP_CONFIG`](./testing/scootctl-starship-env-race.md): flaked CI's one-process `cargo test` on an unrelated PR.
 
 ### Core / config / rendering
+- [Slide animation follow-up: open/close fade](./core/animation-open-close-fade.md) — low, filed 2026-10-25: new/closed windows snap while tiled moves slide; add an optional fade (possibly scale) reusing the slide's scheduling and damage discipline
+- [Slide animation follow-up: workspace-switch slide](./core/animation-workspace-switch-slide.md) — low, filed 2026-10-25: switches move every window at once; decide viewport-vs-per-window and implement the chosen shape
+- [Slide animation follow-up: vertical slide](./core/animation-vertical-slide.md) — low, filed 2026-10-25: the slide animates x only; stacked-column y moves still jump
+- [Slide animation follow-up: spring easing](./core/animation-spring-easing.md) — low, filed 2026-10-25: `ease-out`/`linear` only; add an optional spring that still finishes on time and idles
 - [Lock blur follows the live per-output wallpaper](./core/lock-screen-per-output-blur.md) — low, filed 2026-10-24: the locker's blur is baked at build time from the shipped wallpaper; `scootbg set` and live look swaps keep the built blur until rebuild
 - [Idle lock shows a blank white screen with no prompt](./resolved/lock-screen-blank-no-prompt-done.md) — RESOLVED 2026-10-24: the white frame was the locker's own default (swaylock paints white with no background configured); every emitted config now carries a background, and the default lock shows the look's wallpaper blurred with an always-visible indicator and an unlock message
 - [`scoot look list` prints every look twice (shadowed duplicates)](./core/look-list-shadowed-duplicates.md) — low, filed 2026-10-17 from the same walkthrough: system + home halves both register the catalog; applies work

@@ -3,7 +3,7 @@ title: Configure scoot
 description: "The config file, live reload, autostart, and what happens when the file is wrong."
 ---
 
-One TOML file holds everything — layout, appearance,
+One TOML file holds everything — layout, appearance, animation,
 outputs, binds, global shortcuts, floating rules, autostart, wallpaper — and most of it
 re-applies live with `scoot msg reload`. No config file yet?
 `--print-default-config` writes a starting one (below).
@@ -13,8 +13,8 @@ re-applies live with `scoot msg reload`. No config file yet?
 `--config PATH` loads a TOML file explicitly. Without it, scoot looks
 for `$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
 `~/.config/scoot/config.toml`, and runs on built-in defaults if
-neither exists. Thirteen optional tables: `[layout]`, `[appearance]`,
-`[output]`, `[[outputs]]`, `[renderer]`, `[tty]`, `[xwayland]`, `[virtual_input]`,
+neither exists. Fourteen optional tables: `[layout]`, `[appearance]`,
+`[animation]`, `[output]`, `[[outputs]]`, `[renderer]`, `[tty]`, `[xwayland]`, `[virtual_input]`,
 `[autostart]`, `[floating]`, `[wallpaper]`, `[binds]`, `[global_shortcuts]` — plus any number of
 `[[window_rule]]` entries. Every field in every table is itself
 optional and defaults independently, so a config that only sets `gap`
@@ -74,7 +74,8 @@ both triggers above say exactly when.
 
 **Applied live:** layout (gap, column widths, default width), output
 scales and positions, `[[outputs]]` modes (a live resize per backend —
-`--nested` refuses them, the host owns the size), appearance (ring, background, corners, cursor), the whole
+`--nested` refuses them, the host owns the size), appearance (ring, background, corners, cursor), animation
+(enabled, duration, easing), the whole
 `[binds]` table, the `[global_shortcuts]` chords, new `[autostart]` spawn entries, `[floating]` and the
 `[[window_rule]]`s (for windows that map after the reload), `[wallpaper]`
 (handed to scootbg again), `[xwayland] fractional`. The reply names
@@ -192,6 +193,28 @@ Lock after ten minutes, panels off after fifteen, back on at the first
 input. The same state is drivable over IPC
 (`scoot msg output-power 1 off`, `scoot msg outputs` reporting it).
 
+## Animation
+
+| Field | Type | Default | Reload | Meaning |
+|---|---|---|---|---|
+| `enabled` | boolean | `false` | live, snaps any live slide | Slide tiled windows horizontally to their new place instead of jumping. |
+| `duration_ms` | integer | `150` | live, later slides only | How long one slide takes. `0` snaps immediately. Clamped `0..=500`. |
+| `easing` | string | `"ease-out"` | live, later slides only | The curve: `"ease-out"` or `"linear"`. Anything else warns and uses the default. |
+
+```toml
+[animation]
+enabled = true
+duration_ms = 150
+easing = "ease-out"
+```
+
+Off by default, and free when off: no timer, no per-frame work, no
+allocation. When on, only the moving windows' old and new rects are
+redrawn per frame; clients are never asked to re-commit. `scoot msg
+windows` and pointer input keep reporting the final geometry while a
+slide runs. Floating, fullscreen and maximized windows snap rather than
+slide. Disabling mid-slide snaps to the final frame.
+
 ## Example config.toml
 
 ```toml
@@ -227,6 +250,12 @@ scale = 1.0
 # [[outputs]]
 # name = "DP-1"
 # mode = "1920x1080"
+
+# [animation]
+# Slide tiled windows horizontally instead of jumping. Off by default.
+# enabled = false
+# duration_ms = 150
+# easing = "ease-out"
 
 # [renderer]
 # Type string, default "auto". One of "auto" (the default: the GPU

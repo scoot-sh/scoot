@@ -485,6 +485,55 @@ impl AutostartConfig {
     }
 }
 
+/// `[animation]`. Three fields: `enabled`, whether tiled windows slide
+/// horizontally to their new place instead of jumping; `duration_ms`, how
+/// long one slide takes; and `easing`, the curve (`ease-out` or `linear`).
+/// All `Option` so a partial table leaves the rest at defaults. Disabled by
+/// default; a reload applies live, and disabling mid-slide snaps to the
+/// target.
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct AnimationConfig {
+    enabled: Option<bool>,
+    duration_ms: Option<u32>,
+    easing: Option<String>,
+}
+
+impl AnimationConfig {
+    fn into_settings(self) -> super::animation::AnimationSettings {
+        use super::animation::{AnimationSettings, Easing};
+        let defaults = AnimationSettings::default();
+        let duration = match self.duration_ms {
+            None => defaults.duration,
+            Some(raw) => {
+                let clamped = AnimationSettings::clamp_duration_ms(raw);
+                if clamped.as_millis() as u32 != raw {
+                    tracing::warn!(
+                        duration_ms = raw,
+                        "invalid [animation] duration_ms; clamped into range"
+                    );
+                }
+                clamped
+            }
+        };
+        let easing = match Easing::parse(self.easing.as_deref()) {
+            Ok(easing) => easing,
+            Err(name) => {
+                tracing::warn!(
+                    easing = %name,
+                    "unknown [animation] easing; expected `ease-out` or `linear`, using the default"
+                );
+                Easing::default()
+            }
+        };
+        AnimationSettings {
+            enabled: self.enabled.unwrap_or(defaults.enabled),
+            duration,
+            easing,
+        }
+    }
+}
+
 /// The whole file. `binds`' values and `autostart`'s entries are parsed
 /// lazily, one at a time (see [`apply_binds`] and
 /// [`AutostartConfig::into_actions`]), so one bad bind or entry can't take
@@ -512,6 +561,8 @@ struct FileConfig {
     virtual_input: Option<VirtualInputConfig>,
     #[serde(default)]
     autostart: Option<AutostartConfig>,
+    #[serde(default)]
+    animation: Option<AnimationConfig>,
     #[serde(default)]
     floating: Option<FloatingConfig>,
     /// `[[window_rule]]`, an array of tables: see `window_rules.rs`.
@@ -652,6 +703,9 @@ pub struct LoadedConfig {
     /// problem (named; startup logs it and runs nothing, a reload refuses
     /// the field).
     pub wallpaper: WallpaperSetting,
+    /// `[animation]`: the optional horizontal slide, disabled by default.
+    /// Re-applied live by a reload; disabling snaps any live slide.
+    pub animation: super::animation::AnimationSettings,
 }
 
 impl LoadedConfig {
@@ -677,6 +731,7 @@ impl LoadedConfig {
             floating_modifier: DEFAULT_DRAG_MODIFIER,
             invalid_floating_modifier: None,
             wallpaper: WallpaperSetting::Absent,
+            animation: super::animation::AnimationSettings::default(),
         }
     }
 
@@ -768,6 +823,7 @@ impl LoadedConfig {
             };
         let (floating, skipped_rules) =
             FloatingRules::from_config(file.floating, &file.window_rule);
+        let animation = file.animation.unwrap_or_default().into_settings();
         let wallpaper =
             WallpaperSetting::resolve(file.wallpaper, path, std::env::var_os("HOME").as_deref());
         for skipped in &skipped_rules {
@@ -795,6 +851,7 @@ impl LoadedConfig {
                 floating_modifier,
                 invalid_floating_modifier,
                 wallpaper,
+                animation,
             },
             shadowed,
             invalid,
@@ -1647,7 +1704,8 @@ pub fn default_config_toml() -> String {
          #\n\
          # Gap, column widths, the output scale, the ring/background/cursor\n\
          # appearance fields, binds, [floating] and [[window_rule]], new\n\
-         # [autostart] spawn entries, [wallpaper] and [xwayland] fractional\n\
+         # [autostart] spawn entries, [wallpaper], [xwayland] fractional
+# and [animation]\n\
          # re-apply live with `scoot msg reload`; [tty] gpu, [renderer]\n\
          # backend, [xwayland] enabled, [virtual_input] enabled and\n\
          # [virtual_input] binds take effect on restart and a reload\n\
@@ -1771,6 +1829,23 @@ pub fn default_config_toml() -> String {
     );
     out.push_str("# enabled = false\n");
     out.push_str("# fractional = \"sharp\"\n");
+
+    out.push_str("\n[animation]\n");
+    out.push_str(
+        "# Slide tiled windows horizontally to their new place instead of\n\
+         # jumping (columns scrolling into view, a column opening/closing/moving,\n\
+         # focus moving the view). Off by default; re-applies live on reload.\n\
+         # The slide moves already-committed buffers: clients are never asked\n\
+         # to re-commit for it.\n",
+    );
+    out.push_str("# enabled = false\n");
+    out.push_str(&format!(
+        "# duration_ms = {}  # 0 snaps immediately, clamped {}..={}\n",
+        super::animation::DEFAULT_DURATION_MS,
+        super::animation::MIN_DURATION_MS,
+        super::animation::MAX_DURATION_MS,
+    ));
+    out.push_str("# easing = \"ease-out\"  # or \"linear\"\n");
 
     out.push_str("\n[virtual_input]\n");
     out.push_str(
