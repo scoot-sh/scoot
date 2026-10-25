@@ -7,16 +7,17 @@ nothing. The heavy jobs overlap instead of queueing behind one another:
   is the compositor gate. It does no nix evaluation of its own.
 - `nix-check` evaluates the flake once (`nix fmt`, `nix flake check`,
   `nix flake show --all-systems`) in parallel with `linux`. It replaced
-  the serial `nix flake check` that measured 5-9 min inside `linux` plus a
-  duplicate Darwin eval inside `macos`; same `scoot` gate covers both.
+  the serial `nix flake check` that measured 5-9 min inside `linux`. It
+  covers the Linux systems only; `macos` keeps its own `nix flake check`
+  for the Darwin ones.
 - `linux-xwayland` and `linux-minimal` are the two halves of the old
   serial `linux-features` job (measured 24-36 min, the critical path).
   Each restores the `linux` cargo cache read-only and rebuilds Smithay
   under its own unification, so the run costs the max of the two, not
   the sum. Neither saves: a feature-rebuilt `target/` is unusable to the
   default build and would only buy a second multi-GB cache line.
-- `macos` is client-only (`cargo check`, `scoot msg --help`); its flake
-  eval lives in `nix-check`.
+- `macos` is client-only (`cargo check`, `scoot msg --help`) plus the
+  Darwin `nix flake check`, which a Linux run cannot do.
 - `scootbg`, `scootbar`, `scootlaunch`, `scootnotify`, `portal`, `look`
   keep their own cargo caches (no Smithay inside) and run only when
   their paths (or shared deps) change; the `-integration` jobs restore

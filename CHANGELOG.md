@@ -19,7 +19,7 @@ release, entries were dated.
 
 ### ci
 
-- changed: cut the CI critical path without losing coverage: the serial `linux-features` job is split into parallel `linux-xwayland` and `linux-minimal` jobs, and the flake evaluation (`nix fmt`, `nix flake check`, the FlakeHub all-systems gate) moves out of the serial `linux`/`macos` path into a parallel `nix-check` job. PR cancel-in-progress no longer applies to main. Not breaking: no test, check or matrix entry removed or loosened.
+- changed: cut the CI critical path without losing coverage: the serial `linux-features` job is split into parallel `linux-xwayland` and `linux-minimal` jobs, and the Linux flake evaluation (`nix fmt`, `nix flake check`, the FlakeHub all-systems gate) moves out of the serial `linux` job into a parallel `nix-check` job (macOS keeps its own `nix flake check` for the Darwin systems). PR cancel-in-progress no longer applies to main. Not breaking: no test, check or matrix entry removed or loosened.
 
 ### ci,docs
 

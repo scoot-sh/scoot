@@ -612,12 +612,10 @@ jobs:
   # The flake's own outputs, evaluated once instead of twice: `linux` used
   # to run `nix fmt`, `nix flake check` and `nix flake show --all-systems`
   # serially before its Smithay build (5-9 min measured, the second-longest
-  # step in that job), and `macos` ran `nix flake check` again for the
-  # Darwin half. This job runs the three once, in parallel with the cargo
-  # jobs, on the same `scoot` gate that ran both: every path that set
-  # `macos` also sets `scoot` (each arm sets both; the catch-all sets all),
-  # and `flake.nix`/`flake.lock`/`nix/` fall to the catch-all, so whenever
-  # either job would have evaluated the flake, this one does.
+  # step in that job). This job runs them once, in parallel with the cargo
+  # jobs, on the same `scoot` gate. The Linux half only: `macos` keeps
+  # its own `nix flake check -L`, because a Linux run omits the Darwin
+  # systems.
   nix-check:
     name: Nix (flake check)
     needs: changes
@@ -1322,10 +1320,15 @@ jobs:
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo run -q -p scoot -- msg --help
 
-      # The Darwin half of gh #173 used to run here; it now runs in the
-      # `nix-check` job, which evaluates every system (Linux and Darwin)
-      # once instead of once per job. That job runs on the same `scoot`
-      # gate, which every `macos`-setting path also sets.
+      # The Darwin half of gh #173: `nix flake check` on Linux omits the
+      # Darwin systems (and vice versa), so the `nix-check` job never
+      # evaluates `packages.aarch64-darwin.*`, the Darwin `apps`, or the
+      # Darwin module checks. Same command, seconds on a warm store, and
+      # it runs beside the Linux jobs, not on the critical path; the
+      # `.nix` format pin lives in `nix-check` only (formatting is
+      # system-independent).
+      - name: nix flake check
+        run: nix flake check -L
 
       - name: Save the cargo cache
         # Same condition as the Linux job's save -- see the comment there for
