@@ -530,6 +530,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [Pin the fd-pressure grace conjunction's boundaries](./resolved/fd-pressure-grace-boundary-pins-done.md) — RESOLVED 2026-09-18 (pin, no behavior change): `pressure_refusal`'s pure conjunction split out as `pressure_refusal_for` and pinned at both operators and both graces (129 refused, 128 passes; either half alone passes); the ceiling record's 400 stands as "two at grace", the permitted maximum is 404
 
 ### Packaging / tooling
+- [bump-downstream resolves tags via prefix glob; query the exact ref and peel](./packaging/bump-downstream-exact-ref.md) (low, filed 2026-10-24 from the #733 review): exact ref plus peel, with an offline check
 - [Slim the scoot ISO under GitHub's 2 GB release-asset cap](./core/iso-slim-under-2gb.md) — 2.83 GiB today; start with mbrola-voices
 - [Nix package can reach neither GPU tier](./resolved/nix-gpu-tiers-done.md)
   — RESOLVED 2026-09-21 (gh #177): `packages.scoot` force-links libEGL
