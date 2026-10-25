@@ -390,11 +390,23 @@ unlock. One timeout set covers AC and battery alike.
 The locker follows the look: screen and indicator from its palette (a
 value in `lock.settings` winning per key, `theme.targets.lock.enable =
 false` dropping the themed block while the rest follows the look).
-Locked, it looks like this — the music-desk palette, paper screen, the
-indicator hidden until you type (captured from a real session through
-scoot's own IPC screenshot path):
+Locked, the look's wallpaper shows behind everything, blurred at build
+time, with the indicator always visible and a message saying what to
+do — no blank frame, no guessing. The music-desk palette over its
+blurred wallpaper (captured from a real session through scoot's own
+IPC screenshot path):
 
-![The scoot lock screen in the music-desk look: a plain paper screen, no windows, no indicator until you type](../../../assets/idle-lock-screen.png)
+![The scoot lock screen in the music-desk look: the blurred wallpaper behind the always-visible indicator ring and an unlock message](../../../assets/idle-lock-screen.png)
+
+Without a wallpaper the lock falls back to the look's background color,
+still with the indicator and the message; with no look at all it falls
+back to a navy screen with a white ring. A wrong password says so
+(`Wrong password. Try again.`), and the screen still locks even if an
+image cannot load — an unthemed lock beats no lock.
+
+A wallpaper applied live (rather than rebuilt with) keeps showing
+the built blur until the next rebuild; per-output runtime blur is
+tracked as follow-up work.
 
 Every value is an option, applied on rebuild/switch (the units restart
 into the new config; no re-login):
@@ -409,8 +421,8 @@ into the new config; no re-login):
 | `desktop.idle.mediaInhibit.enable` | bool | `true` with the profile | hold idle while audio plays (needs PipeWire or PulseAudio running) |
 | `desktop.idle.lock.enable` | bool | `true` with the profile | lock through the locker below |
 | `desktop.idle.lock.command` | string | `loginctl lock-session` (system path on NixOS) | the stable lock action: what the timeout runs, and what the keymap's `Super+Escape` bind runs — lid-close and manual locks share this path through logind |
-| `desktop.idle.lock.daemon` | enum (`"swaylock"`) | `"swaylock"` | the locker behind the action (a future scootlock widens this without renaming anything) |
-| `desktop.idle.lock.settings` | attrset of string | `{ }` | extra swaylock lines over the themed ones (a value here wins per key) |
+| `desktop.idle.lock.daemon` | enum (`"swaylock-effects"`, `"swaylock"`) | `"swaylock-effects"` | the locker behind the action: the effects fork (blurred screen, always-visible indicator, unlock message; a future scootlock widens this without renaming anything), or stock swaylock one line back (the same blurred screen, hidden-until-you-type indicator, no message) |
+| `desktop.idle.lock.settings` | attrset of string | `{ }` | extra locker lines over the themed ones (a value here wins per key) |
 | `desktop.theme.targets.lock.enable` | bool | `true` | theme the locker from the look; `false` keeps swaylock's own style while the rest follows the look |
 
 ```nix title="configuration.nix and home.nix"

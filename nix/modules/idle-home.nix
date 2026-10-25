@@ -46,10 +46,114 @@ let
     separator-color = look.appearance.focus_ring_inactive_color;
   };
 
+  # The locker's fallback leaves, without a look (or opted out): the
+  # same keys as `lockTheme`, so the locker never runs colorless --
+  # swaylock's own default background is white (`0xFFFFFFFF` in its
+  # source), which is the blank white frame a lookless session used to
+  # lock to. Dark navy screen with a white ring and white text: visible
+  # on its own, and the blur and the message below sit on it the same
+  # way they sit on a look.
+  lockFallback = {
+    color = "2B3648";
+    inside-color = "2B3648";
+    ring-color = "FFFFFF";
+    ring-ver-color = "FFFFFF";
+    ring-clear-color = "FFFFFF";
+    ring-wrong-color = "EE6F5E";
+    inside-ver-color = "2B3648";
+    inside-clear-color = "2B3648";
+    inside-wrong-color = "2B3648";
+    key-hl-color = "FFFFFF";
+    bs-hl-color = "EE6F5E";
+    text-color = "FFFFFF";
+    line-color = "FFFFFF";
+    separator-color = "FFFFFF";
+  };
+
+  # The locker's background image: the look's wallpaper, blurred once
+  # at build time (ImageMagick, pinned through nixpkgs), or a solid
+  # tile of the fallback navy without a look. Why pre-blurred rather
+  # than a live screenshot: this compositor deliberately publishes no
+  # `wlr-screencopy` (it speaks `ext-image-copy-capture` instead), so
+  # the fork's `--screenshots` has nothing to capture against scoot and
+  # would always fall back -- the blur has to be baked in. Blurring at
+  # build time also keeps the lock instant (no per-lock image work on
+  # any renderer, CPU included) and per generation (the file a session
+  # locks with is the one it was built with). A live-applied custom
+  # wallpaper keeps showing the built blur until the next rebuild --
+  # still blurred, still themed, still messaged, just not the new
+  # image; per-output runtime blur is a follow-up
+  # (docs/backlog/core/lock-screen-per-output-blur.md). An unreadable
+  # image still locks (the locker falls back to `color`): an unthemed
+  # lock beats no lock.
+  lockWallpaper =
+    let
+      # The themed image only while the lock target is themed: opted
+      # out (or lookless) the navy tile stands with the fallback
+      # colors, the way the colors do.
+      wallpaper = if themed then look.wallpaper else null;
+    in
+    if wallpaper != null then
+      pkgs.runCommand "scoot-lock-blur.png" { } ''
+        ${lib.getExe pkgs.imagemagick} ${wallpaper.image} \
+          -filter Gaussian -resize 10% -blur 0x6 -resize 1000% \
+          png32:$out
+      ''
+    else
+      pkgs.runCommand "scoot-lock-blur.png" { } ''
+        ${lib.getExe pkgs.imagemagick} -size 64x64 xc:'#2B3648' png32:$out
+      '';
+
+  # The background both daemons share: the blurred image, filled to
+  # each output (a crop of a blur is still a blur), over the look's
+  # color (or the fallback's) for the letterbox and for the day the
+  # image cannot load. A value in `lock.settings` wins per key, so a
+  # hand-pointed `image` still works -- unblurred, by choice.
+  lockImage = {
+    image = "${lockWallpaper}";
+    scaling = "fill";
+  };
+
+  # The unlock message banner: white text on a dark translucent bar,
+  # rendered once at build time (ImageMagick over DejaVu Bold, both
+  # pinned through nixpkgs), composed over the background image by the
+  # locker. One neutral banner for every look: the bar carries the
+  # contrast, so it reads over a light wallpaper and a dark one alike.
+  # A store path, so the locker reads it wherever the session runs.
+  lockBanner = pkgs.runCommand "scoot-lock-banner.png" { } ''
+    ${lib.getExe pkgs.imagemagick} \
+      -background '#0000008C' -fill white \
+      -font ${pkgs.dejavu_fonts}/share/fonts/truetype/DejaVuSans-Bold.ttf \
+      -pointsize 32 label:'Locked. Type your password and press Enter to unlock.' \
+      -bordercolor '#0000008C' -border 28x18 \
+      png32:$out
+  '';
+
+  # The locker's prompt leaves (no colors, no background): keep the
+  # indicator always visible, say what to do in it, and compose the
+  # message banner over the background image. Read only with
+  # `lock.daemon = "swaylock-effects"` (the default): stock swaylock
+  # refuses these keys, so beside it the set is empty and the config
+  # stays colors plus the shared background above.
+  lockEffects = lib.optionalAttrs (idle.lock.daemon == "swaylock-effects") {
+    indicator = "";
+    indicator-radius = "100";
+    indicator-thickness = "10";
+    font-size = "32";
+    text-ver = "Checking password...";
+    text-wrong = "Wrong password. Try again.";
+    text-clear = "Cleared. Type your password and press Enter to unlock.";
+    text-caps-lock = "Caps Lock is on.";
+    effect-compose = "50%,68%;70%x-1;center;${lockBanner}";
+  };
+
   # swaylock reads `key=value` lines (`#` comments, blank lines
   # skipped; a bare word is a flag), so a merged attrset renders
-  # directly. `lock.settings` wins per key; without a look (or opted
-  # out) only those render, over swaylock's own defaults.
+  # directly. The background always renders (the look's color, or the
+  # fallback's, under the blurred image), then the prompt leaves, then
+  # `lock.settings`, which wins per key; without a look (or opted out)
+  # the fallback stands where the theme stood, so the locker is never
+  # colorless.
   swaylockLines =
     attrs:
     lib.concatStringsSep "\n" (
@@ -60,7 +164,9 @@ let
     )
     + "\n";
   swaylockConfig = pkgs.writeText "swaylock-config" (
-    swaylockLines ((lib.optionalAttrs themed lockTheme) // idle.lock.settings)
+    swaylockLines (
+      (if themed then lockTheme else lockFallback) // lockImage // lockEffects // idle.lock.settings
+    )
   );
 
   # The user's own locker settings, rendered alone: at lock time the
@@ -69,7 +175,15 @@ let
   # look fills the rest. swaylock has no include and `-C` replaces its
   # default search, so without this merge a swap would drop the image,
   # the flags and every user color override behind the lock screen.
-  swaylockSettings = pkgs.writeText "swaylock-settings" (swaylockLines idle.lock.settings);
+  # The background and the prompt leaves render here too (beneath the
+  # user's keys, so a value set here still wins): the merged file then
+  # shows, prompts and banners exactly like the store config, whatever
+  # the live look carries -- while the look fragment itself stays
+  # colors-only, so a stock swaylock session merging the same fragment
+  # never meets a key it refuses.
+  swaylockSettings = pkgs.writeText "swaylock-settings" (
+    swaylockLines (lockImage // lockEffects // idle.lock.settings)
+  );
   lookLeafLib = builtins.readFile ./look-leaf.sh;
 
   # The lock action is also the keymap's `super+escape` bind (see
@@ -234,10 +348,20 @@ in
     lock = {
       package = lib.mkOption {
         type = lib.types.nullOr lib.types.package;
-        default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.swaylock or null else null;
-        defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.swaylock or null else null";
+        default =
+          if pkgs.stdenv.hostPlatform.isLinux then
+            (
+              if idle.lock.daemon == "swaylock-effects" then
+                pkgs.swaylock-effects or null
+              else
+                pkgs.swaylock or null
+            )
+          else
+            null;
+        defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then (the package speaking idle.lock.daemon: pkgs.swaylock-effects or null by default, pkgs.swaylock or null beside daemon = \"swaylock\") else null";
         description = ''
-          The locker package behind `daemon` (must speak its flags).
+          The locker package behind `daemon` (must speak its flags:
+          the default follows the daemon, so the two never disagree).
           Null installs nothing. Linux-only: null off Linux.
         '';
       };

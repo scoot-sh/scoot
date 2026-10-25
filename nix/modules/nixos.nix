@@ -442,11 +442,21 @@ in
         lock = desktop.options.idle.lock // {
           package = lib.mkOption {
             type = lib.types.nullOr lib.types.package;
-            default = if pkgs.stdenv.hostPlatform.isLinux then pkgs.swaylock or null else null;
-            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then pkgs.swaylock or null else null";
+            default =
+              if pkgs.stdenv.hostPlatform.isLinux then
+                (
+                  if cfg.desktop.idle.lock.daemon == "swaylock-effects" then
+                    pkgs.swaylock-effects or null
+                  else
+                    pkgs.swaylock or null
+                )
+              else
+                null;
+            defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then (the package speaking idle.lock.daemon: pkgs.swaylock-effects or null by default, pkgs.swaylock or null beside daemon = \"swaylock\") else null";
             description = ''
               The locker package to install system-wide (must speak the
-              daemon's flags). Null installs nothing. Linux-only: null
+              daemon's flags: the default follows the daemon, so the two
+              never disagree). Null installs nothing. Linux-only: null
               off Linux.
             '';
           };
@@ -2564,15 +2574,19 @@ in
       );
     })
     # The locker's PAM service (password auth for the locker): without
-    # it swaylock cannot validate, loud here instead of a locker that
-    # never unlocks. Kept in its own element (not under `idle.enable`):
-    # with `enable` off and `lock.enable` on, the refusal below must
-    # still fire rather than going quiet.
+    # it neither locker can validate, loud here instead of a locker
+    # that never unlocks. Both daemons validate through the same
+    # `swaylock` service name (the fork keeps upstream's). Kept in its
+    # own element (not under `idle.enable`): with `enable` off and
+    # `lock.enable` on, the refusal below must still fire rather than
+    # going quiet.
     (lib.mkIf
       (
         cfg.desktop.idle.enable
         && cfg.desktop.idle.lock.enable
-        && cfg.desktop.idle.lock.daemon == "swaylock"
+        && (
+          cfg.desktop.idle.lock.daemon == "swaylock" || cfg.desktop.idle.lock.daemon == "swaylock-effects"
+        )
       )
       {
         security.pam.services.swaylock = { };

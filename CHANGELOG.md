@@ -21,6 +21,10 @@ release, entries were dated.
 
 - added: the ISO install path is documented, and a published release opens scoot-pin bump PRs in try-scoot and scoot-iso (needs the `DOWNSTREAM_BUMP_TOKEN` secret) ([#733](https://github.com/scoot-sh/scoot/pull/733)). Fixed the bump workflow's bad pinned action SHA ([#737](https://github.com/scoot-sh/scoot/pull/737)). Not breaking: no CLI, config schema or protocol changed.
 
+### nix
+
+- added: the default lock screen shows the look's wallpaper blurred instead of a flat color, keeps the password indicator always visible, and shows an unlock message over every output (`Locked. Type your password and press Enter to unlock.`), with a wrong password saying so. The locker behind it is now `swaylock-effects` (stock swaylock plus image effects, same MIT license): set `desktop.idle.lock.daemon = "swaylock"` for the same blurred screen with the hidden-until-you-type indicator and no message. The blur is baked in at build time (this compositor publishes no `wlr-screencopy`, so a live screenshot has nothing to capture against it): a wallpaper applied live keeps the built blur until the next rebuild. Without a wallpaper the lock falls back to the look's background color with the indicator and message still on; with no look it falls back to a navy screen with a white ring, so a session never locks to the locker's white default again. Not breaking: no option renamed or removed, and a value set in `desktop.idle.lock.settings` still wins per key.
+
 ## [0.6.3](https://github.com/scoot-sh/scoot/compare/v0.6.2...v0.6.3) - 2026-10-24
 
 ### nix

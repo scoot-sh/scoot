@@ -1,9 +1,10 @@
 ---
 title: "Idle lock shows a blank white screen with no prompt"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-24"
 ---
 
 # Idle lock shows a blank white screen with no prompt
@@ -39,3 +40,22 @@ locking.
 
 The idle timeout values themselves, and the installer-launch failure
 found in the same walkthrough (fixed in scoot-iso PR #7).
+
+## Resolution
+
+The white frame was the locker's own default, not the compositor's:
+swaylock paints `0xFFFFFFFF` (white) when no background is configured
+(`set_default_colors` in its source; the man page says "instead of
+white"), while scoot itself paints only black behind a live lock and
+red behind an abandoned one -- so a white fullscreen frame is
+necessarily lock-client pixels with no effective background. Any
+generated config without a `color=` line locks white, and the lookless
+config carried none at all. Fixed by always emitting a background (the
+look's color, or a navy fallback), and the default lock now shows the
+look's wallpaper blurred (pre-blurred at build time: this compositor
+publishes no `wlr-screencopy`, so a live screenshot has nothing to
+capture against it -- see dev/design/lock-blur.md), with the indicator
+always visible and an unlock message over every output. The exact
+themed-config-yet-white pixel path from the walkthrough (a one-day-old
+locker wrapper at the time) is no longer reachable: no emitted config
+depends on the client's white default.
