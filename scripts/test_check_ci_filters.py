@@ -96,11 +96,34 @@ CASES = {
     "packaging/deb/control": set(),
     "packaging/rpm/scoot.spec": set(),
     "scripts/backlog": {"backlog"},
+    # read at flake evaluation by the shipped-looks agreement check
+    "docs/examples/music-desk/scoot.toml": {"scoot"},
+    "docs/examples/music-desk/bar.toml": {"scoot"},
+    "docs/examples/music-desk/foot.ini": {"scoot"},
+    "vm/compositor-deps.nix": {"scoot", "scootbg", "scootbar", "scootlaunch",
+                               "scootnotify", "portal", "look"},
     "resources/scoot-session": {"session"},
 }
 
 
+# Jobs a path must NOT run (a narrowing, proven safe in the PR that added it).
+NOT_RUN = {
+    # the macOS shell is Linux-gated, so this file cannot change a Mac run
+    "vm/compositor-deps.nix": {"macos"},
+    # example prose and assets nothing evaluates
+    "docs/examples/music-desk/README.md": {"scoot"},
+    "docs/examples/music-desk/wallpaper.png": {"scoot"},
+}
+
+
 class ClassifyTest(unittest.TestCase):
+    def test_narrowed_paths_stay_narrow(self):
+        for path, banned in NOT_RUN.items():
+            with self.subTest(path=path):
+                got = classify([path])
+                ran = {j for j in banned if got.get(j) == "true"}
+                self.assertEqual(ran, set(), f"{path} should not run {ran}")
+
     def test_each_sample_fans_out(self):
         for path, must in CASES.items():
             with self.subTest(path=path):

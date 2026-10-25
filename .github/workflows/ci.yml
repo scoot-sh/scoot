@@ -96,7 +96,10 @@ jobs:
   #                           the leaf every parser depends on (checked by
   #                           scripts/check-ci-filters.py from cargo metadata)
   #   vm/compositor-deps.nix -> every Linux cargo job (it feeds nix/dev-shell.nix
-  #                           on Linux) plus macos (kept; Linux-gated, see report)
+  #                           on Linux); not macos (that shell is Linux-gated)
+  #   docs/examples/*/{scoot.toml,bar.toml,foot.ini} -> scoot=true: the
+  #                           shipped-looks agreement check in `nix flake check`
+  #                           (nix/looks-examples-check.nix) reads them at eval
   #   crates/scootbg/, crates/scootbg-mem/ -> scootbg=true (scootbg job)
   #     except crates/scootbg/Cargo.toml    -> scoot too: flake.nix reads
   #     its description, which the `nix-check` job's `nix flake check` evaluates
@@ -307,6 +310,12 @@ jobs:
                 # for everything else there).
                 docs/examples/*/regreet.css)
                   docs_site=true ;;
+                # The shipped-looks agreement check reads these at flake
+                # evaluation (nix/looks-examples-check.nix, via
+                # `nix flake check` in the scoot-gated nix-check job), so
+                # an edit that breaks the agreement must run it.
+                docs/examples/*/scoot.toml | docs/examples/*/bar.toml | docs/examples/*/foot.ini)
+                  scoot=true ;;
                 *.md | docs/* | dev/*) ;;
                 # Needs a real `systemd --user`, which CI has none of: run by hand
                 # (dev/research/scootbar-testing.md), so a change to it alone runs nothing.
@@ -349,11 +358,10 @@ jobs:
                 # vm/compositor-deps.nix feeds every Linux dev shell
                 # (nix/dev-shell.nix imports it on Linux), so a change there
                 # can affect every cargo job, not just the compositor.
-                # macos stays set (harmless; its shell is Linux-gated, listed
-                # as a question in the report rather than narrowed here).
+                # macos is not set: its shell is Linux-gated, so the file
+                # cannot change what a Mac run does.
                 vm/compositor-deps.nix)
                   scoot=true
-                  macos=true
                   scootbg=true
                   scootbar=true
                   scootlaunch=true
