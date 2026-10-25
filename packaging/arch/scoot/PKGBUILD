@@ -20,7 +20,7 @@
 # this exact file against a same-layout tarball of HEAD.
 
 pkgname=scoot
-pkgver=0.6.2
+pkgver=0.6.3
 pkgrel=1
 pkgdesc='Scrolling-tiling Wayland compositor (auto CPU/GPU rendering, runs without a GPU)'
 arch=('x86_64' 'aarch64')
