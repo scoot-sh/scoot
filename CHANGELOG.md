@@ -17,6 +17,8 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.3](https://github.com/scoot-sh/scoot/compare/v0.6.2...v0.6.3) - 2026-10-24
+
 ### nix
 
 - fixed: the desktop automounter default now runs udiskie with every kernel-keyring test off (`test_keyutils` and the whole of `test_cache`, including `TestPasswordCache`), which need a working kernel keyring and failed the build under Docker's default seccomp profile (`keyctl(2)` refused with EPERM). The rest of the suite still runs. Point `desktop.automount.package` at your own build to run them. Not breaking: no CLI, config schema or protocol changed.
