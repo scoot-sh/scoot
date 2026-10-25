@@ -1674,6 +1674,7 @@ where
         output: state.outputs.id_of(output),
         locked,
     };
+    let now = std::time::Instant::now();
     let ring_elements: Rings<R> = ring_elements(
         &mut state.decorations,
         &state.appearance,
@@ -1682,6 +1683,8 @@ where
         arrangement,
         &frame,
         renderer,
+        &state.slides,
+        now,
     );
     let draws_cursor = state.frame_draws_cursor();
     let (elements, cursor_surface) = state.gather_elements(
@@ -1692,6 +1695,7 @@ where
         arrangement,
         draws_cursor,
         candidate,
+        now,
     );
     let tried_with = primary_direct::TriedWith {
         size: frame.size,
@@ -2024,6 +2028,10 @@ where
     // the tick's one shared layout (see `draw_frame`), gathered into per-output
     // elements below. See `decorations.rs`'s module doc for why the background
     // isn't part of this list.
+    // The frame clock for the slide: sampled once per output frame, never a
+    // separate timer. A late frame jumps forward (frames are skipped, never
+    // queued); a frame past its deadline snaps.
+    let now = std::time::Instant::now();
     let ring_elements: Rings<_> = ring_elements(
         &mut state.decorations,
         &state.appearance,
@@ -2032,6 +2040,8 @@ where
         arrangement,
         &frame,
         renderer,
+        &state.slides,
+        now,
     );
     match renderer.bind(target) {
         Ok(mut framebuffer) => {
@@ -2046,6 +2056,7 @@ where
                 // Pixman, offscreen GLES and the dumb tier have no overlay
                 // plane to ride: only the scanout tier marks candidates.
                 None,
+                now,
             );
             outcome.cursor_surface = cursor_surface;
 

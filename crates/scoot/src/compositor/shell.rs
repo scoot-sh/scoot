@@ -380,6 +380,12 @@ impl State {
         #[cfg(feature = "xwayland")]
         self.size_undrawn_x11_floats();
         let arrangement = self.world.arrange();
+        // Slides track targets, never pixels: before the space remaps, the
+        // space still holds the old targets, so a move starts from what is
+        // on screen. Disabled or locked snaps (clears). Input hit-testing,
+        // focus and `scoot msg windows` keep reading the targets below.
+        let locked = self.session_lock.is_locked();
+        self.update_slides(&arrangement, std::time::Instant::now(), locked);
         for placement in &arrangement.placements {
             let Some(window) = self.windows.get(&placement.id).cloned() else {
                 continue;

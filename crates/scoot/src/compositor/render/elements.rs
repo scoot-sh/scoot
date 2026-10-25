@@ -32,6 +32,7 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use crate::compositor::State;
+use crate::compositor::animation::{Slide, visual_offset};
 use crate::compositor::cursor::CursorElement;
 use crate::compositor::decorations::{Appearance, Decorations, RingElement};
 use crate::compositor::drawn::{clamp_to_slot, drawn_rect};
@@ -260,6 +261,7 @@ impl State {
         arrangement: Option<&Arrangement>,
         cursor: bool,
         candidate: Option<WindowId>,
+        now: std::time::Instant,
     ) -> (Vec<Elements<R>>, Option<WlSurface>)
     where
         R: Renderer + ImportAll + ImportMem,
@@ -275,6 +277,7 @@ impl State {
             cursor,
             candidate,
             &mut elements,
+            now,
         );
         (elements, cursor_surface)
     }
@@ -294,6 +297,7 @@ impl State {
         cursor: bool,
         candidate: Option<WindowId>,
         out: &mut Vec<Elements<R>>,
+        now: std::time::Instant,
     ) -> Option<WlSurface>
     where
         R: Renderer + ImportAll + ImportMem,
@@ -395,6 +399,8 @@ impl State {
                         elements: floating_rings,
                         spans,
                     },
+                    &self.slides,
+                    now,
                 ),
                 // Unreachable: every output the render loop walks is in the
                 // space and in `Outputs`, and the arrangement is only `None`
@@ -464,6 +470,7 @@ pub(super) fn map_ring<R: Renderer>(element: RingElement<R>) -> Elements<R> {
 /// `decoration_bound` is the session's record of which windows negotiated
 /// server-side decorations (see `State::decoration_bound`): it feeds the CSD
 /// backdrop rule below.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn ring_elements<R>(
     decorations: &mut Decorations,
     appearance: &Appearance,
@@ -472,12 +479,23 @@ pub(super) fn ring_elements<R>(
     arrangement: Option<&Arrangement>,
     frame: &FrameContext,
     renderer: &mut R,
+    slides: &[Slide],
+    now: std::time::Instant,
 ) -> Rings<R>
 where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Texture + Send + Clone + 'static,
 {
-    let drawn = |placement: &Placement| drawn_rect(placement.rect, windows.get(&placement.id));
+    let drawn = |placement: &Placement| {
+        let mut rect = drawn_rect(placement.rect, windows.get(&placement.id));
+        // One branch on empty covers the disabled and idle cases; the
+        // slide moves the ring with its window (see `window_elements`).
+        let off = visual_offset(slides, placement.id, placement.rect.x, now);
+        if off != 0 {
+            rect.x = rect.x.saturating_add(off);
+        }
+        rect
+    };
     // The CSD backdrop rule (see `decorations.rs`'s CSD section): a window
     // gets a ring-colored backdrop under its four corners when it decorates
     // itself, so its own rounded corners read as the ring. That is exactly
@@ -680,6 +698,8 @@ fn window_elements<R>(
     configured_radius: i32,
     candidate: Option<WindowId>,
     floating_rings: FloatingRings<R>,
+    slides: &[Slide],
+    now: std::time::Instant,
 ) -> Vec<Elements<R>>
 where
     R: Renderer + ImportAll + ImportMem,
@@ -713,6 +733,16 @@ where
                 break 'draw;
             };
             let geometry = window.geometry();
+            // The slide moves already-committed buffers: the space stays
+            // mapped at the target (hit-testing and IPC read it), and only
+            // the drawn location shifts. One branch on empty covers the
+            // disabled and idle cases.
+            let off = visual_offset(slides, placement.id, placement.rect.x, now);
+            let mapped = if off != 0 {
+                Point::from((mapped.x.saturating_add(off), mapped.y))
+            } else {
+                mapped
+            };
             let render_location = mapped - geometry.loc;
             // `SpaceElement::bbox` (popups included), not the inherent
             // `Window::bbox` (the toplevel tree only), which is the one
@@ -796,7 +826,10 @@ where
             // Hoisted above the main surface tree (it is pure geometry): the
             // radius decides whether the mark reaches the main elements --
             // plain only, never rounded.
-            let drawn = clamp_to_slot(placement.rect, geometry.size.w, geometry.size.h);
+            let mut drawn = clamp_to_slot(placement.rect, geometry.size.w, geometry.size.h);
+            if off != 0 {
+                drawn.x = drawn.x.saturating_add(off);
+            }
             let clip = clip_rect(to_output_local(drawn, origin), scale);
             // Never rounded while fullscreen: it covers the output edge to edge,
             // and a rounded clip would cut its corners back to the background.
