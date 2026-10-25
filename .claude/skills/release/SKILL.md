@@ -41,26 +41,35 @@ first red and report it; a red is a bug until a log proves otherwise.
 
 ## 4. Bump the downstreams
 
-`bump-downstreams.yml` should open a bump PR in scoot-iso and try-scoot by
-itself. Check both: `gh pr list -R scoot-sh/scoot-iso` and
-`-R scoot-sh/try-scoot`. If it did not run or failed at its secret check
-(no `DOWNSTREAM_BUMP_TOKEN`), do it by hand:
+Run each repo's own workflow (no secret needed; it uses `GITHUB_TOKEN`):
 
-- Fresh clone of each repo, branch `bump-scoot-vX.Y.Z`.
-- Run `scripts/bump-downstream <checkout-dir> vX.Y.Z` from scoot's `main`.
-- Commit, push, open the PR. Never touch scoot-iso's `iso/target` pins by
-  hand; the script retargets them.
-- Retry the workflow with `gh workflow run bump-downstreams.yml -f tag=vX.Y.Z`
-  once the secret exists.
+```sh
+gh workflow run bump-scoot.yml -R scoot-sh/scoot-iso -f tag=vX.Y.Z
+gh workflow run bump-scoot.yml -R scoot-sh/try-scoot -f tag=vX.Y.Z
+```
+
+Watch each run (`gh run list -R scoot-sh/<repo> --workflow bump-scoot.yml`).
+It runs scoot's `scripts/bump-downstream` from the tag, pushes
+`ci/bump-scoot-vX.Y.Z`, opens or updates one PR, and dispatches `ci.yml` on
+the branch. A run that finds the pin already current opens nothing and says
+so. The scoot-side `bump-downstreams.yml` is a second route that needs
+`DOWNSTREAM_BUMP_TOKEN`; ignore its red until that secret exists.
 
 ## 5. Validate and merge the downstream PRs
 
+- The PR's own `pull_request` run waits at "action_required" (a
+  `GITHUB_TOKEN` PR), and `gh pr checks` shows nothing. The real checks are
+  the dispatched run's, attached to the head commit. Read them there:
+  `gh api repos/scoot-sh/<repo>/commits/<head-sha>/check-runs -q '.check_runs[]|.name+" "+.conclusion'`,
+  and make sure the run is `completed`, not still in progress.
 - scoot-iso needs `check`, `kvm-probe`, `build-iso`, `qemu-test`,
-  `docker-build` green; try-scoot needs `check`, the build and push jobs for
-  both architectures. `manifest` is main-only and skips on the PR.
+  `docker-build` green. try-scoot needs `check` and both architectures of
+  `build` and `build-selkies`; its dispatched run skips the `push` jobs
+  (they only publish PR-tagged images) and `manifest`.
 - Confirm the diff pins vX.Y.Z only (flake.nix and flake.lock, plus the
   `iso/target` flake and `tests/patch_consistency.py` for scoot-iso).
-- Merge each with `--squash --match-head-commit <sha>`.
+- Merge each with `gh pr merge <n> -R scoot-sh/<repo> --squash
+  --match-head-commit <sha>`.
 
 ## 6. Close out
 
