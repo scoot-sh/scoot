@@ -456,7 +456,9 @@ in
             description = ''
               The locker package to install system-wide (must speak the
               daemon's flags: the default follows the daemon, so the two
-              never disagree). Null installs nothing. Linux-only: null
+              never disagree; a mismatched locker locks with only the
+              config lines it parsed, possibly a flat color with no
+              message). Null installs nothing. Linux-only: null
               off Linux.
             '';
           };

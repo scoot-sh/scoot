@@ -79,10 +79,12 @@ let
   # would always fall back -- the blur has to be baked in. Blurring at
   # build time also keeps the lock instant (no per-lock image work on
   # any renderer, CPU included) and per generation (the file a session
-  # locks with is the one it was built with). A live-applied custom
-  # wallpaper keeps showing the built blur until the next rebuild --
-  # still blurred, still themed, still messaged, just not the new
-  # image; per-output runtime blur is a follow-up
+  # locks with is the one it was built with). The blur is built from the
+  # Nix-configured look's wallpaper only: a wallpaper set at runtime
+  # (`scootbg set`, a slideshow step, `scoot look apply`, a [wallpaper]
+  # file) is never read by a rebuild either, so the lock keeps showing
+  # the built blur -- still blurred, still themed, still messaged, just
+  # not that image; per-output runtime blur is a follow-up
   # (docs/backlog/core/lock-screen-per-output-blur.md). An unreadable
   # image still locks (the locker falls back to `color`): an unthemed
   # lock beats no lock.
@@ -362,7 +364,10 @@ in
         description = ''
           The locker package behind `daemon` (must speak its flags:
           the default follows the daemon, so the two never disagree).
-          Null installs nothing. Linux-only: null off Linux.
+          A locker that does not know a key in the config stops reading
+          it at that line and locks with what it parsed so far, which
+          can be a flat color with no message: pair `package` with the
+          matching `daemon`. Null installs nothing. Linux-only: null off Linux.
         '';
       };
 

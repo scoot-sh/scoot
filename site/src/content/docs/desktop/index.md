@@ -398,15 +398,21 @@ IPC screenshot path):
 
 ![The scoot lock screen in the music-desk look: the blurred wallpaper behind the always-visible indicator ring and an unlock message](../../../assets/idle-lock-screen.png)
 
-Without a wallpaper the lock falls back to the look's background color,
-still with the indicator and the message; with no look at all it falls
-back to a navy screen with a white ring. A wrong password says so
+Without a wallpaper the lock falls back to a navy screen, still with
+the indicator and the message; with no look at all it is the same navy
+screen with a white ring. A wrong password says so
 (`Wrong password. Try again.`), and the screen still locks even if an
 image cannot load — an unthemed lock beats no lock.
 
-A wallpaper applied live (rather than rebuilt with) keeps showing
-the built blur until the next rebuild; per-output runtime blur is
-tracked as follow-up work.
+The blur is built from the wallpaper of the look you configure in Nix.
+A wallpaper you set at runtime (`scootbg set`, a slideshow, `scoot look
+apply`) is not picked up, even by a rebuild: the lock keeps the built
+blur. Per-output runtime blur is tracked as follow-up work.
+
+If you set `desktop.idle.lock.package` yourself, it must match
+`desktop.idle.lock.daemon`. A locker that does not know a key in the
+config stops reading it there and locks with what it parsed, which can
+be a flat color with no message.
 
 Every value is an option, applied on rebuild/switch (the units restart
 into the new config; no re-login):

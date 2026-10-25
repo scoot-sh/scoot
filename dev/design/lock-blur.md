@@ -22,7 +22,8 @@ the CPU renderer too), and degrades to the configured `color` when the
 image cannot load -- never failing open.
 
 Trade-off, tracked not hidden: the built blur is per generation, so a
-wallpaper applied live (`scootbg set`, `scoot look apply`) keeps the
-built blur until the next rebuild, and per-output wallpapers share the
+wallpaper set at runtime (`scootbg set`, `scoot look apply`, a slideshow)
+is never read by a rebuild, which blurs the Nix-configured look's
+wallpaper only, so the lock keeps the built blur, and per-output wallpapers share the
 one image. See docs/backlog/core/lock-screen-per-output-blur.md for
 the runtime follow-up (scootbg maintaining a blurred copy per output).
