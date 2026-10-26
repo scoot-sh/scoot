@@ -170,6 +170,14 @@ pub struct State {
     /// whenever it is on but idle, so every hot path branches once on
     /// `is_empty` and otherwise runs the old code.
     pub slides: Vec<super::animation::Slide>,
+    /// One workspace-switch slide per switched output, pooled like `slides`:
+    /// a single horizontal offset the whole incoming strip shares. Empty
+    /// whenever the option is off, locked, or idle.
+    pub viewport_slides: Vec<super::animation::ViewportSlide>,
+    /// The active workspace index per output as of the last `apply()`: what
+    /// a workspace switch is diffed against. Updated in place, so the steady
+    /// state allocates nothing.
+    pub(crate) last_workspace_active: Vec<(scoot_core::OutputId, usize)>,
 
     /// The layout. Everything else here exists to serve it.
     pub world: World,
@@ -1395,6 +1403,8 @@ impl State {
             xwayland_fractional: super::config::XwaylandFractional::default(),
             animation: super::animation::AnimationSettings::default(),
             slides: Vec::new(),
+            viewport_slides: Vec::new(),
+            last_workspace_active: Vec::new(),
             world: World::new(config),
             windows: HashMap::new(),
             next_id: 0,

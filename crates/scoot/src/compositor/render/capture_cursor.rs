@@ -758,6 +758,7 @@ where
         &frame,
         renderer,
         &state.slides,
+        &state.viewport_slides,
         now,
     );
     state.gather_elements_into(

@@ -1,5 +1,41 @@
 # Slide animation: horizontal and vertical window slides (dev/design)
 
+## Workspace-switch slide: the design decision
+
+How a workspace switch reaches the renderer: `apply()` maps the core's
+TARGET arrangement onto the Smithay `Space` — visible placements map,
+invisible ones unmap. The frame path (`window_elements`) draws only windows
+placed on that output; invisible windows are not drawn at all. Before this
+ticket a switch snapped: the outgoing windows unmapped (their per-window
+slides pruned as non-sliding) and the incoming windows had no old location
+in the `Space` (unmapped → lookup misses → snap). No whole-viewport motion
+existed.
+
+Chosen shape: a single horizontal offset per output (viewport slide),
+incoming-only. When the active workspace index on an output changes and the
+new workspace shows a tiled window, that output's incoming strip slides in
+from the output edge (`±` the logical width: right for a higher index, left
+for a lower one) over the background, easing with the same
+`duration_ms`/`easing` as window slides. Every incoming window shares the
+one offset, so the strip arrives as one unit rather than many windows.
+
+Why not draw the outgoing workspace too (a true cross-slide): it would need
+retaining unmapped windows (or a snapshot list), drawing roughly twice the
+windows per frame, damaging the full viewport per frame (old + new viewports
+overlap everywhere), and holding both sets through the flight. Measured on
+the CPU renderer the incoming-only slide costs one offset lookup per output
+per frame plus the same per-window damage the moving windows already pay;
+an outgoing-retaining slide would pay that plus a second strip's elements
+every frame. The incoming-only shape costs nothing when off (two empty
+`Vec`s, one branch per hot path, no timer/wakeup) and little when on
+(frames only while in flight, damage limited to the incoming rects,
+`needs_render` drops the instant the last viewport lands, per-output so
+multi-output switches stay independent, lock/reload-disable snap, empty
+workspaces snap because there is nothing to draw, single-window is one
+window with the shared offset). `scoot-core` is untouched (TARGET
+arrangement; IPC and hit-testing keep the target); one monotonic `Instant`
+per output frame; no allocation on the per-frame path.
+
 ## Internals (short)
 
 When `[animation] enabled = true`, tiled windows slide horizontally and

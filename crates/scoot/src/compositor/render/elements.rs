@@ -32,7 +32,7 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use crate::compositor::State;
-use crate::compositor::animation::{Slide, visual_delta};
+use crate::compositor::animation::{Slide, ViewportSlide, viewport_delta, visual_delta};
 use crate::compositor::cursor::CursorElement;
 use crate::compositor::decorations::{Appearance, Decorations, RingElement};
 use crate::compositor::drawn::{clamp_to_slot, drawn_rect};
@@ -384,6 +384,11 @@ impl State {
                 floating: floating_rings,
                 spans,
             } = ring_elements;
+            // The workspace-switch viewport offset for this output, read once
+            // per frame: zero when idle. One branch covers disabled/idle.
+            let viewport_dx = output_id
+                .map(|id| viewport_delta(&self.viewport_slides, id, now))
+                .unwrap_or(0);
             let window_elements: Vec<Elements<R>> = match (geometry, arrangement, output_id) {
                 (Some(region), Some(arranged), Some(output_id)) => window_elements(
                     &self.space,
@@ -400,6 +405,7 @@ impl State {
                         spans,
                     },
                     &self.slides,
+                    viewport_dx,
                     now,
                 ),
                 // Unreachable: every output the render loop walks is in the
@@ -480,16 +486,24 @@ pub(super) fn ring_elements<R>(
     frame: &FrameContext,
     renderer: &mut R,
     slides: &[Slide],
+    viewport: &[ViewportSlide],
     now: std::time::Instant,
 ) -> Rings<R>
 where
     R: Renderer + ImportAll + ImportMem,
     R::TextureId: Texture + Send + Clone + 'static,
 {
+    // The workspace-switch viewport offset for this output, read once per
+    // frame (not per window): zero when idle. One branch covers disabled/idle.
+    let viewport_dx = frame
+        .output
+        .map(|id| viewport_delta(viewport, id, now))
+        .unwrap_or(0);
     let drawn = |placement: &Placement| {
         let mut rect = drawn_rect(placement.rect, windows.get(&placement.id));
         // One branch on empty covers the disabled and idle cases; the
         // slide moves the ring with its window (see `window_elements`).
+        // The viewport offset rides along so the ring tracks the strip.
         let (dx, dy) = visual_delta(
             slides,
             placement.id,
@@ -497,6 +511,7 @@ where
             placement.rect.y,
             now,
         );
+        let dx = dx.saturating_add(viewport_dx);
         if dx != 0 {
             rect.x = rect.x.saturating_add(dx);
         }
@@ -708,6 +723,7 @@ fn window_elements<R>(
     candidate: Option<WindowId>,
     floating_rings: FloatingRings<R>,
     slides: &[Slide],
+    viewport_dx: i32,
     now: std::time::Instant,
 ) -> Vec<Elements<R>>
 where
@@ -745,7 +761,8 @@ where
             // The slide moves already-committed buffers: the space stays
             // mapped at the target (hit-testing and IPC read it), and only
             // the drawn location shifts. One branch on empty covers the
-            // disabled and idle cases.
+            // disabled and idle cases. The workspace-switch viewport offset
+            // rides along so the whole incoming strip moves as one unit.
             let (dx, dy) = visual_delta(
                 slides,
                 placement.id,
@@ -753,6 +770,7 @@ where
                 placement.rect.y,
                 now,
             );
+            let dx = dx.saturating_add(viewport_dx);
             let mapped = if dx != 0 || dy != 0 {
                 Point::from((mapped.x.saturating_add(dx), mapped.y.saturating_add(dy)))
             } else {

@@ -418,7 +418,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 
 ### Core / config / rendering
 - [Slide animation follow-up: open/close fade](./core/animation-open-close-fade.md) — low, filed 2026-10-25: new/closed windows snap while tiled moves slide; add an optional fade (possibly scale) reusing the slide's scheduling and damage discipline
-- [Slide animation follow-up: workspace-switch slide](./core/animation-workspace-switch-slide.md) — low, filed 2026-10-25: switches move every window at once; decide viewport-vs-per-window and implement the chosen shape
+- [Slide animation follow-up: workspace-switch slide](./resolved/animation-workspace-switch-slide-done.md) — RESOLVED 2026-10-26: workspace switches slide the incoming strip as one viewport offset (no new option; per-output, lock/reload snap, empty snaps)
 - [Slide animation follow-up: vertical slide](./resolved/animation-vertical-slide-done.md) — RESOLVED 2026-10-26: the slide interpolates y with the same curve, retarget-from-visual and damage discipline (PR #749); stacked-column y moves glide instead of jumping
 - [Slide animation follow-up: spring easing](./resolved/animation-spring-easing-done.md) — RESOLVED 2026-10-26: an optional `"spring"` easing (baked 65-entry table, ~9% overshoot, same retarget-from-visual and damage discipline); still lands exactly and idles (PR #751)
 - [Lock blur follows the live per-output wallpaper](./core/lock-screen-per-output-blur.md) — low, filed 2026-10-24: the locker's blur is baked at build time from the shipped wallpaper; `scootbg set` and live look swaps keep the built blur until rebuild
