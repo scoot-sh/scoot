@@ -10,7 +10,29 @@ use scoot_core::{OutputId, Placement, Rect, Size, WindowId};
 
 use super::{
     AnimationSettings, Easing, is_finished, progress, should_slide, slide_position, visual_x,
+    visual_y,
 };
+
+fn placement_at(
+    id: u64,
+    x: i32,
+    y: i32,
+    visible: bool,
+    floating: bool,
+    fullscreen: bool,
+    maximized: bool,
+) -> Placement {
+    Placement {
+        id: WindowId(id),
+        output: OutputId(1),
+        rect: Rect::new(x, y, 400, 300),
+        visible,
+        fullscreen,
+        maximized,
+        floating,
+        requested: Some(Size::new(400, 300)),
+    }
+}
 
 fn placement(
     id: u64,
@@ -20,16 +42,7 @@ fn placement(
     fullscreen: bool,
     maximized: bool,
 ) -> Placement {
-    Placement {
-        id: WindowId(id),
-        output: OutputId(1),
-        rect: Rect::new(x, 0, 400, 300),
-        visible,
-        fullscreen,
-        maximized,
-        floating,
-        requested: Some(Size::new(400, 300)),
-    }
+    placement_at(id, x, 0, visible, floating, fullscreen, maximized)
 }
 
 #[test]
@@ -72,7 +85,9 @@ fn zero_duration_finishes_on_its_first_frame() {
     let slide = super::Slide {
         id: WindowId(1),
         from_x: 0,
+        from_y: 0,
         to_x: 500,
+        to_y: 0,
         start: now,
         duration: Duration::ZERO,
         easing: Easing::EaseOut,
@@ -138,7 +153,9 @@ fn retarget_continues_from_the_visual_position() {
     let first = super::Slide {
         id: WindowId(7),
         from_x: 0,
+        from_y: 0,
         to_x: 400,
+        to_y: 0,
         start,
         duration,
         easing: Easing::Linear,
@@ -149,7 +166,9 @@ fn retarget_continues_from_the_visual_position() {
     let retargeted = super::Slide {
         id: WindowId(7),
         from_x: seen,
+        from_y: 0,
         to_x: 600,
+        to_y: 0,
         start: mid_now,
         duration,
         easing: Easing::Linear,
@@ -198,7 +217,7 @@ fn disabled_by_default() {
 // needed to exercise retarget and cleanup).
 // -------------------------------------------------------------------------
 
-use super::{Slide, prune_finished, slides_in_flight, visual_offset};
+use super::{Slide, prune_finished, slides_in_flight, visual_delta};
 use crate::compositor::decorations::Appearance;
 use crate::compositor::headless;
 use crate::compositor::keybindings::Keybindings;
@@ -272,15 +291,17 @@ fn a_new_target_mid_slide_retargets_from_the_visual() {
     fixture.state.slides.push(Slide {
         id: WindowId(1),
         from_x: 0,
+        from_y: 0,
         to_x: 400,
+        to_y: 0,
         start,
         duration: Duration::from_millis(200),
         easing: Easing::Linear,
     });
     let mid = start + Duration::from_millis(100);
     assert_eq!(
-        visual_offset(&fixture.state.slides, WindowId(1), 400, mid),
-        -200
+        visual_delta(&fixture.state.slides, WindowId(1), 400, 0, mid),
+        (-200, 0)
     );
     fixture.update(
         &arrangement_of(vec![placement(1, 600, true, false, false, false)]),
@@ -301,7 +322,9 @@ fn a_closed_window_loses_its_slide() {
     fixture.state.slides.push(Slide {
         id: WindowId(9),
         from_x: 0,
+        from_y: 0,
         to_x: 400,
+        to_y: 0,
         start: now,
         duration: Duration::from_millis(200),
         easing: Easing::Linear,
@@ -317,7 +340,9 @@ fn a_window_hidden_by_workspace_switch_loses_its_slide() {
     fixture.state.slides.push(Slide {
         id: WindowId(3),
         from_x: 0,
+        from_y: 0,
         to_x: 400,
+        to_y: 0,
         start: now,
         duration: Duration::from_millis(200),
         easing: Easing::Linear,
@@ -343,7 +368,9 @@ fn fullscreen_maximized_and_floating_never_slide() {
         fixture.state.slides.push(Slide {
             id: WindowId(id),
             from_x: 0,
+            from_y: 0,
             to_x: 400,
+            to_y: 0,
             start: now,
             duration: Duration::from_millis(200),
             easing: Easing::Linear,
@@ -369,7 +396,9 @@ fn locked_and_disabled_both_snap() {
     fixture.state.slides.push(Slide {
         id: WindowId(1),
         from_x: 0,
+        from_y: 0,
         to_x: 400,
+        to_y: 0,
         start: now,
         duration: Duration::from_millis(200),
         easing: Easing::Linear,
@@ -383,7 +412,9 @@ fn locked_and_disabled_both_snap() {
     fixture.state.slides.push(Slide {
         id: WindowId(1),
         from_x: 0,
+        from_y: 0,
         to_x: 400,
+        to_y: 0,
         start: now,
         duration: Duration::from_millis(200),
         easing: Easing::Linear,
@@ -416,12 +447,14 @@ fn extreme_coordinates_do_not_panic() {
     fixture.state.slides.push(Slide {
         id: WindowId(1),
         from_x: i32::MAX - 100,
+        from_y: 0,
         to_x: i32::MAX,
+        to_y: 0,
         start: now,
         duration: Duration::from_millis(200),
         easing: Easing::EaseOut,
     });
-    assert!(visual_offset(&fixture.state.slides, WindowId(1), i32::MAX, now) <= 0);
+    assert!(visual_delta(&fixture.state.slides, WindowId(1), i32::MAX, 0, now).0 <= 0);
     fixture.update(
         &arrangement_of(vec![placement(1, i32::MAX, true, false, false, false)]),
         now + Duration::from_millis(300),
@@ -436,7 +469,9 @@ fn finished_slides_prune_and_idle_goes_quiet() {
     let mut slides = vec![Slide {
         id: WindowId(1),
         from_x: 0,
+        from_y: 0,
         to_x: 100,
+        to_y: 0,
         start,
         duration: Duration::from_millis(50),
         easing: Easing::Linear,
@@ -453,7 +488,9 @@ fn input_and_ipc_read_the_final_geometry_mid_slide() {
     let slide = Slide {
         id: WindowId(1),
         from_x: 0,
+        from_y: 0,
         to_x: 400,
+        to_y: 0,
         start,
         duration: Duration::from_millis(200),
         easing: Easing::Linear,
@@ -463,8 +500,8 @@ fn input_and_ipc_read_the_final_geometry_mid_slide() {
     let visual = super::visual_x(&slide, mid);
     assert_eq!(visual, 200);
     assert_eq!(
-        visual_offset(std::slice::from_ref(&slide), WindowId(1), target, mid),
-        -200
+        visual_delta(std::slice::from_ref(&slide), WindowId(1), target, 0, mid),
+        (-200, 0)
     );
 }
 
@@ -511,7 +548,9 @@ fn reload_enables_disables_and_snaps_a_live_slide() {
     fixture.state.slides.push(Slide {
         id: WindowId(1),
         from_x: 0,
+        from_y: 0,
         to_x: 400,
+        to_y: 0,
         start: now,
         duration: Duration::from_millis(200),
         easing: Easing::Linear,
@@ -528,4 +567,303 @@ fn reload_enables_disables_and_snaps_a_live_slide() {
     }
     assert!(!fixture.state.animation.enabled);
     assert!(fixture.state.slides.is_empty());
+}
+
+// -------------------------------------------------------------------------
+// Vertical slide: same interpolation, retarget and cancel rules on y.
+// -------------------------------------------------------------------------
+
+#[test]
+fn vertical_slide_interpolates_like_horizontal() {
+    assert_eq!(slide_position(0, 300, 0.5, Easing::Linear), 150);
+    assert_eq!(slide_position(300, 0, 0.5, Easing::Linear), 150);
+    assert_eq!(slide_position(0, 300, 0.5, Easing::EaseOut), 263);
+    let start = Instant::now();
+    let duration = Duration::from_millis(200);
+    let slide = Slide {
+        id: WindowId(21),
+        from_x: 0,
+        from_y: 0,
+        to_x: 0,
+        to_y: 300,
+        start,
+        duration,
+        easing: Easing::Linear,
+    };
+    let mid = start + Duration::from_millis(100);
+    assert_eq!(visual_y(&slide, mid), 150);
+    assert_eq!(
+        visual_delta(std::slice::from_ref(&slide), WindowId(21), 0, 300, mid),
+        (0, -150)
+    );
+}
+
+#[test]
+fn vertical_retarget_continues_from_the_visual_position() {
+    let start = Instant::now();
+    let duration = Duration::from_millis(200);
+    let first = Slide {
+        id: WindowId(22),
+        from_x: 0,
+        from_y: 0,
+        to_x: 0,
+        to_y: 400,
+        start,
+        duration,
+        easing: Easing::Linear,
+    };
+    let mid_now = start + Duration::from_millis(100);
+    assert_eq!(visual_y(&first, mid_now), 200);
+    let retargeted = Slide {
+        id: WindowId(22),
+        from_x: 0,
+        from_y: 200,
+        to_x: 0,
+        to_y: 600,
+        start: mid_now,
+        duration,
+        easing: Easing::Linear,
+    };
+    assert_eq!(visual_y(&retargeted, mid_now), 200);
+    assert_eq!(
+        visual_y(&retargeted, mid_now + Duration::from_millis(200)),
+        600
+    );
+}
+
+#[test]
+fn diagonal_slide_moves_both_axes_together() {
+    let start = Instant::now();
+    let duration = Duration::from_millis(200);
+    let slide = Slide {
+        id: WindowId(23),
+        from_x: 0,
+        from_y: 0,
+        to_x: 400,
+        to_y: 300,
+        start,
+        duration,
+        easing: Easing::Linear,
+    };
+    let mid = start + Duration::from_millis(100);
+    assert_eq!(
+        visual_delta(std::slice::from_ref(&slide), WindowId(23), 400, 300, mid),
+        (-200, -150)
+    );
+}
+
+#[test]
+fn a_y_only_move_starts_a_slide() {
+    let mut fixture = SlideFixture::new();
+    let now = Instant::now();
+    // Seed the old target: the space holds y=0 until `apply()` remaps, so
+    // first publish y=0, then move to y=300.
+    fixture.update(
+        &arrangement_of(vec![placement_at(1, 100, 0, true, false, false, false)]),
+        now,
+        false,
+    );
+    assert!(fixture.state.slides.is_empty());
+    // `update_slides` reads the old target off the space only for windows it
+    // knows; the harness has no real `Window`, so stage the old position as
+    // an in-flight visual at the old target instead: a fresh move from there.
+    fixture.state.slides.push(Slide {
+        id: WindowId(1),
+        from_x: 100,
+        from_y: 0,
+        to_x: 100,
+        to_y: 0,
+        start: now,
+        duration: Duration::from_millis(200),
+        easing: Easing::Linear,
+    });
+    fixture.update(
+        &arrangement_of(vec![placement_at(1, 100, 300, true, false, false, false)]),
+        now + Duration::from_millis(10),
+        false,
+    );
+    assert_eq!(fixture.state.slides.len(), 1);
+    let slide = &fixture.state.slides[0];
+    assert_eq!((slide.from_x, slide.to_x), (100, 100));
+    assert_eq!((slide.from_y, slide.to_y), (0, 300));
+}
+
+#[test]
+fn a_height_only_resize_starts_no_slide() {
+    let mut fixture = SlideFixture::new();
+    let now = Instant::now();
+    fixture.update(
+        &arrangement_of(vec![placement_at(1, 100, 200, true, false, false, false)]),
+        now,
+        false,
+    );
+    // Same x/y (size is not tracked by slides): nothing to animate.
+    assert!(fixture.state.slides.is_empty());
+}
+
+#[test]
+fn a_closed_window_loses_its_vertical_slide() {
+    let mut fixture = SlideFixture::new();
+    let now = Instant::now();
+    fixture.state.slides.push(Slide {
+        id: WindowId(24),
+        from_x: 0,
+        from_y: 0,
+        to_x: 0,
+        to_y: 400,
+        start: now,
+        duration: Duration::from_millis(200),
+        easing: Easing::Linear,
+    });
+    fixture.update(&arrangement_of(Vec::new()), now, false);
+    assert!(fixture.state.slides.is_empty());
+}
+
+#[test]
+fn a_window_hidden_by_output_switch_loses_its_vertical_slide() {
+    let mut fixture = SlideFixture::new();
+    let now = Instant::now();
+    fixture.state.slides.push(Slide {
+        id: WindowId(25),
+        from_x: 0,
+        from_y: 0,
+        to_x: 0,
+        to_y: 400,
+        start: now,
+        duration: Duration::from_millis(200),
+        easing: Easing::Linear,
+    });
+    fixture.update(
+        &arrangement_of(vec![placement_at(25, 0, 400, false, false, false, false)]),
+        now,
+        false,
+    );
+    assert!(fixture.state.slides.is_empty());
+}
+
+#[test]
+fn vertical_fullscreen_maximized_and_floating_never_slide() {
+    let mut fixture = SlideFixture::new();
+    let now = Instant::now();
+    for (id, floating, fullscreen, maximized) in [
+        (31, true, false, false),
+        (32, false, true, false),
+        (33, false, false, true),
+    ] {
+        fixture.state.slides.clear();
+        fixture.state.slides.push(Slide {
+            id: WindowId(id),
+            from_x: 0,
+            from_y: 0,
+            to_x: 0,
+            to_y: 400,
+            start: now,
+            duration: Duration::from_millis(200),
+            easing: Easing::Linear,
+        });
+        fixture.update(
+            &arrangement_of(vec![placement_at(
+                id, 0, 600, true, floating, fullscreen, maximized,
+            )]),
+            now,
+            false,
+        );
+        assert!(
+            fixture.state.slides.is_empty(),
+            "id {id} must snap, never slide"
+        );
+    }
+}
+
+#[test]
+fn vertical_extreme_coordinates_do_not_panic() {
+    let mut fixture = SlideFixture::new();
+    let now = Instant::now();
+    fixture.state.slides.push(Slide {
+        id: WindowId(26),
+        from_x: 0,
+        from_y: i32::MAX - 100,
+        to_x: 0,
+        to_y: i32::MAX,
+        start: now,
+        duration: Duration::from_millis(200),
+        easing: Easing::EaseOut,
+    });
+    let (dx, dy) = visual_delta(&fixture.state.slides, WindowId(26), 0, i32::MAX, now);
+    assert_eq!(dx, 0);
+    assert!(dy <= 0);
+    fixture.update(
+        &arrangement_of(vec![placement_at(
+            26,
+            0,
+            i32::MAX,
+            true,
+            false,
+            false,
+            false,
+        )]),
+        now + Duration::from_millis(300),
+        false,
+    );
+    assert!(fixture.state.slides.is_empty());
+}
+
+#[test]
+fn vertical_locked_and_disabled_both_snap() {
+    let mut fixture = SlideFixture::new();
+    let now = Instant::now();
+    fixture.state.slides.push(Slide {
+        id: WindowId(27),
+        from_x: 0,
+        from_y: 0,
+        to_x: 0,
+        to_y: 400,
+        start: now,
+        duration: Duration::from_millis(200),
+        easing: Easing::Linear,
+    });
+    fixture.update(
+        &arrangement_of(vec![placement_at(27, 0, 400, true, false, false, false)]),
+        now,
+        true,
+    );
+    assert!(fixture.state.slides.is_empty());
+    fixture.state.slides.push(Slide {
+        id: WindowId(27),
+        from_x: 0,
+        from_y: 0,
+        to_x: 0,
+        to_y: 400,
+        start: now,
+        duration: Duration::from_millis(200),
+        easing: Easing::Linear,
+    });
+    fixture.state.animation.enabled = false;
+    fixture.update(
+        &arrangement_of(vec![placement_at(27, 0, 600, true, false, false, false)]),
+        now,
+        false,
+    );
+    assert!(fixture.state.slides.is_empty());
+}
+
+#[test]
+fn vertical_input_and_ipc_read_the_final_geometry_mid_slide() {
+    let start = Instant::now();
+    let slide = Slide {
+        id: WindowId(28),
+        from_x: 0,
+        from_y: 0,
+        to_x: 0,
+        to_y: 400,
+        start,
+        duration: Duration::from_millis(200),
+        easing: Easing::Linear,
+    };
+    let mid = start + Duration::from_millis(100);
+    assert_eq!(visual_y(&slide, mid), 200);
+    assert_eq!(
+        visual_delta(std::slice::from_ref(&slide), WindowId(28), 0, 400, mid),
+        (0, -200)
+    );
 }

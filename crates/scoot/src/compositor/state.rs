@@ -160,7 +160,7 @@ pub struct State {
     /// `xwayland/scale.rs`). Unconditional -- without the `xwayland` Cargo
     /// feature nothing reads it, but the reload diff still does.
     pub xwayland_fractional: super::config::XwaylandFractional,
-    /// `[animation]`: the optional horizontal slide, disabled by default.
+    /// `[animation]`: the optional horizontal and vertical slide, disabled by default.
     /// Read on `apply()` (whether to start/retarget slides) and on the frame
     /// path (which curve and duration in-flight slides follow at creation;
     /// in-flight slides keep the timing they started with).

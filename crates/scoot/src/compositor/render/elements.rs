@@ -32,7 +32,7 @@ use smithay::wayland::seat::WaylandFocus;
 use smithay::wayland::shell::wlr_layer::Layer;
 
 use crate::compositor::State;
-use crate::compositor::animation::{Slide, visual_offset};
+use crate::compositor::animation::{Slide, visual_delta};
 use crate::compositor::cursor::CursorElement;
 use crate::compositor::decorations::{Appearance, Decorations, RingElement};
 use crate::compositor::drawn::{clamp_to_slot, drawn_rect};
@@ -490,9 +490,18 @@ where
         let mut rect = drawn_rect(placement.rect, windows.get(&placement.id));
         // One branch on empty covers the disabled and idle cases; the
         // slide moves the ring with its window (see `window_elements`).
-        let off = visual_offset(slides, placement.id, placement.rect.x, now);
-        if off != 0 {
-            rect.x = rect.x.saturating_add(off);
+        let (dx, dy) = visual_delta(
+            slides,
+            placement.id,
+            placement.rect.x,
+            placement.rect.y,
+            now,
+        );
+        if dx != 0 {
+            rect.x = rect.x.saturating_add(dx);
+        }
+        if dy != 0 {
+            rect.y = rect.y.saturating_add(dy);
         }
         rect
     };
@@ -737,9 +746,15 @@ where
             // mapped at the target (hit-testing and IPC read it), and only
             // the drawn location shifts. One branch on empty covers the
             // disabled and idle cases.
-            let off = visual_offset(slides, placement.id, placement.rect.x, now);
-            let mapped = if off != 0 {
-                Point::from((mapped.x.saturating_add(off), mapped.y))
+            let (dx, dy) = visual_delta(
+                slides,
+                placement.id,
+                placement.rect.x,
+                placement.rect.y,
+                now,
+            );
+            let mapped = if dx != 0 || dy != 0 {
+                Point::from((mapped.x.saturating_add(dx), mapped.y.saturating_add(dy)))
             } else {
                 mapped
             };
@@ -827,8 +842,11 @@ where
             // radius decides whether the mark reaches the main elements --
             // plain only, never rounded.
             let mut drawn = clamp_to_slot(placement.rect, geometry.size.w, geometry.size.h);
-            if off != 0 {
-                drawn.x = drawn.x.saturating_add(off);
+            if dx != 0 {
+                drawn.x = drawn.x.saturating_add(dx);
+            }
+            if dy != 0 {
+                drawn.y = drawn.y.saturating_add(dy);
             }
             let clip = clip_rect(to_output_local(drawn, origin), scale);
             // Never rounded while fullscreen: it covers the output edge to edge,

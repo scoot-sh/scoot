@@ -17,6 +17,10 @@ release, entries were dated.
 
 ## Unreleased
 
+### scoot
+
+- added: the optional `[animation]` slide now moves vertically as well as horizontally, so stacked windows in one column slide to their new y instead of jumping. Same interpolation, retarget-from-visual and damage discipline, still no client re-commit. Not breaking: no new option, no CLI or protocol changed.
+
 ## [0.6.5](https://github.com/scoot-sh/scoot/compare/v0.6.4...v0.6.5) - 2026-10-25
 
 ### scoot

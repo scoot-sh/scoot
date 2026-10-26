@@ -1,4 +1,4 @@
-//! An optional horizontal slide animation for windows, off by default and free when off.
+//! An optional horizontal and vertical slide animation for windows, off by default and free when off.
 //!
 //! The core (`scoot-core`) keeps returning the TARGET arrangement; this module
 //! only interpolates where a window is *drawn* between two targets. No
@@ -100,7 +100,7 @@ impl AnimationSettings {
 /// One window mid-slide: where it was seen when the slide started, where the
 /// core wants it now, and when the slide started.
 ///
-/// `from_x` is the *visual* position at retarget time (not the previous
+/// `from_x`/`from_y` is the *visual* position at retarget time (not the previous
 /// target), so a new target arriving mid-slide continues from what is on
 /// screen rather than jumping back.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,6 +108,8 @@ pub struct Slide {
     pub id: WindowId,
     pub from_x: i32,
     pub to_x: i32,
+    pub from_y: i32,
+    pub to_y: i32,
     pub start: Instant,
     pub duration: Duration,
     pub easing: Easing,
@@ -152,6 +154,16 @@ pub fn visual_x(slide: &Slide, now: Instant) -> i32 {
     )
 }
 
+/// Where `slide` is seen vertically at `now`: the same interpolation on y.
+pub fn visual_y(slide: &Slide, now: Instant) -> i32 {
+    slide_position(
+        slide.from_y,
+        slide.to_y,
+        progress(now, slide.start, slide.duration),
+        slide.easing,
+    )
+}
+
 /// Whether the slide has reached its target at `now`.
 pub fn is_finished(slide: &Slide, now: Instant) -> bool {
     progress(now, slide.start, slide.duration) >= 1.0
@@ -165,21 +177,31 @@ pub fn should_slide(placement: &Placement) -> bool {
     placement.visible && !placement.floating && !placement.fullscreen && !placement.maximized
 }
 
-/// How far a window's drawn position shifts from its target at `now`:
-/// `visual - target`, 0 when there is no slide for it. One predictable
-/// branch on `is_empty` covers the disabled and the idle-enabled cases;
-/// otherwise one linear scan of the in-flight list (a handful of entries,
-/// only while a slide runs). No allocation.
-pub fn visual_offset(slides: &[Slide], id: WindowId, target_x: i32, now: Instant) -> i32 {
+/// How far a window's drawn position shifts from its target on both axes at
+/// `now`: `(visual_x - target_x, visual_y - target_y)`, `(0, 0)` when there
+/// is no slide for it. One predictable branch on `is_empty` covers the
+/// disabled and idle cases; otherwise one linear scan of the in-flight list.
+/// No allocation. This is what the frame path reads, so a diagonal move
+/// costs one scan, not two.
+pub fn visual_delta(
+    slides: &[Slide],
+    id: WindowId,
+    target_x: i32,
+    target_y: i32,
+    now: Instant,
+) -> (i32, i32) {
     if slides.is_empty() {
-        return 0;
+        return (0, 0);
     }
     for slide in slides {
         if slide.id == id {
-            return visual_x(slide, now).saturating_sub(target_x);
+            return (
+                visual_x(slide, now).saturating_sub(target_x),
+                visual_y(slide, now).saturating_sub(target_y),
+            );
         }
     }
-    0
+    (0, 0)
 }
 
 /// Whether any slide is still in flight at `now`. Empty (the disabled and
@@ -243,21 +265,22 @@ impl State {
                 continue;
             }
             let target_x = placement.rect.x;
+            let target_y = placement.rect.y;
             // What is on screen now: the in-flight visual, else the old
             // target the space still holds, else the new target (a brand-new
             // window snaps rather than sliding in from nowhere).
-            let seen = match self.slides.iter().find(|s| s.id == placement.id) {
-                Some(slide) => visual_x(slide, now),
+            let (seen_x, seen_y) = match self.slides.iter().find(|s| s.id == placement.id) {
+                Some(slide) => (visual_x(slide, now), visual_y(slide, now)),
                 None => match self
                     .windows
                     .get(&placement.id)
                     .and_then(|window| self.space.element_location(window))
                 {
-                    Some(old) => old.x,
-                    None => target_x,
+                    Some(old) => (old.x, old.y),
+                    None => (target_x, target_y),
                 },
             };
-            if seen == target_x {
+            if seen_x == target_x && seen_y == target_y {
                 // Reached (or never left): no slide to keep.
                 if let Some(index) = self.slides.iter().position(|s| s.id == placement.id) {
                     self.slides.swap_remove(index);
@@ -267,10 +290,12 @@ impl State {
             match self.slides.iter_mut().find(|s| s.id == placement.id) {
                 Some(slide) => {
                     // A new target mid-slide: restart from what is on screen.
-                    // No-op when the target did not move (same `to_x`).
-                    if slide.to_x != target_x {
-                        slide.from_x = seen;
+                    // No-op when the target did not move (same `to_x`/`to_y`).
+                    if slide.to_x != target_x || slide.to_y != target_y {
+                        slide.from_x = seen_x;
                         slide.to_x = target_x;
+                        slide.from_y = seen_y;
+                        slide.to_y = target_y;
                         slide.start = now;
                         slide.duration = duration;
                         slide.easing = easing;
@@ -279,8 +304,10 @@ impl State {
                 None => {
                     self.slides.push(Slide {
                         id: placement.id,
-                        from_x: seen,
+                        from_x: seen_x,
                         to_x: target_x,
+                        from_y: seen_y,
+                        to_y: target_y,
                         start: now,
                         duration,
                         easing,
