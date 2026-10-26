@@ -1,10 +1,11 @@
-# Slide animation: horizontal window slides (dev/design)
+# Slide animation: horizontal and vertical window slides (dev/design)
 
 ## Internals (short)
 
-When `[animation] enabled = true`, tiled windows slide horizontally to their
-new x instead of jumping. The core keeps returning the TARGET arrangement;
-the compositor interpolates only where a window is *drawn*.
+When `[animation] enabled = true`, tiled windows slide horizontally and
+vertically to their new x/y instead of jumping. The core keeps returning
+the TARGET arrangement; the compositor interpolates only where a window
+is *drawn*.
 
 - **Easing**: cheap closed-form ease-out cubic, `1-(1-p)^3` (two
   multiplies, no transcendental, no table), plus a `linear` spelling.
@@ -15,14 +16,14 @@ the compositor interpolates only where a window is *drawn*.
   (slide start/retarget) and once per output frame in `draw_frame_with`.
   Never a separate timer thread. A late frame jumps its progress forward
   (frames are skipped, never queued); a frame past its deadline snaps.
-- **State**: `State::slides: Vec<Slide>` (`{id, from_x, to_x, start,
-  duration, easing}`), pooled in place (capacity retained, finished slides
-  pruned, never rebuilt per frame; no `HashMap` rebuilt per frame).
+- **State**: `State::slides: Vec<Slide>` (`{id, from_x, to_x, from_y, to_y,
+  start, duration, easing}`), pooled in place (capacity retained, finished
+  slides pruned, never rebuilt per frame; no `HashMap` rebuilt per frame).
   Empty whenever the option is off (cleared on disable, never filled) and
   whenever it is on but idle (finished slides pruned). Every hot path
   branches once on `is_empty` and otherwise runs the old code: no timer, no
   allocation, no per-frame work while empty.
-- **Retarget**: `from_x` is the *visual* position at retarget time, so a
+- **Retarget**: `from_x`/`from_y` is the *visual* position at retarget time, so a
   new target arriving mid-slide continues from what is on screen, never
   jumps back. New windows (no old position) snap; windows that stop
   sliding (closed, hidden, floating, fullscreen, maximized) lose their
@@ -30,7 +31,7 @@ the compositor interpolates only where a window is *drawn*.
 - **What slides**: tiled, visible, non-floating, non-fullscreen,
   non-maximized windows only. Floating/fullscreen/maximized snap (they
   appear, disappear or resize in place). Invisible windows are not drawn.
-  Width/height snap; only x interpolates (no size animation, no client
+  Width/height snap; only x/y interpolate (no size animation, no client
   re-commit: the slide moves already-committed buffers).
 - **Damage**: Smithay's `OutputDamageTracker` sees moved element locations
   and damages old+new rects per frame; no full-output redraw, no extra

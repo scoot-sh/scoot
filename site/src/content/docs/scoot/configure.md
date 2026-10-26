@@ -197,7 +197,7 @@ input. The same state is drivable over IPC
 
 | Field | Type | Default | Reload | Meaning |
 |---|---|---|---|---|
-| `enabled` | boolean | `false` | live, snaps any live slide | Slide tiled windows horizontally to their new place instead of jumping. |
+| `enabled` | boolean | `false` | live, snaps any live slide | Slide tiled windows horizontally and vertically to their new place instead of jumping. |
 | `duration_ms` | integer | `150` | live, later slides only | How long one slide takes. `0` snaps immediately. Clamped `0..=500`. |
 | `easing` | string | `"ease-out"` | live, later slides only | The curve: `"ease-out"` or `"linear"`. Anything else warns and uses the default. |
 
@@ -252,7 +252,7 @@ scale = 1.0
 # mode = "1920x1080"
 
 # [animation]
-# Slide tiled windows horizontally instead of jumping. Off by default.
+# Slide tiled windows horizontally and vertically instead of jumping. Off by default.
 # enabled = false
 # duration_ms = 150
 # easing = "ease-out"

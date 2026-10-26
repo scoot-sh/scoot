@@ -486,7 +486,7 @@ impl AutostartConfig {
 }
 
 /// `[animation]`. Three fields: `enabled`, whether tiled windows slide
-/// horizontally to their new place instead of jumping; `duration_ms`, how
+/// horizontally and vertically to their new place instead of jumping; `duration_ms`, how
 /// long one slide takes; and `easing`, the curve (`ease-out` or `linear`).
 /// All `Option` so a partial table leaves the rest at defaults. Disabled by
 /// default; a reload applies live, and disabling mid-slide snaps to the
@@ -1832,8 +1832,9 @@ pub fn default_config_toml() -> String {
 
     out.push_str("\n[animation]\n");
     out.push_str(
-        "# Slide tiled windows horizontally to their new place instead of\n\
+        "# Slide tiled windows horizontally and vertically to their new place instead of\n\
          # jumping (columns scrolling into view, a column opening/closing/moving,\n\
+         # stacked windows shifting when a sibling opens/closes,\n\
          # focus moving the view). Off by default; re-applies live on reload.\n\
          # The slide moves already-committed buffers: clients are never asked\n\
          # to re-commit for it.\n",
