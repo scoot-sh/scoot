@@ -197,9 +197,9 @@ input. The same state is drivable over IPC
 
 | Field | Type | Default | Reload | Meaning |
 |---|---|---|---|---|
-| `enabled` | boolean | `false` | live, snaps any live slide | Slide tiled windows horizontally and vertically to their new place instead of jumping. |
-| `duration_ms` | integer | `150` | live, later slides only | How long one slide takes. `0` snaps immediately. Clamped `0..=500`. |
-| `easing` | string | `"ease-out"` | live, later slides only | The curve: `"ease-out"` (default), `"linear"`, or `"spring"` (overshoots ~9% past the target, then settles; still lands exactly on time). Anything else warns and uses the default. |
+| `enabled` | boolean | `false` | live, snaps any live slide or fade | Slide tiled windows horizontally and vertically to their new place instead of jumping, and fade them in on open and out on close. |
+| `duration_ms` | integer | `150` | live, later slides and fades only | How long one slide or fade takes. `0` snaps immediately. Clamped `0..=500`. |
+| `easing` | string | `"ease-out"` | live, later slides and fades only | The curve: `"ease-out"` (default), `"linear"`, or `"spring"` (overshoots ~9% past the target, then settles; still lands exactly on time). Anything else warns and uses the default. |
 
 ```toml
 [animation]
@@ -213,12 +213,20 @@ allocation. When on, only the moving windows' old and new rects are
 redrawn per frame; clients are never asked to re-commit. `scoot msg
 windows` and pointer input keep reporting the final geometry while a
 slide runs — a spring overshoot is purely visual; input still hits the
-target. Floating, fullscreen and maximized windows snap rather than
-slide. Switching workspaces slides the whole incoming strip in from the
-output edge as one unit (right for a higher workspace, left for a lower
-one); an empty workspace has nothing to draw, so it snaps. Each output
-animates independently. Disabling mid-slide snaps to the final frame. A spring costs one
-table lookup and a lerp per window per frame (no `exp`/`sin` on the
+target. New windows fade in from transparent over the same
+`duration_ms`/`easing` instead of appearing instantly, and closed windows
+fade out while their last buffers are still drawn (at most 8 retained
+windows, each held no longer than one `duration`, so a client that opens
+and closes windows in a loop cannot pin unbounded memory; the 9th close
+snaps the oldest away). A window closed mid-fade-out restarts from what
+is on screen, and a window closed mid-fade-in fades out from its current
+opacity — nothing jumps. Floating, fullscreen and maximized windows snap
+rather than slide or fade. Switching workspaces slides the whole incoming
+strip in from the output edge as one unit (right for a higher workspace,
+left for a lower one) with no per-window fade on top; an empty workspace
+has nothing to draw, so it snaps. Each output animates independently.
+Disabling mid-slide or mid-fade snaps to the final frame. A spring costs
+one table lookup and a lerp per window per frame (no `exp`/`sin` on the
 frame path); the clamped duration still bounds its settle, and a frame
 past its deadline still snaps instead of queuing.
 

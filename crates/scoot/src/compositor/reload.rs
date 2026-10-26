@@ -1285,9 +1285,9 @@ impl State {
     }
 
     /// `[animation]`: swaps the live setting. Disabling snaps any live
-    /// slide to its target (clears, then redraws the final frame); changing
-    /// the duration or easing only affects slides started after the reload
-    /// (in-flight slides keep the timing they started with, so nothing jumps).
+    /// slide or fade to its target (clears, then redraws the final frame); changing
+    /// the duration or easing only affects slides and fades started after the reload
+    /// (in-flight slides and fades keep the timing they started with, so nothing jumps).
     /// Reports each changed key under its dotted name.
     fn apply_animation_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
         let live = self.animation;
@@ -1295,9 +1295,14 @@ impl State {
         if live.enabled != next.enabled {
             self.animation.enabled = next.enabled;
             report.applied.push(field::ANIMATION_ENABLED.to_owned());
-            if !next.enabled && (!self.slides.is_empty() || !self.viewport_slides.is_empty()) {
+            if !next.enabled
+                && (!self.slides.is_empty()
+                    || !self.viewport_slides.is_empty()
+                    || !self.fades.is_empty())
+            {
                 self.slides.clear();
                 self.viewport_slides.clear();
+                self.fades.clear();
                 self.request_render();
             }
         }

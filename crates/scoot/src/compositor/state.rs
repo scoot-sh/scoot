@@ -160,10 +160,11 @@ pub struct State {
     /// `xwayland/scale.rs`). Unconditional -- without the `xwayland` Cargo
     /// feature nothing reads it, but the reload diff still does.
     pub xwayland_fractional: super::config::XwaylandFractional,
-    /// `[animation]`: the optional horizontal and vertical slide, disabled by default.
-    /// Read on `apply()` (whether to start/retarget slides) and on the frame
-    /// path (which curve and duration in-flight slides follow at creation;
-    /// in-flight slides keep the timing they started with).
+    /// `[animation]`: the optional horizontal and vertical slide plus the
+    /// open/close fade, disabled by default.
+    /// Read on `apply()` (whether to start/retarget slides and fades) and on the frame
+    /// path (which curve and duration in-flight slides and fades follow at creation;
+    /// in-flight ones keep the timing they started with).
     pub animation: super::animation::AnimationSettings,
     /// Windows mid-slide, pooled in place (capacity retained, finished slides
     /// pruned, never rebuilt per frame). Empty whenever the option is off and
@@ -174,6 +175,13 @@ pub struct State {
     /// a single horizontal offset the whole incoming strip shares. Empty
     /// whenever the option is off, locked, or idle.
     pub viewport_slides: Vec<super::animation::ViewportSlide>,
+    /// Open and close fades, pooled like `slides`: opening windows go opaque
+    /// `0 → 1`, closed windows go transparent while their last buffers are
+    /// still drawn (retained windows, bounded by
+    /// [`MAX_CLOSING_FADES`](super::animation::MAX_CLOSING_FADES)). Empty
+    /// whenever the option is off, locked, or idle, so every hot path
+    /// branches once on `is_empty` and otherwise runs the old code.
+    pub fades: Vec<super::animation::Fade>,
     /// The active workspace index per output as of the last `apply()`: what
     /// a workspace switch is diffed against. Updated in place, so the steady
     /// state allocates nothing.
@@ -1404,6 +1412,7 @@ impl State {
             animation: super::animation::AnimationSettings::default(),
             slides: Vec::new(),
             viewport_slides: Vec::new(),
+            fades: Vec::new(),
             last_workspace_active: Vec::new(),
             world: World::new(config),
             windows: HashMap::new(),
