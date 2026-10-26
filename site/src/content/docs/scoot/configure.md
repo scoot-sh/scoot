@@ -197,7 +197,7 @@ input. The same state is drivable over IPC
 
 | Field | Type | Default | Reload | Meaning |
 |---|---|---|---|---|
-| `enabled` | boolean | `false` | live, snaps any live slide or fade | Slide tiled windows horizontally and vertically to their new place instead of jumping, and fade them in on open and out on close. |
+| `enabled` | boolean | `false` | live, snaps any live slide or fade | Slide tiled windows horizontally and vertically to their new place instead of jumping, and fade new windows in on open (closes snap). |
 | `duration_ms` | integer | `150` | live, later slides and fades only | How long one slide or fade takes. `0` snaps immediately. Clamped `0..=500`. |
 | `easing` | string | `"ease-out"` | live, later slides and fades only | The curve: `"ease-out"` (default), `"linear"`, or `"spring"` (overshoots ~9% past the target, then settles; still lands exactly on time). Anything else warns and uses the default. |
 
@@ -214,13 +214,12 @@ redrawn per frame; clients are never asked to re-commit. `scoot msg
 windows` and pointer input keep reporting the final geometry while a
 slide runs — a spring overshoot is purely visual; input still hits the
 target. New windows fade in from transparent over the same
-`duration_ms`/`easing` instead of appearing instantly, and closed windows
-fade out while their last buffers are still drawn (at most 8 retained
-windows, each held no longer than one `duration`, so a client that opens
-and closes windows in a loop cannot pin unbounded memory; the 9th close
-snaps the oldest away). A window closed mid-fade-out restarts from what
-is on screen, and a window closed mid-fade-in fades out from its current
-opacity — nothing jumps. Floating, fullscreen and maximized windows snap
+`duration_ms`/`easing` instead of appearing instantly, and only genuinely
+new windows do: a window scrolling back into view after a sibling closes
+snaps rather than fading in like a fresh open. Closes snap — there is no
+close fade (a retained window draws nothing once a real client has
+destroyed its surface, so keeping one would hold buffers for an effect
+that never shows). Floating, fullscreen and maximized windows snap
 rather than slide or fade. Switching workspaces slides the whole incoming
 strip in from the output edge as one unit (right for a higher workspace,
 left for a lower one) with no per-window fade on top; an empty workspace

@@ -1045,7 +1045,7 @@ impl State {
         // one lands the flag clears and the compositor idles. While locked
         // there is nothing to slide (no windows draw), so any slide snaps.
         // Covers the per-window slides, the per-output workspace-switch
-        // viewport slides, and the open/close fades.
+        // viewport slides, and the open fades.
         if self.session_lock.is_locked() {
             if !self.slides.is_empty() {
                 self.slides.clear();
