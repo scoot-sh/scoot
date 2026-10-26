@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.5](https://github.com/scoot-sh/scoot/compare/v0.6.4...v0.6.5) - 2026-10-25
+
+### scoot
+
+- added: optional horizontal slide animation for windows, off by default ([#744](https://github.com/scoot-sh/scoot/pull/744))
+
 ### ci
 
 - changed: edits to `docs/examples/*/{scoot.toml,bar.toml,foot.ini}` now run the scoot jobs (the shipped-looks agreement check reads them during `nix flake check`; before, such an edit ran nothing and could break main), and `vm/compositor-deps.nix` no longer runs the macOS job (its shell is Linux-gated). Not breaking: no CLI, config schema or protocol changed.
