@@ -31,7 +31,7 @@ single-window workspaces.
 
 Open/close fade, vertical slides, springs (siblings).
 
-## Resolution (2026-10-26, PR to be opened)
+## Resolution (2026-10-26, PR #752)
 
 Landed as `feat(scoot): slide the incoming strip on workspace switches`.
 Chose the single-offset viewport shape (incoming-only): when the active
