@@ -31,7 +31,7 @@ same retarget/cancel and reload tests as the shipped curves.
 
 Open/close fade, workspace-switch slide, vertical slides (siblings).
 
-## Resolution (2026-10-25, PR forthcoming)
+## Resolution (2026-10-26, PR #751)
 
 Landed as `feat(scoot): optional spring easing for the window slide`.
 `Easing` gained `Spring`, parsed from `[animation] easing = "spring"`
