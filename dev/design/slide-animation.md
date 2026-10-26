@@ -8,8 +8,14 @@ the TARGET arrangement; the compositor interpolates only where a window
 is *drawn*.
 
 - **Easing**: cheap closed-form ease-out cubic, `1-(1-p)^3` (two
-  multiplies, no transcendental, no table), plus a `linear` spelling.
-  Progress is clamped `0..=1` before it reaches the curve.
+  multiplies, no transcendental, no table), plus a `linear` spelling —
+  and a `spring` spelling for niri-style motion. The spring is a 65-entry
+  baked table (damping ratio 0.6: ~9% overshoot, settled back by the
+  deadline): one lookup and a lerp per window per frame, no `exp`/`sin`
+  on the frame path, no allocation. Progress is clamped `0..=1` before
+  it reaches any curve, and every curve lands exactly at `1.0`, so a
+  spring still snaps when the compositor falls behind and still goes
+  fully idle at the end.
 - **Duration**: `duration_ms`, default 150, clamped `0..=500`. Zero snaps
   (a slide that finishes on its first frame, no extra frame).
 - **Time**: monotonic frame-clock `Instant::now()` sampled on `apply()`

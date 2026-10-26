@@ -487,7 +487,7 @@ impl AutostartConfig {
 
 /// `[animation]`. Three fields: `enabled`, whether tiled windows slide
 /// horizontally and vertically to their new place instead of jumping; `duration_ms`, how
-/// long one slide takes; and `easing`, the curve (`ease-out` or `linear`).
+/// long one slide takes; and `easing`, the curve (`ease-out`, `linear` or `spring`).
 /// All `Option` so a partial table leaves the rest at defaults. Disabled by
 /// default; a reload applies live, and disabling mid-slide snaps to the
 /// target.
@@ -521,7 +521,7 @@ impl AnimationConfig {
             Err(name) => {
                 tracing::warn!(
                     easing = %name,
-                    "unknown [animation] easing; expected `ease-out` or `linear`, using the default"
+                    "unknown [animation] easing; expected `ease-out`, `linear` or `spring`, using the default"
                 );
                 Easing::default()
             }
@@ -703,7 +703,7 @@ pub struct LoadedConfig {
     /// problem (named; startup logs it and runs nothing, a reload refuses
     /// the field).
     pub wallpaper: WallpaperSetting,
-    /// `[animation]`: the optional horizontal slide, disabled by default.
+    /// `[animation]`: the optional window slide, disabled by default.
     /// Re-applied live by a reload; disabling snaps any live slide.
     pub animation: super::animation::AnimationSettings,
 }
@@ -1846,7 +1846,7 @@ pub fn default_config_toml() -> String {
         super::animation::MIN_DURATION_MS,
         super::animation::MAX_DURATION_MS,
     ));
-    out.push_str("# easing = \"ease-out\"  # or \"linear\"\n");
+    out.push_str("# easing = \"ease-out\"  # \"linear\" or \"spring\"\n");
 
     out.push_str("\n[virtual_input]\n");
     out.push_str(

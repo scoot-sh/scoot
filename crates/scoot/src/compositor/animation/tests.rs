@@ -67,6 +67,8 @@ fn easing_clamps_progress_both_ends() {
     assert_eq!(super::easing_factor(2.0, Easing::EaseOut), 1.0);
     assert_eq!(super::easing_factor(-1.0, Easing::Linear), 0.0);
     assert_eq!(super::easing_factor(2.0, Easing::Linear), 1.0);
+    assert_eq!(super::easing_factor(-1.0, Easing::Spring), 0.0);
+    assert_eq!(super::easing_factor(2.0, Easing::Spring), 1.0);
 }
 
 #[test]
@@ -181,11 +183,15 @@ fn retarget_continues_from_the_visual_position() {
 }
 
 #[test]
-fn easing_parses_the_two_names_and_rejects_the_rest() {
+fn easing_parses_the_three_names_and_rejects_the_rest() {
     assert_eq!(Easing::parse(None), Ok(Easing::EaseOut));
     assert_eq!(Easing::parse(Some("ease-out")), Ok(Easing::EaseOut));
     assert_eq!(Easing::parse(Some("linear")), Ok(Easing::Linear));
-    assert!(Easing::parse(Some("spring")).is_err());
+    assert_eq!(Easing::parse(Some("spring")), Ok(Easing::Spring));
+    assert_eq!(Easing::Spring.name(), "spring");
+    assert_eq!(Easing::EaseOut.name(), "ease-out");
+    assert_eq!(Easing::Linear.name(), "linear");
+    assert!(Easing::parse(Some("bounce")).is_err());
     assert!(Easing::parse(Some("")).is_err());
 }
 
@@ -866,4 +872,352 @@ fn vertical_input_and_ipc_read_the_final_geometry_mid_slide() {
         visual_delta(std::slice::from_ref(&slide), WindowId(28), 0, 400, mid),
         (0, -200)
     );
+}
+
+// -------------------------------------------------------------------------
+// Spring easing: the same retarget/cancel/reload pins as the shipped
+// curves, plus the spring's own shape (overshoot, exact landing).
+// -------------------------------------------------------------------------
+
+#[test]
+fn spring_overshoots_then_lands_exactly() {
+    assert_eq!(super::easing_factor(0.0, Easing::Spring), 0.0);
+    assert_eq!(super::easing_factor(1.0, Easing::Spring), 1.0);
+    // p = 36/64 hits a table entry exactly (no lerp): the peak overshoot.
+    let peak = super::easing_factor(0.5625, Easing::Spring);
+    assert!(
+        peak > 1.08 && peak < 1.11,
+        "spring must overshoot ~9% mid-flight, got {peak}"
+    );
+    // A quarter of the way in hits entry 16 exactly: ahead of linear.
+    let early = super::easing_factor(0.25, Easing::Spring);
+    assert!(
+        (early - 0.681888).abs() < 1e-6,
+        "spring at 0.25 pins the table entry, got {early}"
+    );
+    assert!(
+        early > 0.25,
+        "spring starts faster than linear, got {early}"
+    );
+}
+
+#[test]
+fn spring_slide_position_passes_the_target_mid_flight() {
+    // Overshoot is visual only: the slide still reports the target at rest.
+    assert_eq!(slide_position(0, 100, 0.0, Easing::Spring), 0);
+    assert_eq!(slide_position(0, 100, 1.0, Easing::Spring), 100);
+    let mid = slide_position(0, 100, 0.5625, Easing::Spring);
+    assert!(
+        mid > 100,
+        "spring must draw past the target mid-flight, got {mid}"
+    );
+    assert_eq!(mid, 109);
+    // Same on the way back down: 400 -> 0 passes below zero... no: it
+    // approaches from above, so mid-flight it has not yet reached 0.
+    let back = slide_position(400, 0, 0.5625, Easing::Spring);
+    assert!(
+        back < 0,
+        "spring overshoots a leftward slide past zero, got {back}"
+    );
+}
+
+#[test]
+fn spring_zero_distance_has_nowhere_to_slide() {
+    assert_eq!(slide_position(100, 100, 0.5625, Easing::Spring), 100);
+    let empty: Vec<Placement> = Vec::new();
+    assert!(empty.is_empty());
+}
+
+#[test]
+fn spring_late_frame_snaps_and_idles() {
+    let start = Instant::now();
+    let duration = Duration::from_millis(200);
+    let slide = Slide {
+        id: WindowId(41),
+        from_x: 0,
+        from_y: 0,
+        to_x: 400,
+        to_y: 300,
+        start,
+        duration,
+        easing: Easing::Spring,
+    };
+    // A compositor falling behind snaps rather than queuing frames, even
+    // with an overshooting curve: past the deadline the visual IS the target.
+    let late = start + Duration::from_millis(10_000);
+    assert!(is_finished(&slide, late));
+    assert_eq!(visual_x(&slide, late), 400);
+    assert_eq!(visual_y(&slide, late), 300);
+    assert_eq!(
+        visual_delta(std::slice::from_ref(&slide), WindowId(41), 400, 300, late),
+        (0, 0)
+    );
+    let mut slides = vec![slide];
+    assert!(!slides_in_flight(&slides, late));
+    prune_finished(&mut slides, late);
+    assert!(slides.is_empty());
+}
+
+#[test]
+fn spring_retarget_continues_from_the_visual_position() {
+    let start = Instant::now();
+    let duration = Duration::from_millis(200);
+    let first = Slide {
+        id: WindowId(42),
+        from_x: 0,
+        from_y: 0,
+        to_x: 400,
+        to_y: 0,
+        start,
+        duration,
+        easing: Easing::Spring,
+    };
+    // Quarter-flight visual (entry 16, no lerp): the retarget base.
+    let mid_now = start + Duration::from_millis(50);
+    let seen = visual_x(&first, mid_now);
+    assert_eq!(seen, slide_position(0, 400, 0.25, Easing::Spring));
+    let retargeted = Slide {
+        id: WindowId(42),
+        from_x: seen,
+        from_y: 0,
+        to_x: 600,
+        to_y: 0,
+        start: mid_now,
+        duration,
+        easing: Easing::Spring,
+    };
+    assert_eq!(visual_x(&retargeted, mid_now), seen);
+    assert_eq!(
+        visual_x(&retargeted, mid_now + Duration::from_millis(200)),
+        600
+    );
+}
+
+#[test]
+fn spring_moves_diagonally_and_reports_the_target_to_ipc() {
+    let start = Instant::now();
+    let duration = Duration::from_millis(200);
+    let slide = Slide {
+        id: WindowId(43),
+        from_x: 0,
+        from_y: 0,
+        to_x: 400,
+        to_y: 300,
+        start,
+        duration,
+        easing: Easing::Spring,
+    };
+    // At the overshoot peak both axes draw past their targets...
+    let peak_now = start + Duration::from_millis(112);
+    let (dx, dy) = visual_delta(
+        std::slice::from_ref(&slide),
+        WindowId(43),
+        400,
+        300,
+        peak_now,
+    );
+    assert!(dx > 0 && dy > 0, "both axes overshoot, got ({dx}, {dy})");
+    // ...while IPC and hit-testing keep reading the final geometry
+    // (that half never looks at the slide at all).
+    assert_eq!(slide.to_x, 400);
+    assert_eq!(slide.to_y, 300);
+}
+
+#[test]
+fn spring_extreme_coordinates_saturate_instead_of_wrapping() {
+    // An overshooting curve on an `i32::MAX` window must clamp, never wrap.
+    assert_eq!(
+        slide_position(i32::MAX - 100, i32::MAX, 0.5625, Easing::Spring),
+        i32::MAX
+    );
+    assert_eq!(
+        slide_position(i32::MIN + 100, i32::MIN, 0.5625, Easing::Spring),
+        i32::MIN
+    );
+    let start = Instant::now();
+    let duration = Duration::from_millis(200);
+    let slide = Slide {
+        id: WindowId(44),
+        from_x: i32::MAX - 100,
+        from_y: 0,
+        to_x: i32::MAX,
+        to_y: 0,
+        start,
+        duration,
+        easing: Easing::Spring,
+    };
+    let (dx, _) = visual_delta(
+        std::slice::from_ref(&slide),
+        WindowId(44),
+        i32::MAX,
+        0,
+        start,
+    );
+    assert!(dx <= 0);
+}
+
+#[test]
+fn spring_cancel_rules_match_the_shipped_curves() {
+    // Closed, hidden, floating, fullscreen and maximized windows lose a
+    // spring slide exactly like a linear one; lock and disable snap.
+    let mut fixture = SlideFixture::new();
+    fixture.state.animation.easing = Easing::Spring;
+    let now = Instant::now();
+    let spring_slide = |id: u64| Slide {
+        id: WindowId(id),
+        from_x: 0,
+        from_y: 0,
+        to_x: 400,
+        to_y: 300,
+        start: now,
+        duration: Duration::from_millis(200),
+        easing: Easing::Spring,
+    };
+    // A real move under the spring session stamps spring slides...
+    fixture.update(
+        &arrangement_of(vec![placement_at(1, 100, 200, true, false, false, false)]),
+        now,
+        false,
+    );
+    // ...but nothing was on screen before (no old position), so a brand-new
+    // window still snaps rather than sliding in from nowhere.
+    assert!(fixture.state.slides.is_empty());
+    // A staged in-flight spring slide is dropped when its window closes.
+    fixture.state.slides.push(spring_slide(9));
+    fixture.update(&arrangement_of(Vec::new()), now, false);
+    assert!(fixture.state.slides.is_empty());
+    // ...when it hides (workspace switch / output switch)...
+    fixture.state.slides.push(spring_slide(10));
+    fixture.update(
+        &arrangement_of(vec![placement_at(10, 400, 300, false, false, false, false)]),
+        now,
+        false,
+    );
+    assert!(fixture.state.slides.is_empty());
+    // ...and when it stops tiling (floats, fullscreen, maximizes).
+    for (id, floating, fullscreen, maximized) in [
+        (11, true, false, false),
+        (12, false, true, false),
+        (13, false, false, true),
+    ] {
+        fixture.state.slides.clear();
+        fixture.state.slides.push(spring_slide(id));
+        fixture.update(
+            &arrangement_of(vec![placement_at(
+                id, 600, 500, true, floating, fullscreen, maximized,
+            )]),
+            now,
+            false,
+        );
+        assert!(
+            fixture.state.slides.is_empty(),
+            "id {id} must snap, never slide"
+        );
+    }
+    // Lock snaps; disable snaps.
+    fixture.state.slides.push(spring_slide(14));
+    fixture.update(
+        &arrangement_of(vec![placement_at(14, 400, 300, true, false, false, false)]),
+        now,
+        true,
+    );
+    assert!(fixture.state.slides.is_empty());
+    fixture.state.slides.push(spring_slide(14));
+    fixture.state.animation.enabled = false;
+    fixture.update(
+        &arrangement_of(vec![placement_at(14, 600, 500, true, false, false, false)]),
+        now,
+        false,
+    );
+    assert!(fixture.state.slides.is_empty());
+}
+
+#[test]
+fn spring_reload_applies_easing_and_keeps_in_flight_timing() {
+    use scoot_ipc::{Request, Response};
+    use std::fs;
+
+    let mut fixture = SlideFixture::new();
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("config.toml");
+    fs::write(
+        &path,
+        "[animation]\nenabled = true\nduration_ms = 200\neasing = \"spring\"\n",
+    )
+    .expect("a config file");
+    fixture.state.config_path = Some(path.clone());
+    fixture.state.needs_render = false;
+    fixture.state.scene_dirty = false;
+    fixture.state.animation = AnimationSettings::default();
+
+    match fixture.state.handle_request(Request::Reload) {
+        Response::Reloaded { applied, .. } => {
+            assert!(
+                applied.contains(&"animation.enabled".to_owned()),
+                "{applied:?}"
+            );
+            assert!(
+                applied.contains(&"animation.duration_ms".to_owned()),
+                "{applied:?}"
+            );
+            assert!(
+                applied.contains(&"animation.easing".to_owned()),
+                "{applied:?}"
+            );
+        }
+        other => panic!("reload must apply: {other:?}"),
+    }
+    assert_eq!(fixture.state.animation.easing, Easing::Spring);
+
+    // An in-flight ease-out slide keeps its curve across the reload (only
+    // slides started after the reload read the new easing), so nothing jumps.
+    let now = Instant::now();
+    fixture.state.slides.push(Slide {
+        id: WindowId(15),
+        from_x: 0,
+        from_y: 0,
+        to_x: 400,
+        to_y: 0,
+        start: now,
+        duration: Duration::from_millis(200),
+        easing: Easing::EaseOut,
+    });
+    let before = visual_x(&fixture.state.slides[0], now);
+    fs::write(
+        &path,
+        "[animation]\nenabled = true\nduration_ms = 300\neasing = \"linear\"\n",
+    )
+    .expect("a rewritten config");
+    match fixture.state.handle_request(Request::Reload) {
+        Response::Reloaded { applied, .. } => {
+            assert!(
+                applied.contains(&"animation.duration_ms".to_owned()),
+                "{applied:?}"
+            );
+            assert!(
+                applied.contains(&"animation.easing".to_owned()),
+                "{applied:?}"
+            );
+        }
+        other => panic!("reload must apply: {other:?}"),
+    }
+    assert_eq!(fixture.state.animation.easing, Easing::Linear);
+    assert_eq!(fixture.state.slides.len(), 1);
+    assert_eq!(fixture.state.slides[0].easing, Easing::EaseOut);
+    assert_eq!(visual_x(&fixture.state.slides[0], now), before);
+
+    // Unknown names warn back to the default (and the reload reports the
+    // default taking effect), never to spring.
+    assert!(Easing::parse(Some("bounce")).is_err());
+    fs::write(&path, "[animation]\neasing = \"bounce\"\n").expect("a bad easing");
+    match fixture.state.handle_request(Request::Reload) {
+        Response::Reloaded { applied, .. } => {
+            assert!(
+                applied.contains(&"animation.easing".to_owned()),
+                "{applied:?}"
+            );
+        }
+        other => panic!("bad easing falls back to the default: {other:?}"),
+    }
+    assert_eq!(fixture.state.animation.easing, Easing::EaseOut);
 }

@@ -19,6 +19,7 @@ release, entries were dated.
 
 ### scoot
 
+- added: a `"spring"` easing for the optional `[animation]` slide (niri-style: overshoots ~9% past the target, then settles; still lands exactly on time and goes idle). Same retarget-from-visual and damage discipline, still no client re-commit; a baked table keeps it to a lookup and a lerp per window per frame. Not breaking: new spelling only, default still `"ease-out"`, no CLI or protocol changed.
 - added: the optional `[animation]` slide now moves vertically as well as horizontally, so stacked windows in one column slide to their new y instead of jumping. Same interpolation, retarget-from-visual and damage discipline, still no client re-commit. Not breaking: no new option, no CLI or protocol changed.
 
 ## [0.6.5](https://github.com/scoot-sh/scoot/compare/v0.6.4...v0.6.5) - 2026-10-25
