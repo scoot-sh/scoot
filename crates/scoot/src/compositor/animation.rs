@@ -32,7 +32,7 @@
 
 use std::time::{Duration, Instant};
 
-use scoot_core::{Placement, WindowId};
+use scoot_core::{OutputId, Placement, WindowId};
 
 /// Default slide length: short enough to feel instant, long enough to see.
 pub const DEFAULT_DURATION_MS: u32 = 150;
@@ -273,6 +273,78 @@ pub fn slides_in_flight(slides: &[Slide], now: Instant) -> bool {
     slides.iter().any(|slide| !is_finished(slide, now))
 }
 
+/// One output's workspace-switch slide: a single horizontal offset the whole
+/// incoming strip shares, easing from `from_x` to zero.
+///
+/// Unlike [`Slide`] (one per window, from the window's own old target), the
+/// viewport slide exists because a workspace switch has no old target to
+/// slide from: the incoming windows were unmapped (`visible = false`) and
+/// the outgoing ones are gone from the arrangement. Drawing the outgoing
+/// workspace would double the frame's windows and damage; instead only the
+/// incoming strip slides in from the output edge over the background, so
+/// every incoming window moves as one unit with one offset.
+///
+/// `from_x` is `±` the output's logical width (right for a higher workspace
+/// index, left for a lower one); the visual at `now` is the interpolation
+/// `from_x → 0`, so hit-testing and IPC (which read the target) are
+/// untouched and a late frame still snaps to zero and idles.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ViewportSlide {
+    pub output: OutputId,
+    pub from_x: i32,
+    pub start: Instant,
+    pub duration: Duration,
+    pub easing: Easing,
+}
+
+/// Where a viewport slide is seen at `now`: its offset from the target.
+pub fn viewport_position(
+    from_x: i32,
+    now: Instant,
+    start: Instant,
+    duration: Duration,
+    easing: Easing,
+) -> i32 {
+    slide_position(from_x, 0, progress(now, start, duration), easing)
+}
+
+/// How far an output's strip shifts from its target at `now`: the viewport
+/// slide's visual, `0` when there is none. One branch on `is_empty` covers
+/// the disabled and idle cases; otherwise one linear scan over at most
+/// `MAX_OUTPUTS` entries. No allocation.
+pub fn viewport_delta(slides: &[ViewportSlide], output: OutputId, now: Instant) -> i32 {
+    if slides.is_empty() {
+        return 0;
+    }
+    for slide in slides {
+        if slide.output == output {
+            return viewport_position(slide.from_x, now, slide.start, slide.duration, slide.easing);
+        }
+    }
+    0
+}
+
+/// Whether a viewport slide is still in flight at `now`.
+pub fn viewport_is_finished(slide: &ViewportSlide, now: Instant) -> bool {
+    progress(now, slide.start, slide.duration) >= 1.0
+}
+
+/// Whether any viewport slide still needs frames at `now`.
+pub fn viewports_in_flight(slides: &[ViewportSlide], now: Instant) -> bool {
+    if slides.is_empty() {
+        return false;
+    }
+    slides.iter().any(|slide| !viewport_is_finished(slide, now))
+}
+
+/// Drops finished viewport slides in place, keeping the allocation.
+pub fn prune_finished_viewports(slides: &mut Vec<ViewportSlide>, now: Instant) {
+    if slides.is_empty() {
+        return;
+    }
+    slides.retain(|slide| !viewport_is_finished(slide, now));
+}
+
 /// Drops finished slides in place, keeping the allocation. Empty stays empty.
 pub fn prune_finished(slides: &mut Vec<Slide>, now: Instant) {
     if slides.is_empty() {
@@ -300,6 +372,10 @@ impl State {
             if !self.slides.is_empty() {
                 self.slides.clear();
             }
+            if !self.viewport_slides.is_empty() {
+                self.viewport_slides.clear();
+            }
+            self.note_workspace_active();
             return;
         }
         // Drop slides for windows that are gone or no longer slide. Linear in
@@ -318,6 +394,10 @@ impl State {
             if !self.slides.is_empty() {
                 self.slides.clear();
             }
+            if !self.viewport_slides.is_empty() {
+                self.viewport_slides.clear();
+            }
+            self.note_workspace_active();
             return;
         }
         for placement in &arrangement.placements {
@@ -375,16 +455,131 @@ impl State {
                 }
             }
         }
+        self.update_viewport_slides(arrangement, now);
+    }
+
+    /// Records the current active workspace per output without animating:
+    /// what the disabled/locked/zero-duration early returns call so a later
+    /// enable still compares against the truth, never a stale index.
+    pub(crate) fn note_workspace_active(&mut self) {
+        let current: Vec<(OutputId, usize)> = self
+            .outputs
+            .iter_with_ids()
+            .filter_map(|(id, _)| self.world.workspaces(id).map(|ws| (id, ws.active)))
+            .collect();
+        // Update in place where possible so the steady state (no output
+        // added/removed) allocates nothing.
+        self.last_workspace_active
+            .retain(|(id, _)| current.iter().any(|(cur, _)| cur == id));
+        for (id, active) in current {
+            match self
+                .last_workspace_active
+                .iter_mut()
+                .find(|(known, _)| *known == id)
+            {
+                Some(slot) => slot.1 = active,
+                None => self.last_workspace_active.push((id, active)),
+            }
+        }
+        // An output that went away takes its viewport slide with it.
+        if !self.viewport_slides.is_empty() {
+            self.viewport_slides.retain(|slide| {
+                self.last_workspace_active
+                    .iter()
+                    .any(|(id, _)| *id == slide.output)
+            });
+        }
+    }
+
+    /// Starts a viewport slide for every output whose active workspace just
+    /// changed, when there is something visible to slide.
+    ///
+    /// Runs at the end of [`State::update_slides`], after the per-window
+    /// pass: the per-window pass already snapped newly-visible windows (no
+    /// old location), and this adds the shared viewport offset that makes
+    /// them arrive as one strip. Empty and single-window workspaces fall out
+    /// naturally: empty has no visible tiled window so no slide starts (but
+    /// the index is still recorded), single-window slides its one window.
+    /// One allocation-free scan per output; the slide itself is one small
+    /// struct per switched output.
+    fn update_viewport_slides(&mut self, arrangement: &Arrangement, now: Instant) {
+        let current: Vec<(OutputId, usize)> = self
+            .outputs
+            .iter_with_ids()
+            .filter_map(|(id, _)| self.world.workspaces(id).map(|ws| (id, ws.active)))
+            .collect();
+        let duration = self.animation.duration;
+        let easing = self.animation.easing;
+        for (id, active) in current {
+            match self
+                .last_workspace_active
+                .iter_mut()
+                .find(|(known, _)| *known == id)
+            {
+                Some(slot) if slot.1 == active => {}
+                Some(slot) => {
+                    let old = slot.1;
+                    slot.1 = active;
+                    // Only animate when the new workspace shows a tiled
+                    // window on this output; an empty workspace has nothing
+                    // to draw, so it snaps (the index update above is the
+                    // whole work).
+                    let has_visible = arrangement
+                        .placements
+                        .iter()
+                        .any(|p| p.output == id && should_slide(p));
+                    if !has_visible {
+                        if let Some(index) =
+                            self.viewport_slides.iter().position(|s| s.output == id)
+                        {
+                            self.viewport_slides.swap_remove(index);
+                        }
+                        continue;
+                    }
+                    let width = self.world.usable_area(id).map(|area| area.w).unwrap_or(0);
+                    if width <= 0 {
+                        continue;
+                    }
+                    let from_x = if active > old { width } else { -width };
+                    match self.viewport_slides.iter_mut().find(|s| s.output == id) {
+                        Some(slide) => {
+                            slide.from_x = from_x;
+                            slide.start = now;
+                            slide.duration = duration;
+                            slide.easing = easing;
+                        }
+                        None => self.viewport_slides.push(ViewportSlide {
+                            output: id,
+                            from_x,
+                            start: now,
+                            duration,
+                            easing,
+                        }),
+                    }
+                }
+                None => self.last_workspace_active.push((id, active)),
+            }
+        }
+        self.last_workspace_active
+            .retain(|(id, _)| self.world.workspaces(*id).is_some());
+        if !self.viewport_slides.is_empty() {
+            self.viewport_slides.retain(|slide| {
+                self.last_workspace_active
+                    .iter()
+                    .any(|(id, _)| *id == slide.output)
+            });
+        }
     }
 
     /// Whether any slide still needs frames at `now`.
     pub(crate) fn animation_in_flight(&self, now: Instant) -> bool {
-        slides_in_flight(&self.slides, now)
+        slides_in_flight(&self.slides, now) || viewports_in_flight(&self.viewport_slides, now)
     }
 
     /// Prunes slides that reached their target. Call after a frame draws.
     pub(crate) fn prune_slides(&mut self, now: Instant) {
         prune_finished(&mut self.slides, now);
+        prune_finished_viewports(&mut self.viewport_slides, now);
     }
 }
 

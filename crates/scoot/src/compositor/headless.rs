@@ -1044,11 +1044,16 @@ impl State {
         // set so the frame timer re-arms for the next tick. When the last
         // one lands the flag clears and the compositor idles. While locked
         // there is nothing to slide (no windows draw), so any slide snaps.
+        // Covers both the per-window slides and the per-output
+        // workspace-switch viewport slides.
         if self.session_lock.is_locked() {
             if !self.slides.is_empty() {
                 self.slides.clear();
             }
-        } else if !self.slides.is_empty() {
+            if !self.viewport_slides.is_empty() {
+                self.viewport_slides.clear();
+            }
+        } else if !self.slides.is_empty() || !self.viewport_slides.is_empty() {
             let now = std::time::Instant::now();
             self.prune_slides(now);
             if self.animation_in_flight(now) {

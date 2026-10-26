@@ -1295,8 +1295,9 @@ impl State {
         if live.enabled != next.enabled {
             self.animation.enabled = next.enabled;
             report.applied.push(field::ANIMATION_ENABLED.to_owned());
-            if !next.enabled && !self.slides.is_empty() {
+            if !next.enabled && (!self.slides.is_empty() || !self.viewport_slides.is_empty()) {
                 self.slides.clear();
+                self.viewport_slides.clear();
                 self.request_render();
             }
         }

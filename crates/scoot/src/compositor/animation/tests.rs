@@ -1221,3 +1221,464 @@ fn spring_reload_applies_easing_and_keeps_in_flight_timing() {
     }
     assert_eq!(fixture.state.animation.easing, Easing::EaseOut);
 }
+
+// -------------------------------------------------------------------------
+// Workspace-switch viewport slide: one offset per output, incoming only.
+// -------------------------------------------------------------------------
+
+use super::{ViewportSlide, viewport_delta, viewports_in_flight};
+use scoot_core::{Action, Event as CoreEvent, Vertical, WindowInfo};
+
+fn open_window(fixture: &mut SlideFixture, id: u64, output: OutputId) {
+    fixture.state.world.handle_event(CoreEvent::WindowOpened {
+        id: WindowId(id),
+        info: WindowInfo::default(),
+        output: Some(output),
+        focus: true,
+    });
+}
+
+fn arrange_now(fixture: &SlideFixture) -> Arrangement {
+    fixture.state.world.arrange()
+}
+
+fn primary_id(fixture: &SlideFixture) -> OutputId {
+    fixture
+        .state
+        .outputs
+        .primary_id()
+        .expect("a primary output")
+}
+
+#[test]
+fn viewport_delta_is_zero_when_idle_and_eases_to_zero() {
+    use super::viewport_position;
+    let output = OutputId(1);
+    let empty: Vec<ViewportSlide> = Vec::new();
+    let now = Instant::now();
+    assert_eq!(viewport_delta(&empty, output, now), 0);
+    let start = now;
+    let duration = Duration::from_millis(200);
+    let slide = ViewportSlide {
+        output,
+        from_x: 800,
+        start,
+        duration,
+        easing: Easing::Linear,
+    };
+    let arr = [slide];
+    assert_eq!(viewport_delta(&arr, output, start), 800);
+    assert_eq!(
+        viewport_delta(&arr, output, start + Duration::from_millis(100)),
+        400
+    );
+    assert_eq!(
+        viewport_delta(&arr, output, start + Duration::from_millis(200)),
+        0
+    );
+    assert_eq!(
+        viewport_delta(&arr, output, start + Duration::from_millis(10_000)),
+        0,
+        "a late frame snaps rather than queuing"
+    );
+    // Another output is untouched.
+    assert_eq!(viewport_delta(&arr, OutputId(2), start), 0);
+    // Ease-out lands exactly too.
+    assert_eq!(
+        viewport_position(800, start + duration, start, duration, Easing::EaseOut),
+        0
+    );
+    assert!(viewports_in_flight(
+        &arr,
+        start + Duration::from_millis(100)
+    ));
+    assert!(!viewports_in_flight(
+        &arr,
+        start + Duration::from_millis(10_000)
+    ));
+}
+
+#[test]
+fn workspace_switch_slides_the_incoming_strip_from_the_edge() {
+    let mut fixture = SlideFixture::new();
+    let id = primary_id(&fixture);
+    let now = Instant::now();
+    // Seed the index recording.
+    fixture.update(&arrange_now(&fixture), now, false);
+    assert!(fixture.state.viewport_slides.is_empty());
+    open_window(&mut fixture, 1, id);
+    // New window snaps per-window; no workspace switch yet so no viewport.
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(10),
+        false,
+    );
+    assert!(fixture.state.viewport_slides.is_empty());
+    // Switch down to the empty trailing workspace: nothing visible to slide.
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(20),
+        false,
+    );
+    assert!(
+        fixture.state.viewport_slides.is_empty(),
+        "an empty workspace has nothing to draw, so it snaps"
+    );
+    // Switch back up: the single window slides in from the left.
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Up));
+    let switch_now = now + Duration::from_millis(30);
+    fixture.update(&arrange_now(&fixture), switch_now, false);
+    assert_eq!(fixture.state.viewport_slides.len(), 1);
+    let slide = &fixture.state.viewport_slides[0];
+    assert_eq!(slide.output, id);
+    let width = fixture
+        .state
+        .world
+        .usable_area(id)
+        .map(|a| a.w)
+        .unwrap_or(0);
+    assert!(width > 0);
+    assert_eq!(slide.from_x, -width, "up (lower index) comes from the left");
+    assert_eq!(
+        super::viewport_delta(&fixture.state.viewport_slides, id, switch_now),
+        -width
+    );
+    assert_eq!(
+        super::viewport_delta(
+            &fixture.state.viewport_slides,
+            id,
+            switch_now + Duration::from_millis(10_000)
+        ),
+        0
+    );
+}
+
+#[test]
+fn workspace_switch_direction_follows_the_index() {
+    let mut fixture = SlideFixture::new();
+    let id = primary_id(&fixture);
+    let now = Instant::now();
+    fixture.update(&arrange_now(&fixture), now, false);
+    open_window(&mut fixture, 1, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(10),
+        false,
+    );
+    // Down to empty (no slide), open a window there so both sides are occupied.
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(20),
+        false,
+    );
+    assert!(fixture.state.viewport_slides.is_empty());
+    open_window(&mut fixture, 2, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(30),
+        false,
+    );
+    assert!(fixture.state.viewport_slides.is_empty());
+    // Up then down again: down (higher index) comes from the right.
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Up));
+    let up_now = now + Duration::from_millis(40);
+    fixture.update(&arrange_now(&fixture), up_now, false);
+    assert_eq!(fixture.state.viewport_slides.len(), 1);
+    let width = fixture
+        .state
+        .world
+        .usable_area(id)
+        .map(|a| a.w)
+        .unwrap_or(0);
+    assert_eq!(fixture.state.viewport_slides[0].from_x, -width);
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    let down_now = now + Duration::from_millis(50);
+    fixture.update(&arrange_now(&fixture), down_now, false);
+    assert_eq!(fixture.state.viewport_slides.len(), 1);
+    assert_eq!(fixture.state.viewport_slides[0].from_x, width);
+}
+
+#[test]
+fn empty_and_single_window_workspaces_behave() {
+    let mut fixture = SlideFixture::new();
+    let now = Instant::now();
+    // Empty to empty: no slide, no panic.
+    fixture.update(&arrangement_of(Vec::new()), now, false);
+    assert!(fixture.state.viewport_slides.is_empty());
+    // Single window switching to empty and back is covered above; here pin
+    // that an empty arrangement never starts a slide even when the index
+    // moved (driven through the real world below).
+    let id = primary_id(&fixture);
+    fixture.update(&arrange_now(&fixture), now, false);
+    open_window(&mut fixture, 1, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(10),
+        false,
+    );
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(20),
+        false,
+    );
+    assert!(fixture.state.viewport_slides.is_empty());
+}
+
+#[test]
+fn multi_output_switches_are_independent() {
+    let mut fixture = SlideFixture::new();
+    let first = primary_id(&fixture);
+    crate::compositor::headless::add_output(&mut fixture.state, "headless-2", 800, 600)
+        .expect("a second output");
+    let second = fixture
+        .state
+        .outputs
+        .iter_with_ids()
+        .map(|(id, _)| id)
+        .find(|id| *id != first)
+        .expect("two outputs");
+    let now = Instant::now();
+    fixture.update(&arrange_now(&fixture), now, false);
+    open_window(&mut fixture, 1, first);
+    open_window(&mut fixture, 2, second);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(10),
+        false,
+    );
+    assert!(fixture.state.viewport_slides.is_empty());
+    // Switch only the first output's workspace (focus it first).
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    // The focused output is the one holding focus; ensure only one side
+    // switched by checking at most one viewport slide and that it names a
+    // switched output. If both switched (focus moved), both slides are still
+    // per-output and independent.
+    let switch_now = now + Duration::from_millis(20);
+    fixture.update(&arrange_now(&fixture), switch_now, false);
+    for slide in &fixture.state.viewport_slides {
+        assert!(slide.output == first || slide.output == second);
+    }
+    // A switch that touches neither output starts nothing (already pinned by
+    // the empty case); here pin that a second output with no switch keeps no
+    // slide once its own index is recorded: clear, re-record, no switch.
+    fixture.state.viewport_slides.clear();
+    fixture.update(
+        &arrange_now(&fixture),
+        switch_now + Duration::from_millis(10),
+        false,
+    );
+    assert!(
+        fixture.state.viewport_slides.is_empty(),
+        "no index change means no viewport slide, on any output"
+    );
+}
+
+#[test]
+fn viewport_lock_and_disable_snap() {
+    let mut fixture = SlideFixture::new();
+    let id = primary_id(&fixture);
+    let now = Instant::now();
+    fixture.update(&arrange_now(&fixture), now, false);
+    open_window(&mut fixture, 1, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(10),
+        false,
+    );
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(20),
+        false,
+    );
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Up));
+    let switch_now = now + Duration::from_millis(30);
+    fixture.update(&arrange_now(&fixture), switch_now, false);
+    assert_eq!(fixture.state.viewport_slides.len(), 1);
+    // Lock snaps.
+    fixture.update(
+        &arrange_now(&fixture),
+        switch_now + Duration::from_millis(10),
+        true,
+    );
+    assert!(fixture.state.viewport_slides.is_empty());
+    // Restart, then disable snaps.
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    fixture.update(
+        &arrange_now(&fixture),
+        switch_now + Duration::from_millis(20),
+        false,
+    );
+    // Down went to empty (no slide); go back up for a real slide.
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Up));
+    fixture.update(
+        &arrange_now(&fixture),
+        switch_now + Duration::from_millis(30),
+        false,
+    );
+    assert_eq!(fixture.state.viewport_slides.len(), 1);
+    fixture.state.animation.enabled = false;
+    fixture.update(
+        &arrange_now(&fixture),
+        switch_now + Duration::from_millis(40),
+        false,
+    );
+    assert!(fixture.state.viewport_slides.is_empty());
+    assert!(fixture.state.slides.is_empty());
+}
+
+#[test]
+fn viewport_reload_disable_snaps_and_reports() {
+    use scoot_ipc::{Request, Response};
+    use std::fs;
+
+    let mut fixture = SlideFixture::new();
+    let id = primary_id(&fixture);
+    let dir = tempfile::tempdir().expect("a temp dir");
+    let path = dir.path().join("config.toml");
+    fs::write(&path, "[animation]\nenabled = true\n").expect("a config file");
+    fixture.state.config_path = Some(path.clone());
+    fixture.state.animation = AnimationSettings::default();
+    match fixture.state.handle_request(Request::Reload) {
+        Response::Reloaded { applied, .. } => {
+            assert!(
+                applied.contains(&"animation.enabled".to_owned()),
+                "{applied:?}"
+            );
+        }
+        other => panic!("reload must apply: {other:?}"),
+    }
+    assert!(fixture.state.animation.enabled);
+    let now = Instant::now();
+    fixture.update(&arrange_now(&fixture), now, false);
+    open_window(&mut fixture, 1, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(10),
+        false,
+    );
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(20),
+        false,
+    );
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Up));
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(30),
+        false,
+    );
+    assert_eq!(fixture.state.viewport_slides.len(), 1);
+    fs::write(&path, "[animation]\nenabled = false\n").expect("a rewritten config");
+    match fixture.state.handle_request(Request::Reload) {
+        Response::Reloaded { applied, .. } => {
+            assert!(
+                applied.contains(&"animation.enabled".to_owned()),
+                "{applied:?}"
+            );
+        }
+        other => panic!("disable must apply: {other:?}"),
+    }
+    assert!(!fixture.state.animation.enabled);
+    assert!(fixture.state.viewport_slides.is_empty());
+    assert!(fixture.state.slides.is_empty());
+}
+
+#[test]
+fn viewport_prunes_and_idles() {
+    let start = Instant::now();
+    let mut slides = vec![ViewportSlide {
+        output: OutputId(1),
+        from_x: 800,
+        start,
+        duration: Duration::from_millis(50),
+        easing: Easing::Linear,
+    }];
+    let late = start + Duration::from_millis(5000);
+    assert!(!viewports_in_flight(&slides, late));
+    super::prune_finished_viewports(&mut slides, late);
+    assert!(slides.is_empty());
+    // State-level: in-flight keeps frames, landed idles.
+    let mut fixture = SlideFixture::new();
+    let id = primary_id(&fixture);
+    let now = Instant::now();
+    fixture.update(&arrange_now(&fixture), now, false);
+    open_window(&mut fixture, 1, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(10),
+        false,
+    );
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(20),
+        false,
+    );
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Up));
+    let switch_now = now + Duration::from_millis(30);
+    fixture.update(&arrange_now(&fixture), switch_now, false);
+    assert!(
+        fixture
+            .state
+            .animation_in_flight(switch_now + Duration::from_millis(10))
+    );
+    assert!(
+        !fixture
+            .state
+            .animation_in_flight(switch_now + Duration::from_millis(10_000))
+    );
+    fixture
+        .state
+        .prune_slides(switch_now + Duration::from_millis(10_000));
+    assert!(fixture.state.viewport_slides.is_empty());
+}

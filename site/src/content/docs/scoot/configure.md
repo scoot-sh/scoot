@@ -214,7 +214,10 @@ redrawn per frame; clients are never asked to re-commit. `scoot msg
 windows` and pointer input keep reporting the final geometry while a
 slide runs — a spring overshoot is purely visual; input still hits the
 target. Floating, fullscreen and maximized windows snap rather than
-slide. Disabling mid-slide snaps to the final frame. A spring costs one
+slide. Switching workspaces slides the whole incoming strip in from the
+output edge as one unit (right for a higher workspace, left for a lower
+one); an empty workspace has nothing to draw, so it snaps. Each output
+animates independently. Disabling mid-slide snaps to the final frame. A spring costs one
 table lookup and a lerp per window per frame (no `exp`/`sin` on the
 frame path); the clamped duration still bounds its settle, and a frame
 past its deadline still snaps instead of queuing.

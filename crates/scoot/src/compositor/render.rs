@@ -1684,6 +1684,7 @@ where
         &frame,
         renderer,
         &state.slides,
+        &state.viewport_slides,
         now,
     );
     let draws_cursor = state.frame_draws_cursor();
@@ -2041,6 +2042,7 @@ where
         &frame,
         renderer,
         &state.slides,
+        &state.viewport_slides,
         now,
     );
     match renderer.bind(target) {
