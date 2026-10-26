@@ -486,10 +486,11 @@ impl AutostartConfig {
 }
 
 /// `[animation]`. Three fields: `enabled`, whether tiled windows slide
-/// horizontally and vertically to their new place instead of jumping; `duration_ms`, how
-/// long one slide takes; and `easing`, the curve (`ease-out`, `linear` or `spring`).
+/// horizontally and vertically to their new place instead of jumping (and
+/// fade in on open and out on close); `duration_ms`, how
+/// long one slide or fade takes; and `easing`, the curve (`ease-out`, `linear` or `spring`).
 /// All `Option` so a partial table leaves the rest at defaults. Disabled by
-/// default; a reload applies live, and disabling mid-slide snaps to the
+/// default; a reload applies live, and disabling mid-slide or mid-fade snaps to the
 /// target.
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -1835,9 +1836,10 @@ pub fn default_config_toml() -> String {
         "# Slide tiled windows horizontally and vertically to their new place instead of\n\
          # jumping (columns scrolling into view, a column opening/closing/moving,\n\
          # stacked windows shifting when a sibling opens/closes,\n\
-         # focus moving the view). Off by default; re-applies live on reload.\n\
-         # The slide moves already-committed buffers: clients are never asked\n\
-         # to re-commit for it.\n",
+         # focus moving the view), and fade them in on open and out on close.\n\
+         # Off by default; re-applies live on reload. The slide moves\n\
+         # already-committed buffers and the fade only changes their opacity:\n\
+         # clients are never asked to re-commit for either.\n",
     );
     out.push_str("# enabled = false\n");
     out.push_str(&format!(

@@ -100,8 +100,8 @@ is *drawn*.
   agents (which read `windows` to aim) and costs nothing (no hit-test
   change when disabled or enabled).
 - **Reload**: `[animation]` applies live. Disabling snaps any live slide
-  (clears + redraws the final frame). Duration/easing changes affect only
-  slides started after the reload (in-flight slides keep the timing they
+  or fade (clears + redraws the final frame). Duration/easing changes affect only
+  slides and fades started after the reload (in-flight ones keep the timing they
   started with, so nothing jumps). Zero duration snaps.
 - **Extreme sizes**: coordinates use `saturating_add`, so `i32::MAX`
   windows cannot wrap onto the screen.
@@ -109,3 +109,56 @@ is *drawn*.
   so there is no typed option to mirror and no `nix/tests.nix` pin to
   add. There is no generic config/status IPC query today (`binds`,
   `outputs`, `windows`, ... are specific), so no IPC change.
+
+## Open/close fade: the design decision
+
+Behind the same `[animation]` gate as the slide, with no second knob:
+new tiled windows fade `0 → 1` and closed tiled windows fade `1 → 0`
+over the session's `duration_ms`/`easing`, reusing the slide's frame
+scheduling (frames only while in flight, idle when done) and damage
+discipline (fading rects only — Smithay's damage tracker keys alpha, so
+an alpha change damages exactly the window's rects, never the full
+output). No client re-commit: the fade only changes the opacity already-
+committed buffers are drawn with. Rings snap (only content fades):
+multiplying every ring segment's color per frame costs more than the
+1px chrome is worth, and the content fade carries the effect.
+
+Why fade only, no scale: a scale would resample every fading window's
+pixels per frame (pixman scaling ≈ 2–3× a plain blit plus filtering),
+grow and shrink the damaged bbox every frame, and tempt a re-commit
+(size change → configure). A fade is one alpha multiply per window per
+frame (the `render_elements_from_surface_tree` calls already take an
+alpha), the damaged rect never moves, and no configure is ever sent.
+
+Why the same gate, no second knob: the zero-cost-when-off bar already
+covers both (one empty branch per hot path, no timer/wakeup), the
+siblings (vertical, spring, viewport) all reused the gate, and a second
+knob doubles the config surface for a 150 ms polish effect. A user who
+wants slides without fades can ask for the knob later; the fade keeps
+the gate's semantics (off by default, live reload, lock snaps).
+
+What Smithay/scoot retain after the surface is gone, and the bound:
+after `remove_window` the space no longer maps the window and the map
+no longer names it, so without a retain there is nothing left to draw.
+The close fade retains the [`Window`] itself (`Arc` clone: no pixel
+copy, just the client's already-allocated buffers living up to one
+`duration` longer). The hold is capped at 8 closing windows system-wide
+(`MAX_CLOSING_FADES`): the 9th close evicts the oldest (it snaps away),
+so even a client opening and closing windows in a loop pins at most 8
+windows × 500 ms. If the surface is already dead (client disconnected),
+its surface tree yields no elements and the fade draws nothing — it
+still prunes on time, never leaks, never panics. `scoot-core` is
+untouched (TARGET arrangement; IPC and hit-testing keep the target);
+one monotonic `Instant` per output frame; no allocation on the
+per-frame path (the closing pass is one `is_empty` branch plus a linear
+scan over at most 8 entries).
+
+Rules that fall out: open fades never restart on a move (the slide
+retargets from the visual; the fade keeps its own clock); a
+close-during-open starts from the open's in-flight alpha; a viewport
+switch suppresses per-window fades (the strip rides the shared offset —
+double animation would cost both every frame); hidden windows (workspace
+switch, output move) never fade, only closed ones do; floating,
+fullscreen and maximized windows snap shut; output removal drops that
+output's fades with it; lock and reload-disable clear everything and
+snap.

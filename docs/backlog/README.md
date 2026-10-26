@@ -417,7 +417,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [scootctl look wiring tests race on `STARSHIP_CONFIG`](./testing/scootctl-starship-env-race.md): flaked CI's one-process `cargo test` on an unrelated PR.
 
 ### Core / config / rendering
-- [Slide animation follow-up: open/close fade](./core/animation-open-close-fade.md) — low, filed 2026-10-25: new/closed windows snap while tiled moves slide; add an optional fade (possibly scale) reusing the slide's scheduling and damage discipline
+- [Slide animation follow-up: open/close fade](./resolved/animation-open-close-fade-done.md) — RESOLVED 2026-10-26: tiled windows fade in on open and out on close behind the same gate (fade-only, no scale; closes retain last buffers bounded at 8 × one duration)
 - [Slide animation follow-up: workspace-switch slide](./resolved/animation-workspace-switch-slide-done.md) — RESOLVED 2026-10-26: workspace switches slide the incoming strip as one viewport offset (no new option; per-output, lock/reload snap, empty snaps)
 - [Slide animation follow-up: vertical slide](./resolved/animation-vertical-slide-done.md) — RESOLVED 2026-10-26: the slide interpolates y with the same curve, retarget-from-visual and damage discipline (PR #749); stacked-column y moves glide instead of jumping
 - [Slide animation follow-up: spring easing](./resolved/animation-spring-easing-done.md) — RESOLVED 2026-10-26: an optional `"spring"` easing (baked 65-entry table, ~9% overshoot, same retarget-from-visual and damage discipline); still lands exactly and idles (PR #751)
