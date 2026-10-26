@@ -1405,14 +1405,183 @@ fn workspace_switch_direction_follows_the_index() {
         .map(|a| a.w)
         .unwrap_or(0);
     assert_eq!(fixture.state.viewport_slides[0].from_x, -width);
+    // Down again, after the up slide landed and pruned: a fresh slide from
+    // the right (higher index comes from the right). Letting the first
+    // slide land first matters: a switch arriving *mid-flight* continues
+    // from the visual instead (pinned below), it does not restart from
+    // the edge.
+    fixture
+        .state
+        .prune_slides(up_now + Duration::from_millis(10_000));
+    assert!(fixture.state.viewport_slides.is_empty());
     fixture
         .state
         .world
         .handle_action(Action::FocusWorkspace(Vertical::Down));
-    let down_now = now + Duration::from_millis(50);
+    let down_now = now + Duration::from_millis(300);
     fixture.update(&arrange_now(&fixture), down_now, false);
     assert_eq!(fixture.state.viewport_slides.len(), 1);
     assert_eq!(fixture.state.viewport_slides[0].from_x, width);
+}
+
+#[test]
+fn a_switch_mid_flight_continues_from_the_visual() {
+    // Rapid A→B→C: the second switch arrives while the first slide is still
+    // running, so it must continue from what is on screen rather than jump
+    // back to the full edge — the viewport twin of the per-window retarget
+    // rule.
+    let mut fixture = SlideFixture::new();
+    let id = primary_id(&fixture);
+    let now = Instant::now();
+    fixture.update(&arrange_now(&fixture), now, false);
+    open_window(&mut fixture, 1, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(10),
+        false,
+    );
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(20),
+        false,
+    );
+    open_window(&mut fixture, 2, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(30),
+        false,
+    );
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(40),
+        false,
+    );
+    open_window(&mut fixture, 3, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(50),
+        false,
+    );
+    // Up to the middle workspace: a fresh slide from the left edge.
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Up));
+    let first_switch = now + Duration::from_millis(60);
+    fixture.update(&arrange_now(&fixture), first_switch, false);
+    assert_eq!(fixture.state.viewport_slides.len(), 1);
+    let width = fixture
+        .state
+        .world
+        .usable_area(id)
+        .map(|a| a.w)
+        .unwrap_or(0);
+    assert!(width > 0);
+    assert_eq!(fixture.state.viewport_slides[0].from_x, -width);
+    // Down again 50ms later (duration is 200ms): still in flight. What the
+    // strip shows at the retarget instant...
+    let second_switch = first_switch + Duration::from_millis(50);
+    let shown = super::viewport_delta(&fixture.state.viewport_slides, id, second_switch);
+    assert!(shown < 0 && shown > -width);
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    fixture.update(&arrange_now(&fixture), second_switch, false);
+    assert_eq!(fixture.state.viewport_slides.len(), 1);
+    // ...is where the retargeted slide starts: not the full right edge.
+    let retargeted = &fixture.state.viewport_slides[0];
+    assert_eq!(retargeted.from_x, shown);
+    assert_ne!(retargeted.from_x, width);
+    // No visual jump: the delta the instant before is the delta the
+    // instant after.
+    assert_eq!(
+        super::viewport_delta(&fixture.state.viewport_slides, id, second_switch),
+        shown
+    );
+    // And it still lands exactly on time.
+    assert_eq!(
+        super::viewport_delta(
+            &fixture.state.viewport_slides,
+            id,
+            second_switch + Duration::from_millis(10_000)
+        ),
+        0
+    );
+}
+
+#[test]
+fn a_direction_reversal_mid_flight_continues_from_the_visual() {
+    // A→B then back to A before the first slide lands: restarting from the
+    // new edge would fling the strip across the screen; continuing from the
+    // visual glides it back from where it is.
+    let mut fixture = SlideFixture::new();
+    let id = primary_id(&fixture);
+    let now = Instant::now();
+    fixture.update(&arrange_now(&fixture), now, false);
+    open_window(&mut fixture, 1, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(10),
+        false,
+    );
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(20),
+        false,
+    );
+    open_window(&mut fixture, 2, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(30),
+        false,
+    );
+    // Up to the first workspace: fresh slide from the left.
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Up));
+    let first_switch = now + Duration::from_millis(40);
+    fixture.update(&arrange_now(&fixture), first_switch, false);
+    assert_eq!(fixture.state.viewport_slides.len(), 1);
+    let width = fixture
+        .state
+        .world
+        .usable_area(id)
+        .map(|a| a.w)
+        .unwrap_or(0);
+    assert_eq!(fixture.state.viewport_slides[0].from_x, -width);
+    // Back down 50ms later, mid-flight: the strip is left of center...
+    let second_switch = first_switch + Duration::from_millis(50);
+    let shown = super::viewport_delta(&fixture.state.viewport_slides, id, second_switch);
+    assert!(shown < 0 && shown > -width);
+    fixture
+        .state
+        .world
+        .handle_action(Action::FocusWorkspace(Vertical::Down));
+    fixture.update(&arrange_now(&fixture), second_switch, false);
+    assert_eq!(fixture.state.viewport_slides.len(), 1);
+    // ...and the retarget keeps it there instead of restarting from the
+    // right edge a reversal would otherwise name.
+    let retargeted = &fixture.state.viewport_slides[0];
+    assert_eq!(retargeted.from_x, shown);
+    assert_ne!(retargeted.from_x, width);
+    assert_eq!(
+        super::viewport_delta(&fixture.state.viewport_slides, id, second_switch),
+        shown
+    );
 }
 
 #[test]

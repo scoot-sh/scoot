@@ -500,6 +500,8 @@ impl State {
     /// them arrive as one strip. Empty and single-window workspaces fall out
     /// naturally: empty has no visible tiled window so no slide starts (but
     /// the index is still recorded), single-window slides its one window.
+    /// A switch arriving mid-flight retargets from the current visual
+    /// (never back to the full edge); a landed one starts fresh.
     /// One allocation-free scan per output; the slide itself is one small
     /// struct per switched output.
     fn update_viewport_slides(&mut self, arrangement: &Arrangement, now: Instant) {
@@ -543,7 +545,25 @@ impl State {
                     let from_x = if active > old { width } else { -width };
                     match self.viewport_slides.iter_mut().find(|s| s.output == id) {
                         Some(slide) => {
-                            slide.from_x = from_x;
+                            // A switch mid-flight continues from what is on
+                            // screen, like a per-window retarget: the current
+                            // visual becomes the new start, so rapid A→B→C
+                            // switches and direction reversals never jump
+                            // back to the full edge. A landed slide (kept
+                            // only until the next tick prunes it) starts
+                            // fresh from the edge instead: its visual is the
+                            // target already, which would be no slide at all.
+                            if viewport_is_finished(slide, now) {
+                                slide.from_x = from_x;
+                            } else {
+                                slide.from_x = viewport_position(
+                                    slide.from_x,
+                                    now,
+                                    slide.start,
+                                    slide.duration,
+                                    slide.easing,
+                                );
+                            }
                             slide.start = now;
                             slide.duration = duration;
                             slide.easing = easing;
