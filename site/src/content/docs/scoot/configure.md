@@ -199,7 +199,7 @@ input. The same state is drivable over IPC
 |---|---|---|---|---|
 | `enabled` | boolean | `false` | live, snaps any live slide | Slide tiled windows horizontally and vertically to their new place instead of jumping. |
 | `duration_ms` | integer | `150` | live, later slides only | How long one slide takes. `0` snaps immediately. Clamped `0..=500`. |
-| `easing` | string | `"ease-out"` | live, later slides only | The curve: `"ease-out"` or `"linear"`. Anything else warns and uses the default. |
+| `easing` | string | `"ease-out"` | live, later slides only | The curve: `"ease-out"` (default), `"linear"`, or `"spring"` (overshoots ~9% past the target, then settles; still lands exactly on time). Anything else warns and uses the default. |
 
 ```toml
 [animation]
@@ -212,8 +212,12 @@ Off by default, and free when off: no timer, no per-frame work, no
 allocation. When on, only the moving windows' old and new rects are
 redrawn per frame; clients are never asked to re-commit. `scoot msg
 windows` and pointer input keep reporting the final geometry while a
-slide runs. Floating, fullscreen and maximized windows snap rather than
-slide. Disabling mid-slide snaps to the final frame.
+slide runs — a spring overshoot is purely visual; input still hits the
+target. Floating, fullscreen and maximized windows snap rather than
+slide. Disabling mid-slide snaps to the final frame. A spring costs one
+table lookup and a lerp per window per frame (no `exp`/`sin` on the
+frame path); the clamped duration still bounds its settle, and a frame
+past its deadline still snaps instead of queuing.
 
 ## Example config.toml
 
@@ -255,7 +259,7 @@ scale = 1.0
 # Slide tiled windows horizontally and vertically instead of jumping. Off by default.
 # enabled = false
 # duration_ms = 150
-# easing = "ease-out"
+# easing = "ease-out"  # "linear" or "spring"
 
 # [renderer]
 # Type string, default "auto". One of "auto" (the default: the GPU

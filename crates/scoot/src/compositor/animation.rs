@@ -23,9 +23,12 @@
 //!
 //! # Easing
 //!
-//! A cheap closed-form ease-out cubic (`1-(1-p)^3`: two multiplies, no
-//! transcendental, no table) plus a linear spelling. Progress is clamped
-//! `0..=1` before it reaches either.
+//! Cheap closed-form ease-out cubic (`1-(1-p)^3`: two multiplies, no
+//! transcendental, no table), a linear spelling, and an optional spring
+//! that overshoots and settles. The spring is a small precomputed table
+//! (no per-frame transcendental, no allocation): progress is clamped
+//! `0..=1` before it reaches any curve, and every curve lands exactly at
+//! `1.0` so a late frame still snaps and the compositor still goes idle.
 
 use std::time::{Duration, Instant};
 
@@ -46,6 +49,11 @@ pub enum Easing {
     EaseOut,
     /// Straight-line interpolation. For testing and for anyone who wants it.
     Linear,
+    /// An underdamped spring (damping ratio 0.6): overshoots about 9% past
+    /// the target mid-flight, then settles back to an exact landing. Same
+    /// duration bound as the other curves. For users who prefer niri-style
+    /// motion.
+    Spring,
 }
 
 impl Easing {
@@ -57,6 +65,7 @@ impl Easing {
             Some(raw) => match raw.trim() {
                 "ease-out" => Ok(Self::EaseOut),
                 "linear" => Ok(Self::Linear),
+                "spring" => Ok(Self::Spring),
                 _ => Err(raw.to_owned()),
             },
         }
@@ -67,6 +76,7 @@ impl Easing {
         match self {
             Self::EaseOut => "ease-out",
             Self::Linear => "linear",
+            Self::Spring => "spring",
         }
     }
 }
@@ -126,7 +136,8 @@ pub fn progress(now: Instant, start: Instant, duration: Duration) -> f32 {
 }
 
 /// The easing curve: progress in, eased progress out. Pure arithmetic, no
-/// transcendental, no table.
+/// transcendental, no table — except the spring, which lerps a small baked
+/// table (two loads and a multiply, still no transcendental).
 pub fn easing_factor(progress: f32, easing: Easing) -> f32 {
     let clamped = progress.clamp(0.0, 1.0);
     match easing {
@@ -135,13 +146,62 @@ pub fn easing_factor(progress: f32, easing: Easing) -> f32 {
             let inv = 1.0 - clamped;
             1.0 - inv * inv * inv
         }
+        Easing::Spring => spring_factor(clamped),
     }
 }
 
+/// The spring curve, sampled from a 65-entry table over `p` in `0..=1`.
+///
+/// The entries bake the step response of an underdamped spring (damping
+/// ratio 0.6, normalized frequency 7.0): fast off the mark, about 9%
+/// overshoot past the target mid-flight, settled back by the deadline.
+/// Endpoints are pinned (`[0] == 0.0`, `[64] == 1.0`) so the slide lands
+/// exactly and prunes on time. Baked once at compile time so the frame
+/// path pays no `exp`/`sin` per window per frame: just a table lookup and
+/// a lerp. Clamped duration still bounds the settle, and a frame past its
+/// deadline still snaps (`progress` reaches `1.0` first).
+const SPRING_TABLE: [f32; 65] = [
+    0.000000, 0.005722, 0.021877, 0.046999, //
+    0.079705, 0.118695, 0.162760, 0.210781, //
+    0.261736, 0.314691, 0.368808, 0.423338, //
+    0.477619, 0.531074, 0.583206, 0.633594, //
+    0.681888, 0.727804, 0.771121, 0.811673, //
+    0.849347, 0.884074, 0.915828, 0.944619, //
+    0.970489, 0.993507, 1.013767, 1.03138, //
+    1.046476, 1.059194, 1.069685, 1.078105, //
+    1.084615, 1.089376, 1.092551, 1.094299, //
+    1.094775, 1.094131, 1.092513, 1.090057, //
+    1.086895, 1.083148, 1.078931, 1.074349, //
+    1.069498, 1.064465, 1.059329, 1.05416, //
+    1.04902, 1.043964, 1.039037, 1.034279, //
+    1.029722, 1.025393, 1.021312, 1.017495, //
+    1.01395, 1.010686, 1.007703, 1.005001, //
+    1.002576, 1.00042, 0.998524, 0.996878, //
+    1.000000,
+];
+
+/// The spring easing curve: progress in (already clamped `0..=1`), eased
+/// progress out. Overshoots past `1.0` mid-flight by design; lands exactly.
+fn spring_factor(progress: f32) -> f32 {
+    const LAST: f32 = (SPRING_TABLE.len() - 1) as f32;
+    let scaled = progress * LAST;
+    let low = scaled.floor() as usize;
+    // `progress <= 1.0`, so `low <= 64`; the `min` is belt and braces.
+    let low = low.min(SPRING_TABLE.len() - 1);
+    let high = (low + 1).min(SPRING_TABLE.len() - 1);
+    let t = scaled - low as f32;
+    SPRING_TABLE[low] + (SPRING_TABLE[high] - SPRING_TABLE[low]) * t
+}
+
 /// Where a slide is seen at `now`: the interpolation of its endpoints.
+/// The spring overshoots past the target by design, so the arithmetic is
+/// saturating: an `i32::MAX` window overshooting forward cannot wrap onto
+/// the screen. (For the non-overshooting curves the result is identical to
+/// plain `+`.)
 pub fn slide_position(from_x: i32, to_x: i32, progress: f32, easing: Easing) -> i32 {
     let factor = easing_factor(progress, easing);
-    from_x + ((f64::from(to_x - from_x) * f64::from(factor)).round() as i32)
+    let delta = i64::from(to_x) - i64::from(from_x);
+    from_x.saturating_add((delta as f64 * f64::from(factor)).round() as i32)
 }
 
 /// Where `slide` is seen at `now`.
