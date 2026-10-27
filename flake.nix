@@ -181,8 +181,8 @@
             # it got -- it cannot drift out of sync quietly. Nothing else
             # in Cargo.lock comes from git.
             outputHashes = {
-              "git+https://github.com/scoot-sh/smithay?rev=fdf424d633fc15736a4a9c967b4e04a9e1e90077#fdf424d633fc15736a4a9c967b4e04a9e1e90077" =
-                "sha256-kab0ji3Edz571Xv3BAZhB/KzERA0HTef1Gw2NyH9h/c=";
+              "git+https://github.com/scoot-sh/smithay?rev=b65cbc5f6b1279e4f03aab950d7ee2a817f4ddfb#b65cbc5f6b1279e4f03aab950d7ee2a817f4ddfb" =
+                "sha256-9+flWML4hGRNd4vsdGikC3wiDFM+Bp9GZALaAZty90w=";
               "git+https://github.com/scoot-sh/wayland-rs?rev=70f81e005179463fb4d46ac68045a7f21eb5aff2#70f81e005179463fb4d46ac68045a7f21eb5aff2" =
                 "sha256-cANItBOi9o+Jb1+u86thcBgdb6u0u2becgJoMI/v4T8=";
             };

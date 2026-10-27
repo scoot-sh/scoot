@@ -68,4 +68,4 @@ updated to the pick in the same branch. Spike source measured at
 `c96e7e341`, deleted before merge. What did not run: real keys on M2
 hardware, the M2 Asahi kernel's `memfd_secret` (dev VM has it). Found on
 the way: the shared keymap-fd offset bug, filed as
-[core/keymap-fd-shared-offset](../../../backlog/core/keymap-fd-shared-offset.md).
+[core/keymap-fd-shared-offset](../../../backlog/resolved/keymap-fd-shared-offset-done.md).

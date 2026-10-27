@@ -1,9 +1,10 @@
 ---
 title: "Second read()-based keyboard client gets an empty keymap"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-27"
 ---
 
 # Second read()-based keyboard client gets an empty keymap
@@ -47,3 +48,30 @@ sends to all known keyboards), virtual-keyboard clients, and the
 
 The keyboard-stack pick itself (`scootui-keyboard-spike` decided
 `xkbcommon`); client-side workarounds in scootui.
+
+## What landed
+
+PR #764. Fork commit `b65cbc5f` on `scoot/cursor-dmabuf-storage`, repinned here
+(`crates/scoot/Cargo.toml`, `Cargo.lock`, `flake.nix` `outputHashes`,
+`dev/forks.md`, the `CLAUDE.md` pin paragraph), plus
+`crates/scoot/src/compositor/input/keymap_fd.rs` pinning it.
+
+`SealedFile` gains `open_independent`: a read-only reopen through
+`/proc/self/fd` with its own offset at 0. Seals live on the file, so the
+copy stays sealed; it is closed once the send returns, and the receiver's
+own copy outlives it. `KeymapFile::with_fd` hands each send that copy
+instead of the shared fd, falling back to the shared description where it
+cannot be opened (no procfs). Sends happen only on keyboard creation and
+keymap change (`send_keymap` returns early on an unchanged id), so the
+per-key path allocates nothing new.
+
+Measured on the dev VM: before the repin, three new tests fail with
+`client 1 read 0 of 35572 announced bytes`; after, all four pass -- a
+sequential second reader, a `change_keymap` broadcast to all known
+keyboards, virtual-keyboard clients, and a well-behaved survivor reading
+whole keymaps while a second connection floods past the wayland fork's
+queue cap and is disconnected by it. Full cycle on the same build:
+`cargo nextest run -p scoot` 2877 passed / 42 skipped;
+`cargo test -p scoot` 2835 passed in the bin target plus every
+integration target green; `cargo clippy -p scoot --all-targets --
+-D warnings` and `cargo fmt --check -p scoot` clean.

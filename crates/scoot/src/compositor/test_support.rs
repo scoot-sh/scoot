@@ -279,6 +279,12 @@ impl<S, A> Harness<S, A> {
         &self.clients[index].client
     }
 
+    /// How many clients are connected: the index the next [`Harness::spawn`]
+    /// will hand out, for scripts that need to know who they are.
+    pub(crate) fn clients_len(&self) -> usize {
+        self.clients.len()
+    }
+
     /// Runs one step on client 0 to completion, then lets the compositor
     /// settle so anything the step provoked (a configure, a re-layout) has
     /// happened before the test looks.

@@ -29,6 +29,8 @@ mod compose;
 #[cfg(test)]
 mod global_tests;
 pub(super) mod interaction;
+#[cfg(test)]
+mod keymap_fd;
 mod modifiers;
 #[cfg(test)]
 mod tests;
