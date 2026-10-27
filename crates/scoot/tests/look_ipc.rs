@@ -422,11 +422,17 @@ impl Drop for Session {
     }
 }
 
-/// Whether a `scoot look apply --from-compositor` child runs anywhere:
-/// the compositor spawns one per IPC swap, so a visible one proves a swap
-/// is in flight. Reads /proc directly (Linux-only, like this file): no
-/// subprocess, no buffering, no new dependency.
-fn apply_child_running() -> bool {
+/// Whether one of *this session's* `scoot look apply --from-compositor`
+/// children runs: the compositor spawns one per IPC swap, so a visible one
+/// proves a swap is in flight. Reads /proc directly (Linux-only, like this
+/// file): no subprocess, no buffering, no new dependency.
+///
+/// Scoped to the session's compositor pid: a global scan would also match a
+/// concurrent `look_ipc` test's child (nextest runs each test in its own
+/// process, several `look_ipc` tests at once), firing the gate before this
+/// session's own swap has parked and letting the second request win the
+/// race -- which refuses with lock contention instead of the gate.
+fn apply_child_running_for(compositor: u32) -> bool {
     let proc = std::fs::read_dir("/proc");
     let entries = match proc {
         Ok(entries) => entries,
@@ -435,7 +441,20 @@ fn apply_child_running() -> bool {
     for entry in entries.flatten() {
         // NUL-separated argv: `scoot look apply <name> --from-compositor`.
         let cmdline = std::fs::read(entry.path().join("cmdline")).unwrap_or_default();
-        if String::from_utf8_lossy(&cmdline).contains("--from-compositor") {
+        if !String::from_utf8_lossy(&cmdline).contains("--from-compositor") {
+            continue;
+        }
+        // `/proc/<pid>/stat`: `pid (comm) state ppid ...` -- comm may hold
+        // spaces or parens, so the parent is read past the last `)`.
+        let stat = std::fs::read_to_string(entry.path().join("stat")).unwrap_or_default();
+        let after_comm = match stat.rfind(')') {
+            Some(idx) => &stat[idx + 1..],
+            None => continue,
+        };
+        let mut fields = after_comm.split_whitespace();
+        let _state = fields.next();
+        let ppid: u32 = fields.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        if ppid == compositor {
             return true;
         }
     }
@@ -625,10 +644,13 @@ fn a_second_swap_while_one_runs_is_refused() {
     // below (process spawn plus IPC connect) takes milliseconds, while the
     // park lands microseconds after the spawn, so the park is set before
     // the second request reaches the gate. (The compositor log would do
-    // too, but its file writer may buffer; /proc never does.)
+    // too, but its file writer may buffer; /proc never does.) Scoped to
+    // this session's compositor pid: a global scan would also match a
+    // concurrent look_ipc test's child and fire early.
+    let compositor = session.child.id();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        if apply_child_running() {
+        if apply_child_running_for(compositor) {
             break;
         }
         assert!(
