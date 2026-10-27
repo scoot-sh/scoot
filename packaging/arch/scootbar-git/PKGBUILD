@@ -5,7 +5,7 @@
 # Conflicts with `scootbar`: install one or the other, never both.
 
 pkgname=scootbar-git
-pkgver=0.6.8.r0.g0000000
+pkgver=0.6.9.r0.g0000000
 pkgrel=1
 pkgdesc='Status bar for the scoot compositor (git)'
 arch=('x86_64' 'aarch64')
