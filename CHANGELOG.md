@@ -25,7 +25,7 @@ release, entries were dated.
 - added: optional spring easing for the window slide ([#751](https://github.com/scoot-sh/scoot/pull/751))
 - added: slide the incoming strip on workspace switches ([#752](https://github.com/scoot-sh/scoot/pull/752))
 - fixed: continue viewport slide from the visual on mid-flight retarget ([#754](https://github.com/scoot-sh/scoot/pull/754))
-- added: fade tiled windows in on open and out on close ([#753](https://github.com/scoot-sh/scoot/pull/753))
+- added: fade new tiled windows in on open ([#753](https://github.com/scoot-sh/scoot/pull/753))
 - fixed: make the open fade new-only and drop the dead close fade ([#755](https://github.com/scoot-sh/scoot/pull/755))
 
 ### scoot
@@ -33,8 +33,7 @@ release, entries were dated.
 - added: a `"spring"` easing for the optional `[animation]` slide (niri-style: overshoots ~9% past the target, then settles; still lands exactly on time and goes idle). Same retarget-from-visual and damage discipline, still no client re-commit; a baked table keeps it to a lookup and a lerp per window per frame. Not breaking: new spelling only, default still `"ease-out"`, no CLI or protocol changed.
 - added: the optional `[animation]` slide now moves vertically as well as horizontally, so stacked windows in one column slide to their new y instead of jumping. Same interpolation, retarget-from-visual and damage discipline, still no client re-commit. Not breaking: no new option, no CLI or protocol changed.
 - added: the optional `[animation]` slide now carries workspace switches: the incoming strip slides in from the output edge as one viewport offset (right for a higher workspace, left for a lower one), empty workspaces snap, each output animates independently. Same zero-cost-when-off bar, damage limited to the incoming rects, no client re-commit, lock and reload-disable snap. Not breaking: no new option, no CLI or protocol changed.
-- added: the optional `[animation]` gate now also fades tiled windows in on open (`0 → 1`) and out on close (`1 → 0`), over the same `duration_ms`/`easing` as the slide. A close keeps the window's last buffers drawn while it fades (at most 8 retained windows, each held no longer than one `duration`; the 9th close snaps the oldest away), with no client re-commit; a close mid-fade continues from what is on screen. Same zero-cost-when-off bar, frames only while in flight, damage limited to the fading rects, lock and reload-disable snap, `scoot-core` untouched. Not breaking: no new option, no CLI or protocol changed.
-- fixed: the `[animation]` fade is now open-only, and only genuinely new windows fade in. A live run showed the close fade drew nothing for real clients (foot destroys its surface on close, so the retained window yields no elements) — closes snap instead of holding buffers for an effect that never shows. It also showed a window scrolling back into view after a sibling closed fading in like a fresh open — returning windows now snap while their siblings slide. Not breaking: no option, CLI or protocol changed; a close simply shows its final frame immediately.
+- added: the optional `[animation]` gate now also fades new tiled windows in on open (`0 → 1`) over the same `duration_ms`/`easing` as the slide. A window that scrolls back into view after a sibling closes snaps instead of fading, and a close snaps (a real client destroys its surface on close, so there is nothing left to fade out). Same zero-cost-when-off bar, frames only while in flight, damage limited to the fading rects, no client re-commit, lock and reload-disable snap. Not breaking: no new option, no CLI or protocol changed.
 
 ## [0.6.5](https://github.com/scoot-sh/scoot/compare/v0.6.4...v0.6.5) - 2026-10-25
 
