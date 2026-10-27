@@ -86,7 +86,8 @@ the bare desktop does not dismiss in v1: with exclusive keyboard the
 compositor holds focus, so the click never reaches the panel. A
 second `scootlaunch` while the panel is open dismisses it, so one
 bind toggles: no pid file, no abstract name, just a socket in
-`$XDG_RUNTIME_DIR` with the peer's uid checked.
+`$XDG_RUNTIME_DIR` with the peer's uid checked, plus a
+`scootlaunch-<display>.lock` file that serialises two opens at once.
 
 ## Config
 

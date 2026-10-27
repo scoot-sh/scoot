@@ -1,16 +1,33 @@
 ---
 title: "scootlaunch socket claim follow-ups from the #766 review"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-27"
 ---
 
 # scootlaunch socket claim follow-ups from the #766 review
 
 Filed 2026-10-27. Serves **daily-drive** (a second press on the launcher bind must never silently do nothing, hang, or leave the toggle name missing; the published socket and its lock file are the toggle contract).
 
-Each item below was re-verified against the code on `origin/main` at `51e30fef` (the #766 merge) before filing; line refs are `crates/scootlaunch/src/socket.rs` unless named otherwise.
+Each item below was re-verified against the code on `origin/main` at `51e30fef` (the #766 merge) before filing; line refs are `crates/scootlaunch/src/socket.rs` unless named otherwise. Re-verified against `origin/main` at `aa700233` before fixing: no changes to `socket.rs` since `51e30fef`, all nine still hold.
+
+## Resolution
+
+Landed in `crates/scootlaunch/src/socket.rs` plus `site/src/content/docs/scootlaunch/panel.md` and the `launch-toggle-race-and-socket-mode-done.md` tidy:
+
+- F1: losing the lock race now waits briefly for the winner's panel (`PEER_TIMEOUT`, 20 ms polls) then yields; a lock held with no panel answering is a loud `Err`, not silent `Signalled`.
+- F2: the fast path is now nonblocking (`socket_with` + `NONBLOCK`, `poll` for `OUT` with `PEER_TIMEOUT`, `send`): a deaf listener with a full backlog times out instead of hanging the press.
+- F3: `clear_stale` no longer unlinks; it verifies (socket, not answering) and the staged rename replaces a stale socket atomically, so the name always resolves during handover.
+- F4: `stage` now reopens staging `O_DIRECTORY|O_NOFOLLOW` via `rustix`, `fchmod`s to `0700` through the fd, and binds under `/proc/self/fd/<n>/s`, matching `scoot/src/compositor/ipc/listener.rs` (no `libc` crate).
+- F5: the lock opens `RDWR|CREATE|NOFOLLOW|CLOEXEC` (`0600`) via `rustix`: a symlinked lock path fails with `ELOOP` instead of being followed.
+- F6: the `SUN_PATH_MAX` check runs at the top of `open`/`claim`, ahead of any probe, so an overlong path gets the friendly message.
+- F7: `panel.md` now names `scootlaunch-<display>.lock` beside the socket.
+- F8: the archive file drops its empty template sections, draft paragraph and instruction block.
+- F9: `_lock` now documents the plain-`File`-held-for-life shape.
+
+Evidence: six new `socket::tests` (`a_lock_holder_with_no_panel_is_a_visible_error`, `a_full_backlog_does_not_hang_the_press`, `clearing_a_stale_socket_leaves_no_missing_name`, `staging_through_a_symlink_is_refused`, `a_symlinked_lock_is_refused`, `an_overlong_path_gets_the_friendly_length_error`) all failed before and pass after; `nextest -p scootlaunch` 321 passed, `cargo test -p scootlaunch` green, `clippy -D warnings` and `fmt --check` clean. Claim path stays allocation-light (fds, stack poll/timespec, no heap on the happy path beyond the existing staging name); toggle contract unchanged.
 
 ## The gap
 
