@@ -1,9 +1,10 @@
 ---
 title: "Site: scootlaunch/scootnotify break the per-app page template"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-27"
 ---
 
 # Site: scootlaunch/scootnotify break the per-app page template
@@ -43,3 +44,18 @@ llms gate stays green (`pnpm verify`).
 
 Rewriting `panel.md` or the notify configure content — this is
 structure plus symptom entries, not reference prose.
+
+## Resolution
+
+Landed in the docs(site) PR with webtop-docs-glibc-tag: added
+`site/src/content/docs/scootlaunch/troubleshooting.md` and
+`site/src/content/docs/scootnotify/troubleshooting.md` (task-first,
+plain English, `> **Symptom:**` boxes, snippet gates green), registered
+both in the `scootlaunch`/`scootnotify` sidebars in
+`site/astro.config.mjs`, and linked both ways with
+`desktop/index.md#notifications` and `troubleshooting/index.md`.
+Conscious decision: panel+configure stays one page — `panel.md` already
+holds the config and theming, so no separate `scootlaunch/configure.md`.
+The `customSets` in `astro.config.mjs` already cover the new pages via
+`scootlaunch/**` and `scootnotify/**`, so the llms gate stays green with
+no extra sets.

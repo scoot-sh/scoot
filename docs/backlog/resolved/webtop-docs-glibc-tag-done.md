@@ -1,9 +1,10 @@
 ---
 title: "webtop page names no glibc tag and the install page does not warn off Alpine/musl"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-27"
 ---
 
 # webtop page names no glibc tag and the install page does not warn off Alpine/musl
@@ -42,3 +43,20 @@ a stranger following Install -> webtop walks into a wall on the default image.
 ## Not in this ticket
 
 The nested socket-steal and foot-version bugs found in the same test (separate tickets).
+
+## Resolution
+
+Landed in the docs(site) PR with site-section-templates: webtop.md now
+names the glibc floor (2.36+, via the Install page) and the tags
+(`debian-xfce` works, `ubuntu-xfce` is glibc-based too; `latest` is
+Alpine/musl, build from source there), with `PIXELFLUX_WAYLAND=true`
+explicit. The Install Any-Linux tab already warned off Alpine/musl;
+the remaining gap was the curl-(23) pipe noise, fixed docs-side (the
+smaller fix): one line that a `curl: (23)` above a
+`scoot-install: error:` is fallout, not the cause.
+
+Evidence: `site/public/install.sh:369-372` refuses musl and floors
+glibc at 2.36; linuxserver docs Version Tags table names `latest` as
+XFCE Alpine and `debian-xfce`/`ubuntu-xfce` as Debian/Ubuntu;
+`nested-steals-host-wayland-socket-done.md` records the field test on
+`debian-xfce + PIXELFLUX_WAYLAND=true`.

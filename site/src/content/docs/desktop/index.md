@@ -612,7 +612,8 @@ into the new config; no re-login):
 | `desktop.notifications.bar.icons.dnd` | string: empty or one glyph | `"☾"` | the icon the feed sends while do-not-disturb is on |
 | `desktop.theme.targets.notifications.enable` | bool | `true` | theme the notification daemon from the look; `false` keeps the daemon's own style while the rest follows the look |
 
-Troubleshooting, by symptom:
+Troubleshooting, by symptom (full diagnosis in [scootnotify troubleshooting](../scootnotify/troubleshooting.md)
+and the [Symptom index](../troubleshooting/)):
 
 - *No popups at all.* Check the unit: `systemctl --user status scootnotify`
   (or `mako` with the mako escape hatch) — and that D-Bus knows it:

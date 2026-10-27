@@ -202,6 +202,7 @@ export default defineConfig({
             { label: 'Overview', slug: 'scootlaunch' },
             { label: 'The panel', slug: 'scootlaunch/panel' },
             { label: 'CLI reference', slug: 'scootlaunch/cli' },
+            { label: 'Troubleshooting', slug: 'scootlaunch/troubleshooting' },
           ],
         },
         {
@@ -210,6 +211,7 @@ export default defineConfig({
             { label: 'Overview', slug: 'scootnotify' },
             { label: 'Configure', slug: 'scootnotify/configure' },
             { label: 'CLI reference', slug: 'scootnotify/cli' },
+            { label: 'Troubleshooting', slug: 'scootnotify/troubleshooting' },
           ],
         },
         {
