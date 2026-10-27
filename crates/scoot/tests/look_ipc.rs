@@ -422,11 +422,17 @@ impl Drop for Session {
     }
 }
 
-/// Whether a `scoot look apply --from-compositor` child runs anywhere:
-/// the compositor spawns one per IPC swap, so a visible one proves a swap
-/// is in flight. Reads /proc directly (Linux-only, like this file): no
-/// subprocess, no buffering, no new dependency.
-fn apply_child_running() -> bool {
+/// Whether one of *this session's* `scoot look apply --from-compositor`
+/// children runs: the compositor spawns one per IPC swap, so a visible one
+/// proves a swap is in flight. Reads /proc directly (Linux-only, like this
+/// file): no subprocess, no buffering, no new dependency.
+///
+/// Scoped to the session's compositor pid: a global scan would also match a
+/// concurrent `look_ipc` test's child (nextest runs each test in its own
+/// process, several `look_ipc` tests at once), firing the gate before this
+/// session's own swap has parked and letting the second request win the
+/// race -- which refuses with lock contention instead of the gate.
+fn apply_child_running_for(compositor: u32) -> bool {
     let proc = std::fs::read_dir("/proc");
     let entries = match proc {
         Ok(entries) => entries,
@@ -435,7 +441,20 @@ fn apply_child_running() -> bool {
     for entry in entries.flatten() {
         // NUL-separated argv: `scoot look apply <name> --from-compositor`.
         let cmdline = std::fs::read(entry.path().join("cmdline")).unwrap_or_default();
-        if String::from_utf8_lossy(&cmdline).contains("--from-compositor") {
+        if !String::from_utf8_lossy(&cmdline).contains("--from-compositor") {
+            continue;
+        }
+        // `/proc/<pid>/stat`: `pid (comm) state ppid ...` -- comm may hold
+        // spaces or parens, so the parent is read past the last `)`.
+        let stat = std::fs::read_to_string(entry.path().join("stat")).unwrap_or_default();
+        let after_comm = match stat.rfind(')') {
+            Some(idx) => &stat[idx + 1..],
+            None => continue,
+        };
+        let mut fields = after_comm.split_whitespace();
+        let _state = fields.next();
+        let ppid: u32 = fields.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        if ppid == compositor {
             return true;
         }
     }
@@ -588,21 +607,24 @@ fn a_second_swap_while_one_runs_is_refused() {
     let scratch = Scratch::new("concurrent");
     let session = Session::start(&scratch);
     let lock = session.private_dir().join("look.lock");
-    // Hold the state-dir lock so the first swap's child parks in its
-    // lock wait: the swap is in flight (the compositor holds it parked)
-    // however long the child waits. The holder exits by itself after 6s
-    // -- well past the second request below, and well before the
-    // child's 10s lock wait runs out -- so no kill is needed (killing
-    // `flock` could orphan its `sleep` still holding the lock).
-    let mut holder = Command::new("flock")
-        .arg(&lock)
-        .arg("sleep")
-        .arg("6")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("flock holds the state-dir lock (util-linux)");
+    // Hold the state-dir lock in-process so the first swap's child parks
+    // in its lock wait: the swap is in flight (the compositor holds it
+    // parked) for as long as this guard lives. The guard drops only after
+    // the second request has been answered, so no wall-clock lifetime can
+    // expire early on a loaded runner (the old `flock sleep 6` holder did:
+    // CI run 40437160156 took 7.0s, the holder had exited, the first swap
+    // had completed, and the second was NOT refused). Explicit release via
+    // drop, never a kill (killing an external `flock` could orphan its
+    // `sleep` still holding the lock).
+    let lock_file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock)
+        .expect("the test holds the state-dir lock");
+    rustix::fs::flock(&lock_file, rustix::fs::FlockOperation::LockExclusive)
+        .expect("an exclusive state-dir lock");
     // The first swap parks; the second meets the one-swap gate.
     let socket = session.socket.clone();
     let scoot = scoot();
@@ -615,14 +637,20 @@ fn a_second_swap_while_one_runs_is_refused() {
             .output()
             .expect("the first look-apply runs")
     });
-    // Deterministic gate: the swap's child process exists from the
-    // spawn, and parking follows on the same loop thread with nothing
-    // blocking between -- so a visible `--from-compositor` child plus a
-    // grace beat proves the first swap is in flight. (The compositor log
-    // would do too, but its file writer may buffer; /proc never does.)
+    // Deterministic gate: the swap's child process exists from the spawn,
+    // and parking follows on the same loop thread with nothing blocking
+    // between -- so a visible `--from-compositor` child proves the first
+    // swap is in flight. No grace sleep: spawning the second `scoot msg`
+    // below (process spawn plus IPC connect) takes milliseconds, while the
+    // park lands microseconds after the spawn, so the park is set before
+    // the second request reaches the gate. (The compositor log would do
+    // too, but its file writer may buffer; /proc never does.) Scoped to
+    // this session's compositor pid: a global scan would also match a
+    // concurrent look_ipc test's child and fire early.
+    let compositor = session.child.id();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        if apply_child_running() {
+        if apply_child_running_for(compositor) {
             break;
         }
         assert!(
@@ -632,7 +660,6 @@ fn a_second_swap_while_one_runs_is_refused() {
         );
         std::thread::sleep(Duration::from_millis(100));
     }
-    std::thread::sleep(Duration::from_millis(300));
     let out = session.msg(&["look-apply", "look-b"]);
     assert!(
         !out.status.success(),
@@ -643,9 +670,9 @@ fn a_second_swap_while_one_runs_is_refused() {
         stderr.contains("already running"),
         "the refusal names the gate: {stderr}"
     );
-    // Release the lock: the holder exits by itself, and the first
-    // swap completes once it does.
-    holder.wait().ok();
+    // Release the lock now that the second request has been answered: the
+    // first swap completes once its child acquires it.
+    drop(lock_file);
     let out = first.join().expect("the first swap answers");
     assert!(
         out.status.success(),

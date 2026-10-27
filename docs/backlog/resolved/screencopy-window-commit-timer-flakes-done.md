@@ -1,9 +1,10 @@
 ---
 title: "screencopy/window_commit timer tests flake under parallel load"
-status: "open"
-area: "testing"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-27"
 ---
 
 # screencopy/window_commit timer tests flake under parallel load
@@ -22,4 +23,10 @@ Characterize the base rate on `main` under full-suite load: run full `cargo test
 
 ## Not in this ticket
 
-The `refused_cost` fd leak (own ticket); the probe-caused `timer_armed` reds (fixed in the #655 fix round).
+The `refused_cost` fd leak (own ticket, since resolved as a swept-delta measure in #757); the probe-caused `timer_armed` reds (fixed in the #655 fix round).
+
+## Resolution (2026-10-27)
+
+Landed as `test(scoot): quiesce before parking screencopy captures` in this PR: `park_across_deferred_lock` and `a_parked_capture_outlives_a_locker_that_dies_mid_wait` now wait for a quiescent `frame_serial` (settle plus ticks until the serial holds, up to 10x, asserting stillness) before `CaptureWithoutWaiting`. This replaces the immediate park-after-Ready (a wall-clock guess that the screen is static) with an event wait, mirroring the proven pattern in `parked_captures_on_two_sessions_are_all_delivered_by_one_confirm` which already drains the same load shape with a retry. No timeouts raised (`POLL_PATIENCE` 300 ms and `tick(50 ms)` bounds unchanged); `desync_batch` has no wall-clock by design and is left untouched.
+
+Evidence: before — ticket's trio: targeted runs green (2733 passed / 1 `refused_cost` only; main trio 9/1; screencopy module 58/58), full-suite intermittent `parked_capture`/`desync_batch`. After — dev VM (`ssh -p 2223`, `/dev/shm/wt-bl5`, `CARGO_INCREMENTAL=0`, `nix develop path:/dev/shm/wt-bl5 -c cargo ...`): `screencopy::tests::a_parked_capture*` (3 tests) 50/50 green; `window_commit::tests::batch` (3 tests) 20/20 green; full `cargo test -p scoot --bin scoot` 2831 passed / 0 failed / 42 ignored; `cargo fmt --check -p scoot` and `cargo clippy -p scoot --all-targets -- -D warnings` clean.

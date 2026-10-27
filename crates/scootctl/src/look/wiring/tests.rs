@@ -1,5 +1,12 @@
 //! The wiring check against scratch dirs: statuses, real paths, and the
 //! absent-leaf silence. No environment is read: every dir is explicit.
+//!
+//! Audit 2026-10-27 (`scootctl-starship-env-race`): no test in this module
+//! touches the process environment -- `STARSHIP_CONFIG` rides `WiringInput`
+//! (the `starship_config_injection` test fails if the field is removed), so
+//! concurrent `cargo test` threads cannot race. The remaining `set_var`
+//! users in scootctl are the re-exec'd help-docs child (separate process)
+//! and the `PATH_LOCK`-serialized leaves suite; nothing else mutates env.
 
 use super::{WiringInput, WiringStatus, check_wiring};
 use scoot_look::state::Record;

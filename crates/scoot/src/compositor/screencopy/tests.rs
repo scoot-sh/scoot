@@ -746,6 +746,31 @@ fn park_across_deferred_lock(fixture: &mut Fixture) -> Instant {
         })
         .frame();
     assert_eq!(outcome, Outcome::Ready);
+    // Wait for the screen to go quiescent before parking: a stable
+    // `frame_serial` across a settle plus several ticks means no commit is
+    // still working its way through the frame timer. Without this, under
+    // full-suite parallel load the pre-park frame can be consumed by an
+    // earlier tick than the park's own, leaving `delivered` behind the
+    // serial the park observes -- the measured load shape (see
+    // `parked_captures_on_two_sessions_are_all_delivered_by_one_confirm`
+    // for the retry that drains it). Quiescence makes the park
+    // deterministic: nothing after it can advance the serial again.
+    let mut serial = fixture.state.frame_serial;
+    for _ in 0..10 {
+        fixture.settle();
+        fixture.tick(Duration::from_millis(50));
+        let next = fixture.state.frame_serial;
+        if next == serial {
+            break;
+        }
+        serial = next;
+    }
+    assert_eq!(
+        fixture.state.frame_serial, serial,
+        "the screen must be quiescent before parking: a still-advancing \
+         frame_serial would serve the parked capture this test asserts \
+         `Waiting` on"
+    );
     fixture.run(Step::CaptureWithoutWaiting);
     let (outcome, _) = fixture.run(Step::PollFrame).frame();
     assert_eq!(outcome, Outcome::Waiting);
@@ -1092,6 +1117,23 @@ fn a_parked_capture_outlives_a_locker_that_dies_mid_wait() {
         })
         .frame();
     assert_eq!(outcome, Outcome::Ready);
+    // Quiesce before parking, as in `park_across_deferred_lock`: under
+    // full-suite parallel load an unquiesced park can be consumed by an
+    // earlier tick, so the post-confirm `PollFrame` would see `Waiting`.
+    let mut serial = fixture.state.frame_serial;
+    for _ in 0..10 {
+        fixture.settle();
+        fixture.tick(Duration::from_millis(50));
+        let next = fixture.state.frame_serial;
+        if next == serial {
+            break;
+        }
+        serial = next;
+    }
+    assert_eq!(
+        fixture.state.frame_serial, serial,
+        "the screen must be quiescent before parking"
+    );
     fixture.run(Step::CaptureWithoutWaiting);
 
     let locker = fixture.spawn(run_client);
