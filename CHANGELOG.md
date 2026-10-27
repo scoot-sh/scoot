@@ -17,6 +17,17 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.6](https://github.com/scoot-sh/scoot/compare/v0.6.5...v0.6.6) - 2026-10-27
+
+### scoot
+
+- added: slide windows vertically as well as horizontally ([#749](https://github.com/scoot-sh/scoot/pull/749))
+- added: optional spring easing for the window slide ([#751](https://github.com/scoot-sh/scoot/pull/751))
+- added: slide the incoming strip on workspace switches ([#752](https://github.com/scoot-sh/scoot/pull/752))
+- fixed: continue viewport slide from the visual on mid-flight retarget ([#754](https://github.com/scoot-sh/scoot/pull/754))
+- added: fade tiled windows in on open and out on close ([#753](https://github.com/scoot-sh/scoot/pull/753))
+- fixed: make the open fade new-only and drop the dead close fade ([#755](https://github.com/scoot-sh/scoot/pull/755))
+
 ### scoot
 
 - added: a `"spring"` easing for the optional `[animation]` slide (niri-style: overshoots ~9% past the target, then settles; still lands exactly on time and goes idle). Same retarget-from-visual and damage discipline, still no client re-commit; a baked table keeps it to a lookup and a lerp per window per frame. Not breaking: new spelling only, default still `"ease-out"`, no CLI or protocol changed.
