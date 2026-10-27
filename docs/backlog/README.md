@@ -414,7 +414,8 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 ### Found reviewing the shell-app extractions (2026-10-18)
 
 - [Keyboard `leave` when a client destroys its only surface](./core/keyboard-leave-on-last-surface-destroy-probe.md): a headless probe before anyone asserts a compositor bug.
-- [scootctl look wiring tests race on `STARSHIP_CONFIG`](./testing/scootctl-starship-env-race.md): flaked CI's one-process `cargo test` on an unrelated PR.
+- [scootctl look wiring tests race on `STARSHIP_CONFIG`](./resolved/scootctl-starship-env-race-done.md) — RESOLVED 2026-10-27 (test-only, no new code: the injection fix landed in #711; this PR verifies 50/50 under load and audits the remaining env users as safe).
+- [look_ipc second-swap test flakes when the lock holder exits early](./resolved/look-second-swap-timing-flake-done.md) — RESOLVED 2026-10-27 (test-only: in-process exclusive lock held until the second request is answered, 300 ms grace removed; 50/50 green).
 
 ### Core / config / rendering
 - [Slide animation follow-up: open/close fade](./resolved/animation-open-close-fade-done.md) — RESOLVED 2026-10-26: tiled windows fade in on open and out on close behind the same gate (fade-only, no scale; closes retain last buffers bounded at 8 × one duration)
@@ -587,7 +588,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [virtual-input protocol-error tests race EPIPE after the server closes](./resolved/virtual-input-protocol-error-epipe-done.md)
   — RESOLVED 2026-10-05 (test-only): poison rides the round trip's own flush and `expect_error` drains read-side-only on I/O errors before deciding
 - [Enhanced hardware/DRM testing ideas](./testing/hardware-testing-ideas.md) (research)
-- [screencopy/window_commit timer tests flake under parallel load](./testing/screencopy-window-commit-timer-flakes.md) (medium, filed 2026-10-17): the probe-caused `timer_armed` reds are fixed in #655; the `parked_capture`/`desync_batch` base rate still needs main characterization
+- [screencopy/window_commit timer tests flake under parallel load](./resolved/screencopy-window-commit-timer-flakes-done.md) — RESOLVED 2026-10-27 (test-only: quiescence wait before parking in `park_across_deferred_lock` and `outlives_locker`; 50/50 parked green, full `cargo test` 2831/0).
 - [scootbg-mem fd-close test races on fd reuse](./resolved/scootbg-mem-fd-close-test-race-done.md)
   — RESOLVED 2026-10-03 (already landed in #331): the dev+ino identity check was in the tree 4 minutes before the ticket was filed; verified with 46 green suite runs plus mutation checks.
 - [cursor_hide tests read the host cursor theme](./resolved/cursor-hide-tests-theme-hermetic-done.md)
