@@ -47,6 +47,15 @@ including its own keyboard layout (`wayvnc -k de` types German positions
 correctly). An idle wayvnc costs nothing measurable: no CPU on either side
 until the screen changes or the pointer moves.
 
+**The pointer shows up in the viewer without any flag.** wayvnc asks scoot
+for the pointer's image through a [pointer cursor
+session](./protocols.md#screen-capture-ext-image-copy-capture-v1) and sends
+it to the viewer as a VNC cursor, which the viewer draws locally at the
+pointer: the shape follows the application (an arrow, an I-beam over text, a
+resize arrow), a hidden pointer disappears, and moving it costs no screen
+updates. Do not add wayvnc's `-r` (`--render-cursor`): it also paints the
+pointer into the screen, so the viewer shows two.
+
 | Field | Type | Default | Reload | Meaning |
 |---|---|---|---|---|
 | `[virtual_input] enabled` | bool | `false` | restart only | Offer the virtual-pointer (`zwlr_virtual_pointer_manager_v1`) and virtual-keyboard (`zwp_virtual_keyboard_manager_v1`) globals a remote-control tool like wayvnc needs to drive the session. Off unless asked: any same-uid client that binds them can type and click as the user, so with this off the globals are not advertised at all. |
@@ -136,6 +145,10 @@ Troubleshooting, by symptom:
   session runs with `[virtual_input]` off (or was not restarted after
   turning it on). Either switch it on and restart, or run wayvnc with
   `--disable-input` for view-only.
+- *The viewer shows no pointer, or two*: scoot must be new enough to serve
+  pointer cursor sessions, and wayvnc must run without `-r` (see above). With
+  `-r` wayvnc paints the pointer into the screen as well as sending it as a
+  cursor, hence two.
 - *The viewer shows the screen but typing does nothing*: the session is
   locked (see above), or no window has keyboard focus — click one first.
 - *The viewer shows the screen but keybindings do nothing*: `binds` is

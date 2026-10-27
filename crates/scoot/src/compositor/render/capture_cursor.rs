@@ -101,6 +101,9 @@ use crate::compositor::State;
 use crate::compositor::cursor::CursorElement;
 use crate::compositor::rounded::Rounded;
 
+mod image;
+pub(crate) use image::{CursorImage, MAX_EDGE};
+
 #[cfg(test)]
 mod tests;
 
@@ -699,6 +702,68 @@ impl Backend {
     }
 }
 
+/// Draws `pool.moved` over `clear_color` into the pool's target for a
+/// `region_size` region at `scale` -- built if the pool has none of that
+/// size and scale -- and reads it into `pixels` (see [`PatchTarget`]).
+///
+/// The one place both users of the pool (a capture's cursor region, and a
+/// pointer cursor session's image, `image.rs`) draw through. `pool.moved` is
+/// emptied whatever happened, so no element -- and no texture it holds --
+/// outlives the call.
+pub(super) fn draw_pooled<R, T>(
+    renderer: &mut R,
+    pool: &mut PatchPool<R, T>,
+    region_size: (i32, i32),
+    scale: f64,
+    clear_color: Color32F,
+    pixels: &mut Vec<u8>,
+) -> Result<(), String>
+where
+    R: Renderer + ImportAll + ImportMem,
+    R::TextureId: Texture + Send + Clone + 'static,
+    T: PatchTarget<R>,
+{
+    let scale_bits = scale.to_bits();
+    let rendered = (|| -> Result<(), String> {
+        let reuse = pool
+            .target
+            .as_ref()
+            .is_some_and(|kept| kept.size == region_size && kept.scale == scale_bits);
+        if !reuse {
+            // Replaced, not kept beside: the old one is dropped first, so at
+            // most one target lives per output.
+            pool.target = None;
+            #[cfg(test)]
+            {
+                pool.built += 1;
+            }
+            pool.target = Some(Box::new(PooledTarget {
+                size: region_size,
+                scale: scale_bits,
+                target: T::create(renderer, region_size)?,
+                damage: OutputDamageTracker::new(
+                    region_size,
+                    Scale::from(scale),
+                    Transform::Normal,
+                ),
+            }));
+        }
+        let Some(kept) = pool.target.as_mut() else {
+            return Err("the region's target went missing".to_owned());
+        };
+        kept.target.render_into(
+            renderer,
+            &mut kept.damage,
+            &pool.moved,
+            clear_color,
+            region_size,
+            pixels,
+        )
+    })();
+    pool.moved.clear();
+    rendered
+}
+
 /// [`State::capture_cursor_patch`]'s body over whichever renderer the
 /// backend carries: decides the region, and renders it into `pixels` when
 /// there is one, answering the region.
@@ -790,42 +855,14 @@ where
     let clear_color = frame_clear_color(state, locked);
 
     let region_size = (region.size.w, region.size.h);
-    let scale_bits = frame.scale.to_bits();
-    let rendered = (|| -> Result<(), String> {
-        let reuse = pool
-            .target
-            .as_ref()
-            .is_some_and(|kept| kept.size == region_size && kept.scale == scale_bits);
-        if !reuse {
-            // Replaced, not kept beside: the old one is dropped first, so at
-            // most one target lives per output.
-            pool.target = None;
-            #[cfg(test)]
-            {
-                pool.built += 1;
-            }
-            pool.target = Some(Box::new(PooledTarget {
-                size: region_size,
-                scale: scale_bits,
-                target: T::create(renderer, region_size)?,
-                damage: OutputDamageTracker::new(region_size, scale, Transform::Normal),
-            }));
-        }
-        let Some(kept) = pool.target.as_mut() else {
-            return Err("the region's target went missing".to_owned());
-        };
-        kept.target.render_into(
-            renderer,
-            &mut kept.damage,
-            &pool.moved,
-            clear_color,
-            region_size,
-            pixels,
-        )
-    })();
-    // Emptied whatever happened, so no element -- and no texture it holds --
-    // outlives this capture.
-    pool.moved.clear();
+    let rendered = draw_pooled(
+        renderer,
+        pool,
+        region_size,
+        frame.scale,
+        clear_color,
+        pixels,
+    );
     match rendered {
         Ok(()) => Some(region),
         Err(error) => {
@@ -895,13 +932,8 @@ impl State {
     /// frame parked, since nothing else would wake it to serve one.
     ///
     /// Every path that moves the pointer or changes its image comes through
-    /// here: pointer motion (`input.rs`), `wl_pointer.set_cursor` and
-    /// `wp-cursor-shape-v1` (`SeatHandler::cursor_image`), a tablet tool's
-    /// cursor (`tablet.rs`), a commit to the cursor surface itself (an
-    /// animated cursor, a new hotspot -- `CompositorHandler::commit`), the
-    /// cursor surface going away (`destroyed`), a session lock resetting it
-    /// to the default shape (`session_lock.rs`), and a reload that rebuilt
-    /// the cursor (`reload.rs`).
+    /// here: pointer motion (`input.rs`) directly, and every image change
+    /// through [`State::cursor_image_changed`].
     ///
     /// Called per motion event, which libinput delivers at up to 1000 Hz: a
     /// counter increment, and either a flag set or a scan of the capture
@@ -914,5 +946,23 @@ impl State {
         } else if self.screencopy.cursor_frame_parked() {
             self.ensure_ticking();
         }
+    }
+
+    /// The cursor's image changed (and, with it, whatever shows the
+    /// cursor): [`State::cursor_changed`] plus the image serial a pointer
+    /// cursor session keys on.
+    ///
+    /// Every path that changes the image comes through here:
+    /// `wl_pointer.set_cursor` and `wp-cursor-shape-v1`
+    /// (`SeatHandler::cursor_image`), a tablet tool's cursor (`tablet.rs`), a
+    /// commit to the cursor surface itself (an animated cursor, a new
+    /// hotspot -- `CompositorHandler::commit`), the cursor surface going away
+    /// (`destroyed`), the cursor hiding after idle and reappearing
+    /// (`cursor_hide.rs`), a session lock or a floating-window drag setting
+    /// the shape, a reload that rebuilt the cursor (`reload.rs`), and a
+    /// capture client's output changing size or scale.
+    pub(crate) fn cursor_image_changed(&mut self) {
+        self.cursor_image_serial = self.cursor_image_serial.wrapping_add(1);
+        self.cursor_changed();
     }
 }

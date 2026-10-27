@@ -596,6 +596,17 @@ impl Cursor {
         &self.status
     }
 
+    /// The clamped logical edge length the drawn shapes are built for: what a
+    /// cursor session is first told to allocate before any image exists.
+    pub(crate) fn logical_size(&self) -> i32 {
+        self.size
+    }
+
+    /// Whether the client asked for no cursor at all (`set_cursor(NULL)`).
+    pub(crate) fn is_hidden(&self) -> bool {
+        matches!(self.status, CursorImageStatus::Hidden)
+    }
+
     pub fn set_status(&mut self, status: CursorImageStatus) {
         self.status = status;
         self.refresh_themed();

@@ -1,9 +1,10 @@
 ---
 title: "Headless VNC shows no mouse: pointer cursor sessions refused"
-status: "open"
-area: "protocols"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-27"
 ---
 
 # Headless VNC shows no mouse: pointer cursor sessions refused
@@ -32,3 +33,26 @@ try-scoot ships a workaround, noVNC `show_dot=true` (a dot). The try-scoot autho
 ## Not in this ticket
 
 A VNC server inside scoot; changing try-scoot (it keeps the dot until this lands).
+
+## Resolution (2026-10-27)
+
+Pointer cursor sessions are served on every backend (`screencopy/cursor_session.rs`,
+the image from `render/capture_cursor/image.rs`). Measured before the change on
+the dev VM with wayvnc 0.10.1 and a raw RFB client (`Raw` + `Cursor` encodings):
+no cursor rect and no screen update across two pointer moves. After: one cursor
+rect on connect (16x16, hotspot 1,1), none on motion alone, a new one (32x32)
+after a reload changed `cursor_size`.
+
+- **`wayvnc -r` does land pointer pixels**: frames differ between pointer
+  positions and small damage rects land at the old and new spot (headless,
+  `-r`, same RFB client). The try-scoot observation does not reproduce on
+  this build. With the cursor session served, `-r` is now harmful: wayvnc
+  paints the pointer and also sends it as a cursor, so a viewer shows two.
+  The remote-desktop page says to leave it off.
+- **Cost**: nothing while no client holds a session beyond an empty-list
+  check per motion event. With one, a motion event arms the frame tick and the
+  tick sends a deduplicated position event; the image is rendered (one
+  cursor-sized offscreen render, pooled target, shared across sessions) only
+  when the cursor's image changed.
+- The cursor's image serial (`State::cursor_image_serial`) is separate from
+  `cursor_serial`, which keeps meaning "moved or changed".

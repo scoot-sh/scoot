@@ -1609,10 +1609,29 @@ What to know before pointing a client at it:
   itself to change, including under `--tty`, where moving the pointer
   redraws the frame. The pointer is only in the capture of the output it is
   on.
-- **Cursor capture sessions are refused.** `create_pointer_cursor_session`
-  itself gets no event — the cursor-session object has no `stopped` of its
-  own — but the `ext_image_copy_capture_session_v1` a client gets back from
-  its `get_capture_session` is answered `stopped` immediately.
+- **Pointer cursor sessions are served.** `create_pointer_cursor_session`
+  hands a client the pointer's *image* in a buffer of its own, with `enter`,
+  `leave`, `position` and `hotspot` events — what wayvnc uses to send the
+  pointer to a VNC viewer as a cursor shape instead of painting it into the
+  screen.
+  - The buffer is `Argb8888` only (a cursor needs its alpha), sized to the
+    image in the output's pixels: 16 x 16 for the built-in arrow at scale 1,
+    the theme's size for a themed cursor, a client's own cursor surface at
+    its size. Images are capped at 512 x 512 pixels. A new image of another
+    size is announced with a fresh buffer-size batch and the client's waiting
+    frame fails with `buffer_constraints`, which is the protocol's cue to
+    allocate again.
+  - A frame is answered when the image changes — a new shape, a cursor
+    surface committing, hiding and reshowing, a reload that changes
+    `cursor_size`, `cursor_color` or `cursor_theme` — and the first one
+    immediately. Moving the pointer is not a new image: it only moves
+    `position`, sent at most once per frame interval.
+  - A hidden cursor (`set_cursor` with no surface, or hidden after idle) and
+    a pointer over another output are answered with a fully transparent
+    image of the same size and a `leave`, never a failure; the next shown
+    cursor is a new frame with `enter`.
+  - It costs nothing while no client holds a session. With one, an image
+    change is one cursor-sized render shared by every session on the output.
 
 ### GPU-rendering clients (`zwp_linux_dmabuf_v1`)
 

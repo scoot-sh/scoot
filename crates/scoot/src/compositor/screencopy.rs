@@ -192,10 +192,11 @@
 //! rules on all three, with its own `cursor` request field in place of
 //! `paint_cursors` (drawn in unless the request says otherwise).
 //!
-//! `create_pointer_cursor_session` is refused outright (Smithay's default
-//! `cursor_capture_constraints` returns `None`): a cursor session captures the
-//! cursor *image* into its own buffer, which is a second, independent render
-//! target with its own lifecycle, and no client measured here asks for one.
+//! `create_pointer_cursor_session` is served: a cursor session captures the
+//! cursor *image* alone into its own buffer, with enter/leave, position and
+//! hotspot events, which is how wayvnc learns the shape to send as a VNC
+//! cursor. It is a second render target with its own lifecycle, kept in
+//! [`cursor_session`], and costs nothing while no client holds one.
 //!
 //! ## Buffer formats
 //!
@@ -249,6 +250,7 @@ use scoot_core::OutputId;
 use smithay::output::{Output, WeakOutput};
 use smithay::reexports::wayland_server::backend::ClientId;
 use smithay::reexports::wayland_server::protocol::wl_buffer::WlBuffer;
+use smithay::reexports::wayland_server::protocol::wl_pointer::WlPointer;
 use smithay::reexports::wayland_server::protocol::wl_shm;
 use smithay::reexports::wayland_server::{Client, DisplayHandle};
 use smithay::utils::{Buffer as BufferCoords, Clock, IsAlive, Monotonic, Rectangle, Transform};
@@ -258,14 +260,15 @@ use smithay::wayland::image_capture_source::{
     OutputCaptureSourceState,
 };
 use smithay::wayland::image_copy_capture::{
-    BufferConstraints, CaptureFailureReason, Frame, FrameRef, ImageCopyCaptureHandler,
-    ImageCopyCaptureState, Session, SessionRef,
+    BufferConstraints, CaptureFailureReason, CursorSession, CursorSessionRef, Frame, FrameRef,
+    ImageCopyCaptureHandler, ImageCopyCaptureState, Session, SessionRef,
 };
 use smithay::wayland::shm::with_buffer_contents_mut;
 
 use super::State;
 use super::render::{Backend, CaptureStage, CursorPatch};
 
+mod cursor_session;
 #[cfg(test)]
 mod tests;
 
@@ -463,6 +466,8 @@ pub struct Screencopy {
     /// [`ImageCopyCaptureHandler::session_destroyed`], which is the only place
     /// a session is dropped.
     sessions: Vec<Capture>,
+    /// The pointer cursor sessions (see [`cursor_session`]).
+    cursors: cursor_session::CursorSessions,
     /// How many live `ext_image_copy_capture_frame_v1` objects each Wayland
     /// client holds, by client id.
     ///
@@ -634,14 +639,16 @@ impl Screencopy {
         })
     }
 
-    /// Whether some session that asked for the pointer has a frame parked:
-    /// the one case where a cursor change with nothing redrawn owes the
-    /// frame tick a wake-up (see `State::cursor_changed`). A scan of a list
-    /// that is empty unless some client is capturing.
+    /// Whether some session that asked for the pointer (`paint_cursors`, or a
+    /// pointer cursor session) has a frame parked: the one case where a cursor
+    /// change with nothing redrawn owes the frame tick a wake-up (see
+    /// `State::cursor_changed`). A scan of lists that are empty unless some
+    /// client is capturing.
     pub(super) fn cursor_frame_parked(&self) -> bool {
         self.sessions
             .iter()
             .any(|capture| capture.paint_cursors && capture.pending.is_some())
+            || self.cursors.frame_parked()
     }
 
     /// Creates the `ext_image_copy_capture_manager_v1` and
@@ -665,6 +672,7 @@ impl Screencopy {
             capture: ImageCopyCaptureState::new::<State>(dh),
             dmabuf: DmabufState::new(),
             sessions: Vec::new(),
+            cursors: cursor_session::CursorSessions::default(),
             frames_per_client: HashMap::new(),
             clock: Clock::new(),
         }
@@ -682,6 +690,13 @@ impl Screencopy {
     #[cfg(test)]
     pub(super) fn session_count(&self) -> (usize, usize) {
         (self.sessions.len(), self.capture.sessions().len())
+    }
+
+    /// [`Screencopy::session_count`] for pointer cursor sessions: ours, and
+    /// Smithay's. Both have to fall back to zero.
+    #[cfg(test)]
+    pub(super) fn cursor_session_count(&self) -> (usize, usize) {
+        (self.cursors.len(), self.capture.cursor_sessions().len())
     }
 
     /// How many capture frames all clients hold between them. Test-only: the
@@ -789,6 +804,27 @@ impl ImageCopyCaptureHandler for State {
         Some(constraints(self.backends.get(&id)?))
     }
 
+    /// What a pointer cursor session must allocate; see [`cursor_session`].
+    fn cursor_capture_constraints(
+        &mut self,
+        source: &ImageCaptureSource,
+        _pointer: &WlPointer,
+    ) -> Option<BufferConstraints> {
+        self.cursor_session_constraints(source)
+    }
+
+    fn new_cursor_session(&mut self, session: CursorSession) {
+        self.add_cursor_session(session);
+    }
+
+    fn cursor_frame(&mut self, session: &CursorSessionRef, frame: Frame) {
+        self.park_cursor_frame(session, frame);
+    }
+
+    fn cursor_session_destroyed(&mut self, session: CursorSessionRef) {
+        self.forget_cursor_session(&session);
+    }
+
     fn new_session(&mut self, session: Session) {
         // The output binding this session's captures are served from (see
         // `Capture::output`): resolved here, once, from the source Smithay
@@ -866,6 +902,7 @@ impl ImageCopyCaptureHandler for State {
                 return;
             }
         }
+        self.screencopy.cursors.abort_frame(&frame);
     }
 
     /// A session object went away -- destroyed by the client, or with it.
@@ -907,6 +944,7 @@ impl State {
     /// has no render target from a different one would do the same -- so a
     /// missing target fails its sessions instead.
     pub(super) fn service_captures(&mut self) {
+        self.service_cursor_sessions();
         let serials = self.capture_serials();
         if !self
             .screencopy
@@ -1083,6 +1121,7 @@ impl State {
             }
             false
         });
+        self.stop_cursor_sessions_on(id);
         self.screencopy.capture.cleanup();
     }
 
@@ -1109,6 +1148,12 @@ impl State {
                 continue;
             };
             capture.session.update_constraints(constraints);
+        }
+        // A cursor image is drawn at the output's scale and clamped to its
+        // size: a change to either is news to a pointer cursor session, which
+        // re-announces its own size when it next answers.
+        if !self.screencopy.cursors.is_empty() {
+            self.cursor_image_changed();
         }
     }
 }

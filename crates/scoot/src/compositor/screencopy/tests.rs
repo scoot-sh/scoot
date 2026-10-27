@@ -31,15 +31,16 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_output, wl_registry, wl_shm, wl_shm_pool, wl_surface,
+    wl_buffer, wl_compositor, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool,
+    wl_surface,
 };
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
 use wayland_protocols::ext::image_capture_source::v1::client::{
     ext_image_capture_source_v1, ext_output_image_capture_source_manager_v1,
 };
 use wayland_protocols::ext::image_copy_capture::v1::client::{
-    ext_image_copy_capture_frame_v1, ext_image_copy_capture_manager_v1,
-    ext_image_copy_capture_session_v1,
+    ext_image_copy_capture_cursor_session_v1, ext_image_copy_capture_frame_v1,
+    ext_image_copy_capture_manager_v1, ext_image_copy_capture_session_v1,
 };
 use wayland_protocols::ext::session_lock::v1::client::{
     ext_session_lock_manager_v1, ext_session_lock_surface_v1, ext_session_lock_v1,
@@ -55,6 +56,7 @@ use super::MAX_FRAMES_PER_CLIENT;
 use super::xrgb_needs_forcing;
 
 mod cursor;
+mod cursor_session;
 #[cfg(feature = "gpu-scanout")]
 mod streaming;
 
@@ -181,6 +183,18 @@ enum Step {
     CycleFrames { rounds: u32 },
     /// `ext_image_copy_capture_session_v1.destroy`.
     DestroySession,
+    /// Create a pointer cursor session on the one output (releasing the
+    /// `wl_pointer` right after, as wayvnc does) and its capture session, and
+    /// round-trip until the constraint batch is closed by `done` or the
+    /// session is stopped. The capture session becomes *the* session every
+    /// other step works on.
+    StartCursorSession,
+    /// `ext_image_copy_capture_cursor_session_v1.destroy`.
+    DestroyCursorSession,
+    /// Report, and forget, the cursor events received so far.
+    ReadCursorEvents,
+    /// [`Step::CaptureWithoutWaiting`] with a buffer of this size.
+    CaptureSizedWithoutWaiting { width: i32, height: i32 },
     /// Lock the session and give it a solid [`LOCK_BGRA`] lock surface.
     Lock,
     /// The same, but return once the surface commit is on the wire without
@@ -197,6 +211,17 @@ enum Ack {
     /// A frame's outcome, plus the client's own buffer read straight back out
     /// of its memfd.
     Frame(Outcome, Vec<u8>),
+    /// The cursor-session events since the last read.
+    CursorEvents(Vec<CursorEvent>),
+}
+
+/// One event of a pointer cursor session, as the client saw it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CursorEvent {
+    Enter,
+    Leave,
+    Position(i32, i32),
+    Hotspot(i32, i32),
 }
 
 impl Ack {
@@ -211,6 +236,13 @@ impl Ack {
         match self {
             Ack::Frame(outcome, pixels) => (outcome, pixels),
             _ => panic!("expected a frame outcome"),
+        }
+    }
+
+    fn cursor_events(self) -> Vec<CursorEvent> {
+        match self {
+            Ack::CursorEvents(events) => events,
+            _ => panic!("expected cursor events"),
         }
     }
 }
@@ -1767,6 +1799,10 @@ struct TestClient {
     sources:
         Option<ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1>,
     capture: Option<ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1>,
+    seat: Option<wl_seat::WlSeat>,
+    /// Pointer cursor session events, oldest first, until a
+    /// [`Step::ReadCursorEvents`] takes them.
+    cursor_events: Vec<CursorEvent>,
     lock_manager: Option<ext_session_lock_manager_v1::ExtSessionLockManagerV1>,
 
     /// The newest constraint batch, and whether a `done` has closed it yet.
@@ -1827,6 +1863,9 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         .ok_or("no ext_image_copy_capture_manager_v1 -- the global is missing")?;
 
     let mut session: Option<ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1> = None;
+    let mut cursor_session: Option<
+        ext_image_copy_capture_cursor_session_v1::ExtImageCopyCaptureCursorSessionV1,
+    > = None;
     let mut frame: Option<ext_image_copy_capture_frame_v1::ExtImageCopyCaptureFrameV1> = None;
     let mut held: Option<CaptureBuffer> = None;
     let mut windows: Vec<wl_surface::WlSurface> = Vec::new();
@@ -2060,6 +2099,50 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     live.destroy();
                     queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 }
+                Ack::Done
+            }
+            Step::StartCursorSession => {
+                let seat = client.seat.clone().ok_or("no wl_seat")?;
+                let source = sources.create_source(&output, &qh, ());
+                let pointer = seat.get_pointer(&qh, ());
+                client.constraints = Constraints::default();
+                client.incoming = Constraints::default();
+                client.cursor_events.clear();
+                let cursor = capture.create_pointer_cursor_session(&source, &pointer, &qh, ());
+                source.destroy();
+                // wayvnc releases its pointer right after creating the
+                // session: nothing about the session may depend on it.
+                pointer.release();
+                let new_session = cursor.get_capture_session(&qh, ());
+                wait_for(&mut queue, &mut client, "a constraint batch", |client| {
+                    (client.constraints.dones > 0 || client.constraints.stopped).then_some(())
+                })?;
+                session = Some(new_session);
+                cursor_session = Some(cursor);
+                Ack::Constraints(client.constraints.clone())
+            }
+            Step::DestroyCursorSession => {
+                if let Some(cursor) = cursor_session.take() {
+                    cursor.destroy();
+                }
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::ReadCursorEvents => Ack::CursorEvents(std::mem::take(&mut client.cursor_events)),
+            Step::CaptureSizedWithoutWaiting { width, height } => {
+                let session = session.as_ref().ok_or("no session")?;
+                start_frame(
+                    &shm,
+                    &qh,
+                    session,
+                    &mut frame,
+                    &mut held,
+                    &mut client,
+                    width,
+                    height,
+                    wl_shm::Format::Argb8888,
+                )?;
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
             }
             Step::Lock => {
@@ -2327,6 +2410,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
             "ext_image_copy_capture_manager_v1" => {
                 client.capture = Some(registry.bind(name, version.min(1), qh, ()));
             }
+            "wl_seat" => client.seat = Some(registry.bind(name, version.min(5), qh, ())),
             "ext_session_lock_manager_v1" => {
                 client.lock_manager = Some(registry.bind(name, version.min(1), qh, ()));
             }
@@ -2483,3 +2567,28 @@ wayland_client::delegate_noop!(
 wayland_client::delegate_noop!(
     TestClient: ignore ext_session_lock_manager_v1::ExtSessionLockManagerV1
 );
+
+impl Dispatch<ext_image_copy_capture_cursor_session_v1::ExtImageCopyCaptureCursorSessionV1, ()>
+    for TestClient
+{
+    fn event(
+        client: &mut Self,
+        _: &ext_image_copy_capture_cursor_session_v1::ExtImageCopyCaptureCursorSessionV1,
+        event: ext_image_copy_capture_cursor_session_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use ext_image_copy_capture_cursor_session_v1::Event;
+        client.cursor_events.push(match event {
+            Event::Enter => CursorEvent::Enter,
+            Event::Leave => CursorEvent::Leave,
+            Event::Position { x, y } => CursorEvent::Position(x, y),
+            Event::Hotspot { x, y } => CursorEvent::Hotspot(x, y),
+            _ => return,
+        });
+    }
+}
+
+wayland_client::delegate_noop!(TestClient: ignore wl_seat::WlSeat);
+wayland_client::delegate_noop!(TestClient: ignore wl_pointer::WlPointer);

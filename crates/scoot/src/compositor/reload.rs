@@ -629,7 +629,7 @@ impl State {
         if report.applied.iter().any(|name| {
             name == field::CURSOR_SIZE || name == field::CURSOR_COLOR || name == field::CURSOR_THEME
         }) {
-            self.cursor_changed();
+            self.cursor_image_changed();
         }
     }
 
@@ -1300,7 +1300,7 @@ impl State {
         // scales no entry serves yet: build for the live set now (cold),
         // never on the frame path.
         super::headless::sync_cursor_scales(self);
-        self.cursor_changed();
+        self.cursor_image_changed();
     }
     /// `[binds]`: rebuilt from defaults plus the file (see
     /// [`keybindings_for`](super::config::keybindings_for)), swapped in

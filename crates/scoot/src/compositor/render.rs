@@ -92,9 +92,10 @@ mod primary_direct;
 #[cfg(feature = "gpu-scanout")]
 mod scanout;
 
+pub(crate) use capture_cursor::MAX_EDGE as MAX_CURSOR_IMAGE_EDGE;
 #[cfg(feature = "gpu-scanout")]
 pub(crate) use capture_cursor::Plane;
-pub(crate) use capture_cursor::{CursorInFrame, CursorPatch};
+pub(crate) use capture_cursor::{CursorImage, CursorInFrame, CursorPatch};
 #[cfg(feature = "gpu-scanout")]
 pub(crate) use cursor_plane::{CursorPlanes, GbmUpload};
 #[cfg(all(test, feature = "gpu-scanout"))]

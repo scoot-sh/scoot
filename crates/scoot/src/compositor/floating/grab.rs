@@ -340,7 +340,7 @@ impl PointerGrab<State> for FloatingGrab {
             configure_resizing(&self.window, None, false);
         }
         data.cursor.set_status(CursorImageStatus::default_named());
-        data.cursor_changed();
+        data.cursor_image_changed();
         data.floating_grab_resync = true;
         data.request_render();
     }
@@ -694,7 +694,7 @@ impl State {
         // with it. Nothing resets it again until the grab ends (its motion
         // keeps focus empty).
         self.cursor.set_status(CursorImageStatus::Named(icon));
-        self.cursor_changed();
+        self.cursor_image_changed();
     }
 
     /// Whether `[floating] modifier` is held right now.

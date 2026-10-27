@@ -302,7 +302,7 @@ impl State {
         self.cursor.set_status(image);
         // A redraw where frames draw the cursor, a capture tick where only
         // captures do -- the same path as `SeatHandler::cursor_image`.
-        self.cursor_changed();
+        self.cursor_image_changed();
     }
 
     /// What a tool event at `location` is addressed to: the surface the

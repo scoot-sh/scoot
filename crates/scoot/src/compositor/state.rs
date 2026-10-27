@@ -628,6 +628,15 @@ pub struct State {
     /// source changed" test on both counters. Wraps, like `frame_serial`,
     /// and for the same reason it cannot matter.
     pub cursor_serial: u64,
+    /// Bumped whenever the cursor's *image* may have changed: a new shape, a
+    /// commit to a client's cursor surface, the cursor hiding or reshowing, a
+    /// rebuilt theme. Not on plain motion, which is the only thing that moves
+    /// [`State::cursor_serial`] alone. What a pointer cursor session
+    /// (`screencopy/cursor_session.rs`) keys its "is there a new picture"
+    /// test on: a client that streams the pointer's image must not be handed
+    /// a fresh copy of an unchanged one per motion event. Wraps, like the
+    /// other serials.
+    pub cursor_image_serial: u64,
     /// Test-only override of [`State::frame_draws_cursor`]: `Some(true)`
     /// makes a harness's frames composite the cursor the way every `--tty`
     /// frame on the dumb tier does, which is the shape the capture path's
@@ -1583,6 +1592,7 @@ impl State {
             frame_serial: 0,
             scene_dirty: true,
             cursor_serial: 0,
+            cursor_image_serial: 0,
             cursor_idle_hidden: false,
             cursor_hide_deadline: None,
             cursor_hide_timer_live: false,
