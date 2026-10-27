@@ -1,9 +1,10 @@
 ---
 title: "look apply reports reloaded compositor but decorations keep the old look until restart"
-status: "open"
-area: "core"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-26"
 ---
 
 # look apply reports reloaded compositor but decorations keep the old look until restart
@@ -57,3 +58,20 @@ they inherit the fix — the field test exercised all of them).
 The nested socket-steal, the foot `initial-color-theme` refusal, and the
 webtop glibc-tag docs (separate tickets from the same test). The bar's visual
 reload was not verified (clock-only bar in the shots) — check while here.
+
+## Resolution
+
+Verified live on current `main`: a headless `scoot` with a `foot` client
+swaps both the background and the focus ring on every `scoot msg look-apply`
+across all five shipped looks (ginger-night `#FF9A30`, moonrise `#FF9A49`,
+music-desk `#3D579A`, radial-burst `#31A9E5`, vinyl-sunset `#FE9949`),
+each screenshot carrying ~7067 px of the new focus color and a new md5
+(e.g. ginger `06cc9daa...`, music `994c5910...`, moonrise `876f57ce...`).
+`reload --look` afterwards reports `applied: []`, proving `State::appearance`
+already matches the new fragment, and `request_render` fires (new
+`needs_render`). The 0.3.0 report no longer reproduces; no compositor code
+changed. Added `a_scoped_reload_swaps_focus_ring_colors_live_and_requests_render`
+(`crates/scoot/src/compositor/reload/tests.rs`), which pins the ticket's
+exact ginger/music pair plus the render request, so a future regression that
+drops appearance on the floor fails loudly instead of reporting
+`reloaded: compositor` with stale decorations.
