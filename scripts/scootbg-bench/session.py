@@ -35,6 +35,14 @@ def _is_socket(path):
 _SO_ACCEPTCON = 0x10000
 
 
+def kernel_dev(st_dev):
+    """``st_dev`` as the kernel's ``UNIX_DIAG_VFS`` record carries it: the
+    in-kernel ``dev_t``, ``(major << 20) | minor``. Not the userspace
+    ``new_encode_dev`` form, which agrees only for major 0 and minor < 256
+    (so a tmpfs-only test would pass either way)."""
+    return (os.major(st_dev) << 20) | os.minor(st_dev)
+
+
 def _listening_by_diag(path):
     """Whether the socket file at ``path`` is a listening unix socket, asked
     of the kernel's ``sock_diag`` (``UNIX_DIAG``): it reports each listener's
@@ -46,8 +54,7 @@ def _listening_by_diag(path):
     import struct
 
     info = os.stat(path)
-    major, minor = os.major(info.st_dev), os.minor(info.st_dev)
-    dev = (minor & 0xFF) | (major << 8) | ((minor & ~0xFF) << 12)  # new_encode_dev
+    dev = kernel_dev(info.st_dev)
     af_unix, tcp_listen, show_vfs, unix_diag_vfs = 1, 10, 0x2, 1  # UDIAG_SHOW_VFS, UNIX_DIAG_VFS
     request = struct.pack("=BBHIIIII", af_unix, 0, 0, 1 << tcp_listen, 0, show_vfs, 0xFFFFFFFF, 0xFFFFFFFF)
     header = struct.pack("=IHHII", 16 + len(request), 20, 0x301, 1, 0)  # SOCK_DIAG_BY_FAMILY, REQUEST|DUMP
@@ -98,7 +105,7 @@ def listening(path):
         return False
     try:
         return _listening_by_diag(path)
-    except OSError:
+    except (OSError, AttributeError):  # no sock_diag, or no AF_NETLINK (not Linux)
         pass
     try:
         with open("/proc/net/unix") as f:
