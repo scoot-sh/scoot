@@ -13,6 +13,7 @@ import subprocess
 import bench
 import commits
 import procs
+import session
 import report
 
 
@@ -106,6 +107,49 @@ class TraceCommits(unittest.TestCase):
             self.assertEqual(len(trace.commits), 1)
         finally:
             os.unlink(path)
+
+
+class Listening(unittest.TestCase):
+    """`session.listening` reads /proc/net/unix by inode, so a socket
+    renamed from where it was bound (scootbg's staging) still counts."""
+
+    def setUp(self):
+        import socket
+        self.socket = socket
+        self.dir = tempfile.mkdtemp(prefix="sbl", dir=tempfile.gettempdir())
+        self.keep = []
+
+    def tearDown(self):
+        import shutil
+        for s in self.keep:
+            s.close()
+        shutil.rmtree(self.dir)
+
+    def bound(self, name, listen):
+        s = self.socket.socket(self.socket.AF_UNIX)
+        self.keep.append(s)
+        s.bind(os.path.join(self.dir, name))
+        if listen:
+            s.listen(1)
+        return os.path.join(self.dir, name)
+
+    def test_a_plain_listener_counts(self):
+        self.assertTrue(session.listening(self.bound("plain", True)))
+
+    def test_a_bound_socket_that_does_not_listen_does_not(self):
+        self.assertFalse(session.listening(self.bound("quiet", False)))
+
+    def test_a_renamed_listener_counts_by_inode(self):
+        staged = self.bound("staged", True)
+        published = os.path.join(self.dir, "published")
+        os.rename(staged, published)
+        self.assertTrue(session.listening(published))
+
+    def test_a_missing_path_and_a_plain_file_do_not(self):
+        self.assertFalse(session.listening(os.path.join(self.dir, "none")))
+        path = os.path.join(self.dir, "file")
+        open(path, "w").close()
+        self.assertFalse(session.listening(path))
 
 
 class Gate(unittest.TestCase):
