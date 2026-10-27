@@ -3,7 +3,7 @@
 //! The per-output pins: a bar's exclusive zone shrinks the usable area of
 //! the output it is mapped on and no other's, pointer hit-testing and
 //! keyboard focus follow the output under the pointer, and a surface that
-//! names no output lands on the primary. The two harms in scope -- a zone
+//! names no output lands on the pointer's output. The two harms in scope -- a zone
 //! misapplied across outputs, and keyboard focus delivered to a surface on
 //! the wrong output -- are both pinned fail-first below.
 //!
@@ -130,10 +130,11 @@ fn bars_on_both_outputs_hold_both_zones() {
     );
 }
 
-/// A surface that names no output lands on the primary: the protocol's "the
-/// compositor chooses", and scoot's choice. Pins the default rather than the
-/// mechanism -- what matters is that an unrequested bar reserves the first
-/// output's edge and nothing on the second.
+/// A surface that names no output lands on the primary when the pointer is
+/// there: the protocol's "the compositor chooses", and scoot's choice is the
+/// pointer's output (which starts centred on the primary). Pins the default
+/// rather than the mechanism -- what matters is that an unrequested bar
+/// reserves the first output's edge and nothing on the second.
 #[test]
 fn a_layer_surface_without_a_requested_output_lands_on_the_primary() {
     let mut fixture = two_output_fixture();
@@ -148,6 +149,92 @@ fn a_layer_surface_without_a_requested_output_lands_on_the_primary() {
         usable(&fixture, 2),
         WHOLE_SECOND,
         "an unrequested bar reserves nothing on the second output"
+    );
+}
+
+/// An output-less surface follows the pointer: with the pointer on output 2
+/// it maps there, like a new window does. Fail-first: choosing the primary
+/// reserves output 1's edge and leaves output 2 untouched.
+#[test]
+fn an_output_less_layer_surface_maps_on_the_pointer_output() {
+    let mut fixture = two_output_fixture();
+    fixture.state.pointer_move(X2 + 100.0, 100.0);
+    fixture.settle();
+    map_bar(&mut fixture, 0, None, 24);
+
+    assert_eq!(
+        usable(&fixture, 1),
+        WHOLE_FIRST,
+        "an unrequested bar with the pointer on output 2 reserves nothing on output 1"
+    );
+    assert_eq!(
+        usable(&fixture, 2),
+        Rect::new(CANVAS, 24, CANVAS, CANVAS - 24),
+        "an unrequested bar with the pointer on output 2 reserves output 2's edge"
+    );
+
+    // ...and the pixels agree: the bar draws on output 2, not output 1.
+    let first = draw(&mut fixture, 1);
+    let second = draw(&mut fixture, 2);
+    assert!(
+        !contains(&first, BAR_BGRA),
+        "output 1 shows its own strip, not output 2's bar"
+    );
+    assert_pixel(
+        &second,
+        CANVAS / 2,
+        0,
+        BAR_BGRA,
+        "the bar covers the second output's top row",
+    );
+}
+
+/// The fallback leg: with the pointer over no output (reachable -- absolute
+/// motion is never clamped), an output-less surface still maps, on the
+/// primary -- the same fallback a new window uses.
+#[test]
+fn an_output_less_layer_surface_with_the_pointer_over_no_output_falls_back_to_primary() {
+    let mut fixture = two_output_fixture();
+    fixture.state.pointer_move(-50.0, -50.0);
+    fixture.settle();
+    map_bar(&mut fixture, 0, None, 24);
+
+    assert_eq!(
+        usable(&fixture, 1),
+        Rect::new(0, 24, CANVAS, CANVAS - 24),
+        "an unrequested bar with the pointer over no output reserves the primary's edge"
+    );
+    assert_eq!(
+        usable(&fixture, 2),
+        WHOLE_SECOND,
+        "an unrequested bar with the pointer over no output reserves nothing on output 2"
+    );
+}
+
+/// Removing the output an output-less bar defaulted to closes it, like any
+/// layer surface on a removed output: its zone is released and nothing leaks
+/// onto the remaining output.
+#[test]
+fn removing_the_pointer_output_closes_its_output_less_bar() {
+    let mut fixture = two_output_fixture();
+    fixture.state.pointer_move(X2 + 100.0, 100.0);
+    fixture.settle();
+    map_bar(&mut fixture, 0, None, 24);
+    assert_eq!(
+        usable(&fixture, 2),
+        Rect::new(CANVAS, 24, CANVAS, CANVAS - 24),
+        "the control: the zone really applied on output 2 before the removal"
+    );
+
+    assert!(
+        fixture.state.remove_output(OutputId(2)),
+        "removing the second output"
+    );
+
+    assert_eq!(
+        usable(&fixture, 1),
+        WHOLE_FIRST,
+        "output 1's usable area is whole once the output 2 bar is closed"
     );
 }
 

@@ -30,7 +30,7 @@ Children, in order:
 5. [launch-nix](resolved/launch-nix-done.md), [launch-packaging](resolved/launch-packaging-done.md),
    [launch-default-flip](resolved/launch-default-flip-done.md); later, [launch-windows-mode](launch-windows-mode.md).
 
-Compositor side: [layer-shell-default-output](../../backlog/core/layer-shell-default-output.md).
+Compositor side: [layer-shell-default-output](../../backlog/resolved/layer-shell-default-output-done.md).
 Resource tables are published here per milestone, against fuzzel, tofi, bemenu and wofi.
 
 **Name: `scootlaunch`** (settled 2026-09-29, over `scootmenu`); the picker is

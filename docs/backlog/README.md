@@ -872,7 +872,7 @@ capture-cursor → resize-in-place → syncobj → nested dmabuf → VRR.
 
 ### Shell apps, the compositor side (filed 2026-10-12)
 The scootnotify, scootlaunch and scootgreet plans ([dev/design/shell-apps.md](../../dev/design/shell-apps.md)) live in [scootbar's backlog](../scootbar/backlog/README.md#m7--the-rest-of-the-shell-separate-products-own-backlogs-when-they-start); these two are scoot changes they want.
-- [An output-less layer surface goes to the pointer's output](./core/layer-shell-default-output.md) — medium, unblocked: today it lands on the primary output while a new window opens under the pointer, which puts launchers and notifications on the wrong monitor (fuzzel and mako today included).
+- [An output-less layer surface goes to the pointer's output](./resolved/layer-shell-default-output-done.md) — RESOLVED 2026-10-27: a surface that names no output maps on the output under the pointer, falling back to the primary when the pointer is over no output — the same rule new windows use.
 - [A locked-down greeter-host mode](./core/scoot-greeter-mode.md) — low, only if cage fails the GPU-free check (blocked on its spike): no IPC socket, no binds but VT switch, exit with the child; opt-in.
 
 ### Requested 2026-09-24

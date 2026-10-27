@@ -227,7 +227,10 @@ impl WlrLayerShellHandler for State {
     ///
     /// `output` is the client's request for which screen to appear on. It is
     /// allowed to be `None`, which the protocol defines as "the compositor
-    /// chooses"; scoot chooses the primary output (see `Outputs::primary`).
+    /// chooses" (generally the one the user most recently interacted with);
+    /// scoot chooses the output under the pointer, falling back to the
+    /// primary when the pointer names no output -- the same rule new windows
+    /// use (see `State::pointer_output`).
     fn new_layer_surface(
         &mut self,
         surface: WlrLayerSurface,
@@ -236,7 +239,13 @@ impl WlrLayerShellHandler for State {
         namespace: String,
     ) {
         let requested = output.as_ref().and_then(Output::from_resource);
-        let Some(output) = requested.or_else(|| self.outputs.primary().cloned()) else {
+        // Cold path (once per layer surface), so the geometry scan costs
+        // nothing beside the map and configure beside it. No allocation:
+        // each leg hands back an `Output` (`Arc` bump) or nothing.
+        let Some(output) = requested
+            .or_else(|| self.pointer_output())
+            .or_else(|| self.outputs.primary().cloned())
+        else {
             // No output at all. Unreachable in this compositor (`headless::init`
             // creates one before the event loop starts and nothing removes
             // it), but it is a client-facing path, so it closes the surface
