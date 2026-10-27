@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.7](https://github.com/scoot-sh/scoot/compare/v0.6.6...v0.6.7) - 2026-10-27
+
+### scoot
+
+- fixed: hand each wl_keyboard.keymap send its own file description ([#764](https://github.com/scoot-sh/scoot/pull/764))
+
+### scootctl,scoot-look
+
+- fixed: downgrade the foot fragment for foots before 1.26 ([#762](https://github.com/scoot-sh/scoot/pull/762))
+
 ## [0.6.6](https://github.com/scoot-sh/scoot/compare/v0.6.5...v0.6.6) - 2026-10-27
 
 ### scoot
