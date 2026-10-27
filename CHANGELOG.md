@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.9](https://github.com/scoot-sh/scoot/compare/v0.6.8...v0.6.9) - 2026-10-27
+
+### scoot
+
+- fixed: serve pointer cursor sessions so a VNC viewer shows the pointer ([#774](https://github.com/scoot-sh/scoot/pull/774))
+
+### scootlaunch
+
+- fixed: socket claim follow-ups F1-F9 ([#772](https://github.com/scoot-sh/scoot/pull/772))
+
 ## [0.6.8](https://github.com/scoot-sh/scoot/compare/v0.6.7...v0.6.8) - 2026-10-27
 
 ### scoot
