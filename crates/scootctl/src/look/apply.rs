@@ -35,9 +35,9 @@ use scoot_look::state::{
 };
 use scoot_look::{
     Origin, RawLook, RenderInputs, check_contrast, parse_kv_config, render_bar, render_foot,
-    render_fuzzel, render_greet, render_gtk3_css, render_gtk4_css, render_json, render_launch,
-    render_leaf_files, render_notify, render_qt_scheme, render_scoot, render_swaylock, resolve,
-    source_hash,
+    render_foot_legacy, render_fuzzel, render_greet, render_gtk3_css, render_gtk4_css, render_json,
+    render_launch, render_leaf_files, render_notify, render_qt_scheme, render_scoot,
+    render_swaylock, resolve, source_hash,
 };
 
 use super::cycle::{Preview, PreviewRead, clear_preview, read_preview, write_preview};
@@ -197,6 +197,14 @@ pub trait Checks {
     /// parser (`foot --check-config --config`). A missing binary is
     /// [`Availability::Unavailable`]; a failing check refuses.
     fn foot_fragment(&self, fragment: &Path) -> Result<Availability<()>, String>;
+    /// The installed foot's version (`foot --version`, e.g. `1.28.0`):
+    /// `None` when foot is missing or its version does not parse. The
+    /// renderer keys the foot fragment's shape off this (the themed
+    /// fragment needs 1.26+); an unparseable version renders modern and
+    /// lets the `--check-config` refusal downgrade instead.
+    fn foot_version(&self) -> Option<String> {
+        None
+    }
     /// Resolves a URL wallpaper from the download cache: `install` fetched
     /// and verified it at install time, and a swap never fetches. A miss
     /// refuses (never fetches here); `install` owns the fetch.
@@ -265,7 +273,7 @@ pub fn validate_entry(
         // validate.
         check_bar_fragment(name, &merged, &inputs.inputs, checks, &mut validation);
         // Foot's own parser over its fragment, as `apply` runs it.
-        check_foot_fragment(name, &merged, checks, &mut validation);
+        check_foot_fragment(name, &merged, &inputs.inputs, checks, &mut validation);
         // The launcher and locker leaves, as `apply` writes them.
         check_leaf_fragments(name, &merged, &mut validation);
         // The terminal static leaves, as `apply` renders them (or drops
@@ -382,7 +390,13 @@ pub fn validate_dir(
             checks,
             &mut validation,
         );
-        check_foot_fragment(&merged.name, &merged, checks, &mut validation);
+        check_foot_fragment(
+            &merged.name,
+            &merged,
+            &inputs.inputs,
+            checks,
+            &mut validation,
+        );
         check_leaf_fragments(&merged.name, &merged, &mut validation);
         check_static_fragments(&chain, trust, &mut validation);
         return Ok(validation);
@@ -807,23 +821,44 @@ fn check_bar_fragment(
     }
 }
 
+/// Renders foot's fragment in the shape `inputs` selects: the themed
+/// fragment for a current foot, the legacy `[colors]` fragment for a
+/// foot that predates it (see [`RenderInputs::foot_legacy`]).
+fn render_foot_for(
+    name: &str,
+    merged: &scoot_look::ResolvedLook,
+    inputs: &RenderInputs,
+) -> Result<Option<String>, String> {
+    let render = if inputs.foot_legacy {
+        render_foot_legacy
+    } else {
+        render_foot
+    };
+    render(merged).map_err(|error| format!("cannot render {name}: {error}"))
+}
+
 /// Renders foot's fragment and runs the installed binary's own parser over
 /// it — the same check `apply` and `build` run, so `validate` and `apply`
 /// agree on foot. A missing binary is a note. Looks without a `[terminal]`
 /// table render no fragment and check nothing. Refusals land in `errors`.
+///
+/// A refusal shaped like version skew (an older foot naming the themed
+/// keys it does not know) re-renders the legacy fragment once and checks
+/// that instead, with a note: only a genuinely broken fragment still
+/// refuses.
 fn check_foot_fragment(
     name: &str,
     merged: &scoot_look::ResolvedLook,
+    inputs: &RenderInputs,
     checks: &dyn Checks,
     validation: &mut Validation,
 ) {
-    let foot = match render_foot(merged) {
+    let mut inputs = inputs.clone();
+    let foot = match render_foot_for(name, merged, &inputs) {
         Ok(Some(foot)) => foot,
         Ok(None) => return,
         Err(error) => {
-            validation
-                .errors
-                .push(format!("cannot render {name}: {error}"));
+            validation.errors.push(error);
             return;
         }
     };
@@ -845,7 +880,103 @@ fn check_foot_fragment(
     match checks.foot_fragment(&path) {
         Ok(Availability::Available(())) => {}
         Ok(Availability::Unavailable(note)) => validation.notes.push(note),
-        Err(message) => validation.errors.push(message),
+        Err(message) => {
+            // Version skew, not a broken fragment: an older foot naming
+            // the themed keys it does not know. Re-render the legacy
+            // fragment once and check that instead, with a note — unless
+            // already legacy, which refuses like any genuine error.
+            if !inputs.foot_legacy
+                && (is_foot_version_refusal(&message) || is_foot_check_missing(&message))
+            {
+                inputs.foot_legacy = true;
+                if let Ok(Some(legacy)) = render_foot_for(name, merged, &inputs)
+                    && std::fs::write(&path, &legacy).is_ok()
+                {
+                    match checks.foot_fragment(&path) {
+                        Ok(Availability::Available(())) => {
+                            validation.notes.push(foot_legacy_note(&message));
+                            return;
+                        }
+                        Ok(Availability::Unavailable(note)) => {
+                            validation.notes.push(foot_legacy_note(&message));
+                            validation.notes.push(note);
+                            return;
+                        }
+                        Err(_) => {}
+                    }
+                }
+            }
+            validation.errors.push(message);
+        }
+    }
+}
+
+/// The note a foot downgrade carries: what the installed foot refused
+/// and what rendered instead. Names the refused detail (truncated) so
+/// the note says which key the installed foot does not know.
+fn foot_legacy_note(refusal: &str) -> String {
+    let detail = refusal.split(':').next_back().unwrap_or(refusal).trim();
+    let detail = truncate_head(detail, 256);
+    format!(
+        "foot predates the themed fragment (needs 1.26 for initial-color-theme and [colors-dark]/[colors-light]): rendered the legacy [colors] fragment ({detail})"
+    )
+}
+
+/// Checks the rendered foot fragment for a swap, downgrading once on
+/// version skew: an older foot naming the themed keys it does not know
+/// re-renders the legacy fragment (with a note) instead of refusing the
+/// whole look. `rerender` rebuilds the target from legacy inputs; a
+/// second refusal is a genuinely broken fragment and refuses, except a
+/// foot without `--check-config` itself, which leaves the legacy
+/// fragment unchecked with a note. A missing foot is a note, like
+/// everywhere else.
+fn check_foot_for_swap(
+    target: &mut PathBuf,
+    render_inputs: &mut RenderInputs,
+    merged: &scoot_look::ResolvedLook,
+    checks: &dyn Checks,
+    notes: &mut Vec<String>,
+    rerender: impl FnOnce(&RenderInputs, &mut Vec<String>) -> Result<PathBuf, String>,
+) -> Result<(), String> {
+    if merged.terminal.is_none() {
+        return Ok(());
+    }
+    match checks.foot_fragment(&target.join("foot.ini")) {
+        Ok(Availability::Available(())) => Ok(()),
+        Ok(Availability::Unavailable(note)) => {
+            notes.push(note);
+            Ok(())
+        }
+        Err(message) => {
+            if render_inputs.foot_legacy
+                || (!is_foot_version_refusal(&message) && !is_foot_check_missing(&message))
+            {
+                return Err(message);
+            }
+            render_inputs.foot_legacy = true;
+            *target = rerender(render_inputs, notes)?;
+            match checks.foot_fragment(&target.join("foot.ini")) {
+                Ok(Availability::Available(())) => {
+                    notes.push(foot_legacy_note(&message));
+                    Ok(())
+                }
+                Ok(Availability::Unavailable(note)) => {
+                    notes.push(foot_legacy_note(&message));
+                    notes.push(note);
+                    Ok(())
+                }
+                Err(second) => {
+                    if is_foot_check_missing(&second) {
+                        notes.push(foot_legacy_note(&message));
+                        notes
+                            .push("foot has no --check-config: foot fragment unchecked".to_owned());
+                        Ok(())
+                    } else {
+                        Err(second)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -965,6 +1096,86 @@ impl BarDrop {
 fn is_popup_refusal(message: &str) -> bool {
     let lower = message.to_lowercase();
     lower.contains("popup-radius") || (lower.contains("popup") && lower.contains("unknown field"))
+}
+
+/// The foot release that added the themed fragment: `[colors-dark]` and
+/// `[colors-light]` (replacing `[colors]`/`[colors2]`) and the
+/// `initial-color-theme` values `dark`/`light` (replacing `1`/`2`).
+/// Verified against foot's own history (`initial-color-theme=1|2` lands
+/// after 1.22, first released in 1.23.0; the rename to `dark`/`light`
+/// and the themed sections land after 1.25, first released in 1.26.0).
+const FOOT_THEMED_SINCE: (u64, u64, u64) = (1, 26, 0);
+
+/// The installed foot's version from `foot --version` output
+/// (`foot version: 1.28.0 +pgo ...`): the `major.minor.patch` triple, or
+/// `None` when no token parses (a foot too old to answer, or an
+/// unexpected format — the caller renders modern and lets the
+/// `--check-config` refusal downgrade instead).
+fn parse_foot_version(output: &str) -> Option<(u64, u64, u64)> {
+    for token in output.split_whitespace() {
+        let token =
+            token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-');
+        let core = token.split('-').next().unwrap_or(token);
+        let mut parts = core.split('.');
+        let (Some(major), Some(minor), patch) = (parts.next(), parts.next(), parts.next()) else {
+            continue;
+        };
+        if parts.next().is_some() {
+            continue;
+        }
+        let (Ok(major), Ok(minor)) = (major.parse(), minor.parse()) else {
+            continue;
+        };
+        let patch = match patch {
+            None => 0,
+            Some(patch) => patch.parse().ok()?,
+        };
+        return Some((major, minor, patch));
+    }
+    None
+}
+
+/// Whether the installed foot (a `foot --version` string) predates the
+/// themed fragment: anything before [`FOOT_THEMED_SINCE`], or an
+/// unparseable answer (fail modern: the `--check-config` refusal
+/// downgrades instead of the version string refusing the look).
+fn foot_needs_legacy(version: Option<&str>) -> bool {
+    match version.and_then(parse_foot_version) {
+        Some(triple) => triple < FOOT_THEMED_SINCE,
+        None => false,
+    }
+}
+
+/// Whether a `foot_fragment` refusal is version skew rather than a
+/// genuinely broken fragment: foot names one of the themed keys the
+/// renderer emits (`initial-color-theme`, `[colors-dark]`,
+/// `[colors-light]`) as unknown (`not a valid option`, `invalid section
+/// name`) or mis-valued (`not one of 'dark', 'light'` — a 1.23-1.25 foot
+/// spells the values `1`/`2`). Only that shape downgrades to the legacy
+/// fragment; anything else still refuses the look.
+fn is_foot_version_refusal(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    let names_key = lower.contains("initial-color-theme")
+        || lower.contains("colors-dark")
+        || lower.contains("colors-light");
+    let refuses_key = lower.contains("not a valid option")
+        || lower.contains("invalid section")
+        || lower.contains("not one of");
+    names_key && refuses_key
+}
+
+/// Whether a `foot_fragment` refusal is a foot without `--check-config`
+/// itself answering usage instead of a verdict. The flag is ancient, so
+/// this is the "too old to even answer" edge: the caller downgrades to
+/// the legacy fragment (which that era parses) rather than refusing, and
+/// skips validation with a note only when the legacy check answers the
+/// same shape.
+fn is_foot_check_missing(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    lower.contains("check-config")
+        && (lower.contains("unrecognized")
+            || lower.contains("unknown option")
+            || lower.contains("usage:"))
 }
 
 /// The `unknown field \`name\`` a deny-unknown-fields parser names, if the
@@ -1352,6 +1563,22 @@ pub(crate) fn check_inputs(
             .cloned()
             .unwrap_or_else(|| "invalid look".to_owned()));
     }
+    // Foot's fragment shape follows the installed foot: the themed
+    // fragment (`initial-color-theme`, `[colors-dark]`/`[colors-light]`)
+    // needs foot 1.26+, so an older foot renders the legacy `[colors]`
+    // fragment instead, with a note naming the key and the floor — the
+    // same "notes, never errors" rule absent apps get. An unparseable
+    // version renders modern: the `--check-config` refusal downgrades
+    // instead of the version string refusing the look.
+    let mut foot_legacy = false;
+    if let Some(version) = checks.foot_version()
+        && foot_needs_legacy(Some(&version))
+    {
+        foot_legacy = true;
+        validation.notes.push(format!(
+            "foot {version} predates the themed fragment (needs 1.26 for initial-color-theme and [colors-dark]/[colors-light]): rendered the legacy [colors] fragment"
+        ));
+    }
     // The bar's UI font and the wallpaper feed the cache key through
     // their resolved paths and mtimes (see `cache_key`), so a font
     // package update re-renders instead of leaving the bar pointing at a
@@ -1363,6 +1590,7 @@ pub(crate) fn check_inputs(
             bar_popup: true,
             bar_drop_sections: Vec::new(),
             omit_cursor: false,
+            foot_legacy,
         },
         details,
     })
@@ -1643,6 +1871,9 @@ fn cache_key(
     // An opted-out cursor renders a different fragment (no cursor keys),
     // so it keys apart from the full render of the same sources.
     buffer.push(if inputs.omit_cursor { 1 } else { 0 });
+    // A legacy foot renders a different fragment (one `[colors]` section
+    // instead of the themed pair), so it keys apart the same way.
+    buffer.push(if inputs.foot_legacy { 1 } else { 0 });
     // The static terminal leaves ride the key by origin and trust: an
     // installed look renders them only with `--trust`, so the two
     // renders must never share a directory.
@@ -1719,7 +1950,7 @@ fn render_all_fragments(
     let gtk3_css = render_gtk3_css(merged);
     let gtk4_css = render_gtk4_css(merged);
     let qt_scheme = render_qt_scheme(merged);
-    let foot = render_foot(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let foot = render_foot_for(name, merged, inputs)?;
     let fuzzel = render_fuzzel(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     let swaylock =
         render_swaylock(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
@@ -2682,14 +2913,30 @@ pub(crate) fn render_for_swap(
         }
     }
     // Foot's own parser over the rendered fragment, when the look renders
-    // one. A missing foot is a note; a refusal refuses the swap before
-    // anything is recorded, like the bar's genuine errors.
+    // one. A missing foot is a note; version skew (an older foot naming
+    // the themed keys it does not know) re-renders the legacy fragment
+    // with a note; any other refusal refuses the swap before anything is
+    // recorded, like the bar's genuine errors.
     if merged.terminal.is_some() {
-        match checks.foot_fragment(&target.join("foot.ini")) {
-            Ok(Availability::Available(())) => {}
-            Ok(Availability::Unavailable(note)) => notes.push(note),
-            Err(message) => return Err(message),
-        }
+        let rerender = |inputs: &RenderInputs, notes: &mut Vec<String>| match &source {
+            // The catalog render is build-time modern; skew needs a
+            // fresh legacy render instead of that directory.
+            RenderSource::PreRendered { .. } => {
+                render_cached(name, chain, merged, inputs, cache, notes, trust)
+            }
+            RenderSource::Fresh => render_cached(name, chain, merged, inputs, cache, notes, trust),
+            RenderSource::FixedSlot { slot } => {
+                render_fixed_slot(name, chain, merged, inputs, cache, slot, notes, trust)
+            }
+        };
+        check_foot_for_swap(
+            &mut target,
+            &mut render_inputs,
+            merged,
+            checks,
+            notes,
+            rerender,
+        )?;
     }
     Ok((target, render_inputs))
 }
@@ -2903,14 +3150,23 @@ pub fn apply_with_live(
         }
     }
     // Foot's own parser over the rendered fragment, when the look renders
-    // one. A missing foot is a note; a refusal refuses the swap before
-    // anything is recorded, like the bar's genuine errors.
+    // one. A missing foot is a note; version skew (an older foot naming
+    // the themed keys it does not know) re-renders the legacy fragment
+    // with a note; any other refusal refuses the swap before anything is
+    // recorded, like the bar's genuine errors.
     if merged.terminal.is_some() {
-        match checks.foot_fragment(&target.join("foot.ini")) {
-            Ok(Availability::Available(())) => {}
-            Ok(Availability::Unavailable(note)) => report.notes.push(note),
-            Err(message) => return Err(refuse(message)),
-        }
+        let rerender = |inputs: &RenderInputs, notes: &mut Vec<String>| {
+            render_cached(name, &chain, &merged, inputs, cache, notes, options.trust)
+        };
+        check_foot_for_swap(
+            &mut target,
+            &mut render_inputs,
+            &merged,
+            checks,
+            &mut report.notes,
+            rerender,
+        )
+        .map_err(refuse)?;
     }
     let generation = previous
         .as_ref()
@@ -3584,8 +3840,7 @@ pub fn build_to_out(
             .map_err(|error| format!("cannot render {name}: {error}"))?;
         let bar = render_bar(&merged, render_inputs)
             .map_err(|error| format!("cannot render {name}: {error}"))?;
-        let foot =
-            render_foot(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+        let foot = render_foot_for(&name, &merged, render_inputs)?;
         let fuzzel =
             render_fuzzel(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
         let swaylock =
@@ -3808,13 +4063,78 @@ pub fn build_to_out(
         }
     }
     // Foot's own parser over the staged fragment, when the look renders
-    // one. A missing foot is a note; a refusal refuses the build before
-    // anything lands in `--out`.
+    // one. A missing foot is a note; version skew (an older foot naming
+    // the themed keys it does not know) re-renders the legacy fragment
+    // with a note; any other refusal refuses the build before anything
+    // lands in `--out`.
     if foot.is_some() {
         match checks.foot_fragment(&stage.join("foot.ini")) {
             Ok(Availability::Available(())) => {}
             Ok(Availability::Unavailable(note)) => validation.notes.push(note),
-            Err(message) => return Err(message),
+            Err(message) => {
+                if render_inputs.foot_legacy
+                    || (!is_foot_version_refusal(&message) && !is_foot_check_missing(&message))
+                {
+                    return Err(message);
+                }
+                render_inputs.foot_legacy = true;
+                (
+                    scoot,
+                    bar,
+                    foot,
+                    fuzzel,
+                    swaylock,
+                    greet,
+                    launch,
+                    notify,
+                    rendered_json,
+                    leaf_files,
+                ) = render_once(&render_inputs)?;
+                staged = stage_of(
+                    &scoot,
+                    &bar,
+                    &foot,
+                    &fuzzel,
+                    &swaylock,
+                    &greet,
+                    &launch,
+                    &notify,
+                    &gtk3_css,
+                    &gtk4_css,
+                    &qt_scheme,
+                    &rendered_json,
+                    &leaf_files,
+                    &static_files,
+                );
+                for (file, contents) in &staged {
+                    let path = stage.join(file);
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+                    }
+                    std::fs::write(&path, contents)
+                        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+                }
+                match checks.foot_fragment(&stage.join("foot.ini")) {
+                    Ok(Availability::Available(())) => {
+                        validation.notes.push(foot_legacy_note(&message));
+                    }
+                    Ok(Availability::Unavailable(note)) => {
+                        validation.notes.push(foot_legacy_note(&message));
+                        validation.notes.push(note);
+                    }
+                    Err(second) => {
+                        if is_foot_check_missing(&second) {
+                            validation.notes.push(foot_legacy_note(&message));
+                            validation.notes.push(
+                                "foot has no --check-config: foot fragment unchecked".to_owned(),
+                            );
+                        } else {
+                            return Err(second);
+                        }
+                    }
+                }
+            }
         }
     }
     // The output dir guard lives in `build_dir` (refuses symlinks and
@@ -4201,6 +4521,21 @@ impl Checks for ProdChecks {
                 }
             ))
         }
+    }
+
+    fn foot_version(&self) -> Option<String> {
+        // `foot --version` answers `foot version: 1.28.0 +pgo ...`; a
+        // failing run (a foot too old to answer, an unparseable format)
+        // is None: the caller renders modern and lets the
+        // `--check-config` refusal downgrade instead.
+        let foot = self.foot.as_ref()?;
+        let out = run_with_timeout(foot, &["--version"]).ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let text = String::from_utf8(out.stdout).ok()?;
+        let (major, minor, patch) = parse_foot_version(&text)?;
+        Some(format!("{major}.{minor}.{patch}"))
     }
 }
 

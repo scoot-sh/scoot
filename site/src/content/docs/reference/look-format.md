@@ -79,7 +79,7 @@ color = "#2B3648"
 | Section | Keys (type, default) |
 |---|---|
 | `palette` | Thirteen `#rrggbb` roles. Required: `background`, `foreground`, `dim`, `accent`, `urgent`. Defaults: `surface` = `background`; `hover` = `accent`; `focus` = `accent`; `border` = `dim`; `accent-fg` = `background`; `selection` = `accent`; `selection-text` = `accent-fg`; `match` = `hover`. |
-| `terminal` | `colors`: exactly 16 `#rrggbb` hues, hand-placed. No table means no foot fragment, never a synthesized palette. |
+| `terminal` | `colors`: exactly 16 `#rrggbb` hues, hand-placed. No table means no foot fragment, never a synthesized palette. Renders the themed fragment (`[main]` `initial-color-theme` plus `[colors-dark]`/`[colors-light]`, needs foot 1.26+); against an older foot the apply renders the legacy `[colors]` fragment instead, with a note. |
 | `fonts` | `ui`, `sans`, `mono`: family names. `size`: points, desktop text. `popup-size`: default = `size`. `app-size`: default = `12`. `terminal-size`: default = `size`. Sizes convert to pixels as `clamp(1, 256, (pt * 4 + 1) / 3)`. A named family that is not installed falls back with a note (the look's other families first, then fontconfig's generic answer); only a box with no usable font file at all refuses. |
 | `fonts.files` | Bundled files in `fonts/`: `ui`, `sans` or `mono` to a `.ttf` or `.otf` path. License required. A bundled face wins over the fallback chain for its key. |
 | `fonts.nix` | Nixpkgs attribute paths: `ui`, `sans` or `mono` to one to eight `Name.segment` paths. Resolved only with `lib.attrByPath` against `pkgs`. Nix-only; a non-Nix box resolves families with `fc-match`. |

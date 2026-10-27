@@ -659,6 +659,37 @@ fi
 if grep -q "none of the usual font files" "$work/out"; then fail "font reason with --no-bar"; fi
 ok "--no-bar needs no font"
 
+# 8a. An older foot (before 1.26) is flagged, never a refusal: the look
+#     still applies (the apply renders the legacy fragment), so the
+#     report is a note beside whatever else prints. A current foot
+#     prints no note. The foot stub answers --version; the PATH prepend
+#     shadows the shared silent stub without touching it.
+mkdir -p "$work/oldfoot" "$work/newfoot"
+printf '#!/bin/sh\necho "foot version: 1.21.0"\n' >"$work/oldfoot/foot"
+printf '#!/bin/sh\necho "foot version: 1.28.0 +pgo +ime +graphemes"\n' >"$work/newfoot/foot"
+chmod +x "$work/oldfoot/foot" "$work/newfoot/foot"
+export SCOOT_INSTALL_OS_RELEASE="$f/os-ubuntu" SCOOT_INSTALL_FONTS="$work/have-font.ttf"
+if ! PATH="$work/oldfoot:$PATH" releases=file://$f/tags-unified.json run_in "$work/h-oldfoot" --dry-run; then
+    cat "$work/out"
+    fail "dry run with an old foot"
+fi
+unset SCOOT_INSTALL_OS_RELEASE SCOOT_INSTALL_FONTS releases
+if ! grep -q "Your foot predates 1.26" "$work/out"; then
+    cat "$work/out"
+    fail "no old-foot note"
+fi
+export SCOOT_INSTALL_OS_RELEASE="$f/os-ubuntu" SCOOT_INSTALL_FONTS="$work/have-font.ttf"
+if ! PATH="$work/newfoot:$PATH" releases=file://$f/tags-unified.json run_in "$work/h-newfoot" --dry-run; then
+    cat "$work/out"
+    fail "dry run with a new foot"
+fi
+unset SCOOT_INSTALL_OS_RELEASE SCOOT_INSTALL_FONTS releases
+if grep -q "Your foot predates 1.26" "$work/out"; then
+    cat "$work/out"
+    fail "old-foot note with a new foot"
+fi
+ok "an older foot is flagged, never a refusal"
+
 # 8b. --launch installs the launcher alongside, records it, stays up
 #     to date across re-runs, and uninstall removes it.
 h=$work/h-launch

@@ -1,9 +1,10 @@
 ---
 title: "look apply refuses the whole look when the installed foot is older than initial-color-theme"
-status: "open"
-area: "core"
-priority: "high"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-26"
 ---
 
 # look apply refuses the whole look when the installed foot is older than initial-color-theme
@@ -44,6 +45,45 @@ Pick one (in order of preference):
 Pin the edge cases: a foot too old to even answer `--version`; a fragment that is broken beyond
 one unknown key (must still refuse); `foot --check-config` itself missing (older foot? then skip
 validation with a note, or refuse — decide and test both).
+
+## Resolution (2026-10-27)
+
+Option 1 (probe) with the refusal shape as fallback, plus option 3 (docs + installer flag).
+
+Version archaeology against foot's own history: `initial-color-theme=1|2`
+lands after 1.22 (first released in 1.23.0); the rename to `dark`/`light`
+and the `[colors-dark]`/`[colors-light]` sections land after 1.25 (first
+released in 1.26.0). So every foot before 1.26 refuses the themed
+fragment — before 1.23 on the key, on 1.23–1.25 on the `dark`/`light`
+values and the section names — and 1.28 removed the legacy `[colors]`
+section, so one shape cannot serve both eras. Affected: foot < 1.26
+(Debian 13's 1.21.0, Debian 12's and Ubuntu 24.04's older still).
+
+Behavior: `foot --version` is probed at render time; an older foot
+renders the legacy single-`[colors]` fragment (same hues, that era
+parses) up front, with a note naming the key and the 1.26 floor. An
+unparseable version renders modern and downgrades once off the
+`--check-config` refusal instead. A fragment broken beyond the themed
+keys still refuses the whole look (fail-closed); a foot without
+`--check-config` itself leaves the legacy fragment unchecked with a
+note. Never half-applied: the swap applies everything with a foot
+fragment the installed foot parses, or refuses cleanly before anything
+is recorded. `install.sh` flags an older foot the way it flags a
+missing font (note, never a refusal); the install page and the look
+docs name the 1.26 floor.
+
+Evidence: failing test first
+(`an_older_foot_downgrades_the_fragment_instead_of_refusing_the_look`
+failed with the ticket's exact message, then passed); `nextest -p
+scoot-look -p scootctl` 538 passed; `cargo test` likewise; `clippy -D
+warnings` and `fmt --check` clean; `test-install.sh` all passed
+including the new old-foot case; the legacy bytes validate under a
+real foot 1.21.0 built from source on the dev VM, whose `--check-config`
+refuses the themed bytes with the ticket's message. The one `cargo
+test -p scoot` / `nextest -p scoot` failure
+(`a_refused_managed_window_costs_the_server_nothing`, 273 fds vs the
+264 cap) reproduces byte-identically on pristine `origin/main` —
+pre-existing, owned by open PR #757.
 
 ## Not in this ticket
 

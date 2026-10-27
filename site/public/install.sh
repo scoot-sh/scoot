@@ -1107,6 +1107,26 @@ if command -v ldd >/dev/null 2>&1; then
 fi
 need_foot=0
 command -v foot >/dev/null 2>&1 || need_foot=1
+# An older foot (before 1.26) still gets the look: `scoot look apply`
+# renders the legacy `[colors]` fragment for it, with a note. Flag it
+# here the way a missing font is flagged, so the Debian-13-shaped
+# install (apt's newest foot is 1.21.0, with no backports) says why new
+# terminals start on one palette instead of the themed pair. A foot
+# whose version does not parse counts as current: the apply's own
+# `--check-config` refusal downgrades instead.
+old_foot=0
+if [ "$need_foot" = 0 ]; then
+    if foot --version 2>/dev/null | awk '
+        { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+(\.[0-9]+)?$/) {
+            n = split($i, v, ".");
+            old = ((v[1] + 0) * 1000000 + (v[2] + 0) * 1000 + (v[3] + 0) < 1026000);
+            found = 1;
+            exit;
+        } }
+        END { exit !(found && old); }'; then
+        old_foot=1
+    fi
+fi
 # The font files scootbar tries without --font (crates/scootui/src/font.rs
 # WELL_KNOWN), overridable for tests the way the release URLs are.
 font_candidates=${SCOOT_INSTALL_FONTS:-"/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
@@ -1201,6 +1221,11 @@ if [ -n "$pkgs" ]; then
     fi
     say "Non-interactive: use apt -y, dnf -y, or pacman --noconfirm."
     say "  $cmd"
+fi
+if [ "$old_foot" = 1 ]; then
+    say ""
+    say "Your foot predates 1.26, so new terminals start on the look's legacy colors instead of its themed pair."
+    say "The look still applies. For the themed pair, upgrade foot past 1.26 (backports where your distro has them)."
 fi
 
 # --- next ---------------------------------------------------------------------------
