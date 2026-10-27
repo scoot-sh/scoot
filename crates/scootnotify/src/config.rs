@@ -69,9 +69,8 @@ pub struct Config {
     /// The screen corner the stack anchors to.
     pub anchor: Anchor,
     /// The output the stack shows on: `None` is a null output, the
-    /// compositor's choice (today its primary; the
-    /// `layer-shell-default-output` ticket moves that to the output the
-    /// user is on). A name pins that output; when it is gone the stack
+    /// compositor's choice (the output under the pointer, else its
+    /// primary). A name pins that output; when it is gone the stack
     /// falls back to the compositor's choice.
     pub output: Option<String>,
     /// Body lines per card before the ellipsis.

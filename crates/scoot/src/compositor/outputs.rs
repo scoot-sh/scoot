@@ -165,8 +165,8 @@ impl Outputs {
     ///
     /// The sites that already resolve an output *per surface* rather than
     /// through here are `layer_shell.rs`'s `new_layer_surface` (which honours
-    /// the client's requested `wl_output`, defaulting to the primary when it
-    /// names none) and [`State::output_of_layer`], which finds the map a
+    /// the client's requested `wl_output`, defaulting to the pointer's output,
+    /// then the primary, when it names none) and [`State::output_of_layer`], which finds the map a
     /// layer surface is actually in.
     ///
     /// [`State::output_of_layer`]: super::State::output_of_layer
