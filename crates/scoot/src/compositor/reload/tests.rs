@@ -3140,6 +3140,13 @@ fn a_stale_cursor_answer_is_dropped() {
 const LOOK_BG_A: &str = "[appearance]\nbackground_color = \"#111111\"\n";
 const LOOK_BG_B: &str = "[appearance]\nbackground_color = \"#222222\"\n";
 
+/// Two minimal look fragments swapping the focus ring colors (the ticket's
+/// ginger `#FF9A30` vs music-desk `#3D579A` shape): the compositor's
+/// decorations must follow the layer live, not keep the startup snapshot
+/// until restart.
+const LOOK_FOCUS_A: &str = "[appearance]\nfocus_ring_active_color = \"#FF9A30\"\nfocus_ring_inactive_color = \"#4E2913\"\n";
+const LOOK_FOCUS_B: &str = "[appearance]\nfocus_ring_active_color = \"#3D579A\"\nfocus_ring_inactive_color = \"#D5D7DD\"\n";
+
 fn reload_scoped_with_look(fixture: &mut Fixture, text: &str, name: &str, hash: &str) -> Response {
     fixture
         .state
@@ -3212,6 +3219,54 @@ fn a_scoped_reload_swaps_only_the_look_and_names_its_scope() {
             .as_deref(),
         Some("b"),
         "the layer identity commits after the scoped apply"
+    );
+}
+
+#[test]
+fn a_scoped_reload_swaps_focus_ring_colors_live_and_requests_render() {
+    let mut fixture = Fixture::with_config("[layout]\ngap = 20\n");
+    let plain = fixture
+        .state
+        .reload_with_state(LookLayerState::Present(look_fragment(
+            LOOK_FOCUS_A,
+            "a",
+            "hash-a",
+        )));
+    assert_eq!(
+        fixture.state.appearance.focus_ring_active_color,
+        Color::parse("#FF9A30").expect("a parsable color"),
+        "the plain load applies the layer's focus: {plain:?}"
+    );
+    // Quiet the render the plain reload requested, so `needs_render` below
+    // witnesses the scoped reload's own `request_render` and nothing else.
+    fixture.state.needs_render = false;
+    fixture.state.scene_dirty = false;
+
+    let scoped = reload_scoped_with_look(&mut fixture, LOOK_FOCUS_B, "b", "hash-b");
+    assert_eq!(
+        scope_of(&scoped),
+        Some(ReloadScope::Look),
+        "the reply says which scope ran: {scoped:?}"
+    );
+    for name in [field::RING_ACTIVE, field::RING_INACTIVE] {
+        assert!(
+            applied(&scoped).contains(&name.to_owned()),
+            "{name} was not reported applied: {scoped:?}"
+        );
+    }
+    assert_eq!(
+        fixture.state.appearance.focus_ring_active_color,
+        Color::parse("#3D579A").expect("a parsable color"),
+        "the focused ring follows the layer live: {scoped:?}"
+    );
+    assert_eq!(
+        fixture.state.appearance.focus_ring_inactive_color,
+        Color::parse("#D5D7DD").expect("a parsable color"),
+        "the unfocused ring follows the layer live: {scoped:?}"
+    );
+    assert!(
+        fixture.state.needs_render,
+        "a ring-color swap requests a render, or the screenshot keeps the old frame: {scoped:?}"
     );
 }
 
