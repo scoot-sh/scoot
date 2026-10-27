@@ -17,11 +17,11 @@
 SCOOT_SRC="${SCOOT_SRC:-$PWD}"
 export SCOOT_SRC
 
-STATE_DIR="${SCOOT_VM_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/scoot-vm}"
+STATE_DIR="${SCOOT_VM_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/${SCOOT_VM_STATE_NAME:-scoot-vm}}"
 
 # The generated runner honours NIX_DISK_IMAGE; without it the disk lands in
 # whatever directory you happened to be standing in.
-NIX_DISK_IMAGE="$STATE_DIR/scoot-vm.qcow2"
+NIX_DISK_IMAGE="$STATE_DIR/${SCOOT_VM_STATE_NAME:-scoot-vm}.qcow2"
 export NIX_DISK_IMAGE
 
 if [ "${1:-}" = "--reset" ]; then
@@ -33,7 +33,7 @@ fi
 mkdir -p "$STATE_DIR"
 
 echo "scoot-vm: sharing $SCOOT_SRC at /mnt/scoot"
-echo "scoot-vm: ssh -p 2222 dev@localhost   (password: dev)"
+echo "scoot-vm: ssh -p ${SCOOT_VM_SSH_PORT:-2222} dev@localhost   (password: dev)"
 echo "scoot-vm: packing the store image, this takes a moment on each boot..."
 
 exec "$SCOOT_VM_RUNNER" "$@"
