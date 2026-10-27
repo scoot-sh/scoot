@@ -17,6 +17,17 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.8](https://github.com/scoot-sh/scoot/compare/v0.6.7...v0.6.8) - 2026-10-27
+
+### scoot
+
+- fixed: put an output-less layer surface on the pointer's output ([#768](https://github.com/scoot-sh/scoot/pull/768))
+- fixed: deferred reply for reload --wait-wallpaper ([#769](https://github.com/scoot-sh/scoot/pull/769))
+
+### scootlaunch
+
+- fixed: atomic toggle claim and owner-only socket ([#766](https://github.com/scoot-sh/scoot/pull/766))
+
 ## [0.6.7](https://github.com/scoot-sh/scoot/compare/v0.6.6...v0.6.7) - 2026-10-27
 
 ### scoot
