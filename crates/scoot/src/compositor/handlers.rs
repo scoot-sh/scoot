@@ -160,7 +160,7 @@ impl CompositorHandler for State {
         // pointer sees it and one that did not is not re-served. Every other
         // commit may change the scene.
         if self.cursor.owns_surface(surface) {
-            self.cursor_changed();
+            self.cursor_image_changed();
         } else {
             self.request_render();
         }
@@ -261,7 +261,7 @@ impl CompositorHandler for State {
             // The cursor's shape just changed to the fallback: a redraw
             // where frames draw it, a capture tick where only captures do --
             // the same path as `cursor_image` below.
-            self.cursor_changed();
+            self.cursor_image_changed();
         }
         if self.forget_lock_surface(surface) {
             // Unconditional, unlike the cursor above: what the lock screen
@@ -705,7 +705,7 @@ impl SeatHandler for State {
         // headless/nested would do real work for nothing on screen. A capture
         // that asked for the pointer still sees the new image: see
         // `cursor_changed`.
-        self.cursor_changed();
+        self.cursor_image_changed();
     }
 
     fn focus_changed(

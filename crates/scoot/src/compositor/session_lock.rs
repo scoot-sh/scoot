@@ -1320,7 +1320,7 @@ impl SessionLockHandler for State {
         self.cursor.set_status(CursorImageStatus::default_named());
         // A cursor change like any other (see `State::cursor_changed`); the
         // transition below redraws the whole screen anyway.
-        self.cursor_changed();
+        self.cursor_image_changed();
         self.lock_transition();
         // A fresh lock is the false → true transition `Lock` subscribers
         // wait for; a takeover of an already-locked session is no

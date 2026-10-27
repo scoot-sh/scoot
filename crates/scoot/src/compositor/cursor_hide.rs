@@ -184,7 +184,7 @@ impl State {
             // carries cursor elements: every frame does until the next hide,
             // so on a CRTC with no cursor plane every one of them composites
             // (see the module doc).
-            self.cursor_changed();
+            self.cursor_image_changed();
         }
         self.cursor_hide_deadline = Some(Instant::now() + self.cursor_hide_delay());
         self.arm_cursor_hide_timer();
@@ -216,7 +216,7 @@ impl State {
         self.cursor_hide_deadline = None;
         if self.cursor_idle_hidden {
             self.cursor_idle_hidden = false;
-            self.cursor_changed();
+            self.cursor_image_changed();
         }
     }
 
@@ -261,7 +261,7 @@ impl State {
                 // The hidden cursor's own redraw: the frame without it is
                 // what may go primary-direct, and captures re-serve without
                 // it (`cursor_serial` moves even where frames draw none).
-                self.cursor_changed();
+                self.cursor_image_changed();
                 TimeoutAction::Drop
             }
         }
