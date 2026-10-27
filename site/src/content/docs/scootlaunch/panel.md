@@ -169,9 +169,11 @@ panel from the same roles:
 > **Symptom:** the panel opens on the wrong monitor.
 
 The panel names no output, and an output-less layer surface lands on
-the compositor's primary today. The core
-`layer-shell-default-output` ticket moves it under the pointer; until
-then the panel carries no output logic of its own.
+the output under the pointer (falling back to the primary when the
+pointer is over no output) — the same rule new windows use. If the
+panel still opens away from where you are looking, move the pointer
+onto that monitor first: the compositor picks the output once, when
+the surface maps, and does not move it afterwards.
 
 > **Symptom:** the panel refuses to start over a font.
 

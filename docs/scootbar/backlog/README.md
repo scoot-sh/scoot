@@ -149,7 +149,7 @@ The tickets live here until each app gets its own backlog.
 What starts when:
 
 - **Now:** the two spikes and `greet-baseline` (with the core
-  [`layer-shell-default-output`](../../backlog/core/layer-shell-default-output.md)).
+  [`layer-shell-default-output`](../../backlog/resolved/layer-shell-default-output-done.md)).
 - **On the maintainer's go-ahead:** the three go/no-go prototypes, which run out of the
   workspace (Decisions needed 1).
 - **Only after a gate's GO:** the extraction and the app work, held by prose blockers that

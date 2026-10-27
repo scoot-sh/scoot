@@ -1016,10 +1016,9 @@ own keyboard derivation:
 - A bar reserves the edge of the output it is mapped on, and no other's. A
   bar on the second screen never shrinks the first screen's tiling area.
 - A surface that names an output (`get_layer_surface` with a `wl_output`)
-  appears on that output. A surface that names none appears on the first
-  output — the compositor's choice. New windows, by contrast, open on the
-  output under the pointer (falling back to the first when the pointer is
-  over no output).
+  appears on that output. A surface that names none appears on the output
+  under the pointer (falling back to the first when the pointer is over no
+  output) — the compositor's choice, and the same rule new windows use.
 - Pointer input and keyboard focus follow the output under the pointer: a
   click on a second-screen bar focuses that bar, and an `exclusive`
   launcher mapped where the pointer is takes the keyboard there. If

@@ -454,9 +454,9 @@ fn run_panel(
         warn(format_args!("scootlaunch: no outputs: nothing to open on"));
         return pump.finish(app, 1, None);
     }
-    // A null output: the compositor picks (today its primary; the
-    // `layer-shell-default-output` core ticket moves it under the
-    // pointer). The panel carries no output logic of its own.
+    // A null output: the compositor picks the output under the pointer
+    // (its primary when the pointer is on none). The panel carries no
+    // output logic of its own.
     app.show(pump.handle());
     // The first configure sizes the draws; without one there is nothing
     // to draw into.
