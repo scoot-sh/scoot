@@ -538,6 +538,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 
 ### Packaging / tooling
 - [Slim the scoot ISO under GitHub's 2 GB release-asset cap](./core/iso-slim-under-2gb.md) — 2.83 GiB today; start with mbrola-voices
+- [Automate the Nix pnpm-deps hash bump for dependabot site PRs](./core/pnpm-deps-hash-automation.md) (low): `nix/docs-site.nix` `pnpmDeps.hash` goes stale on every `site/pnpm-lock.yaml` change (#734/#735 red, hand-fixed in #756); Linux-canonical hash, no pin weakening
 - [Nix package can reach neither GPU tier](./resolved/nix-gpu-tiers-done.md)
   — RESOLVED 2026-09-21 (gh #177): `packages.scoot` force-links libEGL
   (niri's `--no-as-needed` trick, Linux-only) so packaged `--renderer gles`
