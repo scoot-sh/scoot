@@ -1260,6 +1260,12 @@ pub struct State {
     /// connection the reply goes to (see `ipc::look_apply`). One at a
     /// time -- a second swap while this holds one is refused.
     pub(crate) pending_look: Option<PendingLookApply>,
+    /// Wallpaper-wait reloads parked while their `apply-config` runs work:
+    /// one entry per `reload --wait-wallpaper` request (see
+    /// `ipc::reload_wait`). Two reloads park two replies; a superseded wait
+    /// follows the newest. Empty unless a wait is parked, so the common
+    /// plain-`Reload` path never touches it.
+    pub(crate) pending_reload_wait: Vec<crate::compositor::ipc::reload_wait::PendingReloadWait>,
     /// A timed preview's revert that fired while a swap was running: it
     /// waits for the running swap (see `ipc::look_apply`) instead of
     /// being dropped, so the preview never sticks past its delay with no
@@ -1594,6 +1600,7 @@ impl State {
             last_commit: Instant::now(),
             pending_idle: Vec::new(),
             pending_look: None,
+            pending_reload_wait: Vec::new(),
             deferred_look_revert: None,
             cursor_sink: None,
             cursor_generation: 0,

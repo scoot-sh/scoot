@@ -109,6 +109,19 @@ impl Wallpaper {
         self.queue.is_empty()
     }
 
+    /// The pid in flight, if any: what a deferred wallpaper-wait parks on.
+    /// `None` means the run already exited (or never started), so the wait
+    /// answers at once like a plain reload.
+    pub fn running_pid(&self) -> Option<u32> {
+        self.queue.running_pid()
+    }
+
+    /// The newest submission's seq, if any: what a deferred wait identifies
+    /// its run by (pids can be reused, seqs cannot).
+    pub fn newest_seq(&self) -> Option<u64> {
+        self.queue.newest_seq()
+    }
+
     /// The queue, for the glue's tests.
     #[cfg(test)]
     pub(super) fn queue_mut(&mut self) -> &mut Queue {
@@ -324,12 +337,18 @@ impl State {
 
     /// Reaps the `apply-config` runs that exited, logs how each ended, and
     /// starts what is next. Called by the reaper on every `SIGCHLD` while a
-    /// run is tracked.
+    /// run is tracked. Parked wallpaper-waits whose submission landed are
+    /// answered here, off the loop like `LookApply` -- never by blocking it.
     pub(super) fn reap_wallpaper(&mut self) {
         let before = self.wallpaper.queue.running_pid();
+        let mut ended_seqs: Vec<u64> = Vec::new();
+        let log_ended = |ended: Ended| {
+            ended_seqs.push(ended.seq);
+            log_end(ended);
+        };
         self.wallpaper
             .queue
-            .reap(super::child_reaper::wait, log_end);
+            .reap(super::child_reaper::wait, log_ended);
         if self.wallpaper.queue.running_pid() != before {
             // The run in flight ended: its timer goes with it.
             if let Some(token) = self.wallpaper.timer.take() {
@@ -337,6 +356,12 @@ impl State {
             }
         }
         self.drive_wallpaper();
+        // Answer deferred waits after the queue advances, so a second parked
+        // wait keeps waiting on its own run while the first is answered.
+        // No allocation on the common path: empty when no wait is parked.
+        for seq in ended_seqs {
+            self.answer_ready_reload_waits(seq);
+        }
     }
 }
 
@@ -348,6 +373,7 @@ fn log_end(ended: Ended) {
         command,
         exit,
         abandoned,
+        seq: _,
     } = ended;
     let command = Lossy(&command);
     match exit {

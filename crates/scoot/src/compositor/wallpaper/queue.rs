@@ -129,6 +129,9 @@ pub struct Ended {
     pub exit: Exit,
     /// Whether it had been abandoned (waited on past [`PATIENCE`]).
     pub abandoned: bool,
+    /// Which submission this run was for: the deferred wallpaper-wait reply
+    /// waits on this, not the pid (pids can be reused, seqs cannot).
+    pub seq: u64,
 }
 
 #[derive(Debug)]
@@ -237,6 +240,12 @@ impl Queue {
         self.running.as_ref().map(|run| run.pid)
     }
 
+    /// The newest submission's seq, if any: what a deferred wallpaper-wait
+    /// parks on. Increases with every [`Queue::submit`], so it never reuses.
+    pub fn newest_seq(&self) -> Option<u64> {
+        self.newest.as_ref().map(|newest| newest.seq)
+    }
+
     /// Asks `wait` about every tracked pid, and applies the rules above to
     /// each that ended, calling `ended` for each (in-flight run first). No
     /// allocation: the abandoned list is filtered in place.
@@ -251,6 +260,7 @@ impl Queue {
                 command: run.command,
                 exit,
                 abandoned: false,
+                seq: run.seq,
             });
         }
         let mut index = 0;
@@ -266,6 +276,7 @@ impl Queue {
                         command: run.command,
                         exit,
                         abandoned: true,
+                        seq: run.seq,
                     });
                 }
             }

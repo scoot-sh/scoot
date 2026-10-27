@@ -221,7 +221,7 @@ pub(crate) enum LookLayerState {
 /// Resolves the look state dir from the live environment and loads the
 /// active rendered look's fragment. A dangling link or an unreadable
 /// fragment refuses the reload whole; a missing link is no layer.
-fn look_layer_state() -> LookLayerState {
+pub(crate) fn look_layer_state() -> LookLayerState {
     let Some(dir) = look_layer::state_dir(
         None,
         std::env::var_os("SCOOT_LOOK_STATE"),
@@ -393,6 +393,72 @@ impl State {
             invalid: fresh.invalid,
             scope: None,
         }
+    }
+
+    /// Runs a plain reload for a wallpaper-wait park: the same shared path
+    /// as [`State::reload_with_state`], but returning the report instead of
+    /// the reply, so the caller can park it until the wallpaper run exits.
+    /// `Err` is the refusal message (answered at once, never parked).
+    pub(crate) fn reload_for_wait(
+        &mut self,
+        layer: LookLayerState,
+    ) -> Result<crate::compositor::ipc::reload_wait::WaitReport, String> {
+        let Some(path) = self.config_path.clone() else {
+            tracing::error!(
+                "config reload refused: no resolvable config path; keeping the running config"
+            );
+            return Err(
+                "refused: this session started with no resolvable config path \
+                 (neither XDG_CONFIG_HOME nor HOME is set), so there is no \
+                 file to reload; keeping the running config"
+                    .to_owned(),
+            );
+        };
+        let layer_text = match layer {
+            LookLayerState::Absent => None,
+            LookLayerState::Broken(reason) => {
+                tracing::error!(%reason, "config reload failed");
+                return Err(format!(
+                    "refused: the look layer is refused ({reason}); keeping the running config"
+                ));
+            }
+            LookLayerState::Present(fragment) => Some(fragment),
+        };
+        let identity = layer_text
+            .as_ref()
+            .map(|fragment| fragment.identity.clone());
+        let fresh = match config::reload_from_with_layer(
+            &path,
+            self.tty.is_some(),
+            layer_text.as_ref().map(|fragment| fragment.text.as_str()),
+        ) {
+            Ok(fresh) => fresh,
+            Err(error) => {
+                tracing::error!(%error, "config reload failed");
+                return Err(error.to_string());
+            }
+        };
+        let report = self.apply_reload(&fresh.loaded);
+        self.user_snapshot = fresh.user_text;
+        if identity != self.look_identity {
+            self.look_identity = identity.clone();
+            let (name, source_hash) = match &identity {
+                Some(identity) => (identity.name.clone(), identity.source_hash.clone()),
+                None => (None, String::new()),
+            };
+            self.emit_look_changed(name, source_hash);
+        }
+        tracing::info!(
+            applied = ?report.applied,
+            refused = ?report.refused,
+            "config reloaded (wallpaper-wait park)"
+        );
+        Ok(crate::compositor::ipc::reload_wait::WaitReport {
+            applied: report.applied,
+            refused: report.refused,
+            shadowed: fresh.shadowed,
+            invalid: fresh.invalid,
+        })
     }
 
     /// Serves a look-scoped reload against an explicit look layer state.

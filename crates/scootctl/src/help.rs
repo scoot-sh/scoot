@@ -66,9 +66,9 @@ pub const REQUESTS: &[RequestDoc] = &[
     },
     RequestDoc {
         verb: "reload",
-        syntax: "reload [--look]",
+        syntax: "reload [--look] [--wait-wallpaper]",
         description: RELOAD_DESCRIPTION,
-        example: "scoot msg reload --look",
+        example: "scoot msg reload --wait-wallpaper",
         reply: "`{\"type\":\"reloaded\",...}`",
     },
     RequestDoc {

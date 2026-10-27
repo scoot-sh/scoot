@@ -156,6 +156,29 @@ pub enum Request {
     /// speaks byte-for-byte what it did before. Answered by
     /// `Response::Reloaded` with `"scope":"look"`.
     ReloadLook,
+    /// Re-read the config file like [`Request::Reload`] but park the reply
+    /// until the `scootbg apply-config` run this reload hands over exits
+    /// (or a bound passes, reporting handed-over-but-unwaited-on).
+    ///
+    /// Answered with the same [`Response::Reloaded`] a plain reload answers
+    /// with -- applied/refused/shadowed/invalid/scope -- only later: when
+    /// the wallpaper run exits, or with an extra `wallpaper (...)` refused
+    /// entry when the wait times out (the run keeps going, its exit still
+    /// logged). A reload with no wallpaper run in flight answers at once,
+    /// like a plain reload; an `Error` (unreadable file, bad layer) also
+    /// answers at once, never parked.
+    ///
+    /// A distinct tag, not a `wait_wallpaper` field on [`Request::Reload`]:
+    /// an older server would decode `{"type":"reload","wait_wallpaper":true}`
+    /// as a plain `Reload` (serde's internally-tagged unit variants drain
+    /// and ignore extra fields) and answer at once -- a false "landed" --
+    /// where a distinct tag fails that decode with an ordinary
+    /// unknown-request `Error` instead, never a silent immediate answer.
+    /// Additive like `ReloadLook`: a client that never sends it speaks
+    /// byte-for-byte what it did before, and the reply half is the existing
+    /// `Reloaded` variant, so no `PROTOCOL_VERSION` bump at all. An older
+    /// server meets it with an ordinary `Error`, like any unknown tag.
+    ReloadWaitWallpaper,
     /// Subscribe this connection to events of the named kinds, dedicating
     /// it to them: the reply is `Response::Subscribed`, and afterwards the
     /// connection carries events only (any other request on it is refused
