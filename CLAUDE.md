@@ -45,9 +45,9 @@ window layout OmniWM-style through the Accessibility API.
   verify claims about its behavior against the pinned source, not general
   Smithay knowledge; APIs and semantics shift across revs. **It is
   currently a scoot-sh fork** (`github.com/scoot-sh/smithay`, rev
-  `fdf424d6`, branch `scoot/cursor-dmabuf-storage`, which is
+  `b65cbc5f`, branch `scoot/cursor-dmabuf-storage`, which is
   `scoot/xwayland-selection-dnd` plus two): upstream's `0ff0098`
-  plus twenty-seven commits — a `Drop` that stops every syncobj timeline import
+  plus twenty-eight commits — a `Drop` that stops every syncobj timeline import
   leaking a kernel handle (see
   `docs/backlog/resolved/syncobj-handle-leak-done.md`), thirteen XWayland
   selection/drag commits for Phase 4, one pixman `Repeat::Pad`
@@ -62,12 +62,15 @@ window layout OmniWM-style through the Accessibility API.
   flush for XSETTINGS writes, so X toolkits read the scale scoot sets; and
   an `UnderlyingStorage::Dmabuf` so scoot's drawn cursor can ride an
   overlay plane where there is no cursor plane; and a `ConnectionLost`
-  error so a dead seat shuts scoot down instead of panicking in libseat (see
+  error so a dead seat shuts scoot down instead of panicking in libseat; and
+  an independent file description per `wl_keyboard.keymap` send, so a second
+  `read()`-based client reads the whole keymap instead of an empty one (see
+  `dev/forks.md`, which since 2026-10-08 carries a per-commit verdict on
   `dev/forks.md`, which since 2026-10-08 carries a per-commit verdict on
   whether each change could live in scoot instead: all stay except the
   unused `set_commits_allowed`, dropped at the next rebase). Make
   verify-against-source claims against the fork rev (its checkout is
-  `~/.cargo/git/checkouts/smithay-*/fdf424d`), and repin to upstream once
+  `~/.cargo/git/checkouts/smithay-*/b65cbc5`), and repin to upstream once
   a Smithay rev carries the fixes (`docs/backlog/core/smithay-fork-repin.md`).
 - **Dependency fixes go in scoot-sh forks, never upstream from here.**
   (User, 2026-09-24: "Do not open upstream PR's. I would rather fork for now
