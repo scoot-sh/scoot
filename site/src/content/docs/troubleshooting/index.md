@@ -36,7 +36,8 @@ troubleshooting page has the full diagnosis.
 
 - *Socket not there / action refused / screenshot blank* → [IPC troubleshooting](../msg/troubleshooting.md): the ten bounds, what each costs, and the retry rules.
 - *Typed text lands on the wrong window* → [Rules an agent needs](../msg/index.md#rules-an-agent-needs): window focus vs keyboard focus, and the `popup_grab` rule.
-- *No popups / popups under fullscreen / DND stuck* → [Desktop notifications](../desktop/index.md#notifications): unit, `layer=overlay`, `makoctl mode -r`.
+- *No popups / popups under fullscreen / DND stuck* → [Desktop notifications](../desktop/index.md#notifications) and [scootnotify troubleshooting](../scootnotify/troubleshooting.md): unit, `layer=overlay`, DND and history.
+- *Launcher panel won't open / ranking surprises / icon misses / dmenu fails* → [scootlaunch troubleshooting](../scootlaunch/troubleshooting.md): `--check`, `--query --json`, theme and flags.
 
 ## Look and feel
 

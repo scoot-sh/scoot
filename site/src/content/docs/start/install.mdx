@@ -299,6 +299,10 @@ curl -fsSL https://www.scoot.sh/install.sh | sh -s -- --look ginger-night
 You need `curl` (or `wget`) and `sh`: `sudo apt install curl` on
 Debian and Ubuntu. Silence with a zero exit means the download itself
 failed and the script never ran — check the network and run it again.
+A `curl: (23) Failure writing output to destination` line above a
+`scoot-install: error:` line is fallout, not the cause: the script
+exited, so the closed pipe made curl report. Read the
+`scoot-install: error:` line for what failed.
 
 Minimal Fedora and Arch images ship no usable font, and the bar refuses
 to start without one (`no font: none of the usual font files is usable`).

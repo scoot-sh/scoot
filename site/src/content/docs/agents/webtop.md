@@ -17,8 +17,10 @@ nested in the host compositor with the same session script:
 exec scoot --nested -- /path/to/session.sh
 ```
 
-Pull a glibc-based tag: the installer supports glibc only, while the
-default tag (`latest`) is Alpine/musl — `debian-xfce` is one that works.
+Pull a glibc-based tag: the installer needs glibc 2.36 or newer (see
+[Install](../start/install.md#use-it-every-day)), while the
+default tag (`latest`) is Alpine/musl — build from source there.
+`debian-xfce` is one tag that works; `ubuntu-xfce` is glibc-based too.
 Run the container with `-e PIXELFLUX_WAYLAND=true`: without it the image
 boots X11 and there is no Wayland socket to nest into.
 
