@@ -41,7 +41,7 @@ wayland = ["dep:wayland-client", "rustix/event"]
 # name a parameter of the app's (`scootbar`, `scootnotify`): the `msg`
 # interface every shell daemon serves. The error lines use the same JSON
 # encoding as the apps' own reply writers.
-control = ["rustix/event", "rustix/net", "dep:serde", "dep:serde_json"]
+control = ["rustix/event", "rustix/net", "rustix/rand", "dep:serde", "dep:serde_json"]
 # The seat keyboard: the keymap fd with a size cap, modifiers with Caps
 # and Num Lock, key repeat on one timerfd, keysyms and UTF-8 into a
 # caller-supplied buffer, and Compose. Needs `wayland` for the seat
@@ -94,6 +94,8 @@ serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
 [dev-dependencies]
+# `umask` in the control claim's publication tests.
+rustix = { version = "1", default-features = false, features = ["process"] }
 # The headless keyboard test's mapped surface (`xdg_shell`) and its held
 # key (`zwp_virtual_keyboard_v1`). Test-only: never in a shipped binary.
 wayland-protocols = { version = "0.32", features = ["client"] }

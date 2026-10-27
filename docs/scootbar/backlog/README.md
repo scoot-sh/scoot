@@ -220,7 +220,7 @@ hits the wall:
 - [launch-panel-shrink-to-content](launch-panel-shrink-to-content.md)
 - [launch-panel-bare-desktop-click](launch-panel-bare-desktop-click.md)
 - [launch-toggle-race-and-socket-mode](resolved/launch-toggle-race-and-socket-mode-done.md): atomic lock claim plus `0600`-before-publish staging rename — RESOLVED 2026-10-27
-- [control-socket-mode-window](control-socket-mode-window.md)
+- [control-socket-mode-window](resolved/control-socket-mode-window-done.md): the control socket is built `0600` in a `0700` staging dir and renamed onto its name; no chmod-after-bind window, in scootui and scootbg — RESOLVED 2026-10-27
 - [scootlaunch socket claim follow-ups from the #766 review](resolved/scootlaunch-socket-claim-followups-done.md): lock-holder wedge, blocking fast-path connect, unlink-then-rename gap, unpinned staging, lock without `O_NOFOLLOW`, dead `SUN_PATH_MAX` message, lock file unnamed on the site, untidy archive, stale `_lock` comment — RESOLVED 2026-10-27
 - [launch-ci-scootui-manifest-fanout](launch-ci-scootui-manifest-fanout.md)
 - [launch-look-selected-row-contrast](launch-look-selected-row-contrast.md)

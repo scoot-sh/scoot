@@ -45,6 +45,10 @@ pub mod claim;
 pub mod conn;
 pub mod framing;
 pub mod paths;
+mod stage;
+
+#[cfg(test)]
+mod claim_tests;
 
 use std::io;
 use std::os::fd::OwnedFd;

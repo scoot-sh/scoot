@@ -38,9 +38,12 @@
 
 mod claim;
 mod conn;
+mod stage;
 
 #[cfg(test)]
 mod deferred_tests;
+#[cfg(test)]
+mod publish_tests;
 #[cfg(test)]
 mod tests;
 

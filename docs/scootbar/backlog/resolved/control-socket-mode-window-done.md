@@ -1,9 +1,10 @@
 ---
 title: "scootui Claim chmods the control socket after bind; scootbg duplicate too"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-27"
 ---
 
 # scootui Claim chmods the control socket after bind; scootbg duplicate too
@@ -30,3 +31,9 @@ Make `scootui::control::Claim::acquire` (and the `scootbg` duplicate, or de-dupl
 ## Not in this ticket
 
 The `scootlaunch` toggle fix itself (atomic lock + `0600`-before-publish): that lands in `launch-toggle-race-and-socket-mode`. This ticket is the shared control-socket pattern only.
+
+## Resolution
+
+Landed 2026-10-27. `scootui::control::Claim::acquire` and scootbg's duplicate now publish through `control/stage.rs` (a copy in each crate: scootbg is a binary that links nothing of scootui's, and adding the dependency would cost more than the ~130 duplicated lines): a `0700` staging directory beside the path, reopened `O_DIRECTORY | O_NOFOLLOW` and pinned by fd, the socket bound under `/proc/self/fd/<n>`, `chmod 0600` while unreachable, then an atomic `rename` onto the name. `clear_stale` still refuses a live or non-socket path but no longer unlinks: the rename replaces a stale socket, so the name never goes missing. The lock-file claim is unchanged.
+
+Evidence (before the fix, `cargo test -p scootui --features control --lib claim_tests`): `the_socket_is_owner_only_from_the_moment_its_name_exists` failed with `umask 022: ... left: {384, 493}` (a watcher thread statted `0755` at the published name) and `replacing_a_stale_socket_never_leaves_the_name_missing` failed with `the name was missing during the handover`; after, all five pass in both crates (`claim_tests` in scootui, `publish_tests` in scootbg).
