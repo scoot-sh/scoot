@@ -221,6 +221,7 @@ hits the wall:
 - [launch-panel-bare-desktop-click](launch-panel-bare-desktop-click.md)
 - [launch-toggle-race-and-socket-mode](resolved/launch-toggle-race-and-socket-mode-done.md): atomic lock claim plus `0600`-before-publish staging rename — RESOLVED 2026-10-27
 - [control-socket-mode-window](control-socket-mode-window.md)
+- [scootlaunch socket claim follow-ups from the #766 review](scootlaunch-socket-claim-followups.md) (medium): lock-holder wedge, blocking fast-path connect, unlink-then-rename gap, unpinned staging, lock without `O_NOFOLLOW`, dead `SUN_PATH_MAX` message, lock file unnamed on the site, untidy archive, stale `_lock` comment — each verified on `origin/main`
 - [launch-ci-scootui-manifest-fanout](launch-ci-scootui-manifest-fanout.md)
 - [launch-look-selected-row-contrast](launch-look-selected-row-contrast.md)
 - [launch-match-on-selection-contrast](resolved/launch-match-on-selection-contrast-done.md) (low): selected-row match spans now resolve through `Theme::match_on_selection` (readable `hover` kept, else the inverted chip) — RESOLVED 2026-10-21
