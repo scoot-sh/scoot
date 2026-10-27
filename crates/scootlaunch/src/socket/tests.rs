@@ -1,6 +1,7 @@
 //! The toggle's tests: paths, the close handshake, stale files.
 
 use super::*;
+use std::io::Write as _;
 
 fn scratch(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("scootlaunch-socket-{tag}-{}", std::process::id()));
@@ -162,5 +163,218 @@ fn garbage_from_a_peer_is_ignored() {
     assert!(matches!(open(&path), Ok(Open::Signalled)));
     assert!(claim.accept_close(), "the close line still arrives");
     drop(claim);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// F1: a lock holder with no panel is a visible error, not a silent yield.
+#[test]
+fn a_lock_holder_with_no_panel_is_a_visible_error() {
+    use rustix::fs::{FlockOperation, flock};
+    let dir = scratch("wedge");
+    let path = dir.join("scootlaunch-wayland-1.sock");
+    let lock_path = lock_path_for(&path);
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .expect("lock opens");
+    flock(&lock, FlockOperation::NonBlockingLockExclusive).expect("holder takes the lock");
+    // No panel: nothing answers. The second press must not silently claim
+    // success.
+    match open(&path) {
+        Ok(Open::Signalled) => panic!("a lock with no panel must not yield Signalled"),
+        Ok(Open::Listen(_)) => panic!("a held lock must not yield a second panel"),
+        Err(_) => {}
+    }
+    drop(lock);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// A simultaneous open: the loser waits for the winner's panel and must
+// then yield without signalling, or the panel that just won is closed.
+#[test]
+fn losing_a_simultaneous_open_does_not_close_the_winner() {
+    use rustix::fs::{FlockOperation, flock};
+    use std::io::Read;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    let dir = scratch("loser");
+    let path = dir.join("scootlaunch-wayland-1.sock");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path_for(&path))
+        .expect("lock opens");
+    flock(&lock, FlockOperation::NonBlockingLockExclusive).expect("winner takes the lock");
+    let stop = Arc::new(AtomicBool::new(false));
+    let accepted = Arc::new(Mutex::new(Vec::<UnixStream>::new()));
+    let panel = {
+        let (path, stop, accepted) = (path.clone(), stop.clone(), accepted.clone());
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let listener = UnixListener::bind(&path).expect("winner binds");
+            listener.set_nonblocking(true).expect("nonblocking");
+            while !stop.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((stream, _)) => accepted.lock().expect("lock").push(stream),
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(5)),
+                }
+            }
+        })
+    };
+    let outcome = open(&path);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    stop.store(true, Ordering::Relaxed);
+    panel.join().expect("panel thread");
+    assert!(matches!(outcome, Ok(Open::Signalled)), "the loser yields");
+    for mut stream in accepted.lock().expect("lock").drain(..) {
+        stream.set_nonblocking(true).expect("nonblocking");
+        let mut got = Vec::new();
+        let _ = stream.read_to_end(&mut got);
+        assert!(
+            !got.starts_with(b"close"),
+            "the loser closed the panel that won: {got:?}"
+        );
+    }
+    drop(lock);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// F2: a listener that stopped with a full backlog must not hang the press.
+#[test]
+fn a_full_backlog_does_not_hang_the_press() {
+    use rustix::net::{
+        AddressFamily, SocketAddrUnix, SocketFlags, SocketType, connect, socket_with,
+    };
+    let dir = scratch("backlog");
+    let path = dir.join("scootlaunch-wayland-1.sock");
+    let listener = UnixListener::bind(&path).expect("plant listener");
+    // Fill the backlog with nonblocking connects until the kernel says
+    // room is gone (EAGAIN): never accept, so the listener stays deaf.
+    // A blocking connect would now wait for an accept that never comes.
+    let mut held = Vec::new();
+    let mut filled = false;
+    for _ in 0..5200 {
+        let probe = match socket_with(
+            AddressFamily::UNIX,
+            SocketType::STREAM,
+            SocketFlags::NONBLOCK | SocketFlags::CLOEXEC,
+            None,
+        ) {
+            Ok(fd) => fd,
+            Err(_) => break,
+        };
+        let address = match SocketAddrUnix::new(&path) {
+            Ok(a) => a,
+            Err(_) => break,
+        };
+        match connect(&probe, &address) {
+            Ok(()) | Err(rustix::io::Errno::INPROGRESS) => {
+                held.push(probe);
+            }
+            Err(rustix::io::Errno::AGAIN) => {
+                filled = true;
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+    assert!(filled, "the deaf backlog really filled (EAGAIN observed)");
+    assert!(!held.is_empty(), "the backlog holds connections");
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let path_clone = path.clone();
+    std::thread::spawn(move || {
+        let result = open(&path_clone);
+        let _ = done_tx.send(result);
+    });
+    let result = done_rx
+        .recv_timeout(std::time::Duration::from_secs(8))
+        .expect("the press returns within 8s even with a full deaf backlog");
+    assert!(
+        matches!(result, Ok(Open::Signalled)),
+        "a live (deaf) panel still toggles"
+    );
+    drop(held);
+    drop(listener);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// F3: clearing a stale socket leaves the name resolving (rename replaces).
+#[test]
+fn clearing_a_stale_socket_leaves_no_missing_name() {
+    let dir = scratch("nogap");
+    let path = dir.join("scootlaunch-wayland-1.sock");
+    let stale = UnixListener::bind(&path).expect("plant stale");
+    drop(stale);
+    // Stale: bound file with no listener.
+    clear_stale(&path).expect("stale is checkable");
+    assert!(
+        std::fs::symlink_metadata(&path).is_ok(),
+        "checking a stale socket must not unlink it: the rename replaces it"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// F4: staging through a symlink is refused (fd-pinned, O_NOFOLLOW).
+#[test]
+fn staging_through_a_symlink_is_refused() {
+    let dir = scratch("staginglink");
+    let real = dir.join("real");
+    std::fs::create_dir_all(&real).expect("real dir makes");
+    let link = dir.join("link");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, &link).expect("symlink makes");
+    let target = dir.join("scootlaunch-wayland-1.sock");
+    assert!(
+        stage(&link, &target).is_err(),
+        "a symlinked staging dir must be refused"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// F5: a symlinked lock is refused, not followed.
+#[test]
+fn a_symlinked_lock_is_refused() {
+    let dir = scratch("locklink");
+    let path = dir.join("scootlaunch-wayland-1.sock");
+    let lock_path = lock_path_for(&path);
+    let real = dir.join("real.lock");
+    std::fs::write(&real, b"real").expect("real lock makes");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, &lock_path).expect("symlink makes");
+    assert!(
+        open(&path).is_err(),
+        "a symlinked lock must be refused, not followed"
+    );
+    assert_eq!(
+        std::fs::read(&real).expect("target intact"),
+        b"real",
+        "the link target is left alone"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// F6: an overlong path gets the friendly length error.
+#[test]
+fn an_overlong_path_gets_the_friendly_length_error() {
+    let dir = scratch("toolong");
+    let long_name = format!("scootlaunch-{}.sock", "w".repeat(120));
+    let path = dir.join(long_name);
+    assert!(
+        path.as_os_str().len() > SUN_PATH_MAX,
+        "the fixture really is overlong"
+    );
+    let error = match open(&path) {
+        Ok(_) => panic!("an overlong path must be refused"),
+        Err(error) => error,
+    };
+    assert!(
+        error.contains("at most 107"),
+        "the friendly length message, not a probe errno: {error}"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }

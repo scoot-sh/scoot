@@ -25,7 +25,7 @@
 //! bind would leave exactly that window (`0777 & !umask`, e.g. `0755`
 //! under `022`, connectable until the chmod lands).
 
-use std::io::{Read, Write};
+use std::io::Read;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -132,46 +132,116 @@ pub enum Open {
 /// close), else claim the single instance under the lock and listen.
 ///
 /// Two opens at once serialise on the lock: the winner binds and listens
-/// while holding it, the loser finds it held and yields without opening,
-/// so one panel results instead of two with the first orphaned (its file
-/// unlinked from under its listener). The socket is published `0600`
-/// through a `0700` staging directory before the rename, never chmodded
-/// after bind.
+/// while holding it, the loser waits briefly for the winner's panel and
+/// yields without opening, so one panel results instead of two with the
+/// first orphaned (its file unlinked from under its listener). A lock held
+/// with no panel answering is a visible error, not a silent yield. The
+/// socket is published `0600` through a `0700` staging directory before the
+/// rename, never chmodded after bind.
 pub fn open(path: &std::path::Path) -> Result<Open, String> {
-    match UnixStream::connect(path) {
-        Ok(stream) => {
-            // A connectable socket is a live panel: tell it to close. A
-            // write failure means it is dying; the toggle was still
-            // asked, so exit either way.
-            let _ = stream.set_write_timeout(Some(PEER_TIMEOUT));
-            let _ = (&stream).write_all(CLOSE_LINE);
-            Ok(Open::Signalled)
+    check_path_len(path)?;
+    if try_signal(path)? {
+        return Ok(Open::Signalled);
+    }
+    claim(path)
+}
+
+/// The toggle socket path must fit in `sun_path`: checked before any probe
+/// so an overlong path gets the friendly message rather than the probe's
+/// `ENAMETOOLONG`.
+fn check_path_len(path: &Path) -> Result<(), String> {
+    if path.as_os_str().len() > SUN_PATH_MAX {
+        return Err(format!(
+            "the socket path is {} bytes; a unix socket path can be at most {SUN_PATH_MAX}: {}",
+            path.as_os_str().len(),
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Whether a panel is listening, told without blocking: a nonblocking
+/// connect that completes (or reports a full backlog) counts as listening.
+/// Sends `close` when one is, without waiting past [`PEER_TIMEOUT`]: a
+/// `SIGSTOP`ped panel with a full backlog must not hang the press. A write
+/// failure means the panel is dying; the toggle was still asked, so either
+/// way a listening panel reports `true`.
+fn try_signal(path: &Path) -> Result<bool, String> {
+    use rustix::net::{
+        AddressFamily, SendFlags, SocketAddrUnix, SocketFlags, SocketType, connect, send,
+        socket_with,
+    };
+    let probe = socket_with(
+        AddressFamily::UNIX,
+        SocketType::STREAM,
+        SocketFlags::NONBLOCK | SocketFlags::CLOEXEC,
+        None,
+    )
+    .map_err(|error| format!("cannot probe {}: {error}", path.display()))?;
+    let address = SocketAddrUnix::new(path)
+        .map_err(|error| format!("cannot probe {}: {error}", path.display()))?;
+    match connect(&probe, &address) {
+        Err(Errno::NOENT) | Err(Errno::CONNREFUSED) => return Ok(false),
+        Ok(()) | Err(Errno::AGAIN) | Err(Errno::INPROGRESS) => {}
+        Err(errno) => {
+            return Err(format!("cannot probe {}: {errno}", path.display()));
         }
-        Err(_) => claim(path),
+    }
+    // Listening: wait for the connect to finish, then offer `close`.
+    // A deaf panel (stopped, backlog full) times out here rather than
+    // hanging the press; it still counts as signalled.
+    let wait = rustix::time::Timespec {
+        tv_sec: PEER_TIMEOUT.as_secs() as _,
+        tv_nsec: PEER_TIMEOUT.subsec_nanos() as _,
+    };
+    let mut polls = [rustix::event::PollFd::new(
+        &probe,
+        rustix::event::PollFlags::OUT,
+    )];
+    let _ = rustix::event::poll(&mut polls, Some(&wait));
+    let _ = send(&probe, CLOSE_LINE, SendFlags::empty());
+    Ok(true)
+}
+
+/// After losing the lock race: waits briefly for the winner's panel, so a
+/// normal simultaneous open still yields one panel, while a lock held with
+/// no panel (a same-uid squatter, no panel) becomes a visible error.
+fn wait_for_panel(path: &Path) -> Result<bool, String> {
+    let deadline = std::time::Instant::now() + PEER_TIMEOUT;
+    loop {
+        if answers(path).map_err(|error| format!("cannot probe {}: {error}", path.display()))? {
+            return Ok(true);
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(false);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
 
 /// The slow path: no live panel answered, so become the one listener
 /// under the lock.
 fn claim(path: &Path) -> Result<Open, String> {
-    use std::os::unix::fs::OpenOptionsExt as _;
+    check_path_len(path)?;
     let lock_path = lock_path_for(path);
-    let lock = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .mode(0o600)
-        .open(&lock_path)
-        .map_err(|error| format!("cannot open {}: {error}", lock_path.display()))?;
+    let lock = open_lock(&lock_path)?;
     match flock(&lock, FlockOperation::NonBlockingLockExclusive) {
         Ok(()) => {}
         Err(Errno::WOULDBLOCK) => {
-            // Another opener holds the lock: it failed no initial connect
-            // either, so it is opening now. Yield without signalling: the
-            // panel that wins opens, and one panel results. Signalling here
-            // would close the panel that just won.
-            return Ok(Open::Signalled);
+            // Another opener holds the lock: it saw no panel either, so
+            // it is opening now. Wait briefly for its panel, then yield
+            // without signalling: the panel that wins opens, and one
+            // panel results. Signalling here would close the panel that
+            // just won. A lock that never produces a panel is a wedge:
+            // report it loudly rather than exiting 0 with no panel.
+            if wait_for_panel(path)? {
+                return Ok(Open::Signalled);
+            }
+            return Err(format!(
+                "another opener holds {} but no panel answered within {}s; refusing to yield silently",
+                lock_path.display(),
+                PEER_TIMEOUT.as_secs()
+            ));
         }
         Err(errno) => {
             return Err(format!("cannot lock {}: {errno}", lock_path.display()));
@@ -181,10 +251,7 @@ fn claim(path: &Path) -> Result<Open, String> {
     // running without this lock (its lock file was deleted under it).
     // Signal it rather than stealing its name.
     if answers(path).map_err(|error| format!("cannot probe {}: {error}", path.display()))? {
-        if let Ok(stream) = UnixStream::connect(path) {
-            let _ = stream.set_write_timeout(Some(PEER_TIMEOUT));
-            let _ = (&stream).write_all(CLOSE_LINE);
-        }
+        let _ = try_signal(path);
         return Ok(Open::Signalled);
     }
     clear_stale(path)?;
@@ -194,6 +261,21 @@ fn claim(path: &Path) -> Result<Open, String> {
         path: path.to_owned(),
         _lock: lock,
     }))
+}
+
+/// Opens the lock without following a symlink: `O_NOFOLLOW` refuses a
+/// symlinked lock path rather than locking through it. No unlink or
+/// truncate passes through it, but the care matches the staging pin
+/// below.
+fn open_lock(lock_path: &Path) -> Result<std::fs::File, String> {
+    use rustix::fs::{Mode, OFlags};
+    let fd = rustix::fs::open(
+        lock_path,
+        OFlags::RDWR | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::from_bits_truncate(0o600),
+    )
+    .map_err(|error| format!("cannot open {}: {error}", lock_path.display()))?;
+    Ok(std::fs::File::from(fd))
 }
 
 /// Whether something is listening on `socket`, without blocking: a
@@ -218,10 +300,12 @@ fn answers(socket: &Path) -> Result<bool, rustix::io::Errno> {
     }
 }
 
-/// With the lock held: removes a dead daemon's socket, refusing if the
-/// path is live or not a socket at all. Never removes a non-socket:
-/// unlinking whatever sits at the name would let a planted symlink aim
-/// the removal.
+/// With the lock held: verifies a dead daemon's socket, refusing if the
+/// path is live or not a socket at all. Never removes anything: the
+/// rename in [`stage`] replaces a stale socket atomically, so the name
+/// always resolves during handover with no missing-name window. Never
+/// removes a non-socket: unlinking whatever sits at the name would let
+/// a planted symlink aim the removal.
 fn clear_stale(socket: &Path) -> Result<(), String> {
     use std::os::unix::fs::FileTypeExt as _;
     let metadata = match std::fs::symlink_metadata(socket) {
@@ -233,7 +317,7 @@ fn clear_stale(socket: &Path) -> Result<(), String> {
     };
     if !metadata.file_type().is_socket() {
         return Err(format!(
-            "{} exists and is not a socket; refusing to remove it",
+            "{} exists and is not a socket; refusing to replace it",
             socket.display()
         ));
     }
@@ -243,14 +327,7 @@ fn clear_stale(socket: &Path) -> Result<(), String> {
             socket.display()
         ));
     }
-    match std::fs::remove_file(socket) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!(
-            "cannot remove the stale socket {}: {error}",
-            socket.display()
-        )),
-    }
+    Ok(())
 }
 
 /// Binds the listening socket at `path` through a `0700` staging directory
@@ -303,9 +380,27 @@ fn publish(staging: &Path, path: &Path) -> Result<UnixListener, String> {
 
 /// Binds the socket inside `staging`, gives it [`SOCKET_MODE`] and renames
 /// it onto `path`.
+///
+/// `staging` is a directory this process just created, but that claim is
+/// rechecked: it is reopened `O_DIRECTORY | O_NOFOLLOW`, `fchmod`ed to
+/// [`STAGING_MODE`] through the fd, and bound under `/proc/self/fd/<n>`,
+/// as scoot's IPC listener does, so a swapped name or a pathological
+/// umask cannot redirect the bind or the chmod. `directory` stays alive
+/// through the rename: `staged` borrows its fd number, and reusing that
+/// number after an early drop would silently operate on the wrong file.
 fn stage(staging: &Path, path: &Path) -> Result<UnixListener, String> {
+    use rustix::fs::{Mode, OFlags};
+    use std::os::fd::AsRawFd as _;
     use std::os::unix::fs::PermissionsExt as _;
-    let staged = staging.join("s");
+    let directory = rustix::fs::open(
+        staging,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| format!("cannot stage the socket in {}: {error}", staging.display()))?;
+    rustix::fs::fchmod(&directory, Mode::from_bits_truncate(STAGING_MODE))
+        .map_err(|error| format!("cannot stage the socket in {}: {error}", staging.display()))?;
+    let staged = PathBuf::from(format!("/proc/self/fd/{}/s", directory.as_raw_fd()));
     let listener = UnixListener::bind(&staged)
         .map_err(|error| format!("cannot listen on {}: {error}", path.display()))?;
     if let Err(error) = (|| -> std::io::Result<()> {
@@ -359,8 +454,8 @@ fn staging_name() -> PathBuf {
 pub struct Claim {
     listener: UnixListener,
     path: PathBuf,
-    /// Held until drop; `None` is never used: the field exists to keep
-    /// the `flock` for the panel's life.
+    /// Held until drop: the open lock file keeping the `flock` for the
+    /// panel's life.
     _lock: std::fs::File,
 }
 
