@@ -419,6 +419,19 @@ impl ClientFds {
         self.per_client.get(client).map_or(0, |held| held.weight)
     }
 
+    /// How many fds `client` really still holds: [`Self::held_by`] after a
+    /// fresh sweep with the real checks. Test-only: lets a test assert on
+    /// live fds rather than the upper bound `held_by` reads, which lingers
+    /// on dead records until something notices (a pool's fd closes a moment
+    /// after its pool drops, on Smithay's dropping thread; a resized X
+    /// window's old pool is exactly such a record). Production never refuses
+    /// on the raw count for the same reason -- see [`Self::admit`].
+    #[cfg(all(test, feature = "xwayland"))]
+    pub(crate) fn swept_held_by(&mut self, client: &ClientId) -> u32 {
+        self.sweep(client, liveness::still_held);
+        self.held_by(client)
+    }
+
     /// How many timeline fds are recorded for `client`. An upper bound, like
     /// [`Self::held_by`].
     pub(crate) fn timelines_held_by(&self, client: &ClientId) -> u32 {

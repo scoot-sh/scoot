@@ -89,8 +89,26 @@ fn all_served(clients: &[&XClient]) {
     }
 }
 
+/// The server's live buffers and live ledger fds: the buffers exactly, the
+/// fds swept first so dead records (a resized window's closed pool, still
+/// counted by `held_by` until something notices) do not read as held.
+/// `held_by` alone is an upper bound -- production refuses only on a fresh
+/// sweep for the same reason -- so an absolute assertion on it counts timing
+/// as cost.
+fn swept_cost(live: &mut Live, server: &ClientId) -> (u32, u32) {
+    let buffers = live.fixture.state.wl_buffers.live_for(server);
+    let fds = live.fixture.state.client_fds.swept_held_by(server);
+    (buffers, fds)
+}
+
 /// One X client mapping 72 managed windows past its cap costs the server
 /// only what its 128 managed windows do; another X client is still served.
+///
+/// A delta over its own baseline, not an absolute: what the 128 drawn
+/// windows cost varies with resize timing (each resize leaves a dead pool
+/// record until the next sweep), while a refused map is never granted and
+/// allocates nothing, so only the growth past the baseline is the refused
+/// windows' cost.
 #[test]
 fn a_refused_managed_window_costs_the_server_nothing() {
     let Some(mut live) = live("a_refused_managed_window_costs_the_server_nothing") else {
@@ -98,7 +116,7 @@ fn a_refused_managed_window_costs_the_server_nothing() {
     };
     let props = Props::new(RED);
     let mut xids = Vec::with_capacity(CAP + 72);
-    for i in 0..CAP + 72 {
+    for i in 0..CAP {
         xids.push(live.x.map(&props));
         if i % 16 == 15 {
             live.fixture.settle();
@@ -112,13 +130,33 @@ fn a_refused_managed_window_costs_the_server_nothing() {
     });
     live.drain();
     let server = server(&live);
-    let (buffers, fds) = cost(&live, &server);
-    // Measured 256 buffers and 258 fds (a resize or two costs a pool more).
+    let (base_buffers, base_fds) = swept_cost(&mut live, &server);
+    // What the 128 drawn windows cost, live: two pools and two buffers each.
     let drawn = PER_WINDOW * CAP as u32;
     assert!(
-        buffers <= drawn + 8 && fds <= drawn + 8,
-        "128 managed windows and 72 refused cost the server {buffers} buffers and {fds} fds, \
-         more than the {drawn} the managed ones do"
+        base_buffers <= drawn + 8 && base_fds <= drawn + 8,
+        "128 managed windows cost the server {base_buffers} buffers and {base_fds} fds, \
+         more than the {drawn} they should"
+    );
+
+    for i in 0..72 {
+        xids.push(live.x.map(&props));
+        if i % 16 == 15 {
+            live.fixture.settle();
+        }
+    }
+    eventually(&mut live.fixture, "still 128 managed windows", |fixture| {
+        xids.iter()
+            .filter(|xid| id_of_xid(&fixture.state, **xid).is_some())
+            .count()
+            == CAP
+    });
+    live.drain();
+    let (buffers, fds) = swept_cost(&mut live, &server);
+    assert!(
+        buffers <= base_buffers + 8 && fds <= base_fds + 8,
+        "72 refused managed windows took the server from {base_buffers} buffers and {base_fds} fds \
+         to {buffers} buffers and {fds} fds"
     );
 
     let other = XClient::connect(live.display);
