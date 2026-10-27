@@ -8,8 +8,8 @@ that never comes back. Each fix below names the command that proves it.
 What the daemon does is in [Overview](./index.md); placement, timeouts
 and rules are in [Configure](./configure.md); every command is in the
 [CLI reference](./cli.md). The profile setup (units, bar module, mako
-escape hatch) is in [Desktop notifications](../desktop/#notifications);
-the cross-app list is in the [Symptom index](../troubleshooting/).
+escape hatch) is in [Desktop notifications](../../desktop/#notifications);
+the cross-app list is in the [Symptom index](../../troubleshooting/).
 
 > **Symptom:** no popups at all.
 
@@ -40,7 +40,7 @@ Popups use `layer=overlay`, so they stay above fullscreen windows.
 With the mako escape hatch, something set `layer` back to `top` —
 read the generated mako config, the first content line is the layer.
 scootnotify has no layer knob to mis-set. See
-[Desktop notifications](../desktop/#notifications).
+[Desktop notifications](../../desktop/#notifications).
 
 > **Symptom:** DND is stuck on, or the unread count never drops.
 
