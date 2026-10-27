@@ -31,6 +31,7 @@ mod line;
 mod listener;
 pub(super) mod look_apply;
 mod outbound;
+pub(crate) mod reload_wait;
 mod slots;
 #[cfg(test)]
 mod tests;
@@ -349,6 +350,20 @@ impl State {
             // never a silent plain reload.
             Request::Reload => self.reload(),
             Request::ReloadLook => self.reload_scoped(),
+            // Connection::step() intercepts and parks this variant itself
+            // (see above) before handle_request is ever called: the reply
+            // waits on the wallpaper run's exit, off the loop like
+            // `LookApply`. If this ever fires, that interception was
+            // bypassed -- answer an error rather than running a second,
+            // synchronous wait beside the parked one (two paths would be the
+            // `Tty::active` class of bug `CLAUDE.md` warns about).
+            Request::ReloadWaitWallpaper => {
+                debug_assert!(
+                    false,
+                    "ReloadWaitWallpaper reached handle_request; Connection::serve must intercept it"
+                );
+                Response::error("could not wait for the wallpaper: internal routing error")
+            }
             Request::Outputs => Response::Outputs {
                 outputs: self.output_snapshots(),
             },

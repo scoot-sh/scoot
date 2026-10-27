@@ -18,7 +18,7 @@ Every request, `type` vs `key`, and what the replies carry. All of these work as
 | `output-power ID\|all on\|off` | Switch an output's panel off or on — the IPC half of `zwlr_output_power_v1` (see [protocols.md](../scoot/protocols.md#screen-power)). `all` powers every output at once; an unknown id is refused. Session-level like `outputs`, not an action: it applies while locked (the idle cycle is off-after-lock, on-at-resume). On the wire an additive request tag (`{"type":"output_power","output":1,"powered":false}`, `output` omitted for `all`); `PROTOCOL_VERSION` did not change. |
 | `output-scale ID\|NAME SCALE\|reset` | Set an output's scale live, by id or connector name (`DP-1`), or `reset` it to the config file's. Range 0.5 to 4 (resolved to 1/120 like the file's); a value outside it, or not a number, is refused instead of clamped; an unknown id or name is refused too. Runtime state, like `output-power`: it beats the file's scale for that connector (a replugged monitor comes back at it), and a successful `reload` or restart returns to the file's scales. A repeat set, or a reset with nothing to reset, changes nothing. Applies while locked; refused under `--nested`. What the [display profiles](../desktop/index.md#displays) watcher drives. On the wire an additive request tag: `output` is a number (id) or a string (name), `scale` a number or `null` for reset, required either way (`{"type":"output_scale","output":"DP-1","scale":1.5}`); answered with the existing `ok`, so no newer protocol is needed (an older server refuses the unknown tag with an `error`). |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](#actions). |
-| `reload [--look]` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale -- the default and each `[[outputs]]` entry's, `[[outputs]]` mode (a live resize per backend, refused under `--nested`), appearance, keybindings, new autostart spawn entries) — see [configuration.md](../scoot/configure.md#reloading-the-config). A successful reload also drops every live `output-scale` scale, and each one the file disagrees with is listed in `applied` as `outputs.<name>.scale`. Answers `reloaded` with applied-vs-refused field lists plus the `shadowed` file keys that override the active look (and the `invalid` ones whose bad values fell back to it), or `error` (running config untouched, live scales kept) when the file cannot load or validate. With `--look` only the look layer is re-read, under a snapshot of the file from the last successful plain load: appearance and wallpaper swap, pending edits wait, no autostart entry spawns and no bind swaps. The reply carries the scope that ran (`"scope":"look"` on a scoped reload, absent on a plain one). |
+| `reload [--look] [--wait-wallpaper]` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale -- the default and each `[[outputs]]` entry's, `[[outputs]]` mode (a live resize per backend, refused under `--nested`), appearance, keybindings, new autostart spawn entries) — see [configuration.md](../scoot/configure.md#reloading-the-config). A successful reload also drops every live `output-scale` scale, and each one the file disagrees with is listed in `applied` as `outputs.<name>.scale`. Answers `reloaded` with applied-vs-refused field lists plus the `shadowed` file keys that override the active look (and the `invalid` ones whose bad values fell back to it), or `error` (running config untouched, live scales kept) when the file cannot load or validate. With `--look` only the look layer is re-read, under a snapshot of the file from the last successful plain load: appearance and wallpaper swap, pending edits wait, no autostart entry spawns and no bind swaps. The reply carries the scope that ran (`"scope":"look"` on a scoped reload, absent on a plain one). With `--wait-wallpaper` the same plain reload parks its `reloaded` reply until the wallpaper run lands (or 30 s passes, reporting handed-over-but-unwaited-on) instead of answering once handed over — see below. `--look` with `--wait-wallpaper` is refused. |
 | `look-apply NAME` | Swap the active look and wait for the swap to land — what `scoot look apply` does to local files, for a client with no files (a Mac driving a VM). Answers `look_applied` when the swap's child exits, or `error` when the swap is refused (unknown look, a path as the name, a second swap while one runs) with nothing touched. Applies while locked. |
 | `looks` | The look catalog in search order, the active look's name, and the session's state directory — what `scoot look list` and `scoot look current` read from local files, for a client with no files. |
 | `shortcut-register APP_ID SHORTCUT_ID [--trigger COMBO] [--description TEXT]` | Register a portal global shortcut (the stage-1 half of the `org.freedesktop.portal.GlobalShortcuts` portal — see [Global shortcuts](../scoot/keybindings.md#global-shortcuts)). The trigger is a hint only, stored and listed but never auto-bound; the user assigns the chord in `[global_shortcuts]` or with `shortcut-bind`. Idempotent by `(app_id, shortcut_id)`; answers `shortcuts`, re-listing. Bounded: at most 64 per connection and 512 compositor-wide, trigger at most 256 bytes, description at most 1024 bytes — past any of those the register is refused with an ordinary `error` and nothing is stored (a re-register of an owned id never counts against the count caps). |
@@ -39,6 +39,7 @@ Every request, `type` vs `key`, and what the replies carry. All of these work as
 scoot msg windows
 scoot msg action focus-column left
 scoot msg reload
+scoot msg reload --wait-wallpaper
 scoot msg look-apply moonrise
 scoot msg looks
 scoot msg screenshot --out /tmp/shot.png
@@ -255,6 +256,23 @@ additive, so `PROTOCOL_VERSION` did not move: an older compositor answers
 it with an ordinary unknown-request `error` (the client prints the error
 and exits non-zero, the running config untouched), never a silent plain
 reload.
+
+A wallpaper-wait reload (`{"type":"reload_wait_wallpaper"}`, sent as
+`scoot msg reload --wait-wallpaper`) runs the same plain reload but parks
+its `reloaded` reply until the wallpaper run lands instead of answering
+once handed over. The reply shape is the same `reloaded` (no new variant,
+`scope` absent like a plain reload); past 30 s it answers anyway with one
+extra `refused` entry (`wallpaper (timed out waiting for the wallpaper
+run; handed over, exit unwaited-on)`), and the run's exit is still logged
+when it comes. A wait with no wallpaper run in flight answers at once,
+like a plain reload; an `error` (unreadable file, bad layer) also answers
+at once, never parked. Two waits park two replies, each answered when its
+own run (or the newest, if superseded) exits; a disconnected client drops
+its park. `SIGHUP` never parks -- it has no reply channel, so it runs the
+plain path. The tag is additive for the same reason as the scoped one, so
+`PROTOCOL_VERSION` does not move: an older compositor answers it with an
+ordinary unknown-request `error`, never a silent immediate answer (which
+would read as "landed" when it only handed over).
 
 `applied` names the fields re-applied live (including `autostart.commands`
 when new spawn entries started -- a spawn entry that fails to start is

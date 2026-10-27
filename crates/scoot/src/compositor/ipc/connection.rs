@@ -740,6 +740,33 @@ impl Connection {
             }
         }
 
+        // A wallpaper-wait reload runs the plain reload now and parks the
+        // `reloaded` reply until the wallpaper run exits (or a bound
+        // passes), so like `LookApply` the connection leaves this source
+        // and lives on in the parked wait. A clone failure closes the
+        // connection; a synchronous answer (no wallpaper run, or an `Error`)
+        // answers on the spot with nothing parked.
+        if matches!(request, Request::ReloadWaitWallpaper) {
+            let Ok(stream) = self.lines.socket().try_clone() else {
+                return Step::Close;
+            };
+            match state.start_reload_wait(
+                stream,
+                std::mem::take(&mut self.outbound),
+                self.slot.take(),
+            ) {
+                Ok(()) => {
+                    state.ensure_ticking();
+                    return Step::Close;
+                }
+                Err(refused) => {
+                    self.outbound = refused.outbound;
+                    self.slot = refused.slot;
+                    return self.answer(&refused.response);
+                }
+            }
+        }
+
         // Waiting is answered later, from the render loop, so the connection
         // leaves this source and lives on in `pending_idle`.
         if let Request::WaitIdle {

@@ -1891,6 +1891,7 @@ mod tests {
             &["windows"],
             &["reload"],
             &["reload", "--look"],
+            &["reload", "--wait-wallpaper"],
             &["action", "focus-column", "left"],
             &["action", "move-window-to-workspace", "down"],
             &["action", "focus-workspace-index", "2"],

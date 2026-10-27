@@ -26,10 +26,11 @@ use scoot_ipc::{Action, EventKind, Horizontal, PointerButton, Request, Vertical}
 pub const REQUESTS_HELP: &str = "\
     version | outputs | windows
     action ACTION [ARGUMENT...]
-    reload [--look]
+    reload [--look] [--wait-wallpaper]
         re-read the config file and re-apply it live (--look: look layer only)
         (`--look`: only the look layer, under the file's snapshot -- a swap
-        applies no pending edits)
+        applies no pending edits; `--wait-wallpaper`: park the reply until
+        the wallpaper run lands, or 30 s passes)
     keyboard                        the active keyboard layout's name and
                                     index -- what a layout indicator shows
     locked                          whether the session is locked -- the
@@ -227,24 +228,32 @@ fn message(mut args: impl Iterator<Item = String>) -> Result<Msg, Error> {
         "windows" => Request::Windows,
         "reload" => {
             let mut look = false;
+            let mut wait_wallpaper = false;
             for flag in args.by_ref() {
                 match flag.as_str() {
                     "--json" => json = true,
                     "--look" => look = true,
+                    "--wait-wallpaper" => wait_wallpaper = true,
                     other => {
                         return Err(hinted(
                             "flag",
                             other.to_owned(),
-                            &["--json", "--look"],
+                            &["--json", "--look", "--wait-wallpaper"],
                             "help reload",
                         ));
                     }
                 }
             }
-            if look {
-                Request::ReloadLook
-            } else {
-                Request::Reload
+            match (look, wait_wallpaper) {
+                (true, true) => {
+                    return Err(Error::Invalid {
+                        what: "flag combination",
+                        value: "--look with --wait-wallpaper".to_owned(),
+                    });
+                }
+                (true, false) => Request::ReloadLook,
+                (false, true) => Request::ReloadWaitWallpaper,
+                (false, false) => Request::Reload,
             }
         }
         "keyboard" => Request::Keyboard,
@@ -964,6 +973,16 @@ mod tests {
                 json: false,
             })
         );
+        assert_eq!(
+            parse_msg_args(&["reload", "--wait-wallpaper"]),
+            Ok(Msg {
+                request: Request::ReloadWaitWallpaper,
+                out: None,
+                json: false,
+            })
+        );
+        assert!(parse_msg_args(&["reload", "--look", "--wait-wallpaper"]).is_err());
+        assert!(parse_msg_args(&["reload", "--wait-wallpaper", "--look"]).is_err());
         assert_eq!(
             parse_msg_args(&["look-apply", "moonrise"]),
             Ok(Msg {

@@ -1831,6 +1831,82 @@ fn a_scoped_reload_against_an_older_server_is_an_error_never_a_plain_reload() {
     );
 }
 
+/// The wallpaper-wait reload on the wire: a distinct tag, not a flag.
+///
+/// `{"type":"reload_wait_wallpaper"}` runs a plain reload and parks the
+/// `reloaded` reply until the wallpaper run exits (or a bound passes).
+/// The tag must be distinct for the same reason `reload_look` is: serde's
+/// internally-tagged unit variants drain and ignore extra fields, so an
+/// older compositor would decode `{"type":"reload","wait_wallpaper":true}`
+/// as a plain `Reload` and answer at once -- a false "landed". With a
+/// distinct tag an older server meets it with an ordinary unknown-request
+/// `Error`, never a silent immediate answer. Additive like `reload_look`,
+/// and the reply half is the existing `Reloaded`, so no `PROTOCOL_VERSION`
+/// move: a client that never sends it speaks byte-for-byte what it did
+/// before.
+#[test]
+fn a_wallpaper_wait_reload_round_trips_as_its_own_tag() {
+    assert_eq!(
+        json_of(&Request::ReloadWaitWallpaper),
+        json!({ "type": "reload_wait_wallpaper" })
+    );
+    assert_eq!(
+        decode::<Request>(r#"{"type":"reload_wait_wallpaper"}"#).unwrap(),
+        Request::ReloadWaitWallpaper
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&Request::ReloadWaitWallpaper).unwrap()).unwrap(),
+        Request::ReloadWaitWallpaper
+    );
+    assert_eq!(
+        decode::<Request>(r#"{"type":"reload"}"#).unwrap(),
+        Request::Reload,
+        "plain reload keeps its wire shape"
+    );
+}
+
+/// An older compositor meets a wallpaper-wait reload with an error, never
+/// an immediate answer. `OldRequest` is the pre-wait shape (unit `Reload`
+/// and `ReloadLook`): the new tag must fail its decode like any unknown
+/// tag, while the old tags keep theirs.
+#[test]
+fn a_wallpaper_wait_reload_against_an_older_server_is_an_error_never_immediate() {
+    assert_eq!(
+        PROTOCOL_VERSION, 13,
+        "the wallpaper-wait reload is additive: the request half is a new tag, \
+         the reply half the existing Reloaded, so the protocol does not move"
+    );
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum OldRequest {
+        Version,
+        Reload,
+        ReloadLook,
+    }
+
+    assert_eq!(
+        serde_json::from_str::<OldRequest>(r#"{"type":"reload"}"#).unwrap(),
+        OldRequest::Reload,
+        "plain reload keeps its wire shape"
+    );
+    assert_eq!(
+        serde_json::from_str::<OldRequest>(r#"{"type":"reload_look"}"#).unwrap(),
+        OldRequest::ReloadLook,
+        "scoped reload keeps its wire shape"
+    );
+    assert!(
+        serde_json::from_str::<OldRequest>(r#"{"type":"reload_wait_wallpaper"}"#).is_err(),
+        "an older server must answer the wait tag with an unknown-request error"
+    );
+    // Why the tag had to be distinct: a flag field would have degraded
+    // silently to an immediate answer on an older server.
+    assert_eq!(
+        serde_json::from_str::<OldRequest>(r#"{"type":"reload","wait_wallpaper":true}"#).unwrap(),
+        OldRequest::Reload,
+        "a wait flag would have degraded to an immediate reload on an older server"
+    );
+}
+
 /// Portal global shortcuts, stage 1: four new request tags with one new
 /// list reply, plus three new event replies on the new `GlobalShortcut`
 /// kind. New variants, so they moved the protocol 12 → 13: an older

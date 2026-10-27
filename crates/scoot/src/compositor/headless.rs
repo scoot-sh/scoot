@@ -1963,6 +1963,10 @@ fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -
     // never from a tick; the tick still bounds a hung child past its
     // timeout and drains a reply queued for a slow client.
     let look_settling = state.settle_look();
+    // The parked wallpaper-waits: completion comes from the wallpaper
+    // reaper, never from a tick; the tick still bounds hung runs past
+    // their timeout and drains replies queued for slow clients.
+    let reload_wait_settling = state.settle_reload_wait();
     // Before the subscriber tails drain, so a part-written occupancy event
     // retries on this same tick: at most one event per output per tick,
     // however many applies marked it in between (see `ipc/workspace.rs`).
@@ -1974,6 +1978,7 @@ fn frame_tick(_now: std::time::Instant, _metadata: &mut (), state: &mut State) -
         || state.subscribers_draining()
         || state.workspace_events_pending()
         || look_settling
+        || reload_wait_settling
     {
         TimeoutAction::ToDuration(FRAME_INTERVAL)
     } else {
