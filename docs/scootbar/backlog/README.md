@@ -219,7 +219,8 @@ hits the wall:
 - [Audit the popup and icon zero-allocation pins](scootui-popup-alloc-pins-audit.md): they ran without a counting allocator until #670.
 - [launch-panel-shrink-to-content](launch-panel-shrink-to-content.md)
 - [launch-panel-bare-desktop-click](launch-panel-bare-desktop-click.md)
-- [launch-toggle-race-and-socket-mode](launch-toggle-race-and-socket-mode.md)
+- [launch-toggle-race-and-socket-mode](resolved/launch-toggle-race-and-socket-mode-done.md): atomic lock claim plus `0600`-before-publish staging rename — RESOLVED 2026-10-27
+- [control-socket-mode-window](control-socket-mode-window.md)
 - [launch-ci-scootui-manifest-fanout](launch-ci-scootui-manifest-fanout.md)
 - [launch-look-selected-row-contrast](launch-look-selected-row-contrast.md)
 - [launch-match-on-selection-contrast](resolved/launch-match-on-selection-contrast-done.md) (low): selected-row match spans now resolve through `Theme::match_on_selection` (readable `hover` kept, else the inverted chip) — RESOLVED 2026-10-21

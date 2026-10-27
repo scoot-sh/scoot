@@ -61,16 +61,88 @@ fn a_second_open_signals_and_the_claim_sees_close() {
 }
 
 #[test]
-fn a_stale_file_is_taken_over() {
+fn a_stale_socket_is_taken_over() {
     let dir = scratch("stale");
     let path = dir.join("scootlaunch-wayland-1.sock");
-    std::fs::write(&path, b"stale").expect("plant");
+    // A dead panel's socket file: bound, then the listener dropped
+    // without removing the file (a crash leaves exactly this).
+    let stale = UnixListener::bind(&path).expect("plant");
+    drop(stale);
     let claim = match open(&path).expect("stale is taken over") {
         Open::Listen(claim) => claim,
         Open::Signalled => panic!("no listener lived"),
     };
-    // The stale bytes are gone: the path is a live socket again.
+    // The stale file is gone: the path is a live socket again.
     assert!(UnixStream::connect(&path).is_ok());
+    drop(claim);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_regular_file_is_refused_not_removed() {
+    let dir = scratch("not-socket");
+    let path = dir.join("scootlaunch-wayland-1.sock");
+    std::fs::write(&path, b"stale").expect("plant");
+    assert!(open(&path).is_err(), "a regular file is refused");
+    assert_eq!(
+        std::fs::read(&path).expect("still there"),
+        b"stale",
+        "the refused file is left alone"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn two_simultaneous_opens_yield_one_panel() {
+    use std::sync::{Arc, Barrier};
+    let dir = scratch("race");
+    let path = dir.join("scootlaunch-wayland-1.sock");
+    // Two openers at the same instant: a barrier so both fail the
+    // initial connect before either binds (no sleeps as sync).
+    let barrier = Arc::new(Barrier::new(2));
+    let path_a = path.clone();
+    let barrier_a = barrier.clone();
+    let first = std::thread::spawn(move || {
+        barrier_a.wait();
+        open(&path_a)
+    });
+    let path_b = path.clone();
+    barrier.wait();
+    let second = open(&path_b).expect("second opens");
+    let first = first.join().expect("first joins").expect("first opens");
+    let listens = [&first, &second]
+        .iter()
+        .filter(|result| matches!(result, Open::Listen(_)))
+        .count();
+    assert_eq!(
+        listens, 1,
+        "two simultaneous opens yield one panel, not two (one orphaned)"
+    );
+    // The surviving panel still answers; dropping both leaves no file.
+    assert!(UnixStream::connect(&path).is_ok(), "one panel answers");
+    drop(first);
+    drop(second);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn socket_is_owner_only() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = scratch("mode");
+    let path = dir.join("scootlaunch-wayland-1.sock");
+    let claim = match open(&path).expect("listens") {
+        Open::Listen(claim) => claim,
+        Open::Signalled => panic!("nothing was listening"),
+    };
+    let mode = std::fs::metadata(&path)
+        .expect("socket stats")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(
+        mode, 0o600,
+        "the toggle socket is 0600, not umask-dependent"
+    );
     drop(claim);
     std::fs::remove_dir_all(&dir).ok();
 }
