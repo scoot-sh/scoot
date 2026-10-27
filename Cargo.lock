@@ -966,7 +966,7 @@ dependencies = [
 
 [[package]]
 name = "scoot"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "calloop-wayland-source",
  "cc",
@@ -996,11 +996,11 @@ dependencies = [
 
 [[package]]
 name = "scoot-core"
-version = "0.6.6"
+version = "0.6.7"
 
 [[package]]
 name = "scoot-dbus"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "rustix 1.1.4",
  "scoot-rt",
@@ -1009,7 +1009,7 @@ dependencies = [
 
 [[package]]
 name = "scoot-globalshortcuts-portal"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "rustix 1.1.4",
  "scoot-dbus",
@@ -1020,7 +1020,7 @@ dependencies = [
 
 [[package]]
 name = "scoot-ipc"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "base64",
  "scoot-core",
@@ -1030,7 +1030,7 @@ dependencies = [
 
 [[package]]
 name = "scoot-look"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "rustix 1.1.4",
  "serde",
@@ -1041,14 +1041,14 @@ dependencies = [
 
 [[package]]
 name = "scoot-rt"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "rustix 1.1.4",
 ]
 
 [[package]]
 name = "scootbar"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "ab_glyph",
  "base64",
@@ -1071,7 +1071,7 @@ dependencies = [
 
 [[package]]
 name = "scootbg"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "base64",
  "gif",
@@ -1093,14 +1093,14 @@ dependencies = [
 
 [[package]]
 name = "scootbg-mem"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "rustix 1.1.4",
 ]
 
 [[package]]
 name = "scootctl"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "rustix 1.1.4",
  "scoot-dbus",
@@ -1115,7 +1115,7 @@ dependencies = [
 
 [[package]]
 name = "scootlaunch"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "base64",
  "png",
@@ -1137,7 +1137,7 @@ dependencies = [
 
 [[package]]
 name = "scootnotify"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "ab_glyph",
  "png",
@@ -1158,7 +1158,7 @@ dependencies = [
 
 [[package]]
 name = "scootui"
-version = "0.6.6"
+version = "0.6.7"
 dependencies = [
  "ab_glyph",
  "base64",
