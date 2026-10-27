@@ -235,7 +235,6 @@ fn claim(path: &Path) -> Result<Open, String> {
             // just won. A lock that never produces a panel is a wedge:
             // report it loudly rather than exiting 0 with no panel.
             if wait_for_panel(path)? {
-                let _ = try_signal(path);
                 return Ok(Open::Signalled);
             }
             return Err(format!(

@@ -192,6 +192,58 @@ fn a_lock_holder_with_no_panel_is_a_visible_error() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
+// A simultaneous open: the loser waits for the winner's panel and must
+// then yield without signalling, or the panel that just won is closed.
+#[test]
+fn losing_a_simultaneous_open_does_not_close_the_winner() {
+    use rustix::fs::{FlockOperation, flock};
+    use std::io::Read;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
+    let dir = scratch("loser");
+    let path = dir.join("scootlaunch-wayland-1.sock");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_path_for(&path))
+        .expect("lock opens");
+    flock(&lock, FlockOperation::NonBlockingLockExclusive).expect("winner takes the lock");
+    let stop = Arc::new(AtomicBool::new(false));
+    let accepted = Arc::new(Mutex::new(Vec::<UnixStream>::new()));
+    let panel = {
+        let (path, stop, accepted) = (path.clone(), stop.clone(), accepted.clone());
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            let listener = UnixListener::bind(&path).expect("winner binds");
+            listener.set_nonblocking(true).expect("nonblocking");
+            while !stop.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((stream, _)) => accepted.lock().expect("lock").push(stream),
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(5)),
+                }
+            }
+        })
+    };
+    let outcome = open(&path);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    stop.store(true, Ordering::Relaxed);
+    panel.join().expect("panel thread");
+    assert!(matches!(outcome, Ok(Open::Signalled)), "the loser yields");
+    for mut stream in accepted.lock().expect("lock").drain(..) {
+        stream.set_nonblocking(true).expect("nonblocking");
+        let mut got = Vec::new();
+        let _ = stream.read_to_end(&mut got);
+        assert!(
+            !got.starts_with(b"close"),
+            "the loser closed the panel that won: {got:?}"
+        );
+    }
+    drop(lock);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 // F2: a listener that stopped with a full backlog must not hang the press.
 #[test]
 fn a_full_backlog_does_not_hang_the_press() {

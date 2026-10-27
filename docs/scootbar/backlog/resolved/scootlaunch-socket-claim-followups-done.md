@@ -27,7 +27,7 @@ Landed in `crates/scootlaunch/src/socket.rs` plus `site/src/content/docs/scootla
 - F8: the archive file drops its empty template sections, draft paragraph and instruction block.
 - F9: `_lock` now documents the plain-`File`-held-for-life shape.
 
-Evidence: six new `socket::tests` (`a_lock_holder_with_no_panel_is_a_visible_error`, `a_full_backlog_does_not_hang_the_press`, `clearing_a_stale_socket_leaves_no_missing_name`, `staging_through_a_symlink_is_refused`, `a_symlinked_lock_is_refused`, `an_overlong_path_gets_the_friendly_length_error`) all failed before and pass after; `nextest -p scootlaunch` 321 passed, `cargo test -p scootlaunch` green, `clippy -D warnings` and `fmt --check` clean. Claim path stays allocation-light (fds, stack poll/timespec, no heap on the happy path beyond the existing staging name); toggle contract unchanged.
+Evidence: six new `socket::tests` (`a_lock_holder_with_no_panel_is_a_visible_error`, `a_full_backlog_does_not_hang_the_press`, `clearing_a_stale_socket_leaves_no_missing_name`, `staging_through_a_symlink_is_refused`, `a_symlinked_lock_is_refused`, `an_overlong_path_gets_the_friendly_length_error`) all failed before and pass after; `nextest -p scootlaunch` 321 passed, `cargo test -p scootlaunch` green, `clippy -D warnings` and `fmt --check` clean. Claim path stays allocation-light (fds, stack poll/timespec, no heap on the happy path beyond the existing staging name). Review of this PR found the lock-WOULDBLOCK arm signalling `close` to the panel that had just won a simultaneous open (a double-press gave zero panels); that signal is removed and `losing_a_simultaneous_open_does_not_close_the_winner` pins it, so the toggle contract is as before F1.
 
 ## The gap
 
