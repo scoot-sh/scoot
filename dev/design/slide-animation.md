@@ -137,28 +137,74 @@ knob doubles the config surface for a 150 ms polish effect. A user who
 wants slides without fades can ask for the knob later; the fade keeps
 the gate's semantics (off by default, live reload, lock snaps).
 
-What Smithay/scoot retain after the surface is gone, and the bound:
-after `remove_window` the space no longer maps the window and the map
-no longer names it, so without a retain there is nothing left to draw.
-The close fade retains the [`Window`] itself (`Arc` clone: no pixel
-copy, just the client's already-allocated buffers living up to one
-`duration` longer). The hold is capped at 8 closing windows system-wide
-(`MAX_CLOSING_FADES`): the 9th close evicts the oldest (it snaps away),
-so even a client opening and closing windows in a loop pins at most 8
-windows × 500 ms. If the surface is already dead (client disconnected),
-its surface tree yields no elements and the fade draws nothing — it
-still prunes on time, never leaks, never panics. `scoot-core` is
-untouched (TARGET arrangement; IPC and hit-testing keep the target);
-one monotonic `Instant` per output frame; no allocation on the
-per-frame path (the closing pass is one `is_empty` branch plus a linear
-scan over at most 8 entries).
+## Live-run correction: the close fade is removed, the open fade is new-only
+
+A live headless run (`scoot msg screenshot` pixel sampling,
+`[animation] enabled=true duration_ms=500`) showed the open fade working
+(a new window's body: alpha ~0.12 → ~0.56 → 1.0, body color 22 → 29 → 36
+over background 20,20,25) and two defects:
+
+1. The close fade drew nothing for a real client (foot): frames taken
+   right after `scoot msg action close` showed no decreasing-alpha region
+   at all — the closed slot was background on the first frame. The
+   retained-`Window` design assumed the closed window's last committed
+   buffers stay drawable for one `duration`. Against a real client they do
+   not: foot destroys its `wl_surface` on close, and Smithay then has no
+   pixels left to draw. Verified against the pinned fork
+   (`rev fdf424d`): `on_commit_buffer_handler` (`backend/renderer/utils/
+   wayland.rs`) `reset()`s the surface state on a null commit
+   (`buffer=None`, `surface_view=None`, textures cleared), and
+   `render_elements_from_surface_tree` (`backend/renderer/element/
+   surface.rs`) only traverses into subtrees whose state has a `view()`
+   and only emits elements for surfaces with both a view and a buffer —
+   so a destroyed/unmapped tree yields zero elements. The unit tests never
+   caught this because they retained windows that never lost their
+   buffers. `ToplevelSurface::alive()` (`wayland/shell/xdg/mod.rs`) goes
+   false with the surface, but nothing in the fade path consulted it.
+
+   Two options were costed. Snapshotting the closing window's last
+   rendered pixels into a small bounded retained buffer: correct-looking,
+   but it needs renderer access inside `remove_window` (which has none
+   today), a synchronous offscreen render plus readback at close time
+   (a full extra render on the CPU tier, a GPU readback on the other;
+   popups, rounding, `wp_alpha_modifier_v1`, X11 opacity and output scale
+   would all have to be re-implemented at the snapshot site or the
+   snapshot visibly disagrees with the live frame), and bounded-but-real
+   memory (a 582×332 tiled window is ~770 KB at 4 B/px; 8 fullscreen
+   1200×700 holds would be ~27 MB) to buy a 500 ms effect that never
+   worked. Removing the close fade honestly: no retained memory, no
+   close-time render, no fragile second render path — the close snaps,
+   and the docs/config/changelog say open-only. Chosen: removal. The
+   `MAX_CLOSING_FADES` retain, `retain_closing_window`, `close_alpha` and
+   the closing render pass are gone; `Fade` is `{id, start, duration,
+   easing}`, open-only.
+
+2. A window scrolling back into view after a sibling closed (its `visible`
+   flipping false→true, so the space — which unmaps invisible windows —
+   held no old location for it) faded in translucent while its siblings
+   slid, like a fresh open. Only a real new window should fade. The cause
+   was the "new" test reading the space (`element_location().is_none()`)
+   instead of history. Fixed with `State::fade_known`: every arranged
+   window id (visible or not) is recorded on every `update_slides` path,
+   including the disabled/locked/zero-duration snaps, and only an id
+   never arranged before fades in. Bounded by the live arrangement
+   (cleared and re-filled, capacity retained — a closed window leaves on
+   the next pass; ids are never reused, so nothing leaks and nothing
+   collides). A returning window now snaps while its siblings slide.
+
+What a close leaves behind: after `remove_window` the space no longer
+maps the window and the map no longer names it, and the open fade (if the
+window had one) is pruned by id on the same `apply()` — so nothing is
+drawn, nothing is held, and nothing leaks. A close mid-open-fade simply
+ends that fade. `scoot-core` is untouched (TARGET arrangement; IPC and
+hit-testing keep the target); one monotonic `Instant` per output frame;
+no allocation on the per-frame path (the fade lookup is one `is_empty`
+branch plus a linear scan over the in-flight opens).
 
 Rules that fall out: open fades never restart on a move (the slide
-retargets from the visual; the fade keeps its own clock); a
-close-during-open starts from the open's in-flight alpha; a viewport
+retargets from the visual; the fade keeps its own clock); a viewport
 switch suppresses per-window fades (the strip rides the shared offset —
-double animation would cost both every frame); hidden windows (workspace
-switch, output move) never fade, only closed ones do; floating,
-fullscreen and maximized windows snap shut; output removal drops that
-output's fades with it; lock and reload-disable clear everything and
-snap.
+double animation would cost both every frame); returning windows
+(workspace switch, output move, scroll back into view) never fade, only
+genuinely new ones do; floating, fullscreen and maximized windows snap;
+lock and reload-disable clear everything and snap.

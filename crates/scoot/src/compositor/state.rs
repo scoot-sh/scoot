@@ -175,13 +175,18 @@ pub struct State {
     /// a single horizontal offset the whole incoming strip shares. Empty
     /// whenever the option is off, locked, or idle.
     pub viewport_slides: Vec<super::animation::ViewportSlide>,
-    /// Open and close fades, pooled like `slides`: opening windows go opaque
-    /// `0 → 1`, closed windows go transparent while their last buffers are
-    /// still drawn (retained windows, bounded by
-    /// [`MAX_CLOSING_FADES`](super::animation::MAX_CLOSING_FADES)). Empty
-    /// whenever the option is off, locked, or idle, so every hot path
+    /// Open fades, pooled like `slides`: newly opened windows go opaque
+    /// `0 → 1`. Closes snap (see [`Fade`](super::animation::Fade) for why).
+    /// Empty whenever the option is off, locked, or idle, so every hot path
     /// branches once on `is_empty` and otherwise runs the old code.
     pub fades: Vec<super::animation::Fade>,
+    /// Every window id the last `apply()` arranged (visible or not): what an
+    /// open fade is diffed against. A genuinely new window fades in; a
+    /// window scrolling back into view (visible false->true after a sibling
+    /// closes) was already arranged, so it snaps. Synced on every
+    /// `update_slides` path including the snaps, bounded by the live
+    /// arrangement, capacity retained.
+    pub(crate) fade_known: HashSet<WindowId>,
     /// The active workspace index per output as of the last `apply()`: what
     /// a workspace switch is diffed against. Updated in place, so the steady
     /// state allocates nothing.
@@ -1413,6 +1418,7 @@ impl State {
             slides: Vec::new(),
             viewport_slides: Vec::new(),
             fades: Vec::new(),
+            fade_known: HashSet::new(),
             last_workspace_active: Vec::new(),
             world: World::new(config),
             windows: HashMap::new(),

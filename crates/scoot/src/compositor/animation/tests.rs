@@ -1857,10 +1857,7 @@ fn viewport_prunes_and_idles() {
 // on close, behind the same `[animation]` gate as the slide.
 // -------------------------------------------------------------------------
 
-use super::{
-    Fade, MAX_CLOSING_FADES, close_alpha, fade_alpha, fades_in_flight, open_alpha,
-    prune_finished_fades,
-};
+use super::{Fade, fade_alpha, fades_in_flight, open_alpha};
 
 fn open_fade(id: u64, start: Instant) -> Fade {
     Fade {
@@ -1868,39 +1865,16 @@ fn open_fade(id: u64, start: Instant) -> Fade {
         start,
         duration: Duration::from_millis(200),
         easing: Easing::Linear,
-        opening: true,
-        from_alpha: 0.0,
-        rect: Rect::new(100, 0, 400, 300),
-        output: OutputId(1),
-        window: None,
-    }
-}
-
-fn close_fade(id: u64, start: Instant, from_alpha: f32) -> Fade {
-    Fade {
-        id: WindowId(id),
-        start,
-        duration: Duration::from_millis(200),
-        easing: Easing::Linear,
-        opening: false,
-        from_alpha,
-        rect: Rect::new(100, 0, 400, 300),
-        output: OutputId(1),
-        window: None,
     }
 }
 
 #[test]
-fn fade_math_opens_transparent_and_closes_to_transparent() {
+fn fade_math_opens_transparent_and_lands_opaque() {
     let start = Instant::now();
     let open = open_fade(1, start);
     assert_eq!(open_alpha(&open, start), 0.0);
     assert_eq!(open_alpha(&open, start + Duration::from_millis(100)), 0.5);
     assert_eq!(open_alpha(&open, start + Duration::from_millis(200)), 1.0);
-    let close = close_fade(2, start, 1.0);
-    assert_eq!(close_alpha(&close, start), 1.0);
-    assert_eq!(close_alpha(&close, start + Duration::from_millis(100)), 0.5);
-    assert_eq!(close_alpha(&close, start + Duration::from_millis(200)), 0.0);
 }
 
 #[test]
@@ -1908,14 +1882,6 @@ fn fade_alpha_is_opaque_without_a_fade() {
     let empty: Vec<Fade> = Vec::new();
     let now = Instant::now();
     assert_eq!(fade_alpha(&empty, WindowId(1), now), 1.0);
-    // Closing fades never answer the live lookup: their windows are gone
-    // from the live map, and the render path draws those off the retained
-    // list directly.
-    let close = close_fade(1, now, 1.0);
-    assert_eq!(
-        fade_alpha(std::slice::from_ref(&close), WindowId(1), now),
-        1.0
-    );
     let open = open_fade(1, now);
     assert_eq!(
         fade_alpha(
@@ -1936,11 +1902,6 @@ fn fade_easing_matches_the_slide_curve_and_snaps_late() {
         start,
         duration,
         easing: Easing::EaseOut,
-        opening: true,
-        from_alpha: 0.0,
-        rect: Rect::new(0, 0, 400, 300),
-        output: OutputId(1),
-        window: None,
     };
     assert_eq!(open_alpha(&eased, start), 0.0);
     assert_eq!(open_alpha(&eased, start + duration), 1.0);
@@ -1952,7 +1913,6 @@ fn fade_easing_matches_the_slide_curve_and_snaps_late() {
     // A compositor falling behind snaps rather than queuing frames.
     let late = start + Duration::from_millis(10_000);
     assert_eq!(open_alpha(&eased, late), 1.0);
-    assert_eq!(close_alpha(&close_fade(4, start, 1.0), late), 0.0);
     assert!(!fades_in_flight(std::slice::from_ref(&eased), late));
 }
 
@@ -1970,7 +1930,7 @@ fn a_new_window_starts_an_open_fade_not_a_slide() {
     let mut fixture = SlideFixture::new();
     let now = Instant::now();
     // The harness holds no real `Window`s, so every placement reads as new
-    // (no old location): the slide snaps, the fade starts.
+    // (no old location, never arranged): the slide snaps, the fade starts.
     fixture.update(
         &arrangement_of(vec![placement(1, 100, true, false, false, false)]),
         now,
@@ -1979,7 +1939,6 @@ fn a_new_window_starts_an_open_fade_not_a_slide() {
     assert!(fixture.state.slides.is_empty());
     assert_eq!(fixture.state.fades.len(), 1);
     let fade = &fixture.state.fades[0];
-    assert!(fade.opening);
     assert_eq!(fade.id, WindowId(1));
     assert_eq!(fade_alpha(&fixture.state.fades, WindowId(1), now), 0.0);
     assert_eq!(
@@ -1993,15 +1952,49 @@ fn a_new_window_starts_an_open_fade_not_a_slide() {
 }
 
 #[test]
-fn a_staying_window_starts_no_fade() {
-    // A window the space already holds at its target needs nothing: pin at
-    // the math level (a settled fade prunes) since the harness holds no
-    // real windows to seed the space with.
-    let start = Instant::now();
-    let mut fades = vec![open_fade(1, start)];
-    assert!(fades_in_flight(&fades, start));
-    prune_finished_fades(&mut fades, start + Duration::from_millis(10_000));
-    assert!(fades.is_empty());
+fn a_settled_window_never_fades_again() {
+    // The live-run bug behind this: once a window's open fade landed, the
+    // next arrangement re-faded it, because "new" was read off the space
+    // (which the harness never fills, and which unmaps invisible windows).
+    // "New" is arranged-before instead, so a staying window fades exactly
+    // once no matter how many arrangements follow.
+    let mut fixture = SlideFixture::new();
+    let now = Instant::now();
+    let arranged = arrangement_of(vec![placement(1, 100, true, false, false, false)]);
+    fixture.update(&arranged, now, false);
+    assert_eq!(fixture.state.fades.len(), 1);
+    // Past the fade's deadline the tick prunes it...
+    let late = now + Duration::from_millis(10_000);
+    fixture.state.prune_slides(late);
+    assert!(fixture.state.fades.is_empty());
+    // ...and the same arrangement afterwards starts nothing new.
+    fixture.update(&arranged, late, false);
+    assert!(
+        fixture.state.fades.is_empty(),
+        "a staying window must not re-fade after its open fade lands"
+    );
+}
+
+#[test]
+fn a_window_scrolling_back_into_view_snaps_instead_of_fading() {
+    // The live-run bug: after a sibling closed, a window re-entering from
+    // off-screen (`visible` flipping false->true, so the space holds no old
+    // location for it) faded in translucent like a fresh open. Only a real
+    // new window fades; a returning one snaps.
+    let mut fixture = SlideFixture::new();
+    let now = Instant::now();
+    // First arranged while invisible (scrolled off-screen): no fade, but
+    // recorded as known.
+    let hidden = arrangement_of(vec![placement(1, 100, false, false, false, false)]);
+    fixture.update(&hidden, now, false);
+    assert!(fixture.state.fades.is_empty());
+    // Back into view on the next arrangement: still no fade.
+    let shown = arrangement_of(vec![placement(1, 100, true, false, false, false)]);
+    fixture.update(&shown, now + Duration::from_millis(10), false);
+    assert!(
+        fixture.state.fades.is_empty(),
+        "a returning window must snap, never fade in like a fresh open"
+    );
 }
 
 #[test]
@@ -2111,54 +2104,68 @@ fn retarget_mid_fade_keeps_the_fade_clock() {
 }
 
 #[test]
-fn close_during_open_continues_from_the_visible_alpha() {
-    // The close fade starts from the open's in-flight alpha, never from
-    // opaque: pin the arithmetic `retain_closing_window` applies.
-    let start = Instant::now();
-    let open = open_fade(1, start);
-    let mid = start + Duration::from_millis(100);
-    let visible = open_alpha(&open, mid);
-    assert_eq!(visible, 0.5);
-    let close = close_fade(1, mid, visible);
-    assert_eq!(close_alpha(&close, mid), 0.5);
-    assert_eq!(close_alpha(&close, mid + Duration::from_millis(200)), 0.0);
-}
-
-#[test]
-fn closing_fades_are_bounded() {
-    // The retain caps the hold so a close-spamming client cannot pin
-    // unbounded memory: at most `MAX_CLOSING_FADES` retained windows, each
-    // living at most one `duration`.
-    assert_eq!(MAX_CLOSING_FADES, 8);
-    let start = Instant::now();
-    let mut fades: Vec<Fade> = (0..MAX_CLOSING_FADES as u64)
-        .map(|id| close_fade(id, start, 1.0))
-        .collect();
-    assert!(fades_in_flight(&fades, start));
-    prune_finished_fades(&mut fades, start + Duration::from_millis(10_000));
-    assert!(fades.is_empty());
-}
-
-#[test]
-fn output_removed_prunes_its_fades() {
+fn a_close_snaps_with_no_fade_left_behind() {
+    // Open-only, pinned through the real world: a window opens (one open
+    // fade), then closes (no closing fade -- the close snaps, and the open
+    // fade goes with the window). Against a real client the retained close
+    // fade drew nothing anyway (dead surfaces yield no elements); the
+    // headless pixel suite pins the framebuffer half of that.
     let mut fixture = SlideFixture::new();
+    let id = primary_id(&fixture);
     let now = Instant::now();
-    // A fade naming an output the session never had prunes on the next
-    // workspace-index bookkeeping, so a retained window for a dead output
-    // cannot linger.
-    fixture.state.fades.push(Fade {
-        id: WindowId(77),
-        start: now,
-        duration: Duration::from_millis(200),
-        easing: Easing::Linear,
-        opening: false,
-        from_alpha: 1.0,
-        rect: Rect::new(0, 0, 400, 300),
-        output: OutputId(999),
-        window: None,
-    });
-    fixture.state.note_workspace_active();
-    assert!(fixture.state.fades.is_empty());
+    fixture.update(&arrange_now(&fixture), now, false);
+    open_window(&mut fixture, 1, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(10),
+        false,
+    );
+    assert_eq!(fixture.state.fades.len(), 1);
+    fixture
+        .state
+        .world
+        .handle_event(CoreEvent::WindowClosed { id: WindowId(1) });
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(20),
+        false,
+    );
+    assert!(
+        fixture.state.fades.is_empty(),
+        "a close snaps: no closing fade, and the open fade goes with the window"
+    );
+}
+
+#[test]
+fn fade_known_is_bounded_by_the_live_arrangement() {
+    // The known set that tells new windows from returning ones holds the
+    // live arrangement's ids and nothing else: a closed window leaves it on
+    // the next pass, so a long session cannot grow it without bound (ids
+    // are never reused, so nothing collides either).
+    let mut fixture = SlideFixture::new();
+    let id = primary_id(&fixture);
+    let now = Instant::now();
+    fixture.update(&arrange_now(&fixture), now, false);
+    assert!(fixture.state.fade_known.is_empty());
+    open_window(&mut fixture, 1, id);
+    open_window(&mut fixture, 2, id);
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(10),
+        false,
+    );
+    assert_eq!(fixture.state.fade_known.len(), 2);
+    fixture
+        .state
+        .world
+        .handle_event(CoreEvent::WindowClosed { id: WindowId(1) });
+    fixture.update(
+        &arrange_now(&fixture),
+        now + Duration::from_millis(20),
+        false,
+    );
+    assert_eq!(fixture.state.fade_known.len(), 1);
+    assert!(fixture.state.fade_known.contains(&WindowId(2)));
 }
 
 #[test]
@@ -2166,7 +2173,6 @@ fn locked_disabled_and_zero_duration_all_snap_fades() {
     let mut fixture = SlideFixture::new();
     let now = Instant::now();
     fixture.state.fades.push(open_fade(1, now));
-    fixture.state.fades.push(close_fade(2, now, 1.0));
     fixture.update(
         &arrangement_of(vec![placement(1, 100, true, false, false, false)]),
         now,

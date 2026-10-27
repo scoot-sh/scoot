@@ -353,30 +353,18 @@ pub fn prune_finished(slides: &mut Vec<Slide>, now: Instant) {
     slides.retain(|slide| !is_finished(slide, now));
 }
 
-/// At most this many closed windows are kept drawn while their close fade
-/// runs. Each entry holds one retained [`Window`] (an `Arc` clone: no pixel
-/// copy, just the client's already-allocated buffers living up to one
-/// `duration` longer) plus its last rect and output. The 8-slot cap bounds
-/// the hold to 8 windows × ≤500ms even if a client spams opens and closes;
-/// an overflow drops the oldest fade first (it snaps away). Eight covers a
-/// burst (alt-tab churn, a task quitting a group) without letting a
-/// misbehaving client pin memory by closing windows in a loop.
-pub const MAX_CLOSING_FADES: usize = 8;
-
-/// One window mid-fade: an opening window (`opening = true`) going opaque
-/// `0 → 1`, or a closed window (`opening = false`) going transparent
-/// `from_alpha → 0` while its last buffer is still drawn.
+/// One window mid-fade: a newly opened window going opaque `0 → 1`.
 ///
-/// Opening fades hold no window (the live map and space still have it); the
-/// render path reads the alpha off this list and multiplies it into the
-/// window's own elements. Closing fades retain the [`Window`] itself
-/// (`Arc` clone, see [`MAX_CLOSING_FADES`]): after `remove_window` the space
-/// no longer maps it and the map no longer names it, so without the retain
-/// there would be nothing left to draw. The retained window keeps drawing
-/// its last committed buffers at its last rect; no client re-commit is ever
-/// asked for (a dead client could not answer one).
+/// Open-only, by live measurement: a close fade would have to draw the
+/// closed window's last buffers after `remove_window` unmaps it, but a real
+/// client (foot) destroys its `wl_surface` on close, so the retained window
+/// yields no elements and the fade draws nothing (see
+/// `dev/design/slide-animation.md`). The close snaps instead; only opens
+/// fade. The render path reads the alpha off this list and multiplies it
+/// into the window's own elements; the live map and space still hold the
+/// window, so no retain is needed.
 ///
-/// Both kinds reuse the slide's timing (`duration`/`easing` from the live
+/// Reuses the slide's timing (`duration`/`easing` from the live
 /// `[animation]` table at creation; in-flight fades keep the timing they
 /// started with) and the slide's frame scheduling (frames only while in
 /// flight, idle when done). Damage is the fading rects only: Smithay's
@@ -388,19 +376,6 @@ pub struct Fade {
     pub start: Instant,
     pub duration: Duration,
     pub easing: Easing,
-    /// `true`: open (`0 → 1`, `window` is `None`). `false`: close
-    /// (`from_alpha → 0`, `window` retains the closed window).
-    pub opening: bool,
-    /// The alpha the close started from: `1.0` for a settled window, the
-    /// in-flight open alpha for a close-during-open. Unused for opens.
-    pub from_alpha: f32,
-    /// Where the closed window was last drawn (global logical coordinates).
-    /// Unused for opens (the live arrangement names the rect).
-    pub rect: scoot_core::Rect,
-    /// Which output the closed window was last drawn on. Unused for opens.
-    pub output: OutputId,
-    /// The closed window, retained. `None` for opens.
-    pub window: Option<smithay::desktop::Window>,
 }
 
 /// Whether a fade has reached its end at `now`.
@@ -414,22 +389,15 @@ pub fn open_alpha(fade: &Fade, now: Instant) -> f32 {
     easing_factor(progress(now, fade.start, fade.duration), fade.easing)
 }
 
-/// The alpha a closing window draws at: `from_alpha → 0` over the fade.
-pub fn close_alpha(fade: &Fade, now: Instant) -> f32 {
-    fade.from_alpha * (1.0 - easing_factor(progress(now, fade.start, fade.duration), fade.easing))
-}
-
 /// How opaque a live window draws at `now`: its open fade's alpha, or `1.0`
 /// when it has none (the disabled, idle and settled cases). One branch on
 /// empty covers disabled/idle; otherwise one linear scan. No allocation.
-/// Closing fades are never consulted here (their windows are gone from the
-/// live map); the render path draws those from the retained list directly.
 pub fn fade_alpha(fades: &[Fade], id: WindowId, now: Instant) -> f32 {
     if fades.is_empty() {
         return 1.0;
     }
     for fade in fades {
-        if fade.id == id && fade.opening {
+        if fade.id == id {
             return open_alpha(fade, now);
         }
     }
@@ -445,8 +413,7 @@ pub fn fades_in_flight(fades: &[Fade], now: Instant) -> bool {
     fades.iter().any(|fade| !is_fade_finished(fade, now))
 }
 
-/// Drops finished fades in place, keeping the allocation (and dropping the
-/// retained windows they held). Empty stays empty.
+/// Drops finished fades in place, keeping the allocation. Empty stays empty.
 pub fn prune_finished_fades(fades: &mut Vec<Fade>, now: Instant) {
     if fades.is_empty() {
         return;
@@ -480,6 +447,7 @@ impl State {
                 self.fades.clear();
             }
             self.note_workspace_active();
+            self.sync_fade_known(arrangement);
             return;
         }
         // Drop slides for windows that are gone or no longer slide. Linear in
@@ -505,6 +473,7 @@ impl State {
                 self.fades.clear();
             }
             self.note_workspace_active();
+            self.sync_fade_known(arrangement);
             return;
         }
         for placement in &arrangement.placements {
@@ -566,31 +535,30 @@ impl State {
         self.update_fades(arrangement, now);
     }
 
-    /// Starts an open fade for every newly-visible tiled window, from
+    /// Starts an open fade for every genuinely new tiled window, from
     /// transparent. Runs after [`State::update_viewport_slides`], so a
     /// workspace switch's incoming strip (which already rides the shared
     /// viewport offset) does not also fade per-window: double animation
     /// would cost both the offset and the blend every frame for the same
     /// strip.
     ///
-    /// A window is "new" when the space holds no old location for it (it
-    /// was never mapped, or was invisible on another workspace/output):
-    /// existing windows either slide (moved) or need nothing (stayed). An
-    /// in-flight open fade is never restarted by a move (the slide
+    /// A window is "new" when the compositor has never arranged it before
+    /// (tracked in [`State::fade_known`]), not when the space merely holds
+    /// no old location for it: the space unmaps invisible windows, so a
+    /// window scrolling back into view after a sibling closes (its `visible`
+    /// flipping false->true) has no old location either, but it is a
+    /// returning window, not an opening one, and it snaps instead of fading.
+    /// An in-flight open fade is never restarted by a move (the slide
     /// retargets from the visual; the fade keeps its own clock, so nothing
     /// jumps). A retarget mid-fade therefore just continues. Finished fades
-    /// prune on the frame tick, and closing fades (retained windows) are
-    /// never touched here -- only [`State::retain_closing_window`] creates
-    /// those, and only the tick prunes them.
+    /// prune on the frame tick. Closes never fade: the close snaps (see the
+    /// [`Fade`] docs for why retaining the closed window draws nothing
+    /// against a real client).
     fn update_fades(&mut self, arrangement: &Arrangement, now: Instant) {
-        // Drop opening fades for windows that are gone or no longer fade
-        // (closed without a retain, hidden, floated, fullscreened,
-        // maximized). Closing fades stay: their windows are gone by design.
-        // Linear in both lists, no allocation.
+        // Drop fades for windows that are gone or no longer fade (hidden,
+        // floated, fullscreened, maximized). Linear in both lists, no
+        // allocation.
         self.fades.retain(|fade| {
-            if !fade.opening {
-                return true;
-            }
             arrangement
                 .placements
                 .iter()
@@ -623,12 +591,14 @@ impl State {
             // The space still holds the old targets (this runs before
             // `apply()` remaps): `Some` means the window was already drawn
             // somewhere, so a stay needs no fade. `None` means brand-new or
-            // newly-visible with no old location to slide from -- fade it
-            // in from transparent instead of snapping.
-            let is_new = match self.windows.get(&placement.id) {
-                Some(window) => self.space.element_location(window).is_none(),
-                None => true,
-            };
+            // newly-visible with no old location to slide from -- but only
+            // the brand-new ones fade (see `fade_known`): a returning window
+            // snaps instead of fading in like a fresh open.
+            let is_new = !self.fade_known.contains(&placement.id)
+                && match self.windows.get(&placement.id) {
+                    Some(window) => self.space.element_location(window).is_none(),
+                    None => true,
+                };
             if !is_new {
                 continue;
             }
@@ -637,89 +607,23 @@ impl State {
                 start: now,
                 duration,
                 easing,
-                opening: true,
-                from_alpha: 0.0,
-                rect: placement.rect,
-                output: placement.output,
-                window: None,
             });
         }
+        self.sync_fade_known(arrangement);
     }
 
-    /// Retains a closing tiled window so its close fade can draw its last
-    /// buffers. Call from `remove_window` *before* the window leaves the map
-    /// and the space, while the old location is still readable. Snaps (no
-    /// retain) when the option is off or locked, for windows that never drew
-    /// (no location), for non-tiled windows (floating, fullscreen,
-    /// maximized snap like the slide), and on zero duration.
-    ///
-    /// A close-during-open starts from the open's current alpha rather than
-    /// from opaque, so nothing jumps; the opening fade is dropped. The hold
-    /// is bounded by [`MAX_CLOSING_FADES`]: overflowing drops the oldest
-    /// closing fade first (it snaps away).
-    pub(crate) fn retain_closing_window(&mut self, id: WindowId, now: Instant) {
-        if !self.animation.enabled {
-            return;
-        }
-        if self.session_lock.is_locked() {
-            return;
-        }
-        let duration = self.animation.duration;
-        if duration.is_zero() {
-            return;
-        }
-        let Some(window) = self.windows.get(&id).cloned() else {
-            return;
-        };
-        // Tiled only: floating, fullscreen and maximized windows snap shut.
-        if self.world.is_floating(id) || self.world.is_fullscreen(id) || self.world.is_maximized(id)
-        {
-            return;
-        }
-        let Some(mapped) = self.space.element_location(&window) else {
-            return;
-        };
-        let Some(output) = super::output_clip::placed_on(&window) else {
-            return;
-        };
-        let easing = self.animation.easing;
-        // Close-during-open: continue from what is on screen, never jump to
-        // opaque first.
-        let from_alpha = fade_alpha(&self.fades, id, now);
-        // The opening fade (if any) is replaced by the closing one.
-        if let Some(index) = self.fades.iter().position(|f| f.id == id && f.opening) {
-            self.fades.swap_remove(index);
-        }
-        // Also drop any slide: the window is gone, there is no target.
-        if let Some(index) = self.slides.iter().position(|s| s.id == id) {
-            self.slides.swap_remove(index);
-        }
-        // Bound the hold: evict the oldest closing fade first.
-        let closing = self.fades.iter().filter(|f| !f.opening).count();
-        if closing >= MAX_CLOSING_FADES
-            && let Some(oldest) = self
-                .fades
-                .iter()
-                .enumerate()
-                .filter(|(_, f)| !f.opening)
-                .min_by_key(|(_, f)| f.start)
-                .map(|(index, _)| index)
-        {
-            self.fades.swap_remove(oldest);
-        }
-        let geometry = window.geometry();
-        let rect = scoot_core::Rect::new(mapped.x, mapped.y, geometry.size.w, geometry.size.h);
-        self.fades.push(Fade {
-            id,
-            start: now,
-            duration,
-            easing,
-            opening: false,
-            from_alpha,
-            rect,
-            output,
-            window: Some(window),
-        });
+    /// Records every arranged window id as known, so the next
+    /// [`State::update_fades`] tells a genuinely new window (fade it in)
+    /// from a returning one (snap it). Called on every `update_slides`
+    /// path -- including the disabled/locked/zero-duration snaps, so
+    /// enabling later does not fade in the windows that were already there.
+    /// Bounded by the live arrangement (cleared and re-filled, capacity
+    /// retained): a closed window leaves the set on the next pass, and ids
+    /// are never reused, so nothing leaks and nothing collides.
+    fn sync_fade_known(&mut self, arrangement: &Arrangement) {
+        self.fade_known.clear();
+        self.fade_known
+            .extend(arrangement.placements.iter().map(|p| p.id));
     }
 
     /// Records the current active workspace per output without animating:
@@ -745,21 +649,12 @@ impl State {
                 None => self.last_workspace_active.push((id, active)),
             }
         }
-        // An output that went away takes its viewport slide with it, and
-        // any fade drawn on it (opening or closing: neither has a screen
-        // anymore, and a retained window for a dead output must not linger).
+        // An output that went away takes its viewport slide with it.
         if !self.viewport_slides.is_empty() {
             self.viewport_slides.retain(|slide| {
                 self.last_workspace_active
                     .iter()
                     .any(|(id, _)| *id == slide.output)
-            });
-        }
-        if !self.fades.is_empty() {
-            self.fades.retain(|fade| {
-                self.last_workspace_active
-                    .iter()
-                    .any(|(id, _)| *id == fade.output)
             });
         }
     }
@@ -862,13 +757,6 @@ impl State {
                     .any(|(id, _)| *id == slide.output)
             });
         }
-        if !self.fades.is_empty() {
-            self.fades.retain(|fade| {
-                self.last_workspace_active
-                    .iter()
-                    .any(|(id, _)| *id == fade.output)
-            });
-        }
     }
 
     /// Whether any slide or fade still needs frames at `now`.
@@ -886,5 +774,7 @@ impl State {
     }
 }
 
+#[cfg(test)]
+mod fade_close_tests;
 #[cfg(test)]
 mod tests;

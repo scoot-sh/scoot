@@ -94,10 +94,11 @@ impl State {
         if self.floating_grab_window() == Some(id) {
             self.end_floating_grab();
         }
-        // The close fade retains the window's last buffers: capture before
-        // the map and the space forget it (after that there is nothing left
-        // to draw). Snaps when disabled, locked, non-tiled or never-drawn.
-        self.retain_closing_window(id, std::time::Instant::now());
+        // A close snaps: there is no close fade (see
+        // [`super::animation::Fade`] for why a retained window draws nothing
+        // against a real client). The opening fade (if any) goes with the
+        // window, and so does its slide: both are pruned by id on the next
+        // `update_slides`.
         if let Some(window) = self.windows.remove(&id) {
             self.space.unmap_elem(&window);
             output_clip::unstamp(&window);

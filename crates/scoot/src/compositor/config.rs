@@ -487,7 +487,7 @@ impl AutostartConfig {
 
 /// `[animation]`. Three fields: `enabled`, whether tiled windows slide
 /// horizontally and vertically to their new place instead of jumping (and
-/// fade in on open and out on close); `duration_ms`, how
+/// fade in on open); `duration_ms`, how
 /// long one slide or fade takes; and `easing`, the curve (`ease-out`, `linear` or `spring`).
 /// All `Option` so a partial table leaves the rest at defaults. Disabled by
 /// default; a reload applies live, and disabling mid-slide or mid-fade snaps to the
@@ -1836,7 +1836,7 @@ pub fn default_config_toml() -> String {
         "# Slide tiled windows horizontally and vertically to their new place instead of\n\
          # jumping (columns scrolling into view, a column opening/closing/moving,\n\
          # stacked windows shifting when a sibling opens/closes,\n\
-         # focus moving the view), and fade them in on open and out on close.\n\
+         # focus moving the view), and fade new windows in on open (closes snap).\n\
          # Off by default; re-applies live on reload. The slide moves\n\
          # already-committed buffers and the fade only changes their opacity:\n\
          # clients are never asked to re-commit for either.\n",

@@ -33,7 +33,7 @@ use smithay::wayland::shell::wlr_layer::Layer;
 
 use crate::compositor::State;
 use crate::compositor::animation::{
-    Fade, Slide, ViewportSlide, close_alpha, fade_alpha, viewport_delta, visual_delta,
+    Fade, Slide, ViewportSlide, fade_alpha, viewport_delta, visual_delta,
 };
 use crate::compositor::cursor::CursorElement;
 use crate::compositor::decorations::{Appearance, Decorations, RingElement};
@@ -914,86 +914,6 @@ where
         {
             out.extend(rings.by_ref().take(count));
             spans.next();
-        }
-    }
-    // Closing windows: retained last buffers fading out at their last rect.
-    // Drawn after (under) the live windows in list order, which the damage
-    // tracker draws back-to-front... in practice a closing window's old slot
-    // is either empty (its column closed) or already re-laid-out, and either
-    // way its fading rect is exactly what the tracker damages (alpha keys
-    // the damage). One branch on empty covers disabled/idle. Rings snap
-    // with the close (only content fades); rounding matches the live path
-    // so a rounded session's closing corners stay round while they fade.
-    if !fades.is_empty() {
-        for fade in fades {
-            if fade.opening {
-                continue;
-            }
-            if fade.output != output {
-                continue;
-            }
-            let alpha = close_alpha(fade, now);
-            if alpha <= 0.0 {
-                continue;
-            }
-            let Some(window) = fade.window.as_ref() else {
-                continue;
-            };
-            let Some(surface) = window.wl_surface() else {
-                continue;
-            };
-            let geometry = window.geometry();
-            let mapped = Point::from((fade.rect.x, fade.rect.y));
-            let render_location = mapped - geometry.loc;
-            let mut bbox = SpaceElement::bbox(window);
-            bbox.loc += render_location;
-            if !region.overlaps(bbox) {
-                continue;
-            }
-            let location = (render_location - region.loc).to_physical_precise_round(scale);
-            for (popup, popup_offset) in PopupManager::popups_for_surface(&surface) {
-                let offset = (geometry.loc + popup_offset - popup.geometry().loc)
-                    .to_physical_precise_round(scale);
-                out.extend(
-                    render_elements_from_surface_tree(
-                        renderer,
-                        popup.wl_surface(),
-                        location + offset,
-                        scale,
-                        alpha,
-                        Kind::Unspecified,
-                    )
-                    .into_iter()
-                    .map(Elements::Surface),
-                );
-            }
-            #[cfg(feature = "xwayland")]
-            let base: f32 = window
-                .x11_surface()
-                .and_then(smithay::xwayland::X11Surface::opacity)
-                .map_or(1.0, |opacity| opacity as f32 / u32::MAX as f32);
-            #[cfg(not(feature = "xwayland"))]
-            let base: f32 = 1.0;
-            let drawn = clamp_to_slot(fade.rect, geometry.size.w, geometry.size.h);
-            let clip = clip_rect(to_output_local(drawn, origin), scale);
-            let radius = physical_radius(configured_radius, clip, scale);
-            let main: Vec<WaylandSurfaceRenderElement<R>> = render_elements_from_surface_tree(
-                renderer,
-                &surface,
-                location,
-                scale,
-                base * alpha,
-                Kind::Unspecified,
-            );
-            if radius > 0 {
-                out.extend(
-                    main.into_iter().map(|element| {
-                        Elements::RoundedSurface(Rounded::new(element, clip, radius))
-                    }),
-                );
-            } else {
-                out.extend(main.into_iter().map(Elements::Surface));
-            }
         }
     }
     out
