@@ -29,10 +29,12 @@ existing entries are being checked against it by
 
 - **Branch:** `scoot/cursor-dmabuf-storage`, twenty-eight commits on
   `0ff00983`, the tip `b65cbc5f` pinned: `scoot/xwayland-selection-dnd`
-  (twenty-five, tip `035d447c`) plus the cursor commit, on a branch of its
-  own until the PR adding it merges, after which the lane branch can be
-  fast-forwarded to it. `fcf6f314`, the twenty-third, is
-  carried unused (see below). `scoot/buffer-scale-without-new-buffer`
+  (twenty-five, tip `035d447c`) plus `7ab72d53` (cursor), `fdf424d`
+  (seat-loss) and `b65cbc5f` (keymap fd). (2026-10-27: was "(twenty-five,
+  tip `035d447c`) plus the cursor commit", which predated the `fdf424d` and
+  `b65cbc5f` repins; 28-commit count and tip verified against the table
+  above and `crates/scoot/Cargo.toml` rev `b65cbc5f`.) `fcf6f314`, the
+  twenty-third, is carried unused (see below). `scoot/buffer-scale-without-new-buffer`
   (`6ab8b4a2` on `7e18b661`) was pinned briefly by the buffer-scale PR
   while this lane's XWayland commits were unmerged; nothing pins it now.
   Its first, `43f50eb2`, is also the tip of `scoot/syncobj-timeline-drop`,
@@ -514,9 +516,11 @@ carried commit group is classified by that ticket's method: **1**,
 alternatives listed and ruled out with measurement or a concrete
 constraint; **2**, mentioned without evidence; **3**, none recorded;
 **4**, a hard constraint checked against the pinned fork's source. Source
-references below are against the pinned rev `fdf424d`
-(`~/.cargo/git/checkouts/smithay-*/fdf424d`), re-checked against the same
-rev on the Asahi M2. No decision was found wrong, so no wrong-decision
+references below are against the pinned rev `b65cbc5f`
+(`~/.cargo/git/checkouts/smithay-*/b65cbc5f`), re-checked against the same
+rev on the Asahi M2. (2026-10-27: the audit ran 2026-10-08 against
+`fdf424d`, then the pinned rev; pointers updated at the `b65cbc5f` repin.)
+No decision was found wrong, so no wrong-decision
 ticket was filed; the groups that were class 2 or 3 are already priority
 routes in [fork-changes-in-scoot](backlog/core/fork-changes-in-scoot.md),
 so nothing was added there.
@@ -539,7 +543,8 @@ so nothing was added there.
 
 [fork-changes-in-scoot](../docs/backlog/resolved/fork-changes-in-scoot-done.md)
 (resolved 2026-10-08) checked every carried commit against the pinned fork
-rev (`fdf424d`, read as `~/.cargo/git/checkouts/smithay-*/fdf424d`) and
+rev (`b65cbc5f`, read as `~/.cargo/git/checkouts/smithay-*/b65cbc5f`; at
+audit time the rev was `fdf424d`) and
 scoot's code, asking that ticket's question: what does the change need that
 the dependency does not expose, and can a public API, handler trait or wrapper
 express it? Verdict per commit:
