@@ -23,7 +23,7 @@
 # same name (see .github/workflows/rpm.yml).
 
 Name:           scoot
-Version:        0.6.7
+Version:        0.6.8
 Release:        1%{?dist}
 # No -debuginfo/-debugsource subpackages: the vendored crate sources
 # carry their upstream modes (executable .rs files, a `#!` attribute
@@ -137,6 +137,9 @@ cd source
 %doc source/config.toml.example
 
 %changelog
+* Tue Oct 27 2026 scoot-sh <packages@scoot.sh> - 0.6.8-1
+- Built from the v0.6.8 release tag.
+
 * Tue Oct 27 2026 scoot-sh <packages@scoot.sh> - 0.6.7-1
 - Built from the v0.6.7 release tag.
 
