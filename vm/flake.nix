@@ -53,7 +53,12 @@
       # run-vm.sh only decides *where* state lives and what gets shared in;
       # everything else is the generated runner's job.
       mkRunVm =
-        { name, vm, stateName, sshPort }:
+        {
+          name,
+          vm,
+          stateName,
+          sshPort,
+        }:
         hostPkgs.writeShellApplication {
           inherit name;
           runtimeInputs = [ hostPkgs.qemu ];
