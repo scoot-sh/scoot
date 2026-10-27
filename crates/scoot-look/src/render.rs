@@ -57,6 +57,15 @@ pub struct RenderInputs {
     /// cursor and the compositor keeps its own. Absent (false) renders
     /// exactly what it always has.
     pub omit_cursor: bool,
+    /// Render the foot fragment in its pre-1.26 shape: one `[colors]`
+    /// section, no `[main]` `initial-color-theme` key. foot 1.26.0 added
+    /// the `[colors-dark]`/`[colors-light]` sections and the
+    /// `initial-color-theme` values (as `1`/`2`, renamed to
+    /// `dark`/`light` in the same release); older foots refuse the
+    /// modern fragment under `foot --check-config`, so the tool renders
+    /// this shape against them instead, with a note. Absent (false)
+    /// renders the modern fragment.
+    pub foot_legacy: bool,
 }
 
 /// Quote one TOML string value. Every input is already grammar-checked, so
@@ -798,11 +807,70 @@ pub fn render_fontconfig(look: &ResolvedLook) -> String {
 /// `None` when the look has no `[terminal]` table: no fragment is ever
 /// synthesized from the palette.
 ///
+/// Needs foot 1.26 or newer (the release that added the themed sections;
+/// see [`RenderInputs::foot_legacy`] for what older foots render).
 /// Every hue is re-checked here, not only at parse: a library caller can
 /// hand-build a `ResolvedLook` past the gate, and a newline in a hue would
 /// otherwise open a new foot section (foot's `shell` key runs commands, so
 /// a section break is a code-execution shape, not a color typo).
 pub fn render_foot(look: &ResolvedLook) -> Result<Option<String>, GrammarError> {
+    let Some(parts) = foot_parts(look)? else {
+        return Ok(None);
+    };
+    let FootParts {
+        colors,
+        theme,
+        alpha,
+    } = parts;
+    // A hand-built `ResolvedLook` skips the name grammar, so the comment
+    // quotes rather than interpolates: a newline in the name stays one line.
+    let mut out = format!(
+        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n# Both themes carry the look's hues, so new terminals match whatever theme is in effect.\n",
+        toml_str(&look.name)
+    );
+    out.push_str(&format!("\n[main]\ninitial-color-theme={theme}\n"));
+    for section in ["colors-dark", "colors-light"] {
+        out.push_str(&format!("\n[{section}]\nalpha={alpha:.2}\n"));
+        out.push_str(&foot_color_lines(colors));
+    }
+    Ok(Some(out))
+}
+
+/// Render the foot fragment in its pre-1.26 shape (`foot.ini`): one
+/// `[colors]` section carrying the look's 16 ANSI hues as `regular0-7`
+/// then `bright0-7`, with `alpha` from `opacity.terminal`. No `[main]`
+/// section: foot before 1.23 has no `initial-color-theme` key at all
+/// (and 1.23-1.25 spell its values `1`/`2`, not `dark`/`light`), and
+/// before 1.26 it has no `[colors-dark]`/`[colors-light]` sections —
+/// either refuses the modern fragment under `foot --check-config`, so
+/// the tool renders this shape against those foots instead, with a
+/// note. The single section holds the look's hues, which is what an old
+/// foot starts new terminals on. `None` when the look has no
+/// `[terminal]` table, like [`render_foot`].
+pub fn render_foot_legacy(look: &ResolvedLook) -> Result<Option<String>, GrammarError> {
+    let Some(parts) = foot_parts(look)? else {
+        return Ok(None);
+    };
+    let FootParts { colors, alpha, .. } = parts;
+    let mut out = format!(
+        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n# Legacy foot shape ([colors], foot before 1.26): new terminals start on the look's hues.\n",
+        toml_str(&look.name)
+    );
+    out.push_str(&format!("\n[colors]\nalpha={alpha:.2}\n"));
+    out.push_str(&foot_color_lines(colors));
+    Ok(Some(out))
+}
+
+/// The checked foot inputs both shapes share: the 16 hues, the theme name
+/// for the look's polarity, and the terminal opacity. `None` when the
+/// look has no `[terminal]` table.
+struct FootParts<'a> {
+    colors: &'a Vec<String>,
+    theme: &'a str,
+    alpha: f64,
+}
+
+fn foot_parts(look: &ResolvedLook) -> Result<Option<FootParts<'_>>, GrammarError> {
     let Some(colors) = &look.terminal else {
         return Ok(None);
     };
@@ -828,29 +896,27 @@ pub fn render_foot(look: &ResolvedLook) -> Result<Option<String>, GrammarError> 
     } else {
         "light"
     };
-    // A hand-built `ResolvedLook` skips the name grammar, so the comment
-    // quotes rather than interpolates: a newline in the name stays one line.
-    let mut out = format!(
-        "# Rendered from look {} by scoot-look. Do not edit: re-rendered on every apply.\n# Both themes carry the look's hues, so new terminals match whatever theme is in effect.\n",
-        toml_str(&look.name)
-    );
-    out.push_str(&format!("\n[main]\ninitial-color-theme={theme}\n"));
-    for section in ["colors-dark", "colors-light"] {
-        out.push_str(&format!(
-            "\n[{section}]\nalpha={:.2}\n",
-            look.opacity.terminal
-        ));
-        for (i, color) in colors.iter().enumerate() {
-            // Foot's hex carries no `#`; the check above makes the slice safe.
-            let key = if i < 8 {
-                format!("regular{i}")
-            } else {
-                format!("bright{}", i - 8)
-            };
-            out.push_str(&format!("{key}={}\n", &color[1..]));
-        }
+    Ok(Some(FootParts {
+        colors,
+        theme,
+        alpha: look.opacity.terminal,
+    }))
+}
+
+/// The 16 hues as foot's `regular0-7` then `bright0-7` lines, hex without
+/// `#` (checked by [`foot_parts`], so the slice is safe).
+fn foot_color_lines(colors: &[String]) -> String {
+    let mut out = String::new();
+    for (i, color) in colors.iter().enumerate() {
+        // Foot's hex carries no `#`; the check above makes the slice safe.
+        let key = if i < 8 {
+            format!("regular{i}")
+        } else {
+            format!("bright{}", i - 8)
+        };
+        out.push_str(&format!("{key}={}\n", &color[1..]));
     }
-    Ok(Some(out))
+    out
 }
 /// One `key=value` line for the line-based leaf formats (`fuzzel.ini`,
 /// swaylock). Those formats have no string quoting, so the writer is the
@@ -1037,12 +1103,13 @@ pub fn render_json(name: &str, hash: &str, inputs: &RenderInputs) -> String {
         .collect::<Vec<_>>()
         .join(",");
     format!(
-        "{{\"name\":{},\"source_hash\":{},\"wallpaper\":{},\"ui_font\":{},\"bar_popup\":{},\"bar_dropped\":[{dropped}]}}",
+        "{{\"name\":{},\"source_hash\":{},\"wallpaper\":{},\"ui_font\":{},\"bar_popup\":{},\"bar_dropped\":[{dropped}],\"foot_legacy\":{}}}",
         json_str(name),
         json_str(hash),
         json_str(wallpaper),
         json_str(font),
-        inputs.bar_popup
+        inputs.bar_popup,
+        inputs.foot_legacy
     )
 }
 

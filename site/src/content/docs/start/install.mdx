@@ -334,7 +334,10 @@ If you used `--system`, log out and pick **scoot** on your login screen.
   apply runs first, and only when it succeeds does a file still
   identical to an older `--look` run have its look keys removed so the
   layer shows through. A refused apply (a missing font, usually) leaves
-  your files alone. Anything else is left alone while `apply` names the
+  your files alone. An older foot (before 1.26, e.g. Debian 13's
+  1.21.0) is not a refusal: the apply renders the legacy terminal
+  colors with a note, and the installer flags the version the same
+  way. Anything else is left alone while `apply` names the
   keys shadowing the look, and a symlinked config is always left alone.
   Under `sudo` the apply runs as the invoking user. A re-run that is
   already up to date still installs the catalog and applies a `--look`

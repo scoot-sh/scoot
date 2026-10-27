@@ -308,6 +308,15 @@ foot start, so a swap sends no signal. `validate` and `build` check
 the fragment against foot's own parser; `build --out` writes
 `foot.ini` beside the other fragments.
 
+The themed fragment needs foot 1.26 or newer. Against an older foot
+(Debian 13 ships 1.21.0 as its newest) the apply renders the legacy
+`[colors]` fragment instead — one section with the same hues, which
+that era parses — with a note naming the refused key and the 1.26
+floor, and applies everything else. A foot whose version does not
+parse renders the themed fragment first, and the same downgrade runs
+off its `--check-config` refusal. Only a fragment broken beyond the
+themed keys still refuses the look.
+
 ## Helix, Neovim, btop and starship
 
 Each shipped look with an `apps/` directory carries static leaves:

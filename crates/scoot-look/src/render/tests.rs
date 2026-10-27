@@ -22,6 +22,7 @@ fn inputs() -> RenderInputs {
         bar_popup: true,
         bar_drop_sections: Vec::new(),
         omit_cursor: false,
+        foot_legacy: false,
     }
 }
 
@@ -755,6 +756,47 @@ fn foot_absent_without_a_terminal_table() {
     // No `[terminal]` table means no foot fragment, never a palette
     // synthesized into one (design section 3.3).
     assert!(render_foot(&moonrise()).expect("renders").is_none());
+    assert!(render_foot_legacy(&moonrise()).expect("renders").is_none());
+}
+
+#[test]
+fn foot_legacy_renders_one_colors_section_for_an_old_foot() {
+    // look-apply-older-foot-refuses: foot before 1.26 has no
+    // `[colors-dark]`/`[colors-light]` sections and (before 1.23) no
+    // `initial-color-theme` key, so it refuses the themed fragment.
+    // The legacy shape carries the same hues in the one `[colors]`
+    // section that era parses, with no themed keys at all.
+    let frag = render_foot_legacy(&terminal_look())
+        .expect("renders")
+        .expect("a terminal table renders a fragment");
+    assert!(frag.contains("[colors]"), "no [colors]:\n{frag}");
+    assert!(
+        !frag.contains("initial-color-theme"),
+        "legacy keeps the refused key:\n{frag}"
+    );
+    assert!(
+        !frag.contains("colors-dark") && !frag.contains("colors-light"),
+        "legacy keeps the refused sections:\n{frag}"
+    );
+    assert!(frag.contains("alpha=1.00"), "alpha lost:\n{frag}");
+    assert!(frag.contains("regular0=1a2230"), "ansi order lost:\n{frag}");
+    assert!(frag.contains("bright7=f6eedc"), "bright hues lost:\n{frag}");
+    assert!(
+        frag.lines()
+            .filter(|l| !l.starts_with('#'))
+            .all(|l| !l.contains('#')),
+        "a `#` escapes into foot.ini:\n{frag}"
+    );
+}
+
+#[test]
+fn foot_legacy_refuses_a_hand_built_bad_palette() {
+    // The legacy path checks exactly like the themed one: a library
+    // caller can hand-build a `ResolvedLook` past the parse gate.
+    let mut look = terminal_look();
+    look.terminal = Some(vec!["#000000".to_string(); 15]);
+    let err = render_foot_legacy(&look).expect_err("fifteen hues render");
+    assert_eq!(err.field, "terminal.colors");
 }
 
 #[test]

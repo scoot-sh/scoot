@@ -16,7 +16,8 @@ use scoot_look::state::{LINK_NAME, RecordRead, read_record};
 
 use super::{
     ApplyOptions, ApplyReport, Availability, BuildTarget, Checks, apply_with, apply_with_live,
-    build_to_out, shadowed_from_files_in, validate_dir, validate_entry,
+    build_to_out, foot_needs_legacy, is_foot_check_missing, is_foot_version_refusal,
+    parse_foot_version, shadowed_from_files_in, validate_dir, validate_entry,
 };
 use scoot_look::Origin;
 
@@ -218,6 +219,12 @@ struct FakeChecks {
     font_refuse: Option<String>,
     bar_refuse: Option<String>,
     foot_refuse: Option<String>,
+    /// The `foot --version` answer the probe reports, if any.
+    foot_version: Option<String>,
+    /// Models a pre-1.26 foot: refuses fragments carrying the themed keys
+    /// (`initial-color-theme`, `[colors-dark]`) with the refusal shape a
+    /// real 1.21.0 answers with, and accepts the legacy fragment.
+    old_foot: bool,
     /// Models a bar built `--no-default-features`: refuses only fragments
     /// carrying `popup-radius`, recording every fragment seen.
     popup_only: bool,
@@ -239,6 +246,8 @@ impl FakeChecks {
             font_refuse: None,
             bar_refuse: None,
             foot_refuse: None,
+            foot_version: None,
+            old_foot: false,
             popup_only: false,
             minimal_bar: false,
             bar_seen: RefCell::new(Vec::new()),
@@ -324,12 +333,24 @@ impl Checks for FakeChecks {
 
     fn foot_fragment(&self, fragment: &Path) -> Result<Availability<()>, String> {
         let text = std::fs::read_to_string(fragment).unwrap_or_default();
-        self.foot_seen.borrow_mut().push(text);
+        self.foot_seen.borrow_mut().push(text.clone());
+        if self.old_foot && (text.contains("initial-color-theme") || text.contains("colors-dark")) {
+            // The shape a real foot 1.21.0 answers with (captured from
+            // Debian 13): the themed key is not a valid option there.
+            return Err(format!(
+                "foot fragment refused by foot --check-config: err: config.c:1099: {}:5: [main].initial-color-theme: dark: not a valid option: initial-color-theme",
+                fragment.display()
+            ));
+        }
         if let Some(refusal) = &self.foot_refuse {
             return Err(refusal.clone());
         }
         assert!(fragment.is_file(), "the foot fragment renders");
         Ok(Availability::Available(()))
+    }
+
+    fn foot_version(&self) -> Option<String> {
+        self.foot_version.clone()
     }
 }
 
@@ -2287,6 +2308,8 @@ fn a_font_refusal_refuses_before_anything_is_touched() {
         font_refuse: Some("font `DejaVu Sans` resolves to nothing".to_owned()),
         bar_refuse: None,
         foot_refuse: None,
+        foot_version: None,
+        old_foot: false,
         popup_only: false,
         minimal_bar: false,
         bar_seen: RefCell::new(Vec::new()),
@@ -2583,6 +2606,8 @@ fn effectful_refusals_are_structured_not_bare_errors() {
         font_refuse: Some("font `DejaVu Sans` resolves to nothing".to_owned()),
         bar_refuse: None,
         foot_refuse: None,
+        foot_version: None,
+        old_foot: false,
         popup_only: false,
         minimal_bar: false,
         bar_seen: RefCell::new(Vec::new()),
@@ -2701,6 +2726,8 @@ fn validate_and_apply_agree_on_the_bar_fragment() {
         minimal_bar: false,
         bar_seen: RefCell::new(Vec::new()),
         foot_refuse: None,
+        foot_version: None,
+        old_foot: false,
         foot_seen: RefCell::new(Vec::new()),
     };
     let validation =
@@ -2756,6 +2783,8 @@ fn validate_retries_a_popup_refusal_without_popup_keys() {
         minimal_bar: false,
         bar_seen: RefCell::new(Vec::new()),
         foot_refuse: None,
+        foot_version: None,
+        old_foot: false,
         foot_seen: RefCell::new(Vec::new()),
     };
     let validation =
@@ -2820,6 +2849,8 @@ fn a_minimal_bar_drops_module_tokens_with_a_note() {
         minimal_bar: true,
         bar_seen: RefCell::new(Vec::new()),
         foot_refuse: None,
+        foot_version: None,
+        old_foot: false,
         foot_seen: RefCell::new(Vec::new()),
     };
     // Validate drops both and says so.
@@ -3576,6 +3607,212 @@ fn validate_reports_a_foot_refusal() {
         "errors: {:?}",
         validation.errors
     );
+}
+
+/// look-apply-older-foot-refuses: foot 1.21.0 (Debian 13, newest in
+/// trixie) rejects the renderer's `initial-color-theme` key, so every
+/// shipped look refused the whole swap with foot installed. A refusal
+/// shaped like version skew downgrades to the legacy fragment (with a
+/// note) and applies everything else, never refuses the look.
+#[test]
+fn an_older_foot_downgrades_the_fragment_instead_of_refusing_the_look() {
+    let fixture = terminal_fixture("apply-foot-older");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let mut checks = FakeChecks::with_fonts(&fonts);
+    checks.old_foot = true;
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with_live(
+        "look-t",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
+    )
+    .expect("an older foot downgrades the fragment instead of refusing the look");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|n| n.contains("initial-color-theme")),
+        "no downgrade note names the dropped key: {:?}",
+        report.notes
+    );
+    // Both shapes were checked: the themed fragment refused, the legacy
+    // one passed.
+    assert_eq!(
+        checks.foot_seen.borrow().len(),
+        2,
+        "the downgrade never re-checked: {:?}",
+        checks.foot_seen.borrow().len()
+    );
+    assert!(
+        checks.foot_seen.borrow()[0].contains("initial-color-theme"),
+        "the first check was not the themed fragment"
+    );
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    let foot = std::fs::read_to_string(rendered.join("foot.ini")).expect("a foot.ini");
+    assert!(
+        !foot.contains("initial-color-theme"),
+        "the downgraded fragment keeps the refused key:\n{foot}"
+    );
+    assert!(foot.contains("[colors]"), "no legacy section:\n{foot}");
+    assert!(
+        foot.contains("regular0=1a2230"),
+        "the downgraded fragment loses the look's hues:\n{foot}"
+    );
+}
+
+/// The version probe renders legacy up front: a foot reporting 1.21.0
+/// never sees the themed fragment, and the note names its version.
+#[test]
+fn a_probed_old_foot_renders_legacy_up_front() {
+    let fixture = terminal_fixture("apply-foot-probed");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let mut checks = FakeChecks::with_fonts(&fonts);
+    checks.old_foot = true;
+    checks.foot_version = Some("1.21.0".to_owned());
+    let mut compositor = FakeCompositor::not_running();
+    let report = apply_with_live(
+        "look-t",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
+    )
+    .expect("a probed old foot applies");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|n| n.contains("1.21.0") && n.contains("[colors]")),
+        "no probe note names the version: {:?}",
+        report.notes
+    );
+    assert_eq!(
+        checks.foot_seen.borrow().len(),
+        1,
+        "the probe rendered modern first: {:?}",
+        checks.foot_seen.borrow().len()
+    );
+    assert!(
+        !checks.foot_seen.borrow()[0].contains("initial-color-theme"),
+        "the probe rendered the themed fragment"
+    );
+}
+
+/// A fragment broken beyond version skew still refuses: the legacy
+/// re-check fails too, so the whole look refuses before anything is
+/// touched.
+#[test]
+fn a_foot_refusal_past_version_skew_still_refuses() {
+    let fixture = terminal_fixture("apply-foot-broken");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let mut checks = FakeChecks::with_fonts(&fonts);
+    checks.old_foot = true;
+    checks.foot_refuse = Some("foot fragment refused by foot --check-config: bad alpha".to_owned());
+    let mut compositor = FakeCompositor::not_running();
+    let failure = apply_with_live(
+        "look-t",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
+    )
+    .expect_err("a broken foot fragment applies");
+    assert!(failure.message.contains("bad alpha"), "{}", failure.message);
+    assert!(
+        !fixture.state.join("look.json").exists(),
+        "a record was written before the refusal"
+    );
+}
+
+/// `validate` agrees with `apply`: an older foot notes the downgrade,
+/// never an error.
+#[test]
+fn validate_downgrades_for_an_older_foot() {
+    let fixture = terminal_fixture("validate-foot-older");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let mut checks = FakeChecks::with_fonts(&fonts);
+    checks.old_foot = true;
+    let validation =
+        validate_entry(&fixture.catalog, "look-t", &checks, false).expect("a validation");
+    assert!(
+        validation.errors.is_empty(),
+        "errors: {:?}",
+        validation.errors
+    );
+    assert!(
+        validation
+            .notes
+            .iter()
+            .any(|n| n.contains("initial-color-theme")),
+        "no downgrade note: {:?}",
+        validation.notes
+    );
+}
+
+#[test]
+fn foot_version_shapes() {
+    // `foot --version` answers `foot version: 1.28.0 +pgo ...`.
+    assert_eq!(
+        parse_foot_version("foot version: 1.28.0 +pgo +ime +graphemes"),
+        Some((1, 28, 0))
+    );
+    assert_eq!(parse_foot_version("foot version: 1.21.0"), Some((1, 21, 0)));
+    assert_eq!(parse_foot_version("1.26"), Some((1, 26, 0)));
+    assert_eq!(parse_foot_version(""), None);
+    assert_eq!(parse_foot_version("foot version: unknown"), None);
+    // The themed fragment needs 1.26+: older renders legacy, current
+    // renders modern, and an unparseable answer renders modern (the
+    // `--check-config` refusal downgrades instead).
+    assert!(foot_needs_legacy(Some("1.21.0")));
+    assert!(foot_needs_legacy(Some("1.25.3")));
+    assert!(!foot_needs_legacy(Some("1.26.0")));
+    assert!(!foot_needs_legacy(Some("1.28.0")));
+    assert!(!foot_needs_legacy(Some("2.0.0")));
+    assert!(!foot_needs_legacy(None));
+    assert!(!foot_needs_legacy(Some("unknown")));
+    // Only the skew shape downgrades: the themed keys named as unknown
+    // (or mis-valued on 1.23-1.25, which spell them `1`/`2`).
+    assert!(is_foot_version_refusal(
+        "foot fragment refused by foot --check-config: err: config.c:1099: foot.ini:5: [main].initial-color-theme: dark: not a valid option: initial-color-theme"
+    ));
+    assert!(is_foot_version_refusal(
+        "err: config.c:3283: foot.ini:8: [colors-dark]: invalid section name: colors-dark"
+    ));
+    assert!(is_foot_version_refusal(
+        "err: config.c:689: foot.ini:2: [main].initial-color-theme: dark: not one of '1', '2'"
+    ));
+    assert!(!is_foot_version_refusal("foot says no"));
+    assert!(!is_foot_version_refusal(
+        "err: config.c:1187: foot.ini:2: [main].bogus-key: 1: not a valid option: bogus-key"
+    ));
+    assert!(!is_foot_check_missing("foot says no"));
 }
 
 #[test]
