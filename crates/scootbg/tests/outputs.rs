@@ -271,14 +271,16 @@ fn soft_nofile(pid: u32, soft: &str) {
     );
 }
 
-/// The inodes of the sockets listening on `path`, from `/proc/net/unix`
-/// (columns: `Num RefCount Protocol Flags Type St Inode Path`). Only
-/// listeners: a connection accepted on a socket shows its path too, and
+/// The inodes of every listening unix socket, from `/proc/net/unix`
+/// (columns: `Num RefCount Protocol Flags Type St Inode Path`), whatever
+/// path it shows. Not filtered by the control socket's path: the kernel
+/// records the name a socket was *bound* at, and the daemon binds inside a
+/// staging directory (`/proc/self/fd/<n>/s`) and renames the socket onto
+/// its published name, so the published path never appears here.
 /// `__SO_ACCEPTCON` (0x10000) in `Flags` marks the listening one.
-fn listening_inodes(path: &std::path::Path) -> Vec<String> {
+fn listening_inodes() -> Vec<String> {
     const ACCEPTCON: u32 = 0x1_0000;
     let table = std::fs::read_to_string("/proc/net/unix").unwrap();
-    let path = path.to_str().unwrap();
     table
         .lines()
         .skip(1)
@@ -295,7 +297,7 @@ fn listening_inodes(path: &std::path::Path) -> Vec<String> {
             }
             let flags = u32::from_str_radix(columns[3], 16).ok()?;
             let listening = flags & ACCEPTCON != 0;
-            (listening && rest.trim() == path).then(|| columns[6].to_owned())
+            listening.then(|| columns[6].to_owned())
         })
         .collect()
 }
@@ -310,9 +312,8 @@ fn listening_inodes(path: &std::path::Path) -> Vec<String> {
 /// than the limit with `EINVAL`, and the daemon polls two (Wayland and the
 /// listener) with no clients, so the limit must stay at least that.
 ///
-/// The pair is found by what it is, not by shape: the socket listening on
-/// the daemon's path (`/proc/net/unix`), then the daemon's fds on that
-/// inode. "The only socket open twice" broke on an inherited socket that
+/// The pair is found by what it is, not by shape: the listening sockets
+/// (`/proc/net/unix`), then the daemon's fds on those inodes. "The only socket open twice" broke on an inherited socket that
 /// was itself open twice.
 fn limit_past_the_spare(pid: u32, socket: &std::path::Path) -> u64 {
     let mut fds: Vec<(u64, String)> = std::fs::read_dir(format!("/proc/{pid}/fd"))
@@ -328,7 +329,7 @@ fn limit_past_the_spare(pid: u32, socket: &std::path::Path) -> u64 {
     let lowest_free = (0..)
         .find(|n| fds.binary_search_by_key(n, |(fd, _)| *fd).is_err())
         .unwrap();
-    let listeners: Vec<String> = listening_inodes(socket)
+    let listeners: Vec<String> = listening_inodes()
         .iter()
         .map(|inode| format!("socket:[{inode}]"))
         .collect();

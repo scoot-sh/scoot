@@ -132,8 +132,10 @@ blocks on its completion instead of polling screenshots.
 ## The control socket
 
 One daemon per Wayland display:
-`$XDG_RUNTIME_DIR/scootnotify-<display>.sock`, owner-only (`0600`),
-with a `.lock` beside it. At most 16 connections (a 17th closes the
+`$XDG_RUNTIME_DIR/scootnotify-<display>.sock`, owner-only (`0600` from the
+moment its name exists, whatever your umask; a crash in the instant of
+start-up can leave an empty `.scootui-*` directory beside it, safe to
+delete), with a `.lock` beside it. At most 16 connections (a 17th closes the
 oldest non-subscriber) and 4 subscribers (a 5th is refused); a peer
 that stops reading is dropped past 30 s. Requests are one JSON object
 per line carrying the protocol they speak:

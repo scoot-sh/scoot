@@ -955,8 +955,11 @@ VM, which this container cannot reach.
   **Startup**: from `exec` of the daemon, with nothing saved. A daemon
   that takes the wallpaper on its command line or in its config gets it
   there; scootbg and awww get it from their client the moment their
-  socket listens. That is read from `/proc/net/unix`, because a probe
-  that connects and hangs up kills `awww-daemon` with SIGPIPE.
+  socket listens. That is read from the kernel's `sock_diag`, which reports each
+  listener's device and inode and so finds scootbg's socket after it is
+  renamed into place; `/proc/net/unix` keeps only the name a socket was
+  bound at. A probe that connects and hangs up kills `awww-daemon` with
+  SIGPIPE.
   **Restore**: a daemon is set, stopped the way a user would (`scootbg
   kill`, `awww kill`), then a new one is timed.
 - **Geometry**: the timed and peak rows on one 3840×2160 output; the idle

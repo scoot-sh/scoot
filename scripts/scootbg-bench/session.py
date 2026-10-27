@@ -35,13 +35,78 @@ def _is_socket(path):
 _SO_ACCEPTCON = 0x10000
 
 
+def kernel_dev(st_dev):
+    """``st_dev`` as the kernel's ``UNIX_DIAG_VFS`` record carries it: the
+    in-kernel ``dev_t``, ``(major << 20) | minor``. Not the userspace
+    ``new_encode_dev`` form, which agrees only for major 0 and minor < 256
+    (so a tmpfs-only test would pass either way)."""
+    return (os.major(st_dev) << 20) | os.minor(st_dev)
+
+
+def _listening_by_diag(path):
+    """Whether the socket file at ``path`` is a listening unix socket, asked
+    of the kernel's ``sock_diag`` (``UNIX_DIAG``): it reports each listener's
+    filesystem inode and device (``UDIAG_SHOW_VFS``), which is how the
+    renamed socket file is found. ``/proc/net/unix`` cannot do this: its
+    inode column is the socket's own number, not the file's, and its name
+    column is the name the socket was *bound* at."""
+    import socket
+    import struct
+
+    info = os.stat(path)
+    dev = kernel_dev(info.st_dev)
+    af_unix, tcp_listen, show_vfs, unix_diag_vfs = 1, 10, 0x2, 1  # UDIAG_SHOW_VFS, UNIX_DIAG_VFS
+    request = struct.pack("=BBHIIIII", af_unix, 0, 0, 1 << tcp_listen, 0, show_vfs, 0xFFFFFFFF, 0xFFFFFFFF)
+    header = struct.pack("=IHHII", 16 + len(request), 20, 0x301, 1, 0)  # SOCK_DIAG_BY_FAMILY, REQUEST|DUMP
+    nl = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, 4)  # NETLINK_SOCK_DIAG
+    try:
+        nl.settimeout(2.0)
+        nl.send(header + request)
+        while True:
+            data = nl.recv(65536)
+            at = 0
+            while at + 16 <= len(data):
+                length, kind = struct.unpack_from("=IH", data, at)
+                if kind == 3 or length < 16:  # NLMSG_DONE
+                    return False
+                if kind == 2:  # NLMSG_ERROR
+                    raise OSError("sock_diag refused")
+                end = at + length
+                cursor = at + 16 + 16  # past nlmsghdr and unix_diag_msg
+                while cursor + 4 <= end:
+                    alen, atype = struct.unpack_from("=HH", data, cursor)
+                    if alen < 4:
+                        break
+                    if atype == unix_diag_vfs and alen >= 12:
+                        vino, vdev = struct.unpack_from("=II", data, cursor + 4)
+                        if vino == info.st_ino and vdev == dev:
+                            return True
+                    cursor += (alen + 3) & ~3
+                at += (length + 3) & ~3
+    finally:
+        nl.close()
+
+
 def listening(path):
-    """True once a socket at ``path`` is listening, read from
-    ``/proc/net/unix`` without connecting: a probe that connects and hangs
-    up kills ``awww-daemon`` (SIGPIPE), and would be a request the daemon
-    has to serve."""
-    if not _is_socket(path):
+    """True once the socket at ``path`` is listening, learned without
+    connecting: a probe that connects and hangs up kills ``awww-daemon``
+    (SIGPIPE), and would be a request the daemon has to serve. scootbg binds
+    in a staging directory and renames the socket onto ``path``, so the
+    listener is matched by the file's device and inode through
+    ``sock_diag``; if the kernel has no ``UNIX_DIAG``, ``/proc/net/unix`` is
+    read by name, which still finds a daemon that binds at ``path`` itself
+    (awww, wpaperd)."""
+    try:
+        import stat
+
+        if not stat.S_ISSOCK(os.stat(path).st_mode):
+            return False
+    except OSError:
         return False
+    try:
+        return _listening_by_diag(path)
+    except (OSError, AttributeError):  # no sock_diag, or no AF_NETLINK (not Linux)
+        pass
     try:
         with open("/proc/net/unix") as f:
             next(f)
@@ -49,7 +114,7 @@ def listening(path):
                 parts = line.split()
                 if len(parts) >= 8 and parts[7] == path and int(parts[3], 16) & _SO_ACCEPTCON:
                     return True
-    except OSError:
+    except (OSError, ValueError):
         pass
     return False
 

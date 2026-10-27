@@ -119,7 +119,10 @@ PSS) above the output buffers. `scripts/scootbg-bench/bench.py` re-runs the comp
 One daemon per display: its socket is
 `$XDG_RUNTIME_DIR/scootbg-NAME.sock`, `NAME` being the last component of
 `$WAYLAND_DISPLAY` (`wayland-0` when it is unset or empty). A second `scootbg daemon` refuses while one runs, and
-a socket left by a dead one is replaced. It exits 0 on `kill` and 1 when
+a socket left by a dead one is replaced. The socket
+is `0600` from the moment its name exists, whatever your umask (a crash in
+the instant of start-up can leave an empty `.scootbg-*` directory beside it,
+safe to delete). It exits 0 on `kill` and 1 when
 the compositor goes away, removing its socket either way. A signal
 (SIGTERM, Ctrl-C) ends it on the spot and leaves the socket file; the other
 commands then say no daemon is running (exit 1), and the next

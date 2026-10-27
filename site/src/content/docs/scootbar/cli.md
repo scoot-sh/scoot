@@ -259,7 +259,9 @@ uses; nothing is on a per-frame path.
 Asks the running daemon over its control socket,
 `$XDG_RUNTIME_DIR/scootbar-DISPLAY.sock`, a lock-guarded, owner-only
 socket with line-framed JSON, one daemon per display: a second daemon
-refuses, saying one already runs.
+refuses, saying one already runs. The socket is `0600` from the
+moment its name exists, whatever your umask. A crash in the instant of
+start-up can leave an empty `.scootui-*` directory beside it; delete it.
 
 ```sh
 scootbar msg query [ID]             # every placed module's state as JSON (or one module's)

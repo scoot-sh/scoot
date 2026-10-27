@@ -6,8 +6,11 @@
 //!    that died without removing it. Check that nothing answers on it (a
 //!    daemon that somehow runs without the lock, say because someone
 //!    deleted the lock file under it, still gets a refusal rather than its
-//!    socket stolen), then remove it.
-//! 3. Bind, listen, and make the socket owner-only.
+//!    socket stolen). It is not removed: step 3 replaces it in one rename,
+//!    so the name never goes missing.
+//! 3. Bind, listen, and publish the socket owner-only: built `0600` out of
+//!    sight and renamed onto the path (`stage`), never chmodded after a
+//!    bind that left it `0777 & !umask` at its name.
 //!
 //! [`Claim::release`] (or, failing that, `Drop`) removes the socket file
 //! and then drops the lock, so once a daemon has closed its clients'
@@ -18,7 +21,7 @@
 use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io;
-use std::os::unix::fs::{FileTypeExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 
@@ -26,6 +29,7 @@ use rustix::fs::{FlockOperation, flock};
 use rustix::io::Errno;
 use rustix::net::{AddressFamily, SocketAddrUnix, SocketFlags, SocketType, connect, socket_with};
 
+use super::stage;
 use crate::paths::Paths;
 
 #[derive(Debug)]
@@ -90,22 +94,13 @@ impl Claim {
             path: paths.socket.clone(),
             error,
         };
-        let listener = UnixListener::bind(&paths.socket).map_err(|e| io_error("bind", e))?;
-        // Built now so a failure below still removes the file.
-        let claim = Self {
+        let listener = stage::bind(&paths.socket).map_err(|e| io_error("bind", e))?;
+        // Owns the published file from here: any exit removes it.
+        Ok(Self {
             listener,
             socket: paths.socket.clone(),
             lock: Some(lock),
-        };
-        // The runtime dir is already owner-only; this keeps the socket so
-        // if the file is ever moved or the dir's mode is loose.
-        fs::set_permissions(&paths.socket, fs::Permissions::from_mode(0o600))
-            .map_err(|e| io_error("set permissions on", e))?;
-        claim
-            .listener
-            .set_nonblocking(true)
-            .map_err(|e| io_error("configure", e))?;
-        Ok(claim)
+        })
     }
 
     pub fn listener(&self) -> &UnixListener {
@@ -193,8 +188,11 @@ fn take_lock(path: &Path) -> Result<File, ClaimError> {
     }
 }
 
-/// With the lock held: removes a dead daemon's socket, refusing if the
-/// path is live or not a socket at all.
+/// With the lock held: checks that what sits at the path is a dead
+/// daemon's socket, refusing if it is live or not a socket at all. Removes
+/// nothing: the rename in `stage::bind` replaces a stale socket atomically,
+/// and unlinking whatever sits at the name would let a planted symlink aim
+/// the removal.
 fn clear_stale(socket: &Path) -> Result<(), ClaimError> {
     let metadata = match fs::symlink_metadata(socket) {
         Ok(metadata) => metadata,
@@ -217,13 +215,5 @@ fn clear_stale(socket: &Path) -> Result<(), ClaimError> {
             socket: socket.to_path_buf(),
         });
     }
-    match fs::remove_file(socket) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(ClaimError::Io {
-            what: "remove the stale socket",
-            path: socket.to_path_buf(),
-            error,
-        }),
-    }
+    Ok(())
 }

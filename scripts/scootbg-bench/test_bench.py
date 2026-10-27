@@ -13,6 +13,7 @@ import subprocess
 import bench
 import commits
 import procs
+import session
 import report
 
 
@@ -106,6 +107,77 @@ class TraceCommits(unittest.TestCase):
             self.assertEqual(len(trace.commits), 1)
         finally:
             os.unlink(path)
+
+
+class Listening(unittest.TestCase):
+    """`session.listening` asks the kernel's sock_diag for the listener
+    owning the socket file, so a socket renamed from where it was bound
+    (scootbg's staging) still counts."""
+
+    def setUp(self):
+        import socket
+        import sys
+        if not sys.platform.startswith("linux"):
+            self.skipTest("needs Linux sock_diag")
+        self.socket = socket
+        self.dir = tempfile.mkdtemp(prefix="sbl", dir=tempfile.gettempdir())
+        self.keep = []
+
+    def tearDown(self):
+        import shutil
+        for s in self.keep:
+            s.close()
+        shutil.rmtree(self.dir)
+
+    def bound(self, name, listen):
+        s = self.socket.socket(self.socket.AF_UNIX)
+        self.keep.append(s)
+        s.bind(os.path.join(self.dir, name))
+        if listen:
+            s.listen(1)
+        return os.path.join(self.dir, name)
+
+    def test_a_plain_listener_counts(self):
+        self.assertTrue(session.listening(self.bound("plain", True)))
+
+    def test_a_bound_socket_that_does_not_listen_does_not(self):
+        self.assertFalse(session.listening(self.bound("quiet", False)))
+
+    def test_a_renamed_listener_counts_by_inode(self):
+        staged = self.bound("staged", True)
+        published = os.path.join(self.dir, "published")
+        os.rename(staged, published)
+        self.assertTrue(session.listening(published))
+
+    def test_the_device_is_the_kernels_dev_t(self):
+        # (major << 20) | minor, e.g. the ext4 root 254:0 is 0xfe00000.
+        self.assertEqual(session.kernel_dev(os.makedev(254, 0)), 0xFE00000)
+        self.assertEqual(session.kernel_dev(os.makedev(0, 41)), 41)
+        self.assertEqual(session.kernel_dev(os.makedev(8, 300)), (8 << 20) | 300)
+        self.assertEqual(session.kernel_dev(os.makedev(259, 3)), (259 << 20) | 3)
+
+    def test_a_listener_on_a_real_block_device_counts(self):
+        home = os.path.expanduser("~")
+        if os.stat(home).st_dev == os.stat(self.dir).st_dev or not os.access(home, os.W_OK):
+            self.skipTest("no writable directory on another filesystem")
+        # A socket file in the home directory itself: no mkdir, which a full
+        # disk refuses where a socket (an inode, no data block) is fine.
+        path = os.path.join(home, f".sbl-{os.getpid()}.sock")
+        try:
+            s = self.socket.socket(self.socket.AF_UNIX)
+            self.keep.append(s)
+            s.bind(path)
+            s.listen(1)
+            self.assertTrue(session.listening(path))
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def test_a_missing_path_and_a_plain_file_do_not(self):
+        self.assertFalse(session.listening(os.path.join(self.dir, "none")))
+        path = os.path.join(self.dir, "file")
+        open(path, "w").close()
+        self.assertFalse(session.listening(path))
 
 
 class Gate(unittest.TestCase):
