@@ -177,7 +177,7 @@ wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # this adds a feature to a crate already in the tree, not a new dependency.
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 
-# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twenty-seven
+# A scoot-sh fork, not upstream: upstream's pinned rev `0ff00983` plus twenty-eight
 # commits, branch `scoot/cursor-dmabuf-storage` (`scoot/xwayland-selection-dnd`
 # plus the last one; see `dev/forks.md` for each one and why):
 #
@@ -271,6 +271,15 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 #   cursor denies a fullscreen window under it the primary plane
 #   (`compositor/render/cursor_plane.rs`; Asahi.md Test 17: 30-32 jiffies per
 #   10 s for fullscreen mpv with the pointer visible and idle, before).
+# - `fdf424d6` adds a `ConnectionLost` error so a dead seat shuts scoot down
+#   instead of panicking in libseat (see `dev/forks.md`).
+# - `b65cbc5f` hands each `wl_keyboard.keymap` send its own file description
+#   (`open_independent`): every client used to get a dup of one fd, so a
+#   client that `read()`s it without seeking shared one file offset and a
+#   second reader got an empty keymap. The send runs only when a keyboard is
+#   created or the layout changes, never per key
+#   (`compositor/input/keymap_fd.rs`; see
+#   `docs/backlog/resolved/keymap-fd-shared-offset-done.md`).
 #
 # Upstream status (checked 2026-09-25; the pixman hunk re-checked 2026-09-27,
 # the XDND commits 2026-09-27):
