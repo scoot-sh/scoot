@@ -68,6 +68,22 @@ qemu monitor).
   (override with `SCOOT_SRC=/path/to/repo`)
 - the VM's disk lives in `~/.local/state/scoot-vm/`
 
+### A second VM
+
+Two builds at once do not fit one VM's disk and cores, so the flake has a
+second instance. It is the same guest on ssh port 2223 with a 64 GiB disk,
+12 GiB of RAM, and its own state in `~/.local/state/scoot-vm-b/`:
+
+```sh
+nix run ./vm#vm-b            # boot it
+nix run ./vm#vm-b -- --reset # start from a clean disk
+ssh -p 2223 dev@localhost
+```
+
+It starts cold (an empty cargo target), so the first build takes a full
+compile. Both VMs can run together; each needs its own `/mnt/scoot` source
+(`SCOOT_SRC`) only if they must see different trees.
+
 Coming from a VM built before the `flexwm` → `scoot` rename: the share moved
 from `/mnt/flexwm` to `/mnt/scoot` and the state directory from
 `~/.local/state/flexwm-vm/`, so a VM already on disk needs its state moved
