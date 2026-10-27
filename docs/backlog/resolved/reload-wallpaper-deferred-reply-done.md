@@ -63,3 +63,5 @@ passed; `cargo nextest run -p scoot` 2884 passed; `cargo test -p scoot`
 plain 27 ms (fire-and-forget), wait 4010 ms (two sequential 2 s stub runs),
 concurrent `version` 42 ms during the park (old blocking poll would have
 frozen the loop; old flag always timed out at 30 s).
+
+PR: #769.
