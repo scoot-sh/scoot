@@ -17,6 +17,17 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.11](https://github.com/scoot-sh/scoot/compare/v0.6.10...v0.6.11) - 2026-10-28
+
+### scoot
+
+- fixed: place a client cursor at a constant rounded hotspot; pin a live scale change ([#781](https://github.com/scoot-sh/scoot/pull/781))
+- fixed: the CPU seat-reconnect swap keeps unbound heads and reports live:false when nothing presents ([#785](https://github.com/scoot-sh/scoot/pull/785))
+
+### scootbg,scootlaunch
+
+- fixed: two dev-VM-red tests: huge-page arena in the scootbg daemon, fd limit in a scootlaunch test ([#788](https://github.com/scoot-sh/scoot/pull/788))
+
 ## [0.6.10](https://github.com/scoot-sh/scoot/compare/v0.6.9...v0.6.10) - 2026-10-28
 
 ### scootnotify,nix
