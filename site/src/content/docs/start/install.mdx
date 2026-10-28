@@ -54,36 +54,53 @@ yet: see [Use the binary cache](../binary-cache/).
 and installer ISO built on the scoot compositor. Boot it from USB and you are in a
 full scoot session with no login prompt: the ginger-night look, the
 bar, Firefox, and a welcome window. The live session never locks or
-blanks the screen, and nvim is the default editor.
+blanks the screen, and nvim is the default editor. It has the same
+hardware support and features as the stock NixOS graphical installer.
 
 The installer writes a flake-based system with your choice of look
 (four scoot entries on its Desktop page, moonrise selected by
 default), the ReGreet login screen, and the same nvim default. The
-installed system locks like a normal desktop. The installed system has speech synthesis off; set
-`services.speechd.enable = true;` in its `configuration.nix` to turn it on.
-The live image carries less firmware: no NVIDIA, Qualcomm SoC or
-rack-switch blobs.
+installed system locks like a normal desktop. The installer needs the
+network: connect before you start it (a cable, or Wi-Fi with `nmtui`).
 
-Build it with Nix, for your machine's arch (`x86_64-linux` or
-`aarch64-linux`):
+Download the online ISO, `x86_64-linux` or `aarch64-linux`, with its
+`SHA256SUMS` from the
+[scoot-iso releases](https://github.com/scoot-sh/scoot-iso/releases).
+Flash it with `dd` or a GUI writer and boot the stick in UEFI mode.
+Apple Silicon Macs need the Asahi installer instead, not this ISO.
+
+To build the online ISO yourself, with Nix for your machine's arch:
 
 ```sh
 nix build github:scoot-sh/scoot-iso#iso
 ```
 
-Without Nix, the same build runs in Docker and the `.iso` lands in
-`./scoot-iso-out/`:
+Without Nix, run the same build in Docker from a clone of scoot-iso; the
+`.iso` lands in `./scoot-iso-out/`:
 
 ```sh
 scripts/build-iso-docker.sh
 ```
 
-Allow about 20 GB free and some 30 minutes on a warm cache. GitHub
-caps release assets at 2 GB, and the ISO build fails above 2,000,000,000
-bytes to stay under it. Published ISOs ship with `SHA256SUMS` as the
-trust anchor.
-Flash with `dd` or a GUI writer and boot the stick in UEFI mode;
-Apple Silicon Macs need the Asahi installer instead, not this ISO.
+Allow about 20 GB free and some 30 minutes on a warm cache.
+
+### Build the offline ISO
+
+The offline ISO is the online one plus the store paths of one fixed
+reference system, so that system installs with the network cut. It is
+over GitHub's 2 GiB release-asset limit, so it is not published; build
+it yourself, from the same clone:
+
+```sh
+scripts/build-iso-docker.sh --offline
+```
+
+or `nix build github:scoot-sh/scoot-iso#iso-offline`. Its file name
+starts `nixos-scoot-offline-`. A real install on real hardware needs the
+network on either ISO, because its hardware configuration never matches
+the reference system. The [scoot-iso
+README](https://github.com/scoot-sh/scoot-iso#the-offline-iso) has the
+details and the sizes.
 
 ## Use it every day
 
