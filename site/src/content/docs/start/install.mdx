@@ -63,13 +63,14 @@ default), the ReGreet login screen, and the same nvim default. The
 installed system locks like a normal desktop. The installer needs the
 network: connect before you start it (a cable, or Wi-Fi with `nmtui`).
 
-Download the online ISO, `x86_64-linux` or `aarch64-linux`, with its
-`SHA256SUMS` from the
+Download the online ISO (`x86_64-linux`) with its `SHA256SUMS` from the
 [scoot-iso releases](https://github.com/scoot-sh/scoot-iso/releases).
 Flash it with `dd` or a GUI writer and boot the stick in UEFI mode.
-Apple Silicon Macs need the Asahi installer instead, not this ISO.
+For `aarch64-linux`, build it yourself. Apple Silicon Macs need the Asahi
+installer instead, not this ISO.
 
-To build the online ISO yourself, with Nix for your machine's arch:
+To build the online ISO yourself, with Nix for your machine's arch
+(`x86_64-linux` or `aarch64-linux`):
 
 ```sh
 nix build github:scoot-sh/scoot-iso#iso
