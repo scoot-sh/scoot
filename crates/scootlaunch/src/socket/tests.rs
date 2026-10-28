@@ -248,30 +248,43 @@ fn losing_a_simultaneous_open_does_not_close_the_winner() {
 #[test]
 fn a_full_backlog_does_not_hang_the_press() {
     use rustix::net::{
-        AddressFamily, SocketAddrUnix, SocketFlags, SocketType, connect, socket_with,
+        AddressFamily, SocketAddrUnix, SocketFlags, SocketType, bind, connect, listen, socket_with,
     };
     let dir = scratch("backlog");
     let path = dir.join("scootlaunch-wayland-1.sock");
-    let listener = UnixListener::bind(&path).expect("plant listener");
+    let address = SocketAddrUnix::new(&path).expect("listener address");
+    // A backlog of 0 (the kernel admits one pending connection past it),
+    // not std's default: `UnixListener::bind` asks for the kernel's whole
+    // `somaxconn` (4096 here), and filling that holds one fd per
+    // connection, so under a default `ulimit -n 1024` the probe sockets ran
+    // out (EMFILE) before the backlog ever filled. What is under test, a
+    // deaf listener with no room left, does not depend on how deep the
+    // backlog was.
+    let listener = {
+        let fd = socket_with(
+            AddressFamily::UNIX,
+            SocketType::STREAM,
+            SocketFlags::CLOEXEC,
+            None,
+        )
+        .expect("listener socket");
+        bind(&fd, &address).expect("plant listener");
+        listen(&fd, 0).expect("listen");
+        UnixListener::from(fd)
+    };
     // Fill the backlog with nonblocking connects until the kernel says
     // room is gone (EAGAIN): never accept, so the listener stays deaf.
     // A blocking connect would now wait for an accept that never comes.
     let mut held = Vec::new();
     let mut filled = false;
-    for _ in 0..5200 {
-        let probe = match socket_with(
+    for _ in 0..64 {
+        let probe = socket_with(
             AddressFamily::UNIX,
             SocketType::STREAM,
             SocketFlags::NONBLOCK | SocketFlags::CLOEXEC,
             None,
-        ) {
-            Ok(fd) => fd,
-            Err(_) => break,
-        };
-        let address = match SocketAddrUnix::new(&path) {
-            Ok(a) => a,
-            Err(_) => break,
-        };
+        )
+        .expect("probe socket");
         match connect(&probe, &address) {
             Ok(()) | Err(rustix::io::Errno::INPROGRESS) => {
                 held.push(probe);

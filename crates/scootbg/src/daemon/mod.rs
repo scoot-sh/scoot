@@ -137,6 +137,7 @@ pub(super) const SAVE_GRACE: Duration = Duration::from_secs(2);
 /// (`daemon::config`); without one it restores the profile's state (unless
 /// `options.restore` is off).
 pub fn run(options: DaemonOptions, start: Option<&Start>) -> Exit {
+    no_transparent_huge_pages();
     match serve(options, start) {
         Ok(()) => Exit::Stopped,
         Err(error) => Exit::Failed(error),
@@ -500,4 +501,19 @@ fn timespec(duration: Duration) -> rustix::event::Timespec {
 fn reuse<'a, 'b>(mut fds: Vec<PollFd<'a>>) -> Vec<PollFd<'b>> {
     fds.clear();
     fds.into_iter().filter_map(|_| None).collect()
+}
+
+/// Keeps the kernel from backing this process's heap with 2 MiB huge pages.
+///
+/// glibc 2.44's allocator `madvise(MADV_HUGEPAGE)`s its heaps, and on a
+/// kernel whose transparent huge pages are `madvise` (most distributions'
+/// default) the decode thread's arena then becomes one resident, dirty
+/// 2 MiB page that outlives the thread: the settled daemon held 2.5 MB of
+/// anonymous memory against 0.6 MB with the allocator's `hugetlb=0`
+/// (`tests/retention.rs`). A daemon whose whole point is a small floor
+/// pays for no huge page, and never gains from one: its heap is a few
+/// hundred kB. A refusal (a kernel without the call) leaves things as they
+/// were, so the result is not an error.
+fn no_transparent_huge_pages() {
+    let _ = rustix::thread::disable_transparent_huge_pages(true);
 }

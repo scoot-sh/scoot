@@ -119,3 +119,32 @@ fn no_retained_copy_after_image_settles() {
     assert!(session.run(&["kill"]).status.success());
     assert!(wait_exit(&mut daemon).success());
 }
+
+/// The daemon's `THP_enabled` from `/proc/PID/status` (Linux 5.0 on): `0`
+/// once `PR_SET_THP_DISABLE` is set. `None` where the line is absent.
+fn thp_enabled(pid: u32) -> Option<u8> {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("THP_enabled:"))
+        .and_then(|rest| rest.trim().parse().ok())
+}
+
+/// glibc 2.44 madvises its heaps for huge pages; on a `madvise`-mode kernel
+/// the decode thread's arena then stays a resident 2 MiB page, which is
+/// what failed the bound above on a machine whose only difference from CI
+/// was that kernel setting. The daemon opts its whole process out, and this
+/// pins that directly, whatever the allocator and the kernel's mode are.
+#[test]
+fn the_daemon_opts_out_of_transparent_huge_pages() {
+    let Some(session) = Session::start("thp") else {
+        return;
+    };
+    let mut daemon = session.daemon();
+    match thp_enabled(daemon.id()) {
+        Some(enabled) => assert_eq!(enabled, 0, "the daemon left huge pages on"),
+        None => eprintln!("skipped -- no THP_enabled in /proc/PID/status"),
+    }
+    assert!(session.run(&["kill"]).status.success());
+    assert!(wait_exit(&mut daemon).success());
+}
