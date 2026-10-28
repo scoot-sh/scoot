@@ -42,7 +42,7 @@ The shipped looks, and what each gives the bar:
 
 Opt out per target while the rest follows the look, under the one
 `programs.scoot.desktop.theme.targets.<name>.enable` namespace every
-desktop piece uses (as with the [lock screen](../desktop/index.md#idle-and-lock)).
+desktop piece uses (as with the [lock screen](../desktop/idle-lock.md)).
 
 ## From Stylix
 

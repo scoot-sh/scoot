@@ -121,7 +121,7 @@ that menu unthemed (no color flags travel with it), while daemon
 flags as overrides).
 
 To go back, set `daemon = "fuzzel"` and switch again — see
-[Migrating from fuzzel](../desktop/#migrating-from-fuzzel).
+[Migrating from fuzzel](../desktop/launcher/#migrating-from-fuzzel).
 
 > **Symptom:** the menu ignores your `fuzzel.ini` font settings.
 >

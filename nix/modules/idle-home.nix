@@ -2,7 +2,7 @@
 # unit, the audio inhibitor, and the swaylock config behind the lock
 # event. The option shapes live in `./desktop.nix` (shared with the NixOS
 # side); the `package`/`command` defaults live here because only this side
-# has `pkgs`. See site/src/content/docs/desktop/index.md#idle-and-lock ("Idle and lock").
+# has `pkgs`. See site/src/content/docs/desktop/idle-lock.md ("Idle and lock").
 {
   config,
   lib,
@@ -243,7 +243,7 @@ let
   # to wipe with (the refusal for a null beside `enable` is the
   # clipboard child's own assertion); without the idle policy there is
   # no lock event to ride, so a standalone clipboard documents `wipe`
-  # as manual instead (see site/src/content/docs/desktop/index.md#clipboard).
+  # as manual instead (see site/src/content/docs/desktop/clipboard.md).
   clip = cfg.desktop.clipboard;
   clipWipeReady = clip.enable && clip.managerPackage != null;
   clipWipe = lib.optionalString clipWipeReady (
@@ -321,7 +321,7 @@ in
         The backlight tool the dim step runs (`-s set <level>%`, `-r`
         to restore). Needs the session's seat rights (logind grants the
         active login backlight access; over ssh, or with no seat, the
-        step logs EPERM and does nothing) -- see site/src/content/docs/desktop/index.md#idle-and-lock.
+        step logs EPERM and does nothing) -- see site/src/content/docs/desktop/idle-lock.md.
         Linux-only: null off Linux.
       '';
     };

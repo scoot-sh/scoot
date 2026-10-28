@@ -166,7 +166,7 @@ the session).
 ### Idle: locking and screen power
 
 (The manual recipe for sessions outside the flake.) scoot provides the protocols; the policy ships with [the desktop
-profile](../desktop/index.md#idle-and-lock). Outside the flake, the
+profile](../desktop/idle-lock.md). Outside the flake, the
 same policy is a hand-written swayidle setup — `spawn` splits on
 whitespace with no shell, so a swayidle line lives in a small script
 the session starts:

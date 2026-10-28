@@ -474,7 +474,7 @@ in
     # `<package>/bin/scoot --tty -- /home/<user>/.config/<that path>`
     # line -- an absolute path, since `Exec=` lines get no shell
     # expansion -- so the greeter entry runs this script instead of the
-    # `scoot-session` launcher (see site/src/content/docs/desktop/index.md#the-greeter, which shows the pairing
+    # `scoot-session` launcher (see site/src/content/docs/desktop/login.md#the-greeter, which shows the pairing
     # together). That entry runs without the launcher's session wiring;
     # startup programs that want the wiring belong in `[autostart]`
     # instead. Null writes no file.

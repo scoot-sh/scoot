@@ -94,12 +94,12 @@ The desktop profile adds three groups on top of these defaults:
 <kbd>Super</kbd>+<kbd>d</kbd> opens the app launcher and
 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> its run mode (PATH
 executables beside the apps) — see
-[the desktop profile](../desktop/index.md#launcher) — the Fn-row
+[the desktop profile](../desktop/launcher.md) — the Fn-row
 hardware keys (brightness, volume and mute, mic mute, media) plus
 `Print` screenshots and the `Super` desktop actions, and an
 on-screen display over the volume, brightness and mic-mute keys —
-see [the desktop profile](../desktop/index.md#hardware-keys-and-desktop-actions)
-and [the OSD](../desktop/index.md#sound-brightness-keys-and-the-on-screen-display).
+see [the desktop profile](../desktop/keys.md)
+and [the OSD](../desktop/sound.md).
 
 Under `--tty`, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F1</kbd>…<kbd>F12</kbd>
 additionally switch VTs — always winning over config binds, so the recovery

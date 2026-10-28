@@ -3,7 +3,7 @@
 # pick on stdout). The body of the script `apps-home.nix` builds, with
 # every `@NAME@` replaced by an absolute tool path (or a bare name from
 # PATH where the module knows no package; a missing tool then fails
-# loud here). See site/src/content/docs/desktop/index.md#wifi-and-bluetooth.
+# loud here). See site/src/content/docs/desktop/network.md.
 #
 #   list                    paired devices, `* MAC name` while
 #                           connected, `  MAC name` otherwise (stdout

@@ -39,7 +39,7 @@ connector (a replugged monitor comes back at it), and a successful
 reload (which lists each scale it moved in its `applied`) or a restart
 goes back to the file's scales. It takes the same
 range, refusing a value outside it instead of clamping. The
-[display profiles](../desktop/index.md#displays) watcher drives scale
+[display profiles](../desktop/displays.md) watcher drives scale
 this way. See [requests](../msg/requests.md).
 
 A window is told the scale of the output it is placed on, and re-told

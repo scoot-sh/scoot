@@ -15,7 +15,7 @@ Filed 2026-10-11. Serves **daily-drive**: the site is how people learn the keys 
 The docs migration has landed M1 to M6 and the README rewrite (M4) is in
 flight. Left:
 
-- **M7**: split the desktop page.
+- **M7**: ~~split the desktop page~~ done 2026-10-28: `site/src/content/docs/desktop/` is a hub (flake setup, NixOS, Home Manager, session units, slot table) plus one page per piece; the hub keeps a stub heading per moved section so old `/desktop/#section` links still land.
 - **M8**: a STE-100 style pass over the remaining pages, keeping the logo's dry
   voice in headings and intros only.
 - **M9**: flip each "coming" slot (deb, rpm, Arch, ISO, shortcut teacher app) as

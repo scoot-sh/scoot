@@ -2,7 +2,7 @@
 # user unit, its config, and the bar feed (DND state and unread count
 # into the bar's `push` module). The option shapes live in
 # `./desktop.nix` (shared with the NixOS side); the `package` default
-# lives here because only this side has `pkgs`. See site/src/content/docs/desktop/index.md#notifications
+# lives here because only this side has `pkgs`. See site/src/content/docs/desktop/notifications.md
 # ("Notifications"). The scootnotify half lives in
 # `./scootnotify-home.nix`, imported by the profile beside this file
 # (an extra explicit import merges harmlessly).

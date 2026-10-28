@@ -100,7 +100,7 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
   `PATH`. Deeper — that the documented NixOS and home-manager desktop
   configs actually evaluate — is pinned in `nix/tests.nix` ("the
   documented install configs", run by `nix flake check` in CI); keep
-  that test in step with `start/install.mdx` and `desktop/index.md`
+  that test in step with `start/install.mdx` and the top of `desktop/index.md`
   when they change. Every block must also be titled with the file it
   goes in (```` ```nix title="home.nix" ````: `flake.nix`,
   `configuration.nix`, `home.nix`, or `"configuration.nix and home.nix"`

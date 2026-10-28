@@ -40,7 +40,7 @@
 # no daemon of its own (the watcher is built below from `jq`, `flock`
 # and the core utilities beside the scoot binary). The NixOS side has
 # nothing to do: no system service, no backend package. See
-# site/src/content/docs/desktop/index.md#displays.
+# site/src/content/docs/desktop/displays.md.
 {
   config,
   lib,

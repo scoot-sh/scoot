@@ -3,9 +3,9 @@
 # WiFi/Bluetooth pickers, and the trayless automounter. The option
 # shapes live in `./desktop.nix` (shared with the NixOS side); the
 # `package` defaults live here because only this side has `pkgs`. See
-# site/src/content/docs/desktop/index.md#terminal-files-and-removable-media
+# site/src/content/docs/desktop/apps.md
 # ("Terminal, files, and removable media") and
-# site/src/content/docs/desktop/index.md#wifi-and-bluetooth ("WiFi and
+# site/src/content/docs/desktop/network.md ("WiFi and
 # Bluetooth").
 {
   config,
@@ -593,7 +593,7 @@ in
     # Safe removal is `udiskie-umount -d` (beside the daemon in the
     # same package): unmount and power the drive off before
     # unplugging, or buffered writes die with the yank (see
-    # site/src/content/docs/desktop/index.md#terminal-files-and-removable-media).
+    # site/src/content/docs/desktop/apps.md).
     # home-manager's own `services.udiskie` wins (see `udiskieOwned`):
     # its unit runs instead, and this one stays out. The package stays
     # on PATH either way: home-manager's module only names it in its
