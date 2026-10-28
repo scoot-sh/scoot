@@ -59,11 +59,10 @@ blanks the screen, and nvim is the default editor.
 The installer writes a flake-based system with your choice of look
 (four scoot entries on its Desktop page, moonrise selected by
 default), the ReGreet login screen, and the same nvim default. The
-installed system locks like a normal desktop. To fit the size cap the
-installed system has speech synthesis off (`services.speechd.enable =
-false;` in its `configuration.nix`; set it to `true` to turn it back on),
-and the live image carries less firmware: no rack-switch, Qualcomm SoC
-or NVIDIA GSP blobs.
+installed system locks like a normal desktop. The installed system has speech synthesis off; set
+`services.speechd.enable = true;` in its `configuration.nix` to turn it on.
+The live image carries less firmware: no NVIDIA, Qualcomm SoC or
+rack-switch blobs.
 
 Build it with Nix, for your machine's arch (`x86_64-linux` or
 `aarch64-linux`):
