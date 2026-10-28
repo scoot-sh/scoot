@@ -2591,6 +2591,38 @@ let
         desktop.notifications.daemon = "scootnotify";
         desktop.notifications.package = fakeNotifyScoot;
       };
+  # ...the look target off (`theme.targets.notifications.enable`) with
+  # the real option tree: the daemon's file gains `look = false`, where
+  # the default (`hmNotifScootFull`) leaves the file empty.
+  hmNotifScootLookOff =
+    evalHomeModules
+      [
+        ./modules/scootnotify-home.nix
+        { programs.scootnotify.package = fakeNotifyScoot; }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        look = "music-desk";
+        desktop.notifications.daemon = "scootnotify";
+        desktop.notifications.package = fakeNotifyScoot;
+        desktop.theme.targets.notifications.enable = false;
+      };
+  # ...the target off without any look declared: the switch alone
+  # decides (a look applied at runtime still has a layer to turn off).
+  hmNotifScootLookOffNoLook =
+    evalHomeModules
+      [
+        ./modules/scootnotify-home.nix
+        { programs.scootnotify.package = fakeNotifyScoot; }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        desktop.notifications.daemon = "scootnotify";
+        desktop.notifications.package = fakeNotifyScoot;
+        desktop.theme.targets.notifications.enable = false;
+      };
   # ...explicitly enabling scootnotify beside the mako escape hatch:
   # refused (both daemons would fight for the bus name).
   hmNotifBoth =
@@ -10369,6 +10401,21 @@ let
     )
     (
       assert !(hmNotifScootFull.config.systemd.user.services ? scoot-notify-sync);
+      true
+    )
+    # ...the look layer on by default (the file carries no `look` key),
+    # and `theme.targets.notifications.enable = false` writing
+    # `look = false` with or without a look declared...
+    (
+      assert hmNotifScootFull.config.programs.scootnotify.settings == { };
+      true
+    )
+    (
+      assert hmNotifScootLookOff.config.programs.scootnotify.settings == { look = false; };
+      true
+    )
+    (
+      assert hmNotifScootLookOffNoLook.config.programs.scootnotify.settings == { look = false; };
       true
     )
     # ...and enabling scootnotify explicitly beside daemon = "mako"

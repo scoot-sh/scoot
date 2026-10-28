@@ -27,7 +27,7 @@ use crate::bus::server::{self, Server};
 use crate::config::{self, Config};
 use crate::control::respond::{AppliedReload, Responder};
 use crate::feed::Feed;
-use crate::look::{self};
+use crate::look::{self, Look};
 use crate::model::store::IdFile;
 use crate::popup::{self, Popup};
 
@@ -50,7 +50,13 @@ pub fn serve(config_path: Option<&str>, font_path: Option<&str>) -> i32 {
             Config::default()
         }
     };
-    let (look, notes) = look::load(None);
+    // `look = false` in the file keeps the built-in theme whatever the
+    // layer holds; the layer is not even read.
+    let (look, notes) = if config.look {
+        look::load(None)
+    } else {
+        (Look::default(), Vec::new())
+    };
     for note in &notes {
         warn(format_args!("scootnotify: {note}"));
     }

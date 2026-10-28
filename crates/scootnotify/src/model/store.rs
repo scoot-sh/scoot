@@ -393,6 +393,11 @@ impl Store {
         self.history.truncate(self.config.history_max);
     }
 
+    /// Whether the running config lets the look layer theme the cards.
+    pub fn look_enabled(&self) -> bool {
+        self.config.look
+    }
+
     /// The pinned output, if any: the JSON view's `output` (`None` is the
     /// compositor's choice).
     pub fn output_name(&self) -> Option<&str> {

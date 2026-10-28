@@ -21,6 +21,7 @@ use crate::bus::hints::{Hints, Urgency};
 use crate::bus::notify::{Action, Incoming};
 use crate::bus::server::Server as NotifyServer;
 use crate::config::Config;
+use crate::look::Look;
 use crate::model::store::IdFile;
 
 /// Parses `text` (without its newline) the way the daemon parses a line.
@@ -303,6 +304,8 @@ struct Harness {
     _peer: UnixStream,
     config_path: PathBuf,
     dir: PathBuf,
+    /// The look the last request applied (`None` if it applied none).
+    applied_look: Option<Look>,
 }
 
 /// One scratch dir per harness: tests share a process under `cargo
@@ -321,6 +324,7 @@ impl Harness {
         Self {
             server: NotifyServer::new(Config::default(), IdFile::open(None)),
             conn,
+            applied_look: None,
             _peer: peer,
             config_path: dir.join("notify.toml"),
             dir,
@@ -401,7 +405,12 @@ impl Harness {
         );
         let mut out = Vec::new();
         responder.handle(line.as_bytes(), &mut out);
+        self.applied_look = responder.applied.take().map(|applied| applied.look);
         serde_json::from_slice(&out).expect("the reply is JSON")
+    }
+
+    fn applied_look(&self) -> Option<Look> {
+        self.applied_look.clone()
     }
 }
 
@@ -751,6 +760,59 @@ fn a_scoped_reload_ignores_a_half_edited_user_file() {
     assert_eq!(reply["scope"], "look");
     // The running config stands (the edit never applied).
     assert_eq!(harness.server.store().output_name(), Some("DP-1"));
+}
+
+/// A look layer with `radius = 4` under a private state dir, for the
+/// `look = false` tests.
+fn state_with_layer(harness: &Harness) -> std::path::PathBuf {
+    let state = harness.dir.join("state");
+    std::fs::create_dir_all(state.join("look")).unwrap();
+    std::fs::write(
+        state.join("look").join("notify.toml"),
+        "[colors]\nsurface = \"#102030\"\n",
+    )
+    .unwrap();
+    state
+}
+
+#[test]
+fn look_false_reloads_to_the_built_ins_and_back() {
+    let mut harness = Harness::new();
+    let state = state_with_layer(&harness);
+    let plain = Request::Reload { scope: None }.line();
+    // On (the default): the layer themes the cards.
+    let reply = harness.ask_with_look(&plain, Some(&state));
+    assert_eq!(reply["type"], "ok");
+    let on = harness.applied_look().expect("a reload applied");
+    assert_ne!(on.surface, Look::default().surface);
+    // Off: the layer is present but the built-ins stand.
+    std::fs::write(&harness.config_path, "look = false\n").unwrap();
+    let reply = harness.ask_with_look(&plain, Some(&state));
+    assert_eq!(reply["type"], "ok");
+    assert_eq!(harness.applied_look().unwrap(), Look::default());
+    // Back on: the layer is re-read.
+    std::fs::write(&harness.config_path, "look = true\n").unwrap();
+    harness.ask_with_look(&plain, Some(&state));
+    assert_eq!(harness.applied_look().unwrap(), on);
+}
+
+#[test]
+fn a_scoped_reload_with_look_false_is_an_ok_that_keeps_the_built_ins() {
+    let mut harness = Harness::new();
+    let state = state_with_layer(&harness);
+    std::fs::write(&harness.config_path, "look = false\n").unwrap();
+    harness.ask_with_look(&Request::Reload { scope: None }.line(), Some(&state));
+    let scoped = Request::Reload {
+        scope: Some(ReloadScope::Look),
+    }
+    .line();
+    // With a layer on disk and with none, the receipt is the same ok.
+    for state in [Some(state.as_path()), None] {
+        let reply = harness.ask_with_look(&scoped, state);
+        assert_eq!(reply["type"], "ok", "{reply}");
+        assert_eq!(reply["scope"], "look");
+        assert_eq!(harness.applied_look().unwrap(), Look::default());
+    }
 }
 
 #[test]

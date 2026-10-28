@@ -610,7 +610,7 @@ into the new config; no re-login):
 | `desktop.notifications.bar.icons.idle` | string: empty or one glyph | `"○"` | the bar's static icon while idle; `""` shows nothing while idle |
 | `desktop.notifications.bar.icons.unread` | string: empty or one glyph | `"●"` | the icon the feed sends beside the unread count |
 | `desktop.notifications.bar.icons.dnd` | string: empty or one glyph | `"☾"` | the icon the feed sends while do-not-disturb is on |
-| `desktop.theme.targets.notifications.enable` | bool | `true` | theme the notification daemon from the look; `false` keeps the daemon's own style while the rest follows the look |
+| `desktop.theme.targets.notifications.enable` | bool | `true` | theme the notification daemon from the look; `false` keeps the daemon's own style while the rest follows the look (beside scootnotify it writes `look = false` into `programs.scootnotify.settings`; all or nothing, and an explicit `settings.look` wins) |
 
 Troubleshooting, by symptom (full diagnosis in [scootnotify troubleshooting](../scootnotify/troubleshooting.md)
 and the [Symptom index](../troubleshooting/)):

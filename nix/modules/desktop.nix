@@ -1352,9 +1352,12 @@ in
           background and text, ring and urgent leaves from its palette.
           Set to `false` to keep mako's own style
           (`notifications.settings` still applies). Beside the default
-          scootnotify the look's own notify layer always applies; leaving
-          it alone is an open ticket
-          (docs/scootbar/backlog/notify-look-target.md).
+          scootnotify the look's notify layer (card colors, font size,
+          opacity, icon theme) applies; `false` writes `look = false`
+          into `programs.scootnotify.settings` (at `mkDefault`, so an
+          explicit value there wins), and the cards keep the built-in
+          theme. Geometry and timeouts are the daemon's own file in both
+          cases.
         '';
       };
       targets.clipboard.enable = lib.mkOption {

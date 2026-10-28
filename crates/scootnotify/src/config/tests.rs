@@ -9,6 +9,14 @@ fn an_empty_file_is_the_defaults() {
     assert_eq!(config.history_max, 64);
     assert!(config.dnd_allows_critical);
     assert!(config.rule.is_empty());
+    assert!(config.look, "the look layer is on unless the file says no");
+}
+
+#[test]
+fn look_false_turns_the_look_layer_off() {
+    assert!(!parse(b"look = false\n").unwrap().look);
+    assert!(parse(b"look = true\n").unwrap().look);
+    assert!(parse(b"look = \"no\"\n").is_err());
 }
 
 #[test]
