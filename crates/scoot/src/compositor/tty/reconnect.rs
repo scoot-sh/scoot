@@ -983,7 +983,7 @@ fn swap_scanout(
     remove_orphaned_outputs(state, bindings);
     // No separate `reapply_output_power` here: `remove_orphaned_outputs`
     // already re-applies it (one idempotent application, shared with the
-    // CPU tier's `rebind`).
+    // CPU tier's `rebind` and its `swap`).
     // Hand each fresh renderer to its output's backend, by the connector
     // snapshot taken before teardown.
     let mut handoff_failed = false;
@@ -1784,8 +1784,8 @@ fn rebind(state: &mut State, bindings: &[(connector::Handle, OutputId)]) {
 
 /// Outputs whose head is gone (their connector vanished mid-switch):
 /// remove them the way a hotplug would, so no output points at a head
-/// that no longer exists. Shared by [`rebind`] and the GPU-tier swap,
-/// which binds the same way but must not drop the heads no binding
+/// that no longer exists. Shared by [`rebind`], the CPU-tier `swap` and the GPU-tier
+/// swap, the latter two of which bind the same way but must not drop the heads no binding
 /// covers (see `swap_scanout`).
 fn remove_orphaned_outputs(state: &mut State, bindings: &[(connector::Handle, OutputId)]) {
     // Outputs whose head is gone (their connector vanished mid-switch):

@@ -2,17 +2,13 @@
 //! fresh heads still need an output, and whether the swapped-in device may
 //! report `live: true` once binding is done.
 //!
-//! The CPU `swap` used to bind with `rebind`, whose `retain_attached` drops
-//! every fresh head no binding claims. After an empty restore (the old
-//! device drove nothing, so the next attempt's binding snapshot is empty)
-//! that dropped *every* head, yet the fresh `Tty` had already been built
-//! `active: true` on the strength of the proof: no head presenting, the one
-//! stale output kept because the last output is never removed, and `live:
-//! true` on a screen showing nothing until the next seat win healed it. The
-//! GPU tier's `swap_scanout` never had the hole (it routes unbound heads
-//! through `Change::Added` and downgrades a swap that presents nothing);
-//! this module is the shared, headlessly-testable form of those two rules
-//! for the CPU swap.
+//! The CPU `swap` binds by connector without dropping the fresh heads no
+//! binding claims (`rebind`'s `retain_attached` would, leaving a proven swap
+//! `active` with nothing presenting). Unclaimed heads take the
+//! `Change::Added` shape, and a swap whose heads present nothing reports
+//! `live: false` (and holds the primary when it has no heads at all). The GPU
+//! tier's `swap_scanout` follows the same two rules; this module is their
+//! headlessly-testable form for the CPU swap.
 
 use super::reconnect::{SwapLive, swap_downgrade};
 
