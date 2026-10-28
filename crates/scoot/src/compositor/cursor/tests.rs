@@ -314,10 +314,10 @@ fn rebuild_redraws_the_same_cursor_at_the_new_size_theme_and_color() {
 
 #[test]
 fn a_zero_hotspot_leaves_the_pointer_location_unchanged() {
-    let pointer = Point::<f64, Logical>::from((12.5, 30.0));
+    let pointer = Point::<f64, Logical>::from((12.0, 30.0));
     let hotspot = Point::<i32, Logical>::from((0, 0));
     let location = element_location(pointer, hotspot, 1.0);
-    assert_eq!((location.x, location.y), (12.5, 30.0));
+    assert_eq!((location.x, location.y), (12, 30));
 }
 
 #[test]
@@ -325,7 +325,7 @@ fn a_nonzero_hotspot_offsets_the_pointer_location() {
     let pointer = Point::<f64, Logical>::from((100.0, 100.0));
     let hotspot = Point::<i32, Logical>::from((4, 6));
     let location = element_location(pointer, hotspot, 1.0);
-    assert_eq!((location.x, location.y), (96.0, 94.0));
+    assert_eq!((location.x, location.y), (96, 94));
 }
 
 /// At a scale other than 1 both the pointer and the hotspot are in logical
@@ -337,18 +337,45 @@ fn a_nonzero_hotspot_scales_with_the_output() {
     let pointer = Point::<f64, Logical>::from((50.0, 50.0));
     let hotspot = Point::<i32, Logical>::from((4, 6));
     let location = element_location(pointer, hotspot, 2.0);
-    assert_eq!((location.x, location.y), (92.0, 88.0));
+    assert_eq!((location.x, location.y), (92, 88));
 }
 
-/// A fractional scale keeps the subtraction exact rather than rounding the
-/// pointer and the hotspot separately: subtracting first is what makes the
-/// cursor tip land on the same physical subpixel the pointer is over.
+/// The pointer and the hotspot each round to a physical pixel on their own,
+/// so the hotspot is the same whole number of pixels wherever the pointer's
+/// sub-pixel position falls. Pinned at the scales whose products are not
+/// whole: a hotspot of (3, 5) logical is (3.75, 6.25) at 1.25 and (4.5, 7.5)
+/// at 1.5, which round (away from zero at a half) to (4, 6) and (5, 8).
 #[test]
-fn a_fractional_scale_keeps_the_hotspot_offset_exact() {
-    let pointer = Point::<f64, Logical>::from((10.0, 20.0));
-    let hotspot = Point::<i32, Logical>::from((1, 2));
-    let location = element_location(pointer, hotspot, 1.5);
-    assert_eq!((location.x, location.y), (13.5, 27.0));
+fn a_fractional_scale_rounds_the_hotspot_to_a_constant_physical_pixel() {
+    let hotspot = Point::<i32, Logical>::from((3, 5));
+    for (scale, tip) in [(1.0, (3, 5)), (1.25, (4, 6)), (1.5, (5, 8))] {
+        for step in 0..64 {
+            let frac = f64::from(step) / 64.0;
+            let pointer = Point::<f64, Logical>::from((10.0 + frac, 20.0 + frac / 3.0));
+            let location = element_location(pointer, hotspot, scale);
+            let at = (
+                (pointer.x * scale).round() as i32,
+                (pointer.y * scale).round() as i32,
+            );
+            assert_eq!(
+                (at.0 - location.x, at.1 - location.y),
+                tip,
+                "scale {scale}, pointer {pointer:?}: the tip is a constant offset from \
+                 the position a cursor session reports"
+            );
+        }
+    }
+}
+
+/// A hotspot at the `i32` limits (a client sets it raw) saturates instead of
+/// overflowing.
+#[test]
+fn an_extreme_hotspot_saturates_the_location() {
+    let pointer = Point::<f64, Logical>::from((10.0, 10.0));
+    for hotspot in [i32::MIN, i32::MAX] {
+        let location = element_location(pointer, (hotspot, hotspot).into(), 1.5);
+        let _ = (location.x, location.y);
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -487,10 +514,7 @@ fn scale_1_elements_are_built_exactly_like_before() {
     );
     let hotspot = Shape::Default.hotspot(DEFAULT_SIZE);
     let location = element_location(pointer, hotspot, 1.0);
-    assert_eq!(
-        (geometry.loc.x as f64, geometry.loc.y as f64),
-        (location.x, location.y)
-    );
+    assert_eq!((geometry.loc.x, geometry.loc.y), (location.x, location.y));
 }
 
 // -------------------------------------------------------------------------
