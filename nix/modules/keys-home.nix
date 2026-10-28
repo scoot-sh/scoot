@@ -2,7 +2,7 @@
 # `[binds]` plus the tools its hardware binds run. The option shapes
 # live in `./desktop.nix` (shared with the NixOS side); the tool
 # `package` defaults live here because only this side has `pkgs`. See
-# site/src/content/docs/desktop/index.md#hardware-keys-and-desktop-actions ("Hardware keys and desktop actions").
+# site/src/content/docs/desktop/keys.md ("Hardware keys and desktop actions").
 {
   config,
   lib,
@@ -185,7 +185,7 @@ let
 
   # The launcher: the keymap's drun/run binds (XDG apps,
   # most-launched first, PATH executables on the run bind -- see
-  # site/src/content/docs/desktop/index.md#launcher). With fuzzel a script
+  # site/src/content/docs/desktop/launcher.md). With fuzzel a script
   # because the theme needs a shell beside the binary (the live look's
   # colors read out of its `fuzzel.ini` once a swap renders one, seven
   # eval-time colors as CLI flags before that -- the same ones the picker

@@ -34,7 +34,7 @@ window is on (its `output`), never the first output's. (Full rule in
 
 `screenshot` reads the framebuffer, which sits *before* the display's
 gamma LUT and color matrix — so a night light (`wlsunset`,
-`gammastep`, or the desktop profile's [night light](../desktop/index.md#night-light))
+`gammastep`, or the desktop profile's [night light](../desktop/night-light.md))
 never shows in a capture. The file holds the compositor's own pixels:
 two screenshots across a warming boundary are
 byte-identical (modulo the pointer, [below](#the-pointer-in-a-screenshot)).

@@ -288,7 +288,7 @@ the icon theme, the file carries geometry, timeouts and rules, and
 to change one value of the look, override it in the look's
 `[apps.scootnotify]` table. With the Nix profile, `look = false` is
 what [`theme.targets.notifications.enable =
-false`](../../desktop/#notifications) writes.
+false`](../../desktop/notifications/) writes.
 
 | Element | Role |
 |---|---|

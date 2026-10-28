@@ -315,7 +315,7 @@ in
       # panel: `sway-audio-idle-inhibit` (any sink or source running)
       # holding a Wayland idle inhibitor. Needs PipeWire (or PulseAudio)
       # running; without an audio server the unit backs off and stays
-      # stopped (see site/src/content/docs/desktop/index.md#idle-and-lock).
+      # stopped (see site/src/content/docs/desktop/idle-lock.md).
       mediaInhibit = {
         enable = lib.mkOption {
           type = lib.types.bool;
@@ -362,7 +362,7 @@ in
             every output; `swaylock` is one line back (the same blurred
             screen, but its own hidden-until-you-type indicator and no
             message -- see
-            site/src/content/docs/desktop/index.md#idle-and-lock).
+            site/src/content/docs/desktop/idle-lock.md).
             A future scootlock widens this enum, the option and the
             binds staying as they are.
           '';
@@ -463,7 +463,7 @@ in
           instead). The feed that surfaces DND state and the unread
           count into the bar watches the daemon over D-Bus, so every
           key stays overridable without breaking it. Overriding
-          `layer` hides popups under fullscreen windows again (see site/src/content/docs/desktop/index.md#notifications).
+          `layer` hides popups under fullscreen windows again (see site/src/content/docs/desktop/notifications.md).
         '';
       };
 
@@ -568,7 +568,7 @@ in
           1 under scootlaunch against 2 under fuzzel's dmenu, and the
           run bind lists PATH executables alone under scootlaunch
           against apps beside executables under fuzzel -- see
-          site/src/content/docs/desktop/index.md#launcher.
+          site/src/content/docs/desktop/launcher.md.
         '';
       };
     };
@@ -603,7 +603,7 @@ in
       # clipboard picker and the launcher speak, themed by the look),
       # `slurp` picks by clicking a screen (xdpw's own `simple`
       # shape), `none` casts `outputName` (or any output) with no
-      # picker at all. See site/src/content/docs/desktop/index.md#screenshots-and-screen-sharing.
+      # picker at all. See site/src/content/docs/desktop/screenshots.md.
       chooser = lib.mkOption {
         type = lib.types.enum [
           "fuzzel"
@@ -656,7 +656,7 @@ in
     # failing with no agent.
     # `daemon` names the agent (polkit-gnome by default: the smallest
     # closure of the maintained set, measured against lxqt-policykit
-    # and hyprpolkitagent -- see site/src/content/docs/desktop/index.md#privilege-prompts-and-the-keyring);
+    # and hyprpolkitagent -- see site/src/content/docs/desktop/auth.md);
     # a future scoot agent widens that enum without changing the
     # option (the native-replacement contract).
     #
@@ -724,7 +724,7 @@ in
         description = ''
           The daemon behind `enable`. Only gnome-keyring today (the
           only candidate with a login-password unlock path -- see
-          site/src/content/docs/desktop/index.md#privilege-prompts-and-the-keyring
+          site/src/content/docs/desktop/auth.md
           for the measured pick); a future scoot keyring widens this
           enum, the option staying as it is.
         '';
@@ -763,7 +763,7 @@ in
         default = "wob";
         description = ''
           The program behind the OSD. Only wob today (a single-purpose
-          overlay bar with no toolkit -- see site/src/content/docs/desktop/index.md#sound-brightness-keys-and-the-on-screen-display
+          overlay bar with no toolkit -- see site/src/content/docs/desktop/sound.md
           for the measured pick); a future scoot OSD widens this
           enum, the option and the binds staying as they are.
         '';
@@ -808,7 +808,7 @@ in
           Keep the clipboard after its source closes: every copy lands
           in cliphist's history (its package beside this), restorable
           with the keymap's picker, with password-manager copies and
-          anything copied while locked kept out (see site/src/content/docs/desktop/index.md#clipboard).
+          anything copied while locked kept out (see site/src/content/docs/desktop/clipboard.md).
           `wl-copy`/`wl-paste` land on PATH beside it.
         '';
       };
@@ -829,7 +829,7 @@ in
       # Where the history db lives. Null keeps cliphist's default
       # (`~/.cache/cliphist/db`, honoring `XDG_CACHE_HOME`): on disk,
       # so history survives reboots -- with secrets never landing in
-      # it by construction (see site/src/content/docs/desktop/index.md#clipboard for the trade-off). Set it
+      # it by construction (see site/src/content/docs/desktop/clipboard.md for the trade-off). Set it
       # to move the db: an absolute path without shell specials (no
       # `~`, spaces, quotes, `$`, backticks, `;` or backslashes -- the
       # store entry, the picker and the idle policy's lock wipe all
@@ -851,7 +851,7 @@ in
     # Night light over `wlr-gamma-control-v1`. Filled by the
     # `desktop-nightlight` child: `wlsunset` as a user unit bound to
     # `scoot-session.target` (single purpose, tiny -- see
-    # site/src/content/docs/desktop/index.md#night-light for the measured
+    # site/src/content/docs/desktop/night-light.md for the measured
     # pick), manual sunrise/sunset by default (no location, no geoclue,
     # no network), `gammastep` for location-based sunrise/sunset.
     # Each `package` lives beside this in the side modules (`nixos.nix`
@@ -874,7 +874,7 @@ in
           through `wlr-gamma-control-v1`, one control per output (the
           compositor retires a control with `failed` on CRTC moves, so
           the daemon re-reads `gamma_size` and re-pushes -- see
-          site/src/content/docs/desktop/index.md#night-light). Without
+          site/src/content/docs/desktop/night-light.md). Without
           it the ramp stays linear day and night.
         '';
       };
@@ -883,7 +883,7 @@ in
       # geoclue nor network: `-S`/`-s`), `gammastep` on sunrise/sunset
       # computed from `latitude`/`longitude` (which it then requires:
       # without either it would reach for geoclue, which is not wired
-      # -- see site/src/content/docs/desktop/index.md#night-light). A
+      # -- see site/src/content/docs/desktop/night-light.md). A
       # future scoot-native widens this enum, the option and the unit
       # staying as they are (the native-replacement contract).
       daemon = lib.mkOption {
@@ -1035,7 +1035,7 @@ in
           logind, low-battery suspend through UPower, and the
           charge-limit service below. Opt-in, never with the profile:
           lid-close suspend and the charge cap change what the machine
-          does (see site/src/content/docs/desktop/index.md#power).
+          does (see site/src/content/docs/desktop/power.md).
         '';
       };
 
@@ -1046,7 +1046,7 @@ in
       # hardware with no PPD driver (Apple silicon: the placeholder
       # lists power-saver + balanced as no-ops) the charge limit and
       # the lid policy below are what save battery, not profiles
-      # (see site/src/content/docs/desktop/index.md#power).
+      # (see site/src/content/docs/desktop/power.md).
       profiles = {
         enable = lib.mkOption {
           type = lib.types.bool;
@@ -1112,7 +1112,7 @@ in
         description = ''
           What closing the lid does (logind's `HandleLidSwitch`).
           Suspends under SSH too unless inhibited -- see
-          site/src/content/docs/desktop/index.md#power.
+          site/src/content/docs/desktop/power.md.
         '';
       };
 
@@ -1591,7 +1591,7 @@ in
           description = ''
             Install the file manager (its package beside this:
             pcmanfm, the smallest closure of the maintained
-            graphical set -- see site/src/content/docs/desktop/index.md#terminal-files-and-removable-media
+            graphical set -- see site/src/content/docs/desktop/apps.md
             for the measured pick). Off: nothing references one.
           '';
         };
@@ -1689,7 +1689,7 @@ in
           a future slot (launcher, clipboard, notifications,
           capture, the apps pickers) appear only while that slot is
           enabled too;
-          their keys stay reserved either way (see site/src/content/docs/desktop/index.md#hardware-keys-and-desktop-actions).
+          their keys stay reserved either way (see site/src/content/docs/desktop/keys.md).
         '';
       };
 
@@ -1886,7 +1886,7 @@ in
     # Filled by the `desktop-input-method` child: fcitx5 (the only
     # maintained engine speaking `input-method-v2` -- ibus speaks its
     # own D-Bus protocol, kime is Korean-only on the v1 path, uim is
-    # XIM-only -- see site/src/content/docs/desktop/index.md#input-method
+    # XIM-only -- see site/src/content/docs/desktop/input-method.md
     # for the measured pick) as a user unit bound to
     # `scoot-session.target`, the toolkit variables only where a
     # toolkit still needs them (XMODIFIERS for XWayland, QT_IM_MODULE
@@ -1923,7 +1923,7 @@ in
         description = ''
           The engine behind `enable`. Only fcitx5 today (the only
           maintained engine speaking `input-method-v2` -- see
-          site/src/content/docs/desktop/index.md#input-method for the
+          site/src/content/docs/desktop/input-method.md for the
           measured pick); a future engine widens this enum, the option
           staying as it is.
         '';

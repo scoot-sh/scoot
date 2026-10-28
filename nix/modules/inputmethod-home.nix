@@ -3,7 +3,7 @@
 # needs them, and the look's candidate-window theme. The option shapes
 # live in `./desktop.nix` (shared with the NixOS side); the `package`
 # default lives here because only this side has `pkgs`. See
-# site/src/content/docs/desktop/index.md#input-method ("Input method").
+# site/src/content/docs/desktop/input-method.md ("Input method").
 {
   config,
   lib,

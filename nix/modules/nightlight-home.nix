@@ -3,7 +3,7 @@
 # option shapes live in `./desktop.nix` (shared with the NixOS side);
 # the `package` default lives here because only this side has `pkgs`
 # (defaulting to the daemon's own tool). See
-# site/src/content/docs/desktop/index.md#night-light ("Night light").
+# site/src/content/docs/desktop/night-light.md ("Night light").
 {
   config,
   lib,

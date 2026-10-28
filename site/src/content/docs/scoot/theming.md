@@ -7,7 +7,7 @@ Make the whole desktop match one look: compositor ring and
 background, bar colors, session wallpaper, GTK and Qt apps, cursor,
 fonts, dark mode, the login screen, and the terminal, prompt, editor
 and monitor configs — from one `look` choice. Set it in [the desktop
-profile](../desktop/index.md#pick-a-look):
+profile](../desktop/look.md#pick-a-look):
 
 ```nix title="configuration.nix and home.nix"
 programs.scoot = {
@@ -102,7 +102,7 @@ so put extra plugin dirs there to keep both.
 
 Per-target opt-out is Stylix-style, under one namespace, one flag per
 themed piece (every target defaults on) — see the [option
-table](../desktop/index.md#app-theme) for the full list:
+table](../desktop/look.md#app-theme) for the full list:
 
 ```nix title="home.nix"
 programs.scoot.desktop.theme.targets.lock.enable = false;  # keep swaylock's own style
@@ -172,7 +172,7 @@ X11 apps through XWayland read the same `settings.ini` and
 no `Xft.dpi`: the compositor publishes the output scale and XWayland
 follows it. Flatpak apps need the config files exposed into the
 sandbox — see the [Flatpak
-symptom](../desktop/index.md#app-theme).
+symptom](../desktop/look.md#app-theme).
 
 ## Stylix
 

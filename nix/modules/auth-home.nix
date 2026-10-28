@@ -16,7 +16,7 @@
 # The polkit authority (polkitd) and the keyring's D-Bus activation
 # files are the NixOS side's (`nixos.nix`): without it the agent has
 # nobody to answer and secrets have nothing to activate. See
-# site/src/content/docs/desktop/index.md#privilege-prompts-and-the-keyring.
+# site/src/content/docs/desktop/auth.md.
 {
   config,
   lib,

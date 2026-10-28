@@ -4,7 +4,7 @@
 # The dark-mode signal is `scoot look sync`'s, not this module's. The
 # option shapes live in `./desktop.nix` (shared with the NixOS side);
 # the `package` defaults live here because only this side has `pkgs`.
-# See site/src/content/docs/desktop/index.md#app-theme ("App theme")
+# See site/src/content/docs/desktop/look.md#app-theme ("App theme")
 # and site/src/content/docs/scoot/theming.md.
 #
 # Precedence per key, highest first: what the user wrote (a value in

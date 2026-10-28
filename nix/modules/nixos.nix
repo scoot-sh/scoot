@@ -204,7 +204,7 @@ let
   # D-Bus activation environment, and only then starts `scoot-session.target` (which
   # pulls in `graphical-session.target`, so the target is reached with
   # the display already imported), and on exit stops the session
-  # targets so session-bound units stop. See site/src/content/docs/desktop/index.md#the-greeter for the whole flow.
+  # targets so session-bound units stop. See site/src/content/docs/desktop/login.md#the-greeter for the whole flow.
   #
   # With the privilege prompt on, the entry also names the polkit
   # agent (`SCOOT_POLKIT_AGENT`, an `env` prefix before the launcher):
@@ -1315,7 +1315,7 @@ in
           session launcher, so existing configs gain the session wiring
           (user-manager import, `scoot-session.target` reaching
           `graphical-session.target` past the display import, the D-Bus
-          activation environment, teardown on exit -- see site/src/content/docs/desktop/index.md#the-greeter).
+          activation environment, teardown on exit -- see site/src/content/docs/desktop/login.md#the-greeter).
           Set it to run something else instead: the usual shape is
           `<package>/bin/scoot --tty -- <command>`, e.g. the
           home-manager module's `sessionScript` output at
@@ -1344,7 +1344,7 @@ in
       # is only ever on when the user sets it. Roll back by turning it
       # off again (or by booting the previous generation): nothing about
       # the previous login screen is uninstalled while it is on, only
-      # displaced. See site/src/content/docs/desktop/index.md#the-greeter.
+      # displaced. See site/src/content/docs/desktop/login.md#the-greeter.
       enable = lib.mkOption {
         type = lib.types.bool;
         default = false;
@@ -2492,7 +2492,7 @@ in
       # PipeWire with WirePlumber running for the binds (`wpctl` is
       # WirePlumber's CLI: a PipeWire-only shape would leave the binds
       # with nothing to call, for ~4.7 MiB saved -- measured, see
-      # site/src/content/docs/desktop/index.md#sound-brightness-keys-and-the-on-screen-display).
+      # site/src/content/docs/desktop/sound.md).
       # Plain `mkDefault`, so an explicit value still wins -- and the
       # capture slot defaults the same switch, which merges rather
       # than conflicts.
@@ -2836,7 +2836,7 @@ in
         {
           # Same, for SDDM. Anything else owning the login screen
           # (lemurs, ly, another greetd setup) must be turned off by
-          # hand -- see site/src/content/docs/desktop/index.md#the-greeter.
+          # hand -- see site/src/content/docs/desktop/login.md#the-greeter.
           assertion = !config.services.displayManager.sddm.enable;
           message = ''
             programs.scoot.greeter.enable conflicts with SDDM
@@ -2876,7 +2876,7 @@ in
       # instead of being silently shadowed. ReGreet runs under cage,
       # never inside scoot: hosting a pre-login greeter in the
       # compositor would need a locked-down scoot profile (no binds, no
-      # IPC socket), which is out of scope -- see site/src/content/docs/desktop/index.md#the-greeter.
+      # IPC socket), which is out of scope -- see site/src/content/docs/desktop/login.md#the-greeter.
       services.displayManager.regreet = {
         enable = true;
         # One screen, not the whole layout: cage spans every output by

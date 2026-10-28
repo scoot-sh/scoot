@@ -6,7 +6,7 @@
 # themselves and PipeWire are the NixOS side's (`nixos.nix`): without
 # it the chooser config still renders (a files-only setup for a Linux
 # box), but nothing answers the cast. See
-# site/src/content/docs/desktop/index.md#screenshots-and-screen-sharing.
+# site/src/content/docs/desktop/screenshots.md.
 {
   config,
   lib,

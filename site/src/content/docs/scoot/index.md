@@ -148,7 +148,7 @@ instead) and mirrors the diagnosis into the system journal
 (`journalctl -b -t scoot-session`), since the compositor takes over
 the console on startup and buries stderr. See [Without a greeter
 (TTY
-autologin)](../desktop/index.md#without-a-greeter-tty-autologin)
+autologin)](../desktop/login.md#without-a-greeter-tty-autologin)
 for the whole setup.
 
 Environment scoot reads: `$XDG_RUNTIME_DIR` (required — a missing one

@@ -7,7 +7,7 @@
 # side's (`nixos.nix`): without it the CLI and the bind sit ready for
 # a hand-written setup, the way a `[wallpaper]` finds scootbg on PATH
 # without the home-manager side. See
-# site/src/content/docs/desktop/index.md#power ("Power").
+# site/src/content/docs/desktop/power.md ("Power").
 {
   config,
   lib,

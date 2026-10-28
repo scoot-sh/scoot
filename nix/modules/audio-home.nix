@@ -4,7 +4,7 @@
 # the `overlay` layer, themed by the look). The option shapes live in
 # `./desktop.nix` (shared with the NixOS side); the `package` defaults
 # live here because only this side has `pkgs`. See
-# site/src/content/docs/desktop/index.md#sound-brightness-keys-and-the-on-screen-display.
+# site/src/content/docs/desktop/sound.md.
 {
   config,
   lib,
@@ -469,7 +469,7 @@ in
       # too. Retried like the bar's unit rather than conditioned (a
       # skipped start is never retried). Hidden it holds no surface
       # and wakes nothing (measured: ~2.2 MB RSS, ~0 wakeups --
-      # see site/src/content/docs/desktop/index.md#sound-brightness-keys-and-the-on-screen-display).
+      # see site/src/content/docs/desktop/sound.md).
       # A null beside `enable` leaves the unit out (the loud assertion
       # above, not a throw inside `getExe`: the same guard the bar's
       # unit uses, since standalone evals collect assertions without

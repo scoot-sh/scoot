@@ -200,7 +200,7 @@ running daemon live (cards, history and DND survive) — `scootnotify msg
 reload --look` does the same by hand. To go
 back to mako, set `daemon
 = "mako"` and switch again — see [Migrating from
-mako](../desktop/#migrating-from-mako).
+mako](../desktop/notifications/#migrating-from-mako).
 
 `desktop.notifications.settings` does not carry over: it is mako's
 flat dialect, and a non-empty one beside the new daemon warns at

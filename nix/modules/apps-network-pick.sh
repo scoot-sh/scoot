@@ -3,7 +3,7 @@
 # body of the script `apps-home.nix` builds, with every `@NAME@`
 # replaced by an absolute tool path (or a bare name from PATH where
 # the module knows no package; a missing tool then fails loud here).
-# See site/src/content/docs/desktop/index.md#wifi-and-bluetooth.
+# See site/src/content/docs/desktop/network.md.
 #
 #   list            candidate SSIDs, one per line: in range and saved
 #                   first, then the rest in range, then saved but out
