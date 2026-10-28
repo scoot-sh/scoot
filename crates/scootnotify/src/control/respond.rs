@@ -255,7 +255,13 @@ impl Responder<'_> {
     /// it was: the store moves only after both halves validate.
     fn reload(&mut self) -> Result<(), String> {
         let config = read_or_defaults(self.config_path)?;
-        let (look, mut notes) = reload_layer_applied(self.look_state.as_deref())?;
+        // A file with `look = false` themes with the built-ins; flipping
+        // it back on re-reads the layer on the next reload.
+        let (look, mut notes) = if config.look {
+            reload_layer_applied(self.look_state.as_deref())?
+        } else {
+            (Look::default(), Vec::new())
+        };
         self.server.store_mut().set_config(config.clone());
         // Cards on screen keep their ids, clocks and hover: the loop
         // re-themes and re-lays-out under them.
@@ -272,6 +278,20 @@ impl Responder<'_> {
     /// `Err` is the reply, and the running daemon stands exactly as it
     /// was.
     fn reload_scoped(&mut self) -> Result<(), String> {
+        if !self.server.store().look_enabled() {
+            // `look = false`: the layer is off by the user's choice, so
+            // there is nothing to refuse. The receipt is the same ok
+            // (a swap must not report a failure for a daemon that is
+            // behaving as configured); the cards keep the built-ins.
+            self.applied = Some(AppliedReload {
+                config: None,
+                look: Look::default(),
+                notes: vec![String::from(
+                    "look = false in the config: the look layer is not applied",
+                )],
+            });
+            return Ok(());
+        }
         let (look, notes) = match look::reload_layer(self.look_state.as_deref())? {
             Some((look, notes)) => (look, notes),
             None => {

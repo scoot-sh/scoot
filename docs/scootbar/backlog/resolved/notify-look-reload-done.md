@@ -30,7 +30,7 @@ scootnotify look path, which nobody has run yet.
 
 ## Not in this ticket
 
-The `targets.notifications` opt-out (see `notify-look-target.md`).
+The `targets.notifications` opt-out (see `notify-look-target-done.md`).
 Only implement the leaf if it stays small and safe with tests proving
 the headless end-to-end run; otherwise leave this ticket open.
 
@@ -51,5 +51,5 @@ apply leaf under the same pid; bad fragment refuses, daemon keeps the
 last good look), clippy `-D warnings` and `fmt --check` green. PR: #711.
 
 Still open: the M2 real-login proof for the scootnotify look path, and
-the `targets.notifications` opt-out (`notify-look-target.md`, left open:
+the `targets.notifications` opt-out (`notify-look-target-done.md`, since resolved:
 the layer still applies unconditionally beside scootnotify).

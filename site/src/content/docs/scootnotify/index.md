@@ -157,8 +157,10 @@ count to the bar; see [the bar feed](./configure.md#the-bar-feed).
 Two modules, one switch. `programs.scootnotify` manages the
 daemon's own file; `programs.scoot.desktop.notifications.daemon`
 picks the daemon behind the keymap's binds and the bar module. The
-look reaches the cards as a runtime layer: a value you set still
-wins per key. Stylix reaches it only as the `stylix` look — there is
+look reaches the cards as a runtime layer; the Nix profile's
+`theme.targets.notifications.enable = false` turns it off (it writes
+`look = false` into `settings`; an explicit `settings.look` wins).
+Stylix reaches it only as the `stylix` look — there is
 no Stylix switch.
 
 | Option | Type / default | Example | Reload |

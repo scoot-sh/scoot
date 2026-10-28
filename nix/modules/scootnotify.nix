@@ -12,9 +12,16 @@
 #      empty file, which the binary reads as its built-ins).
 #
 # The look is not a rung here at evaluation time at all: it arrives as a
-# runtime layer under the user's own file (see `scoot look sync`), merged
-# per key below every `settings` value above. So the rendered file holds
-# only the user's `settings`, verbatim.
+# runtime layer (see `scoot look sync`) that the daemon reads itself, so
+# the rendered file holds only the user's `settings`, verbatim -- with one
+# exception: the desktop profile's `theme.targets.notifications.enable =
+# false` adds `look = false` at `mkDefault` (rung 2), which tells the
+# daemon to ignore the layer. The layer carries colors, font size,
+# opacity and the icon theme; the file carries geometry, timeouts and
+# rules (the card corner radius is drawn from the file's `radius`). So
+# there is no per-key merge of the two: the switch is all-or-nothing,
+# and the per-key override of a look value is the look's own
+# `[apps.scootnotify]` table.
 #
 # Everything else the daemon reads has its own default in the binary,
 # so an absent key is that default.
@@ -41,6 +48,12 @@ let
   # The notification slot beside this module: on with the profile
   # (still individually disable-able), standalone otherwise.
   slotOn = (desktopProfile.notifications or { }).enable or false;
+  # `theme.targets.notifications.enable`: whether the look themes the
+  # notification daemon. Read on its own, never through the look-set
+  # check the other targets use: the look layer also reaches this daemon
+  # from a look applied at runtime (`scoot look apply`) with none
+  # declared here, and only the user's own `false` turns it off.
+  lookTargetOn = (((desktopProfile.theme or { }).targets or { }).notifications or { }).enable or true;
   daemonIsNotify = (desktopProfile.notifications or { }).daemon or "scootnotify" == "scootnotify";
   # The slot's mako-shaped settings: flat `key = value` lines for mako's
   # own config dialect. They do not carry over to this daemon (whose file
@@ -190,6 +203,17 @@ in
     # own file (see `scoot look sync`), never as eval-time values here.
     (lib.mkIf (profileOn && slotOn && daemonIsNotify) {
       programs.scootnotify.enable = lib.mkDefault true;
+    })
+
+    # The look target off (`theme.targets.notifications.enable = false`)
+    # beside the profile-managed daemon: the file carries `look = false`,
+    # so the cards keep the built-in theme whatever look layer is on
+    # disk. At `mkDefault`, so an explicit `settings.look` still wins.
+    # The key rides the file, not the command line: toggling it
+    # reloads the daemon in place (`X-Reload-Triggers`), where a changed
+    # `ExecStart` would restart it and drop the cards and the history.
+    (lib.mkIf (profileOn && daemonIsNotify && !lookTargetOn) {
+      programs.scootnotify.settings.look = lib.mkDefault false;
     })
 
     # The one slot option that does not survive the swap: mako's flat

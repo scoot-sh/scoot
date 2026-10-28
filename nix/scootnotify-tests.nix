@@ -31,6 +31,11 @@
 #   slot option that does not survive the swap);
 # - there is no Stylix switch (Stylix reaches it only as the `stylix`
 #   look);
+# - the desktop profile's `theme.targets.notifications.enable = false`
+#   beside this daemon renders `look = false` (at `mkDefault`: an
+#   explicit `settings.look` wins), on both sides; on (the default), with
+#   the mako daemon, or with the profile off, the file carries no look
+#   key -- and the real binary accepts the key (see the next item);
 # - the real binary accepts every rendered file (`scootnotify daemon
 #   --check`, exit 0) and refuses a file with an unknown key (exit 1).
 {
@@ -128,8 +133,14 @@ let
       notifications ? true,
       daemon ? "scootnotify",
       settings ? { },
+      # `theme.targets.notifications.enable`: the real option's default.
+      lookTarget ? true,
     }:
     {
+      options.programs.scoot.desktop.theme.targets.notifications.enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+      };
       options.programs.scoot.desktop.enable = lib.mkOption {
         type = lib.types.bool;
         default = false;
@@ -151,6 +162,7 @@ let
       };
       config.programs.scoot.desktop = {
         inherit enable;
+        theme.targets.notifications.enable = lookTarget;
         notifications = {
           enable = notifications;
           inherit daemon settings;
@@ -297,6 +309,29 @@ let
     };
   } { enable = true; };
 
+  # The look target off beside the profile-managed daemon: the file
+  # carries `look = false`. Left on (the default) it does not; a mako
+  # daemon is not this module's business; an explicit user value wins.
+  lookOff = evalHomeProfile {
+    enable = true;
+    lookTarget = false;
+  } { };
+  lookOffNixos = evalNixosProfile {
+    enable = true;
+    lookTarget = false;
+  } { };
+  lookOn = evalHomeProfile { enable = true; } { };
+  lookOffMako = evalHomeProfile {
+    enable = true;
+    daemon = "mako";
+    lookTarget = false;
+  } { enable = true; };
+  lookOffUserOn = evalHomeProfile {
+    enable = true;
+    lookTarget = false;
+  } { settings.look = true; };
+  lookOffProfileOff = evalHomeProfile { lookTarget = false; } { };
+
   # Rendered files the real binary checks: every configuration that
   # renders one, plus a hand-made one it must refuse.
   rendered = {
@@ -304,6 +339,8 @@ let
     user-wins = userWins.config.programs.scootnotify.configFile;
     one-key = oneKey.config.programs.scootnotify.configFile;
     nixos = os.config.programs.scootnotify.configFile;
+    look-off = lookOff.config.programs.scootnotify.configFile;
+    look-off-nixos = lookOffNixos.config.programs.scootnotify.configFile;
   };
   unknownKey = tomlFormat.generate "unknown-key.toml" { colors.backgroun = "#101010"; };
 
@@ -403,16 +440,34 @@ let
     "a mako-shaped settings table beside the new daemon warns, naming the new home" =
       lib.any (lib.hasInfix "programs.scootnotify.settings") optInWarn.config.warnings;
     "the same table beside mako stays quiet" = makoSettingsQuiet.config.warnings == [ ];
+    "the look target off writes look = false into the daemon's file" =
+      settingsOf lookOff == { look = false; } && settingsOf lookOffNixos == { look = false; };
+    "the look target on (the default) leaves the file without a look key" = settingsOf lookOn == { };
+    "the look target off enables the daemon as before, with no warning" =
+      lookOff.config.programs.scootnotify.enable && lookOff.config.warnings == [ ];
+    "the look target off beside mako leaves this daemon's file alone" = settingsOf lookOffMako == { };
+    "an explicit settings.look wins over the target" = settingsOf lookOffUserOn == { look = true; };
+    "the look target off with the profile off changes nothing" = settingsOf lookOffProfileOff == { };
     "an empty table beside the new daemon stays quiet" = optIn.config.warnings == [ ];
   };
   failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
 
   # Text the shell then compares with what tomllib read back.
-  expectations = lib.mapAttrsToList (name: e: {
-    inherit name;
-    file = e.config.programs.scootnotify.configFile;
-    settings = e.config.programs.scootnotify.settings;
-  }) { inherit plain userWins oneKey; };
+  expectations =
+    lib.mapAttrsToList
+      (name: e: {
+        inherit name;
+        file = e.config.programs.scootnotify.configFile;
+        settings = e.config.programs.scootnotify.settings;
+      })
+      {
+        inherit
+          plain
+          userWins
+          oneKey
+          lookOff
+          ;
+      };
 in
 assert lib.assertMsg (failed == [ ]) "scootnotify module checks failed: ${builtins.toJSON failed}";
 runCommand "scootnotify-modules"

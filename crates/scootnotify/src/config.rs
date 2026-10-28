@@ -94,6 +94,11 @@ pub struct Config {
     /// set). Empty sends none, leaving the key out of the payload.
     /// Exactly one character when set: the bar refuses anything else.
     pub bar_icon_dnd: String,
+    /// Whether the look layer (`<state>/look/notify.toml`) themes the
+    /// cards. `false` keeps the built-in colors, font size, opacity and
+    /// icon theme whatever the layer holds (the Nix profile's
+    /// `theme.targets.notifications.enable = false`).
+    pub look: bool,
 }
 
 /// The screen corner the stack anchors to: the layer-shell anchor.
@@ -292,6 +297,7 @@ impl Default for Config {
             pause_when_idle_secs: 60,
             bar_icon_unread: String::new(),
             bar_icon_dnd: String::new(),
+            look: true,
         }
     }
 }

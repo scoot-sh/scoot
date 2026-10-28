@@ -31,6 +31,7 @@ rate_per_sec = 20
 rate_burst = 40
 history_max = 64
 dnd_allows_critical = true
+look = true
 ```
 
 ## Placement
@@ -113,6 +114,9 @@ through a manual lock.
 - `dnd_allows_critical`: critical cards show while DND holds the rest.
   Type: boolean. Default: `true`. Example:
   `dnd_allows_critical = false`. Reload: `msg reload`.
+- `look`: whether the look layer themes the cards (see [The look
+  layer](#the-look-layer)). Type: boolean. Default: `true`. Example:
+  `look = false`. Reload: `msg reload`.
 
 ## History
 
@@ -272,7 +276,19 @@ cards — never from this file. The daemon reads
 `<state>/look/notify.toml` at start (a dangling or missing link means
 no layer, plus a warning), with the user's file winning per key over
 the look over the built-ins. The thirteen color roles map to the
-cards:
+cards.
+
+To keep the built-in colors whatever look is active, set `look =
+false` in the file. The layer is then not read at start, a plain `msg
+reload` applies the built-ins, and `msg reload --look` answers ok and
+changes nothing, so a look swap does not report a failure. Set it
+back to `true` and `msg reload` to re-read the layer. The switch is
+all or nothing: the layer carries colors, font size, opacity and
+the icon theme, the file carries geometry, timeouts and rules, and
+to change one value of the look, override it in the look's
+`[apps.scootnotify]` table. With the Nix profile, `look = false` is
+what [`theme.targets.notifications.enable =
+false`](../desktop/#notifications) writes.
 
 | Element | Role |
 |---|---|
@@ -293,6 +309,12 @@ cards:
 > reload` re-reads the file too). If the look changed but
 > the cards did not, the fragment refused: the daemon warns per key and
 > keeps the last good look.
+
+> **Symptom:** the cards keep the built-in colors under a look.
+> Check the file for `look = false`, which the Nix option
+> `theme.targets.notifications.enable = false` writes. With it set
+> the daemon logs `look = false in the config: the look layer is not
+> applied` on each `scoot look apply`.
 
 > **Symptom:** no icon on the card.
 > PNG `image-data` and reachable PNG paths draw; a theme name draws
