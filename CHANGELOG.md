@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.10](https://github.com/scoot-sh/scoot/compare/v0.6.9...v0.6.10) - 2026-10-28
+
+### scootnotify,nix
+
+- added: theme.targets.notifications.enable = false turns the look layer off beside scootnotify ([#779](https://github.com/scoot-sh/scoot/pull/779))
+
+### scootui,scootbg
+
+- fixed: publish the control socket 0600 with no chmod-after-bind window ([#776](https://github.com/scoot-sh/scoot/pull/776))
+
 ## [0.6.9](https://github.com/scoot-sh/scoot/compare/v0.6.8...v0.6.9) - 2026-10-27
 
 ### scoot
