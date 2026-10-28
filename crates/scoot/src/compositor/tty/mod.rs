@@ -50,6 +50,7 @@ pub(super) mod reconnect;
 #[cfg(feature = "gpu-scanout")]
 pub(super) mod scanout;
 mod stale_vblanks;
+mod swap_bind;
 
 pub(crate) use self::gpu::{ExplicitGpu, resolve};
 /// For `render::scanout`'s capture-sequence tests, which drive the capture

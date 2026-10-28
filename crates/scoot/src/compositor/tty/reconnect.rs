@@ -74,6 +74,7 @@ use smithay::reexports::input::Libinput;
 
 use super::hotplug;
 use super::stale_vblanks::StaleVblanks;
+use super::swap_bind;
 use super::{Reactivation, State, Tty};
 use crate::cli::RendererKind;
 use crate::compositor::output_config::ModeRequests;
@@ -572,7 +573,7 @@ fn fresh_tier_matches(fresh: RendererKind, wanted: RendererKind) -> bool {
 }
 
 /// Whether the swapped-in device proved master and may report `live: true`.
-enum SwapLive {
+pub(super) enum SwapLive {
     /// The synchronous proof passed: master is held, re-probe and render.
     Live,
     /// The proof failed: keep the fresh device dark (it still joins
@@ -593,10 +594,9 @@ enum SwapLive {
 /// heads that merely missed their outputs retry through the normal
 /// re-probe, exactly like the master-less restore).
 /// A pure function so the downgrade is pinned by headless tests -- the fd
-/// half needs real seat hardware, this half must not rot silently. Only
-/// the GPU-tier swap calls it outside tests, so it is gated on either.
-#[cfg(any(test, feature = "gpu-scanout"))]
-fn swap_downgrade(
+/// half needs real seat hardware, this half must not rot silently.
+/// Both tiers' swaps call it (the CPU one through `swap_bind::verdict`).
+pub(super) fn swap_downgrade(
     live: SwapLive,
     handoff_failed: bool,
     nothing_presenting: bool,
@@ -757,7 +757,39 @@ fn swap(
         libinput_token,
         reconnect_armed: None,
     });
-    rebind(state, bindings);
+    // Bind the fresh heads to the outputs the compositor already has, by
+    // the connector snapshot taken before teardown -- but unlike `rebind`,
+    // without dropping the heads no binding covers: after an empty restore
+    // the snapshot is empty, and dropping every fresh head here left the
+    // new `Tty` `active` with nothing presenting and the one stale output
+    // reporting `live: true` (see `swap_bind`). Unbound heads take the
+    // hotplug `Added` shape instead, the way `swap_scanout` does.
+    for (connector, id) in bindings {
+        let connector = *connector;
+        super::attach_where(
+            state,
+            move |head| head.connector == connector && head.output.is_none(),
+            *id,
+        );
+    }
+    remove_orphaned_outputs(state, bindings);
+    let added = unbound_changes(state);
+    hotplug::apply(state, added);
+    // `apply` drops a head whose output creation refused, so what remains
+    // and presents is the truth `live` has to report.
+    let bound: Vec<bool> = state.tty.as_ref().map_or_else(Vec::new, |tty| {
+        tty.heads.iter().map(|head| head.output.is_some()).collect()
+    });
+    let (live, active, nothing_connected) = swap_bind::verdict(live, &bound);
+    {
+        let Some(tty) = state.tty.as_mut() else {
+            debug_assert!(state.tty.is_some(), "new backend vanished mid-swap");
+            tracing::error!("seat reconnect: lost the new backend mid-swap; skipping its re-probe");
+            return;
+        };
+        tty.active = active;
+        tty.nothing_connected = nothing_connected;
+    }
     match live {
         SwapLive::Live => {
             // What the normal reactivation arm does after a win: ask the
@@ -951,7 +983,7 @@ fn swap_scanout(
     remove_orphaned_outputs(state, bindings);
     // No separate `reapply_output_power` here: `remove_orphaned_outputs`
     // already re-applies it (one idempotent application, shared with the
-    // CPU tier's `rebind`).
+    // CPU tier's `rebind` and its `swap`).
     // Hand each fresh renderer to its output's backend, by the connector
     // snapshot taken before teardown.
     let mut handoff_failed = false;
@@ -1709,6 +1741,30 @@ fn restore_scanout_without_input(
     );
 }
 
+/// The `Change::Added` for every CPU-tier head no output claims yet: the
+/// same shape a physical replug runs (a new output, attached by connector,
+/// displaced windows restored). Which heads those are is
+/// [`swap_bind::unbound_heads`]'s call. A CPU head carries no renderer, so
+/// the scanout handoff is the empty default.
+fn unbound_changes(state: &State) -> Vec<hotplug::Change> {
+    let Some(tty) = state.tty.as_ref() else {
+        return Vec::new();
+    };
+    let bound: Vec<bool> = tty.heads.iter().map(|head| head.output.is_some()).collect();
+    swap_bind::unbound_heads(&bound)
+        .into_iter()
+        .filter_map(|index| tty.heads.get(index))
+        .map(|head| hotplug::Change::Added {
+            connector: head.connector,
+            name: head.name.clone(),
+            identity: head.identity.clone(),
+            width: head.width,
+            height: head.height,
+            scanout: crate::compositor::render::ScanoutHandoff::default(),
+        })
+        .collect()
+}
+
 /// Binds rebuilt heads to the outputs the compositor already has, by the
 /// connector snapshot taken before teardown; drops heads no output claims
 /// and removes outputs no head drives (mirroring the hotplug path's
@@ -1728,8 +1784,8 @@ fn rebind(state: &mut State, bindings: &[(connector::Handle, OutputId)]) {
 
 /// Outputs whose head is gone (their connector vanished mid-switch):
 /// remove them the way a hotplug would, so no output points at a head
-/// that no longer exists. Shared by [`rebind`] and the GPU-tier swap,
-/// which binds the same way but must not drop the heads no binding
+/// that no longer exists. Shared by [`rebind`], the CPU-tier `swap` and the GPU-tier
+/// swap, the latter two of which bind the same way but must not drop the heads no binding
 /// covers (see `swap_scanout`).
 fn remove_orphaned_outputs(state: &mut State, bindings: &[(connector::Handle, OutputId)]) {
     // Outputs whose head is gone (their connector vanished mid-switch):
