@@ -103,10 +103,26 @@ impl Drop for Disarm {
 /// Runs `f`, returning what it returned and how many heap allocations it
 /// made on this thread. Do not nest: an inner call resets the outer's
 /// count.
+///
+/// # Panics
+///
+/// If [`CountingAlloc`] is not the binary's global allocator (a probe
+/// allocation goes uncounted), instead of reporting a vacuous 0.
 pub fn count_allocations<R>(f: impl FnOnce() -> R) -> (R, usize) {
     ANY_ARMED.fetch_add(1, Ordering::Relaxed);
     COUNT.with(|count| count.set(Some(0)));
     let _disarm = Disarm;
+    // A probe allocation proves the counter is wired: without
+    // `CountingAlloc` as the binary's `#[global_allocator]` every window
+    // would read 0 and every zero-allocation pin would pass vacuously.
+    drop(std::hint::black_box(Box::new(0u8)));
+    assert!(
+        COUNT.with(|count| count.get()).unwrap_or(0) > 0,
+        "CountingAlloc is not the global allocator of this test binary: \
+         install `#[global_allocator] static A: scootbg_mem::CountingAlloc = \
+         scootbg_mem::CountingAlloc;`, or every count here reads 0"
+    );
+    COUNT.with(|count| count.set(Some(0)));
     let returned = f();
     let count = COUNT.with(|count| count.get()).unwrap_or(0);
     (returned, count)

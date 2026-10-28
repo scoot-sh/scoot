@@ -216,7 +216,7 @@ hits the wall:
 [persistent workspaces (a decision)](../../backlog/core/persistent-workspaces.md),
 [keyboard layout event](../../backlog/ipc/keyboard-layout-event.md).
 
-- [Audit the popup and icon zero-allocation pins](scootui-popup-alloc-pins-audit.md): they ran without a counting allocator until #670.
+- [Audit the popup and icon zero-allocation pins](resolved/scootui-popup-alloc-pins-audit-done.md): all 12 pins mutation-proved real; `count_allocations` now panics when no counting allocator is installed — RESOLVED 2026-10-27
 - [launch-panel-shrink-to-content](launch-panel-shrink-to-content.md)
 - [launch-panel-bare-desktop-click](launch-panel-bare-desktop-click.md)
 - [launch-toggle-race-and-socket-mode](resolved/launch-toggle-race-and-socket-mode-done.md): atomic lock claim plus `0600`-before-publish staging rename — RESOLVED 2026-10-27
