@@ -871,10 +871,13 @@ impl Cursor {
         };
         // The pointer in physical pixels minus the hotspot in the bitmap's
         // own (physical) pixels. At scale 1 the hotspot is the logical one,
-        // so this is exactly `element_location`'s arithmetic there (pinned
-        // by its tests); at other scales the hotspot is the physical bitmap's
-        // own tip, which is what keeps the tip under the pointer when insets
-        // scale sublinearly.
+        // so this is `element_location`'s arithmetic there (pinned by its
+        // tests); at other scales the hotspot is the physical bitmap's own
+        // tip, which is what keeps the tip under the pointer when insets
+        // scale sublinearly. The element's geometry rounds this location to
+        // `round(pointer * scale) - hotspot`, the same place a client cursor
+        // surface's tip lands (`element_location`), so both kinds of cursor
+        // agree with the position a cursor session reports.
         let location = Point::<f64, Physical>::from((
             pointer_location.x * scale - f64::from(hotspot.x),
             pointer_location.y * scale - f64::from(hotspot.y),
@@ -917,7 +920,7 @@ where
     // so "the status didn't change" does not mean "the hotspot
     // didn't change".
     let hotspot = surface_hotspot(surface);
-    let location = element_location(pointer_location, hotspot, scale).to_i32_round();
+    let location = element_location(pointer_location, hotspot, scale);
     // `scale` (the output scale), not 1.0: a client cursor surface is
     // drawn at the same scale as everything else, so its own
     // fractional-scale/viewport state lands it at the right physical
@@ -957,17 +960,26 @@ fn surface_hotspot(surface: &WlSurface) -> Point<i32, Logical> {
 ///
 /// Physical, not Logical, matches what the render-element constructors want
 /// for their location (renderer output space). The pointer and the hotspot
-/// are both logical, so both are scaled: subtracting first and scaling the
-/// difference keeps the hotspot offset exact at a fractional scale, and at
-/// 1.0 the multiplication is the identity, which is what keeps a scale-1
-/// session byte-identical to before output scaling existed.
+/// are both logical, so both are scaled, and **each is rounded to a physical
+/// pixel on its own**: the pointer to where it sits on the output (what a
+/// pointer cursor session reports, `cursor_hotspot_on`), the hotspot to a
+/// whole number of pixels, exactly as a themed bitmap's physical hotspot is
+/// one. That makes the hotspot a constant of the image at a given scale
+/// rather than something that depends on the pointer's sub-pixel position,
+/// which is what lets a remote viewer cache the image and its hotspot and
+/// still put the tip where the screen does. (Rounding the difference
+/// instead put the tip up to a pixel from `round(pointer * scale)`, by an
+/// amount that changed as the pointer moved.) At 1.0 the multiplication is
+/// the identity, so a scale-1 session is byte-identical to before output
+/// scaling existed. Saturating: the hotspot is client-controlled.
 fn element_location(
     pointer: Point<f64, Logical>,
     hotspot: Point<i32, Logical>,
     scale: f64,
-) -> Point<f64, Physical> {
-    Point::from((
-        (pointer.x - f64::from(hotspot.x)) * scale,
-        (pointer.y - f64::from(hotspot.y)) * scale,
-    ))
+) -> Point<i32, Physical> {
+    let axis = |pointer: f64, hotspot: i32| {
+        ((pointer * scale).round() as i32)
+            .saturating_sub((f64::from(hotspot) * scale).round() as i32)
+    };
+    Point::from((axis(pointer.x, hotspot.x), axis(pointer.y, hotspot.y)))
 }

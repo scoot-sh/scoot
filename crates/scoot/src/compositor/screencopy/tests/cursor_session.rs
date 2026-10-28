@@ -283,6 +283,70 @@ fn an_image_of_another_size_is_announced_and_the_old_buffer_refused() {
     assert_eq!(image.len(), (bigger * bigger * 4) as usize);
 }
 
+/// What `scoot msg output-scale` does to the output, minus the IPC.
+fn set_scale(fixture: &mut Fixture, scale: f64) {
+    let id = primary(fixture);
+    let name = fixture.state.outputs.get(id).expect("the output").name();
+    fixture.state.runtime_scales.insert(name, scale);
+    fixture.state.rescale_outputs();
+    fixture.state.resend_output_scale();
+    fixture.state.apply();
+}
+
+#[test]
+fn a_scale_change_is_announced_and_the_old_buffer_refused_then_the_new_size_is_served() {
+    let mut fixture = start();
+    move_pointer(&mut fixture, 20.0, 20.0);
+    let told = open(&mut fixture);
+    assert_eq!(take(&mut fixture, &told).0, Outcome::Ready);
+
+    // A frame is waiting, sized for the image at scale 1.
+    fixture.run(Step::CaptureSizedWithoutWaiting {
+        width: told.width as i32,
+        height: told.height as i32,
+    });
+    set_scale(&mut fixture, 1.5);
+    let (outcome, _) = fixture.run(Step::PollFrame).frame();
+    assert_eq!(
+        outcome,
+        Outcome::Failed(BUFFER_CONSTRAINTS),
+        "a buffer sized for the scale-1 image is refused, never written past"
+    );
+    let now = fixture.run(Step::ReadConstraints).constraints();
+    let edge = crate::compositor::cursor::physical_size(fixture.state.cursor.logical_size(), 1.5);
+    assert!(edge > told.width as i32, "the image grew with the scale");
+    assert_eq!(now.dones, 2, "the new size is announced once");
+    assert_eq!((now.width, now.height), (edge as u32, edge as u32));
+    assert_eq!(now.formats, vec![ARGB8888]);
+
+    let (outcome, image) = take(&mut fixture, &now);
+    assert_eq!(outcome, Outcome::Ready, "and the retry is served at once");
+    assert_eq!(image.len(), (edge * edge * 4) as usize);
+    assert!(
+        image
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .any(|pixel| pixel[3] == 0xff),
+        "the arrow at the new scale has opaque pixels"
+    );
+
+    // And back: the announcement is symmetrical.
+    fixture.run(Step::CaptureSizedWithoutWaiting {
+        width: now.width as i32,
+        height: now.height as i32,
+    });
+    set_scale(&mut fixture, 1.0);
+    assert_eq!(
+        fixture.run(Step::PollFrame).frame().0,
+        Outcome::Failed(BUFFER_CONSTRAINTS)
+    );
+    let back = fixture.run(Step::ReadConstraints).constraints();
+    assert_eq!(back.dones, 3);
+    assert_eq!((back.width, back.height), (told.width, told.height));
+    assert_eq!(take(&mut fixture, &back).0, Outcome::Ready);
+}
+
 #[test]
 fn a_cursor_on_the_screen_edge_keeps_its_whole_image() {
     // The pointer clamps at the edge, but the arrow hangs over it: the image
