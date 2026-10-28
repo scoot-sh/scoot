@@ -1,9 +1,10 @@
 ---
 title: "xwayland clipboard stalled_pastes_do_not_hold_the_bound_for_good fails once under cargo test"
-status: "open"
-area: "testing"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-28"
 ---
 
 # xwayland clipboard stalled_pastes_do_not_hold_the_bound_for_good fails once under cargo test
@@ -37,3 +38,22 @@ fix that and keep the test strict.
 ## Not in this ticket
 
 The other transfer-bound tests in the same file, which passed.
+
+## Resolution
+
+A test race, not a product bug. The compositor frees a stalled paste's slot
+by polling its pipe for hang-up (`reader_gone` in the pinned Smithay fork),
+and a pipe only hangs up once every process holding the read end has closed
+it. `cargo test` runs the tests as threads of one process, so another test
+forking a child (an Xwayland starting) copies this test's read ends, and the
+child holds them from `fork` until `exec`. A paste arriving in that gap is
+refused because the reader really has not gone. nextest gives each test its
+own process, so it never sees this.
+
+Reproduced on the dev VM by forking children in a loop alongside the test
+(the fork-to-exec gap widened to 20 ms): 14 of 40 runs failed at the same
+assertion. Plain CPU load alone did not reproduce it (100 of 100 passed with
+12 busy loops, and 100 of 100 with a fork loop and no widening). The test
+now keeps pasting until one is admitted, for up to 5 s, and fails with the
+same message if none is; under the same widened fork loop 100 of 100 pass,
+and with the readers never dropped it still fails after the 5 s.

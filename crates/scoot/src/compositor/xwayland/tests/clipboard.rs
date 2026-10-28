@@ -876,6 +876,38 @@ fn an_x_client_opens_only_a_few_transfers_at_once() {
     );
 }
 
+/// How long a paste may keep being refused after its predecessors' readers
+/// closed: far beyond a fork-to-exec gap, far short of the test timeout.
+const RELEASE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Pastes until one is admitted, and returns its index in the readers
+/// `ended` reports. The compositor frees a slot by asking the pipe whether
+/// its reader has left, and a pipe only reports that once *every* process
+/// holding the read end has closed it. Under `cargo test` the tests share
+/// one process, so another test forking a child (the Xwayland of a test
+/// starting, say) copies this test's read ends, and the child holds them
+/// until its `exec` -- a gap of milliseconds, wider on a loaded machine. A
+/// paste arriving inside it is refused, correctly: the reader has not
+/// gone. So one refusal is not a verdict; a paste still refused after
+/// [`RELEASE_PATIENCE`] is: the slots never came back.
+fn a_paste_is_admitted_once_the_readers_are_gone(live: &mut Live) -> usize {
+    let deadline = std::time::Instant::now() + RELEASE_PATIENCE;
+    loop {
+        receive_later(live);
+        live.drain();
+        let ends = ended(live);
+        let fresh = ends.len() - 1;
+        if !ends[fresh].0 {
+            return fresh;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the bound was still full of transfers whose readers had gone, {RELEASE_PATIENCE:?} after they closed"
+        );
+        live.fixture.tick(std::time::Duration::from_millis(50));
+    }
+}
+
 /// Pastes stalled by an owner that answered `INCR` and went silent do not
 /// hold the bound for good. Past eight a paste is refused (it reads nothing,
 /// it is not queued); a reader closing frees its slot; and a new owner taking
@@ -914,12 +946,7 @@ fn stalled_pastes_do_not_hold_the_bound_for_good() {
     );
     // The readers go away; their slots come back.
     assert!(matches!(clip(&mut live, ClipStep::DropLater), Ack::Done));
-    receive_later(&mut live);
-    live.drain();
-    assert!(
-        !ended(&mut live)[5].0,
-        "the bound was still full of transfers whose readers had gone"
-    );
+    let fresh = a_paste_is_admitted_once_the_readers_are_gone(&mut live);
     // A new owner: the paste still stalled on the old one is ended...
     outlast_the_owner_change_grace(&mut live);
     focus(&mut live, x);
@@ -933,7 +960,7 @@ fn stalled_pastes_do_not_hold_the_bound_for_good() {
     );
     live.drain();
     assert!(
-        ended(&mut live)[5].0,
+        ended(&mut live)[fresh].0,
         "a paste stalled on the previous owner outlived the change of owner"
     );
     // ... and pasting works.
