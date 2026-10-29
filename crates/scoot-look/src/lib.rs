@@ -71,6 +71,7 @@ pub mod catalog;
 pub mod contrast;
 pub mod grammar;
 pub mod import;
+pub mod leaf_path;
 pub mod leaves;
 pub mod render;
 pub mod resolve;
@@ -86,6 +87,7 @@ pub use allowlist::{
 pub use contrast::{ContrastPair, ContrastReport, check as check_contrast};
 pub use grammar::GrammarError;
 pub use import::{ImportOptions, import_base16};
+pub use leaf_path::locate_leaf;
 pub use leaves::{
     render_fcitx5_theme, render_leaf_files, render_mako, render_nightlight, render_wob,
 };

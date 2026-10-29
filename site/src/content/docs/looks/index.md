@@ -334,6 +334,17 @@ on change, within about a second. A look without an `apps/` file
 renders no leaf for it (radial-burst ships none; music-desk ships no
 btop theme).
 
+A leaf must be a regular file, with no symlink anywhere below the look
+directory (the look directory itself may be a link, as home-manager makes
+it). `apply` and `scoot-look build` both refuse a symlinked leaf or a
+symlinked `apps/` directory, whatever it points at, and name the link:
+
+```text
+refused: ~/.local/share/scoot/user-looks/moonrise/apps/helix.toml is a symlink
+```
+
+Copy the file into the look instead of linking it.
+
 New editors follow the look once each file is wired (one-time setup):
 `~/.config/helix/themes/scoot-look.toml` points at
 `~/.local/state/scoot/look/apps/helix.toml` with `theme =
