@@ -148,8 +148,8 @@ full per-feature cycle.
 - [A config file with per-output defaults](config-file.md) (split from the above; only if people ask)
 - [More image formats: AVIF, JPEG XL, HEIF](more-formats.md)
 - [The sway test helper's first-swaymsg start-up race](resolved/sway-ipc-ready-scootbg-done.md) — RESOLVED 2026-10-29: `Session::sway` polls `swaymsg -t get_version` until sway answers (the scootbar fix, copied)
+- [scale test flaked under full-suite load](resolved/scale-change-decode-flake-done.md) — RESOLVED 2026-10-29: the test holds the job in flight on a download it releases after the daemon reports the new scale
 - [Detached `cargo test` hangs the signal test: inherited `SIG_IGN`](resolved/signal-disposition-detached-tests-done.md) — RESOLVED 2026-10-08: harness resets HUP/INT/QUIT to default in spawned children (PR #540)
 - [Share tests hard-code 4K page rounding](resolved/scootbg-share-tests-page-size-done.md) — RESOLVED 2026-09-30: the tests take the host's page size (verified on the Asahi's 16 KiB pages)
 - [restore two-sizes screenshot flake on sway](sway-restore-two-sizes-flake.md)
-- [scale test flaked once under full-suite load](scale-change-decode-flake.md)
 - [scaler_probe margin test: the daemon closes without replying under CPU load](scaler-probe-margin-daemon-exit-flake.md)
