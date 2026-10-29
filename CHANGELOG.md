@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.12](https://github.com/scoot-sh/scoot/compare/v0.6.11...v0.6.12) - 2026-10-29
+
+### scoot
+
+- fixed: the config help lists [virtual_input] and [animation], from one table ([#793](https://github.com/scoot-sh/scoot/pull/793))
+
+### scootbar
+
+- fixed: a refused spawn names the running commands to stop by hand ([#791](https://github.com/scoot-sh/scoot/pull/791))
+
 ## [0.6.11](https://github.com/scoot-sh/scoot/compare/v0.6.10...v0.6.11) - 2026-10-28
 
 ### scoot

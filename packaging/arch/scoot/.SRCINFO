@@ -1,6 +1,6 @@
 pkgbase = scoot
 	pkgdesc = Scrolling-tiling Wayland compositor (auto CPU/GPU rendering, runs without a GPU)
-	pkgver = 0.6.11
+	pkgver = 0.6.12
 	pkgrel = 1
 	url = https://github.com/scoot-sh/scoot
 	install = scoot.install
@@ -17,7 +17,7 @@ pkgbase = scoot
 	depends = libinput
 	depends = libxkbcommon
 	depends = pixman
-	depends = scootbg=0.6.11
+	depends = scootbg=0.6.12
 	depends = seatd
 	depends = sh
 	depends = systemd-libs
@@ -25,7 +25,7 @@ pkgbase = scoot
 	optdepends = libdrm: GPU scanout tier at run time (auto-detected, no rebuild needed)
 	optdepends = systemd: greeter session login through scoot-session
 	options = !debug
-	source = scoot-0.6.11.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v0.6.11.tar.gz
+	source = scoot-0.6.12.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v0.6.12.tar.gz
 	sha256sums = SKIP
 
 pkgname = scoot

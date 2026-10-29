@@ -9,7 +9,7 @@
 # which provides `scootbg`).
 
 pkgname=scoot-git
-pkgver=0.6.11.r0.g0000000
+pkgver=0.6.12.r0.g0000000
 pkgrel=1
 pkgdesc='Scrolling-tiling Wayland compositor (auto CPU/GPU rendering, runs without a GPU) (git)'
 arch=('x86_64' 'aarch64')
