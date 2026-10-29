@@ -17,6 +17,20 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.14](https://github.com/scoot-sh/scoot/compare/v0.6.13...v0.6.14) - 2026-10-29
+
+### scoot,scootlaunch
+
+- added: a click outside the launcher panel dismisses it ([#803](https://github.com/scoot-sh/scoot/pull/803))
+
+### scootbg
+
+- fixed: rotation tests draw on a small output; a silent daemon is named ([#802](https://github.com/scoot-sh/scoot/pull/802))
+
+### scootlaunch,scootui
+
+- fixed: even panel spacing, full-width rounded selection, icons inside it ([#805](https://github.com/scoot-sh/scoot/pull/805))
+
 ## [0.6.13](https://github.com/scoot-sh/scoot/compare/v0.6.12...v0.6.13) - 2026-10-29
 
 ### scoot-look
