@@ -50,7 +50,8 @@ use scootui::theme::Theme;
 /// The default font size, in logical pixels: the contract's 10 pt
 /// `popup-size` default (`clamp(1, 256, (pt*4+1)/3)`).
 pub const DEFAULT_FONT_SIZE_PX: f32 = 13.0;
-/// The default panel corner radius, in device pixels.
+/// The default panel corner radius, in logical pixels (scaled with the
+/// output, as the border and the font are).
 pub const DEFAULT_RADIUS: u32 = 8;
 /// The default icon theme, when the fragment names none: what the
 /// looks resolve to (`Adwaita`).
@@ -71,7 +72,8 @@ pub struct Look {
     pub font_size_px: f32,
     /// The panel fill's alpha (`opacity`, 0 to 1).
     pub opacity: f32,
-    /// The panel corner radius in device pixels (`radius`, 0 to 64).
+    /// The panel corner radius in logical pixels (`radius`, 0 to 64), scaled
+    /// by the output's scale when drawn.
     pub radius: u32,
     /// The look's UI family (`font`): validated, informational in v1.
     pub font_family: String,

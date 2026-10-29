@@ -39,7 +39,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use scoot_rt::print::{print, warn};
-use scootui::entry::{Geometry, paint_entry, paint_list, paint_password};
+use scootui::entry::{Geometry, paint_entry, paint_list, paint_list_over, paint_password};
 use scootui::keyboard::{
     KeyOutput, KeyboardSeat, MIN_TEXT_BYTES, dispatch_keyboard, negotiate_version,
 };
@@ -65,7 +65,9 @@ use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{self
 
 use crate::cli::ColorOverrides;
 use crate::dmenu::{DmenuUi, Outcome as DmenuOutcome, Print as DmenuPrint};
+use crate::highlight::fill_round_rect;
 use crate::index::{Action, Entry};
+use crate::layout::{BORDER, Layout, Rect};
 use crate::look::Look;
 use crate::spawn::{self, Token};
 use crate::ui::{Outcome, Ui};
@@ -74,12 +76,10 @@ use scootui::outputs::Frame;
 /// How long the registry sweep and the first configure may take: a local
 /// compositor answers in milliseconds, so this only bounds a wedge.
 const PATIENCE: Duration = Duration::from_secs(10);
-/// The panel border's thickness, in device pixels.
-const BORDER: u32 = 2;
 /// The padding between the border and the widgets, in device pixels.
-const PAD: u32 = 8;
+const PAD: u32 = crate::layout::DMENU_PAD;
 /// The gap between the entry line and the list, in device pixels.
-const GAP: u32 = 4;
+const GAP: u32 = crate::layout::DMENU_GAP;
 /// The entry's placeholder, in `dim`.
 const PLACEHOLDER: &str = "Type to search";
 /// evdev `BTN_LEFT`: wayland-client names no button codes.
@@ -273,15 +273,15 @@ pub fn open(opts: Options) -> i32 {
         }
     };
     let em = look.font_size_px.clamp(1.0, 256.0);
-    let row_h = em.ceil() as u32 + 8;
+    let layout = if dmenu.is_some() {
+        Layout::dmenu(em)
+    } else {
+        Layout::new(em, look.radius, 1.0)
+    };
     let width = (config.width_em as f32 * em) as u32;
     // A prompt-only dmenu panel shows the entry alone: no gap, no list
     // (the `list_rows` above already resolved this for the same rows).
-    let height = BORDER
-        .saturating_add(PAD)
-        .saturating_mul(2)
-        .saturating_add(row_h.saturating_mul(list_rows.saturating_add(1)))
-        .saturating_add(GAP);
+    let height = layout.height(list_rows);
     let icon_theme = look.icon_theme.clone();
     let icon_bases = crate::icons::theme_bases();
     run_panel(
@@ -292,7 +292,7 @@ pub fn open(opts: Options) -> i32 {
         PanelSpec {
             width,
             height,
-            row_h,
+            layout,
             rows: list_rows as usize,
             launch,
             dmenu,
@@ -349,7 +349,7 @@ struct LaunchCtx {
 struct PanelSpec {
     width: u32,
     height: u32,
-    row_h: u32,
+    layout: Layout,
     rows: usize,
     launch: LaunchCtx,
     dmenu: Option<DmenuSpec>,
@@ -435,7 +435,7 @@ fn run_panel(
         model,
         spec.width,
         spec.height,
-        spec.row_h,
+        spec.layout,
         spec.launch,
         spec.dmenu,
         spec.empty_text,
@@ -534,7 +534,12 @@ struct App {
     model: Model,
     width: u32,
     height: u32,
-    row_h: u32,
+    layout: Layout,
+    /// The apps panel's geometry as last drawn (device pixels) and the
+    /// scale it was drawn at, so a click lands on the row the pixels
+    /// show at a fractional scale; `None` before the first draw and in
+    /// dmenu mode (drawn at scale 1 from `layout`).
+    drawn: Option<(Layout, f64)>,
     launch: LaunchCtx,
     dmenu: Option<DmenuSpec>,
     empty_text: &'static str,
@@ -588,7 +593,7 @@ impl App {
         model: Model,
         width: u32,
         height: u32,
-        row_h: u32,
+        layout: Layout,
         launch: LaunchCtx,
         dmenu: Option<DmenuSpec>,
         empty_text: &'static str,
@@ -600,7 +605,8 @@ impl App {
             model,
             width,
             height,
-            row_h,
+            layout,
+            drawn: None,
             launch,
             dmenu,
             empty_text,
@@ -743,14 +749,15 @@ impl App {
             Model::Apps(ui) | Model::Run(ui) => ui.list(),
             Model::Dmenu(dui) => dui.list(),
         };
-        let list_y = BORDER
-            .saturating_add(PAD)
-            .saturating_add(self.row_h)
-            .saturating_add(GAP);
-        if self.pointer_y < list_y || self.row_h == 0 {
+        let (layout, factor) = self.drawn.unwrap_or((self.layout, 1.0));
+        // The pointer is in surface (logical) pixels, the drawn rows in
+        // device pixels.
+        let y = (f64::from(self.pointer_y) * factor) as u32;
+        let list_y = layout.list_y();
+        if y < list_y || layout.row_h == 0 {
             return None;
         }
-        let row = (self.pointer_y - list_y) / self.row_h;
+        let row = (y - list_y) / layout.row_h;
         let row = row as usize;
         (row < list.visible_range().len()).then_some(row)
     }
@@ -803,6 +810,10 @@ impl App {
         let dmenu = self.dmenu.as_ref();
         match &self.model {
             Model::Apps(ui) | Model::Run(ui) => {
+                self.drawn = Some((
+                    device_layout(look, frame.scale),
+                    frame.scale.factor().max(MIN_FACTOR),
+                ));
                 paint_panel(
                     slot.pixels_mut(),
                     dims,
@@ -811,7 +822,6 @@ impl App {
                     look,
                     self.width,
                     self.height,
-                    self.row_h,
                     error.as_deref(),
                     self.empty_text,
                     frame.scale,
@@ -832,7 +842,7 @@ impl App {
                     look,
                     self.width,
                     self.height,
-                    self.row_h,
+                    self.layout.row_h,
                     dmenu,
                 );
             }
@@ -981,15 +991,16 @@ impl App {
 /// Paints the panel: the rounded chrome (border ring in `focus`, fill in
 /// `surface` at `opacity`), the entry line, and the list's visible rows.
 /// `dims` is the buffer size; the logical `width`/`height` size the panel
-/// when the compositor configures larger. The entry sits at the top, the
-/// list below a [`GAP`]. A fresh spawn failure draws instead of the list.
+/// when the compositor configures larger. The search field sits at the
+/// top, the list below a gap; every measurement comes from [`Layout`].
+/// A fresh spawn failure draws instead of the list.
 ///
-/// The icon column shifts both entry and list text right by the icon
-/// side plus one space, so the two stay aligned
-/// ([`Geometry::text_x`]): the entry draws the selected row's icon (or
-/// its tile), each visible list row draws its own. Only visible rows
-/// resolve or decode (one file each, bounded by [`crate::icons`]); the
-/// keystroke path never touches the cache.
+/// The selected row's highlight is drawn first, across the whole inner
+/// box, then the row text over it, then each visible row's icon (or its
+/// tile) inside the highlight, one `lead` from its left edge. The search
+/// line carries no icon. Only visible rows resolve or decode (one file
+/// each, bounded by [`crate::icons`]); the keystroke path never touches
+/// the cache.
 #[allow(clippy::too_many_arguments)]
 fn paint_panel(
     pixels: &mut [u8],
@@ -999,7 +1010,6 @@ fn paint_panel(
     look: &Look,
     width: u32,
     height: u32,
-    row_h: u32,
     error: Option<&str>,
     empty_text: &str,
     scale: scootui::density::Scale,
@@ -1008,7 +1018,7 @@ fn paint_panel(
     icons: &mut crate::icons::Cache,
 ) {
     let (buffer_w, buffer_h) = dims;
-    let factor = scale.factor().max(0.25);
+    let factor = scale.factor().max(MIN_FACTOR);
     let scale_len = |logical: u32| -> u32 {
         if logical == 0 {
             0
@@ -1021,117 +1031,75 @@ fn paint_panel(
     };
     let width_d = scale_len(width).min(buffer_w).max(1);
     let height_d = scale_len(height).min(buffer_h).max(1);
-    let row_h_d = scale_len(row_h).max(1);
-    let border_d = scale_len(BORDER).max(1);
-    let pad_d = scale_len(PAD);
-    let gap_d = scale_len(GAP);
-    if width_d == 0 || height_d == 0 || row_h_d == 0 {
-        return;
-    }
-    chrome_scaled(pixels, buffer_w, width_d, height_d, border_d, look);
+    let layout = device_layout(look, scale);
+    let (em, radius_d) = (layout.em, scale_len(look.radius));
+    chrome_scaled(
+        pixels,
+        buffer_w,
+        width_d,
+        height_d,
+        layout.border,
+        radius_d,
+        look,
+    );
     let Some(mut canvas) = Canvas::new(pixels, buffer_w, buffer_h) else {
         return;
     };
-    let em = ((look.font_size_px as f64 * factor) as f32).clamp(1.0, 512.0);
-    let inner = border_d.saturating_add(pad_d);
-    // The icon column: one icon side plus one space, in device pixels.
-    // The side is the em rounded (as the bar's), fitted into the row.
-    let mut side = Text::art_side(em);
-    let cap = crate::icons::MAX_RENDER_SIDE.min(row_h_d.saturating_sub(2).max(1));
-    side = side.clamp(1, cap);
-    let gap = text.art_gap(em).max(1);
-    let icon_col = side.saturating_add(gap);
-    let icon_x = inner.saturating_add((em * 0.5).round().clamp(0.0, 64.0) as u32);
-    let entry_geo = Geometry {
-        x: inner.saturating_add(icon_col),
-        y: inner,
-        width: width_d.saturating_sub(inner.saturating_mul(2).saturating_add(icon_col)),
-        row_height: row_h_d,
-        em,
-    };
-    // The entry's icon: the selection's, so the entry shows what Enter
-    // would launch. A tile when nothing resolves, as in the rows.
-    let selected = ui.selected();
-    let entry_icon = selected.and_then(|entry| entry.icon.as_deref());
-    let entry_label = selected.map(|entry| entry.name.as_str()).unwrap_or("");
-    draw_icon(
-        &mut canvas,
-        text,
-        look,
-        icons,
-        icon_theme,
-        icon_bases,
-        entry_icon,
-        entry_label,
-        icon_x,
-        inner.saturating_add(row_h_d.saturating_sub(side) / 2),
-        side,
-    );
+    let first_row = layout.row(width_d, 0);
+    let list_geo = layout.list_geometry(width_d);
+    // The search field: the entry line alone, with no row icon (the
+    // selection's icon is on its own row).
     paint_entry(
         &mut canvas,
         text,
         &look.theme,
         ui.entry(),
-        &entry_geo,
+        &layout.field_geometry(width_d),
         true,
         PLACEHOLDER,
     );
-    if let Some(error) = error {
-        let metrics = text.metrics(em);
-        let baseline = i64::from(inner.saturating_add(row_h_d).saturating_add(gap_d))
-            + metrics.baseline(row_h_d);
-        text.draw(
-            &mut canvas,
-            None,
-            error,
-            em,
-            i64::from(entry_geo.text_x()),
-            baseline,
-            look.theme.urgent,
-            entry_geo.clip(),
-        );
-        return;
-    }
-    if ui.list().count() == 0 {
-        let metrics = text.metrics(em);
-        let baseline = i64::from(inner.saturating_add(row_h_d).saturating_add(gap_d))
-            + metrics.baseline(row_h_d);
-        text.draw(
-            &mut canvas,
-            None,
-            empty_text,
-            em,
-            i64::from(entry_geo.text_x()),
-            baseline,
-            look.theme.dim,
-            entry_geo.clip(),
-        );
-        return;
-    }
-    let list_geo = Geometry {
-        x: inner.saturating_add(icon_col),
-        y: inner.saturating_add(row_h_d).saturating_add(gap_d),
-        width: entry_geo.width,
-        row_height: row_h_d,
-        em,
+    // An error or an empty list draws one dim line where the first row
+    // would be, aligned with the row text.
+    let note = match error {
+        Some(error) => Some((error, look.theme.urgent)),
+        None if ui.list().count() == 0 => Some((empty_text, look.theme.dim)),
+        None => None,
     };
-    paint_list(
+    if let Some((note, color)) = note {
+        let metrics = text.metrics(em);
+        text.draw(
+            &mut canvas,
+            None,
+            note,
+            em,
+            i64::from(list_geo.text_x()),
+            i64::from(first_row.y) + metrics.baseline(layout.row_h),
+            color,
+            list_geo.clip(),
+        );
+        return;
+    }
+    // The selection highlight first, full row width and the panel's
+    // corner radius, so the icon and text draw on top of it.
+    let selected = ui.list().selected();
+    for (slot, row) in ui.list().visible_range().enumerate() {
+        if selected == Some(row) {
+            let rect = layout.row(width_d, slot as u32);
+            fill_round_rect(&mut canvas, rect, layout.radius, look.theme.accent);
+        }
+    }
+    paint_list_over(
         &mut canvas,
         text,
         &look.theme,
         ui.list(),
         &list_geo,
         &|row| ui.row_text(row),
-        false,
     );
     // The visible rows' icons, after the text (so a slow filesystem
     // never moves the text): one bounded load each, cached per open.
-    let list_y = inner.saturating_add(row_h_d).saturating_add(gap_d);
     for (slot, row) in ui.list().visible_range().enumerate() {
-        let slot = slot as u32;
-        let y = list_y.saturating_add(slot.saturating_mul(row_h_d));
-        let icon = ui.row_icon(row);
-        let label = ui.row_label(row);
+        let rect = layout.icon(layout.row(width_d, slot as u32));
         draw_icon(
             &mut canvas,
             text,
@@ -1139,19 +1107,35 @@ fn paint_panel(
             icons,
             icon_theme,
             icon_bases,
-            icon,
-            label,
-            icon_x,
-            y.saturating_add(row_h_d.saturating_sub(side) / 2),
-            side,
+            ui.row_icon(row),
+            ui.row_label(row),
+            rect,
+            selected == Some(row),
         );
     }
 }
 
-/// Draws one row's icon at (`x`, `y`), `side` device pixels square: the
-/// decoded image blended over the panel, or a letter tile in `accent`
-/// with the letter in `background`. Never panics: a short buffer or a
-/// missing glyph draws nothing.
+/// The smallest output scale the draw honors.
+const MIN_FACTOR: f64 = 0.25;
+
+/// The apps panel's geometry in device pixels at `scale`: all of it
+/// derives from the device em and radius, so the shape is the same at
+/// every font size and scale. The one place the draw and the pointer's
+/// row hit-test take it from.
+fn device_layout(look: &Look, scale: scootui::density::Scale) -> Layout {
+    let factor = scale.factor().max(MIN_FACTOR);
+    let em = ((f64::from(look.font_size_px) * factor) as f32).clamp(1.0, 512.0);
+    let radius = (f64::from(look.radius) * factor)
+        .round()
+        .clamp(0.0, f64::from(u32::MAX)) as u32;
+    Layout::new(em, radius, factor)
+}
+
+/// Draws one row's icon into `rect` (a square, `rect.width` device pixels
+/// a side): the decoded image blended over the row, or a rounded letter
+/// tile in `accent` with the letter in `background` (swapped on the
+/// `selected` row, whose fill is the accent already). Never panics: a
+/// short buffer or a missing glyph draws nothing.
 #[allow(clippy::too_many_arguments)]
 fn draw_icon(
     canvas: &mut Canvas<'_>,
@@ -1162,10 +1146,10 @@ fn draw_icon(
     bases: &[PathBuf],
     icon: Option<&str>,
     label: &str,
-    x: u32,
-    y: u32,
-    side: u32,
+    rect: Rect,
+    selected: bool,
 ) {
+    let (x, y, side) = (rect.x, rect.y, rect.width);
     if side == 0 {
         return;
     }
@@ -1195,12 +1179,14 @@ fn draw_icon(
             }
         }
         crate::icons::Icon::Tile(letter) => {
-            canvas.fill_rect(
-                scootui::paint::Span { x, width: side },
-                y,
-                y.saturating_add(side),
-                look.theme.accent,
-            );
+            // The selected row's fill is the accent already: invert, so
+            // the tile stays a visible square there.
+            let (fill, ink) = if selected {
+                (look.theme.background, look.theme.accent)
+            } else {
+                (look.theme.accent, look.theme.background)
+            };
+            fill_round_rect(canvas, rect, side / 5, fill);
             let mut letter_text = [0u8; 4];
             let letter_str = letter.encode_utf8(&mut letter_text);
             let em = tile_em(side);
@@ -1215,7 +1201,7 @@ fn draw_icon(
                 em,
                 at as i64,
                 baseline,
-                look.theme.background,
+                ink,
                 scootui::paint::Span { x, width: side },
             );
         }
@@ -1331,7 +1317,7 @@ fn paint_dmenu(
 /// over the panel's pixels; redraws happen on state changes, never per
 /// frame.
 fn chrome(pixels: &mut [u8], buffer_w: u32, width: u32, height: u32, look: &Look) {
-    chrome_scaled(pixels, buffer_w, width, height, BORDER, look);
+    chrome_scaled(pixels, buffer_w, width, height, BORDER, look.radius, look);
 }
 
 /// The chrome at a device border width: the fractional draw scales the
@@ -1343,10 +1329,10 @@ fn chrome_scaled(
     width: u32,
     height: u32,
     border: u32,
+    radius: u32,
     look: &Look,
 ) {
-    let radius = look
-        .radius
+    let radius = radius
         .min(width.saturating_div(2))
         .min(height.saturating_div(2)) as f32;
     let alpha = (look.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -2206,8 +2192,8 @@ mod tests {
         let scale = scootui::density::Scale::Fractional(180);
         assert_eq!(scale.factor(), 1.5);
         let width = 400u32;
-        let row_h = 13 + 8; // The default em ceiled, plus the row pad.
-        let height = 2 * (2 + 8) + row_h * 11 + 4;
+        let logical = Layout::new(look.font_size_px, look.radius, 1.0);
+        let height = logical.height(10);
         let width_d = (f64::from(width) * 1.5).round() as u32;
         let height_d = (f64::from(height) * 1.5).round() as u32;
         let mut pixels = vec![0u8; width_d as usize * height_d as usize * 4];
@@ -2220,7 +2206,6 @@ mod tests {
             &look,
             width,
             height,
-            row_h,
             None,
             "empty",
             scale,
@@ -2229,19 +2214,18 @@ mod tests {
             &mut icons,
         );
         // The 1.5x icon side from the scaled em, as `paint_panel`
-        // derives it: above the 13 px a scale-1 draw would use.
+        // derives it: above the 1x side a scale-1 draw would use.
         let em = (f64::from(look.font_size_px) * 1.5) as f32;
-        let row_h_d = (f64::from(row_h) * 1.5).round() as u32;
-        let side = (em.round().max(1.0) as u32).min(row_h_d.saturating_sub(2).max(1));
-        assert!(side > 13, "a 1.5x side {side} above the 1x side 13");
-        // The entry's icon square, as `paint_panel` places it.
-        let inner = (2.0f64 * 1.5).round() as u32 + (8.0f64 * 1.5).round() as u32;
-        let icon_x = inner + (em * 0.5).round().clamp(0.0, 64.0) as u32;
-        let entry_y = inner + row_h_d.saturating_sub(side) / 2;
+        let device = Layout::new(em, (f64::from(look.radius) * 1.5).round() as u32, 1.5);
+        let side = device.side;
+        assert!(side > logical.side, "a 1.5x side {side} above the 1x side");
+        // The first row's icon square, as `paint_panel` places it.
+        let icon = device.icon(device.row(width_d, 0));
+        assert_eq!(icon.width, side);
         // BGRA premultiplied, as the canvas blends it: opaque red.
         let mut red = 0u32;
-        for x in icon_x..icon_x + side {
-            for y in entry_y..entry_y + side {
+        for x in icon.x..icon.right() {
+            for y in icon.y..icon.bottom() {
                 let at = (y * width_d + x) as usize * 4;
                 let pixel = &pixels[at..at + 4];
                 if pixel == [0, 0, 255, 255] {
@@ -2251,7 +2235,102 @@ mod tests {
         }
         assert!(
             red >= side * side / 2,
-            "{red} red icon pixels for one {side}px entry icon at 1.5x"
+            "{red} red icon pixels for one {side}px row icon at 1.5x"
         );
+    }
+
+    /// Fonts 11 to 20 at scales 1, 1.5 and 2, with an empty list, one
+    /// row, a full window and a hostile-narrow panel: the draw never
+    /// panics, the highlight's first and last pixels sit at the inner
+    /// padding, and the pixels left of the icon are still highlight.
+    #[test]
+    fn the_panel_draws_at_every_font_and_scale() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let mut text = test_text(dir.path());
+        let mut icons = crate::icons::Cache::default();
+        for font in [11.0f32, 13.0, 16.0, 20.0] {
+            for scale in [
+                scootui::density::Scale::Integer(1),
+                scootui::density::Scale::Fractional(180),
+                scootui::density::Scale::Integer(2),
+            ] {
+                for count in [0usize, 1, 5, 40] {
+                    let entries = (0..count)
+                        .map(|n| Entry {
+                            id: format!("app{n}.desktop"),
+                            name: format!("Application number {n}"),
+                            generic_name: None,
+                            comment: None,
+                            keywords: Vec::new(),
+                            icon: None,
+                            exec: vec!["x".to_owned()],
+                            terminal: false,
+                            dbus_activatable: false,
+                            actions: Vec::new(),
+                            path: std::path::PathBuf::from("/usr/share/applications/x.desktop"),
+                            workdir: None,
+                            hidden: None,
+                        })
+                        .collect();
+                    let ui = Ui::open(entries, Frecency::empty(), 0, 10);
+                    let look = Look {
+                        font_size_px: font,
+                        ..Look::default()
+                    };
+                    let logical = Layout::new(font, look.radius, 1.0);
+                    let width = (30.0 * font) as u32;
+                    let height = logical.height(10);
+                    let factor = scale.factor();
+                    let width_d = (f64::from(width) * factor).round() as u32;
+                    let height_d = (f64::from(height) * factor).round() as u32;
+                    let mut pixels = vec![0u8; width_d as usize * height_d as usize * 4];
+                    paint_panel(
+                        &mut pixels,
+                        (width_d, height_d),
+                        &ui,
+                        &mut text,
+                        &look,
+                        width,
+                        height,
+                        None,
+                        "empty",
+                        scale,
+                        "Fixture",
+                        &[],
+                        &mut icons,
+                    );
+                    if count == 0 {
+                        continue;
+                    }
+                    let em = (f64::from(font) * factor) as f32;
+                    let radius = (f64::from(look.radius) * factor).round() as u32;
+                    let device = Layout::new(em, radius, factor);
+                    let row = device.row(width_d, 0);
+                    let accent = look.theme.accent.argb8888(255).to_le_bytes();
+                    let at = |x: u32, y: u32| {
+                        let i = (y * width_d + x) as usize * 4;
+                        pixels[i..i + 4].to_vec()
+                    };
+                    let mid = row.y + row.height / 2;
+                    // The first row is selected: highlight edge to edge,
+                    // and the icon column's left margin is still fill.
+                    assert_eq!(at(row.x, mid), accent, "font {font} scale {factor}");
+                    assert_eq!(
+                        at(row.right() - 1, mid),
+                        accent,
+                        "font {font} scale {factor}"
+                    );
+                    assert_eq!(
+                        at(row.x + device.lead - 1, mid),
+                        accent,
+                        "font {font} scale {factor}"
+                    );
+                    // Nothing paints outside the inner box's rows: the
+                    // padding between the border and the highlight is
+                    // not accent.
+                    assert_ne!(at(row.x - 1, mid), accent, "font {font} scale {factor}");
+                }
+            }
+        }
     }
 }

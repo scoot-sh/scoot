@@ -62,4 +62,6 @@ pub use line::{
     PasswordEntry,
 };
 pub use list::{Activate, Highlight, List, MAX_HIGHLIGHT_ROWS, MAX_SPANS_PER_ROW, Selector};
-pub use paint::{Geometry, paint_entry, paint_list, paint_password, paint_selector};
+pub use paint::{
+    Geometry, paint_entry, paint_list, paint_list_over, paint_password, paint_selector,
+};

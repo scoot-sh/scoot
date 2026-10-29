@@ -512,12 +512,17 @@ pub enum Icon {
 /// The process-lifetime icon cache: at most [`MAX_ENTRIES`] icons,
 /// [`MAX_BYTES`] in all. Past either the whole cache is dropped and
 /// refilled from what is drawn next. Keyed by the icon key (name or
-/// path) and the device side. Only decoded images are cached: a letter
-/// tile is the row's own label, cheap to redraw, so tiles never enter
-/// the map (two icon-less rows must never share one entry).
+/// path) and the device side. Decoded images are cached, and so is the
+/// fact that a name yields none; the letter tile is the row's own label,
+/// cheap to redraw, so the letter never enters the map (two icon-less
+/// rows must never share one entry).
 #[derive(Debug, Default)]
 pub struct Cache {
-    entries: HashMap<(String, u32), Icon>,
+    /// `None` is a known miss (nothing resolved, decoded, or the image
+    /// was blank): remembered so a redraw of the same row costs a lookup,
+    /// not a theme walk and a decode. The tile letter is per label, so it
+    /// is never stored.
+    entries: HashMap<(String, u32), Option<Decoded>>,
     bytes: usize,
 }
 
@@ -545,27 +550,27 @@ impl Cache {
         };
         let key = (name.to_string(), side);
         if let Some(hit) = self.entries.get(&key) {
-            return hit.clone();
+            return match hit {
+                Some(decoded) => Icon::Image(decoded.clone()),
+                None => Icon::Tile(tile_letter(label)),
+            };
         }
-        let Some(decoded) =
-            find_file(configured, name, side, bases).and_then(|path| decode_file(&path, side))
-        else {
-            // A name that resolves or decodes to nothing draws the
-            // row's own tile, uncached like the nameless case: caching
-            // it under the name would hand one row's letter to every
-            // other row sharing that name, and tiles cost nothing to
-            // redraw.
-            return Icon::Tile(tile_letter(label));
-        };
-        let bytes = decoded.pixels.len();
+        let decoded =
+            find_file(configured, name, side, bases).and_then(|path| decode_file(&path, side));
+        let bytes = decoded.as_ref().map_or(0, |decoded| decoded.pixels.len());
         if self.entries.len() + 1 > MAX_ENTRIES || self.bytes + bytes > MAX_BYTES {
             self.entries.clear();
             self.bytes = 0;
         }
         self.bytes += bytes;
-        let icon = Icon::Image(decoded);
-        self.entries.insert(key, icon.clone());
-        icon
+        self.entries.insert(key, decoded.clone());
+        // A miss draws the row's own tile, and only the miss is cached:
+        // caching the letter under the name would hand one row's letter
+        // to every other row sharing that name.
+        match decoded {
+            Some(decoded) => Icon::Image(decoded),
+            None => Icon::Tile(tile_letter(label)),
+        }
     }
 
     /// Cached icons and their bytes, for tests.
@@ -593,12 +598,28 @@ fn decode_file(path: &Path, side: u32) -> Option<Decoded> {
         .extension()
         .and_then(|extension| extension.to_str())
         .unwrap_or("");
-    match extension {
+    let decoded = match extension {
         "png" => decode_png(path, side),
         #[cfg(feature = "svg")]
         "svg" => decode_svg(path, side),
         _ => None,
-    }
+    }?;
+    // A fully transparent or near-invisible image draws as a blank
+    // square; the letter tile is the better answer.
+    (!is_blank(&decoded.pixels)).then_some(decoded)
+}
+
+/// The most opaque pixel in an icon's alpha below which it reads as
+/// blank: no pixel at or above it means nothing visible to draw.
+const BLANK_ALPHA: u8 = 24;
+
+/// Whether premultiplied `b, g, r, a` pixels hold nothing visible.
+fn is_blank(pixels: &[u8]) -> bool {
+    pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .all(|pixel| pixel[3] < BLANK_ALPHA)
 }
 
 /// Decodes a PNG and fits it into a `side x side` premultiplied

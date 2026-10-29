@@ -13,15 +13,18 @@
 mod harness;
 
 use std::fs;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use harness::{
-    BROWSER_BLUE, MARK_WHITE, Panel, TERMINAL_ORANGE, desktop, desktop_with_icon,
-    fixture_icon_theme, launch_bin, rgb, session_with_apps, session_with_stubs, wait_for,
-    wait_marker,
+    BROWSER_BLUE, Geom, MARK_WHITE, Panel, TERMINAL_ORANGE, desktop, desktop_with_icon,
+    fixture_icon_theme, launch_bin, render_launch_fragment, rgb, session_with_apps,
+    session_with_stubs, wait_for, wait_marker,
 };
+
+/// The default look's font size and radius (no look layer in the sandbox).
+const DEFAULT_EM: f32 = 13.0;
+const DEFAULT_RADIUS: u32 = 8;
 
 fn refs<'a>(bodies: &'a [(&'a str, String)]) -> Vec<(&'a str, &'a str)> {
     bodies
@@ -52,6 +55,7 @@ fn open_type_select_launches() {
     // focus #f9e2af.
     panel.wait_shown(rgb("#f9e2af"));
     std::thread::sleep(Duration::from_millis(300));
+    let g = Geom::new(DEFAULT_EM, DEFAULT_RADIUS);
     panel.type_text("term");
     std::thread::sleep(Duration::from_millis(500));
     panel.save("type-select");
@@ -59,7 +63,9 @@ fn open_type_select_launches() {
     // second row's middle is panel fill, not a row.
     let (x0, y0, x1, _) = panel.find_panel(rgb("#f9e2af"));
     assert_eq!(
-        panel.shot().at((x0 + x1) / 2, y0 + 35 + 21 + 10),
+        panel
+            .shot()
+            .at((x0 + x1) / 2, y0 + g.list_y() + g.row_h + g.row_h / 2),
         rgb("#1e1e2e"),
         "the filtered list drew"
     );
@@ -287,10 +293,10 @@ fn a_click_on_a_row_launches_it() {
     };
     panel.wait_shown(rgb("#f9e2af"));
     std::thread::sleep(Duration::from_millis(300));
-    // The second row's middle, from the border box: entry at inner 10,
-    // rows 21 px from list_y0 = 35.
+    // The second row's middle, from the border box.
+    let g = Geom::new(DEFAULT_EM, DEFAULT_RADIUS);
     let (x0, y0, x1, _) = panel.find_panel(rgb("#f9e2af"));
-    panel.click((x0 + x1) / 2, y0 + 35 + 21 + 10);
+    panel.click((x0 + x1) / 2, y0 + g.list_y() + g.row_h + g.row_h / 2);
     let status = panel.wait_exit();
     let out = panel.stdout();
     assert!(
@@ -408,8 +414,9 @@ fn golden_one(name: &str) {
     let (x0, x1) = (*xs.iter().min().unwrap(), *xs.iter().max().unwrap());
     let (y0, y1) = (*ys.iter().min().unwrap(), *ys.iter().max().unwrap());
     let width = 40.0 * em;
-    let row_h = em.ceil() + 8.0;
-    let height = 2.0 * (2.0 + 8.0) + row_h * 11.0 + 4.0;
+    let radius = table["radius"].as_integer().expect("radius") as u32;
+    let g = Geom::new(em, radius);
+    let height = g.height(10) as f32;
     assert!(
         (x1 - x0) as f32 >= width - 6.0 && (x1 - x0) as f32 <= width + 2.0,
         "{name}: panel width {} for {width}",
@@ -430,7 +437,7 @@ fn golden_one(name: &str) {
         near(fill, expected_fill, 4),
         "{name}: fill {fill:?} for {expected_fill:?} at opacity {opacity}"
     );
-    let row_center_y = y0 + 2 + 8 + row_h as u32 + 4 + row_h as u32 / 2;
+    let row_center_y = y0 + g.list_y() + g.row_h / 2;
     let selected = shot.at((x0 + x1) / 2, row_center_y);
     assert_eq!(
         selected, selection,
@@ -512,12 +519,13 @@ fn icons_docs_one(name: &str) {
     panel.save(&format!("scootlaunch-{name}"));
     let shot = panel.shot();
     let (x0, y0, _, _) = panel.find_panel(focus);
-    // The icon column, as `paint_panel` derives it at scale 1: one icon
-    // side plus one space, from the em.
-    let row_h = em.ceil() as u32 + 8;
-    let side = (em.round().max(1.0) as u32).min(row_h.saturating_sub(2).max(1));
-    let icon_x = x0 + 10 + (em * 0.5).round().clamp(0.0, 64.0) as u32;
-    let list_y = y0 + 10 + row_h + 4;
+    // The icon column, as `paint_panel` derives it at scale 1: one
+    // `lead` inside the row, which is inside the highlight.
+    let radius = table["radius"].as_integer().expect("radius") as u32;
+    let g = Geom::new(em, radius);
+    let (row_h, side) = (g.row_h, g.side);
+    let icon_x = x0 + g.inner + g.lead;
+    let list_y = y0 + g.list_y();
     // All three rows match "a": Alpha (terminal PNG mark), Beta
     // (browser SVG disc), Gamma (letter tile). Count each decoder's
     // colors over all three rows — the rank order among equal matches
@@ -544,7 +552,9 @@ fn icons_docs_one(name: &str) {
                 if pixel == BROWSER_BLUE || pixel == MARK_WHITE {
                     browser += 1;
                 }
-                if pixel == accent {
+                // The first row is selected, its fill the accent already:
+                // only the rows below count the tile's own fill.
+                if row > 0 && pixel == accent {
                     tile += 1;
                 }
             }
@@ -565,32 +575,6 @@ fn icons_docs_one(name: &str) {
     panel.key("Escape");
     panel.wait_exit();
     panel.clean();
-}
-
-/// Renders the shipped look's `launch.toml`, as `scoot look apply`
-/// writes it into the state link.
-fn render_launch_fragment(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("looks")
-        .join(name)
-        .join("look.toml");
-    let bytes = fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
-    let raw = scoot_look::parse_look_toml(&bytes).unwrap_or_else(|errors| {
-        panic!(
-            "{name}/look.toml refuses to parse: {}",
-            errors
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("; ")
-        )
-    });
-    let map =
-        std::collections::BTreeMap::from([(name.to_string(), (raw, scoot_look::Origin::Shipped))]);
-    let look = scoot_look::resolve(&map, name).unwrap_or_else(|e| panic!("{name}: {e}"));
-    scoot_look::render_launch(&look).unwrap_or_else(|e| panic!("{name}: {e}"))
 }
 
 /// `color` at `alpha` over the empty headless output (black): the same
