@@ -417,6 +417,26 @@ fn invoke_runs_the_binding_a_click_would() {
     rig.wait_lines("clicks", 4);
 }
 
+/// A full spawn table refuses the next `invoke` naming what holds it, so
+/// the user knows what to stop by hand.
+#[cfg(feature = "button")]
+#[test]
+fn invoke_into_a_full_spawn_table_names_the_running_commands() {
+    let bindings = "[button.pad]\ntext = \"P\"\n\
+        on-click = { exec = [\"sh\", \"-c\", \"sleep 8 # secret-token\"] }\n";
+    let Some(rig) = Rig::start("agent-invoke-full", "", 1, bindings, "right = [\"pad\"]\n") else {
+        return;
+    };
+    for _ in 0..8 {
+        rig.ok(&["invoke", "pad", "click"]);
+    }
+    let said = rig.refused(&["invoke", "pad", "click"]);
+    assert!(said.contains("8 launched commands"), "{said}");
+    assert_eq!(said.matches("`sh` pid ").count(), 8, "{said}");
+    assert!(said.contains("stop one by hand"), "{said}");
+    assert!(!said.contains("secret-token"), "{said}");
+}
+
 #[cfg(feature = "workspaces")]
 #[test]
 fn invoke_runs_a_module_action_with_its_number() {
