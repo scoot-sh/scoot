@@ -1,9 +1,10 @@
 ---
 title: "install.sh follow-ups from the #565 re-review"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-29"
 ---
 
 # install.sh follow-ups from the #565 re-review
@@ -28,3 +29,7 @@ One small PR: fix 1-3, decide on 4 (a marker file is enough), add the missing te
 ## Not in this ticket
 
 Checksums for the session, unit and look files (same TLS trust root as `SHA256SUMS`, so no gain), and `.deb`/`.rpm` on the tagged releases.
+
+## Resolution
+
+Items 2 and 3 were already fixed on main when this landed (`pkg_for` maps `foot` in every branch; `has_tag` matches with `grep -F`), so they needed no change. Item 1: the five remaining SC2015 sites in `test-install.sh` are brace-grouped, and the file is clean on shellcheck 0.9.0 and 0.11.0. Item 4: the refusal now says an install of the script still running at the prefix can cause it (no marker file); the gate asserts the hint. Coverage gap: a new case runs the installer on a PATH with no `systemctl` and asserts the "no systemd user manager" note.

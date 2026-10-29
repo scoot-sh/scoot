@@ -685,7 +685,7 @@ if [ "$skip_install" = 0 ]; then
     # per destination: the paths may contain spaces (a $HOME with one), so
     # they are never joined into a word-split string.
     check_ours() {
-        ours "$1" || die "$1 exists and was not installed by this script (a distro package or a source build?). Remove it first, or install elsewhere with --prefix."
+        ours "$1" || die "$1 exists and was not installed by this script (a distro package, a source build, or an install of this script still running here?). Remove it first, wait for the other install, or install elsewhere with --prefix."
     }
     check_ours "$bin_dir/scoot"
     check_ours "$bin_dir/scootbg"
