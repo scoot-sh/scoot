@@ -7997,9 +7997,15 @@ let
     # and build-time render, the declared default, no Nix-owned dconf
     # keys, and the sync step after the links and dconf land...
     (
-      assert lib.hasSuffix "looks/ginger-night" (
-        toString hmDesk.config.xdg.dataFile."scoot/looks/ginger-night".source
-      );
+      assert hmDesk.config.xdg.dataFile."scoot/looks/ginger-night".source == "${../looks/ginger-night}";
+      true
+    )
+    # ...as one store path with the system half's `ln -s ${entry.src}`:
+    # string context makes home-manager link it as is, where a bare path
+    # would be copied again as `hm_<name>` (a second path, every look
+    # listed twice)...
+    (
+      assert builtins.hasContext (toString hmDesk.config.xdg.dataFile."scoot/looks/ginger-night".source);
       true
     )
     (
@@ -8334,9 +8340,8 @@ let
       true
     )
     (
-      assert lib.hasSuffix "looks/music-desk" (
-        toString hmDeskLookMusic.config.xdg.dataFile."scoot/looks/music-desk".source
-      );
+      assert
+        hmDeskLookMusic.config.xdg.dataFile."scoot/looks/music-desk".source == "${../looks/music-desk}";
       true
     )
     (
@@ -8443,9 +8448,8 @@ let
       true
     )
     (
-      assert lib.hasSuffix "looks/vinyl-sunset" (
-        toString hmDeskLookVinyl.config.xdg.dataFile."scoot/looks/vinyl-sunset".source
-      );
+      assert
+        hmDeskLookVinyl.config.xdg.dataFile."scoot/looks/vinyl-sunset".source == "${../looks/vinyl-sunset}";
       true
     )
     (
@@ -14444,7 +14448,7 @@ let
       true
     )
     (
-      assert lib.hasSuffix "test-looks/my-green" (
+      assert lib.hasSuffix "-my-green" (
         toString hmLookCustom.config.xdg.dataFile."scoot/looks/my-green".source
       );
       true
@@ -14459,9 +14463,7 @@ let
     # `"moonrise"` keeps the shipped source (catalog order, not store
     # basename)...
     (
-      assert lib.hasSuffix "looks/moonrise" (
-        toString hmLookCustom.config.xdg.dataFile."scoot/looks/moonrise".source
-      );
+      assert hmLookCustom.config.xdg.dataFile."scoot/looks/moonrise".source == "${../looks/moonrise}";
       true
     )
     (

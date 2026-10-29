@@ -758,7 +758,13 @@ in
         map (entry: {
           name = "scoot/looks/${entry.name}";
           value = {
-            source = entry.src;
+            # Interpolated, so the source carries string context and
+            # home-manager links it as is. A bare path value makes it
+            # `builtins.path` a second copy named `hm_<name>`, a store
+            # path different from the one the NixOS half links
+            # (`ln -s ${entry.src}`), and `scoot look list` then shows
+            # every look twice, the second shadowed.
+            source = "${entry.src}";
           };
         }) lookCatalog.entries
         ++ map (name: {

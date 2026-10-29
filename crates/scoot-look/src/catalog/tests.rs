@@ -235,3 +235,100 @@ fn the_same_directory_twice_scans_once() {
     assert!(catalog.shadowed.is_empty());
     assert_eq!(catalog.entries[0].origin, Origin::User);
 }
+
+/// Two catalog directories whose entries link the same store look, the
+/// shape of a NixOS system half plus a home-manager half (both link
+/// `entry.src`). One look reached twice is not a shadow.
+#[test]
+fn the_same_look_linked_from_two_directories_is_not_shadowed() {
+    let _scratch = scratch("dup-link");
+    let root = _scratch.path();
+    let store = root.join("store").join("abc-moonrise-look");
+    std::fs::create_dir_all(&store).expect("a store dir");
+    std::fs::write(store.join("look.toml"), look_toml("moonrise")).expect("a manifest");
+    let home = root.join("home-looks");
+    let system = root.join("system-looks");
+    for dir in [&home, &system] {
+        std::fs::create_dir_all(dir).expect("a catalog dir");
+        std::os::unix::fs::symlink(&store, dir.join("moonrise")).expect("a look link");
+    }
+    let catalog = discover_ordered(&[(home, Origin::Declared), (system, Origin::Declared)]);
+    assert_eq!(catalog.entries.len(), 1);
+    assert!(
+        catalog.shadowed.is_empty(),
+        "shadowed: {:?}",
+        catalog.shadowed
+    );
+    assert!(catalog.notes.is_empty(), "notes: {:?}", catalog.notes);
+}
+
+/// Per-file farms: each half has its own real directory, both linking the
+/// same store manifest. Same manifest, same files beside it: one look.
+#[test]
+fn per_file_farms_of_the_same_store_look_are_not_shadowed() {
+    let _scratch = scratch("dup-farm");
+    let root = _scratch.path();
+    let store = root.join("store").join("moonrise");
+    std::fs::create_dir_all(&store).expect("a store dir");
+    std::fs::write(store.join("look.toml"), look_toml("moonrise")).expect("a manifest");
+    let mut dirs = Vec::new();
+    for half in ["home-looks", "system-looks"] {
+        let entry = root.join(half).join("moonrise");
+        std::fs::create_dir_all(&entry).expect("a look dir");
+        std::os::unix::fs::symlink(store.join("look.toml"), entry.join("look.toml"))
+            .expect("a manifest link");
+        dirs.push((root.join(half), Origin::Declared));
+    }
+    let catalog = discover_ordered(&dirs);
+    assert_eq!(catalog.entries.len(), 1);
+    assert!(catalog.shadowed.is_empty());
+}
+
+/// A genuine shadow stays loud: two different sources, even with the same
+/// bytes, or one linked source and one real copy.
+#[test]
+fn two_different_sources_of_one_name_still_shadow() {
+    let _scratch = scratch("dup-genuine");
+    let root = _scratch.path();
+    let store_a = root.join("store").join("a-moonrise");
+    let store_b = root.join("store").join("b-moonrise");
+    for store in [&store_a, &store_b] {
+        std::fs::create_dir_all(store).expect("a store dir");
+        std::fs::write(store.join("look.toml"), look_toml("moonrise")).expect("a manifest");
+    }
+    let first = root.join("first");
+    let second = root.join("second");
+    let third = root.join("third");
+    for (dir, store) in [(&first, &store_a), (&second, &store_b)] {
+        std::fs::create_dir_all(dir).expect("a catalog dir");
+        std::os::unix::fs::symlink(store, dir.join("moonrise")).expect("a look link");
+    }
+    write_look(&third, "moonrise", "");
+    let catalog = discover_ordered(&[
+        (first, Origin::Declared),
+        (second, Origin::Declared),
+        (third, Origin::Shipped),
+    ]);
+    assert_eq!(catalog.entries.len(), 1);
+    assert_eq!(catalog.shadowed.len(), 2, "{:?}", catalog.shadowed);
+}
+
+/// A dangling link in the later half is a note, not a shadow and not a
+/// panic; a link loop likewise. The earlier look still wins.
+#[test]
+fn a_dangling_or_looping_duplicate_is_a_note_not_a_shadow() {
+    let _scratch = scratch("dup-dangling");
+    let root = _scratch.path();
+    let first = root.join("first");
+    write_look(&first, "moonrise", "");
+    let second = root.join("second");
+    std::fs::create_dir_all(&second).expect("a catalog dir");
+    std::os::unix::fs::symlink(root.join("gone"), second.join("moonrise"))
+        .expect("a dangling link");
+    std::os::unix::fs::symlink(second.join("loop-b"), second.join("loop-a")).expect("a loop");
+    std::os::unix::fs::symlink(second.join("loop-a"), second.join("loop-b")).expect("a loop");
+    let catalog = discover_ordered(&[(first, Origin::User), (second, Origin::Shipped)]);
+    assert_eq!(catalog.entries.len(), 1);
+    assert!(catalog.shadowed.is_empty());
+    assert_eq!(catalog.notes.len(), 3, "notes: {:?}", catalog.notes);
+}
