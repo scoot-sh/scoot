@@ -289,11 +289,53 @@ fn a_round_of_scales_stays_exact_on_scoot() {
     kill(&session, &mut daemon);
 }
 
-/// The scale changes while the image decodes (a large file, a debug
-/// build): the render for the old size is dropped when it lands, the image
-/// is rendered again from the file at the new size, the reply is `ok` once
-/// that is on screen, and it is sharp. Only buffers of the new size are
-/// ever given to the compositor.
+/// Serves `body` on loopback, but holds the response until `release` is
+/// sent (or dropped): the daemon's job is in flight, and stays so, for as
+/// long as the test wants. Returns the URL. A second request would wait for the
+/// same release (there should be none: the cache answers).
+fn serve_held(body: Vec<u8>, release: std::sync::mpsc::Receiver<()>) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/big.png", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut head = Vec::new();
+            let mut byte = [0u8; 1];
+            while head.len() < 8192 && !head.ends_with(b"\r\n\r\n") {
+                match stream.read(&mut byte) {
+                    Ok(1) => head.push(byte[0]),
+                    _ => break,
+                }
+            }
+            // Held here; a dropped sender releases too.
+            let _ = release.recv();
+            let _ = stream.write_all(
+                format!(
+                    "HTTP/1.0 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\n\
+                     Connection: close\r\n\r\n",
+                    body.len()
+                )
+                .as_bytes(),
+            );
+            let _ = stream.write_all(&body);
+        }
+    });
+    url
+}
+
+/// The scale changes while the image is being prepared (a large file, a
+/// slow disk or link, a debug build): the render for the old size is
+/// dropped when it lands, the image is rendered again from the file at the
+/// new size, the reply is `ok` once that is on screen, and it is sharp.
+/// Only buffers of the new size are ever given to the compositor.
+///
+/// The job is held in flight by a download the test releases only after the
+/// daemon reports the new scale, so the change cannot lose a race with the
+/// job finishing, however slow the reload is on a loaded machine. (A decode
+/// that is merely large enough to be slow raced: under load the reload took
+/// longer than the decode.) The held part is the job's first step, on the
+/// same worker thread as the decode and the draw.
 #[test]
 fn a_scale_change_while_an_image_decodes_draws_at_the_new_scale() {
     use std::io::{BufRead, BufReader, Write};
@@ -302,21 +344,35 @@ fn a_scale_change_while_an_image_decodes_draws_at_the_new_scale() {
     let Some(session) = Session::start_with("middec", 1, "") else {
         return;
     };
-    let mut daemon = session.daemon_logged(&[("WAYLAND_DEBUG", "client")]);
+    let cache = session.scratch.0.join("cache");
+    let mut daemon = session.daemon_logged(&[
+        ("WAYLAND_DEBUG", "client"),
+        ("XDG_CACHE_HOME", cache.to_str().unwrap()),
+        ("no_proxy", "127.0.0.1"),
+        ("NO_PROXY", "127.0.0.1"),
+    ]);
     configured(&session);
     let id = scoot_id(&session);
     let image = session.runtime_dir().join("big.png");
     write_checker(&image, 4000, 2500);
+    let (release, held) = std::sync::mpsc::channel();
+    let url = serve_held(std::fs::read(&image).unwrap(), held);
     let stream = UnixStream::connect(session.socket()).unwrap();
     stream.set_read_timeout(Some(PATIENCE)).unwrap();
-    let line = format!(
-        "{{\"protocol\":1,\"type\":\"set\",\"image\":{:?},\"mode\":\"center\"}}\n",
-        image.to_str().unwrap()
-    );
+    let line =
+        format!("{{\"protocol\":1,\"type\":\"set\",\"image\":{url:?},\"mode\":\"center\"}}\n");
     let asked = Instant::now();
     (&stream).write_all(line.as_bytes()).unwrap();
     reload(&session, "[output]\nscale = 1.5\n");
     let rescaled = asked.elapsed();
+    // The daemon has the new scale, and its job (at the old one) is still
+    // waiting on the held download: the change landed mid-job.
+    session.query_until("at 1.5", |o| o[0]["surface"]["scale"] == 1.5);
+    assert!(
+        sent(&session, ".create_buffer(").is_empty(),
+        "nothing was drawn while the job was held"
+    );
+    release.send(()).unwrap();
     let mut reply = String::new();
     BufReader::new(&stream).read_line(&mut reply).unwrap();
     println!(
