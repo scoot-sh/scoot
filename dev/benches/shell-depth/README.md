@@ -20,8 +20,9 @@ taskset -c 3 target/release/examples/bench_depth --font DejaVuSans.ttf --iters 5
 
 The baseline is `main` at `b233b8ab1` built from a `git archive` into its own
 target dir, with the same harness trimmed to the one style that code has (no
-`Shadow`, no `shadow` argument to `paint`). Main and branch ran alternately, six
-times each. Raw output: [`raw.txt`](raw.txt).
+`Shadow`, no `shadow` argument to `paint`): [`main-baseline-bench.rs`](main-baseline-bench.rs),
+dropped into `crates/scootnotify/examples/bench_depth.rs` of the `main` tree.
+Main and branch ran alternately, six times each. Raw output: [`raw.txt`](raw.txt).
 
 Machine: aarch64 dev VM (6 vCPU, NixOS), release profile, DejaVu Sans 13 px,
 `taskset -c 3`. Branch commit: `d5bc1c9d1`.
