@@ -23,7 +23,7 @@ an option you can build with the command script to make the iso"). Serves
 - CI builds and boot-tests both: `build-iso`, `build-iso-offline`,
   `qemu-test` (offline install, network cut), `qemu-test-online` (asserts the
   reference closure is not on the ISO, installs with the network up, logs
-  in). All green on x86_64 in scoot-iso run 40707845699.
+  in). All green on x86_64 in scoot-iso run 40798966071 (head 14b034f).
 - #20's cuts are reverted (speech synthesis off, trimmed firmware, xz, the
   2,000,000,000-byte gate), and `patch_consistency` fails if they come back.
 - Measured: online 2,729,345,024 bytes (x86_64) / 2,729,836,544 (aarch64);

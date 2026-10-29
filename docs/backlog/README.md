@@ -538,7 +538,7 @@ Project-wide, not tied to one binary; the bar's own Nix package is
 - [Pin the fd-pressure grace conjunction's boundaries](./resolved/fd-pressure-grace-boundary-pins-done.md) — RESOLVED 2026-09-18 (pin, no behavior change): `pressure_refusal`'s pure conjunction split out as `pressure_refusal_for` and pinned at both operators and both graces (129 refused, 128 passes; either half alone passes); the ceiling record's 400 stands as "two at grace", the permitted maximum is 404
 
 ### Packaging / tooling
-- [Slim the scoot ISO under GitHub's 2 GB release-asset cap](./resolved/iso-slim-under-2gb-done.md) — RESOLVED 2026-10-28 (scoot-sh/scoot-iso#20): x86_64 1,908,867,072 bytes (CI), aarch64 1,972,770,816; speechd off, live firmware trimmed, xz squashfs; CI fails above 2,000,000,000 bytes
+- [Slim the scoot ISO under GitHub's 2 GB release-asset cap](./resolved/iso-slim-under-2gb-done.md) — RESOLVED 2026-10-28 (scoot-sh/scoot-iso#20): x86_64 1,908,867,072 bytes (CI), aarch64 1,972,770,816; speechd off, live firmware trimmed, xz squashfs; CI failed above 2,000,000,000 bytes. SUPERSEDED 2026-10-28 by scoot-iso#21: the cuts and the gate are reverted; see [online-iso-default](./core/online-iso-default.md) and [iso-distribution](./core/iso-distribution.md)
 - [Automate the Nix pnpm-deps hash bump for dependabot site PRs](./core/pnpm-deps-hash-automation.md) (low): `nix/docs-site.nix` `pnpmDeps.hash` goes stale on every `site/pnpm-lock.yaml` change (#734/#735 red, hand-fixed in #756); Linux-canonical hash, no pin weakening
 - [Nix package can reach neither GPU tier](./resolved/nix-gpu-tiers-done.md)
   — RESOLVED 2026-09-21 (gh #177): `packages.scoot` force-links libEGL
