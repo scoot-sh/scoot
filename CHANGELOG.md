@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.13](https://github.com/scoot-sh/scoot/compare/v0.6.12...v0.6.13) - 2026-10-29
+
+### scoot-look
+
+- fixed: one look reached from two catalog dirs is not a shadow ([#799](https://github.com/scoot-sh/scoot/pull/799))
+
 ## [0.6.12](https://github.com/scoot-sh/scoot/compare/v0.6.11...v0.6.12) - 2026-10-29
 
 ### scoot
