@@ -85,6 +85,7 @@ color = "#2B3648"
 | `fonts.nix` | Nixpkgs attribute paths: `ui`, `sans` or `mono` to one to eight `Name.segment` paths. Resolved only with `lib.attrByPath` against `pkgs`. Nix-only; a non-Nix box resolves families with `fc-match`. |
 | `opacity` | `bar`, `popups`, `terminal`: 0.0 to 1.0, each default 1.0. |
 | `shape` | `radius`: 0 to 64, default 0. `ring-width`: 0 to 64, required. `ring-inactive-width`: default = `ring-width`. No `gap` in v1: gap is layout, not presentation. |
+| `effects` | Depth tokens, both optional and unset by default. `shadow`: `none`, `soft`, `deep` or `glow`. `fill`: `solid` or `gradient`. Only `scootnotify` reads them today; a look that sets neither renders exactly the fragments it did before. See [notification depth](../scootnotify/configure.md#depth). |
 | `cursor` | `theme`: name, required. `size`: 4 to 256, default 24. `accent`: `#rrggbb` or `"none"`, default = `focus`. `body`: optional `#rrggbb`; a look leaves it alone unless set. |
 | `wallpaper` | One unit, never merged per key: `image` or `color`, never both. `image` is a path inside the look dir, or `https://` plus a required 64-hex `sha256`. `mode`: `fill`, `fit`, `stretch`, `center` or `tile` (image only; a color wallpaper carries no `mode` or `fill`). `fill`: default = `background`. `transition`: `none`, `fade`, `wipe` or `grow` (default `none`; the five shipped looks set `fade`, which animates at scootbg's defaults: 500 ms, `ease-out`). |
 | `icons` | `theme`: name. Default `Adwaita`. |
@@ -119,7 +120,9 @@ keys. The bar's `font` and `fallback-fonts` are not overrides: scootbar
 reads file paths there, so only the tool's resolved `--ui-font-file`
 supplies them, and a fragment without one carries neither key.
 `scootnotify`, `scootlaunch` and `scootgreet` take the thirteen
-color roles plus face, size, opacity and radius.
+color roles plus face, size, opacity and radius. `scootnotify` also
+takes `shadow` and `fill` (the `[effects]` values, per app); the other
+two refuse them, since they would report an unknown key on every load.
 
 Every allowlisted key has a value kind, checked at parse. There is
 no key whose value gets only a length check.
@@ -141,6 +144,8 @@ no key whose value gets only a length check.
 | `workspaces.display` | `numbers` or `dots` |
 | `window-title.icon` | glyph string (see Values) |
 | shell `radius` | whole number, 0 to 64 |
+| `scootnotify` `shadow` | `none`, `soft`, `deep` or `glow` |
+| `scootnotify` `fill` | `solid` or `gradient` |
 
 A URL wallpaper cannot be overridden per app: its `sha256` pin has
 no place in an override, so per-app `image` values refuse URLs.
@@ -235,7 +240,9 @@ carries the same thirteen roles and dotless keys for the notification
 cards. An `[apps.scootlaunch]` (or `[apps.scootnotify]`) `colors.*` key
 replaces the derived role, and a dotless key (`font`, `font-size`,
 `opacity`, `radius`) replaces the top-level value, so each is emitted
-once. scootlaunch reads its fragment at every open; scootnotify reads
+once. A look that sets `[effects]` adds top-level `shadow` and `fill`
+keys to `notify.toml` only; `launch.toml` and `greet.toml` never carry
+them. scootlaunch reads its fragment at every open; scootnotify reads
 its own at start and on `msg reload --look` (which `scoot look apply`
 sends live). `greet.toml` carries the
 login screen's look, read at system build time only. `scoot look

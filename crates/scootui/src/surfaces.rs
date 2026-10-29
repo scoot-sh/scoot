@@ -610,6 +610,15 @@ impl LayerLive {
         self.layer.set_size(width, height);
     }
 
+    /// Moves the surface's margins (top, right, bottom, left, in logical
+    /// pixels, saturated to `i32::MAX` as at creation); applied by the
+    /// compositor on the next commit.
+    pub fn set_margin(&self, margin: [u32; 4]) {
+        let [top, right, bottom, left] =
+            margin.map(|value| i32::try_from(value).unwrap_or(i32::MAX));
+        self.layer.set_margin(top, right, bottom, left);
+    }
+
     /// Acks a `configure`.
     pub fn ack(&self, serial: u32) {
         self.layer.ack_configure(serial);

@@ -7,6 +7,11 @@
 
 use crate::color::Color;
 
+mod depth;
+mod rounded;
+
+pub use depth::{MAX_BLUR, MAX_OFFSET, Pad, Shadow, ShadowSpec};
+
 #[cfg(test)]
 mod tests;
 

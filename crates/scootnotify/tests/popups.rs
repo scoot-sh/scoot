@@ -303,6 +303,65 @@ fn kill(mut child: Child) {
     let _ = child.wait();
 }
 
+/// A look that opts into depth (`shadow = "soft"`, `fill = "gradient"`)
+/// against a real compositor: the card stays exactly where the margin puts
+/// it (the shadow's room comes out of the margin), the desktop beside it
+/// darkens inside the shadow's reach and not beyond, and the fill lightens
+/// toward the top.
+#[test]
+fn a_depth_look_shadows_the_card_without_moving_it() {
+    let Some(bus) = bus_or_skip() else { return };
+    let Some(session) = scoot_or_skip("depth", 1) else {
+        return;
+    };
+    let look_dir = session.scratch.state_home().join("scoot").join("look");
+    std::fs::create_dir_all(&look_dir).unwrap();
+    std::fs::write(
+        look_dir.join("notify.toml"),
+        "shadow = \"soft\"\nfill = \"gradient\"\n",
+    )
+    .unwrap();
+    let (mut server, log) = spawn_popup(&session, &bus, "");
+    let mut client = conn::connect(&bus.path()).expect("the bus accepts");
+    wait_serving(&mut client, &mut server, &log);
+    let (x0, y0) = stack_origin();
+    let before = session.scoot_screenshot(1);
+    let _ = notify(
+        &mut client,
+        &mut server,
+        &log,
+        "a",
+        0,
+        "Hello",
+        "World",
+        &[],
+        &[],
+        0,
+        201,
+    );
+    wait_shown(&mut server, &log, "the shadowed card", || {
+        session.scoot_screenshot(1).at(x0 + 180, y0 + 1) == rgb(FOCUS)
+    });
+    let shown = session.scoot_screenshot(1);
+    let sum = |pixel: [u8; 3]| pixel.iter().map(|&c| u32::from(c)).sum::<u32>();
+    // The card is where the plain look puts it: the ring on its top edge.
+    assert_eq!(shown.at(x0 + 180, y0 + 1), rgb(FOCUS));
+    // Beside it, inside the 12 px reach, the desktop is darker than before.
+    assert!(
+        sum(shown.at(x0 - 3, y0 + 40)) < sum(before.at(x0 - 3, y0 + 40)),
+        "the shadow darkens beside the card"
+    );
+    // Past the reach, and far above the stack, nothing changed.
+    assert_eq!(shown.at(x0 - 20, y0 + 40), before.at(x0 - 20, y0 + 40));
+    assert_eq!(shown.at(x0 + 180, 2), before.at(x0 + 180, 2));
+    // The gradient: lighter at the top of the card's fill than the bottom.
+    assert!(
+        sum(shown.at(x0 + 5, y0 + 6)) > sum(shown.at(x0 + 5, y0 + 60)),
+        "the light is at the top"
+    );
+    kill(server);
+}
+
 /// The card's top edge reads the urgency ring: low the `border` role,
 /// normal `focus`, critical `urgent`.
 #[test]

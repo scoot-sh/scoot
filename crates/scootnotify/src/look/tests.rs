@@ -102,3 +102,90 @@ fn the_low_border_is_its_own_role() {
     assert_eq!(look.focus, Look::default().focus);
     assert_eq!(look.theme.dim, Look::default().theme.dim);
 }
+
+#[test]
+fn the_depth_keys_land_and_default_to_off() {
+    let defaults = Look::default();
+    assert_eq!(defaults.shadow, ShadowStyle::None);
+    assert_eq!(defaults.fill, FillStyle::Solid);
+    assert!(defaults.shadow.spec().is_none(), "none builds nothing");
+    for (name, style) in [
+        ("none", ShadowStyle::None),
+        ("soft", ShadowStyle::Soft),
+        ("deep", ShadowStyle::Deep),
+        ("glow", ShadowStyle::Glow),
+    ] {
+        let (look, notes) = parse(&format!("shadow = \"{name}\"\nfill = \"gradient\"\n"));
+        assert!(notes.is_empty(), "{name}: {notes:?}");
+        assert_eq!(look.shadow, style);
+        assert_eq!(look.fill, FillStyle::Gradient);
+        assert_eq!(look.shadow.spec().is_some(), style != ShadowStyle::None);
+    }
+}
+
+#[test]
+fn a_refused_depth_value_is_reported_and_ignored_never_fatal() {
+    for text in [
+        "shadow = \"huge\"",
+        "shadow = 3",
+        "shadow = \"Soft\"",
+        "fill = \"rainbow\"",
+        "fill = true",
+    ] {
+        let (look, notes) = parse(&format!("radius = 5\n{text}\n"));
+        assert_eq!(look.shadow, ShadowStyle::None, "{text}");
+        assert_eq!(look.fill, FillStyle::Solid, "{text}");
+        // The rest of the fragment still lands.
+        assert_eq!(look.radius, 5, "{text}");
+        assert_eq!(notes.len(), 1, "{text}: {notes:?}");
+        assert!(
+            notes[0].contains("shadow") || notes[0].contains("fill"),
+            "{notes:?}"
+        );
+    }
+}
+
+#[test]
+fn the_shadow_styles_are_ordered_by_weight() {
+    let spec = |style: ShadowStyle| style.spec().expect("a shadow");
+    let (soft, deep, glow) = (
+        spec(ShadowStyle::Soft),
+        spec(ShadowStyle::Deep),
+        spec(ShadowStyle::Glow),
+    );
+    assert!(soft.blur < deep.blur && soft.alpha < deep.alpha);
+    assert_eq!((glow.offset_x, glow.offset_y), (0, 0), "a glow is centered");
+    assert!(
+        soft.offset_y > 0 && deep.offset_y > soft.offset_y,
+        "shadows fall down"
+    );
+}
+
+#[test]
+fn a_gradient_puts_the_light_at_the_top_for_either_polarity() {
+    let mut look = Look {
+        surface: Color::parse("#101010").unwrap(),
+        ..Look::default()
+    };
+    assert_eq!(
+        look.fill_stops(),
+        (look.surface, look.surface),
+        "solid is flat"
+    );
+    look.fill = FillStyle::Gradient;
+    let (top, bottom) = look.fill_stops();
+    assert_eq!(bottom, look.surface);
+    assert!(top.luminance() > bottom.luminance(), "dark: lightened top");
+    look.surface = Color::parse("#f0f0f0").unwrap();
+    let (top, bottom) = look.fill_stops();
+    assert_eq!(top, look.surface);
+    assert!(
+        top.luminance() > bottom.luminance(),
+        "light: darkened bottom"
+    );
+    // The text keeps its contrast across the card: the shift is small.
+    let ink = Color::parse("#f5ead6").unwrap();
+    look.surface = Color::parse("#0e0e0e").unwrap();
+    let (top, bottom) = look.fill_stops();
+    assert!(ink.contrast_ratio(top) > 4.5 && ink.contrast_ratio(bottom) > 4.5);
+}

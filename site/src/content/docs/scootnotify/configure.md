@@ -271,7 +271,7 @@ the file — a look swap under a half-edited file.
 
 ## The look layer
 
-Colors, font, opacity and corners come from the active look, under the
+Colors, font, opacity, corners and depth come from the active look, under the
 cards — never from this file. The daemon reads
 `<state>/look/notify.toml` at start (a dangling or missing link means
 no layer, plus a warning), with the user's file winning per key over
@@ -303,6 +303,66 @@ false`](../../desktop/notifications/) writes.
 | Link text (underlined, never clickable in v1) | `accent` |
 | Font | `fonts.ui` at `fonts.popup-size` |
 | Corners | `shape.radius` |
+| Shadow, fill | `effects.shadow`, `effects.fill` (see [Depth](#depth)) |
+
+### Depth
+
+A look can give the cards a shadow and a gradient fill. Both are off by
+default, and a look that sets neither paints exactly what it did
+before. Set them in `look.toml`:
+
+```toml
+[effects]
+shadow = "soft"      # none | soft | deep | glow
+fill = "gradient"    # solid | gradient
+```
+
+To override one for the notifier alone, put the key in the look's
+`[apps.scootnotify]` table (`shadow = "glow"`). The look renders them as
+top-level `shadow` and `fill` keys in `notify.toml`. A value outside the
+lists is reported in the daemon log and ignored; the card keeps its
+default.
+
+| `shadow` | What it draws | Room it needs |
+|---|---|---|
+| `none` | Nothing. The default; builds and paints nothing. | none |
+| `soft` | A low shadow: 4 px down, 12 px blur, 36% black. | 8 px above, 12 px at the sides, 16 px below |
+| `deep` | A heavy shadow: 10 px down, 28 px blur, 55% black. | 18 px above, 28 px at the sides, 38 px below |
+| `glow` | A 16 px halo, centered, in the card's border color (`border`, `focus` or `urgent` by urgency), at 51%. | 16 px on every side |
+
+| `fill` | What it draws |
+|---|---|
+| `solid` | The `surface` color, flat. The default. |
+| `gradient` | Light at the top. On a dark `surface` the top edge is lightened about 10% toward white and fades to `surface` at the bottom; on a light one the bottom is darkened about 8%. The card keeps the look's `opacity.popups`. |
+
+The shadow's room comes out of `margin_px`: with the default 12 px
+margin and `soft`, the cards sit 12 px from the screen edge, as they do
+without a shadow. A margin smaller than the room moves the cards that
+much further in, since a surface cannot start off screen. The shadow
+falls outside the cards only (a translucent card does not show its own
+shadow through its body), is never clickable (the gaps and the room
+around the stack click through), and is painted when the stack repaints,
+not while it is idle.
+
+`soft` and `deep` are black, so they show over light and mid-tone
+backgrounds and nearly vanish over a near-black wallpaper; `glow` reads on
+any background.
+
+Only `scootnotify` reads these tokens today. `scootlaunch` and
+`scootbar` ignore `[effects]`, and an `[apps.scootlaunch]` `shadow` key
+refuses at validation.
+
+> **Symptom:** a look sets `shadow` and the cards have none.
+> The daemon logs `shadow refused ... default applies` or `shadow is not
+> a shadow style` for a value outside `none`, `soft`, `deep` and `glow`.
+> Check `<state>/look/notify.toml` for a `shadow` line, and that the
+> config has no `look = false`.
+
+> **Symptom:** the cards sit further from the screen edge than
+> `margin_px`.
+> The shadow needs room that comes out of the margin. With `margin_px`
+> below the room (for a top-right stack, 12 px for `soft` and 28 px for
+> `deep`), the cards sit that much further in. Raise `margin_px`, or pick a lighter `shadow`.
 
 > **Symptom:** the cards ignore a look swap.
 > `scoot look apply` reloads the running daemon live (plain `msg

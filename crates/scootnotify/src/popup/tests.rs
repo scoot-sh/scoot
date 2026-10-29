@@ -127,6 +127,7 @@ fn hit_tests_buttons_before_bodies() {
     app.stack = Stack {
         width: 360,
         height: 200,
+        pad: scootui::paint::Pad::ZERO,
         cards: vec![crate::view::layout::Card {
             id: 7,
             rect: crate::view::layout::Rect {
@@ -202,4 +203,84 @@ fn retheme_swaps_the_look_and_marks_dirty() {
     assert_eq!(app.look.font_size_px, 20.0);
     assert!(app.dirty);
     assert_eq!(app.content_size, None);
+}
+
+#[test]
+fn the_default_look_has_no_shadow_and_the_configured_margins() {
+    let app = App::new(Config::default(), Look::default());
+    assert!(app.shadow.is_none());
+    assert!(app.stack.pad.is_zero());
+    let margin = app.config.margin_px;
+    assert_eq!(app.margins(), [margin; 4]);
+}
+
+#[test]
+fn a_shadows_room_comes_out_of_the_margin_and_never_goes_negative() {
+    let soft = Look {
+        shadow: crate::look::ShadowStyle::Soft,
+        ..Look::default()
+    };
+    let mut app = App::new(Config::default(), soft);
+    let shadow = app.shadow.as_ref().expect("soft builds a shadow");
+    app.stack.pad = shadow.pad();
+    // The default 12 px margin against soft's room (top 8, right 12,
+    // bottom 16, left 12): the cards stay 12 px from the edge where the
+    // room fits inside the margin, and sit further in where it does not.
+    assert_eq!(app.stack.pad.top, 8);
+    assert_eq!(app.margins(), [4, 0, 0, 0]);
+    app.config.margin_px = 0;
+    assert_eq!(app.margins(), [0; 4]);
+    app.config.margin_px = 128;
+    let pad = app.stack.pad;
+    assert_eq!(
+        app.margins(),
+        [
+            128 - pad.top,
+            128 - pad.right,
+            128 - pad.bottom,
+            128 - pad.left
+        ]
+    );
+}
+
+#[test]
+fn retheme_builds_a_new_style_and_keeps_an_unchanged_one() {
+    use crate::look::ShadowStyle;
+    let mut app = App::new(Config::default(), Look::default());
+    app.shadow_stale = false;
+    app.retheme(Look {
+        shadow: ShadowStyle::Deep,
+        ..Look::default()
+    });
+    assert!(app.shadow.is_some() && app.shadow_stale);
+    // The corner tables are sized at the next refresh, from the stack.
+    app.prepare_shadow();
+    assert!(!app.shadow_stale);
+    let tables = app.shadow.clone();
+    app.retheme(Look {
+        shadow: ShadowStyle::Deep,
+        font_size_px: 20.0,
+        ..Look::default()
+    });
+    assert_eq!(app.shadow, tables, "the same style keeps its tables");
+    assert!(app.shadow_stale, "but is re-sized for the new look");
+    app.retheme(Look::default());
+    assert!(app.shadow.is_none(), "none drops the shadow");
+}
+
+#[test]
+fn a_config_reload_resizes_the_shadow_for_the_new_radius() {
+    let mut app = App::new(
+        Config::default(),
+        Look {
+            shadow: crate::look::ShadowStyle::Soft,
+            ..Look::default()
+        },
+    );
+    app.shadow_stale = false;
+    app.apply_config(Config {
+        radius: 20,
+        ..Config::default()
+    });
+    assert!(app.shadow_stale);
 }

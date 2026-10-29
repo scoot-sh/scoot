@@ -1431,6 +1431,7 @@ fn run_show(look: &Look, name: &str) -> Result<(), String> {
                 },
                 "opacity": {"bar": merged.opacity.bar, "popups": merged.opacity.popups, "terminal": merged.opacity.terminal},
                 "shape": {"radius": merged.shape.radius, "ring-width": merged.shape.ring_width, "ring-inactive-width": merged.shape.ring_inactive_width},
+                "effects": {"shadow": merged.effects.shadow, "fill": merged.effects.fill},
                 "cursor": {"theme": merged.cursor.theme, "size": merged.cursor.size, "accent": merged.cursor.accent},
                 "wallpaper": merged.wallpaper.as_ref().map(|wallpaper| serde_json::json!({
                     "image": wallpaper.image, "color": wallpaper.color,
@@ -1491,6 +1492,13 @@ fn run_show(look: &Look, name: &str) -> Result<(), String> {
             merged.opacity.popups,
             merged.opacity.terminal
         ))?;
+        if merged.effects.shadow.is_some() || merged.effects.fill.is_some() {
+            print(&format!(
+                "effects: shadow {} fill {}",
+                merged.effects.shadow.as_deref().unwrap_or("-"),
+                merged.effects.fill.as_deref().unwrap_or("-")
+            ))?;
+        }
         print(&format!(
             "cursor: {} {} accent {}; icons {}; night {:?}",
             merged.cursor.theme,

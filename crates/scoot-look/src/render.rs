@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::allowlist::check_app_value;
+use crate::allowlist::{FILL_STYLES, SHADOW_STYLES, check_app_value};
 use crate::grammar::{GrammarError, is_hex_color};
 use crate::resolved::{ResolvedLook, pt_to_px};
 use crate::schema::Polarity;
@@ -454,6 +454,26 @@ fn render_shell_fragment(look: &ResolvedLook, app: &str) -> Result<String, Gramm
     );
     top.insert("opacity".to_string(), format!("{:?}", look.opacity.popups));
     top.insert("radius".to_string(), look.shape.radius.to_string());
+    // The depth tokens, only for an app that reads them and only when the
+    // look sets them: a look that does not opt in renders the fragment it
+    // always did. A hand-built `ResolvedLook` skips the schema, so the
+    // values are checked here too.
+    if app == "scootnotify" {
+        for (key, value, options) in [
+            ("shadow", &look.effects.shadow, SHADOW_STYLES),
+            ("fill", &look.effects.fill, FILL_STYLES),
+        ] {
+            if let Some(value) = value {
+                if !options.contains(&value.as_str()) {
+                    return Err(GrammarError::new(
+                        format!("effects.{key}"),
+                        format!("must be one of {}", options.join(", ")),
+                    ));
+                }
+                top.insert(key.to_string(), toml_str(value));
+            }
+        }
+    }
     let mut colors: BTreeMap<String, String> = BTreeMap::new();
     for (key, color) in [
         ("background", &p.background),
