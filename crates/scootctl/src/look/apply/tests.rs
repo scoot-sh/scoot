@@ -4391,3 +4391,198 @@ fn build_dir_target_honors_origin_and_trust() {
     );
     assert!(out.join("apps/helix.toml").is_file(), "the leaf builds");
 }
+
+/// One way a static leaf can be a link; the same table drives
+/// `scoot-look`'s `build` test (`crates/scoot-look/tests/leaf_symlinks.rs`),
+/// so both tools face the same cases and must give the same answer.
+#[derive(Clone, Copy, Debug)]
+enum LeafLink {
+    ToFileInLook,
+    ToDirInLook,
+    ToFileOutside,
+    Dangling,
+    Loop,
+    SymlinkedApps,
+}
+
+const LEAF_LINKS: &[LeafLink] = &[
+    LeafLink::ToFileInLook,
+    LeafLink::ToDirInLook,
+    LeafLink::ToFileOutside,
+    LeafLink::Dangling,
+    LeafLink::Loop,
+    LeafLink::SymlinkedApps,
+];
+
+/// Turns `look-a`'s `apps/helix.toml` into the link `case` describes.
+fn plant_leaf_link(look: &Path, outside: &Path, case: LeafLink) {
+    use std::os::unix::fs::symlink;
+    let leaf = look.join("apps/helix.toml");
+    match case {
+        LeafLink::ToFileInLook => {
+            std::fs::write(look.join("real.toml"), HELIX_LEAF).expect("a real file");
+            symlink(look.join("real.toml"), &leaf).expect("a link");
+        }
+        LeafLink::ToDirInLook => symlink(look.join("apps"), &leaf).expect("a link"),
+        LeafLink::ToFileOutside => {
+            std::fs::write(outside.join("helix.toml"), HELIX_LEAF).expect("an outside file");
+            symlink(outside.join("helix.toml"), &leaf).expect("a link");
+        }
+        LeafLink::Dangling => symlink(look.join("missing"), &leaf).expect("a link"),
+        LeafLink::Loop => symlink(&leaf, &leaf).expect("a link"),
+        LeafLink::SymlinkedApps => {
+            std::fs::create_dir_all(outside.join("apps")).expect("outside apps");
+            std::fs::write(outside.join("apps/helix.toml"), HELIX_LEAF).expect("a leaf");
+            std::fs::remove_dir_all(look.join("apps")).expect("drop apps");
+            symlink(outside.join("apps"), look.join("apps")).expect("a link");
+        }
+    }
+}
+
+#[test]
+fn a_symlinked_static_leaf_refuses_in_every_shape_and_nothing_renders() {
+    for &case in LEAF_LINKS {
+        let fixture = static_fixture("static-link", Origin::User, &[("apps/helix.toml", "x")]);
+        let outside = fixture._root.join("outside");
+        std::fs::create_dir_all(&outside).expect("outside");
+        let look = fixture._root.join("looks/look-a");
+        std::fs::remove_file(look.join("apps/helix.toml")).expect("replace the leaf");
+        plant_leaf_link(&look, &outside, case);
+        let mut compositor = FakeCompositor::not_running();
+        let failure = apply_with_live(
+            "look-a",
+            &options(),
+            &fixture.catalog,
+            &fixture.cache,
+            &fixture.state,
+            Some(&fixture.config),
+            &mut compositor,
+            &[],
+            &FakeChecks::default(),
+            &FakeDconf::absent(),
+            &ScriptedLeaves::failing(),
+            &[],
+        )
+        .expect_err("a symlinked leaf refuses");
+        assert!(
+            failure.message.contains("is a symlink"),
+            "{case:?}: {}",
+            failure.message
+        );
+        assert!(
+            !fixture.state.join("look.json").exists(),
+            "{case:?}: nothing is recorded"
+        );
+        assert!(
+            !fixture.cache.exists()
+                || std::fs::read_dir(&fixture.cache)
+                    .expect("cache")
+                    .all(|entry| {
+                        let rendered = entry.expect("entry").path().join("apps/helix.toml");
+                        !rendered.exists()
+                    }),
+            "{case:?}: no rendered leaf copy"
+        );
+    }
+}
+
+#[test]
+fn validate_reports_a_symlinked_static_leaf_like_apply() {
+    let fixture = static_fixture("static-link-validate", Origin::User, ALL_LEAVES);
+    let outside = fixture._root.join("outside");
+    std::fs::create_dir_all(&outside).expect("outside");
+    let look = fixture._root.join("looks/look-a");
+    std::fs::remove_file(look.join("apps/helix.toml")).expect("replace the leaf");
+    plant_leaf_link(&look, &outside, LeafLink::ToFileInLook);
+    let report = validate_entry(&fixture.catalog, "look-a", &FakeChecks::default(), false)
+        .expect("validate runs");
+    assert!(
+        report.errors.iter().any(|e| e.contains("is a symlink")),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn an_untrusted_look_names_a_symlinked_leaf_among_the_dropped() {
+    // Dropping without --trust never reads the leaf, so a link there is
+    // dropped with the rest rather than refused or silently missing.
+    let fixture = static_fixture("static-link-drop", Origin::Installed, &[]);
+    let outside = fixture._root.join("outside");
+    std::fs::create_dir_all(&outside).expect("outside");
+    let look = fixture._root.join("looks/look-a");
+    std::fs::create_dir_all(look.join("apps")).expect("apps");
+    plant_leaf_link(&look, &outside, LeafLink::ToFileOutside);
+    let leaves = ScriptedLeaves::ok();
+    let report = offline_apply(&fixture, "look-a", &options(), &leaves);
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|n| n.contains("dropping apps/helix.toml")),
+        "{report:?}"
+    );
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    assert!(!rendered.join("apps/helix.toml").exists());
+}
+
+#[test]
+fn a_childs_own_leaf_hides_a_symlink_in_its_base() {
+    // The nearest look to carry the file decides, in apply as in build.
+    let scratch = scratch("static-link-base");
+    let root: PathBuf = scratch.path().to_owned();
+    let sources = root.join("looks");
+    write_look(&sources, "base-b", "");
+    write_static(&sources, "base-b", &[("apps/helix.toml", "x")]);
+    std::fs::remove_file(sources.join("base-b/apps/helix.toml")).expect("drop");
+    std::os::unix::fs::symlink("/nonexistent", sources.join("base-b/apps/helix.toml"))
+        .expect("a link");
+    write_look(&sources, "child-b", "");
+    write_static(&sources, "child-b", &[("apps/helix.toml", HELIX_LEAF)]);
+    let manifest = std::fs::read_to_string(sources.join("child-b/look.toml")).expect("manifest");
+    std::fs::write(
+        sources.join("child-b/look.toml"),
+        manifest.replacen("[palette]", "extends = \"base-b\"\n\n[palette]", 1),
+    )
+    .expect("extends");
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    let fixture = Fixture {
+        catalog,
+        cache: root.join("cache"),
+        state: root.join("state"),
+        config: root.join("config"),
+        _scratch: scratch,
+        _root: root,
+    };
+    let leaves = ScriptedLeaves::ok();
+    let _ = offline_apply(&fixture, "child-b", &options(), &leaves);
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    assert_eq!(
+        std::fs::read_to_string(rendered.join("apps/helix.toml")).expect("the child's leaf"),
+        HELIX_LEAF
+    );
+}
+
+#[test]
+fn a_symlinked_look_directory_still_applies_its_leaves() {
+    // A home-manager catalog links the look dir itself into the store.
+    let scratch = scratch("static-link-dir");
+    let root: PathBuf = scratch.path().to_owned();
+    let store = root.join("store");
+    write_look(&store, "look-a", "");
+    write_static(&store, "look-a", &[("apps/helix.toml", HELIX_LEAF)]);
+    let sources = root.join("looks");
+    std::fs::create_dir_all(&sources).expect("sources");
+    std::os::unix::fs::symlink(store.join("look-a"), sources.join("look-a")).expect("a link");
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    let fixture = Fixture {
+        catalog,
+        cache: root.join("cache"),
+        state: root.join("state"),
+        config: root.join("config"),
+        _scratch: scratch,
+        _root: root,
+    };
+    let _ = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
+    assert!(rendered.join("apps/helix.toml").is_file());
+}

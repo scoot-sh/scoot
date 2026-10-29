@@ -455,7 +455,11 @@ fn static_leaf_files(
         let mut dropped = Vec::new();
         for dir in &chain {
             for leaf in STATIC_LEAVES {
-                if dir.join(leaf.path).is_file() && !dropped.contains(&leaf.path) {
+                // A symlinked leaf is still the look's own file: it drops
+                // with the rest instead of vanishing from the note.
+                if !matches!(scoot_look::locate_leaf(dir, leaf.path), Ok(None))
+                    && !dropped.contains(&leaf.path)
+                {
                     dropped.push(leaf.path);
                 }
             }
@@ -476,10 +480,16 @@ fn static_leaf_files(
             if found.contains_key(leaf.path) {
                 continue;
             }
-            let candidate = dir.join(leaf.path);
-            if std::fs::symlink_metadata(&candidate).is_err() {
-                continue;
-            }
+            // The same locator `scoot look apply` uses: a symlink at any
+            // component below the look refuses in both.
+            let candidate = match scoot_look::locate_leaf(dir, leaf.path) {
+                Ok(Some(candidate)) => candidate,
+                Ok(None) => continue,
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            };
             let bytes = match read_regular_file(&candidate) {
                 Ok(bytes) => bytes,
                 Err(e) => {

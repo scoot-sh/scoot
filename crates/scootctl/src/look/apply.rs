@@ -1653,7 +1653,9 @@ pub(crate) fn static_leaf_files(
     if root.entry.origin == Origin::Installed && !trust {
         let mut dropped = Vec::new();
         for leaf in STATIC_LEAVES {
-            if static_leaf_source(chain, leaf.path).is_some() {
+            // A symlinked leaf is still the look's own file: it drops
+            // with the rest instead of vanishing from the note.
+            if !matches!(static_leaf_source(chain, leaf.path), Ok(None)) {
                 dropped.push(leaf.path.to_owned());
             }
         }
@@ -1668,13 +1670,16 @@ pub(crate) fn static_leaf_files(
     }
     let mut files = Vec::new();
     for leaf in STATIC_LEAVES {
-        let Some(dir) = static_leaf_source(chain, leaf.path) else {
+        let Some(path) = static_leaf_source(chain, leaf.path)
+            .map_err(|error| format!("cannot render {name}: {error}"))?
+        else {
             continue;
         };
-        let path = contained_file(&dir, leaf.path)?;
-        // Capped at read time and required UTF-8, like every other
-        // look file read.
-        let text = read_capped_follow(&path)
+        // Capped at read time and required UTF-8, like every other look
+        // file read. Opened `O_NOFOLLOW`: `static_leaf_source` already
+        // refused a link anywhere below the look, and this refuses one
+        // raced in behind it.
+        let text = read_capped(&path)
             .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
         let bytes = text.into_bytes();
         check_static_leaf(leaf.path, &bytes)
@@ -1692,17 +1697,23 @@ pub(crate) fn static_leaf_files(
     Ok(files)
 }
 
-/// The manifest directory of the chain's last look carrying the `apps/`
-/// file at `rel`, if any. Existence only (no read): the caller resolves
-/// and reads through [`contained_file`], so an escape refuses there.
-fn static_leaf_source(chain: &[ChainEntry], rel: &str) -> Option<PathBuf> {
-    let mut found = None;
-    for link in chain {
-        if link.entry.manifest_dir.join(rel).is_file() {
-            found = Some(link.entry.manifest_dir.clone());
+/// The path of the chain's last look carrying the `apps/` file at `rel`,
+/// if any. Presence only (no read), found without following a symlink at
+/// any component below the look: `scoot-look build` locates its leaves
+/// through the same [`locate_leaf`], so a look applies exactly when it
+/// builds. A symlink (to a file or directory in the look, outside it,
+/// dangling or looping) refuses instead of reading through it, and the
+/// nearest look to carry the file decides, so a link in the child is not
+/// papered over by the base's file.
+fn static_leaf_source(chain: &[ChainEntry], rel: &str) -> Result<Option<PathBuf>, String> {
+    // Nearest look first and stop at the first that carries it, like the
+    // build: a base's link under a child's own file is never reached.
+    for link in chain.iter().rev() {
+        if let Some(path) = scoot_look::locate_leaf(&link.entry.manifest_dir, rel)? {
+            return Ok(Some(path));
         }
     }
-    found
+    Ok(None)
 }
 
 /// Validates the static terminal leaves the way `apply` renders them, so

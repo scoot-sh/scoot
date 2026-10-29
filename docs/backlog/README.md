@@ -399,7 +399,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Skip every udiskie keyring test, not two](./resolved/udiskie-skip-all-keyring-tests-done.md) — RESOLVED 2026-10-24: the shared udiskie default skips the whole of `test_keyutils.py` and `test_cache.py` (`TestPasswordCache` included), so Docker's default seccomp EPERM no longer fails the check
 - [bump-downstream resolves tags via prefix glob; query the exact ref and peel](./resolved/bump-downstream-exact-ref-done.md) — RESOLVED 2026-10-24: the resolve queries the exact ref plus its peel, with an offline test that fails on the old glob
 - [Bump the nixpkgs pin past the eMudhra/Comodo CA mitigation](./resolved/nixpkgs-pin-ca-mitigation-done.md) (low) — RESOLVED 2026-10-21
-- [`apply` follows an in-dir symlink for a leaf while `build` refuses all symlinks](./packaging/look-apply-symlink-leaf.md) (low)
+- [`apply` follows an in-dir symlink for a leaf while `build` refuses all symlinks](./resolved/look-apply-symlink-leaf-done.md) (low) — RESOLVED 2026-10-29: both tools locate a static leaf through one symlink-free walk, so a symlinked leaf or `apps/` directory refuses in `apply` and `build` alike
 - [Look leaves for mako, wob, fcitx5 and the night light](./resolved/look-leaves-daemons-done.md) (medium) — RESOLVED 2026-10-15
 - [Look leaves for swaylock, fuzzel and the pickers](./resolved/look-leaves-launchers-done.md) (medium) — RESOLVED 2026-10-15
 - [Look leaves for foot, Helix, btop and starship](./resolved/look-leaves-terminal-done.md) (medium) — RESOLVED 2026-10-16
