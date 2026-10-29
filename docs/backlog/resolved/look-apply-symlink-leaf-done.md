@@ -52,9 +52,8 @@ directory itself may be a link, which is how home-manager installs a look.
   followed a symlinked `apps/` directory (the kernel resolves parents).
 - Wallpaper and font files still go through `contained_file` (in-look
   links allowed): `build` never reads them, so there is no rule to match.
-- One difference stays on purpose: `build` refuses a hard-linked leaf
-  (its existing check), `apply` accepts one, since a Nix store optimiser
-  hard-links identical files and would otherwise break installed looks.
+- Hard links stay accepted by both tools: a Nix store optimiser
+  hard-links identical files and refusing them would break installed looks.
 - A directory at a leaf path now refuses in apply (it was silently
   skipped), like build.
 - Tests: `leaf_path::tests`, `crates/scoot-look/tests/leaf_symlinks.rs`
