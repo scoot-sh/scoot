@@ -37,9 +37,9 @@
 //!   long it has run, oldest first) so the user knows what to stop by
 //!   hand: the bar never signals a process it launched. A launched
 //!   command otherwise lives as long as it likes: the bar does not
-//!   supervise it. (A wait-per-spawn queue would be small here, `reap` is
-//!   already the one place slots free, but it is declined: a queued
-//!   command would fire arbitrarily late.)
+//!   supervise it. A wait-per-spawn queue was considered and declined: a
+//!   queued command would fire at an arbitrary later time, which is worse
+//!   than a loud refusal.
 
 use std::fmt::Write as _;
 use std::os::fd::{AsFd, OwnedFd};
@@ -163,12 +163,7 @@ impl Spawner {
         // Children that already exited free their slots first.
         self.reap();
         if self.live.len() >= MAX_CHILDREN {
-            // A child may have exited since: look once more, so the
-            // message never names one that is gone.
-            self.reap();
-            if self.live.len() >= MAX_CHILDREN {
-                return Err(self.refusal(program, Instant::now()));
-            }
+            return Err(self.refusal(program, Instant::now()));
         }
         let mut command = Command::new(program);
         command

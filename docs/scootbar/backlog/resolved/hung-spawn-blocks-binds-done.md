@@ -49,8 +49,8 @@ Took the first option only. A refused spawn (log line and the `invoke`
 error) now names every running command oldest first: program basename (cut
 at 24 bytes, control characters shown as `?`, no arguments), pid and
 monotonic age, so the user can `kill` the hung one by hand. The table is
-re-reaped before the refusal is built, so a child that just exited frees
-the slot instead of being named.
+reaped first, so a child that has exited frees its slot instead of being
+named.
 
 Declined, on purpose:
 

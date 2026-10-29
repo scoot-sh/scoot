@@ -430,12 +430,13 @@ fn zero_and_one_child_tables_report_without_a_stray_separator() {
 }
 
 #[test]
-fn a_child_that_exited_before_the_refusal_is_not_named_and_frees_the_slot() {
+fn a_child_that_exited_but_is_not_yet_reaped_frees_its_slot_and_is_not_named() {
     let mut spawner = Spawner::default();
     fill(&mut spawner);
     let gone = spawner.live[3].child.id();
     let _ = spawner.live[3].child.kill();
-    // Wait for the exit without reaping, as the loop would be mid-turn.
+    // Wait for the exit without reaping, as the loop would be mid-turn;
+    // the reap at the top of `spawn` is what frees the slot.
     {
         let placeholder = rustix::fs::CWD;
         let mut fds: [PollFd<'_>; MAX_CHILDREN] =
