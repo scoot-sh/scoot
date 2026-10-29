@@ -35,9 +35,20 @@ Any change to look resolution order or the catalog format.
 
 ## Resolution
 
-Resolved 2026-10-29 (PR #799). The NixOS and home-manager modules both link
-the same store path, so the per-directory dedup missed it and the per-look
-shadow check fired. `scan_dir` now drops a later entry whose manifest
-directory equals the winner's; two different sources of one name still
-shadow, even with identical bytes. Tests are in
-`crates/scoot-look/src/catalog/tests.rs`.
+Resolved 2026-10-29 (PR #799). The GUI/ISO listing itself was not
+reproduced; the cause was found in the modules and reproduced with
+`nix-instantiate` on the dev VM. The NixOS half links
+`ln -s ${entry.src}`, which copies the source to `/nix/store/<hash>-<name>`.
+The home-manager half set `source = entry.src` (a path value), and
+home-manager's `sourceStorePath` then copies it again with `builtins.path`
+under the name `hm_<name>`: a different store path with identical bytes.
+The catalog saw two sources of one name and listed the second as shadowed.
+
+Two changes. `home.nix` now interpolates the source (`"${entry.src}"`), so
+it carries string context, home-manager links it as is, and both halves
+link one store path (pinned in `nix/tests.nix`; reverting `home.nix` fails
+that check). `scan_dir` then drops a later entry whose manifest directory
+equals the winner's, since one look reached from two catalog directories is
+not a shadow (the per-directory dedup cannot see it). Two different
+sources of one name still shadow, even with identical bytes. Rust tests are
+in `crates/scoot-look/src/catalog/tests.rs`.
