@@ -48,3 +48,11 @@ Trade-offs recorded in the PR: installed systems lose speech synthesis unless
 `services.speechd.enable = true`; NVIDIA Turing-and-newer cards lose nouveau
 on the live image. Locale trimming (`i18n.supportedLocales`) saves nothing:
 calamares-nixos-extensions references the all-locales `glibc-locales`.
+
+## Superseded
+
+Superseded by scoot-sh/scoot-iso#21 (open), on the maintainer's decision of 2026-10-28:
+no trims in either ISO, so both match the stock NixOS graphical installer.
+It reverts the work above: the 2,000,000,000-byte gate and the cuts no longer exist there; see
+[online-iso-default](../core/online-iso-default.md) and
+[iso-distribution](../core/iso-distribution.md).
