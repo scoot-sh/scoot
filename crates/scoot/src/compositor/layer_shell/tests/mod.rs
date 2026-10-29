@@ -66,6 +66,7 @@ use crate::compositor::test_support::{self, Harness, contains, wait_for};
 mod adversarial;
 mod frames;
 mod input;
+mod launcher_dismiss;
 mod layout;
 mod multi_output;
 mod popup;
@@ -129,6 +130,9 @@ struct LayerSpec {
     /// is `None`, and so is every constructor's below -- a bar, a wallpaper
     /// and a notification popup all want exactly that.
     keyboard: KeyboardInteractivity,
+    /// The layer-shell namespace: the only role hint the protocol carries,
+    /// and what the compositor tells a launcher panel apart by.
+    namespace: &'static str,
 }
 
 impl LayerSpec {
@@ -144,6 +148,7 @@ impl LayerSpec {
             exclusive_zone: height as i32,
             margin: (0, 0, 0, 0),
             keyboard: KeyboardInteractivity::None,
+            namespace: "scoot-test",
         }
     }
 
@@ -161,6 +166,7 @@ impl LayerSpec {
             exclusive_zone: -1,
             margin: (0, 0, 0, 0),
             keyboard: KeyboardInteractivity::None,
+            namespace: "scoot-test",
         }
     }
 
@@ -181,11 +187,16 @@ impl LayerSpec {
             exclusive_zone: 0,
             margin: (0, 0, 0, 0),
             keyboard: KeyboardInteractivity::Exclusive,
+            namespace: "scoot-test",
         }
     }
 
     fn with_keyboard(self, keyboard: KeyboardInteractivity) -> Self {
         Self { keyboard, ..self }
+    }
+
+    fn named(self, namespace: &'static str) -> Self {
+        Self { namespace, ..self }
     }
 
     fn on_layer(self, layer: zwlr_layer_shell_v1::Layer) -> Self {
@@ -239,6 +250,9 @@ enum Step {
     DismissLayer { index: usize },
     /// Report how many `done` events each requested frame callback has seen.
     ReportFrames,
+    /// Report how many `zwlr_layer_surface_v1.closed` events each layer
+    /// surface has been sent, by creation order.
+    ReportLayerCloses,
     /// Attach a null buffer to the `index`-th layer surface and commit: the
     /// protocol's own way for a surface to unmap itself without destroying
     /// the object, which a launcher does when it is dismissed and re-shown.
@@ -396,6 +410,8 @@ enum Ack {
     /// [`Step::ReportFrames`]'s answer: per requested callback, how many
     /// `done` events arrived.
     Frames(Vec<u32>),
+    /// [`Step::ReportLayerCloses`]'s answer: `closed` events per layer.
+    LayerCloses(Vec<u32>),
 }
 
 /// Which of the client's own surfaces a `wl_keyboard.enter` named, by the
@@ -525,6 +541,8 @@ struct TestClient {
     /// for a *new* one rather than for "a size", which it already has from
     /// before it unmapped. See [`Step::RemapLayer`].
     layer_configures: Vec<u32>,
+    /// `closed` events per layer surface -- the compositor asking for it to go.
+    layer_closes: Vec<u32>,
     /// The serial of each toplevel's latest unacked `xdg_surface.configure`,
     /// by creation order, `None` until its first one arrives.
     ///
@@ -745,7 +763,11 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, SurfaceIndex> for TestC
                     *seen = seen.saturating_add(1);
                 }
             }
-            zwlr_layer_surface_v1::Event::Closed => {}
+            zwlr_layer_surface_v1::Event::Closed => {
+                if let Some(seen) = client.layer_closes.get_mut(index.0) {
+                    *seen = seen.saturating_add(1);
+                }
+            }
             _ => {}
         }
     }
@@ -1117,11 +1139,12 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 let index = layers.len();
                 client.layer_sizes.push(None);
                 client.layer_configures.push(0);
+                client.layer_closes.push(0);
                 let layer = layer_shell.get_layer_surface(
                     &surface,
                     requested.as_ref(),
                     spec.layer,
-                    "scoot-test".into(),
+                    spec.namespace.into(),
                     &qh,
                     SurfaceIndex(index),
                 );
@@ -1375,6 +1398,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     }
                 }));
             }
+            Step::ReportLayerCloses => outcome = Ack::LayerCloses(client.layer_closes.clone()),
             Step::ReportPointerMotions => {
                 outcome = Ack::PointerMotions(client.pointer_motions.clone());
             }
@@ -1455,6 +1479,14 @@ impl Fixture {
             panic!("the frame probe should report what the client saw");
         };
         dones
+    }
+
+    /// `closed` events each layer surface has been sent, by creation order.
+    fn layer_closes(&mut self) -> Vec<u32> {
+        let Ack::LayerCloses(closes) = self.run(Step::ReportLayerCloses) else {
+            panic!("the close probe should report what the client saw");
+        };
+        closes
     }
 
     /// Total configures the mapped popup has received.

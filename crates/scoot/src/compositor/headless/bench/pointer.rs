@@ -187,3 +187,50 @@ fn pointer_motion_allocations() {
         fixture.state.key(Keycode::new(SUPER), KeyState::Released);
     }
 }
+
+/// What a button press costs, and what the launcher-dismiss check inside it
+/// adds when no launcher is up (the common case): the check alone, then the
+/// whole press-and-release over a window for scale. The check is the only
+/// thing a press pays for `State::dismiss_launcher_on_outside_press`.
+#[test]
+#[ignore = "prints per-press timings for a human; asserts nothing"]
+fn pointer_press_cost() {
+    let (mut fixture, rect) = floating_scene();
+    let points = wiggle(rect);
+    let (x, y) = points[0];
+    fixture.state.pointer_move(x, y);
+    const PRESSES: u32 = 20_000;
+    let mut check: Vec<Duration> = (0..RUNS)
+        .map(|_| {
+            let started = Instant::now();
+            for _ in 0..PRESSES {
+                fixture.state.dismiss_launcher_on_outside_press();
+            }
+            started.elapsed()
+        })
+        .collect();
+    report_press("launcher check alone, no launcher", &mut check, PRESSES);
+    let mut whole: Vec<Duration> = (0..RUNS)
+        .map(|_| {
+            let started = Instant::now();
+            for _ in 0..PRESSES {
+                fixture.state.pointer_button(PointerButton::Left, true);
+                fixture.state.pointer_button(PointerButton::Left, false);
+            }
+            started.elapsed()
+        })
+        .collect();
+    report_press("press+release over a window", &mut whole, PRESSES);
+}
+
+fn report_press(label: &str, runs: &mut [Duration], presses: u32) {
+    runs.sort();
+    let per = |d: Duration| d / presses;
+    println!(
+        "pointer press, {label}: median {:?} (min {:?}, max {:?}; {} runs x {presses})",
+        per(runs[runs.len() / 2]),
+        per(runs[0]),
+        per(runs[runs.len() - 1]),
+        runs.len(),
+    );
+}

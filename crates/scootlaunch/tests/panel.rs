@@ -223,10 +223,8 @@ fn escape_dismisses_without_a_launch() {
 
 #[test]
 fn pointer_motion_outside_does_not_dismiss() {
-    // With exclusive keyboard the compositor holds focus on bare-desktop
-    // clicks, so no dismiss signal arrives: moving the pointer off the
-    // panel (and clicking the bare desktop) must not close it. Escape
-    // still dismisses after.
+    // Moving the pointer off the panel is not a dismiss; only a press is.
+    // Escape still dismisses after.
     let bodies = apps();
     let Some(mut panel) = Panel::start("outside", &refs(&bodies), &[]) else {
         return;
@@ -234,13 +232,46 @@ fn pointer_motion_outside_does_not_dismiss() {
     panel.wait_shown(rgb("#f9e2af"));
     // The panel is centered and far smaller than the output: the corner
     // is outside it.
-    panel.click(10, 10);
+    panel.hover(10, 10);
     std::thread::sleep(Duration::from_millis(500));
+    assert!(
+        panel.child.try_wait().unwrap().is_none(),
+        "motion alone keeps the panel open"
+    );
     panel.wait_shown(rgb("#f9e2af"));
     panel.save("outside-stays-open");
     panel.key("Escape");
     let status = panel.wait_exit();
     assert_eq!(status.code(), Some(1), "Escape dismisses");
+    panel.clean();
+}
+
+#[test]
+fn a_click_outside_the_panel_dismisses_it() {
+    // The compositor never hands an exclusive surface's keyboard to the
+    // desktop, so scoot closes the panel on a press outside it: exit 1,
+    // like Escape, and nothing launched.
+    let Some((session, data_home, markers)) =
+        session_with_stubs("outside-click", &["alpha", "beta", "gamma"])
+    else {
+        return;
+    };
+    let Some(mut panel) = Panel::start_on(session, data_home, &[], &[]) else {
+        return;
+    };
+    panel.wait_shown(rgb("#f9e2af"));
+    std::thread::sleep(Duration::from_millis(300));
+    // The corner of a centered panel far smaller than the output.
+    panel.click(10, 10);
+    let status = panel.wait_exit();
+    assert_eq!(status.code(), Some(1), "an outside click exits 1");
+    assert_eq!(panel.stdout(), "", "no launch prints");
+    for marker in &markers {
+        assert!(
+            fs::read_to_string(marker).unwrap_or_default().is_empty(),
+            "nothing launched"
+        );
+    }
     panel.clean();
 }
 

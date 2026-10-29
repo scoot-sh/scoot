@@ -18,15 +18,15 @@
 //! with `--only-match`), Escape dismisses. A click launches (or prints)
 //! the row; the wheel scrolls. The token is minted from the choosing key or button
 //! serial (never a focus serial, which the compositor refuses); past
-//! its 200 ms bound the launch goes without one. A click
-//! on the bare desktop does not dismiss in v1: with exclusive keyboard
-//! the compositor holds focus (`layer_keyboard_focus` keeps an
-//! exclusive surface first), so no keyboard leave arrives and the click
-//! itself goes to the surface below, never to the panel. A keyboard
-//! leave with the pointer outside the panel still dismisses (whatever
-//! compositor policy delivers one), while a leave with the pointer
-//! still over the panel (a locker taking the keyboard) keeps drawing
-//! and waits for focus, as the design's failure table says.
+//! its 200 ms bound the launch goes without one. A click outside the
+//! panel dismisses it: with exclusive keyboard the compositor never
+//! hands the keyboard to the desktop, so scoot sends the surface
+//! `closed` instead (it recognises the `scootlaunch` namespace), and any
+//! `closed` exits 1, the same as Escape. A keyboard leave with the
+//! pointer outside the panel dismisses too (a compositor that moves
+//! focus on a click), while a leave with the pointer still over the
+//! panel (a locker taking the keyboard) keeps drawing and waits for
+//! focus, as the design's failure table says.
 //!
 //! Control tracking comes off the `wl_keyboard.modifiers` depressed
 //! mask's Control bit (`0x4`, the XKB core bit): the seat reports a
@@ -573,7 +573,6 @@ struct App {
     configured_size: Option<(u32, u32)>,
     dirty: bool,
     exit: Option<Exit>,
-    closed_retried: bool,
     /// The icon theme and bases the visible rows resolve through, read
     /// once at open. The cache lives for the open only: only visible
     /// rows load, at most one file each, bounded by the module.
@@ -631,7 +630,6 @@ impl App {
             configured_size: None,
             dirty: true,
             exit: None,
-            closed_retried: false,
             icon_theme,
             icon_bases,
             icons: crate::icons::Cache::default(),
@@ -2100,7 +2098,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
         event: zwlr_layer_surface_v1::Event,
         _: &(),
         _: &Connection,
-        qh: &QueueHandle<App>,
+        _: &QueueHandle<App>,
     ) {
         // Stale configures for a destroyed surface are dropped by the
         // role comparison, as the surfaces contract asks.
@@ -2132,15 +2130,11 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
                 if !live {
                     return;
                 }
-                match app.demand.closed() {
-                    Effect::DestroyAndRetry if !app.closed_retried => {
-                        app.closed_retried = true;
-                        app.destroy_live();
-                        app.configured_size = None;
-                        app.show(qh);
-                    }
-                    _ => app.exit = Some(Exit::Dismiss),
-                }
+                // The compositor no longer wants the panel: an unplugged
+                // output, or a click outside it (scoot closes an exclusive
+                // launcher that way). A transient panel is not re-created,
+                // unlike a bar, which retries once.
+                app.exit = Some(Exit::Dismiss);
             }
             _ => {}
         }

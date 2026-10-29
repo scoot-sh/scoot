@@ -32,6 +32,7 @@ fn extreme_geometry_from_a_client_cannot_break_the_compositor() {
         // path is exercised by this one too -- it must not take the keyboard,
         // because it never attaches a buffer (see `layer_focus`).
         keyboard: KeyboardInteractivity::Exclusive,
+        namespace: "scoot-test",
     }));
 
     // Deliberately never given a buffer: an `i32::MAX`-square one cannot be
