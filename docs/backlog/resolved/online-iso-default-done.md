@@ -1,9 +1,10 @@
 ---
 title: "Online ISO as the default build, offline ISO as a build-it-yourself option"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-28"
 ---
 
 # Online ISO as the default build, offline ISO as a build-it-yourself option

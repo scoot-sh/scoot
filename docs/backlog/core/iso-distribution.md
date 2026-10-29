@@ -11,7 +11,7 @@ blocked: "maintainer decision (2026-10-28: skip distribution for now, keep the b
 Filed 2026-10-28; **parked** on the maintainer's decision ("Skip the iso
 distribution for now. Keep the builder."). Serves **daily-drive**: a
 downloadable ISO is the easy try-it-on-hardware route. Today nothing is
-published; users build the ISO ([online-iso-default](./online-iso-default.md)).
+published; users build the ISO ([online-iso-default](../resolved/online-iso-default-done.md)).
 
 ## The gap
 
@@ -67,4 +67,4 @@ a one-off analysis (2026-10-28) whose harness is not in the repo.
 ## Not in this ticket
 
 The builder, both variants and the CI that boot-tests them
-([online-iso-default](./online-iso-default.md)).
+([online-iso-default](../resolved/online-iso-default-done.md)).

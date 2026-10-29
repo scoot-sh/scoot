@@ -54,5 +54,5 @@ calamares-nixos-extensions references the all-locales `glibc-locales`.
 Superseded by scoot-sh/scoot-iso#21 (open), on the maintainer's decision of 2026-10-28:
 no trims in either ISO, so both match the stock NixOS graphical installer.
 It reverts the work above: the 2,000,000,000-byte gate and the cuts no longer exist there; see
-[online-iso-default](../core/online-iso-default.md) and
+[online-iso-default](./online-iso-default-done.md) and
 [iso-distribution](../core/iso-distribution.md).
