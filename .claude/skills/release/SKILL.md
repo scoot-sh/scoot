@@ -60,8 +60,9 @@ so.
   the dispatched run's, attached to the head commit. Read them there:
   `gh api repos/scoot-sh/<repo>/commits/<head-sha>/check-runs -q '.check_runs[]|.name+" "+.conclusion'`,
   and make sure the run is `completed`, not still in progress.
-- scoot-iso needs `check`, `kvm-probe`, `build-iso`, `qemu-test`,
-  `docker-build` green. try-scoot needs `check` and both architectures of
+- scoot-iso needs `check`, `kvm-probe`, `build-iso`, `build-iso-offline`,
+  `qemu-test`, `qemu-test-online`, `docker-build` green (`qemu-test` appears
+  late: confirm it exists before calling the run green). try-scoot needs `check` and both architectures of
   `build` and `build-selkies`; its dispatched run skips the `push` jobs
   (they only publish PR-tagged images) and `manifest`.
 - Confirm the diff pins vX.Y.Z only (flake.nix and flake.lock, plus the
