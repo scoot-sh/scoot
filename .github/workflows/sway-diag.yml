@@ -1,0 +1,51 @@
+name: sway-diag
+on:
+  pull_request:
+    paths: [".github/workflows/sway-diag.yml"]
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    env:
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@v23
+      - name: Create XDG_RUNTIME_DIR
+        run: |
+          mkdir -p "$RUNNER_TEMP/xdg"
+          chmod 700 "$RUNNER_TEMP/xdg"
+          echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/xdg" >>"$GITHUB_ENV"
+      - name: Restore the cargo cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            linux-cargo-${{ hashFiles('Cargo.lock', 'flake.lock') }}-
+            linux-cargo-
+      - name: Build scoot and scootbar
+        shell: nix develop --command bash -euo pipefail {0}
+        run: cargo build -p scoot -p scootbar
+      - name: Fetch sway
+        run: |
+          sway=$(nix build --inputs-from . nixpkgs#sway --no-link --print-out-paths)
+          echo "SCOOTBAR_TEST_SWAY=$sway/bin/sway" >>"$GITHUB_ENV"
+      - name: Loop the suite
+        shell: nix develop --command bash -euo pipefail {0}
+        env:
+          SCOOTBAR_REQUIRE_SCOOT: "1"
+          SCOOTBAR_REQUIRE_SWAY: "1"
+        run: |
+          nproc; uname -r; cat /proc/pressure/cpu || true
+          for i in 1 2 3 4; do
+            cargo nextest run -p scootbar --test bar --test hotplug --test clock --test icons --test popup --test tooltip --test visibility --test workspaces --test look_picker --no-fail-fast || true
+          done
