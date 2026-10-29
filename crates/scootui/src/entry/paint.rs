@@ -234,7 +234,7 @@ pub fn paint_list<'a, 'b>(
     if !geo.usable() {
         return;
     }
-    paint_rows(canvas, text, theme, list, geo, geo.y, row_text);
+    paint_rows(canvas, text, theme, list, geo, geo.y, row_text, true);
     if focused {
         let rows = list.visible_range().len() as u32;
         let tall = rows.saturating_mul(geo.row_height);
@@ -306,13 +306,34 @@ pub fn paint_selector<'a, 'b>(
             geo,
             geo.y.saturating_add(geo.row_height),
             row_text,
+            true,
         );
     }
 }
 
+/// [`paint_list`] without the selected row's `accent` fill: the caller
+/// has already drawn its own (rounded, wider than the text) behind the
+/// rows, and this draws the text and match highlights over it, in the
+/// selected-row ink. Not focusable: the caller draws its own chrome.
+pub fn paint_list_over<'a, 'b>(
+    canvas: &mut Canvas<'_>,
+    text: &mut Text,
+    theme: &Theme,
+    list: &List,
+    geo: &Geometry,
+    row_text: &'b (dyn Fn(usize) -> &'a str + 'b),
+) {
+    if !geo.usable() {
+        return;
+    }
+    paint_rows(canvas, text, theme, list, geo, geo.y, row_text, false);
+}
+
 /// The rows `list` shows, one [`Geometry::row_height`] each from `y0`.
 /// Shared by the list and the expanded selector: one code path means
-/// one golden covers both.
+/// one golden covers both. `fill` draws the selected row's square
+/// `accent` fill.
+#[allow(clippy::too_many_arguments)]
 fn paint_rows<'a, 'b>(
     canvas: &mut Canvas<'_>,
     text: &mut Text,
@@ -321,6 +342,7 @@ fn paint_rows<'a, 'b>(
     geo: &Geometry,
     y0: u32,
     row_text: &'b (dyn Fn(usize) -> &'a str + 'b),
+    fill: bool,
 ) {
     let clip = geo.clip();
     let metrics = text.metrics(geo.em);
@@ -333,7 +355,7 @@ fn paint_rows<'a, 'b>(
         let y = y0.saturating_add(slot.saturating_mul(geo.row_height));
         let label = row_text(row);
         let baseline = i64::from(y) + metrics.baseline(geo.row_height);
-        if selected == Some(row) {
+        if fill && selected == Some(row) {
             canvas.fill_rect(
                 Span {
                     x: geo.x,

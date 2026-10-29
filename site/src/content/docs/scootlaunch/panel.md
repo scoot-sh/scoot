@@ -44,8 +44,11 @@ chain, `hicolor`, then the base directories (`~/.icons`,
 used directly. A PNG of the right size wins when the theme ships one;
 SVG rasterizes through `resvg` (the default-on `svg` feature) only
 when no PNG does. Without the feature, or when nothing resolves or
-decodes, the row draws a letter tile: the entry's first alphanumeric,
-in `accent` with `background` ink.
+decodes, or decodes to an image with nothing visible in it (fully
+transparent, as some web-app entries ship), the row draws a letter
+tile: the entry's first alphanumeric, in `accent` with `background`
+ink (swapped on the selected row, so the tile stays visible against
+the selection fill). A tile is the same size and position as an icon.
 
 Only the visible rows load, once per open, into a bounded cache (64
 icons, 1 MiB). The keystroke path never touches the cache, so typing
@@ -59,8 +62,8 @@ most 20000 nodes, rendered at most 256 device pixels a side with no
 network and no system fonts; file hrefs resolve to nothing drawable
 unless a valid image. A corrupt file, a huge header, a symlink loop
 and a missing theme all fall back to the tile. Icons render at device
-pixels: the side is the logical side times the surface scale, so a
-1.5 output draws a 1.5x bitmap through the viewport.
+pixels: the side is about 1.2 times the font size, times the surface
+scale, so a 1.5 output draws a 1.5x bitmap through the viewport.
 
 The stripped release is 1446648 bytes without `svg` (budget 1.8 MB)
 and 2167544 bytes with it (the `svg` row, for the waiver ruling; the
@@ -156,9 +159,17 @@ and is reported; a missing layer is the defaults with one warning.
 | Panel border | `focus` (default `accent`) |
 | Caret, entry focus ring | `accent` |
 | Row icons, tile fill | `accent` with `background` ink (tile letter) |
-| Corners | `radius` |
+| Corners | `radius`, for the panel and for the selection highlight (at most half a row) |
 | Size | `font-size` (the look's popup size) |
+| Spacing | derived from `font-size` and `radius`: no keys |
 | Icon theme | `[icons] theme` (default `Adwaita`) |
+
+The search field and the rows share one inner padding from the panel
+edge. The selection fill runs the full width of that box with the
+panel's corner radius, and the icon sits inside it, never against its
+edge. Every measurement (padding, row height, icon size, the gaps)
+scales with `font-size` and `radius`, so a larger font or an output
+scale gives the same shape bigger.
 
 The `font` key names the look's UI family. There is no fontconfig in
 this stack: the panel draws with `--font PATH`, else the first usable

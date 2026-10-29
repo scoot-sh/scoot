@@ -206,9 +206,10 @@ fn icon_less_rows_draw_their_own_letters() {
         assert!(matches!(calc, Icon::Tile('C')), "{calc:?}");
         assert!(matches!(print, Icon::Tile('P')), "{print:?}");
     }
-    // Tiles never enter the map, so icon-less rows leave it empty.
+    // Letters never enter the map: icon-less rows leave it empty, and a
+    // shared unresolvable name is one remembered miss, not a letter.
     let (entries, bytes) = cache.cached();
-    assert_eq!((entries, bytes), (0, 0));
+    assert_eq!((entries, bytes), (1, 0));
 }
 
 #[test]
@@ -279,4 +280,81 @@ fn cache_evicts_on_bytes() {
 fn device_side_is_capped() {
     assert_eq!(256u32.clamp(1, MAX_RENDER_SIDE), MAX_RENDER_SIDE);
     assert_eq!(0u32.clamp(1, MAX_RENDER_SIDE), 1);
+}
+
+#[test]
+fn a_blank_png_resolves_to_the_tile_like_a_missing_icon() {
+    let root = tmp();
+    fixture_theme(root.path(), "t", &["48x48/apps"], None);
+    let dir = root.path().join("t/48x48/apps");
+    // Fully transparent, and so faint it reads as nothing.
+    for (name, alpha) in [("blank", 0u8), ("faint", BLANK_ALPHA - 1)] {
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, 8, 8);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().expect("png header");
+        let pixels = [255u8, 255, 255, alpha].repeat(64);
+        writer.write_image_data(&pixels).expect("png data");
+        drop(writer);
+        fs::write(dir.join(format!("{name}.png")), out).expect("png");
+    }
+    fs::write(dir.join("solid.png"), png_bytes(8, 8)).expect("png");
+    let bases = vec![root.path().to_path_buf()];
+    let mut cache = Cache::default();
+    for name in ["blank", "faint"] {
+        match cache.get("t", &bases, Some(name), "Zoom", 16) {
+            Icon::Tile(letter) => assert_eq!(letter, 'Z'),
+            Icon::Image(_) => panic!("{name} drew a blank image"),
+        }
+    }
+    assert!(matches!(
+        cache.get("t", &bases, Some("solid"), "Zoom", 16),
+        Icon::Image(_)
+    ));
+    // The solid image and the two remembered misses.
+    assert_eq!(cache.cached().0, 3);
+}
+
+#[test]
+fn a_miss_is_remembered_so_a_redraw_does_not_decode_again() {
+    let root = tmp();
+    fixture_theme(root.path(), "t", &["48x48/apps"], None);
+    let file = root.path().join("t/48x48/apps/late.png");
+    // Fully transparent, as a blank PWA icon.
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, 8, 8);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().expect("png header");
+    writer
+        .write_image_data(&[0u8; 8 * 8 * 4])
+        .expect("png data");
+    drop(writer);
+    fs::write(&file, out).expect("png");
+    let bases = vec![root.path().to_path_buf()];
+    let mut cache = Cache::default();
+    assert!(matches!(
+        cache.get("t", &bases, Some("late"), "Late", 16),
+        Icon::Tile('L')
+    ));
+    // The file now holds a real image: a remembered miss never reads it
+    // again this open, and each label still gets its own letter.
+    fs::write(&file, png_bytes(8, 8)).expect("png");
+    assert!(matches!(
+        cache.get("t", &bases, Some("late"), "Late", 16),
+        Icon::Tile('L')
+    ));
+    assert!(matches!(
+        cache.get("t", &bases, Some("late"), "Other", 16),
+        Icon::Tile('O')
+    ));
+    assert_eq!(cache.cached(), (1, 0));
+}
+
+#[test]
+fn blankness_is_alpha_only() {
+    assert!(is_blank(&[]));
+    assert!(is_blank(&[9, 9, 9, 0, 0, 0, 0, BLANK_ALPHA - 1]));
+    assert!(!is_blank(&[0, 0, 0, 0, 1, 1, 1, BLANK_ALPHA]));
 }

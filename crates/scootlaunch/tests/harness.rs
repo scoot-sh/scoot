@@ -418,3 +418,88 @@ pub fn wait_marker(marker: &std::path::Path) -> String {
     std::thread::sleep(Duration::from_millis(200));
     fs::read_to_string(marker).unwrap_or_default()
 }
+
+/// The panel's geometry at scale 1, restated from `src/layout.rs` (an
+/// integration test cannot import a binary's modules; the unit tests
+/// there pin the same numbers for the default 13 px look). In pixels
+/// from the panel's top-left.
+pub struct Geom {
+    /// Border plus padding: the field's and every row's inset.
+    pub inner: u32,
+    pub row_h: u32,
+    pub gap: u32,
+    pub side: u32,
+    pub lead: u32,
+}
+
+impl Geom {
+    pub fn new(em: f32, radius: u32) -> Self {
+        let round = |v: f32| v.round() as u32;
+        let pad = round(em * 0.75).max((radius * 3).div_ceil(10));
+        let row_h = (em * 1.75).ceil() as u32;
+        let side = round(em * 1.2).clamp(1, row_h.saturating_sub(4).max(1));
+        let radius = radius.min(row_h / 2);
+        Self {
+            inner: 2 + pad,
+            row_h,
+            gap: round(em * 0.4).max(1),
+            side,
+            lead: round(em * 0.6).max(radius.div_ceil(2)),
+        }
+    }
+
+    /// The first list row's top.
+    pub fn list_y(&self) -> u32 {
+        self.inner + self.row_h + self.gap
+    }
+
+    /// The panel's height for `rows` list rows.
+    pub fn height(&self, rows: u32) -> u32 {
+        2 * self.inner + self.row_h * (rows + 1) + self.gap
+    }
+}
+
+/// Renders the shipped look's `launch.toml`, as `scoot look apply`
+/// writes it into the state link.
+pub fn render_launch_fragment(name: &str) -> String {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("looks")
+        .join(name)
+        .join("look.toml");
+    let bytes = fs::read(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+    let raw = scoot_look::parse_look_toml(&bytes).unwrap_or_else(|errors| {
+        panic!(
+            "{name}/look.toml refuses to parse: {}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    });
+    let map =
+        std::collections::BTreeMap::from([(name.to_string(), (raw, scoot_look::Origin::Shipped))]);
+    let look = scoot_look::resolve(&map, name).unwrap_or_else(|e| panic!("{name}: {e}"));
+    scoot_look::render_launch(&look).unwrap_or_else(|e| panic!("{name}: {e}"))
+}
+
+/// A fully transparent `blank.png` in the fixture theme: an icon that
+/// resolves and decodes but draws nothing (a PWA entry's placeholder).
+#[allow(dead_code)]
+pub fn add_blank_icon(data_home: &std::path::Path) {
+    let dir = data_home
+        .join("icons")
+        .join("FixtureTheme")
+        .join("48x48")
+        .join("apps");
+    let mut buf = Vec::new();
+    let mut encoder = png::Encoder::new(&mut buf, 48, 48);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&vec![0u8; 48 * 48 * 4]).unwrap();
+    drop(writer);
+    fs::write(dir.join("blank.png"), buf).unwrap();
+}
