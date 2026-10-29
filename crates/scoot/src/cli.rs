@@ -1919,7 +1919,11 @@ mod tests {
     /// The top-level keys of the config file's `FileConfig`, as the help
     /// spells them: `[name]` for a table, `[[name]]` for an array of tables.
     /// Read from the struct's own source, since serde offers no way to
-    /// enumerate fields; the field types say which spelling applies.
+    /// enumerate fields; the field types say which spelling applies. Limits:
+    /// serde `rename`/`flatten` are not understood (a renamed field would be
+    /// reported under its Rust name), and a type on the line after its name
+    /// is read as a plain table, so a `Vec` split that way would report
+    /// `[name]` and fail the comparison loudly rather than pass.
     fn file_config_tables() -> Vec<String> {
         let source = include_str!("compositor/config.rs");
         let start = source
@@ -1930,10 +1934,10 @@ mod tests {
         body.lines()
             .map(str::trim)
             .filter(|line| !line.starts_with("//") && !line.starts_with('#'))
-            .filter_map(|line| line.split_once(": "))
+            .filter_map(|line| line.split_once(':'))
             .map(|(name, ty)| {
                 let name = name.strip_prefix("pub ").unwrap_or(name);
-                if ty.starts_with("Vec<") {
+                if ty.trim_start().starts_with("Vec<") {
                     format!("[[{name}]]")
                 } else {
                     format!("[{name}]")
@@ -1955,6 +1959,9 @@ mod tests {
         assert_eq!(listed, expected, "CONFIG_SECTIONS drifted from FileConfig");
     }
 
+    // The compositor module (and so the emitter) exists only on Linux, while
+    // this file also compiles for the macOS client.
+    #[cfg(target_os = "linux")]
     #[test]
     fn every_table_the_default_config_emits_is_in_the_help() {
         let emitted = crate::compositor::config::default_config_toml();
@@ -1981,6 +1988,12 @@ mod tests {
             text.lines().all(|line| line.len() < 100),
             "a config help line reached 100 columns"
         );
+        for line in config_sections_block().lines() {
+            assert!(
+                line.len() <= CONFIG_SECTIONS_WIDTH,
+                "section line over {CONFIG_SECTIONS_WIDTH} columns: {line}"
+            );
+        }
     }
 
     #[test]
