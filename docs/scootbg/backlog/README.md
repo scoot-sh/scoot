@@ -153,3 +153,4 @@ full per-feature cycle.
 - [restore two-sizes screenshot flake on sway](sway-restore-two-sizes-flake.md)
 - [scale test flaked once under full-suite load](scale-change-decode-flake.md)
 - [scaler_probe margin test: the daemon closes without replying under CPU load](scaler-probe-margin-daemon-exit-flake.md)
+- [apply_config_killed_mid_wait test took 57 s under load](apply-config-killed-mid-wait-slow.md)
