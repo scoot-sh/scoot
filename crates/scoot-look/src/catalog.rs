@@ -289,13 +289,6 @@ fn scan_dir(dir: &Path, origin: Origin, catalog: &mut Catalog) {
         if failed {
             continue;
         }
-        // Contrast is resolved over the catalog at the use site (an
-        // `extends` child needs its base); the winner check below runs on
-        // names only.
-        if catalog.find(&raw.name).is_some() {
-            catalog.shadowed.push((raw.name.clone(), canonical));
-            continue;
-        }
         // The manifest's own directory: the file read above may itself be
         // a store link, and the files it names sit beside the target, not
         // the entry (`manifest_file` above already resolved it once, so no
@@ -304,6 +297,18 @@ fn scan_dir(dir: &Path, origin: Origin, catalog: &mut Catalog) {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| canonical.clone());
+        // Contrast is resolved over the catalog at the use site (an
+        // `extends` child needs its base); the winner check below runs on
+        // names only. The same look reached twice (a system half and a
+        // home-manager half both link one store path) resolves to the same
+        // manifest directory: that is one look, not a shadow. Two
+        // different sources stay shadowed even with identical bytes.
+        if let Some(winner) = catalog.find(&raw.name) {
+            if winner.manifest_dir != manifest_dir {
+                catalog.shadowed.push((raw.name.clone(), canonical));
+            }
+            continue;
+        }
         catalog.entries.push(Entry {
             name: raw.name.clone(),
             dir: canonical,

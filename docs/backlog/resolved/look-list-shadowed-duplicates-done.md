@@ -1,9 +1,10 @@
 ---
 title: "scoot look list prints every look twice (shadowed duplicates)"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-29"
 ---
 
 # scoot look list prints every look twice (shadowed duplicates)
