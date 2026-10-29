@@ -7997,8 +7997,7 @@ let
     # and build-time render, the declared default, no Nix-owned dconf
     # keys, and the sync step after the links and dconf land...
     (
-      assert
-        hmDesk.config.xdg.dataFile."scoot/looks/ginger-night".source == "${../looks/ginger-night}";
+      assert hmDesk.config.xdg.dataFile."scoot/looks/ginger-night".source == "${../looks/ginger-night}";
       true
     )
     # ...as one store path with the system half's `ln -s ${entry.src}`:
@@ -8006,9 +8005,7 @@ let
     # would be copied again as `hm_<name>` (a second path, every look
     # listed twice)...
     (
-      assert builtins.hasContext (
-        toString hmDesk.config.xdg.dataFile."scoot/looks/ginger-night".source
-      );
+      assert builtins.hasContext (toString hmDesk.config.xdg.dataFile."scoot/looks/ginger-night".source);
       true
     )
     (
@@ -14466,8 +14463,7 @@ let
     # `"moonrise"` keeps the shipped source (catalog order, not store
     # basename)...
     (
-      assert
-        hmLookCustom.config.xdg.dataFile."scoot/looks/moonrise".source == "${../looks/moonrise}";
+      assert hmLookCustom.config.xdg.dataFile."scoot/looks/moonrise".source == "${../looks/moonrise}";
       true
     )
     (
