@@ -291,8 +291,8 @@ fn a_round_of_scales_stays_exact_on_scoot() {
 
 /// Serves `body` on loopback, but holds the response until `release` is
 /// sent (or dropped): the daemon's job is in flight, and stays so, for as
-/// long as the test wants. Returns the URL. Later requests (there should
-/// be none: the cache answers) are served at once.
+/// long as the test wants. Returns the URL. A second request would wait for the
+/// same release (there should be none: the cache answers).
 fn serve_held(body: Vec<u8>, release: std::sync::mpsc::Receiver<()>) -> String {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -348,6 +348,8 @@ fn a_scale_change_while_an_image_decodes_draws_at_the_new_scale() {
     let mut daemon = session.daemon_logged(&[
         ("WAYLAND_DEBUG", "client"),
         ("XDG_CACHE_HOME", cache.to_str().unwrap()),
+        ("no_proxy", "127.0.0.1"),
+        ("NO_PROXY", "127.0.0.1"),
     ]);
     configured(&session);
     let id = scoot_id(&session);
