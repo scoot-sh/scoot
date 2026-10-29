@@ -369,19 +369,77 @@ impl Session {
         } else {
             PathBuf::from("swaymsg")
         };
-        let output = Command::new(program)
-            .arg("-s")
-            .arg(socket)
-            .args(args)
-            .output()
-            .unwrap();
+        let run = || {
+            Command::new(&program)
+                .arg("-s")
+                .arg(socket)
+                .args(args)
+                .output()
+                .unwrap()
+        };
+        let started = Instant::now();
+        let output = run();
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        assert!(
-            output.status.success(),
-            "swaymsg {args:?}: {stdout}{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        if !output.status.success() {
+            // DIAGNOSTIC (temporary): what was sway doing?
+            let first = started.elapsed();
+            let state = self.sway_state();
+            let again = run();
+            panic!(
+                "swaymsg {args:?} failed after {first:?}: {stdout}{}\n--- state at failure:\n{state}\n--- retry ok={} after {:?}: {}{}\n--- sway log:\n{}",
+                String::from_utf8_lossy(&output.stderr),
+                again.status.success(),
+                started.elapsed(),
+                String::from_utf8_lossy(&again.stdout)
+                    .chars()
+                    .take(80)
+                    .collect::<String>(),
+                String::from_utf8_lossy(&again.stderr),
+                self.log()
+            );
+        }
         stdout
+    }
+
+    fn sway_state(&self) -> String {
+        let pid = self.compositor.as_ref().map(Child::id).unwrap_or(0);
+        let mut out = String::new();
+        for file in [
+            "/proc/loadavg",
+            "/proc/pressure/cpu",
+            "/proc/pressure/io",
+            "/proc/pressure/memory",
+        ] {
+            out += &format!("{file}: {}", fs::read_to_string(file).unwrap_or_default());
+        }
+        let ps = Command::new("ps")
+            .args([
+                "-eo",
+                "pid,ppid,stat,pcpu,wchan:20,rss,etimes,args",
+                "--sort=-pcpu",
+            ])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default();
+        out += &ps.lines().take(25).collect::<Vec<_>>().join("\n");
+        out += &format!("\nsway pid {pid}\n");
+        if let Ok(tasks) = fs::read_dir(format!("/proc/{pid}/task")) {
+            for task in tasks.flatten() {
+                let t = task.path();
+                out += &format!(
+                    "task {:?}: stat={} wchan={} syscall={}\n",
+                    task.file_name(),
+                    fs::read_to_string(t.join("stat"))
+                        .unwrap_or_default()
+                        .trim(),
+                    fs::read_to_string(t.join("wchan")).unwrap_or_default(),
+                    fs::read_to_string(t.join("syscall"))
+                        .unwrap_or_default()
+                        .trim()
+                );
+            }
+        }
+        out
     }
 
     /// Sway's outputs: `(name, usable rect)` of each, the rect being its
