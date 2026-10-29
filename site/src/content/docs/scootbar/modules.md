@@ -938,9 +938,18 @@ on-click = { exec = ["foot", "-e", "btop"] }     # a command, run directly
   opens (a descriptor the launcher left open without close-on-exec when it
   started the bar is handed on, as with any child). Its environment is the bar's. It is reaped the moment it
   exits (no zombie, no timer), and at most 8 launched commands run at once:
-  a ninth is refused with a line on stderr, not queued, so a hung command
-  and a flood of clicks cannot fill the process table. The bar does not
-  supervise what it launched: it lives as long as it likes (see
+  a ninth is refused with a line on stderr (and, for `invoke`, an error),
+  not queued, so a hung command and a flood of clicks cannot fill the
+  process table. The refusal names what holds the table, oldest first, each
+  as the program's name (no path, no arguments, cut at 24 bytes), its pid and
+  how long it has run (`7s`, `2m 05s`, `3h 02m`):
+
+  ```text
+  not running `foo`: 8 launched commands are still running (stop one by hand to free a slot): `sleep` pid 4121 for 2h 05m, `sh` pid 4188 for 12s, ...
+  ```
+
+  Stop one with `kill PID`; the bar never signals a command it launched. It
+  does not supervise them either: a command lives as long as it likes (see
   [the unit's `KillMode`](./index.md) for what a
   restart of the bar does to it).
 - **`{ scoot = "quit" }`** asks scoot to end the session over its control

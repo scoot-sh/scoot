@@ -1,9 +1,10 @@
 ---
 title: "Hung spawned children block every other exec binding until the bar restarts"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-28"
 ---
 
 # Hung spawned children block every other exec binding until the bar restarts
@@ -41,3 +42,22 @@ looks picker stages one apply per pick and reports the refusal, which is
 enough until this ticket lands. Killing hung children from the bar is
 explicitly out: the bar never signals another process today, and that
 needs its own design.
+
+## Resolution
+
+Took the first option only. A refused spawn (log line and the `invoke`
+error) now names every running command oldest first: program basename (cut
+at 24 bytes, control characters shown as `?`, no arguments), pid and
+monotonic age, so the user can `kill` the hung one by hand. The table is
+re-reaped before the refusal is built, so a child that just exited frees
+the slot instead of being named.
+
+Declined, on purpose:
+
+- **A bounded wait or queue.** Reaping is already the one place slots free,
+  so a one-deep queue would be small, but a queued command fires at an
+  arbitrary later time (a volume key that lands a minute after the press),
+  which is worse than a loud refusal.
+- **A `msg` kill of a named child.** The bar never signals another process
+  (the ticket's own exclusion); it needs its own design, with the
+  kill-versus-natural-exit race it brings. Park it until a user asks.

@@ -292,3 +292,172 @@ fn the_fd_check_sees_a_descriptor_that_is_inherited() {
     let allowed = crate::testfds::allowed_in_child(&inherited_before_it);
     assert!(fds.difference(&allowed).any(|&fd| fd == leaked.as_raw_fd()));
 }
+
+#[test]
+fn an_age_reads_in_seconds_minutes_or_hours() {
+    let secs = |n| age(Duration::from_secs(n));
+    assert_eq!(secs(0), "0s");
+    assert_eq!(age(Duration::from_millis(999)), "0s");
+    assert_eq!(secs(59), "59s");
+    assert_eq!(secs(60), "1m 00s");
+    assert_eq!(secs(61), "1m 01s");
+    assert_eq!(secs(3599), "59m 59s");
+    assert_eq!(secs(3600), "1h 00m");
+    assert_eq!(secs(3 * 3600 + 125), "3h 02m");
+    assert_eq!(
+        secs(u64::MAX),
+        format!("{}h {:02}m", u64::MAX / 3600, u64::MAX % 3600 / 60)
+    );
+}
+
+#[test]
+fn a_name_is_the_basename_bounded_and_printable() {
+    assert_eq!(Name::of("sleep").to_string(), "sleep");
+    assert_eq!(Name::of("/usr/bin/sleep").to_string(), "sleep");
+    assert_eq!(Name::of("./a/b").to_string(), "b");
+    // Nothing after the last slash, or nothing at all.
+    assert_eq!(Name::of("dir/").to_string(), "?");
+    assert_eq!(Name::of("").to_string(), "?");
+    // Control characters (a newline would split a log line) are shown.
+    assert_eq!(Name::of("a\nb\u{1b}[31m").to_string(), "a?b?[31m");
+    assert_eq!(Name::of("a\u{85}b").to_string(), "a?b");
+    // Exactly the bound fits; one more is cut and marked.
+    let exact = "x".repeat(NAME_MAX);
+    assert_eq!(Name::of(&exact).to_string(), exact);
+    let over = "x".repeat(NAME_MAX + 1);
+    assert_eq!(Name::of(&over).to_string(), format!("{exact}\u{2026}"));
+    // A multi-byte character is never split.
+    let wide = "\u{e9}".repeat(NAME_MAX); // two bytes each
+    let shown = Name::of(&wide).to_string();
+    assert_eq!(shown, format!("{}\u{2026}", "\u{e9}".repeat(NAME_MAX / 2)));
+    // A huge name stays bounded.
+    assert!(Name::of(&"y".repeat(1 << 20)).to_string().len() <= NAME_MAX + 3);
+}
+
+fn fill(spawner: &mut Spawner) {
+    for _ in 0..MAX_CHILDREN {
+        spawner
+            .spawn(&argv(&["sleep", "30"]))
+            .expect("under the cap");
+    }
+}
+
+#[test]
+fn a_full_table_refusal_names_each_command_oldest_first() {
+    let mut spawner = Spawner::default();
+    fill(&mut spawner);
+    let pids: Vec<u32> = spawner.live.iter().map(|live| live.child.id()).collect();
+    let error = spawner
+        .spawn(&argv(&["/opt/tools/next-one", "--token=hunter2"]))
+        .expect_err("one past the cap");
+    assert!(
+        error.starts_with(&format!(
+            "not running `next-one`: {MAX_CHILDREN} launched commands are still running"
+        )),
+        "{error}"
+    );
+    assert!(error.contains("stop one by hand"), "{error}");
+    assert!(
+        !error.contains("hunter2") && !error.contains("/opt/tools"),
+        "{error}"
+    );
+    assert!(!error.contains('\n'), "one log line: {error}");
+    // Every pid appears, in launch order.
+    let mut at = 0;
+    for pid in &pids {
+        let found = error[at..]
+            .find(&format!("`sleep` pid {pid} for "))
+            .unwrap_or_else(|| panic!("pid {pid} missing or out of order: {error}"));
+        at += found;
+    }
+    assert_eq!(spawner.running(), MAX_CHILDREN, "a refusal changes nothing");
+    kill_all(&mut spawner);
+}
+
+#[test]
+fn the_refusal_shows_ages_from_a_monotonic_clock() {
+    let mut spawner = Spawner::default();
+    fill(&mut spawner);
+    let start = spawner.live[0].started;
+    let text = spawner.refusal("x", start + Duration::from_secs(3 * 3600 + 125));
+    assert!(text.contains(" for 3h 02m"), "{text}");
+    // A clock reading before the start (never, but) is zero, not a panic.
+    let text = spawner.refusal("x", start - Duration::from_secs(1));
+    assert!(text.contains(" for 0s"), "{text}");
+    kill_all(&mut spawner);
+}
+
+#[test]
+fn a_refusal_keeps_a_long_program_name_short() {
+    let mut spawner = Spawner::default();
+    fill(&mut spawner);
+    let long = format!("/bin/{}", "n".repeat(4096));
+    let error = spawner.spawn(&argv(&[&long])).expect_err("full");
+    assert!(error.len() < 1024, "{} bytes", error.len());
+    kill_all(&mut spawner);
+}
+
+#[test]
+fn a_long_running_commands_arguments_never_reach_the_refusal() {
+    let mut spawner = Spawner::default();
+    for _ in 0..MAX_CHILDREN {
+        spawner
+            .spawn(&argv(&["sh", "-c", "sleep 30 # secret-token"]))
+            .expect("under the cap");
+    }
+    let error = spawner.spawn(&argv(&["true"])).expect_err("full");
+    assert!(error.contains("`sh` pid"), "{error}");
+    assert!(
+        !error.contains("secret-token") && !error.contains("sleep 30"),
+        "{error}"
+    );
+    kill_all(&mut spawner);
+}
+
+#[test]
+fn zero_and_one_child_tables_report_without_a_stray_separator() {
+    let mut spawner = Spawner::default();
+    let now = Instant::now();
+    // Not reachable from `spawn` (it refuses only when full), but the
+    // text must hold up on its own.
+    let none = spawner.refusal("p", now);
+    assert!(none.ends_with(':'), "{none}");
+    spawner.spawn(&argv(&["sleep", "30"])).expect("spawned");
+    let one = spawner.refusal("p", Instant::now());
+    assert_eq!(one.matches("pid").count(), 1, "{one}");
+    assert!(!one.contains(','), "{one}");
+    kill_all(&mut spawner);
+}
+
+#[test]
+fn a_child_that_exited_before_the_refusal_is_not_named_and_frees_the_slot() {
+    let mut spawner = Spawner::default();
+    fill(&mut spawner);
+    let gone = spawner.live[3].child.id();
+    let _ = spawner.live[3].child.kill();
+    // Wait for the exit without reaping, as the loop would be mid-turn.
+    {
+        let placeholder = rustix::fs::CWD;
+        let mut fds: [PollFd<'_>; MAX_CHILDREN] =
+            std::array::from_fn(|_| PollFd::from_borrowed_fd(placeholder, PollFlags::empty()));
+        let mut len = 0;
+        spawner.sources(&mut fds, &mut len);
+        assert_eq!(len, MAX_CHILDREN);
+        let timeout = Timespec {
+            tv_sec: 10,
+            tv_nsec: 0,
+        };
+        let _ = poll(&mut fds[3..4], Some(&timeout));
+    }
+    // The slot is free: this is a launch, not a refusal.
+    spawner
+        .spawn(&argv(&["sleep", "30"]))
+        .expect("a slot freed");
+    assert_eq!(spawner.running(), MAX_CHILDREN);
+    let error = spawner
+        .spawn(&argv(&["sleep", "30"]))
+        .expect_err("full again");
+    assert!(!error.contains(&format!("pid {gone} ")), "{error}");
+    assert_eq!(error.matches("pid ").count(), MAX_CHILDREN, "{error}");
+    kill_all(&mut spawner);
+}

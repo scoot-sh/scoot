@@ -33,13 +33,19 @@
 //! - **Bounded.** At most [`MAX_CHILDREN`] launched commands run at once;
 //!   one past it is refused with a message, not queued, so a flood of
 //!   clicks (or a bound command that hangs) cannot fill the process table.
-//!   A launched command otherwise lives as long as it likes: the bar does
-//!   not supervise it.
+//!   The message names what holds the table (program basename, pid, how
+//!   long it has run, oldest first) so the user knows what to stop by
+//!   hand: the bar never signals a process it launched. A launched
+//!   command otherwise lives as long as it likes: the bar does not
+//!   supervise it. (A wait-per-spawn queue would be small here, `reap` is
+//!   already the one place slots free, but it is declined: a queued
+//!   command would fire arbitrarily late.)
 
+use std::fmt::Write as _;
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rustix::event::{PollFd, PollFlags};
 use rustix::process::{Pid, PidfdFlags, pidfd_open};
@@ -53,9 +59,79 @@ pub const MAX_CHILDREN: usize = 8;
 /// How often a child with no pidfd is looked at.
 const FALLBACK_POLL: Duration = Duration::from_millis(250);
 
+/// Bytes of a program's name kept for the refusal message.
+const NAME_MAX: usize = 24;
+
+/// A program's basename, bounded and printable, kept inline so launching
+/// allocates nothing for it.
+#[derive(Debug, Clone, Copy)]
+struct Name {
+    buf: [u8; NAME_MAX],
+    len: u8,
+    /// The name was longer than [`NAME_MAX`] and was cut.
+    cut: bool,
+}
+
+impl Name {
+    /// The part of `program` after its last `/`, control characters shown
+    /// as `?`, cut at a character boundary.
+    fn of(program: &str) -> Self {
+        let base = program.rsplit('/').next().unwrap_or(program);
+        let mut name = Self {
+            buf: [0; NAME_MAX],
+            len: 0,
+            cut: false,
+        };
+        let mut at = 0;
+        for c in base.chars() {
+            let c = if c.is_control() { '?' } else { c };
+            let end = at + c.len_utf8();
+            if end > NAME_MAX {
+                name.cut = true;
+                break;
+            }
+            c.encode_utf8(&mut name.buf[at..end]);
+            at = end;
+        }
+        // `at <= NAME_MAX = 24`, which fits in a `u8`.
+        name.len = at as u8;
+        name
+    }
+
+    fn as_str(&self) -> &str {
+        // Only whole characters were written, so this never fails.
+        std::str::from_utf8(&self.buf[..usize::from(self.len)]).unwrap_or("?")
+    }
+}
+
+impl std::fmt::Display for Name {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())?;
+        if self.cut {
+            f.write_str("\u{2026}")?;
+        } else if self.len == 0 {
+            f.write_str("?")?;
+        }
+        Ok(())
+    }
+}
+
+/// `elapsed` for a person: `7s`, `2m 05s`, `3h 02m`.
+fn age(elapsed: Duration) -> String {
+    let secs = elapsed.as_secs();
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m {:02}s", secs / 60, secs % 60),
+        _ => format!("{}h {:02}m", secs / 3600, secs % 3600 / 60),
+    }
+}
+
 #[derive(Debug)]
 struct Live {
     child: Child,
+    name: Name,
+    /// Monotonic, for the refusal's ages.
+    started: Instant,
     /// Readable when the child exits; `None` on a kernel without pidfds.
     pidfd: Option<OwnedFd>,
 }
@@ -87,9 +163,12 @@ impl Spawner {
         // Children that already exited free their slots first.
         self.reap();
         if self.live.len() >= MAX_CHILDREN {
-            return Err(format!(
-                "not running `{program}`: {MAX_CHILDREN} launched commands are still running"
-            ));
+            // A child may have exited since: look once more, so the
+            // message never names one that is gone.
+            self.reap();
+            if self.live.len() >= MAX_CHILDREN {
+                return Err(self.refusal(program, Instant::now()));
+            }
         }
         let mut command = Command::new(program);
         command
@@ -106,8 +185,35 @@ impl Spawner {
         } else {
             None
         };
-        self.live.push(Live { child, pidfd });
+        self.live.push(Live {
+            child,
+            name: Name::of(program),
+            started: Instant::now(),
+            pidfd,
+        });
         Ok(())
+    }
+
+    /// Why `program` was not run, naming what holds the table (oldest
+    /// first, the order they were launched in) as of `now`. Built only
+    /// when refusing.
+    fn refusal(&self, program: &str, now: Instant) -> String {
+        let mut text = format!(
+            "not running `{}`: {} launched commands are still running (stop one by hand to free a slot):",
+            Name::of(program),
+            self.live.len()
+        );
+        for (index, live) in self.live.iter().enumerate() {
+            let _ = write!(
+                text,
+                "{} `{}` pid {} for {}",
+                if index == 0 { "" } else { "," },
+                live.name,
+                live.child.id(),
+                age(now.saturating_duration_since(live.started)),
+            );
+        }
+        text
     }
 
     /// Adds every child's pidfd to `fds` from index `*len` on (up to
