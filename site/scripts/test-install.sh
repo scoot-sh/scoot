@@ -242,7 +242,7 @@ done
 [ -f "$h/.local/share/scoot/looks/ginger-night/apps/starship.toml" ] || fail "no catalog starship leaf"
 [ ! -e "$h/.local/share/scoot/looks/moonrise/apps/helix.toml" ] || fail "a missing leaf was invented"
 grep -Fq "$h/.local/share/scoot/looks/ginger-night/apps/helix.toml" "$h/.local/share/scoot/install-manifest" || fail "leaf not in manifest"
-[ ! -e "$h/.config/scoot/config.toml" ] && [ ! -e "$h/.config/scoot/bar.toml" ] || fail "whole configs written"
+{ [ ! -e "$h/.config/scoot/config.toml" ] && [ ! -e "$h/.config/scoot/bar.toml" ]; } || fail "whole configs written"
 grep -q "look apply ginger-night" "$h/stub-scoot-calls" || fail "apply not invoked"
 grep -q "applied: ginger-night" "$work/out" || fail "no apply reply"
 grep -Fq "$h/.local/share/scoot/looks/ginger-night/look.toml" "$h/.local/share/scoot/install-manifest" || fail "catalog not in manifest"
@@ -459,8 +459,46 @@ mkdir -p "$h/.local/bin"
 echo foreign >"$h/.local/bin/scoot"
 if run_in "$h"; then fail "a foreign scoot was replaced"; fi
 grep -q "was not installed by this script" "$work/out" || fail "foreign-file message"
-[ "$(cat "$h/.local/bin/scoot")" = foreign ] && [ ! -e "$h/.local/bin/scootbg" ] || fail "refusal wrote files"
+grep -q "install of this script still running" "$work/out" || fail "concurrent-install hint missing from the refusal"
+{ [ "$(cat "$h/.local/bin/scoot")" = foreign ] && [ ! -e "$h/.local/bin/scootbg" ]; } || fail "refusal wrote files"
 ok "foreign files refused before anything is written"
+
+# 2d. No systemctl at all: the installer says so and carries on. The
+#     fake manager is on PATH for every other run, so this builds a PATH
+#     of everything except any systemctl (symlinks, so sh and the rest
+#     still resolve).
+nosd=$work/nosystemd
+mkdir -p "$nosd"
+oldifs=$IFS
+IFS=:
+for d in $PATH; do
+    if [ ! -d "$d" ] || [ "$d" = "$work/bin" ]; then continue; fi
+    for t in "$d"/*; do
+        n=${t##*/}
+        [ "$n" != systemctl ] && [ -x "$t" ] && [ ! -e "$nosd/$n" ] && ln -s "$t" "$nosd/$n"
+    done
+done
+IFS=$oldifs
+for t in "$work/bin"/*; do
+    n=${t##*/}
+    [ "$n" != systemctl ] && ln -sf "$t" "$nosd/$n"
+done
+h=$work/h-nosystemd
+if PATH="$nosd" command -v systemctl >/dev/null 2>&1; then fail "test PATH still has systemctl"; fi
+cp "$work/systemctl.log" "$work/systemctl.log.keep"
+: >"$work/systemctl.log"
+oldpath=$PATH
+PATH=$nosd
+run_in "$h" || nosd_rc=$?
+PATH=$oldpath
+[ "${nosd_rc:-0}" -eq 0 ] || { cat "$work/out"; fail "install without systemctl"; }
+grep -q "no systemd user manager here" "$work/out" || fail "no-manager note missing without systemctl"
+nocalls=$(wc -c <"$work/systemctl.log")
+cp "$work/systemctl.log.keep" "$work/systemctl.log"
+[ "$nocalls" -eq 0 ] || fail "systemctl was called although absent"
+[ -x "$h/.local/bin/scoot" ] || fail "install without systemctl wrote no binary"
+h=$work/h1
+ok "no systemctl: noted, nothing enabled, install completes"
 
 # 2c. The refusal also fires when the paths contain spaces, and a clean
 #     install works there too (the check never word-splits destinations).
@@ -479,7 +517,7 @@ h=$work/h1
 # 3. Uninstall removes what was installed (record included) and keeps
 #    the config.
 run_in "$h" --uninstall || fail "uninstall"
-[ ! -e "$h/.local/bin/scoot" ] && [ ! -e "$h/.config/systemd/user/scoot.service" ] || fail "uninstall left files"
+{ [ ! -e "$h/.local/bin/scoot" ] && [ ! -e "$h/.config/systemd/user/scoot.service" ]; } || fail "uninstall left files"
 [ ! -e "$h/.local/share/scoot/install-version" ] || fail "uninstall left the version record"
 [ -f "$h/.config/scoot/config.toml" ] || fail "uninstall removed the config"
 grep -q "systemctl --user disable scootbar.service" "$work/systemctl.log" || fail "bar unit not disabled on uninstall"
@@ -492,8 +530,8 @@ h=$work/h-look
 mkdir -p "$h/.local/share/scoot/looks/foreign"
 echo foreign >"$h/.local/share/scoot/looks/foreign/kept"
 run_in "$h" --uninstall || { cat "$work/out"; fail "uninstall with looks"; }
-[ ! -e "$h/.local/share/scoot/looks/ginger-night" ] && [ ! -e "$h/.local/share/scoot/looks/moonrise" ] || fail "uninstall left look files"
-[ ! -e "$h/.local/share/scoot/looks/music-desk" ] && [ ! -e "$h/.local/share/scoot/looks/radial-burst" ] || fail "uninstall left look files"
+{ [ ! -e "$h/.local/share/scoot/looks/ginger-night" ] && [ ! -e "$h/.local/share/scoot/looks/moonrise" ]; } || fail "uninstall left look files"
+{ [ ! -e "$h/.local/share/scoot/looks/music-desk" ] && [ ! -e "$h/.local/share/scoot/looks/radial-burst" ]; } || fail "uninstall left look files"
 [ ! -e "$h/.local/share/scoot/looks/vinyl-sunset" ] || fail "uninstall left look files"
 [ "$(cat "$h/.local/share/scoot/looks/foreign/kept")" = foreign ] || fail "uninstall removed a foreign file"
 h=$work/h1
