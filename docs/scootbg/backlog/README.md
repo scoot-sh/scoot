@@ -152,3 +152,4 @@ full per-feature cycle.
 - [Share tests hard-code 4K page rounding](resolved/scootbg-share-tests-page-size-done.md) — RESOLVED 2026-09-30: the tests take the host's page size (verified on the Asahi's 16 KiB pages)
 - [restore two-sizes screenshot flake on sway](sway-restore-two-sizes-flake.md)
 - [scale test flaked once under full-suite load](scale-change-decode-flake.md)
+- [scaler_probe margin test: the daemon closes without replying under CPU load](scaler-probe-margin-daemon-exit-flake.md)

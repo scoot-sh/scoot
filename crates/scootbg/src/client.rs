@@ -29,6 +29,11 @@ pub enum Error {
         socket: PathBuf,
         error: io::Error,
     },
+    /// The daemon accepted the request and did not answer within
+    /// [`TIMEOUT`]. What it was asked to do may still happen.
+    TimedOut {
+        socket: PathBuf,
+    },
     /// The daemon closed the connection without a reply.
     NoReply,
     BadReply(String),
@@ -47,6 +52,12 @@ impl fmt::Display for Error {
                 socket.display()
             ),
             Self::Io { socket, error } => write!(f, "{}: {error}", socket.display()),
+            Self::TimedOut { socket } => write!(
+                f,
+                "{}: the daemon did not answer within {} s (the change may still happen)",
+                socket.display(),
+                TIMEOUT.as_secs()
+            ),
             Self::NoReply => write!(f, "the daemon closed the connection without replying"),
             Self::BadReply(why) => write!(f, "unreadable reply from the daemon: {why}"),
             Self::Daemon(message) => write!(f, "daemon: {message}"),
@@ -62,10 +73,7 @@ impl std::error::Error for Error {}
 /// its socket and releasing its lock.
 pub fn send(request: &Request<'_>) -> Result<String, Error> {
     let paths = paths::from_env().map_err(Error::Paths)?;
-    let io_error = |error| Error::Io {
-        socket: paths.socket.clone(),
-        error,
-    };
+    let io_error = |error| io_failure(error, paths.socket.clone());
     let mut stream = match UnixStream::connect(&paths.socket) {
         Ok(stream) => stream,
         Err(error)
@@ -88,8 +96,23 @@ pub fn send(request: &Request<'_>) -> Result<String, Error> {
         Err(Error::NoReply) if *request == Request::Kill && !paths.socket.exists() => {
             Ok(String::new())
         }
-        Err(Error::Io { error, .. }) => Err(io_error(error)),
+        Err(Error::Io { error, .. }) => Err(io_failure(error, paths.socket)),
         other => other,
+    }
+}
+
+/// An I/O failure on the socket at `socket`. A read or write that outlasts
+/// its timeout comes back from the kernel as `EAGAIN` and would print as
+/// "Resource temporarily unavailable (os error 11)", which says nothing
+/// about a daemon that took the request and never answered.
+fn io_failure(error: io::Error, socket: PathBuf) -> Error {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+    ) {
+        Error::TimedOut { socket }
+    } else {
+        Error::Io { socket, error }
     }
 }
 
@@ -143,4 +166,37 @@ fn exchange(stream: &mut UnixStream, request: &Request<'_>) -> Result<String, Er
         line.push('\n');
     }
     Ok(line)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::net::UnixStream;
+
+    use super::*;
+
+    #[test]
+    fn a_silent_daemon_is_said_to_be_silent() {
+        // The premise: an expired socket timeout is `WouldBlock`.
+        let (client, _silent) = UnixStream::pair().unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_millis(20)))
+            .unwrap();
+        let error = (&client).read(&mut [0u8; 1]).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+
+        let said = io_failure(error, PathBuf::from("/run/scootbg-wayland-0.sock")).to_string();
+        assert_eq!(
+            said,
+            "/run/scootbg-wayland-0.sock: the daemon did not answer within 30 s \
+             (the change may still happen)"
+        );
+        assert!(!said.contains("os error"));
+    }
+
+    #[test]
+    fn other_io_failures_keep_the_system_message() {
+        let error = io::Error::from_raw_os_error(13);
+        let said = io_failure(error, PathBuf::from("/s")).to_string();
+        assert!(said.starts_with("/s: Permission denied"), "{said}");
+    }
 }

@@ -12,6 +12,22 @@ use std::time::{Duration, Instant};
 use common::{PATIENCE, Session};
 use serde_json::{Value, json};
 
+/// The output side, in pixels, of every test that runs on a
+/// `SCOOTBG_DEBUG_ROTATION_EVERY` interval of 1 or 2 s.
+///
+/// A step that comes due while the start's own `set` still waits for its
+/// draw supersedes it: the output is stamped with the step's newer
+/// generation, so the start's reply waits for that one too
+/// (`waiters::outcome`). A step interval shorter than a draw therefore
+/// starves the `set` until the client's 30 s read timeout ("Resource
+/// temporarily unavailable (os error 11)"), or settles it as failed when
+/// the step itself fails. A debug-build draw of the default 1600 x 1000
+/// output takes ~0.8 s idle and ~2 s on a loaded 6-core machine, which is
+/// longer than that interval. The release build cannot reach this: its
+/// shortest interval is `MIN_EVERY_SECS` (60 s). A tiny output draws in
+/// ~10 ms, so the interval has the margin it needs.
+const SMALL: u32 = 64;
+
 /// Every output listed and configured.
 fn configured(session: &Session, count: usize) -> Vec<Value> {
     session.query_until("all configured", |o| {
@@ -153,7 +169,7 @@ fn a_slideshow_starts_reports_and_stops() {
 
 #[test]
 fn a_slideshow_advances_on_its_timer() {
-    let Some(session) = Session::start_with("rotation-advance", 1, "") else {
+    let Some(session) = Session::start_sized("rotation-advance", SMALL, SMALL) else {
         return;
     };
     // Debug-shortened to 2 s (release builds have no such knob, and refuse
@@ -277,7 +293,7 @@ fn no_slideshow_means_no_wakeups() {
 /// the undecodable-file interplay lives in the first-file test instead.
 #[test]
 fn a_slideshow_step_animates_through_its_transition() {
-    let Some(session) = Session::start_with("rotation-transition", 1, "") else {
+    let Some(session) = Session::start_sized("rotation-transition", SMALL, SMALL) else {
         return;
     };
     // Debug-shortened to 1 s.
@@ -369,7 +385,7 @@ fn a_slideshow_step_animates_through_its_transition() {
 /// 1 s steps).
 #[test]
 fn a_slideshow_with_an_undecodable_first_file_starts_and_advances() {
-    let Some(session) = Session::start_with("rotation-first-bad", 1, "") else {
+    let Some(session) = Session::start_sized("rotation-first-bad", SMALL, SMALL) else {
         return;
     };
     // Debug-shortened to 1 s, so the step past the bad first file comes at once.
@@ -462,7 +478,7 @@ fn a_slideshow_with_an_undecodable_first_file_starts_and_advances() {
 /// queue without saying anything about the fix.
 #[test]
 fn a_refused_second_slideshow_keeps_the_running_one() {
-    let Some(session) = Session::start_with("rotation-busy", 1, "") else {
+    let Some(session) = Session::start_sized("rotation-busy", SMALL, SMALL) else {
         return;
     };
     // Debug-shortened to 1 s, so the surviving slideshow steps promptly.
@@ -624,7 +640,7 @@ fn scootbg_listing_cap() -> usize {
 /// again like with no slideshow at all.
 #[test]
 fn a_slideshow_stops_when_its_directory_goes_away() {
-    let Some(session) = Session::start_with("rotation-gone", 1, "") else {
+    let Some(session) = Session::start_sized("rotation-gone", SMALL, SMALL) else {
         return;
     };
     // Debug-shortened to 1 s, so the step past the deletion comes at once.
@@ -706,7 +722,7 @@ fn write_many_frame_gif(path: &Path) {
 /// with zero wakeups).
 #[test]
 fn a_slideshow_steps_over_animated_files_showing_first_frames() {
-    let Some(session) = Session::start_with("rotation-animated", 1, "") else {
+    let Some(session) = Session::start_sized("rotation-animated", SMALL, SMALL) else {
         return;
     };
     let dir = session.runtime_dir().join("wallpapers");
@@ -789,7 +805,7 @@ fn a_slideshow_first_file_past_the_animation_cap_still_starts() {
 /// `draw_failed` until the next step, which draws again.
 #[test]
 fn a_slideshow_step_past_the_animation_cap_fails_only_its_turn() {
-    let Some(session) = Session::start_with("rotation-stepcap", 1, "") else {
+    let Some(session) = Session::start_sized("rotation-stepcap", SMALL, SMALL) else {
         return;
     };
     // Debug-shortened to 1 s, so the failing step comes at once.
