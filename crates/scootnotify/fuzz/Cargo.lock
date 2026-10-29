@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "scoot-dbus"
-version = "0.6.13"
+version = "0.6.14"
 dependencies = [
  "rustix",
  "scoot-rt",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "scoot-look"
-version = "0.6.13"
+version = "0.6.14"
 dependencies = [
  "rustix",
  "serde",
@@ -296,21 +296,21 @@ dependencies = [
 
 [[package]]
 name = "scoot-rt"
-version = "0.6.13"
+version = "0.6.14"
 dependencies = [
  "rustix",
 ]
 
 [[package]]
 name = "scootbg-mem"
-version = "0.6.13"
+version = "0.6.14"
 dependencies = [
  "rustix",
 ]
 
 [[package]]
 name = "scootnotify"
-version = "0.6.13"
+version = "0.6.14"
 dependencies = [
  "rustix",
  "scoot-dbus",
@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "scootui"
-version = "0.6.13"
+version = "0.6.14"
 dependencies = [
  "ab_glyph",
  "png",
