@@ -194,25 +194,52 @@ impl Shadow {
             return;
         }
         let shape = Shape { sx0, sx1, r };
+        let radius = i64::from(r);
         for y in y_from..y_to {
             let v = (y - sy0).min(sy1 - 1 - y);
             let (hole_from, hole_to) = covered_run(card, r, y);
             let row = y as usize * canvas.width as usize * 4;
+            // Between the corner squares a row above the straight sides
+            // (`v < radius`: the rows beside the corners, and every row
+            // outside the shape) is one alpha along its whole length: the
+            // falloff of its distance from the horizontal edge.
+            let middle = (v < radius && sx0 + radius < sx1 - radius)
+                .then(|| (sx0 + radius, sx1 - radius, self.edge_at(v)));
             for (from, to) in [(x_from, x_to.min(hole_from)), (x_from.max(hole_to), x_to)] {
                 if from >= to {
                     continue;
                 }
-                let Some(run) = canvas
-                    .pixels
-                    .get_mut(row + from as usize * 4..row + to as usize * 4)
-                else {
-                    continue;
+                let (steady_from, steady_to, steady) = match middle {
+                    Some((a, b, alpha)) if from.max(a) < to.min(b) => {
+                        (from.max(a), to.min(b), alpha)
+                    }
+                    _ => (to, to, 0),
                 };
-                for (index, pixel) in run.as_chunks_mut::<4>().0.iter_mut().enumerate() {
-                    let u = shape.inward(from + index as i64);
-                    let alpha = self.alpha_at(corner, shape.r, u, v);
-                    if alpha != 0 {
-                        over(pixel, color, alpha);
+                for (start, end, constant) in [
+                    (from, steady_from, None),
+                    (steady_from, steady_to, Some(steady)),
+                    (steady_to, to, None),
+                ] {
+                    if start >= end {
+                        continue;
+                    }
+                    let Some(run) = canvas
+                        .pixels
+                        .get_mut(row + start as usize * 4..row + end as usize * 4)
+                    else {
+                        continue;
+                    };
+                    for (index, pixel) in run.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                        let alpha = match constant {
+                            Some(alpha) => alpha,
+                            None => {
+                                let u = shape.inward(start + index as i64);
+                                self.alpha_at(corner, shape.r, u, v)
+                            }
+                        };
+                        if alpha != 0 {
+                            over(pixel, color, alpha);
+                        }
                     }
                 }
             }
