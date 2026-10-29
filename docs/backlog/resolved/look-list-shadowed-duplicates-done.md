@@ -32,3 +32,12 @@ setup identical to the installed target.
 ## Not in this ticket
 
 Any change to look resolution order or the catalog format.
+
+## Resolution
+
+Resolved 2026-10-29 (PR #799). The NixOS and home-manager modules both link
+the same store path, so the per-directory dedup missed it and the per-look
+shadow check fired. `scan_dir` now drops a later entry whose manifest
+directory equals the winner's; two different sources of one name still
+shadow, even with identical bytes. Tests are in
+`crates/scoot-look/src/catalog/tests.rs`.
