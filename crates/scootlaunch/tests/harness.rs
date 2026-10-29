@@ -329,6 +329,11 @@ impl Panel {
         ));
     }
 
+    /// Moves the pointer without pressing anything.
+    pub fn hover(&self, x: u32, y: u32) {
+        self.ipc(&format!(r#"{{"type":"pointer_move","x":{x},"y":{y}}}"#));
+    }
+
     /// Waits for the panel's border color to appear on screen: the
     /// compositor mapped the surface and drew the chrome. The ring is 2
     /// px wide, so every other pixel still hits it.

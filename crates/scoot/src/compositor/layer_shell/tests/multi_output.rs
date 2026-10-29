@@ -438,3 +438,21 @@ fn a_bar_is_told_its_own_outputs_scale() {
         "output 2's zone, in its own logical pixels"
     );
 }
+
+/// A `scootlaunch` panel on the first output, a click on the second
+/// output's bare desktop: outside the panel, so the compositor closes it.
+#[test]
+fn a_click_on_another_output_closes_the_launcher_panel() {
+    let mut fixture = two_output_fixture();
+    fixture.run(Step::CreateLayerOn {
+        spec: LayerSpec::launcher(60).named("scootlaunch"),
+        output: 0,
+    });
+    fixture.run(Step::MapLayer {
+        index: 0,
+        color: BAR_BGRA,
+    });
+    assert_eq!(fixture.keyboard().focused, Some(Focused::Layer(0)));
+    fixture.click(X2 + 100.0, 100.0);
+    assert_eq!(fixture.layer_closes(), vec![1]);
+}

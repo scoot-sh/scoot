@@ -611,6 +611,7 @@ impl State {
             return;
         };
         if pressed {
+            self.dismiss_launcher_on_outside_press();
             self.focus_under_pointer();
         }
         let serial = SERIAL_COUNTER.next_serial();
@@ -1385,7 +1386,10 @@ impl State {
     ///   bare desktop. The one thing it cannot do is take the keyboard off an
     ///   `exclusive` surface, which by protocol keeps it until it unmaps;
     ///   `layer_keyboard_focus` answers that before `clicked_layer` is ever
-    ///   consulted, so nothing here has to special-case it.
+    ///   consulted, so nothing here has to special-case it. A `scootlaunch`
+    ///   panel is the one exception, and it is not this function that makes
+    ///   it: `dismiss_launcher_on_outside_press` runs just before and asks
+    ///   the panel to close, after which the unmap hands the keyboard back.
     fn focus_under_pointer(&mut self) {
         // Nothing a click can focus exists while the session is locked:
         // window focus must not move behind the lock screen, and the lock

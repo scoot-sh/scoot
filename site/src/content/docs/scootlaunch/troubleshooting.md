@@ -28,6 +28,15 @@ the same way. Full paths and the per-distro packages are in
 closed: a second `scootlaunch` while it is open dismisses it, so one
 bind toggles.
 
+> **Symptom:** clicking outside the panel does not close it.
+
+On scoot a press outside closes `scootlaunch`'s panel, matched by its
+layer-shell namespace (`scootlaunch`). Another compositor keeps the
+keyboard on an exclusive surface and never tells the panel about the
+click, so the panel stays until Escape or a second `scootlaunch`. On
+scoot, a panel run with a different namespace, or a layer surface that
+asks for `on_demand` keyboard, is not closed this way.
+
 > **Symptom:** the panel opens on the wrong monitor.
 
 The panel names no output. An output-less layer surface lands on the

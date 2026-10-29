@@ -60,6 +60,14 @@
 //!   holding the keyboard is deliberately not a window and does not pretend
 //!   to be one.
 //!
+//! One exception to "mine until I unmap", from the pointer side: a press that
+//! lands anywhere but on a mapped `exclusive` surface whose namespace is
+//! [`LAUNCHER_NAMESPACE`] sends it `closed` (see
+//! [`State::dismiss_launcher_on_outside_press`]). The surface keeps the
+//! keyboard until it does unmap, so this stores nothing and every other
+//! `exclusive` surface -- a layer-shell locker, a password prompt -- is
+//! untouched.
+//!
 //! Keybindings are matched in `input.rs`'s `key()` *before* anything is
 //! forwarded to the focused client, so they keep working while an exclusive
 //! layer surface holds the keyboard. That is what makes it safe to let a
@@ -94,6 +102,11 @@ use super::output_clip::output_holds_point;
 pub(super) mod occlusion;
 #[cfg(test)]
 mod tests;
+
+/// The layer-shell namespace `scootlaunch` creates its panel with: the one
+/// role a press outside an `exclusive` surface closes (see
+/// [`State::dismiss_launcher_on_outside_press`]).
+pub(super) const LAUNCHER_NAMESPACE: &str = "scootlaunch";
 
 /// The layers drawn in front of ordinary windows, front-most first -- the
 /// order both the render stack and pointer hit-testing walk them in.
@@ -858,6 +871,57 @@ impl State {
         (still_mapped && layer_focus(clicked) != LayerFocus::Never).then(|| LayerKeyboardFocus {
             surface: clicked.wl_surface().clone(),
             exclusive: false,
+        })
+    }
+
+    /// A press outside the launcher panel that holds the keyboard closes it.
+    ///
+    /// `exclusive` keeps the keyboard until the surface unmaps, so a click
+    /// on the desktop can never take it away (`focus_under_pointer` says so)
+    /// and a launcher panel would sit there until Escape. The protocol's own
+    /// answer is `zwlr_layer_surface_v1.closed`: the compositor asking the
+    /// client to remove the surface. Sent here, it needs no stored state:
+    /// the surface keeps `exclusive` for as long as it exists, and its
+    /// unmap hands the keyboard back through the usual derivation.
+    ///
+    /// Only for a surface whose namespace is [`LAUNCHER_NAMESPACE`]. Nothing
+    /// in the protocol says "this is a launcher", and an `exclusive` surface
+    /// in general may be a locker or a password prompt that a stray click
+    /// must not remove. A surface the press lands on, subsurfaces included,
+    /// is left alone; a press anywhere else is outside (the bare desktop, a
+    /// window, a bar, another output). A locked session is never touched.
+    ///
+    /// Runs once per button press, ahead of the focus change so the press is
+    /// judged against the state it found. No allocation: an `Output` and a
+    /// `LayerSurface` clone are `Arc` bumps, and the namespace is compared
+    /// as a `&str`.
+    pub(super) fn dismiss_launcher_on_outside_press(&mut self) {
+        if self.session_lock.is_locked() {
+            return;
+        }
+        let Some(launcher) = self.launcher_holding_keyboard() else {
+            return;
+        };
+        let Some(pointer) = self.seat.get_pointer() else {
+            return;
+        };
+        let inside = self
+            .layer_under(&ABOVE_WINDOWS, pointer.current_location())
+            .is_some_and(|hit| hit == launcher);
+        if !inside {
+            launcher.layer_surface().send_close();
+        }
+    }
+
+    /// The `exclusive` surface holding the keyboard, if it is a launcher
+    /// panel (see [`LAUNCHER_NAMESPACE`]).
+    fn launcher_holding_keyboard(&self) -> Option<LayerSurface> {
+        let held = self.layer_keyboard_focus().filter(|held| held.exclusive)?;
+        self.outputs.iter().find_map(|output| {
+            layer_map_for_output(output)
+                .layer_for_surface(&held.surface, WindowSurfaceType::TOPLEVEL)
+                .filter(|found| found.namespace() == LAUNCHER_NAMESPACE)
+                .cloned()
         })
     }
 

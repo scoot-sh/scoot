@@ -75,15 +75,18 @@ index-only 1053368-byte row predates icons).
 | Page Up / Page Down, Ctrl+Home / Ctrl+End | by page, to the ends |
 | Enter | launch the selection |
 | Ctrl+Enter | run the typed text as a command |
-| Escape | dismiss (exit 1) |
+| Escape, or a click outside the panel | dismiss (exit 1) |
 
 Left/Right, Home/End, BackSpace, Delete, Ctrl+W, Ctrl+U and Ctrl+A
 edit the query. In dmenu mode Enter prints the selection (or the
 typed text when nothing matches, unless `--only-match` says
 otherwise) and Ctrl+Enter always prints the typed text. A click picks
-the row; the wheel scrolls. A click on
-the bare desktop does not dismiss in v1: with exclusive keyboard the
-compositor holds focus, so the click never reaches the panel. A
+the row; the wheel scrolls. A click outside the panel dismisses it
+(exit 1, like Escape) on scoot, which closes an exclusive launcher
+panel on a press anywhere else: the desktop, a window, a bar, another
+output. The click then goes on to whatever is under it. A compositor
+that keeps the keyboard on an exclusive surface and has no such rule
+leaves the panel open; Escape or a second invocation closes it. A
 second `scootlaunch` while the panel is open dismisses it, so one
 bind toggles: no pid file, no abstract name, just a socket in
 `$XDG_RUNTIME_DIR` with the peer's uid checked, plus a

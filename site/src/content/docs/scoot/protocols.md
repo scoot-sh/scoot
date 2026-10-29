@@ -1038,6 +1038,13 @@ fullscreen window, where the `top` layer is hidden and holds no keyboard
   maps and holds it until it unmaps — what a launcher needs. If several ask
   at once, the front-most wins, and the keyboard falls back to the next one
   down when it goes away.
+- A press outside an `exclusive` surface cannot take the keyboard away, but
+  scoot closes one kind of it: a surface whose namespace is `scootlaunch`
+  gets `zwlr_layer_surface_v1.closed` when any button is pressed anywhere
+  but on the surface itself (the desktop, a window, a bar, another output;
+  never while the session is locked). The press still goes on to what is
+  under it. Any other `exclusive` surface keeps the keyboard until it
+  unmaps.
 - `on_demand` is click-to-focus, exactly like a window: click the surface to
   give it the keyboard, click a window, a bar or bare desktop to take it
   back. `exclusive` on `bottom` or `background` is treated the same way — the
