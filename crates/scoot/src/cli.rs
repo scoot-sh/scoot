@@ -36,32 +36,90 @@ OPTIONS (backends in brackets: all means --headless, --nested and --tty):
     -- COMMAND...        run once the compositor is up, with WAYLAND_DISPLAY set
 ";
 
+/// Every top-level table the config file reads, in the order the help and
+/// the JSON list them: one table, so the text and `config_sections` cannot
+/// disagree. Pinned against the file's own `FileConfig` fields by a test, so a
+/// table added to the compositor cannot be forgotten here.
+const CONFIG_SECTIONS: &[&str] = &[
+    "[layout]",
+    "[appearance]",
+    "[animation]",
+    "[output]",
+    "[[outputs]]",
+    "[renderer]",
+    "[tty]",
+    "[xwayland]",
+    "[virtual_input]",
+    "[binds]",
+    "[global_shortcuts]",
+    "[autostart]",
+    "[floating]",
+    "[[window_rule]]",
+    "[wallpaper]",
+];
+
+/// The widest a rendered `Sections:` line may be, indent included.
+const CONFIG_SECTIONS_WIDTH: usize = 80;
+
 /// The config-file topics `scoot help config` summarizes: every section
 /// `site/src/content/docs/scoot/configure.md` documents, with the one command that emits them
 /// all. The file itself stays the reference; this is the map to it.
 /// The `reload` sentence is rendered from [`scootctl::help::RELOAD_DESCRIPTION`]
 /// in [`config_help`], so it cannot drift from the client help.
-const CONFIG_BODY: &str = "\
+const CONFIG_HEAD: &str = "\
 CONFIG:
     The config file ($XDG_CONFIG_HOME/scoot/config.toml) holds every option;
     a flag given replaces the file's value for its own option. Sections:
 
-    [layout] [appearance] [output] [[outputs]] [renderer] [tty] [xwayland]
-    [binds] [global_shortcuts] [autostart] [floating] [[window_rule]] [wallpaper]
+";
+
+/// What follows the section list. `[tty] gpu`, `[renderer] backend`,
+/// `[xwayland] enabled` and `[virtual_input] enabled|binds` are the keys a
+/// reload refuses (`compositor/reload.rs`).
+const CONFIG_TAIL: &str = "
+    `[tty] gpu`, `[renderer] backend`, `[xwayland] enabled` and `[virtual_input]
+    enabled|binds` take effect on restart; a reload refuses them.
 
     `scoot --print-default-config` prints a starting file generated from the
     compositor's own live defaults; with `--write` it places the file (never
     overwriting). ";
 
-/// The config-file map: [`CONFIG_BODY`] plus the reload sentence (from the
+/// The section list wrapped to [`CONFIG_SECTIONS_WIDTH`], four-space indent.
+fn config_sections_block() -> String {
+    let mut text = String::new();
+    let mut line = String::new();
+    for section in CONFIG_SECTIONS {
+        if !line.is_empty() && 4 + line.len() + 1 + section.len() > CONFIG_SECTIONS_WIDTH {
+            text.push_str("    ");
+            text.push_str(&line);
+            text.push('\n');
+            line.clear();
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(section);
+    }
+    if !line.is_empty() {
+        text.push_str("    ");
+        text.push_str(&line);
+        text.push('\n');
+    }
+    text
+}
+
+/// The config-file map: [`CONFIG_HEAD`], the [`CONFIG_SECTIONS`] list,
+/// [`CONFIG_TAIL`], the reload sentence (from the
 /// one [`scootctl::help::RELOAD_DESCRIPTION`]) plus the reference URLs,
 /// rendered from [`scoot_ipc::DOCS_URL`] -- the one copy of the docs domain,
 /// so a move is one edit. A function rather than a `const` so the text can name
 /// those constants; a cold path (one process per `--help`), so the small
 /// allocations cost nothing.
 pub fn config_help() -> String {
-    let mut text = String::with_capacity(CONFIG_BODY.len() + 256);
-    text.push_str(CONFIG_BODY);
+    let mut text = String::with_capacity(CONFIG_HEAD.len() + CONFIG_TAIL.len() + 512);
+    text.push_str(CONFIG_HEAD);
+    text.push_str(&config_sections_block());
+    text.push_str(CONFIG_TAIL);
     text.push_str(&format!(
         "\n    `scoot msg reload`: {}.\n",
         scootctl::help::RELOAD_DESCRIPTION
@@ -389,21 +447,12 @@ fn json_value() -> serde_json::Value {
     );
     root.insert(
         "config_sections".into(),
-        serde_json::Value::from(vec![
-            serde_json::Value::from("[layout]"),
-            serde_json::Value::from("[appearance]"),
-            serde_json::Value::from("[output]"),
-            serde_json::Value::from("[[outputs]]"),
-            serde_json::Value::from("[renderer]"),
-            serde_json::Value::from("[tty]"),
-            serde_json::Value::from("[xwayland]"),
-            serde_json::Value::from("[binds]"),
-            serde_json::Value::from("[global_shortcuts]"),
-            serde_json::Value::from("[autostart]"),
-            serde_json::Value::from("[floating]"),
-            serde_json::Value::from("[[window_rule]]"),
-            serde_json::Value::from("[wallpaper]"),
-        ]),
+        serde_json::Value::from(
+            CONFIG_SECTIONS
+                .iter()
+                .map(|section| serde_json::Value::from(*section))
+                .collect::<Vec<_>>(),
+        ),
     );
     serde_json::Value::Object(root)
 }
@@ -1858,7 +1907,93 @@ mod tests {
             document["client"]["binary"],
             serde_json::Value::from("scoot msg")
         );
-        assert!(document["config_sections"].as_array().unwrap().len() >= 10);
+        let json_sections: Vec<&str> = document["config_sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|section| section.as_str().unwrap())
+            .collect();
+        assert_eq!(json_sections, CONFIG_SECTIONS);
+    }
+
+    /// The top-level keys of the config file's `FileConfig`, as the help
+    /// spells them: `[name]` for a table, `[[name]]` for an array of tables.
+    /// Read from the struct's own source, since serde offers no way to
+    /// enumerate fields; the field types say which spelling applies. Limits:
+    /// serde `rename`/`flatten` are not understood (a renamed field would be
+    /// reported under its Rust name), and a type on the line after its name
+    /// is read as a plain table, so a `Vec` split that way would report
+    /// `[name]` and fail the comparison loudly rather than pass.
+    fn file_config_tables() -> Vec<String> {
+        let source = include_str!("compositor/config.rs");
+        let start = source
+            .find("struct FileConfig {")
+            .expect("FileConfig is in config.rs");
+        let body = &source[start..];
+        let body = &body[..body.find("\n}\n").expect("the struct ends")];
+        body.lines()
+            .map(str::trim)
+            .filter(|line| !line.starts_with("//") && !line.starts_with('#'))
+            .filter_map(|line| line.split_once(':'))
+            .map(|(name, ty)| {
+                let name = name.strip_prefix("pub ").unwrap_or(name);
+                if ty.trim_start().starts_with("Vec<") {
+                    format!("[[{name}]]")
+                } else {
+                    format!("[{name}]")
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_help_sections_are_every_table_the_config_file_reads() {
+        let mut expected = file_config_tables();
+        assert!(
+            expected.len() >= 14,
+            "the FileConfig scan found too little: {expected:?}"
+        );
+        let mut listed: Vec<String> = CONFIG_SECTIONS.iter().map(|s| (*s).to_owned()).collect();
+        expected.sort();
+        listed.sort();
+        assert_eq!(listed, expected, "CONFIG_SECTIONS drifted from FileConfig");
+    }
+
+    // The compositor module (and so the emitter) exists only on Linux, while
+    // this file also compiles for the macOS client.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn every_table_the_default_config_emits_is_in_the_help() {
+        let emitted = crate::compositor::config::default_config_toml();
+        let mut seen = 0;
+        for line in emitted.lines() {
+            if line.starts_with('[') && line.ends_with(']') {
+                seen += 1;
+                assert!(
+                    CONFIG_SECTIONS.contains(&line),
+                    "{line} is emitted by --print-default-config but not in the help"
+                );
+            }
+        }
+        assert!(seen >= 10, "found only {seen} emitted tables");
+    }
+
+    #[test]
+    fn the_config_help_text_names_every_section_within_the_width() {
+        let text = config_help();
+        for section in CONFIG_SECTIONS {
+            assert!(text.contains(section), "{section} missing from the text");
+        }
+        assert!(
+            text.lines().all(|line| line.len() < 100),
+            "a config help line reached 100 columns"
+        );
+        for line in config_sections_block().lines() {
+            assert!(
+                line.len() <= CONFIG_SECTIONS_WIDTH,
+                "section line over {CONFIG_SECTIONS_WIDTH} columns: {line}"
+            );
+        }
     }
 
     #[test]
