@@ -357,6 +357,7 @@ impl Session {
             found
         });
         session.sway_ipc = ipc.map(|socket| (sway.with_file_name("swaymsg"), socket));
+        session.wait_for_sway_ipc();
         Some(session)
     }
 
@@ -382,6 +383,54 @@ impl Session {
             String::from_utf8_lossy(&output.stderr)
         );
         stdout
+    }
+
+    /// Waits until sway answers on its IPC socket.
+    ///
+    /// The socket exists before sway serves it: sway binds it during
+    /// start-up and only reads it once its event loop runs, so a client
+    /// that connects in between waits. `swaymsg` gives up after 3 s, and a
+    /// sway on a CPU-starved CI runner can need longer than that to get
+    /// there, which made the first `swaymsg` of a test fail with "Unable to
+    /// receive IPC response". Each try here is that same 3 s; trying again
+    /// until [`PATIENCE`] makes a slow start-up slow instead of fatal. Only
+    /// this read-only query is retried: a command that timed out may still
+    /// run, so repeating it would not be the same as running it once.
+    fn wait_for_sway_ipc(&mut self) {
+        let Some((swaymsg, socket)) = self.sway_ipc.clone() else {
+            return;
+        };
+        let program = if swaymsg.is_file() {
+            swaymsg
+        } else {
+            PathBuf::from("swaymsg")
+        };
+        let deadline = Instant::now() + PATIENCE;
+        loop {
+            let answered = Command::new(&program)
+                .arg("-s")
+                .arg(&socket)
+                .args(["-t", "get_version", "-r"])
+                .output()
+                .unwrap()
+                .status
+                .success();
+            if answered {
+                return;
+            }
+            if let Some(status) = self.compositor.as_mut().and_then(|c| c.try_wait().unwrap()) {
+                panic!(
+                    "sway exited before it answered IPC ({status}):\n{}",
+                    self.log()
+                );
+            }
+            assert!(
+                Instant::now() < deadline,
+                "sway did not answer on its IPC socket within {PATIENCE:?}:\n{}",
+                self.log()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Sway's outputs: `(name, usable rect)` of each, the rect being its
