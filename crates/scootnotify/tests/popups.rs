@@ -362,6 +362,76 @@ fn a_depth_look_shadows_the_card_without_moving_it() {
     kill(server);
 }
 
+/// A card-style look on a real surface: the stripe is where the look puts
+/// it (inside the 2 px ring, three columns wide, in the app's own accent)
+/// and the card is where the plain look puts it; the pill cuts the corner
+/// the plain card keeps.
+#[test]
+fn a_card_style_look_marks_the_card_without_moving_it() {
+    let Some(bus) = bus_or_skip() else { return };
+    let Some(session) = scoot_or_skip("card-style", 1) else {
+        return;
+    };
+    let look_dir = session.scratch.state_home().join("scoot").join("look");
+    std::fs::create_dir_all(&look_dir).unwrap();
+    std::fs::write(
+        look_dir.join("notify.toml"),
+        "[card]\nmark = \"stripe\"\napp-accent = true\nshape = \"pill\"\n\
+         [title]\nweight = 400\n",
+    )
+    .unwrap();
+    let (mut server, log) = spawn_popup(&session, &bus, "");
+    let mut client = conn::connect(&bus.path()).expect("the bus accepts");
+    wait_serving(&mut client, &mut server, &log);
+    let (x0, y0) = stack_origin();
+    let _ = notify(
+        &mut client,
+        &mut server,
+        &log,
+        "a",
+        0,
+        "Hello",
+        "World",
+        &[],
+        &[],
+        0,
+        201,
+    );
+    wait_shown(&mut server, &log, "the styled card", || {
+        session.scoot_screenshot(1).at(x0 + 180, y0 + 1) == rgb(FOCUS)
+    });
+    let shown = session.scoot_screenshot(1);
+    // The pill: the plain card's corner pixel is the ring; a pill's is
+    // the desktop behind it.
+    assert_ne!(shown.at(x0, y0), rgb(FOCUS), "the corner is cut");
+    assert_ne!(shown.at(x0, y0), rgb(SURFACE));
+    // The stripe: the app's accent, in the columns just inside the ring,
+    // somewhere down the card where the pill's end is straight enough to
+    // hold all three.
+    let ink = scootui::color::Color::parse(FOREGROUND).unwrap();
+    let accent = scootnotify::look::style::app_accent("a", ink).expect("an accent");
+    assert!(ink.contrast_ratio(accent) >= 4.5);
+    let want = [accent.r, accent.g, accent.b];
+    let rows: Vec<u32> = (y0..y0 + 60)
+        .filter(|&y| {
+            (2..5).all(|dx| {
+                // The pill's arc leaves its edge pixel a hair short of full.
+                let got = shown.at(x0 + dx, y);
+                got.iter().zip(want).all(|(a, b)| a.abs_diff(b) <= 3)
+            })
+        })
+        .collect();
+    assert!(
+        !rows.is_empty(),
+        "no row carries the stripe's three columns"
+    );
+    for &y in &rows {
+        // Beside the stripe is the card's own fill, never the ring or accent.
+        assert_ne!(shown.at(x0 + 6, y), want, "row {y}");
+    }
+    kill(server);
+}
+
 /// The card's top edge reads the urgency ring: low the `border` role,
 /// normal `focus`, critical `urgent`.
 #[test]

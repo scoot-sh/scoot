@@ -52,6 +52,13 @@
 //! refused at the grammar and clamped again here, so a hand-edited
 //! fragment cannot ask for an hour-long slide.
 //!
+//! Card styles and typography are the fourth group, optional like the rest
+//! and off by default: in `[card]`, `mark` (`none`, `stripe`, `dot` or
+//! `badge`), `shape` (`rounded` or `pill`) and `app-accent` (a boolean:
+//! each app's cards carry a color hashed from its name); in `[title]`,
+//! `weight` (100 to 900) and `spacing` (-2 to 8 px per character) for the
+//! summary line. See [`style`].
+//!
 //! The `font` key names the look's UI family. There is no fontconfig in
 //! this stack: the daemon draws with `--font PATH`, else the first usable
 //! well-known file, as the bar does. The key is validated and kept (a
@@ -59,6 +66,9 @@
 //! file.
 
 use std::path::{Path, PathBuf};
+
+pub mod style;
+pub use style::{CardMark, CardShape};
 
 use scootui::color::Color;
 use scootui::motion::{Curve, DEFAULT_BOUNCE, DEFAULT_DURATION_MS, Timing};
@@ -234,9 +244,44 @@ pub struct Look {
     pub fill: FillStyle,
     /// How cards move: arriving, leaving and restacking.
     pub motion: MotionTokens,
+    /// The accent marker on each card (`card.mark`).
+    pub mark: CardMark,
+    /// The card outline (`card.shape`).
+    pub shape: CardShape,
+    /// Whether each app's cards carry a color from its name
+    /// (`card.app-accent`).
+    pub app_accent: bool,
+    /// The summary's weight (`title.weight`, 100 to 900).
+    pub title_weight: u16,
+    /// Extra pixels after each summary character (`title.spacing`, -2 to
+    /// 8).
+    pub title_spacing: i32,
 }
 
 impl Look {
+    /// The corner radius cards are drawn with: `configured` (the config's
+    /// `radius`) for a rounded card, [`style::PILL_RADIUS`] for a pill.
+    /// Every paint cuts it back to half the card's own size, so a short
+    /// card under a pill look is a true pill. The one place the outline
+    /// is chosen: paint, shadow and its corner tables all read it.
+    pub fn card_radius(&self, configured: u32) -> u32 {
+        match self.shape {
+            CardShape::Rounded => configured,
+            CardShape::Pill => style::PILL_RADIUS,
+        }
+    }
+
+    /// How many times a bold summary run is struck
+    /// ([`style::title_strikes`]).
+    pub fn title_strikes(&self) -> u8 {
+        style::title_strikes(self.title_weight)
+    }
+
+    /// The summary's letter spacing in logical pixels per character.
+    pub fn title_tracking(&self) -> f32 {
+        self.title_spacing as f32
+    }
+
     /// The card fill's top and bottom colors. Solid: `surface` twice. A
     /// gradient puts the light at the top whatever the look's polarity: on
     /// a dark surface the top edge is lightened a tenth of the way toward
@@ -276,6 +321,11 @@ impl Default for Look {
             shadow: ShadowStyle::None,
             fill: FillStyle::Solid,
             motion: MotionTokens::default(),
+            mark: CardMark::None,
+            shape: CardShape::Rounded,
+            app_accent: false,
+            title_weight: style::DEFAULT_TITLE_WEIGHT,
+            title_spacing: 0,
         }
     }
 }
@@ -410,6 +460,16 @@ fn apply_table(look: &mut Look, table: &toml::Table, notes: &mut Vec<String>) {
             }
             continue;
         }
+        if key == "title" {
+            let Some(title) = value.as_table() else {
+                notes.push(String::from("`title` is not a table: skipped"));
+                continue;
+            };
+            for (name, style) in title {
+                apply(look_title(look, name), "title", name, style, notes);
+            }
+            continue;
+        }
         apply(look_dotless(look, key), "", key, value, notes);
     }
 }
@@ -456,6 +516,11 @@ enum Slot<'a> {
     MotionMs(&'a mut u32),
     MotionBounce(&'a mut f32),
     CardMotion(&'a mut CardMotion),
+    Mark(&'a mut CardMark),
+    Shape(&'a mut CardShape),
+    Flag(&'a mut bool),
+    TitleWeight(&'a mut u16),
+    TitleSpacing(&'a mut i32),
     /// An allowlisted key the cards draw nothing with (`accent-fg`):
     /// validated above, then dropped.
     Ignore,
@@ -533,6 +598,34 @@ impl Slot<'_> {
                     "`{dotted}` is not a card motion (slide, fade, scale or drop): default applies"
                 )),
             },
+            Slot::Mark(slot) => match value.as_str().and_then(CardMark::parse) {
+                Some(mark) => *slot = mark,
+                None => notes.push(format!(
+                    "`{dotted}` is not a card mark (none, stripe, dot or badge): default applies"
+                )),
+            },
+            Slot::Shape(slot) => match value.as_str().and_then(CardShape::parse) {
+                Some(shape) => *slot = shape,
+                None => notes.push(format!(
+                    "`{dotted}` is not a card shape (rounded or pill): default applies"
+                )),
+            },
+            Slot::Flag(slot) => match value.as_bool() {
+                Some(flag) => *slot = flag,
+                None => notes.push(format!("`{dotted}` is not true or false: default applies")),
+            },
+            // The grammar bounds both; the clamps keep a caller that
+            // skipped it from asking for an absurd weight or spacing.
+            Slot::TitleWeight(slot) => match value.as_integer() {
+                Some(weight) => *slot = weight.clamp(100, 900) as u16,
+                None => notes.push(format!("`{dotted}` is not a weight: default applies")),
+            },
+            Slot::TitleSpacing(slot) => match value.as_integer() {
+                Some(spacing) => *slot = spacing.clamp(-2, 8) as i32,
+                None => notes.push(format!(
+                    "`{dotted}` is not a spacing in pixels: default applies"
+                )),
+            },
             Slot::IconTheme(slot) => match value.as_str() {
                 Some(theme) if is_icon_theme(theme) => *slot = theme.to_owned(),
                 _ => notes.push(format!("`{dotted}` is not an icon theme: default applies")),
@@ -577,11 +670,24 @@ fn look_dotless<'a>(look: &'a mut Look, key: &str) -> Option<Slot<'a>> {
     }
 }
 
-/// The slot for a `[card]` key: `enter` and `exit`.
+/// The slot for a `[card]` key: `enter`, `exit`, `mark`, `shape` and
+/// `app-accent`.
 fn look_card<'a>(look: &'a mut Look, name: &str) -> Option<Slot<'a>> {
     match name {
         "enter" => Some(Slot::CardMotion(&mut look.motion.enter)),
         "exit" => Some(Slot::CardMotion(&mut look.motion.exit)),
+        "mark" => Some(Slot::Mark(&mut look.mark)),
+        "shape" => Some(Slot::Shape(&mut look.shape)),
+        "app-accent" => Some(Slot::Flag(&mut look.app_accent)),
+        _ => None,
+    }
+}
+
+/// The slot for a `[title]` key: `weight` and `spacing`.
+fn look_title<'a>(look: &'a mut Look, name: &str) -> Option<Slot<'a>> {
+    match name {
+        "weight" => Some(Slot::TitleWeight(&mut look.title_weight)),
+        "spacing" => Some(Slot::TitleSpacing(&mut look.title_spacing)),
         _ => None,
     }
 }

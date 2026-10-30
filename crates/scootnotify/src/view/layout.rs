@@ -10,7 +10,11 @@
 use scootui::paint::Pad;
 use scootui::text::Text;
 
+use scootui::color::Color;
+
 use crate::config::Config;
+use crate::look::style::{DOT_GAP, DOT_PX, PILL_INSET};
+use crate::look::{CardMark, CardShape, Look};
 use crate::model::store::Notification;
 
 /// The icon slot, in logical pixels: the design's 48 px, left.
@@ -105,6 +109,18 @@ pub struct Card {
     /// The letter tile's letter: the app name's first alphanumeric,
     /// uppercased, or '•' without one. Drawn when no icon decoded.
     pub tile: char,
+    /// The app's accent color (`card.app-accent`): hashed from the app
+    /// name at layout, so the repaint only reads it. `None` unless the
+    /// look asks for it, draws a mark, and the app has a name.
+    pub accent: Option<Color>,
+    /// How far the content (the icon slot, the text, the progress bar and
+    /// the buttons) starts in from the card's left edge: the border, the
+    /// pad, and a pill's inset. A distance, so moving the card moves
+    /// nothing in it.
+    pub pad_x: u32,
+    /// The dot of `card.mark = "dot"`, before the app name on the meta
+    /// line.
+    pub dot: Option<Rect>,
 }
 
 impl Card {
@@ -127,6 +143,7 @@ impl Card {
         };
         back(&mut card.rect);
         back(&mut card.body_hit);
+        card.dot.iter_mut().for_each(back);
         card.summary.iter_mut().for_each(back_line);
         back_line(&mut card.meta);
         card.body.iter_mut().for_each(back_line);
@@ -188,12 +205,34 @@ impl Stack {
 /// `em` is the look's text size. Allocates (Strings, Vecs): this runs on
 /// content change, never per repaint.
 pub fn layout(live: &[&Notification], config: &Config, text: &Text, em: f32, now_ms: u64) -> Stack {
+    layout_styled(live, config, text, em, now_ms, &Look::default())
+}
+
+/// [`layout`] with the look's card styles: the badge's icon slot on every
+/// card, the dot's room on the meta line, the summary's letter spacing,
+/// and each app's accent color. With a default look this is `layout`
+/// exactly.
+pub fn layout_styled(
+    live: &[&Notification],
+    config: &Config,
+    text: &Text,
+    em: f32,
+    now_ms: u64,
+    look: &Look,
+) -> Stack {
+    let badge = look.mark == CardMark::Badge;
+    let tracking = look.title_tracking();
     let metrics = text.metrics(em);
     let line_h = (metrics.ascent + metrics.descent + 4.0).ceil().max(1.0) as u32;
     let ascent = metrics.ascent.ceil().max(1.0) as u32;
     let width = config.width_px.max(10);
     let border = config.border_px;
-    let content_x = border + PAD;
+    let pill_inset = if look.shape == CardShape::Pill {
+        PILL_INSET
+    } else {
+        0
+    };
+    let content_x = border + PAD + pill_inset;
     let content_w = width.saturating_sub(2 * content_x);
     let max_visible = config.max_visible.max(1) as usize;
     let body_lines = config.body_lines.max(1) as usize;
@@ -202,11 +241,8 @@ pub fn layout(live: &[&Notification], config: &Config, text: &Text, em: f32, now
     let mut y = 0u32;
     for note in live.iter().rev().take(max_visible) {
         let spans = crate::markup::parse(&note.body);
-        let icon_w = if has_icon_slot(note) {
-            ICON_PX + PAD
-        } else {
-            0
-        };
+        let has_icon = has_icon_slot(note) || badge;
+        let icon_w = if has_icon { ICON_PX + PAD } else { 0 };
         let text_w = content_w.saturating_sub(icon_w);
         let text_x = content_x + icon_w;
         let mut card_y = y + border + PAD;
@@ -220,9 +256,12 @@ pub fn layout(live: &[&Notification], config: &Config, text: &Text, em: f32, now
             card_y,
             ascent,
             line_h,
+            tracking,
         );
         card_y += summary.len() as u32 * line_h;
         let meta_text = meta_text(note, now_ms);
+        let dotted = look.mark == CardMark::Dot;
+        let meta_indent = if dotted { DOT_PX + DOT_GAP } else { 0 };
         let meta = Line {
             runs: vec![Run {
                 text: meta_text,
@@ -230,14 +269,28 @@ pub fn layout(live: &[&Notification], config: &Config, text: &Text, em: f32, now
                 underline: false,
                 link: false,
             }],
-            x: i64::from(text_x),
+            x: i64::from(text_x + meta_indent),
             baseline: i64::from(card_y + ascent),
         };
+        // The dot sits a little above the middle of the line's box, where
+        // the lowercase letters' middle is.
+        let dot = dotted.then(|| Rect {
+            x: text_x,
+            y: (card_y + ascent).saturating_sub(ascent * 2 / 5 + DOT_PX / 2),
+            width: DOT_PX,
+            height: DOT_PX,
+        });
         card_y += line_h;
         let body = wrap_spans(
-            &spans, text, em, text_w, body_lines, text_x, card_y, ascent, line_h,
+            &spans, text, em, text_w, body_lines, text_x, card_y, ascent, line_h, 0.0,
         );
         card_y += body.len() as u32 * line_h;
+        // The progress bar and the buttons run the full content width, so
+        // they start below the icon slot when the text above is shorter
+        // than it (a volume OSD: a summary and a value, no body).
+        if has_icon {
+            card_y = card_y.max(y + border + PAD + ICON_PX);
+        }
         let progress_bar = note.value.map(|_| {
             let bar = Rect {
                 x: content_x,
@@ -281,7 +334,7 @@ pub fn layout(live: &[&Notification], config: &Config, text: &Text, em: f32, now
             card_y += line_h + 2 * BUTTON_PAD_Y;
         }
         let text_h = card_y - (y + border + PAD);
-        let icon_h = if has_icon_slot(note) { ICON_PX } else { 0 };
+        let icon_h = if has_icon { ICON_PX } else { 0 };
         let h = border + PAD + text_h.max(icon_h) + PAD + border;
         let rect = Rect {
             x: 0,
@@ -305,8 +358,15 @@ pub fn layout(live: &[&Notification], config: &Config, text: &Text, em: f32, now
             buttons,
             progress: note.value,
             progress_bar,
-            has_icon: has_icon_slot(note),
+            has_icon,
+            pad_x: content_x,
             tile: tile_letter(&note.app_name),
+            accent: if look.app_accent && look.mark != CardMark::None {
+                crate::look::style::app_accent(&note.app_name, look.theme.foreground)
+            } else {
+                None
+            },
+            dot,
         });
         y += h + GAP;
     }
@@ -356,6 +416,7 @@ pub fn inset(mut stack: Stack, pad: Pad) -> Stack {
     for card in &mut stack.cards {
         shift(&mut card.rect);
         shift(&mut card.body_hit);
+        card.dot.iter_mut().for_each(shift);
         card.summary.iter_mut().for_each(shift_line);
         shift_line(&mut card.meta);
         card.body.iter_mut().for_each(shift_line);
@@ -447,6 +508,7 @@ fn wrap_spans(
     y: u32,
     ascent: u32,
     line_h: u32,
+    tracking: f32,
 ) -> Vec<Line> {
     // Flatten to characters with their style: the wrap owns this (layout
     // time, never the repaint).
@@ -469,7 +531,7 @@ fn wrap_spans(
     let mut at = 0usize;
     while at < chars.len() && lines.len() < max_lines {
         let last = lines.len() + 1 == max_lines;
-        let (next, truncated) = take_line(&chars, at, text, em, max_width);
+        let (next, truncated) = take_line(&chars, at, text, em, max_width, tracking);
         let mut runs: Vec<Run> = Vec::new();
         for (c, bold, underline, link) in &chars[at..next] {
             if *c == '\n' {
@@ -491,7 +553,7 @@ fn wrap_spans(
             });
         }
         if truncated && last {
-            ellipsize_runs(&mut runs, text, em, max_width);
+            ellipsize_runs(&mut runs, text, em, max_width, tracking);
         }
         // An empty source still draws its line (a blank row keeps the
         // card's shape); an empty wrap of nothing draws nothing.
@@ -539,6 +601,7 @@ fn take_line(
     text: &Text,
     em: f32,
     max_width: u32,
+    tracking: f32,
 ) -> (usize, bool) {
     let mut pen = 0.0f32;
     let mut break_at: Option<usize> = None;
@@ -548,7 +611,7 @@ fn take_line(
         if c == '\n' {
             return (i, i + 1 < chars.len());
         }
-        pen += text.advance(c, em);
+        pen += text.advance(c, em) + tracking;
         if pen.round() > max_width as f32 {
             // Over the edge: break at the last opportunity, else here
             // (a hard break: an overlong word still shows).
@@ -579,8 +642,8 @@ fn is_cjk(c: char) -> bool {
 
 /// Ellipsizes the last run to fit `max_width`: appends "…" to the
 /// longest fitting prefix.
-fn ellipsize_runs(runs: &mut Vec<Run>, text: &Text, em: f32, max_width: u32) {
-    let ellipsis_w = text.measure(None, "…", em);
+fn ellipsize_runs(runs: &mut Vec<Run>, text: &Text, em: f32, max_width: u32, tracking: f32) {
+    let ellipsis_w = text.measure(None, "…", em) + tracking.max(0.0).ceil() as u32;
     if ellipsis_w > max_width {
         runs.clear();
         return;
@@ -591,7 +654,7 @@ fn ellipsize_runs(runs: &mut Vec<Run>, text: &Text, em: f32, max_width: u32) {
     let mut end_char = 0usize;
     'outer: for (r, run) in runs.iter().enumerate() {
         for (k, c) in run.text.chars().enumerate() {
-            pen += text.advance(c, em);
+            pen += text.advance(c, em) + tracking;
             if pen.round() > budget as f32 {
                 end_run = r;
                 end_char = k;

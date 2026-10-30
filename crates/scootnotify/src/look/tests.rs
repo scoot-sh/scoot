@@ -277,3 +277,81 @@ fn motion_tokens_clamp_even_when_built_by_hand() {
         std::time::Duration::from_millis(u64::from(scootui::motion::MAX_DURATION_MS))
     );
 }
+
+#[test]
+fn a_fragment_without_card_styles_or_a_title_table_styles_nothing() {
+    let (look, notes) = parse("radius = 8\n[card]\nenter = \"fade\"\n");
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(look.mark, CardMark::None);
+    assert_eq!(look.shape, CardShape::Rounded);
+    assert!(!look.app_accent);
+    assert_eq!(look.title_weight, 700);
+    assert_eq!(look.title_spacing, 0);
+    assert_eq!(look.card_radius(8), 8);
+    assert_eq!(look.title_strikes(), 2);
+}
+
+#[test]
+fn every_card_style_and_title_key_lands() {
+    let (look, notes) = parse(
+        "[card]\nmark = \"badge\"\nshape = \"pill\"\napp-accent = true\n\
+         [title]\nweight = 800\nspacing = 2\n",
+    );
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(look.mark, CardMark::Badge);
+    assert_eq!(look.shape, CardShape::Pill);
+    assert!(look.app_accent);
+    assert_eq!(look.title_weight, 800);
+    assert_eq!(look.title_spacing, 2);
+    // The pill ignores the configured radius; the paint cuts it to the card.
+    assert_eq!(look.card_radius(8), style::PILL_RADIUS);
+    assert_eq!(look.title_strikes(), 3);
+    assert_eq!(look.title_tracking(), 2.0);
+}
+
+#[test]
+fn bad_card_style_and_title_values_are_named_and_ignored() {
+    for (text, key) in [
+        ("[card]\nmark = \"ribbon\"\n", "card.mark"),
+        ("[card]\nmark = 3\n", "card.mark"),
+        ("[card]\nshape = \"round\"\n", "card.shape"),
+        ("[card]\napp-accent = \"yes\"\n", "card.app-accent"),
+        ("[card]\napp-accent = 1\n", "card.app-accent"),
+        ("[title]\nweight = 50\n", "title.weight"),
+        ("[title]\nweight = 901\n", "title.weight"),
+        ("[title]\nweight = \"bold\"\n", "title.weight"),
+        ("[title]\nspacing = 9\n", "title.spacing"),
+        ("[title]\nspacing = -3\n", "title.spacing"),
+        ("[title]\nspacing = 0.5\n", "title.spacing"),
+        ("[title]\nfamily = \"x\"\n", "title.family"),
+    ] {
+        let (look, notes) = parse(text);
+        assert_eq!(look, Look::default(), "{text}");
+        assert!(
+            notes.len() == 1 && notes[0].contains(key),
+            "{text}: {notes:?}"
+        );
+    }
+    let (look, notes) = parse("title = 3\n");
+    assert_eq!(look, Look::default());
+    assert!(notes[0].contains("not a table"), "{notes:?}");
+}
+
+#[test]
+fn title_numbers_clamp_even_when_the_grammar_is_skipped() {
+    let mut look = Look::default();
+    let mut notes = Vec::new();
+    for (value, weight, spacing) in [(i64::MAX, 900, 8), (i64::MIN, 100, -2)] {
+        Slot::TitleWeight(&mut look.title_weight).set(
+            &toml::Value::Integer(value),
+            "title.weight",
+            &mut notes,
+        );
+        Slot::TitleSpacing(&mut look.title_spacing).set(
+            &toml::Value::Integer(value),
+            "title.spacing",
+            &mut notes,
+        );
+        assert_eq!((look.title_weight, look.title_spacing), (weight, spacing));
+    }
+}

@@ -17,7 +17,8 @@ use super::layout::{Card, Rect, Stack};
 use super::motion::Motion;
 use crate::bus::hints::Urgency;
 use crate::config::Config;
-use crate::look::{Look, ShadowStyle};
+use crate::look::style::{DOT_PX, STRIPE_PX};
+use crate::look::{CardMark, Look, ShadowStyle};
 
 /// The decoded icon size, in device pixels: the 48 px slot at scale 2.
 /// Scale 1 samples it down at draw time (nearest, no allocation).
@@ -165,7 +166,12 @@ fn shadow_of(
         ShadowStyle::Glow => ring_color(look, urgency),
         _ => Color { r: 0, g: 0, b: 0 },
     };
-    shadow.paint(canvas, region(card.rect), config.radius, tint);
+    shadow.paint(
+        canvas,
+        region(card.rect),
+        look.card_radius(config.radius),
+        tint,
+    );
 }
 
 /// [`paint`] without the clear, skipping the cards `skip` names (the ones
@@ -221,7 +227,7 @@ fn paint_card(
     icons: &HashMap<u32, IconBits>,
 ) {
     let border = ring_color(look, urgency);
-    let radius = config.radius;
+    let radius = look.card_radius(config.radius);
     let alpha = (look.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
     let rect = card.rect;
     if config.border_px > 0 {
@@ -243,15 +249,47 @@ fn paint_card(
     } else {
         fill_gradient(canvas, rect, radius, look.fill_stops(), alpha);
     }
+    paint_mark(canvas, card, look, radius, config.border_px);
     if card.has_icon {
         paint_icon(canvas, text, card, look, em, clip, config.border_px, icons);
     }
+    let title = Ink {
+        strikes: look.title_strikes(),
+        tracking: look.title_tracking(),
+    };
     for line in &card.summary {
-        paint_line(text, canvas, line, look.theme.foreground, look, em, clip);
+        paint_line(
+            text,
+            canvas,
+            line,
+            look.theme.foreground,
+            look,
+            em,
+            clip,
+            title,
+        );
     }
-    paint_line(text, canvas, &card.meta, look.theme.dim, look, em, clip);
+    paint_line(
+        text,
+        canvas,
+        &card.meta,
+        look.theme.dim,
+        look,
+        em,
+        clip,
+        BODY_INK,
+    );
     for line in &card.body {
-        paint_line(text, canvas, line, look.theme.foreground, look, em, clip);
+        paint_line(
+            text,
+            canvas,
+            line,
+            look.theme.foreground,
+            look,
+            em,
+            clip,
+            BODY_INK,
+        );
     }
     if let (Some(value), Some(bar)) = (card.progress, card.progress_bar) {
         paint_progress(canvas, bar, look, value);
@@ -270,6 +308,57 @@ fn paint_card(
             clip,
             hovered_button == Some(index),
         );
+    }
+}
+
+/// How a line is struck and spaced: a bold run is drawn `strikes` times
+/// 1 px apart, and every character steps `tracking` extra pixels.
+#[derive(Debug, Clone, Copy)]
+struct Ink {
+    strikes: u8,
+    tracking: f32,
+}
+
+/// Body, meta and the bold runs inside them: two strikes, no spacing, as
+/// bold has always drawn.
+const BODY_INK: Ink = Ink {
+    strikes: 2,
+    tracking: 0.0,
+};
+
+/// The accent a card's mark is drawn in: the app's own color when the look
+/// asks for one, else the look's `accent`.
+fn mark_color(card: &Card, look: &Look) -> Color {
+    card.accent.unwrap_or(look.theme.accent)
+}
+
+/// Paints the stripe or the dot (the badge is the icon slot's tile): after
+/// the surface and inside it, so the stripe is cut by the card's own
+/// rounded (or pill) shape, and before the text. In the card's own
+/// coordinates, so a card painted into a motion layer carries its mark.
+fn paint_mark(canvas: &mut Canvas<'_>, card: &Card, look: &Look, radius: u32, border: u32) {
+    match look.mark {
+        CardMark::Stripe => {
+            let rect = card.rect;
+            let inner = Rect {
+                x: rect.x + border,
+                y: rect.y + border,
+                width: rect.width.saturating_sub(2 * border),
+                height: rect.height.saturating_sub(2 * border),
+            };
+            canvas.fill_rounded_edge(
+                region(inner),
+                radius.saturating_sub(border),
+                STRIPE_PX,
+                mark_color(card, look),
+            );
+        }
+        CardMark::Dot => {
+            if let Some(dot) = card.dot {
+                fill_card(canvas, dot, DOT_PX / 2, mark_color(card, look), 255);
+            }
+        }
+        CardMark::None | CardMark::Badge => {}
     }
 }
 
@@ -330,8 +419,16 @@ fn paint_icon(
     icons: &HashMap<u32, IconBits>,
 ) {
     let side = super::layout::ICON_PX;
-    let ix = card.rect.x + border + super::layout::PAD;
+    let ix = card.rect.x + card.pad_x;
     let iy = card.rect.y + border + super::layout::PAD;
+    // The plate and the letter's ink: dim with the background's letter, or
+    // under a badge the mark's tile with the ink the app accent was
+    // darkened (or lightened) to read.
+    let (plate, ink) = match (look.mark, card.accent) {
+        (CardMark::Badge, Some(accent)) => (accent, look.theme.foreground),
+        (CardMark::Badge, None) => (look.theme.accent, look.theme.background),
+        _ => (look.theme.dim, look.theme.background),
+    };
     fill_card(
         canvas,
         crate::view::layout::Rect {
@@ -341,7 +438,7 @@ fn paint_icon(
             height: side,
         },
         8,
-        look.theme.dim,
+        plate,
         255,
     );
     let metrics = text.metrics(em);
@@ -358,7 +455,7 @@ fn paint_icon(
         ix as i64 + (side as i64 - tile_w) / 2,
         iy as i64
             + (side as i64 + metrics.ascent.ceil() as i64 - metrics.descent.ceil() as i64) / 2,
-        look.theme.background,
+        ink,
         clip,
     );
     if let Some(bits) = icons.get(&card.id) {
@@ -396,7 +493,9 @@ fn blit(canvas: &mut Canvas<'_>, bits: &IconBits, ix: u32, iy: u32, side: u32, c
 }
 
 /// Paints one wrapped line in `base` (`accent` for `a` runs): bold runs
-/// drawn twice 1 px apart, underlines ruled under the baseline.
+/// struck `ink.strikes` times 1 px apart, underlines ruled under the
+/// baseline, every character stepped `ink.tracking` extra.
+#[allow(clippy::too_many_arguments)] // A paint helper, as the bar's own are.
 fn paint_line(
     text: &mut Text,
     canvas: &mut Canvas<'_>,
@@ -405,24 +504,28 @@ fn paint_line(
     look: &Look,
     em: f32,
     clip: Span,
+    ink: Ink,
 ) {
     let mut pen = line.x;
     for run in &line.runs {
         let color = if run.link { look.theme.accent } else { base };
-        text.draw(canvas, None, &run.text, em, pen, line.baseline, color, clip);
-        if run.bold {
-            text.draw(
+        let strikes = if run.bold { ink.strikes.max(1) } else { 1 };
+        for strike in 0..strikes {
+            text.draw_tracked(
                 canvas,
                 None,
                 &run.text,
                 em,
-                pen + 1,
+                ink.tracking,
+                pen + i64::from(strike),
                 line.baseline,
                 color,
                 clip,
             );
         }
-        let width = text.measure(None, &run.text, em) as i64 + i64::from(u8::from(run.bold));
+        let extra = Text::tracking_extra(&run.text, ink.tracking).round() as i64;
+        let width =
+            text.measure(None, &run.text, em) as i64 + extra + i64::from(strikes.saturating_sub(1));
         if run.underline {
             canvas.fill_rect(
                 Span {
@@ -572,5 +675,7 @@ fn paint_pill(
 mod depth_tests;
 #[cfg(test)]
 mod motion_tests;
+#[cfg(test)]
+mod style_tests;
 #[cfg(test)]
 pub(crate) mod tests;

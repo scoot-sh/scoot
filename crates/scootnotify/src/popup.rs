@@ -360,7 +360,7 @@ impl App {
         }
         if let Some(shadow) = self.shadow.as_mut() {
             shadow.prepare(
-                self.config.radius,
+                self.look.card_radius(self.config.radius),
                 self.stack
                     .cards
                     .iter()
@@ -753,7 +753,8 @@ impl App {
         }
         self.config = config;
         self.refresh_due = true;
-        // The card radius is the config's: the shadow's corners follow it.
+        // The card radius is the config's (or the pill's): the shadow's
+        // corners follow it.
         self.shadow_stale = true;
         // The layout's sizes depend on the config: force a rebuild on
         // the next refresh, as `retheme` does.
@@ -901,7 +902,10 @@ impl Popup {
         };
         app.refresh_due = false;
         let pad = app.shadow.as_ref().map_or(Pad::ZERO, Shadow::pad);
-        let mut stack = layout::inset(layout::layout(live, &app.config, text, em, now_ms), pad);
+        let mut stack = layout::inset(
+            layout::layout_styled(live, &app.config, text, em, now_ms, &app.look),
+            pad,
+        );
         // Two empty stacks are the same stack, whatever their widths.
         let changed = if stack.cards.is_empty() && app.stack.cards.is_empty() {
             false
