@@ -56,4 +56,4 @@ Keep `PATIENCE` as it is; the point is a test that is fast, not a longer wait.
 
 The daemon itself: nothing here says it misbehaved. The other load flakes
 already filed (`scale-change-decode-flake.md`,
-`scaler-probe-margin-daemon-exit-flake.md`).
+`resolved/scaler-probe-margin-daemon-exit-flake-done.md`).
