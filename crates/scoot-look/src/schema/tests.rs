@@ -367,3 +367,38 @@ fn i32_overflow_override_refuses_at_parse() {
     );
     assert!(parse_look_toml(text.as_bytes()).is_err());
 }
+
+#[test]
+fn effects_parse_and_default_to_unset() {
+    let none = parse_look_toml(minimal_toml().as_bytes()).expect("parses");
+    assert!(none.effects.shadow.is_none() && none.effects.fill.is_none());
+    let text = minimal_toml().replacen(
+        "[cursor]",
+        "[effects]\nshadow = \"deep\"\nfill = \"gradient\"\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    assert_eq!(raw.effects.shadow.as_deref(), Some("deep"));
+    assert_eq!(raw.effects.fill.as_deref(), Some("gradient"));
+}
+
+#[test]
+fn effects_refuse_an_unknown_value_or_key_by_name() {
+    for (extra, field) in [
+        ("shadow = \"huge\"", "effects.shadow"),
+        ("fill = \"rainbow\"", "effects.fill"),
+        ("shadow = \"Soft\"", "effects.shadow"),
+    ] {
+        let text = minimal_toml().replacen("[cursor]", &format!("[effects]\n{extra}\n[cursor]"), 1);
+        let errors = parse_look_toml(text.as_bytes()).expect_err("refused");
+        assert!(
+            errors.iter().any(|e| e.to_string().contains(field)),
+            "{extra}: {errors:?}"
+        );
+    }
+    let text = minimal_toml().replacen("[cursor]", "[effects]\nblur = 3\n[cursor]", 1);
+    assert!(
+        parse_look_toml(text.as_bytes()).is_err(),
+        "an unknown [effects] key refuses"
+    );
+}

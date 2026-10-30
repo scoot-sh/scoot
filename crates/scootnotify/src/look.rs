@@ -38,6 +38,12 @@
 //! overrides either apart, so the shipped looks draw exactly what the
 //! table says (pinned by the goldens in the popup tests).
 //!
+//! Two more dotless keys give the cards depth, both optional and both
+//! off by default (a look that sets neither paints exactly what it
+//! always did): `shadow` (`none`, `soft`, `deep` or `glow`) and `fill`
+//! (`solid` or `gradient`). A value outside those is reported and the
+//! default stays.
+//!
 //! The `font` key names the look's UI family. There is no fontconfig in
 //! this stack: the daemon draws with `--font PATH`, else the first usable
 //! well-known file, as the bar does. The key is validated and kept (a
@@ -47,6 +53,7 @@
 use std::path::{Path, PathBuf};
 
 use scootui::color::Color;
+use scootui::paint::ShadowSpec;
 use scootui::theme::Theme;
 
 /// The default font size, in logical pixels: the contract's 10 pt
@@ -57,6 +64,73 @@ pub const DEFAULT_RADIUS: u32 = 8;
 /// The default icon theme, when the fragment names none: what the
 /// looks resolve to (`Adwaita`).
 pub const DEFAULT_ICON_THEME: &str = "Adwaita";
+
+/// The depth under each card (`shadow`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ShadowStyle {
+    /// No shadow: the default, and free (nothing is built or painted).
+    #[default]
+    None,
+    /// A tight, low shadow: lifts a card off the window behind it.
+    Soft,
+    /// A wide, heavy shadow: a card floating well above the desktop.
+    Deep,
+    /// A zero-offset shadow tinted with the card's border color, so an
+    /// urgent card glows in the urgent color.
+    Glow,
+}
+
+impl ShadowStyle {
+    /// The style a `shadow` value names, if it names one.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "none" => Some(Self::None),
+            "soft" => Some(Self::Soft),
+            "deep" => Some(Self::Deep),
+            "glow" => Some(Self::Glow),
+            _ => None,
+        }
+    }
+
+    /// The geometry and strength of the style's shadow, in logical
+    /// pixels; `None` for [`ShadowStyle::None`].
+    pub fn spec(self) -> Option<ShadowSpec> {
+        let (offset_y, blur, alpha) = match self {
+            Self::None => return None,
+            Self::Soft => (4, 12, 92),
+            Self::Deep => (10, 28, 140),
+            Self::Glow => (0, 16, 130),
+        };
+        Some(ShadowSpec {
+            offset_x: 0,
+            offset_y,
+            blur,
+            alpha,
+        })
+    }
+}
+
+/// How a card's surface color is laid down (`fill`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FillStyle {
+    /// The `surface` color, flat: the default.
+    #[default]
+    Solid,
+    /// A vertical gradient with the light at the top (see
+    /// [`Look::fill_stops`]).
+    Gradient,
+}
+
+impl FillStyle {
+    /// The style a `fill` value names, if it names one.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "solid" => Some(Self::Solid),
+            "gradient" => Some(Self::Gradient),
+            _ => None,
+        }
+    }
+}
 
 /// The cards' resolved look: the widget theme plus the cards' own fill,
 /// borders, size, opacity and radius.
@@ -82,6 +156,34 @@ pub struct Look {
     /// The icon theme names resolve in (`[icons] theme`): the look's
     /// theme, `Adwaita` by default.
     pub icon_theme: String,
+    /// The depth under each card (`shadow`).
+    pub shadow: ShadowStyle,
+    /// How the card fill is laid down (`fill`).
+    pub fill: FillStyle,
+}
+
+impl Look {
+    /// The card fill's top and bottom colors. Solid: `surface` twice. A
+    /// gradient puts the light at the top whatever the look's polarity: on
+    /// a dark surface the top edge is lightened a tenth of the way toward
+    /// white and the bottom is `surface`; on a light one the top is
+    /// `surface` and the bottom is darkened by a twelfth. The shift is
+    /// small enough that the text keeps its contrast across the card.
+    pub fn fill_stops(&self) -> (Color, Color) {
+        const WHITE: Color = Color {
+            r: 255,
+            g: 255,
+            b: 255,
+        };
+        const BLACK: Color = Color { r: 0, g: 0, b: 0 };
+        match self.fill {
+            FillStyle::Solid => (self.surface, self.surface),
+            FillStyle::Gradient if self.surface.luminance() < 0.5 => {
+                (self.surface.mix(WHITE, 26), self.surface)
+            }
+            FillStyle::Gradient => (self.surface, self.surface.mix(BLACK, 20)),
+        }
+    }
 }
 
 impl Default for Look {
@@ -97,6 +199,8 @@ impl Default for Look {
             radius: DEFAULT_RADIUS,
             font_family: String::new(),
             icon_theme: DEFAULT_ICON_THEME.to_string(),
+            shadow: ShadowStyle::None,
+            fill: FillStyle::Solid,
         }
     }
 }
@@ -261,6 +365,8 @@ enum Slot<'a> {
     Radius(&'a mut u32),
     FontFamily(&'a mut String),
     IconTheme(&'a mut String),
+    Shadow(&'a mut ShadowStyle),
+    Fill(&'a mut FillStyle),
     /// An allowlisted key the cards draw nothing with (`accent-fg`):
     /// validated above, then dropped.
     Ignore,
@@ -297,6 +403,18 @@ impl Slot<'_> {
                 Some(family) => *slot = family.to_owned(),
                 None => notes.push(format!("`{dotted}` is not a font name: default applies")),
             },
+            Slot::Shadow(slot) => match value.as_str().and_then(ShadowStyle::parse) {
+                Some(style) => *slot = style,
+                None => notes.push(format!(
+                    "`{dotted}` is not a shadow style (none, soft, deep or glow): default applies"
+                )),
+            },
+            Slot::Fill(slot) => match value.as_str().and_then(FillStyle::parse) {
+                Some(style) => *slot = style,
+                None => notes.push(format!(
+                    "`{dotted}` is not a fill style (solid or gradient): default applies"
+                )),
+            },
             Slot::IconTheme(slot) => match value.as_str() {
                 Some(theme) if is_icon_theme(theme) => *slot = theme.to_owned(),
                 _ => notes.push(format!("`{dotted}` is not an icon theme: default applies")),
@@ -325,13 +443,15 @@ fn look_color<'a>(look: &'a mut Look, name: &str) -> Option<Slot<'a>> {
     }
 }
 
-/// The slot for a dotless top-level key, if it is one of the four.
+/// The slot for a dotless top-level key, if it is one of the six.
 fn look_dotless<'a>(look: &'a mut Look, key: &str) -> Option<Slot<'a>> {
     match key {
         "font" => Some(Slot::FontFamily(&mut look.font_family)),
         "font-size" => Some(Slot::FontSize(&mut look.font_size_px)),
         "opacity" => Some(Slot::Opacity(&mut look.opacity)),
         "radius" => Some(Slot::Radius(&mut look.radius)),
+        "shadow" => Some(Slot::Shadow(&mut look.shadow)),
+        "fill" => Some(Slot::Fill(&mut look.fill)),
         _ => None,
     }
 }

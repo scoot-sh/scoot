@@ -619,3 +619,36 @@ fn nvim_colorscheme_reloads_live() {
     server.kill().ok();
     server.wait().ok();
 }
+
+#[test]
+fn only_ginger_night_opts_into_depth_and_only_the_notifier_hears_of_it() {
+    for name in SHIPPED {
+        let look = resolved(name);
+        let notify = render_notify(&look).unwrap_or_else(|e| panic!("{name}: notify.toml: {e}"));
+        let notify: toml::Table = toml::from_str(&notify).expect("notify.toml reparses");
+        if *name == "ginger-night" {
+            assert_eq!(notify["shadow"].as_str(), Some("soft"));
+            assert!(
+                !notify.contains_key("fill"),
+                "ginger-night keeps a solid fill"
+            );
+        } else {
+            // A look that does not opt in renders the fragment it always did.
+            assert!(
+                !notify.contains_key("shadow") && !notify.contains_key("fill"),
+                "{name}: depth keys without an opt-in"
+            );
+        }
+        // The launcher and the greeter never carry the keys.
+        for (what, fragment) in [
+            ("launch.toml", render_launch(&look)),
+            ("greet.toml", render_greet(&look)),
+        ] {
+            let table: toml::Table = toml::from_str(&fragment.expect("renders")).expect("TOML");
+            assert!(
+                !table.contains_key("shadow") && !table.contains_key("fill"),
+                "{name}: {what} carries a depth key"
+            );
+        }
+    }
+}

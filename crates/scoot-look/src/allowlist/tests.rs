@@ -257,3 +257,35 @@ fn scootbar_font_keys_refused() {
         );
     }
 }
+
+#[test]
+fn the_depth_keys_belong_to_the_notifier_alone() {
+    for key in ["shadow", "fill"] {
+        assert!(allows("scootnotify", key));
+        // The launcher and the greeter read neither yet: a key they would
+        // report as unknown is refused at the look, not at every load.
+        assert!(!allows("scootlaunch", key), "{key}");
+        assert!(!allows("scootgreet", key), "{key}");
+        assert!(!allows("scootbar", key), "{key}");
+    }
+    let text = |s: &str| toml::Value::String(s.to_string());
+    for style in SHADOW_STYLES {
+        assert!(check_app_value("scootnotify", "shadow", &text(style)).is_none());
+    }
+    for style in FILL_STYLES {
+        assert!(check_app_value("scootnotify", "fill", &text(style)).is_none());
+    }
+    for (key, bad) in [
+        ("shadow", "huge"),
+        ("shadow", "SOFT"),
+        ("fill", "rainbow"),
+        ("fill", ""),
+    ] {
+        assert!(
+            check_app_value("scootnotify", key, &text(bad)).is_some(),
+            "{key}={bad}"
+        );
+    }
+    assert!(check_app_value("scootnotify", "shadow", &toml::Value::Integer(1)).is_some());
+    assert!(check_app_value("scootlaunch", "shadow", &text("soft")).is_some());
+}

@@ -1164,3 +1164,66 @@ fn notify_overrides_merge_under_its_own_app() {
     )]);
     assert!(render_notify(&look).is_err());
 }
+
+fn with_effects(extra: &str) -> ResolvedLook {
+    let text =
+        crate::schema::tests::minimal_toml().replacen("[cursor]", &format!("{extra}[cursor]"), 1);
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    resolve(&map, "x").expect("resolves")
+}
+
+#[test]
+fn a_look_without_effects_renders_the_fragments_it_always_did() {
+    // No `[effects]`: no depth key anywhere, so every fragment is
+    // byte-identical to what the renderer wrote before the tokens existed.
+    let frag = render_notify(&moonrise()).expect("renders");
+    assert!(!frag.contains("shadow") && !frag.contains("fill"), "{frag}");
+}
+
+#[test]
+fn effects_reach_the_notifier_fragment_and_no_other() {
+    let look = with_effects("[effects]\nshadow = \"soft\"\nfill = \"gradient\"\n");
+    let notify: toml::Table =
+        toml::from_str(&render_notify(&look).expect("renders")).expect("TOML");
+    assert_eq!(notify["shadow"].as_str(), Some("soft"));
+    assert_eq!(notify["fill"].as_str(), Some("gradient"));
+    // The keys are top-level, before any table, like `radius`.
+    let text = render_notify(&look).expect("renders");
+    assert!(
+        text.find("shadow").unwrap() < text.find("[colors]").unwrap(),
+        "{text}"
+    );
+    // The launcher and the greeter read neither key yet: they would
+    // report it as unknown on every load.
+    for other in [render_launch(&look), render_greet(&look)] {
+        let other = other.expect("renders");
+        assert!(
+            !other.contains("shadow") && !other.contains("fill"),
+            "{other}"
+        );
+    }
+}
+
+#[test]
+fn a_notifier_override_beats_the_shared_effects() {
+    let look = with_effects(
+        "[effects]\nshadow = \"soft\"\n[apps.scootnotify]\n\"shadow\" = \"glow\"\n\"fill\" = \"gradient\"\n",
+    );
+    let text = render_notify(&look).expect("renders");
+    let parsed: toml::Table = toml::from_str(&text).expect("each key is emitted once");
+    assert_eq!(parsed["shadow"].as_str(), Some("glow"));
+    assert_eq!(parsed["fill"].as_str(), Some("gradient"));
+}
+
+#[test]
+fn a_hand_built_look_with_a_bad_effect_value_is_refused_not_rendered() {
+    let mut look = moonrise();
+    look.effects.shadow = Some("soft\"\n[autostart]".to_string());
+    assert!(render_notify(&look).is_err());
+    look.effects.shadow = None;
+    look.effects.fill = Some("rainbow".to_string());
+    assert!(render_notify(&look).is_err());
+    // An app that never reads the keys does not look at them.
+    assert!(render_launch(&look).is_ok());
+}

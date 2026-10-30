@@ -18,6 +18,8 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
+use crate::allowlist;
+
 use crate::grammar::{
     GrammarError, MAX_FILE_BYTES, check_display_text, check_relative_path, check_wallpaper_url,
     is_cursor_accent, is_hex_color, is_identifier, is_image_file_name, is_name, is_nix_attr_path,
@@ -97,6 +99,8 @@ pub struct RawLook {
     pub opacity: Opacity,
     #[serde(default)]
     pub shape: RawShape,
+    #[serde(default)]
+    pub effects: Effects,
     #[serde(default)]
     pub cursor: RawCursor,
     #[serde(default)]
@@ -205,6 +209,20 @@ pub struct RawShape {
     pub ring_width: Option<i64>,
     #[serde(default, rename = "ring-inactive-width")]
     pub ring_inactive_width: Option<i64>,
+}
+
+/// The depth tokens (`[effects]`): the shell apps' shadow and card fill.
+/// Both are unset by default, which renders no key at all, so a look that
+/// does not opt in produces the fragments it always did.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Effects {
+    /// `none`, `soft`, `deep` or `glow` ([`crate::allowlist::SHADOW_STYLES`]).
+    #[serde(default)]
+    pub shadow: Option<String>,
+    /// `solid` or `gradient` ([`crate::allowlist::FILL_STYLES`]).
+    #[serde(default)]
+    pub fill: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -401,6 +419,7 @@ fn validate_raw(raw: &RawLook, errors: &mut Vec<GrammarError>) {
     validate_fonts(&raw.fonts, errors);
     validate_opacity(&raw.opacity, errors);
     validate_shape(&raw.shape, errors);
+    validate_effects(&raw.effects, errors);
     validate_cursor(&raw.cursor, errors);
     if let Some(wallpaper) = &raw.wallpaper {
         validate_wallpaper(wallpaper, errors);
@@ -535,6 +554,22 @@ fn validate_shape(shape: &RawShape, errors: &mut Vec<GrammarError>) {
             && !(0..=64).contains(w)
         {
             errors.push(GrammarError::new(field, "must be 0 to 64"));
+        }
+    }
+}
+
+fn validate_effects(effects: &Effects, errors: &mut Vec<GrammarError>) {
+    for (field, value, options) in [
+        ("effects.shadow", &effects.shadow, allowlist::SHADOW_STYLES),
+        ("effects.fill", &effects.fill, allowlist::FILL_STYLES),
+    ] {
+        if let Some(value) = value
+            && !options.contains(&value.as_str())
+        {
+            errors.push(GrammarError::new(
+                field,
+                format!("must be one of {}", options.join(", ")),
+            ));
         }
     }
 }

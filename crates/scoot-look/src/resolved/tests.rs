@@ -33,3 +33,25 @@ fn defaults_derive_from_required_roles() {
     );
     assert_eq!(pt_to_px(look.fonts.size), 13);
 }
+
+#[test]
+fn effects_inherit_and_a_child_overrides_per_key() {
+    let base_text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[effects]\nshadow = \"soft\"\nfill = \"gradient\"\n[cursor]",
+        1,
+    );
+    let base = parse_look_toml(base_text.as_bytes()).expect("base parses");
+    let child_text =
+        "schema = 1\nname = \"child\"\nextends = \"base\"\n[effects]\nshadow = \"none\"\n";
+    let child = parse_look_toml(child_text.as_bytes()).expect("child parses");
+    let map = BTreeMap::from([
+        ("base".to_string(), (base, Origin::User)),
+        ("child".to_string(), (child, Origin::User)),
+    ]);
+    let look = resolve(&map, "child").expect("resolves");
+    // `none` is a value, not an absence: the child cancels the parent's
+    // shadow and still inherits its fill.
+    assert_eq!(look.effects.shadow.as_deref(), Some("none"));
+    assert_eq!(look.effects.fill.as_deref(), Some("gradient"));
+}

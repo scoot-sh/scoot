@@ -124,6 +124,20 @@ pub const SHELL_APP_ALLOWLIST: &[&str] = &[
     "icons.theme",
 ];
 
+/// The `shadow` values (`[effects] shadow`, and the notifier's `shadow`
+/// override): the depth under a card.
+pub const SHADOW_STYLES: &[&str] = &["none", "soft", "deep", "glow"];
+
+/// The `fill` values (`[effects] fill`, and the notifier's `fill` override):
+/// how a card's surface color is laid down.
+pub const FILL_STYLES: &[&str] = &["solid", "gradient"];
+
+/// The depth keys only `scootnotify` reads so far, on top of
+/// [`SHELL_APP_ALLOWLIST`]. They are not in the shared list because an app
+/// that never reads one would report it as an unknown look key on every
+/// load; each app joins as it learns the key.
+pub const NOTIFY_DEPTH_KEYS: &[&str] = &["shadow", "fill"];
+
 /// Whether `key` (an `[apps.<app>]` dotted key) is allowlisted for `app`.
 /// Unknown apps are refused: only the apps below read look layers.
 pub fn allows(app: &str, key: &str) -> bool {
@@ -133,7 +147,8 @@ pub fn allows(app: &str, key: &str) -> bool {
     match app {
         "scoot" => SCOOT_ALLOWLIST.contains(&key) || is_wallpaper_override_key(key),
         "scootbar" => SCOOTBAR_ALLOWLIST.contains(&key),
-        "scootnotify" | "scootlaunch" | "scootgreet" => SHELL_APP_ALLOWLIST.contains(&key),
+        "scootnotify" => SHELL_APP_ALLOWLIST.contains(&key) || NOTIFY_DEPTH_KEYS.contains(&key),
+        "scootlaunch" | "scootgreet" => SHELL_APP_ALLOWLIST.contains(&key),
         _ => false,
     }
 }
@@ -346,6 +361,8 @@ pub fn value_kind(app: &str, key: &str) -> Option<ValueKind> {
             "font-size" => Some(ValueKind::IntRange { min: 1, max: 256 }),
             "opacity" => Some(ValueKind::Opacity),
             "radius" => Some(ValueKind::IntRange { min: 0, max: 64 }),
+            "shadow" if app == "scootnotify" => Some(ValueKind::Enum(SHADOW_STYLES)),
+            "fill" if app == "scootnotify" => Some(ValueKind::Enum(FILL_STYLES)),
             _ => None,
         },
         _ => None,

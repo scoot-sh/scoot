@@ -7,6 +7,7 @@
 //! what the zero-allocation pin covers. Anything time-varying (the age in
 //! the meta line) is frozen at layout, so no tick wakes the loop.
 
+use scootui::paint::Pad;
 use scootui::text::Text;
 
 use crate::config::Config;
@@ -111,10 +112,14 @@ pub struct Card {
 /// the gaps click through).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stack {
-    /// The surface width, in logical pixels.
+    /// The surface width, in logical pixels, [`pad`](Stack::pad) included.
     pub width: u32,
-    /// The surface height, in logical pixels.
+    /// The surface height, in logical pixels, [`pad`](Stack::pad) included.
     pub height: u32,
+    /// The room around the cards a shadow paints in, which every
+    /// rectangle below already accounts for. Zero without a shadow:
+    /// the surface is then exactly the cards.
+    pub pad: Pad,
     /// The visible cards, newest first.
     pub cards: Vec<Card>,
     /// Cards past `max_visible`, covered by the "+N more" pill.
@@ -270,11 +275,58 @@ pub fn layout(live: &[&Notification], config: &Config, text: &Text, em: f32, now
     Stack {
         width,
         height,
+        pad: Pad::ZERO,
         cards,
         hidden,
         pill_label,
         input,
     }
+}
+
+/// Grows `stack`'s surface by `pad` on each side and moves everything in
+/// it (cards, text, buttons, progress bars, the input region) to match,
+/// so a shadow has room to paint around the cards. The input region stays
+/// the cards' rectangles: the shadow band clicks through. An empty stack
+/// stays empty (it hides, rather than showing a surface of pure padding).
+/// `stack` is `layout`'s own output, not yet padded.
+pub fn inset(mut stack: Stack, pad: Pad) -> Stack {
+    if pad.is_zero() || stack.cards.is_empty() {
+        return stack;
+    }
+    debug_assert!(stack.pad.is_zero(), "a stack is inset once");
+    let (dx, dy) = (pad.left, pad.top);
+    let shift = |rect: &mut Rect| {
+        rect.x = rect.x.saturating_add(dx);
+        rect.y = rect.y.saturating_add(dy);
+    };
+    let shift_line = |line: &mut Line| {
+        line.x += i64::from(dx);
+        line.baseline += i64::from(dy);
+    };
+    for card in &mut stack.cards {
+        shift(&mut card.rect);
+        shift(&mut card.body_hit);
+        card.summary.iter_mut().for_each(shift_line);
+        shift_line(&mut card.meta);
+        card.body.iter_mut().for_each(shift_line);
+        if let Some(bar) = card.progress_bar.as_mut() {
+            shift(bar);
+        }
+        for button in &mut card.buttons {
+            shift(&mut button.rect);
+        }
+    }
+    stack.input.iter_mut().for_each(shift);
+    stack.width = stack
+        .width
+        .saturating_add(pad.left)
+        .saturating_add(pad.right);
+    stack.height = stack
+        .height
+        .saturating_add(pad.top)
+        .saturating_add(pad.bottom);
+    stack.pad = pad;
+    stack
 }
 
 /// The "+N more" pill's height: one padded line, or nothing.

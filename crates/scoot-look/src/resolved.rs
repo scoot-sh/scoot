@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 
 use crate::grammar::GrammarError;
-use crate::schema::{Icons, Night, Polarity, RawLook, Terminal, Wallpaper};
+use crate::schema::{Effects, Icons, Night, Polarity, RawLook, Terminal, Wallpaper};
 
 /// A look with every token concrete: the input to contrast, rendering and
 /// every loader.
@@ -29,6 +29,8 @@ pub struct ResolvedLook {
     pub fonts: Fonts,
     pub opacity: Opacity,
     pub shape: Shape,
+    /// The depth tokens; a key is `None` until the look sets it.
+    pub effects: Effects,
     pub cursor: Cursor,
     pub wallpaper: Option<Wallpaper>,
     pub icons_theme: String,
@@ -108,6 +110,7 @@ pub(crate) struct Partial {
     pub fonts: RawFontsAccum,
     pub opacity: OpacityAccum,
     pub shape: RawShapeAccum,
+    pub effects: Effects,
     pub cursor: RawCursorAccum,
     pub wallpaper: Option<Wallpaper>,
     pub icons: Option<Icons>,
@@ -253,6 +256,12 @@ impl Partial {
         if raw.shape.ring_inactive_width.is_some() {
             self.shape.ring_inactive_width = raw.shape.ring_inactive_width;
         }
+        if raw.effects.shadow.is_some() {
+            self.effects.shadow = raw.effects.shadow.clone();
+        }
+        if raw.effects.fill.is_some() {
+            self.effects.fill = raw.effects.fill.clone();
+        }
         if raw.cursor.theme.is_some() {
             self.cursor.theme = raw.cursor.theme.clone();
         }
@@ -381,6 +390,7 @@ impl Partial {
                 ring_inactive_width: self.shape.ring_inactive_width.unwrap_or(ring_width),
                 ring_width,
             },
+            effects: self.effects,
             cursor: Cursor {
                 theme: required("cursor.theme", self.cursor.theme)?,
                 size: self.cursor.size.unwrap_or(24),

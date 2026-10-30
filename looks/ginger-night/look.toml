@@ -36,6 +36,9 @@ radius = 14
 ring-width = 2
 ring-inactive-width = 2
 
+[effects]
+shadow = "soft"
+
 [cursor]
 theme = "Mocu"
 size = 24

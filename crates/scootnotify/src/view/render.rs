@@ -8,13 +8,14 @@
 
 use std::collections::HashMap;
 
-use scootui::paint::{Canvas, Span};
+use scootui::color::Color;
+use scootui::paint::{Canvas, Shadow, Span};
 use scootui::text::Text;
 
 use super::layout::{Card, Rect, Stack};
 use crate::bus::hints::Urgency;
 use crate::config::Config;
-use crate::look::Look;
+use crate::look::{Look, ShadowStyle};
 
 /// The decoded icon size, in device pixels: the 48 px slot at scale 2.
 /// Scale 1 samples it down at draw time (nearest, no allocation).
@@ -37,8 +38,12 @@ pub type Hover = Option<(u32, Option<usize>)>;
 
 /// Paints `stack` into `canvas` (cleared first: the gaps stay
 /// transparent and click through). Allocates nothing after warm-up: the
-/// lines, labels and rectangles are the layout's, and the glyph cache
-/// holds every drawn glyph after the first paint.
+/// lines, labels and rectangles are the layout's, the glyph cache holds
+/// every drawn glyph after the first paint, and `shadow`'s tables were
+/// built when the stack changed. `shadow` is the look's shadow (`None`
+/// for `shadow = "none"`, which paints and costs nothing); every shadow
+/// is painted before any card so a card's shadow never lands on its
+/// neighbor.
 #[allow(clippy::too_many_arguments)] // A paint helper, as the bar's own are.
 pub fn paint(
     canvas: &mut Canvas<'_>,
@@ -49,6 +54,7 @@ pub fn paint(
     urgencies: &HashMap<u32, Urgency>,
     hover: Hover,
     icons: &HashMap<u32, IconBits>,
+    shadow: Option<&Shadow>,
 ) {
     canvas.clear();
     let em = look.font_size_px;
@@ -56,6 +62,18 @@ pub fn paint(
         x: 0,
         width: canvas.width(),
     };
+    if let Some(shadow) = shadow {
+        for card in &stack.cards {
+            let urgency = urgencies.get(&card.id).copied().unwrap_or(Urgency::Normal);
+            let tint = match look.shadow {
+                // A glow is the card's own ring color, so a critical card
+                // glows in the urgent color.
+                ShadowStyle::Glow => ring_color(look, urgency),
+                _ => Color { r: 0, g: 0, b: 0 },
+            };
+            shadow.paint(canvas, region(card.rect), config.radius, tint);
+        }
+    }
     for card in &stack.cards {
         let urgency = urgencies.get(&card.id).copied().unwrap_or(Urgency::Normal);
         paint_card(
@@ -82,11 +100,7 @@ fn paint_card(
     hover: Hover,
     icons: &HashMap<u32, IconBits>,
 ) {
-    let border = match urgency {
-        Urgency::Low => look.border,
-        Urgency::Normal => look.focus,
-        Urgency::Critical => look.theme.urgent,
-    };
+    let border = ring_color(look, urgency);
     let radius = config.radius;
     let alpha = (look.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
     let rect = card.rect;
@@ -99,15 +113,15 @@ fn paint_card(
             width: rect.width.saturating_sub(2 * inset),
             height: rect.height.saturating_sub(2 * inset),
         };
-        fill_card(
+        fill_gradient(
             canvas,
             inner,
             radius.saturating_sub(inset),
-            look.surface,
+            look.fill_stops(),
             alpha,
         );
     } else {
-        fill_card(canvas, rect, radius, look.surface, alpha);
+        fill_gradient(canvas, rect, radius, look.fill_stops(), alpha);
     }
     if card.has_icon {
         paint_icon(canvas, text, card, look, em, clip, config.border_px, icons);
@@ -139,71 +153,44 @@ fn paint_card(
     }
 }
 
-/// Fills `rect` with `color` at `alpha` (255 opaque) and rounded corners
-/// of `radius`: the card fill and its urgency ring. Coverage is analytic
-/// per pixel (the bar's corner tables would allocate per repaint), run
-/// through the shared blender, so this allocates nothing and reads
-/// correct over any destination (the inset fill over its ring, cartoon
-/// text over the fill).
-fn fill_card(
-    canvas: &mut Canvas<'_>,
-    rect: Rect,
-    radius: u32,
-    color: scootui::color::Color,
-    alpha: u8,
-) {
-    if rect.width == 0 || rect.height == 0 {
-        return;
-    }
-    let radius = radius.min(rect.width / 2).min(rect.height / 2);
-    let clip = Span {
-        x: 0,
-        width: canvas.width(),
-    };
-    let clip_y = canvas.height();
-    for y in rect.y..rect.y + rect.height {
-        if y >= clip_y {
-            break;
-        }
-        for x in rect.x..rect.x + rect.width {
-            let coverage = rounded_coverage(x, y, rect, radius);
-            if coverage == 0 {
-                continue;
-            }
-            // The fill's alpha times the corner's coverage, through one
-            // blend: opaque fills replace, translucent ones composite.
-            let blended = (u32::from(alpha) * u32::from(coverage) + 127) / 255;
-            canvas.blend(x as i64, y as i64, blended.min(255) as u8, color, clip);
-        }
+/// The card's ring color for `urgency`: also the tint of its glow.
+fn ring_color(look: &Look, urgency: Urgency) -> Color {
+    match urgency {
+        Urgency::Low => look.border,
+        Urgency::Normal => look.focus,
+        Urgency::Critical => look.theme.urgent,
     }
 }
 
-/// The rounded-rectangle coverage of the pixel at `(x, y)` (0 to 255):
-/// 255 in the straight runs, the circle's analytic coverage in the
-/// corners (a pixel's center within half a pixel of the circle, as the
-/// bar's own corner tables read it).
-fn rounded_coverage(x: u32, y: u32, rect: Rect, radius: u32) -> u8 {
-    if radius == 0 {
-        return 255;
+/// Fills `rect` with `color` at `alpha` (255 opaque) and rounded corners
+/// of `radius`: the urgency ring, the icon tile, the hovered button.
+fn fill_card(canvas: &mut Canvas<'_>, rect: Rect, radius: u32, color: Color, alpha: u8) {
+    fill_gradient(canvas, rect, radius, (color, color), alpha);
+}
+
+/// Fills `rect` like [`fill_card`] with a vertical gradient from the
+/// first stop (top) to the second (bottom): the card surface. Equal stops
+/// are the solid fill, byte for byte. The shared blender reads correct
+/// over any destination (the inset fill over its ring, a translucent
+/// fill over its shadow, cartoon text over the fill).
+fn fill_gradient(
+    canvas: &mut Canvas<'_>,
+    rect: Rect,
+    radius: u32,
+    stops: (Color, Color),
+    alpha: u8,
+) {
+    canvas.fill_rounded_gradient(region(rect), radius, stops.0, stops.1, alpha);
+}
+
+/// A layout rectangle as the shared canvas's.
+fn region(rect: Rect) -> scootui::region::Rect {
+    scootui::region::Rect {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
     }
-    let r = f64::from(radius);
-    // Distances to the near corner center, when inside a corner square.
-    let cx = if x < rect.x + radius {
-        f64::from(rect.x + radius) - (f64::from(x) + 0.5)
-    } else if x >= rect.x + rect.width - radius {
-        (f64::from(x) + 0.5) - f64::from(rect.x + rect.width - radius)
-    } else {
-        return 255;
-    };
-    let cy = if y < rect.y + radius {
-        f64::from(rect.y + radius) - (f64::from(y) + 0.5)
-    } else if y >= rect.y + rect.height - radius {
-        (f64::from(y) + 0.5) - f64::from(rect.y + rect.height - radius)
-    } else {
-        return 255;
-    };
-    let distance = (cx * cx + cy * cy).sqrt();
-    ((r + 0.5 - distance).clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 /// Paints the icon slot: decoded pixels in the 48 px box, or the app's
@@ -294,7 +281,7 @@ fn paint_line(
     text: &mut Text,
     canvas: &mut Canvas<'_>,
     line: &super::layout::Line,
-    base: scootui::color::Color,
+    base: Color,
     look: &Look,
     em: f32,
     clip: Span,
@@ -439,8 +426,14 @@ fn paint_pill(
     let label_w = text.measure(None, label, em);
     let pill_w = label_w + 2 * super::layout::PAD;
     let pill_h = (metrics.ascent.ceil() + metrics.descent.ceil()) as u32 + super::layout::PAD;
-    let x = stack.width.saturating_sub(pill_w) / 2;
-    let y = stack.height.saturating_sub(pill_h);
+    // Centered under the cards and sitting on their bottom edge, not on
+    // the shadow's room below them.
+    let cards_w = stack.width.saturating_sub(stack.pad.left + stack.pad.right);
+    let x = stack.pad.left + cards_w.saturating_sub(pill_w) / 2;
+    let y = stack
+        .height
+        .saturating_sub(stack.pad.bottom)
+        .saturating_sub(pill_h);
     canvas.fill_pill(Span { x, width: pill_w }, y, y + pill_h, 8, look.theme.dim);
     let baseline = y as i64 + metrics.ascent.ceil() as i64 + super::layout::PAD as i64 / 2;
     text.draw(
@@ -455,5 +448,7 @@ fn paint_pill(
     );
 }
 
+#[cfg(test)]
+mod depth_tests;
 #[cfg(test)]
 mod tests;

@@ -164,3 +164,104 @@ fn an_empty_stack_has_no_size() {
     assert_eq!((stack.width, stack.height), (360, 0));
     assert!(stack.cards.is_empty() && stack.input.is_empty());
 }
+
+fn busy_stack() -> Stack {
+    let font = text();
+    let mut rich = note(
+        2,
+        "mail",
+        "Subject line",
+        "A body that wraps around a few times over",
+    );
+    rich.value = Some(40);
+    rich.actions = vec![
+        Action {
+            key: "open".to_owned(),
+            label: "Open".to_owned(),
+        },
+        Action {
+            key: "later".to_owned(),
+            label: "Later".to_owned(),
+        },
+    ];
+    let plain = note(1, "chat", "Hello", "World");
+    layout(&[&plain, &rich], &Config::default(), &font, 13.0, 2_000)
+}
+
+#[test]
+fn an_inset_stack_is_the_same_stack_moved_by_the_pad() {
+    let bare = busy_stack();
+    assert!(bare.pad.is_zero());
+    let pad = Pad {
+        top: 8,
+        right: 12,
+        bottom: 16,
+        left: 20,
+    };
+    let padded = inset(bare.clone(), pad);
+    assert_eq!(padded.pad, pad);
+    assert_eq!(padded.width, bare.width + 32);
+    assert_eq!(padded.height, bare.height + 24);
+    assert_eq!(padded.cards.len(), bare.cards.len());
+    let moved = |rect: Rect| Rect {
+        x: rect.x + 20,
+        y: rect.y + 8,
+        ..rect
+    };
+    for (was, now) in bare.cards.iter().zip(&padded.cards) {
+        assert_eq!(now.rect, moved(was.rect));
+        assert_eq!(now.body_hit, moved(was.body_hit));
+        assert_eq!(now.progress_bar, was.progress_bar.map(moved));
+        assert_eq!(now.id, was.id);
+        for (a, b) in was.buttons.iter().zip(&now.buttons) {
+            assert_eq!(b.rect, moved(a.rect));
+            assert_eq!(b.label, a.label);
+        }
+        let lines = |card: &Card| -> Vec<Line> {
+            card.summary
+                .iter()
+                .chain([&card.meta])
+                .chain(&card.body)
+                .cloned()
+                .collect()
+        };
+        for (a, b) in lines(was).iter().zip(&lines(now)) {
+            assert_eq!((b.x, b.baseline), (a.x + 20, a.baseline + 8));
+            assert_eq!(b.runs, a.runs);
+        }
+    }
+    // The shadow band clicks through: the input region is the cards.
+    assert_eq!(
+        padded.input,
+        padded
+            .cards
+            .iter()
+            .map(|card| card.rect)
+            .collect::<Vec<_>>()
+    );
+    // Every card sits wholly inside the padded surface.
+    for card in &padded.cards {
+        assert!(card.rect.x + card.rect.width + pad.right <= padded.width);
+        assert!(card.rect.y + card.rect.height + pad.bottom <= padded.height);
+    }
+}
+
+#[test]
+fn no_pad_and_no_cards_change_nothing() {
+    let bare = busy_stack();
+    assert_eq!(inset(bare.clone(), Pad::ZERO), bare);
+    let font = text();
+    let empty = layout(&[], &Config::default(), &font, 13.0, 0);
+    let pad = Pad {
+        top: 5,
+        right: 5,
+        bottom: 5,
+        left: 5,
+    };
+    let still_empty = inset(empty.clone(), pad);
+    assert_eq!(still_empty, empty);
+    assert_eq!(
+        still_empty.height, 0,
+        "an empty stack hides, not a padded blank"
+    );
+}

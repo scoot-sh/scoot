@@ -64,6 +64,21 @@ impl Color {
         u32::from(alpha) << 24 | scale(self.r) << 16 | scale(self.g) << 8 | scale(self.b)
     }
 
+    /// This color moved `toward` out of 255 of the way to `other`, rounded:
+    /// 0 is this color, 255 is `other`. The gradient's stops and the tint
+    /// of a lightened edge are built with it.
+    pub fn mix(self, other: Color, toward: u8) -> Color {
+        let t = u32::from(toward);
+        let channel = |from: u8, to: u8| {
+            ((u32::from(from) * (255 - t) + u32::from(to) * t + 127) / 255) as u8
+        };
+        Color {
+            r: channel(self.r, other.r),
+            g: channel(self.g, other.g),
+            b: channel(self.b, other.b),
+        }
+    }
+
     /// WCAG relative luminance (0 black, 1 white): the same formula the
     /// look pipeline's contrast check uses, over the parsed channels.
     pub fn luminance(self) -> f64 {

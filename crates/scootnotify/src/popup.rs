@@ -37,7 +37,7 @@ use std::time::{Duration, Instant};
 use scoot_rt::print::warn;
 use scootui::output::Size;
 use scootui::outputs::Frame;
-use scootui::paint::Canvas;
+use scootui::paint::{Canvas, Pad, Shadow};
 use scootui::surfaces::{Buffers, Demand, Effect, Globals, LayerLive, LayerSpec, Plan};
 use scootui::text::Text;
 use wayland_client::protocol::{
@@ -140,6 +140,18 @@ pub struct App {
     /// a busy loop at full CPU).
     draw_skipped: bool,
     stack: Stack,
+    /// The look's shadow tables (`None` for `shadow = "none"`, which
+    /// builds, paints and pads nothing). Built with the look, sized to the
+    /// stack's corner radii whenever either changes: the repaint only
+    /// reads them.
+    shadow: Option<Shadow>,
+    /// Set when the look or the config changed under a stack that may
+    /// compare equal: the shadow's corner tables are rebuilt on the next
+    /// refresh.
+    shadow_stale: bool,
+    /// The layer margins last handed to the compositor: a shadow's room
+    /// comes out of the margin, so the margins follow the stack.
+    margin_sent: [u32; 4],
     icons: HashMap<u32, IconBits>,
     urgencies: HashMap<u32, Urgency>,
     /// Cards in the last commit(s), awaiting their frame callback.
@@ -166,6 +178,9 @@ impl App {
     fn new(config: Config, look: Look) -> Self {
         Self {
             config,
+            shadow: shadow_of(&look),
+            shadow_stale: true,
+            margin_sent: [0; 4],
             look,
             text: None,
             compositor: None,
@@ -195,6 +210,7 @@ impl App {
             stack: Stack {
                 width: 0,
                 height: 0,
+                pad: Pad::ZERO,
                 cards: Vec::new(),
                 hidden: 0,
                 pill_label: String::new(),
@@ -259,14 +275,15 @@ impl App {
             width: self.config.width_px,
             height: 1,
         });
-        let margin = self.config.margin_px;
+        let margin = self.margins();
+        self.margin_sent = margin;
         let spec = LayerSpec {
             namespace: NAMESPACE,
             exclusive_keyboard: false,
             anchor: anchor_of(self.config.anchor),
             width: content.width,
             height: content.height.max(1),
-            margin: [margin, margin, margin, margin],
+            margin,
             exclusive_zone: 0,
         };
         let output = self.output();
@@ -299,6 +316,32 @@ impl App {
         self.configured_size = None;
         self.sized_to = None;
         self.draw_skipped = false;
+    }
+
+    /// The layer margins: `margin_px` from the screen edge to the cards, so
+    /// the shadow's room on each side comes out of it (a margin smaller
+    /// than the room leaves the cards that much further in; margins cannot
+    /// go negative).
+    fn margins(&self) -> [u32; 4] {
+        let margin = self.config.margin_px;
+        let pad = self.stack.pad;
+        [pad.top, pad.right, pad.bottom, pad.left].map(|room| margin.saturating_sub(room))
+    }
+
+    /// Sizes the shadow's corner tables to the stack's cards. Allocates
+    /// when a radius is new: runs when the content, the look or the config
+    /// changed, never in a repaint.
+    fn prepare_shadow(&mut self) {
+        if let Some(shadow) = self.shadow.as_mut() {
+            shadow.prepare(
+                self.config.radius,
+                self.stack
+                    .cards
+                    .iter()
+                    .map(|card| (card.rect.width, card.rect.height)),
+            );
+        }
+        self.shadow_stale = false;
     }
 
     /// Hides an emptied stack: no surface, no buffers, no input region.
@@ -414,6 +457,9 @@ impl App {
         if dims.0 == 0 || dims.1 == 0 {
             return false;
         }
+        // The room a shadow takes comes out of the margin: follow the
+        // stack (a re-theme can change it under a live surface).
+        let margin = self.margins();
         let shm = self.shm.clone();
         if self.text.is_none() {
             return false;
@@ -462,11 +508,16 @@ impl App {
                 &self.urgencies,
                 self.hover,
                 &self.icons,
+                self.shadow.as_ref(),
             );
         }
         let Some(live) = self.live.as_mut() else {
             return false;
         };
+        if margin != self.margin_sent {
+            live.set_margin(margin);
+            self.margin_sent = margin;
+        }
         // The content sizes the surface: ask once per size (a clamped
         // compositor answers its own size, and re-asking every draw
         // would storm configures). The size rides the same commit as
@@ -519,6 +570,12 @@ impl App {
     /// Re-themes in place: the new look over the live cards, which keep
     /// their ids, clocks, hover and history.
     fn retheme(&mut self, look: Look) {
+        // Same style, same tables: keep them. A new style builds its own,
+        // sized at the next refresh.
+        if look.shadow != self.look.shadow {
+            self.shadow = shadow_of(&look);
+        }
+        self.shadow_stale = true;
         self.look = look;
         // The layout's sizes depend on the text size: force a rebuild
         // on the next refresh (the stack comparison would call equal
@@ -533,6 +590,8 @@ impl App {
     fn apply_config(&mut self, config: Config) -> bool {
         let idle_changed = self.config.pause_when_idle_secs != config.pause_when_idle_secs;
         self.config = config;
+        // The card radius is the config's: the shadow's corners follow it.
+        self.shadow_stale = true;
         // The layout's sizes depend on the config: force a rebuild on
         // the next refresh, as `retheme` does.
         self.content_size = None;
@@ -565,6 +624,11 @@ impl App {
         let note = notifier.get_input_idle_notification(secs * 1000, seat, qh, ());
         self.idle = Some(note);
     }
+}
+
+/// The shadow tables for `look`'s style (none for `shadow = "none"`).
+fn shadow_of(look: &Look) -> Option<Shadow> {
+    look.shadow.spec().map(Shadow::new)
 }
 
 /// The layer-shell anchor for the configured corner.
@@ -651,8 +715,10 @@ impl Popup {
             Some(text) => text,
             None => return,
         };
-        let stack = layout::layout(live, &app.config, text, em, now_ms);
-        if stack != app.stack {
+        let pad = app.shadow.as_ref().map_or(Pad::ZERO, Shadow::pad);
+        let stack = layout::inset(layout::layout(live, &app.config, text, em, now_ms), pad);
+        let changed = stack != app.stack;
+        if changed {
             app.stack = stack;
             app.content_size = if app.stack.cards.is_empty() {
                 None
@@ -663,6 +729,9 @@ impl Popup {
                 })
             };
             app.dirty = true;
+        }
+        if changed || app.shadow_stale {
+            app.prepare_shadow();
         }
         // Urgencies follow the live set (the paint reads them per card).
         app.urgencies.clear();

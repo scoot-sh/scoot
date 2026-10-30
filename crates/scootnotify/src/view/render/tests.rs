@@ -17,13 +17,13 @@ use crate::model::expiry::Clock;
 use crate::model::store::{Icon, Notification};
 use crate::view::layout;
 
-fn make_text() -> Text {
+pub(super) fn make_text() -> Text {
     Text::new(FontArc::new(
         FontVec::try_from_vec(scootui::testfont::build()).unwrap(),
     ))
 }
 
-fn note(id: u32, summary: &str, body: &str) -> Notification {
+pub(super) fn note(id: u32, summary: &str, body: &str) -> Notification {
     Notification {
         id,
         app_name: "test".to_owned(),
@@ -67,6 +67,7 @@ fn painted(stack: &layout::Stack, look: &Look) -> (Vec<u8>, u32, u32) {
             &urgencies,
             None,
             &HashMap::new(),
+            None,
         );
     }
     (pixels, dims.0, dims.1)
@@ -134,6 +135,7 @@ fn urgency_colors_the_ring() {
                 &urgencies,
                 None,
                 &HashMap::new(),
+                None,
             );
         }
         assert_eq!(
@@ -190,6 +192,7 @@ fn a_repaint_allocates_nothing_after_warm_up() {
             &urgencies,
             None,
             &HashMap::new(),
+            None,
         );
     }
     let (_, allocs) = scootbg_mem::count_allocations(|| {
@@ -203,7 +206,85 @@ fn a_repaint_allocates_nothing_after_warm_up() {
             &urgencies,
             None,
             &HashMap::new(),
+            None,
         );
     });
     assert_eq!(allocs, 0, "a repaint allocates");
+}
+
+/// FNV-1a over `bytes`: a stable fingerprint of a painted buffer.
+fn fingerprint(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, &byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+/// Seven notifications: three urgencies, a body, a progress bar and two
+/// buttons on the newest, and more than `max_visible` for the "+N more"
+/// pill.
+pub(super) fn busy_notes() -> Vec<Notification> {
+    let mut notes: Vec<Notification> = (1..=7)
+        .map(|id| {
+            note(
+                id,
+                &format!("Card {id}"),
+                "A body that wraps around a few times",
+            )
+        })
+        .collect();
+    notes[5].urgency = Urgency::Low;
+    notes[6].urgency = Urgency::Critical;
+    notes[6].value = Some(60);
+    notes[6].actions = vec![
+        crate::bus::notify::Action {
+            key: "open".to_owned(),
+            label: "Open".to_owned(),
+        },
+        crate::bus::notify::Action {
+            key: "later".to_owned(),
+            label: "Later".to_owned(),
+        },
+    ];
+    notes
+}
+
+/// A busy stack painted under the default look, the newest card's first
+/// button hovered.
+fn default_look_stack() -> (Vec<u8>, u32, u32) {
+    let config = Config::default();
+    let look = Look::default();
+    let notes = busy_notes();
+    let live: Vec<&Notification> = notes.iter().collect();
+    let font_text = make_text();
+    let stack = layout::layout(&live, &config, &font_text, look.font_size_px, 2_000);
+    assert!(stack.hidden > 0 && stack.cards.len() > 3);
+    let urgencies = notes.iter().map(|n| (n.id, n.urgency)).collect();
+    let mut pixels = vec![0u8; stack.width as usize * stack.height as usize * 4];
+    {
+        let mut canvas = Canvas::new(&mut pixels, stack.width, stack.height).unwrap();
+        paint(
+            &mut canvas,
+            &mut make_text(),
+            &stack,
+            &config,
+            &look,
+            &urgencies,
+            Some((7, Some(0))),
+            &HashMap::new(),
+            None,
+        );
+    }
+    (pixels, stack.width, stack.height)
+}
+
+#[test]
+fn the_default_look_paints_the_bytes_it_always_did() {
+    let (pixels, width, height) = default_look_stack();
+    // Recorded from the repaint before the depth tokens existed: a look
+    // that opts into nothing must keep painting exactly this.
+    assert_eq!(
+        fingerprint(&pixels),
+        0xd689_fb62_65bd_ac76,
+        "{width}x{height}"
+    );
 }
