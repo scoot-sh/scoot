@@ -10035,7 +10035,7 @@ let
     (
       assert
         hmNotif.config.programs.scoot.settings.binds."super+n"
-        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss";
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss --all";
       true
     )
     (
@@ -10048,6 +10048,25 @@ let
       assert
         hmNotif.config.programs.scoot.settings.binds."super+ctrl+n"
         == "spawn ${fakeNotifyScoot}/bin/scootnotify msg restore";
+      true
+    )
+    # ...and every `scootnotify` bind the profile renders is a command the
+    # CLI accepts (`crates/scootnotify/src/cli.rs`: `msg dismiss` needs an
+    # id or `--all`, which a bare bind once lacked and the compositor log
+    # was the only place the refusal showed).
+    (
+      let
+        binds = hmNotif.config.programs.scoot.settings.binds;
+        scootnotifyBinds = lib.filter (b: builtins.isString b && lib.hasInfix "/bin/scootnotify " b) (
+          lib.attrValues binds
+        );
+        accepted =
+          b:
+          builtins.match "spawn [^ ]+/bin/scootnotify msg (dismiss (--all|[0-9]+)|dnd (on|off|toggle|status)|restore)" b
+          != null;
+      in
+      assert scootnotifyBinds != [ ];
+      assert lib.all accepted scootnotifyBinds;
       true
     )
     # ...spelled out (`desktop.notifications.daemon = "scootnotify"`,
@@ -10351,7 +10370,7 @@ let
     (
       assert
         hmNotifScootPkg.config.programs.scoot.settings.binds."super+n"
-        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss";
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss --all";
       true
     )
     (
@@ -10380,7 +10399,7 @@ let
     (
       assert
         hmNotifScootFull.config.programs.scoot.settings.binds."super+n"
-        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss";
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss --all";
       true
     )
     (
@@ -15859,7 +15878,7 @@ let
           "super+d" = "spawn ${slotScriptBin hmKeys "scoot-launcher"}";
           "ctrl+alt+space" = "spawn ${slotScriptBin hmKeys "scoot-launcher"} --list-executables-in-path";
           "super+v" = "spawn ${slotScriptBin hmKeys "scoot-clipboard-pick"}";
-          "super+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss";
+          "super+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss --all";
           "super+shift+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg dnd toggle";
           "super+ctrl+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg restore";
           "print" = "spawn ${slotScriptBin hmKeys "scoot-capture-output"}";
@@ -15963,7 +15982,7 @@ let
     (
       assert
         hmKeysSlots.config.programs.scoot.settings.binds."super+n"
-        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss";
+        == "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss --all";
       true
     )
     (
@@ -16446,7 +16465,7 @@ let
             allow_when_locked = true;
           };
           "super+escape" = "spawn loginctl lock-session";
-          "super+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss";
+          "super+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg dismiss --all";
           "super+shift+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg dnd toggle";
           "super+ctrl+n" = "spawn ${fakeNotifyScoot}/bin/scootnotify msg restore";
         };
@@ -18385,7 +18404,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     assert "--list-executables-in-path" not in got["super+d"], got["super+d"]
     assert isinstance(got["ctrl+alt+space"], str), got["ctrl+alt+space"]
     assert got["ctrl+alt+space"].endswith("/bin/scoot-launcher --list-executables-in-path"), got["ctrl+alt+space"]
-    assert got["super+n"].startswith("spawn ") and got["super+n"].endswith("scootnotify msg dismiss"), got["super+n"]
+    assert got["super+n"].startswith("spawn ") and got["super+n"].endswith("scootnotify msg dismiss --all"), got["super+n"]
     assert got["super+shift+n"].endswith("scootnotify msg dnd toggle"), got["super+shift+n"]
     assert got["super+ctrl+n"].endswith("scootnotify msg restore"), got["super+ctrl+n"]
     assert isinstance(got["print"], str), got["print"]
@@ -18406,7 +18425,7 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     assert "wofi" not in open(sys.argv[1]).read(), "wofi default left in [binds]"
     assert "/bin/scoot-launcher" in got["super+d"] and "--list-executables-in-path" not in got["super+d"], got["super+d"]
     assert got["ctrl+alt+space"].endswith("/bin/scoot-launcher --list-executables-in-path"), got["ctrl+alt+space"]
-    assert got["super+n"].endswith("scootnotify msg dismiss"), got["super+n"]
+    assert got["super+n"].endswith("scootnotify msg dismiss --all"), got["super+n"]
     assert "/bin/scoot-clipboard-pick" in got["super+v"], got["super+v"]
     assert "/bin/scoot-volume sink-up" in got["XF86AudioRaiseVolume"]["action"], got["XF86AudioRaiseVolume"]
     assert "/bin/scoot-brightness up" in got["XF86MonBrightnessUp"]["action"], got["XF86MonBrightnessUp"]
