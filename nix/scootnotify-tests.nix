@@ -36,6 +36,11 @@
 #   explicit `settings.look` wins), on both sides; on (the default), with
 #   the mako daemon, or with the profile off, the file carries no look
 #   key -- and the real binary accepts the key (see the next item);
+# - the desktop profile's `theme.overrides` (the look-independent effect
+#   tokens) renders into the file's own `[effects]`, `[card]` and
+#   `[title]` tables at `mkDefault` (an explicit `settings` key wins per
+#   key), a table with nothing set is not written, and a profile that
+#   sets none renders the file it always did;
 # - the real binary accepts every rendered file (`scootnotify daemon
 #   --check`, exit 0) and refuses a file with an unknown key (exit 1).
 {
@@ -135,8 +140,18 @@ let
       settings ? { },
       # `theme.targets.notifications.enable`: the real option's default.
       lookTarget ? true,
+      # `theme.overrides`: the look-independent effect tokens, empty by
+      # default as in the real option.
+      overrides ? { },
     }:
     {
+      options.programs.scoot.desktop.theme.overrides = lib.genAttrs [ "effects" "card" "title" ] (
+        _:
+        lib.mkOption {
+          type = lib.types.attrsOf lib.types.raw;
+          default = { };
+        }
+      );
       options.programs.scoot.desktop.theme.targets.notifications.enable = lib.mkOption {
         type = lib.types.bool;
         default = true;
@@ -163,6 +178,7 @@ let
       config.programs.scoot.desktop = {
         inherit enable;
         theme.targets.notifications.enable = lookTarget;
+        theme.overrides = overrides;
         notifications = {
           enable = notifications;
           inherit daemon settings;
@@ -321,6 +337,40 @@ let
     lookTarget = false;
   } { };
   lookOn = evalHomeProfile { enable = true; } { };
+
+  # The profile's look-independent effect tokens (`theme.overrides`):
+  # written into the file's own tables at `mkDefault`, per key.
+  overridden = evalHomeProfile {
+    enable = true;
+    overrides = {
+      effects = {
+        shadow = "soft";
+        motion = "spring";
+        motion-duration-ms = 200;
+        motion-bounce = 0.25;
+      };
+      card = {
+        mark = "stripe";
+        app-accent = true;
+      };
+      title.weight = 600;
+    };
+  } { };
+  overriddenNixos = evalNixosProfile {
+    enable = true;
+    overrides.effects.shadow = "soft";
+  } { };
+  overriddenEffectsOnly = evalHomeProfile {
+    enable = true;
+    overrides.effects.motion = "spring";
+  } { };
+  overriddenUserWins = evalHomeProfile {
+    enable = true;
+    overrides.effects = {
+      shadow = "soft";
+      motion = "spring";
+    };
+  } { settings.effects.motion = "ease-out"; };
   lookOffMako = evalHomeProfile {
     enable = true;
     daemon = "mako";
@@ -341,6 +391,8 @@ let
     nixos = os.config.programs.scootnotify.configFile;
     look-off = lookOff.config.programs.scootnotify.configFile;
     look-off-nixos = lookOffNixos.config.programs.scootnotify.configFile;
+    overridden = overridden.config.programs.scootnotify.configFile;
+    overridden-user-wins = overriddenUserWins.config.programs.scootnotify.configFile;
   };
   unknownKey = tomlFormat.generate "unknown-key.toml" { colors.backgroun = "#101010"; };
 
@@ -449,6 +501,36 @@ let
     "an explicit settings.look wins over the target" = settingsOf lookOffUserOn == { look = true; };
     "the look target off with the profile off changes nothing" = settingsOf lookOffProfileOff == { };
     "an empty table beside the new daemon stays quiet" = optIn.config.warnings == [ ];
+    "theme.overrides unset renders the file it always did" = settingsOf lookOn == { };
+    "theme.overrides lands in the file's own effect tables" =
+      settingsOf overridden == {
+        effects = {
+          shadow = "soft";
+          motion = "spring";
+          motion-duration-ms = 200;
+          motion-bounce = 0.25;
+        };
+        card = {
+          mark = "stripe";
+          app-accent = true;
+        };
+        title.weight = 600;
+      };
+    "theme.overrides reaches the NixOS file too" =
+      settingsOf overriddenNixos == {
+        effects.shadow = "soft";
+      };
+    "a table with nothing set is not written" =
+      settingsOf overriddenEffectsOnly == {
+        effects.motion = "spring";
+      };
+    "an explicit settings key wins over theme.overrides, per key" =
+      settingsOf overriddenUserWins == {
+        effects = {
+          shadow = "soft";
+          motion = "ease-out";
+        };
+      };
   };
   failed = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
 

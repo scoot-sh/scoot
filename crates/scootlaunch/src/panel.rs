@@ -174,6 +174,10 @@ pub fn open(opts: Options) -> i32 {
     };
     // The user's own file: missing is the defaults; bad is a loud
     // refusal (there is no running instance a bad file could loop).
+    let config_path = opts
+        .config
+        .clone()
+        .unwrap_or_else(crate::config::default_path);
     let config = match &opts.config {
         Some(path) => match crate::config::load(path) {
             Ok(config) => config,
@@ -207,7 +211,9 @@ pub fn open(opts: Options) -> i32 {
     };
     // The look layer, read at this open: missing is the defaults, one
     // warning per fallback. The per-invocation colors override it.
-    let (mut look, notes) = crate::look::load(None);
+    let (mut look, mut notes) = crate::look::load(None);
+    // The user's `[effects]` win over the layer.
+    crate::look::apply_user(&mut look, &config, &config_path, &mut notes);
     for note in &notes {
         warn(format_args!("scootlaunch: {note}"));
     }

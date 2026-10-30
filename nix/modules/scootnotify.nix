@@ -21,7 +21,10 @@
 # rules (the card corner radius is drawn from the file's `radius`). So
 # there is no per-key merge of the two: the switch is all-or-nothing,
 # and the per-key override of a look value is the look's own
-# `[apps.scootnotify]` table.
+# `[apps.scootnotify]` table. The exception is the depth, motion and card
+# tokens: the file's own `[effects]`, `[card]` and `[title]` tables win
+# per key over the look at runtime, and the profile's
+# `theme.overrides` fills them at `mkDefault`.
 #
 # Everything else the daemon reads has its own default in the binary,
 # so an absent key is that default.
@@ -60,6 +63,12 @@ let
   # is the user's `settings` here, below): a non-empty one beside the new
   # daemon warns, naming where the values go instead.
   slotSettings = (desktopProfile.notifications or { }).settings or { };
+  # The profile's look-independent tokens (`theme.overrides`): written
+  # into the file's own `[effects]`, `[card]` and `[title]` tables, which
+  # win per key over whatever look is active. An empty table writes
+  # nothing, so a profile that sets none renders the file it always did.
+  overrides = (desktopProfile.theme or { }).overrides or { };
+  overrideTables = lib.filterAttrs (_: table: table != { }) overrides;
 in
 {
   options.programs.scootnotify = {
@@ -214,6 +223,13 @@ in
     # `ExecStart` would restart it and drop the cards and the history.
     (lib.mkIf (profileOn && daemonIsNotify && !lookTargetOn) {
       programs.scootnotify.settings.look = lib.mkDefault false;
+    })
+
+    # `theme.overrides`: the user's effect tokens in the file, per key at
+    # `mkDefault` so an explicit `settings.<table>.<key>` wins. Unset (or
+    # no profile) writes nothing.
+    (lib.mkIf (overrideTables != { }) {
+      programs.scootnotify.settings = lib.mapAttrs (_: lib.mapAttrs (_: lib.mkDefault)) overrideTables;
     })
 
     # The one slot option that does not survive the swap: mako's flat

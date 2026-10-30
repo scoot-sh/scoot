@@ -180,7 +180,20 @@ fn cmd_check(config: Option<&str>) -> i32 {
             1
         }
         Ok(bytes) => match config::parse(&bytes) {
-            Ok(_) => {
+            Ok(config) => {
+                // A bad `[effects]` value is a note and not a refusal (the
+                // panel ignores it the same way), so `--check` reports it
+                // and still exits 0.
+                let mut notes = Vec::new();
+                crate::look::apply_user(
+                    &mut crate::look::Look::default(),
+                    &config,
+                    &path,
+                    &mut notes,
+                );
+                for note in &notes {
+                    warn(format_args!("scootlaunch: {note}"));
+                }
                 let _ = std::io::stdout().write_fmt(format_args!("{}: valid\n", path.display()));
                 0
             }

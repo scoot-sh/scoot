@@ -32,7 +32,7 @@ pub fn default_path() -> PathBuf {
 /// wrapped to 5 lines, expiry paused after 60 s without input; a history
 /// ring of 64, critical cards showing through DND, no per-update bar
 /// icons (empty), and no rules.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// Low-urgency expiry for `expire_timeout = -1`, in milliseconds.
@@ -99,6 +99,17 @@ pub struct Config {
     /// icon theme whatever the layer holds (the Nix profile's
     /// `theme.targets.notifications.enable = false`).
     pub look: bool,
+    /// The `[effects]` table: the user's own shadow, fill and motion
+    /// tokens, winning per key over the look layer. Kept as the raw table
+    /// so the look module's one parser reads it (see
+    /// [`crate::look::user`]); only the key names are checked here.
+    pub effects: toml::Table,
+    /// The `[card]` table: `enter`, `exit`, `mark`, `shape` and
+    /// `app-accent`, over the look layer like `effects`.
+    pub card: toml::Table,
+    /// The `[title]` table: `weight` and `spacing`, over the look layer
+    /// like `effects`.
+    pub title: toml::Table,
 }
 
 /// The screen corner the stack anchors to: the layer-shell anchor.
@@ -298,6 +309,9 @@ impl Default for Config {
             bar_icon_unread: String::new(),
             bar_icon_dnd: String::new(),
             look: true,
+            effects: toml::Table::new(),
+            card: toml::Table::new(),
+            title: toml::Table::new(),
         }
     }
 }
@@ -451,7 +465,24 @@ impl Config {
                 return Err(format!("config refused: {key} carries a control character"));
             }
         }
+        for (table, values) in self.user_look_tables() {
+            for key in values.keys() {
+                if scoot_look::allowlist::user_effect_key("scootnotify", table, key).is_none() {
+                    return Err(format!("config refused: [{table}] has no key `{key}`"));
+                }
+            }
+        }
         Ok(self)
+    }
+
+    /// The three tables that hold the user's look tokens, with their
+    /// names: `[effects]`, `[card]` and `[title]`.
+    pub fn user_look_tables(&self) -> [(&'static str, &toml::Table); 3] {
+        [
+            ("effects", &self.effects),
+            ("card", &self.card),
+            ("title", &self.title),
+        ]
     }
 }
 

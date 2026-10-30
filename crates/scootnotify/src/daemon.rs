@@ -52,11 +52,14 @@ pub fn serve(config_path: Option<&str>, font_path: Option<&str>) -> i32 {
     };
     // `look = false` in the file keeps the built-in theme whatever the
     // layer holds; the layer is not even read.
-    let (look, notes) = if config.look {
+    let (mut look, mut notes) = if config.look {
         look::load(None)
     } else {
         (Look::default(), Vec::new())
     };
+    // The user's own `[effects]`, `[card]` and `[title]` win over the
+    // layer, `look = false` or not.
+    look::apply_user(&mut look, &config, &path, &mut notes);
     for note in &notes {
         warn(format_args!("scootnotify: {note}"));
     }

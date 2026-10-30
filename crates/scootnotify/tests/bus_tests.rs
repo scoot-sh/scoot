@@ -742,6 +742,23 @@ fn check_validates_without_a_bus() {
     let out = run(&["daemon", "--check", "--config", bad.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("max_bogus"));
+    // A bad `[effects]` value is reported and still valid; a typo in
+    // the table's keys refuses.
+    let soft = dir.path().join("soft.toml");
+    std::fs::write(
+        &soft,
+        "[effects]\nshadow = \"bogus\"\n[card]\nmark = \"dot\"\n",
+    )
+    .unwrap();
+    let out = run(&["daemon", "--check", "--config", soft.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("valid"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("`shadow` refused"));
+    let typo = dir.path().join("typo.toml");
+    std::fs::write(&typo, "[card]\nmrk = \"dot\"\n").unwrap();
+    let out = run(&["daemon", "--check", "--config", typo.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("mrk"));
     let missing = dir.path().join("missing.toml");
     let out = run(&["daemon", "--check", "--config", missing.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(0), "a missing file is the defaults");

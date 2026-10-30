@@ -13,7 +13,8 @@
 //! (a later ticket) the terminal `Terminal=true` entries run through.
 //! Merge order at every open: flags, then this file, then the look, then
 //! the built-ins (`dev/design/scootlaunch.md`, Stylix and look
-//! integration).
+//! integration). The one look-shaped table here is `[effects]`: the
+//! user's shadow, fill and motion, winning per key over the look.
 
 use std::path::PathBuf;
 
@@ -42,7 +43,7 @@ pub fn default_path() -> PathBuf {
 
 /// The built-in defaults every row below documents: a 40-em panel with 10
 /// list rows, the first usable well-known font file.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// A `.ttf` or `.otf` file. Without it, the first of the well-known
@@ -52,6 +53,12 @@ pub struct Config {
     pub width_em: u32,
     /// The list's visible rows under the entry line (1 to 64).
     pub rows: u32,
+    /// The `[effects]` table: the user's own shadow, fill and motion
+    /// tokens, winning per key over the look layer. Kept as the raw table
+    /// so the look module's one parser reads it (see
+    /// [`crate::look::user`]); only the key names are checked here, and a
+    /// bad value is a note at open, never a refusal.
+    pub effects: toml::Table,
 }
 
 impl Default for Config {
@@ -60,6 +67,7 @@ impl Default for Config {
             font: None,
             width_em: DEFAULT_WIDTH_EM,
             rows: DEFAULT_ROWS,
+            effects: toml::Table::new(),
         }
     }
 }
@@ -112,6 +120,11 @@ impl Config {
                 return Err(String::from(
                     "config refused: font must not contain control characters",
                 ));
+            }
+        }
+        for key in self.effects.keys() {
+            if scoot_look::allowlist::user_effect_key("scootlaunch", "effects", key).is_none() {
+                return Err(format!("config refused: [effects] has no key `{key}`"));
             }
         }
         Ok(self)

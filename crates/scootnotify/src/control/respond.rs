@@ -257,11 +257,12 @@ impl Responder<'_> {
         let config = read_or_defaults(self.config_path)?;
         // A file with `look = false` themes with the built-ins; flipping
         // it back on re-reads the layer on the next reload.
-        let (look, mut notes) = if config.look {
+        let (mut look, mut notes) = if config.look {
             reload_layer_applied(self.look_state.as_deref())?
         } else {
             (Look::default(), Vec::new())
         };
+        look::apply_user(&mut look, &config, self.config_path, &mut notes);
         self.server.store_mut().set_config(config.clone());
         // Cards on screen keep their ids, clocks and hover: the loop
         // re-themes and re-lays-out under them.
@@ -278,21 +279,27 @@ impl Responder<'_> {
     /// `Err` is the reply, and the running daemon stands exactly as it
     /// was.
     fn reload_scoped(&mut self) -> Result<(), String> {
-        if !self.server.store().look_enabled() {
+        let config = self.server.store().config();
+        if !config.look {
             // `look = false`: the layer is off by the user's choice, so
             // there is nothing to refuse. The receipt is the same ok
             // (a swap must not report a failure for a daemon that is
             // behaving as configured); the cards keep the built-ins.
+            let mut look = Look::default();
+            let mut notes = vec![String::from(
+                "look = false in the config: the look layer is not applied",
+            )];
+            look::apply_user(&mut look, config, self.config_path, &mut notes);
             self.applied = Some(AppliedReload {
                 config: None,
-                look: Look::default(),
-                notes: vec![String::from(
-                    "look = false in the config: the look layer is not applied",
-                )],
+                look,
+                notes,
             });
             return Ok(());
         }
-        let (look, notes) = match look::reload_layer(self.look_state.as_deref())? {
+        // The look swapped under the running file: the user's tables, held
+        // by the running config, still win over the new look.
+        let (mut look, mut notes) = match look::reload_layer(self.look_state.as_deref())? {
             Some((look, notes)) => (look, notes),
             None => {
                 return Err(String::from(
@@ -300,6 +307,7 @@ impl Responder<'_> {
                 ));
             }
         };
+        look::apply_user(&mut look, config, self.config_path, &mut notes);
         self.applied = Some(AppliedReload {
             config: None,
             look,

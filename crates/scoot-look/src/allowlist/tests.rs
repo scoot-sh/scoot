@@ -478,3 +478,61 @@ fn the_shared_radius_bound_is_unchanged_for_every_app() {
         assert!(check_app_value(app, "radius", &toml::Value::Integer(65)).is_some());
     }
 }
+
+#[test]
+fn user_tables_map_to_the_dotted_look_keys() {
+    for key in EFFECTS_TABLE_KEYS {
+        assert_eq!(user_effect_key("scootnotify", "effects", key), Some(*key));
+        assert_eq!(user_effect_key("scootlaunch", "effects", key), Some(*key));
+    }
+    assert_eq!(
+        user_effect_key("scootnotify", "card", "mark"),
+        Some("card.mark")
+    );
+    assert_eq!(
+        user_effect_key("scootnotify", "title", "weight"),
+        Some("title.weight")
+    );
+    // Every key the notifier reads from the look is reachable from its
+    // user tables, and nothing else is: one list, two entry points.
+    for dotted in NOTIFY_DEPTH_KEYS {
+        let (table, key) = dotted.split_once('.').unwrap_or(("effects", dotted));
+        assert_eq!(user_effect_key("scootnotify", table, key), Some(*dotted));
+    }
+}
+
+#[test]
+fn user_tables_never_reach_the_looks_own_keys() {
+    // `[effects]` is the five tokens, not the dotless presentation keys.
+    for key in ["font", "font-size", "opacity", "radius", "card.mark"] {
+        assert_eq!(
+            user_effect_key("scootnotify", "effects", key),
+            None,
+            "{key}"
+        );
+        assert_eq!(
+            user_effect_key("scootlaunch", "effects", key),
+            None,
+            "{key}"
+        );
+    }
+    // The look's color and icon tables are not user tables.
+    for table in ["colors", "icons", "apps", "", "Effects"] {
+        assert_eq!(user_effect_key("scootnotify", table, "theme"), None);
+        assert_eq!(user_effect_key("scootnotify", table, "accent"), None);
+    }
+    // The launcher has no cards or titles; apps outside the shell pair read none.
+    assert_eq!(user_effect_key("scootlaunch", "card", "mark"), None);
+    assert_eq!(user_effect_key("scootlaunch", "title", "weight"), None);
+    for app in ["scootbar", "scootgreet", "scoot", "nonesuch"] {
+        assert_eq!(user_effect_key(app, "effects", "shadow"), None, "{app}");
+    }
+    // Hostile keys: long, non-ASCII, dotted.
+    assert_eq!(
+        user_effect_key("scootnotify", "card", &"x".repeat(5000)),
+        None
+    );
+    assert_eq!(user_effect_key("scootnotify", "card", "mark\u{e9}"), None);
+    assert_eq!(user_effect_key("scootnotify", "card", "x.mark"), None);
+    assert_eq!(user_effect_key("scootnotify", "effects", "card.mark"), None);
+}

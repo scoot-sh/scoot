@@ -1543,6 +1543,61 @@ in
           module owns the same file).
         '';
       };
+      # The user's own depth, motion and card tokens, whatever look is
+      # active. Free-form like the daemons' `settings`: each table is
+      # written verbatim into the `[effects]`, `[card]` and `[title]`
+      # tables of `notify.toml` (and `[effects]` alone into
+      # `launch.toml`), where the binary checks the keys and the values.
+      # At `mkDefault`, so an explicit
+      # `programs.scootnotify.settings.effects.<key>` still wins per key.
+      overrides =
+        let
+          scalar = lib.types.oneOf [
+            lib.types.str
+            lib.types.int
+            lib.types.float
+            lib.types.bool
+          ];
+          table = lib.mkOption {
+            type = lib.types.attrsOf scalar;
+            default = { };
+          };
+        in
+        {
+          effects = table // {
+            example = {
+              shadow = "soft";
+              motion = "spring";
+            };
+            description = ''
+              The look's `[effects]` tokens, over whatever look is
+              active: `shadow`, `fill`, `motion`, `motion-duration-ms`
+              and `motion-bounce`. Written into `[effects]` of
+              `notify.toml` and `launch.toml`. An empty set writes
+              nothing, and the look decides.
+            '';
+          };
+          card = table // {
+            example = {
+              mark = "stripe";
+            };
+            description = ''
+              The notification cards' `[card]` tokens (`enter`, `exit`,
+              `mark`, `shape`, `app-accent`), over the active look.
+              Written into `[card]` of `notify.toml`.
+            '';
+          };
+          title = table // {
+            example = {
+              weight = 600;
+            };
+            description = ''
+              The notification summary's `[title]` tokens (`weight`,
+              `spacing`), over the active look. Written into `[title]`
+              of `notify.toml`.
+            '';
+          };
+        };
     };
     # The terminal the default binds spawn, a file manager, and the
     # network/Bluetooth pickers. The terminal is on with the profile

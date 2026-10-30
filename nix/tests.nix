@@ -2608,6 +2608,35 @@ let
         desktop.notifications.package = fakeNotifyScoot;
         desktop.theme.targets.notifications.enable = false;
       };
+  # ...`desktop.theme.overrides` with the real option tree: the effect
+  # tokens land in the daemon's own `[effects]`, `[card]` and `[title]`
+  # tables (and `[effects]` alone in the launcher's file), whatever look
+  # is active; unset, the default profile's files stay empty
+  # (`hmNotifScootFull` above).
+  hmNotifScootOverrides =
+    evalHomeModules
+      [
+        ./modules/scootnotify-home.nix
+        ./modules/scootlaunch-home.nix
+        {
+          programs.scootnotify.package = fakeNotifyScoot;
+          programs.scootlaunch.package = fakeLaunchScoot;
+        }
+      ]
+      {
+        enable = true;
+        desktop.enable = true;
+        look = "music-desk";
+        desktop.notifications.daemon = "scootnotify";
+        desktop.notifications.package = fakeNotifyScoot;
+        desktop.theme.overrides = {
+          effects = {
+            shadow = "soft";
+            motion = "spring";
+          };
+          card.mark = "stripe";
+        };
+      };
   # ...the target off without any look declared: the switch alone
   # decides (a look applied at runtime still has a layer to turn off).
   hmNotifScootLookOffNoLook =
@@ -10420,6 +10449,27 @@ let
     )
     (
       assert hmNotifScootLookOffNoLook.config.programs.scootnotify.settings == { look = false; };
+      true
+    )
+    (
+      assert
+        hmNotifScootOverrides.config.programs.scootnotify.settings == {
+          effects = {
+            shadow = "soft";
+            motion = "spring";
+          };
+          card.mark = "stripe";
+        };
+      true
+    )
+    (
+      assert
+        hmNotifScootOverrides.config.programs.scootlaunch.settings == {
+          effects = {
+            shadow = "soft";
+            motion = "spring";
+          };
+        };
       true
     )
     # ...and enabling scootnotify explicitly beside daemon = "mako"

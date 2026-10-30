@@ -19,6 +19,9 @@
 #   default, through a stub of that option subtree) enables this
 #   launcher at `mkDefault` (an explicit value still wins), while
 #   `daemon = "fuzzel"` leaves it alone;
+# - the desktop profile's `theme.overrides.effects` renders into the
+#   file's `[effects]` table at `mkDefault` (an explicit `settings` key
+#   wins per key); the card and title tables never reach this file;
 # - there is no unit and no Stylix switch (the launcher holds nothing
 #   when closed; Stylix reaches it only as the `stylix` look);
 # - every `--dmenu` flag every Nix call site passes is in scootlaunch's
@@ -100,8 +103,18 @@ let
       enable ? false,
       launcher ? true,
       daemon ? "scootlaunch",
+      # `theme.overrides`: the look-independent effect tokens, empty by
+      # default as in the real option.
+      overrides ? { },
     }:
     {
+      options.programs.scoot.desktop.theme.overrides = lib.genAttrs [ "effects" "card" "title" ] (
+        _:
+        lib.mkOption {
+          type = lib.types.attrsOf lib.types.raw;
+          default = { };
+        }
+      );
       options.programs.scoot.desktop.enable = lib.mkOption {
         type = lib.types.bool;
         default = false;
@@ -119,6 +132,7 @@ let
       };
       config.programs.scoot.desktop = {
         inherit enable;
+        theme.overrides = overrides;
         launcher = {
           enable = launcher;
           inherit daemon;
@@ -246,6 +260,31 @@ let
     enable = true;
     daemon = "scootlaunch";
   } { };
+  # The profile's look-independent effect tokens: only `[effects]` is
+  # the launcher's. The notifier's card and title tables stay out of
+  # the file (the launcher refuses a file that carries them).
+  overridden = evalHomeProfile {
+    enable = true;
+    overrides = {
+      effects = {
+        shadow = "glow";
+        motion = "spring";
+      };
+      card.mark = "stripe";
+      title.weight = 600;
+    };
+  } { };
+  overriddenNixos = evalNixosProfile {
+    enable = true;
+    overrides.effects.fill = "gradient";
+  } { };
+  overriddenUserWins = evalHomeProfile {
+    enable = true;
+    overrides.effects = {
+      shadow = "glow";
+      motion = "spring";
+    };
+  } { settings.effects.motion = "ease-out"; };
 
   # Rendered files the real binary checks: every configuration that
   # renders one, plus a hand-made one it must refuse.
@@ -254,6 +293,8 @@ let
     user-wins = userWins.config.programs.scootlaunch.configFile;
     one-key = oneKey.config.programs.scootlaunch.configFile;
     nixos = os.config.programs.scootlaunch.configFile;
+    overridden = overridden.config.programs.scootlaunch.configFile;
+    overridden-user-wins = overriddenUserWins.config.programs.scootlaunch.configFile;
   };
   unknownKey = tomlFormat.generate "unknown-key.toml" { colors.backgroun = "#101010"; };
 
@@ -381,6 +422,25 @@ let
     "the opt-in needs the launcher slot on" =
       !(optInSlotOff.config.programs.scootlaunch.enable or false);
     "the opt-in enables the NixOS half too" = osOptIn.config.programs.scootlaunch.enable;
+    "theme.overrides unset renders the file it always did" = settingsOf optIn == { };
+    "theme.overrides.effects lands in the file's [effects], and only that table" =
+      settingsOf overridden == {
+        effects = {
+          shadow = "glow";
+          motion = "spring";
+        };
+      };
+    "theme.overrides reaches the NixOS file too" =
+      settingsOf overriddenNixos == {
+        effects.fill = "gradient";
+      };
+    "an explicit settings key wins over theme.overrides, per key" =
+      settingsOf overriddenUserWins == {
+        effects = {
+          shadow = "glow";
+          motion = "ease-out";
+        };
+      };
     "every menu flag every call site passes is in the supported set" = lib.all (
       f: builtins.elem f supportedMenuFlags
     ) usedMenuFlags;

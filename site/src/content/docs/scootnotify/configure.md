@@ -271,8 +271,10 @@ the file — a look swap under a half-edited file.
 
 ## The look layer
 
-Colors, font, opacity, corners, depth and motion come from the active look, under the
-cards — never from this file. The daemon reads
+Colors, font, opacity and corners come from the active look, under the
+cards — never from this file. Depth, motion, card styles and title weight
+come from the look too, unless this file sets them: see
+[Effects over any look](#effects-over-any-look). The daemon reads
 `<state>/look/notify.toml` at start (a dangling or missing link means
 no layer, plus a warning), with the user's file winning per key over
 the look over the built-ins. The thirteen color roles map to the
@@ -311,6 +313,72 @@ false`](../../desktop/notifications/) writes.
 The corner radius is the file's `radius` (see [Limits](#limits)),
 not the look's `shape.radius`: the layer carries it, but the cards do not
 read it yet, so a look cannot round the cards except through `card.shape`.
+
+### Effects over any look
+
+Depth, motion, card styles and title weight can also be set in
+`notify.toml`, in `[effects]`, `[card]` and `[title]` tables. They win per
+key over whatever look is active, so one setting turns a shadow or a spring
+on for every look without copying a look. A key the file does not set stays
+the look's, and a key the look does not set stays the built-in default.
+
+```toml
+[effects]
+shadow = "soft"
+motion = "spring"
+motion-duration-ms = 240
+
+[card]
+mark = "stripe"
+
+[title]
+weight = 600
+```
+
+| Table and key | Value | Same as the look's |
+|---|---|---|
+| `[effects]` `shadow` | `none`, `soft`, `deep` or `glow` | `effects.shadow` ([Depth](#depth)) |
+| `[effects]` `fill` | `solid` or `gradient` | `effects.fill` ([Depth](#depth)) |
+| `[effects]` `motion` | `none`, `ease-out` or `spring` | `effects.motion` ([Motion](#motion)) |
+| `[effects]` `motion-duration-ms` | whole number, 0 to 1000 | `effects.motion-duration-ms` |
+| `[effects]` `motion-bounce` | number, 0 to 1 | `effects.motion-bounce` |
+| `[card]` `enter`, `exit` | `slide`, `fade`, `scale` or `drop` | `card.enter`, `card.exit` |
+| `[card]` `mark` | `none`, `stripe`, `dot` or `badge` | `card.mark` ([Card styles](#card-styles)) |
+| `[card]` `shape` | `rounded` or `pill` | `card.shape` |
+| `[card]` `app-accent` | `true` or `false` | `card.app-accent` |
+| `[title]` `weight` | whole number, 100 to 900 | `title.weight` ([Title weight and spacing](#title-weight-and-spacing)) |
+| `[title]` `spacing` | whole number, -2 to 8 | `title.spacing` |
+
+All keys are optional and unset by default. They use the look's own token
+names (with hyphens), unlike the snake_case keys elsewhere in this file.
+Only these keys are accepted in these tables: anything else, including
+`font-size` or a color, refuses the file like any other typo, and so does
+a top-level `shadow` or `motion`.
+
+A value outside its list or range does not refuse the file. The daemon
+logs `notify.toml: ... refused ...: value ignored` and the key keeps the
+look's value (or the built-in default when the look sets none). `daemon
+--check` prints the same line and still exits 0.
+
+These keys apply with `look = false` too: they are yours, over the
+built-ins. A plain `msg reload` re-reads them. `msg reload --look` and
+`scoot look apply` do not re-read the file, but the values the daemon is
+running with still win over the new look.
+
+With the Nix profile, `programs.scoot.desktop.theme.overrides` writes these
+tables for you (see [Look and theme](../../desktop/look/#look-independent-effects)).
+
+> **Symptom:** `daemon --check` says `config refused: [effects] has no key`.
+> The key is not one of the five effect tokens. `[effects]` takes
+> `shadow`, `fill`, `motion`, `motion-duration-ms` and `motion-bounce`;
+> `enter`, `exit`, `mark`, `shape` and `app-accent` go in `[card]`, and
+> `weight` and `spacing` in `[title]`.
+
+> **Symptom:** a key is set here and the cards do not change.
+> Run `scootnotify msg reload`. If the daemon logs `refused ...: value
+> ignored`, the value is outside its list or range. The tables live in the
+> user's file, not in `<state>/look/notify.toml`, which a look swap
+> rewrites.
 
 ### Depth
 
@@ -361,7 +429,7 @@ any background.
 and an `[apps.scootbar]` `shadow` key refuses at validation.
 
 > **Symptom:** a look sets `shadow` and the cards have none.
-> The daemon logs `shadow refused ... default applies` or `shadow is not
+> The daemon logs `shadow refused ... value ignored` or `shadow is not
 > a shadow style` for a value outside `none`, `soft`, `deep` and `glow`.
 > Check `<state>/look/notify.toml` for a `shadow` line, and that the
 > config has no `look = false`.
@@ -435,7 +503,7 @@ click in the cut corner of a pill invokes or dismisses the card instead of
 reaching the window behind it.
 
 > **Symptom:** a look sets `card.mark` and the cards have none.
-> The daemon logs `card.mark refused ... default applies` or
+> The daemon logs `card.mark refused ... value ignored` or
 > `card.mark is not a card mark` for a value outside `none`, `stripe`,
 > `dot` and `badge`. Check `<state>/look/notify.toml` for a `[card]`
 > table, and that the config has no `look = false`.
@@ -554,7 +622,7 @@ slides. To turn card motion off, set `motion = "none"` in the look or in
 --look`).
 
 > **Symptom:** a look sets `motion` and the cards still jump.
-> The daemon logs `motion refused ... default applies` or `motion is not
+> The daemon logs `motion refused ... value ignored` or `motion is not
 > a motion` for a value outside `none`, `ease-out` and `spring`.
 > Check `<state>/look/notify.toml` for a `motion` line, that
 > `motion-duration-ms` is not `0`, and that the config has no `look =
