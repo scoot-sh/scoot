@@ -8,9 +8,11 @@
 use crate::color::Color;
 
 mod depth;
+mod layer;
 mod rounded;
 
 pub use depth::{MAX_BLUR, MAX_OFFSET, Pad, Shadow, ShadowSpec};
+pub use layer::{Layer, MAX_LAYER_PIXELS};
 
 #[cfg(test)]
 mod tests;
@@ -128,6 +130,21 @@ impl<'a> Canvas<'a> {
 
     pub fn height(&self) -> u32 {
         self.height
+    }
+
+    /// The canvas without its first `rows` rows: the same pixels seen from
+    /// `rows` lower, so a paint written for a surface that starts at the
+    /// top lands that much further down. Empty when `rows` reaches the
+    /// bottom.
+    pub fn below(&mut self, rows: u32) -> Canvas<'_> {
+        let rows = rows.min(self.height);
+        let skipped = rows as usize * self.width as usize * 4;
+        let pixels = self.pixels.get_mut(skipped..).unwrap_or_default();
+        Canvas {
+            pixels,
+            width: self.width,
+            height: self.height - rows,
+        }
     }
 
     /// Fills the full-height `span`, clipped to the canvas, with `color`.
