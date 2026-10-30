@@ -125,8 +125,13 @@ impl Layer {
                 else {
                     continue;
                 };
-                for (d, s) in out.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
-                    over(d, [s[0], s[1], s[2], s[3]], g);
+                for (d, s) in out
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(src.as_chunks::<4>().0)
+                {
+                    over(d, *s, g);
                 }
             } else {
                 // Bilinear in 16.16 fixed point: the source position of a
@@ -135,7 +140,7 @@ impl Layer {
                 let step_y = (h << 16) / dh;
                 let fy = (row - top) * step_y + step_y / 2 - 0x8000;
                 let (ty0, ty1, wy) = taps(fy, h);
-                for (offset, d) in out.chunks_exact_mut(4).enumerate() {
+                for (offset, d) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                     let ox = x0 - left + offset as i64;
                     let fx = ox * step_x + step_x / 2 - 0x8000;
                     let (tx0, tx1, wx) = taps(fx, w);

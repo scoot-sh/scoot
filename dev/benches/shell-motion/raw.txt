@@ -75,3 +75,38 @@ branch 6 None 360x474 median=180.8 p5=133.6; Soft 384x498 median=340.5 p5=223.5;
 #  as of commit f1403b973 less the later layer-refit fix, never committed)
 # gate on : frame requests=14 commits=16 refresh calls=7
 # gate off: frame requests=14 commits=16 refresh calls=35
+
+# bench_motion rerun at the head after the clippy fix, three runs, busy VM
+== run 1
+scenario surface-px median-us p5-us
+static repaint, 5 cards 384x498 307.9 226.9
+enter slide, arrival on 5: frame 384x522 624.1 461.4
+enter slide, arrival on 5: start (retarget + layers) 384x522 1063.1 1063.1
+enter scale, arrival on 5: frame 384x522 1208.0 619.0
+enter scale, arrival on 5: start (retarget + layers) 384x522 694.0 694.0
+restack, close middle of 5: frame 384x508 512.8 319.8
+restack, close middle of 5: start (retarget + layers) 384x508 276.5 276.5
+restack, bottom anchor: frame 384x508 442.2 329.8
+restack, bottom anchor: start (retarget + layers) 384x508 199.1 199.1
+== run 2
+scenario surface-px median-us p5-us
+static repaint, 5 cards 384x498 305.5 225.4
+enter slide, arrival on 5: frame 384x522 627.8 459.1
+enter slide, arrival on 5: start (retarget + layers) 384x522 853.8 853.8
+enter scale, arrival on 5: frame 384x522 1178.2 583.9
+enter scale, arrival on 5: start (retarget + layers) 384x522 773.2 773.2
+restack, close middle of 5: frame 384x508 512.2 295.2
+restack, close middle of 5: start (retarget + layers) 384x508 324.9 324.9
+restack, bottom anchor: frame 384x508 444.1 329.1
+restack, bottom anchor: start (retarget + layers) 384x508 176.5 176.5
+== run 3
+scenario surface-px median-us p5-us
+static repaint, 5 cards 384x498 311.0 227.3
+enter slide, arrival on 5: frame 384x522 662.8 458.7
+enter slide, arrival on 5: start (retarget + layers) 384x522 850.6 850.6
+enter scale, arrival on 5: frame 384x522 1187.8 651.0
+enter scale, arrival on 5: start (retarget + layers) 384x522 746.4 746.4
+restack, close middle of 5: frame 384x508 392.8 319.9
+restack, close middle of 5: start (retarget + layers) 384x508 386.1 386.1
+restack, bottom anchor: frame 384x508 493.0 332.5
+restack, bottom anchor: start (retarget + layers) 384x508 217.0 217.0

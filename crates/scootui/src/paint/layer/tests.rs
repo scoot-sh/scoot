@@ -4,7 +4,7 @@ use super::*;
 fn filled(w: u32, h: u32, pixel: [u8; 4]) -> Layer {
     let mut layer = Layer::new();
     assert!(layer.begin(w, h));
-    for chunk in layer.pixels.chunks_exact_mut(4) {
+    for chunk in layer.pixels.as_chunks_mut::<4>().0 {
         chunk.copy_from_slice(&pixel);
     }
     layer
@@ -160,10 +160,10 @@ fn a_uniform_layer_stays_uniform_when_scaled() {
     let mut dst = canvas_of(&mut buf, 30, 30, [0, 0, 0, 0]);
     layer.composite(&mut dst, 3, 3, 1.7, 255);
     let mut seen = 0;
-    for chunk in buf.chunks_exact(4) {
+    for chunk in buf.as_chunks::<4>().0 {
         if chunk[3] != 0 {
             seen += 1;
-            assert_eq!(chunk, [80, 60, 40, 255]);
+            assert_eq!(*chunk, [80, 60, 40, 255]);
         }
     }
     assert!(seen > 100);

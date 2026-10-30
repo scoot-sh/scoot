@@ -29,29 +29,29 @@ unchanged `bench_depth` of that tree alternately with this branch's, six
 times each.
 
 Machine: aarch64 dev VM (6 vCPU, NixOS), release profile, DejaVu Sans 13 px,
-`taskset -c 3`. Branch commit `46edad482` (code `f1403b973`). Raw output:
+`taskset -c 3`. Branch commit `HEADSHA`. Raw output:
 [`raw.txt`](raw.txt).
 
 ## Result
 
-Microseconds per frame, quiet-window run (run 1; the noisy runs are 2 to 4
-times higher across the board and in `raw.txt`):
+Microseconds per frame, at commit `HEADSHA` (three runs on a busy VM; the
+earlier quiet-window figures were 97 static and 152 to 231 animated and are in
+the first run of the previous `raw.txt`). Best median and best p5 of the three:
 
 | Scenario | Surface | Median | p5 |
 |---|---|---|---|
-| static repaint, 5 cards (what any stack at rest repaints) | 384x498 | 99 | 97 |
-| enter `slide`, one arrival on 5: animated frame | 384x522 | 231 | 227 |
-| enter `scale`, one arrival on 5: animated frame | 384x522 | 329 | 231 |
-| restack, close the middle of 5: animated frame | 384x508 | 152 | 152 |
-| restack, bottom anchor: animated frame | 384x508 | 159 | 159 |
-| start a motion (retarget and rasterize the layers), 5 to 6 cards | | 67 to 267 (up to 984 in noisy runs) | |
+| static repaint, 5 cards (what any stack at rest repaints) | 384x498 | 306 | 225 |
+| enter `slide`, one arrival on 5: animated frame | 384x522 | 624 | 459 |
+| enter `scale`, one arrival on 5: animated frame | 384x522 | 1178 | 584 |
+| restack, close the middle of 5: animated frame | 384x508 | 393 | 295 |
+| restack, bottom anchor: animated frame | 384x508 | 442 | 329 |
+| start a motion (retarget and rasterize the layers) | | 177 to 1063 | |
 
-Across the five runs the worst animated frame is 1.19 ms median
-(`scale`, a noisy window), against a 16.6 ms frame at 60 Hz.
+The worst animated frame is 1.2 ms median (`scale`), against a 16.6 ms frame at 60 Hz.
 
 Reading it:
 
-- **An animated frame is 1.5 to 2.4 times a static repaint, and well inside
+- **An animated frame is 1.3 to 2 times a static repaint, and well inside
   the budget.** Every card in a stack that restacks is a layer being
   composited (a pure blit with an alpha and, for `scale`, a bilinear
   resample), plus the clear and the pill. Text is not re-rasterized per frame:
@@ -63,7 +63,7 @@ Reading it:
   wakes skips the relayout and the store's ordered view when nothing but the
   Wayland fd spoke. One card sliding in over 300 ms: 14 frames requested, 16
   commits, 7 calls to `Popup::refresh` with the gate and 35 without
-  (`raw.txt`).
+  (`raw.txt`; those gate on/off counts come from an uncommitted, instrumented tree, not from the committed code).
 - **`motion = none` costs nothing.** `bench_depth` on main and on this branch,
   the default look and `soft`, six alternating runs: the 5th percentile is
   131 to 134 µs (default look) and 221 to 226 µs (`soft`) on both in the

@@ -286,10 +286,12 @@ fn run_loop(
         server.reap_exec();
         // A frame tick while cards animate changes nothing the layout
         // reads, so it skips the layout (and the store's ordered view).
-        // What is left of the turn is the loop's own per-turn work (the
-        // poll's fd list, the control and bus pumps), the frame callback
-        // and the input region the draw sets, none of which the animation
-        // adds to; the step and the paint themselves allocate nothing.
+        // What is left of the turn is the loop's per-turn work (the poll's
+        // fd list, the control and bus pumps) and the draw. The draw is
+        // not allocation-free end to end: each animated frame creates a
+        // frame callback and a wl_region (create, add, set_input_region,
+        // destroy) so the input region follows the cards. The step and
+        // the paint themselves allocate nothing.
         if let Some(popup) = popup.as_mut()
             && !(quiet && popup.animating() && !popup.refresh_due())
         {

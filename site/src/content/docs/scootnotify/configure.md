@@ -423,7 +423,7 @@ the screen edge the stack is anchored to stops at the edge instead of
 overshooting off it. Cards that were not moving paint exactly as they do
 without motion.
 
-The `radial-burst` look ships with a spring and a scale entrance;
+The `radial-burst` look ships with a glow shadow, a spring and a scale entrance;
 `ginger-night`, the default look, sets no motion.
 
 There is no reduced-motion setting to follow: scoot has none yet, and the
