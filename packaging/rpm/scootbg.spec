@@ -10,7 +10,7 @@
 # here unchanged (the same release tarball, under the same name).
 
 Name:           scootbg
-Version:        0.6.15
+Version:        0.6.16
 Release:        1%{?dist}
 # No -debuginfo/-debugsource subpackages: see scoot.spec.
 %global         debug_package %{nil}
@@ -54,6 +54,9 @@ cd source
 %license source/LICENSE source/NOTICE source/THIRD-PARTY-LICENSES
 
 %changelog
+* Fri Oct 30 2026 scoot-sh <packages@scoot.sh> - 0.6.16-1
+- Built from the v0.6.16 release tag.
+
 * Fri Oct 30 2026 scoot-sh <packages@scoot.sh> - 0.6.15-1
 - Built from the v0.6.15 release tag.
 

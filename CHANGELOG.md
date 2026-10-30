@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.16](https://github.com/scoot-sh/scoot/compare/v0.6.15...v0.6.16) - 2026-10-30
+
+### scootlaunch,scootui,scoot-look,scootnotify
+
+- added: panel shadow, fill and motion ([#814](https://github.com/scoot-sh/scoot/pull/814))
+
+### scootui,scootnotify,scoot-look
+
+- added: card marks, pill outline, per-app accent and title style ([#812](https://github.com/scoot-sh/scoot/pull/812))
+
 ## [0.6.15](https://github.com/scoot-sh/scoot/compare/v0.6.14...v0.6.15) - 2026-10-30
 
 ### scootui,scootnotify,scoot-look,scoot-rt,scootctl
