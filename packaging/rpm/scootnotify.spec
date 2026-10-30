@@ -14,7 +14,7 @@
 # here unchanged (the same release tarball, under the same name).
 
 Name:           scootnotify
-Version:        0.6.14
+Version:        0.6.15
 Release:        1%{?dist}
 # No -debuginfo/-debugsource subpackages: see scoot.spec.
 %global         debug_package %{nil}
@@ -81,6 +81,9 @@ cd source
 %doc source/packaging/rpm/notify.toml.example
 
 %changelog
+* Fri Oct 30 2026 scoot-sh <packages@scoot.sh> - 0.6.15-1
+- Built from the v0.6.15 release tag.
+
 * Thu Oct 29 2026 scoot-sh <packages@scoot.sh> - 0.6.14-1
 - Built from the v0.6.14 release tag.
 
