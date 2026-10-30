@@ -13,7 +13,7 @@ license = "MIT AND LicenseRef-Unsplash"
 [palette]
 background = "#2B3648"
 foreground = "#F6EEDC"
-dim = "#9C8B95"
+dim = "#AA9AA0"
 accent = "#FFA45C"
 urgent = "#E87F6A"
 hover = "#FFD54A"

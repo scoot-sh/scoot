@@ -12,12 +12,12 @@ license = "MIT AND LicenseRef-Unsplash"
 [palette]
 background = "#FCFBFB"
 foreground = "#1A2032"
-dim = "#C9CBD0"
+dim = "#70747F"
 accent = "#3D579A"
 urgent = "#EE6F5E"
 hover = "#5D7AB0"
 focus = "#3D579A"
-border = "#D5D7DD"
+border = "#8E919C"
 
 [terminal]
 colors = ["#1a2032", "#e0574a", "#5f7d3f", "#c9962a", "#3d579a", "#8a73c4", "#3f8a9a", "#a2a4a8", "#4d5463", "#ee6f5e", "#7a9a55", "#e6b440", "#5d7ab0", "#a493d6", "#5aa6b5", "#ebebea"]

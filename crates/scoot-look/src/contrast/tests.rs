@@ -67,7 +67,91 @@ fn dim_and_urgent_never_refuse() {
     let look = resolve(&map, "x").expect("resolves");
     let report = check(&look, Origin::Shipped);
     assert!(report.refusals().is_empty());
-    assert_eq!(report.warnings().len(), 2);
+    // dim/background, dim/surface (the surface defaults to the background),
+    // urgent/background and border/background (the minimal look's border is
+    // its dim).
+    assert_eq!(report.warnings().len(), 4);
+}
+
+fn pair(report: &ContrastReport, name: &str) -> ContrastPair {
+    report
+        .pairs
+        .iter()
+        .find(|p| p.name == name)
+        .cloned()
+        .unwrap_or_else(|| panic!("no {name} pair"))
+}
+
+#[test]
+fn dim_on_surface_is_measured_against_the_surface_and_reports() {
+    // The surface differs from the background: the pair uses the surface.
+    // 4.5 is the text bar; below it warns (never refuses), on every origin.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[palette]",
+        "[palette]\nsurface = \"#FFFFFF\"",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::Shipped))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let report = check(&look, Origin::Shipped);
+    let dim = pair(&report, "dim/surface");
+    assert_eq!(dim.background, "#FFFFFF");
+    assert_eq!(dim.threshold, 4.5);
+    assert!(!dim.refuses);
+    assert_eq!(
+        dim.ratio,
+        (ratio("#9C8B95", "#FFFFFF") * 10.0).round() / 10.0
+    );
+    assert!(report.warnings().iter().any(|p| p.name == "dim/surface"));
+    assert!(report.refusals().is_empty());
+}
+
+#[test]
+fn a_gradient_fill_measures_dim_at_its_worse_stop() {
+    // moonrise's dim is 3.79 on its flat background; the gradient lightens
+    // the top by 26/255 toward white, which is the worse stop for light text.
+    let text = crate::schema::tests::minimal_toml();
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::Shipped))]);
+    let mut look = resolve(&map, "x").expect("resolves");
+    let flat = pair(&check(&look, Origin::Shipped), "dim/surface");
+    assert_eq!(flat.background, look.palette.surface);
+    look.effects.fill = Some("gradient".to_string());
+    let gradient = pair(&check(&look, Origin::Shipped), "dim/surface");
+    assert_eq!(gradient.background, "#414a5b");
+    assert!(gradient.ratio < flat.ratio, "{gradient:?} vs {flat:?}");
+    // A solid fill is the flat surface.
+    look.effects.fill = Some("solid".to_string());
+    assert_eq!(
+        pair(&check(&look, Origin::Shipped), "dim/surface").background,
+        flat.background
+    );
+}
+
+#[test]
+fn a_light_gradient_darkens_the_bottom_stop() {
+    assert_eq!(gradient_stops("#FCFBFB")[1], "#e8e7e7");
+    assert_eq!(gradient_stops("#2B3648")[1], "#414a5b");
+    // A malformed surface reads as black and never panics.
+    assert_eq!(gradient_stops("nope")[0], "nope");
+}
+
+#[test]
+fn the_inactive_ring_is_held_to_three_to_one_and_only_reports() {
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[palette]",
+        "[palette]\nborder = \"#2C3749\"",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::Shipped))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let report = check(&look, Origin::Shipped);
+    let ring = pair(&report, "border/background");
+    assert_eq!(ring.threshold, 3.0);
+    assert!(ring.ratio < 3.0 && !ring.refuses);
+    assert!(report.refusals().is_empty());
 }
 
 #[test]

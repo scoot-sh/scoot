@@ -13,7 +13,7 @@ license = "MIT"
 [palette]
 background = "#270E0A"
 foreground = "#F6E8CB"
-dim = "#AA6D5F"
+dim = "#AC6F61"
 accent = "#FE9949"
 urgent = "#CE6B4B"
 hover = "#FEC69A"
