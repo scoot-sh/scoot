@@ -37,6 +37,16 @@
 //! surface holds the height it needs for the whole motion
 //! ([`Motion::hold`]) and drops back to the layout's when it ends.
 //!
+//! # Allocation
+//!
+//! [`Motion::retarget`] allocates (clones, layers): it runs on a content
+//! change. Everything a frame calls does not, and a test pins it:
+//! [`settle`](Motion::settle) (while something is still moving),
+//! [`pose`](Motion::pose), [`paint_layers`](Motion::paint_layers) when no
+//! layer is stale, [`compose`](Motion::compose),
+//! [`input_rect`](Motion::input_rect) and [`unproject`](Motion::unproject).
+//! Landing frees the pool once, on the frame after the last card stops.
+//!
 //! Nothing is read from a clock: every query takes `now`. The popup passes
 //! the frame it is drawing, so a late frame jumps forward and a frame past
 //! the deadline lands.
@@ -200,6 +210,10 @@ pub struct Motion {
     pool: Vec<Layer>,
     /// The surface height the current motion needs.
     hold: u32,
+    /// The height of the surface the cards are drawn on, `0` until the
+    /// popup says ([`fit`](Self::fit)): a card settling stops at the
+    /// surface's edge instead of springing past it.
+    surface: u32,
 }
 
 impl Motion {
@@ -217,7 +231,16 @@ impl Motion {
             ghosts: Vec::new(),
             pool: Vec::new(),
             hold: 0,
+            surface: 0,
         }
+    }
+
+    /// Tells the motion how tall the surface it draws on is. A spring
+    /// overshoots its target; toward the edge the stack is anchored to
+    /// there is no surface left to overshoot into, so a card is held at
+    /// the edge there (the far side has the room `hold` reserves).
+    pub fn fit(&mut self, surface: u32) {
+        self.surface = surface;
     }
 
     /// Whether the look moves anything at all. When false, every other
@@ -250,6 +273,7 @@ impl Motion {
         self.ghosts.clear();
         self.pool.clear();
         self.hold = 0;
+        self.surface = 0;
     }
 
     /// A card's top relative to the anchored edge.
@@ -463,8 +487,30 @@ impl Motion {
             _ => Pose::REST,
         };
         let off = track.off.value(&self.timing, now).round() as i32;
-        pose.dy = pose.dy.saturating_add(off);
+        pose.dy = pose.dy.saturating_add(self.keep_on_surface(track, off));
         Some(pose)
+    }
+
+    /// `off` limited so the card, at its target plus `off`, stays on the
+    /// surface. Only a spring's overshoot toward the anchored edge ever
+    /// reaches the limit: a card never travels farther than the surface
+    /// held for it.
+    fn keep_on_surface(&self, track: &Track, off: i32) -> i32 {
+        if self.surface == 0 {
+            return off;
+        }
+        let surface = i64::from(self.surface);
+        let top = if self.bottom {
+            surface + i64::from(track.e)
+        } else {
+            i64::from(track.e)
+        };
+        let height = i64::from(track.picture.local.rect.height);
+        let (lowest, highest) = (-top, surface - top - height);
+        if lowest > highest {
+            return off;
+        }
+        i64::from(off).clamp(lowest, highest) as i32
     }
 
     /// Whether `id` is drawn through a layer this frame.

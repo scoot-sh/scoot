@@ -285,8 +285,11 @@ fn run_loop(
         }
         server.reap_exec();
         // A frame tick while cards animate changes nothing the layout
-        // reads, so it skips the layout (and the store's ordered view): an
-        // animated frame is a step and a paint, nothing else.
+        // reads, so it skips the layout (and the store's ordered view).
+        // What is left of the turn is the loop's own per-turn work (the
+        // poll's fd list, the control and bus pumps), the frame callback
+        // and the input region the draw sets, none of which the animation
+        // adds to; the step and the paint themselves allocate nothing.
         if let Some(popup) = popup.as_mut()
             && !(quiet && popup.animating() && !popup.refresh_due())
         {

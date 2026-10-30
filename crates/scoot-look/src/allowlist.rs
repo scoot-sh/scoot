@@ -272,6 +272,10 @@ pub enum ValueKind {
     /// `0.0..=1.0`: a float, or an integer `0` or `1`, like the bar's own
     /// `parse_opacity`.
     Opacity,
+    /// `0.0..=1.0`, like [`ValueKind::Opacity`], for a value that is a
+    /// fraction and not an opacity (`motion-bounce`): same check, its own
+    /// message.
+    Unit,
     /// One of the named strings.
     Enum(&'static [&'static str]),
     /// A font family, cursor or icon theme name: the identifier grammar.
@@ -387,7 +391,7 @@ pub fn value_kind(app: &str, key: &str) -> Option<ValueKind> {
                 min: 0,
                 max: MOTION_DURATION_MAX_MS,
             }),
-            "motion-bounce" if app == "scootnotify" => Some(ValueKind::Opacity),
+            "motion-bounce" if app == "scootnotify" => Some(ValueKind::Unit),
             "card.enter" | "card.exit" if app == "scootnotify" => {
                 Some(ValueKind::Enum(CARD_MOTIONS))
             }
@@ -429,6 +433,13 @@ pub fn check_app_value(app: &str, key: &str, value: &toml::Value) -> Option<Gram
             (*i != 0 && *i != 1).then(|| {
                 refused("must be a number from 0 (transparent) to 1 (opaque)".to_string())
             })?
+        }
+        (ValueKind::Unit, toml::Value::Float(f)) => {
+            (!f.is_finite() || !(0.0..=1.0).contains(f))
+                .then(|| refused("must be a number from 0 to 1".to_string()))?
+        }
+        (ValueKind::Unit, toml::Value::Integer(i)) => {
+            (*i != 0 && *i != 1).then(|| refused("must be a number from 0 to 1".to_string()))?
         }
         (ValueKind::Enum(options), toml::Value::String(s)) => {
             (!options.contains(&s.as_str())).then(|| {
@@ -487,6 +498,7 @@ pub fn check_app_value(app: &str, key: &str, value: &toml::Value) -> Option<Gram
             ValueKind::Opacity => {
                 "must be a number from 0 (transparent) to 1 (opaque)".to_string()
             }
+            ValueKind::Unit => "must be a number from 0 to 1".to_string(),
             ValueKind::Enum(options) => format!("must be one of {}", options.join(", ")),
             ValueKind::Identifier => "must be an identifier string".to_string(),
             ValueKind::Glyph => "must be a glyph string".to_string(),

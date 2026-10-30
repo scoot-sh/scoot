@@ -631,23 +631,23 @@ const SHELL_EFFECT_KEYS: &[&str] = &[
 ];
 
 #[test]
-fn only_ginger_night_and_radial_burst_opt_into_depth_and_motion() {
+fn only_ginger_night_and_radial_burst_opt_in_and_only_radial_burst_moves() {
     for name in SHIPPED {
         let look = resolved(name);
         let notify = render_notify(&look).unwrap_or_else(|e| panic!("{name}: notify.toml: {e}"));
         let notify: toml::Table = toml::from_str(&notify).expect("notify.toml reparses");
         match *name {
             "ginger-night" => {
+                // The default look: depth, no motion (the Nix default look
+                // should not start moving without being asked).
                 assert_eq!(notify["shadow"].as_str(), Some("soft"));
                 assert!(
                     !notify.contains_key("fill"),
                     "ginger-night keeps a solid fill"
                 );
-                assert_eq!(notify["motion"].as_str(), Some("ease-out"));
-                assert_eq!(notify["motion-duration-ms"].as_integer(), Some(240));
-                assert!(!notify.contains_key("motion-bounce"));
-                assert_eq!(notify["card"]["enter"].as_str(), Some("slide"));
-                assert_eq!(notify["card"]["exit"].as_str(), Some("fade"));
+                for key in ["motion", "motion-duration-ms", "motion-bounce", "card"] {
+                    assert!(!notify.contains_key(key), "ginger-night sets no `{key}`");
+                }
             }
             "radial-burst" => {
                 assert_eq!(notify["shadow"].as_str(), Some("glow"));

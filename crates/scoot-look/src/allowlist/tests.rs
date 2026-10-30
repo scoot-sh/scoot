@@ -357,3 +357,18 @@ fn motion_numbers_are_range_checked() {
         );
     }
 }
+
+#[test]
+fn a_bad_bounce_says_bounce_not_opacity() {
+    let reason = check_app_value("scootnotify", "motion-bounce", &toml::Value::Integer(2))
+        .expect("refused")
+        .to_string();
+    assert!(reason.contains("0 to 1"), "{reason}");
+    assert!(!reason.contains("opaque"), "{reason}");
+    // The bounds are the same as an opacity's: whole 0 and 1 pass.
+    for ok in [0, 1] {
+        assert!(
+            check_app_value("scootnotify", "motion-bounce", &toml::Value::Integer(ok)).is_none()
+        );
+    }
+}

@@ -436,3 +436,18 @@ fn a_bad_motion_value_refuses_by_name() {
         );
     }
 }
+
+#[test]
+fn a_whole_number_bounce_parses_as_a_bounce() {
+    for (value, want) in [("0", 0.0), ("1", 1.0)] {
+        let text = minimal_toml().replacen(
+            "[cursor]",
+            &format!("[effects]\nmotion-bounce = {value}\n[cursor]"),
+            1,
+        );
+        let raw = parse_look_toml(text.as_bytes()).expect("a whole 0 or 1 parses");
+        assert_eq!(raw.effects.motion_bounce, Some(want));
+    }
+    let text = minimal_toml().replacen("[cursor]", "[effects]\nmotion-bounce = 2\n[cursor]", 1);
+    assert!(parse_look_toml(text.as_bytes()).is_err());
+}

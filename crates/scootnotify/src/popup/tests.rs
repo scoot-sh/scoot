@@ -457,3 +457,29 @@ fn compositor_changes_make_the_next_turn_lay_out() {
     app.apply_config(Config::default());
     assert!(app.refresh_due);
 }
+
+#[test]
+fn a_retheme_mid_motion_returns_the_surface_to_the_layouts_height() {
+    // `refresh` ends in `sync_content_size`, so a re-theme (which replaces
+    // the motion and clears the size) over an unchanged stack still shrinks
+    // a surface that was held tall for a card in flight.
+    let mut app = App::new(Config::default(), moving_look(Curve::EaseOut));
+    let before = stack_of(&app, &[1, 2, 3]);
+    let after = stack_of(&app, &[1, 3]);
+    let t0 = Instant::now();
+    app.motion.retarget(&Stack::default_empty(), &before, t0);
+    app.motion.settle(t0 + std::time::Duration::from_secs(5));
+    app.motion.retarget(&before, &after, t0);
+    app.stack = after.clone();
+    app.sync_content_size();
+    assert!(app.content_size.is_some_and(|s| s.height >= before.height));
+    app.retheme(Look::default());
+    assert_eq!(app.content_size, None, "retheme forces a rebuild");
+    app.sync_content_size();
+    assert_eq!(
+        app.content_size.map(|size| size.height),
+        Some(after.height),
+        "the held height is gone"
+    );
+    assert!(app.dirty);
+}

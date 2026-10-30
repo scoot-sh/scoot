@@ -473,3 +473,53 @@ fn a_replace_that_changes_a_moving_cards_height_resizes_its_layer() {
     assert_eq!(track.picture.layer.height(), taller.cards[last].rect.height);
     assert!(track.picture.stale);
 }
+
+#[test]
+fn a_spring_never_carries_a_card_off_the_surface() {
+    // Close the newest card (the stack's top moves) and the oldest (its
+    // bottom does), under each anchor, with a spring that overshoots 9%.
+    let t0 = Instant::now();
+    let before = stack_of(&[1, 2, 3, 4, 5], Pad::ZERO);
+    for (anchor, after) in [
+        (Anchor::TopRight, stack_of(&[1, 2, 3, 4], Pad::ZERO)),
+        (Anchor::TopRight, stack_of(&[2, 3, 4, 5], Pad::ZERO)),
+        (Anchor::BottomRight, stack_of(&[1, 2, 3, 4], Pad::ZERO)),
+        (Anchor::BottomRight, stack_of(&[2, 3, 4, 5], Pad::ZERO)),
+    ] {
+        let mut motion = Motion::new(&tokens(Curve::Spring, CardMotion::Fade), anchor);
+        motion.retarget(&before, &after, t0);
+        let surface = after.height.max(motion.hold());
+        motion.fit(surface);
+        let shift = motion.shift(surface, after.height);
+        let mut clamped = false;
+        for ms in 0..=200 {
+            let now = at(t0, ms);
+            for card in &after.cards {
+                let Some(pose) = motion.pose(card.id, now) else {
+                    continue;
+                };
+                let top = i64::from(card.rect.y) + i64::from(pose.dy) + i64::from(shift);
+                let bottom = top + i64::from(card.rect.height);
+                assert!(
+                    top >= 0 && bottom <= i64::from(surface),
+                    "{anchor:?} card {} at {ms} ms: {top}..{bottom} of {surface}",
+                    card.id
+                );
+                clamped |= top == 0 || bottom == i64::from(surface);
+            }
+        }
+        // Without `fit` the same spring may leave the surface.
+        let mut loose = Motion::new(&tokens(Curve::Spring, CardMotion::Fade), anchor);
+        loose.retarget(&before, &after, t0);
+        let leaves = (0..=200).any(|ms| {
+            after.cards.iter().any(|card| {
+                loose.pose(card.id, at(t0, ms)).is_some_and(|pose| {
+                    let top = i64::from(card.rect.y) + i64::from(pose.dy) + i64::from(shift);
+                    top < 0 || top + i64::from(card.rect.height) > i64::from(surface)
+                })
+            })
+        });
+        // The limit engages exactly when the spring would have left.
+        assert_eq!(clamped, leaves, "{anchor:?}");
+    }
+}

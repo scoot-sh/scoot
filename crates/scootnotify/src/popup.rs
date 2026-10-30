@@ -491,6 +491,7 @@ impl App {
             self.content_size = wanted;
             self.dirty = true;
         }
+        self.motion.fit(wanted.map_or(0, |size| size.height));
     }
 
     /// Draws the stack into a pooled buffer and commits it, requesting a
@@ -590,7 +591,10 @@ impl App {
             // demand's scale is always 1; a HiDPI output upscales the
             // buffer (correct size, softer text). Sharp fractional
             // rendering is a follow-up, said so in the site docs.
-            if self.motion.active() {
+            // A surface still taller than its layout (the compositor has
+            // not yet honored the shrink) paints through the same path, so
+            // a bottom-anchored stack stays where it sits.
+            if self.motion.active() || (self.motion.enabled() && dims.1 != self.stack.height) {
                 // Cards in flight composite from their layers; a layer
                 // repaints only when its card's hover changed.
                 let (config, look, urgencies, icons, shadow) = (
@@ -936,8 +940,11 @@ impl Popup {
             }
             app.stack = stack;
             app.dirty = true;
-            app.content_size = app.wanted_size();
         }
+        // Whatever moved the size (this layout, a re-theme that dropped
+        // the held height, a new look): the surface follows the stack and
+        // the motion in flight, and tells the motion how tall it is.
+        app.sync_content_size();
         if changed || app.shadow_stale {
             app.prepare_shadow();
         }

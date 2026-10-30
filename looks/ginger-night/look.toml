@@ -38,12 +38,6 @@ ring-inactive-width = 2
 
 [effects]
 shadow = "soft"
-motion = "ease-out"
-motion-duration-ms = 240
-
-[apps.scootnotify]
-"card.enter" = "slide"
-"card.exit" = "fade"
 
 [cursor]
 theme = "Mocu"
