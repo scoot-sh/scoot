@@ -899,11 +899,28 @@ where
                 renderer, surface, location, scale, alpha, main_kind,
             );
             if radius > 0 {
-                out.extend(
-                    main.into_iter().map(|element| {
-                        Elements::RoundedSurface(Rounded::new(element, clip, radius))
-                    }),
-                );
+                // The client's window geometry, in the same output-physical
+                // space as `clip`: what its toplevel tree may paint inside.
+                // An xdg toplevel only (an X window has no CSD margin), and
+                // not an empty geometry (nothing committed yet).
+                let bounds =
+                    (window.toplevel().is_some() && geometry.size.w > 0 && geometry.size.h > 0)
+                        .then(|| {
+                            clip_rect(
+                                to_output_local(
+                                    Rect::new(mapped.x, mapped.y, geometry.size.w, geometry.size.h),
+                                    origin,
+                                ),
+                                scale,
+                            )
+                        });
+                out.extend(main.into_iter().map(|element| {
+                    let rounded = Rounded::new(element, clip, radius);
+                    Elements::RoundedSurface(match bounds {
+                        Some(bounds) => rounded.clipped_to(bounds),
+                        None => rounded,
+                    })
+                }));
             } else {
                 out.extend(main.into_iter().map(Elements::Surface));
             }

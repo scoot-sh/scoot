@@ -16,7 +16,7 @@ live by `scoot msg reload`.
 | `focus_ring_active_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#6ba6fa` (accent blue) | Ring color around the focused window. |
 | `focus_ring_inactive_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#595961` (muted gray) | Ring color around every other window. |
 | `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black) | Cleared behind all window content — the frame clear color; what shows wherever [wallpaper](../scootbg/index.md) shows nothing. |
-| `corner_radius` | integer (pixels) | `0` (square) | Window corner radius in logical pixels. Rounds window content and ring together; clamped per window to half its smaller dimension. Costs a little per frame when non-zero. Popups stay square. |
+| `corner_radius` | integer (pixels) | `0` (square) | Window corner radius in logical pixels. Rounds window content and ring together; clamped per window to half its smaller dimension. Also clips each window to its window geometry, so a client's own frame or shadow drawn outside it does not show (see [client frames outside the window](#client-frames-outside-the-window)). Costs a little per frame when non-zero. Popups stay square and are never clipped. |
 | `cursor_size` | integer (pixels) | `16` | The **logical** size of the built-in pointer cursor, both dimensions (clamped `4..=256`; drawn only under `--tty`). The bitmap is rasterised at `round(cursor_size × output scale)` physical pixels -- 16 at 1x, 24 at 1.5x, 32 at 2x -- so the on-screen size never changes but a high-DPI output samples native art 1:1 instead of a stretched bitmap. A real cursor theme likewise contributes the image nearest the physical size; `XCURSOR_SIZE` still exports the logical size. Where no theme is installed the cursors are Mocu, drawn by scoot itself -- see [the built-in cursors](#the-built-in-cursors) below. |
 | `cursor_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#fcfcfc` (Mocu white) | Fill color of the built-in cursors. The outline follows Mocu's pairing: `#222222` around a light fill, `#f9f9f9` around a dark one, both at the fill's own alpha. So the default is Mocu's white theme and `"#111111"` is its black theme. A translucent fill genuinely composites (outline and shadow follow its alpha). No effect inside a real theme's artwork. |
 | `cursor_theme` | string | unset | Which installed xcursor theme named cursor shapes are drawn from. Unset follows `$XCURSOR_THEME`, then `default`. A name matching nothing installed is not an error: named shapes come from scoot's own drawn set. |
@@ -45,6 +45,26 @@ is the exception: its default, `#fcfcfc`, is exactly representable.)
 The look you picked in [the desktop profile](../desktop/look.md#pick-a-look)
 writes these same keys — `settings.appearance.background_color =
 "#123456"` beside a look replaces that one color and keeps the rest.
+
+### Client frames outside the window
+
+A client that draws its own decorations (Chrome with its default custom
+frame, GTK with client-side shadows) can paint outside its
+`xdg_surface` window geometry: a 1px border, a drop shadow, resize handles.
+With `corner_radius` above `0`, scoot shows only what lies inside the
+window geometry, so those pixels never show in the gap or poke out past the
+rounded corners and the ring. This applies to every toplevel that is not
+fullscreen, tiled or floating. Popups and menus are separate surfaces and
+extend past the geometry as they always did.
+
+With `corner_radius = 0` the window is drawn unclipped, so the border stays
+visible over the ring.
+
+> **Symptom:** a window with a square 1px light border pokes out past the
+> rounded ring at its four corners.
+> **Fix:** set `corner_radius` to a value above `0` (the clip comes with the
+> rounding), or turn off the client's own frame (Chrome: Settings,
+> Appearance, "Use system title bar and borders").
 
 ## The look layer
 
