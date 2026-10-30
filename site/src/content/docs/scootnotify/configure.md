@@ -302,9 +302,15 @@ false`](../../desktop/notifications/) writes.
 | Action button outline / hovered fill | `focus` / `hover` |
 | Link text (underlined, never clickable in v1) | `accent` |
 | Font | `fonts.ui` at `fonts.popup-size` |
-| Corners | `shape.radius` |
+| Corners | the file's `radius` (see the note below), or `card.shape` |
 | Shadow, fill | `effects.shadow`, `effects.fill` (see [Depth](#depth)) |
 | Motion | `effects.motion`, `effects.motion-duration-ms`, `effects.motion-bounce`, and `card.enter`, `card.exit` (see [Motion](#motion)) |
+| Accent marker, outline, per-app color | `card.mark`, `card.shape`, `card.app-accent` (see [Card styles](#card-styles)) |
+| Summary weight and spacing | `title.weight`, `title.spacing` (see [Title weight and spacing](#title-weight-and-spacing)) |
+
+The corner radius is the file's `radius` (see [the keys above](#config)),
+not the look's `shape.radius`: the layer carries it, but the cards do not
+read it yet, so a look cannot round the cards except through `card.shape`.
 
 ### Depth
 
@@ -366,6 +372,116 @@ refuses at validation.
 > below the room (for a top-right stack, 12 px for `soft` and 28 px for
 > `deep`), the cards sit that much further in. Raise `margin_px`, or pick a lighter `shadow`.
 
+### Card styles
+
+A look can mark each card with an accent, give the cards a pill outline
+and color each app's cards differently. All three are off by default, and
+a look that sets none paints and lays out exactly what it did before.
+They are notifier keys, in the look's `[apps.scootnotify]` table, quoted:
+
+```toml
+[apps.scootnotify]
+"card.mark" = "stripe"      # none | stripe | dot | badge
+"card.shape" = "pill"       # rounded | pill
+"card.app-accent" = true    # true | false
+```
+
+The look renders them into `notify.toml` as a `[card]` table with
+`mark`, `shape` and `app-accent`, only when the look sets them. A value
+outside its list is refused by `scoot look validate`; a hand-edited
+`notify.toml` with one is reported in the daemon log and ignored, and the
+key keeps its default.
+
+| `card.mark` | What it draws |
+|---|---|
+| `none` | No marker. The default. |
+| `stripe` | A 3 px bar down the card's leading (left) edge, just inside the border, cut by the card's rounded corners. Takes no room. |
+| `dot` | An 8 px dot before the app name on the `app · age` line. The text moves 14 px right to make room; the card does not grow. |
+| `badge` | The icon slot on a tinted tile. A card with no icon gets the slot too, showing the app's initial, so every card is 48 px tall at least and its text starts 58 px in. |
+
+The marker's color is the look's `accent`. With `card.app-accent` on it
+is the app's own color instead (below).
+
+`card.app-accent` gives every app a color hashed from its name: the same
+app is the same color on every run and every machine, and `Firefox` and
+`firefox` share one. The hue is spread around the wheel at medium
+saturation and lightness, then darkened (on a light-on-dark look) or
+lightened (on a dark-on-light one) until the look's `foreground` reaches
+a 4.5:1 contrast ratio on it, WCAG AA for normal text. That is what makes
+the letter on a `badge` tile readable; on a dark look it also means
+accents are deep rather than bright. An app with no name has no accent and
+uses the look's `accent`. The color is worked out when the card is laid
+out, not on every repaint. `card.app-accent` with `card.mark = "none"`
+draws nothing.
+
+| `card.shape` | What it draws |
+|---|---|
+| `rounded` | The corner radius from the config file. The default. |
+| `pill` | Ends rounded to half the card's height, to at most a 36 px radius: a one- or two-line card is a true pill, a tall one keeps round ends of that size. The content moves 8 px further in on each side so text, the progress bar and the buttons stay clear of the curve. The shadow follows the shape. |
+
+`card.shape` is a keyword and not a larger `radius` because the look's
+`radius` is limited to 64 for every app, and a radius does not say "as
+round as this card can be" for cards of different heights.
+
+A `stripe` on a `pill` shows only where the curved end is nearly
+straight, a short sliver at its middle; `dot` and `badge` suit a pill
+better.
+
+A card that is moving carries its marker with it, and the marker, the
+tile and the pill are all inside the card's shadow and clipped by its
+shape.
+
+> **Symptom:** a look sets `card.mark` and the cards have none.
+> The daemon logs `card.mark refused ... default applies` or
+> `card.mark is not a card mark` for a value outside `none`, `stripe`,
+> `dot` and `badge`. Check `<state>/look/notify.toml` for a `[card]`
+> table, and that the config has no `look = false`.
+
+> **Symptom:** every app's marker is the same color.
+> `card.app-accent` is off, or the app's name is empty (`msg list --json`
+> shows the `app_name` the sender gave).
+
+> **Symptom:** the dot or the badge crowds the text.
+> Both reserve room at layout, so a look swap needs a daemon that
+> re-laid out the cards: `scoot look apply` does, and plain `msg reload
+> --look` does too.
+
+### Title weight and spacing
+
+The summary (the first, bold line of a card) can be set apart from the
+body. `title.weight` and `title.spacing` apply to the summary only; the
+`app · age` line and the body keep their weight, and bold inside a body
+keeps drawing as it always did.
+
+```toml
+[apps.scootnotify]
+"title.weight" = 800    # 100 to 900
+"title.spacing" = 1     # -2 to 8, pixels after each character
+```
+
+The look renders them into `notify.toml` as a `[title]` table with
+`weight` and `spacing`, only when the look sets them.
+
+| `title.weight` | What it draws |
+|---|---|
+| 100 to 500 | The summary in the regular weight, like the body. |
+| 501 to 700 | Bold, as the summary always was. The default is 700. |
+| 701 to 900 | Heavier: one more strike, so the strokes are a pixel thicker again. |
+
+scootnotify has no fontconfig and no variable-font support: it draws with
+one font file (`--font PATH`, else the first well-known file) and makes
+bold by drawing a run again 1 px to the right. So a weight is three steps
+and not nine, and it does not pick another font file. `font` in the look
+is validated and still does not choose the file.
+
+`title.spacing` adds that many logical pixels after every character of the
+summary (negative tightens). The summary wraps and ellipsizes with the
+spacing included, so a wider summary breaks earlier instead of running out
+of the card.
+
+> **Symptom:** `title.weight` makes no visible change between 600 and 700.
+> They are the same step. The steps start at 501 and 701.
+
 ### Motion
 
 By default cards appear and disappear at once and the stack jumps when a
@@ -424,7 +540,9 @@ overshooting off it. Cards that were not moving paint exactly as they do
 without motion.
 
 The `radial-burst` look ships with a glow shadow, a spring and a scale entrance;
-`ginger-night`, the default look, sets no motion.
+`ginger-night`, the default look, sets no motion. `ginger-night` also draws
+the `stripe` marker; `radial-burst` the `badge` marker with per-app color, the
+`pill` shape and a heavier, spaced summary.
 
 There is no reduced-motion setting to follow: scoot has none yet, and the
 compositor's `[animation] enabled` is a separate opt-in for window

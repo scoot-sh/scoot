@@ -233,3 +233,5 @@ hits the wall:
 - [notify-popups-review-notes](notify-popups-review-notes.md)
 - [packaging-workflows-red-on-main](resolved/packaging-workflows-red-on-main-done.md)
 - [check scootbar for the glibc 2.44 huge-page arena](thp-arena-check.md)
+- [notify-look-radius-unread](notify-look-radius-unread.md) (medium): the look's `radius` is parsed and never read, so every card draws the config file's 8 px; found building #807 slice 3
+- [shell-font-resolution](shell-font-resolution.md) (low): resolve the look's font family to a file and use a real bold face; the shell apps draw one file with synthetic bold
