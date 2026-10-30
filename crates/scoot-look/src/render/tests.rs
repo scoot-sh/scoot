@@ -581,6 +581,23 @@ fn fontconfig_prefers_the_look_faces() {
 }
 
 #[test]
+fn fontconfig_rules_apply_only_to_a_first_choice_generic() {
+    let conf = render_fontconfig(&moonrise());
+    for generic in ["sans-serif", "system-ui", "monospace"] {
+        let rule =
+            format!("<test name=\"family\" qual=\"first\"><string>{generic}</string></test>");
+        assert!(conf.contains(&rule), "{generic} not first-only:\n{conf}");
+    }
+    // No test may match a generic anywhere in the list: that would turn an
+    // explicit named family into the look's face.
+    assert!(
+        !conf.contains("<test name=\"family\"><string>"),
+        "an unqualified family test:\n{conf}"
+    );
+    assert_eq!(conf.matches("<match ").count(), 3, "{conf}");
+}
+
+#[test]
 fn theme_and_style_names_follow_polarity() {
     assert_eq!(gtk_theme_name(true), "Adwaita-dark");
     assert_eq!(gtk_theme_name(false), "Adwaita");

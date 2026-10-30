@@ -807,10 +807,17 @@ pub fn render_gtk_ini(look: &ResolvedLook) -> String {
 }
 
 /// Render the fontconfig default (`10-scoot-look.conf`): the proportional
-/// sans for sans-serif (GTK/Qt apps, the greeter) and the terminal face
+/// sans for sans-serif and system-ui (GTK/Qt apps, the greeter) and the terminal face
 /// for monospace. Written as `match` rules with strong bindings, not
 /// `<alias>` blocks. Family names pass the identifier grammar (no
 /// `<>&"'` possible), so no XML escaping is needed on top.
+///
+/// Each rule tests `qual="first"`: it applies only when the generic is the
+/// client's first choice, which is what a UI toolkit or terminal asks for.
+/// fontconfig appends `sans-serif` behind every named sans face, so a rule
+/// matching the generic anywhere would also replace an explicit "Arial" or
+/// "Helvetica" with the look's face. `system-ui` takes the proportional
+/// sans too: web pages name it first for native-looking text.
 pub fn render_fontconfig(look: &ResolvedLook) -> String {
     let mut out = String::from(
         "<?xml version=\"1.0\"?>\n<!DOCTYPE fontconfig SYSTEM \"fonts.dtd\">\n<fontconfig>\n",
@@ -821,11 +828,12 @@ pub fn render_fontconfig(look: &ResolvedLook) -> String {
     ));
     for (generic, family) in [
         ("sans-serif", &look.fonts.sans),
+        ("system-ui", &look.fonts.sans),
         ("monospace", &look.fonts.mono),
     ] {
         out.push_str("  <match target=\"pattern\">\n");
         out.push_str(&format!(
-            "    <test name=\"family\"><string>{generic}</string></test>\n"
+            "    <test name=\"family\" qual=\"first\"><string>{generic}</string></test>\n"
         ));
         out.push_str(&format!(
             "    <edit name=\"family\" mode=\"prepend\" binding=\"strong\"><string>{family}</string></edit>\n"

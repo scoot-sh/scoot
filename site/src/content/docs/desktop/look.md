@@ -76,7 +76,8 @@ variables only, no daemon, so the theme costs no wakeups.
 | GTK apps | `desktop.theme.targets.gtk.enable` | bool | `true` | `settings.ini` (GTK 3 + 4): Adwaita, or Adwaita-dark for a dark look, with the look's proportional sans, cursor and dark preference — plus `gtk.css` carrying the look's accent and surfaces (named colors and the `:root` vars libadwaita paints with); the dark-mode signal is `color-scheme`, written by `scoot look sync` from the active look (no `GTK_THEME` force: it would make libadwaita skip its own providers) |
 | Qt apps | `desktop.theme.targets.qt.enable` | bool | `true` | `qt6ct.conf` through `QT_QPA_PLATFORMTHEME=qt6ct` (plus `QT_PLUGIN_PATH` for its platformtheme and style): the Adwaita Qt style in the look's polarity, Adwaita icons, and a generated color scheme from the look's palette — dark looks get a dark palette, the light look a light one |
 | Cursor | `desktop.theme.targets.cursor.enable` | bool | `true` | Mocu at its native 24 px: the look layer names it for the compositor plus `XCURSOR_THEME`/`XCURSOR_SIZE` for X11 apps — the same art as the built-in fallback, as real theme files; the managed sync renders no cursor keys while the target is off |
-| Fonts | `desktop.theme.targets.fonts.enable` | bool | `true` | DejaVu Sans for sans-serif (proportional UI text in GTK/Qt apps and the greeter), FiraCode Nerd Font for monospace (DejaVu Sans Mono for `radial-burst`), through fontconfig — and the look layer carries the bar's DroidSansM Nerd Font Propo file, whose glyphs carry the module icons; the managed sync renders no bar font while the target is off. The profile installs all three families (NixOS system-wide, home-manager per user with `fonts.fontconfig.enable` on by default) so `scoot look apply` resolves them; a family still missing falls back with a note instead of refusing |
+| Fonts | `desktop.theme.targets.fonts.enable` | bool | `true` | DejaVu Sans for sans-serif and system-ui (proportional UI text in GTK/Qt apps and the greeter), FiraCode Nerd Font for monospace (DejaVu Sans Mono for `radial-burst`), through fontconfig — and the look layer carries the bar's DroidSansM Nerd Font Propo file, whose glyphs carry the module icons; the managed sync renders no bar font while the target is off. The profile installs all three families (NixOS system-wide, home-manager per user with `fonts.fontconfig.enable` on by default) so `scoot look apply` resolves them; a family still missing falls back with a note instead of refusing |
+| Web-page fonts | `desktop.theme.fonts.compatPackages` | list of package | `[ pkgs.liberation_ttf pkgs.gyre-fonts ]` (about 9 MB; `[ ]` off Linux) | Installed with the fonts target. Liberation answers Arial, Times New Roman and Courier New, TeX Gyre answers Helvetica, Times and Courier, through fontconfig's metric aliases, so a page that names them keeps the sizes and line breaks it was written for. Set `[ ]` to skip them; every such name then falls back to fontconfig's default |
 | Login screen | `desktop.theme.targets.greeter.enable` | bool | `true` | the session wallpaper behind the login card, the dark setting, the look's ReGreet CSS and font — needs `greeter.enable` too |
 | Terminal | `desktop.theme.targets.terminal.enable` | bool | `true` | the look's `foot.ini` from the flake |
 | Prompt | `desktop.theme.targets.shell.enable` | bool | `true` | the look's `starship.toml` (`radial-burst` ships none: inert there) |
@@ -85,6 +86,15 @@ variables only, no daemon, so the theme costs no wakeups.
 | Monitor | `desktop.theme.targets.monitor.enable` | bool | `true` | the look's btop config beside its theme (`radial-burst` ships none, `music-desk` ships no theme: inert there) |
 | Input method | `desktop.theme.targets.inputMethod.enable` | bool | `true` | a generated `scoot-look` classic-UI theme (background and text, selection and border from the look's palette) plus the `classicui.conf` naming it — needs `inputMethod.enable` too |
 | Extra GTK keys | `desktop.theme.settings` | attrs of str | `{ }` | merged over the generated `settings.ini`: a value here wins per key |
+
+The look's fontconfig rules apply only when a client asks for the
+generic family *first* (`sans-serif`, `system-ui` or `monospace` ahead of
+any named family), which is what toolkits and terminals do. A web page's
+`font-family: Helvetica, sans-serif`, or an app that names "Arial" or
+"DejaVu Sans", gets that family, or fontconfig's metric substitute for
+it, not the look's face. A request that names a family the system lacks
+before the generic (`Foo, sans-serif` or `Foo, monospace`) gets the
+system's default for that generic, not the look's face.
 
 On NixOS the profile also turns on `programs.dconf.enable` (as a
 default, so your own `false` wins): `scoot look sync` writes the
