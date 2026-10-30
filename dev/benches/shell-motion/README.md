@@ -29,12 +29,12 @@ unchanged `bench_depth` of that tree alternately with this branch's, six
 times each.
 
 Machine: aarch64 dev VM (6 vCPU, NixOS), release profile, DejaVu Sans 13 px,
-`taskset -c 3`. Branch commit `HEADSHA`. Raw output:
+`taskset -c 3`. Branch commit `d40ae1d21`. Raw output:
 [`raw.txt`](raw.txt).
 
 ## Result
 
-Microseconds per frame, at commit `HEADSHA` (three runs on a busy VM; the
+Microseconds per frame, at commit `d40ae1d21` (three runs on a busy VM; the
 earlier quiet-window figures were 97 static and 152 to 231 animated and are in
 the first run of the previous `raw.txt`). Best median and best p5 of the three:
 
