@@ -51,8 +51,10 @@ missing file is the built-in defaults. Unknown keys are refused (a
 typo that silently did nothing would be worse than an error), and
 out-of-range numbers name their key. The file is capped at 64 KiB. A
 bad file at daemon start runs on the built-in defaults and reports
-the error; `--check` and `msg reload` exit 1 on it. Every key lives in
-[Configure](./configure.md).
+the error; `--check` and `msg reload` exit 1 on it. A bad value in the
+`[effects]`, `[card]` or `[title]` tables is the one exception: `--check`
+prints it on stderr and still exits 0, and the daemon ignores it. Every
+key lives in [Configure](./configure.md).
 
 ```sh
 scootnotify daemon --check --config ./notify.toml

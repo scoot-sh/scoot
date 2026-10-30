@@ -34,7 +34,9 @@ scootlaunch --version                      # print the version
 also shapes the panel's index and `--run-id`). `--action` needs
 `--run-id`. `--font` is a panel option; `--config` belongs to the
 panel and `--check`. `--list`, `--query`, `--run-id`, `--check`,
-`--dmenu` and `--run` cannot combine. TEXT is the next
+`--dmenu` and `--run` cannot combine. `--check` refuses a bad config
+file with exit 1, except a bad value in `[effects]`: that prints on
+stderr and exits 0, as the panel ignores it. TEXT is the next
 argument after `--query`, whatever it holds. Anything else is a loud
 error: exit 2, naming the flag and the supported list, never silently
 ignored. The panel launches the picked entry (exit 0) or nothing on
