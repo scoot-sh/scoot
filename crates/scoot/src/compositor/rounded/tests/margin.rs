@@ -27,6 +27,7 @@ fn check_margin_is_clipped(scale: f64, margin: i32) {
         color: WINDOW_BGRA,
         frame: FRAME_BGRA,
         margin,
+        band: Band::Floor,
     });
     let placement = fixture.placement();
     let pixels = fixture.render();
@@ -123,6 +124,47 @@ fn a_csd_margin_is_clipped_at_scale_one_point_two_five() {
     check_margin_is_clipped(1.25, 3);
 }
 
+/// A toolkit whose frame band is rounded to whole buffer pixels can straddle
+/// the geometry edge at a fractional scale: the edge falls between two
+/// pixels, and the compositor rounds it to the nearest one, the same way the
+/// ring's inner edge is. A frame pixel inside the rounded edge is then the
+/// content's own boundary pixel (the staircase still rounds it); the contract
+/// is that none lies *outside* it, where it would show in the gap.
+fn check_straddling_frame_stays_inside_the_edge(scale: f64, margin: i32) {
+    let mut fixture = Fixture::with_radius_at_scale(10, 4, scale);
+    fixture.run(Step::Framed {
+        color: WINDOW_BGRA,
+        frame: FRAME_BGRA,
+        margin,
+        band: Band::Round,
+    });
+    let placement = fixture.placement();
+    let pixels = fixture.render();
+    let clip = clip_rect(placement, scale);
+    for y in 0..CANVAS {
+        for x in 0..CANVAS {
+            let inside = x >= clip.loc.x
+                && x < clip.loc.x + clip.size.w
+                && y >= clip.loc.y
+                && y < clip.loc.y + clip.size.h;
+            assert!(
+                inside || pixel(&pixels, CANVAS, x, y) != FRAME_BGRA,
+                "scale {scale}: frame pixel at ({x}, {y}) outside the geometry {clip:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_rounded_frame_band_stays_inside_the_edge_at_one_point_five() {
+    check_straddling_frame_stays_inside_the_edge(1.5, 1);
+}
+
+#[test]
+fn a_rounded_frame_band_stays_inside_the_edge_at_one_point_two_five() {
+    check_straddling_frame_stays_inside_the_edge(1.25, 3);
+}
+
 /// `corner_radius = 0` wraps nothing and clips nothing (the module's square
 /// baseline): the client's frame still draws. This pins the choice, so a
 /// later change to it is a decision rather than a drift.
@@ -133,6 +175,7 @@ fn a_square_session_still_draws_the_margin() {
         color: WINDOW_BGRA,
         frame: FRAME_BGRA,
         margin: 1,
+        band: Band::Floor,
     });
     let pixels = fixture.render();
     assert!(
@@ -153,6 +196,7 @@ fn a_popup_outside_the_geometry_is_not_clipped() {
         color: WINDOW_BGRA,
         frame: FRAME_BGRA,
         margin: 1,
+        band: Band::Floor,
     });
     fixture.run(Step::PopupOutside {
         color: POPUP_BGRA,
@@ -192,6 +236,7 @@ fn the_margin_stays_clipped_across_frames() {
         color: WINDOW_BGRA,
         frame: FRAME_BGRA,
         margin: 1,
+        band: Band::Floor,
     });
     for _ in 0..3 {
         let pixels = fixture.render();

@@ -114,6 +114,10 @@ enum Step {
         color: [u8; 4],
         frame: [u8; 4],
         margin: i32,
+        /// How the band is quantized into buffer pixels at a fractional
+        /// scale: floored (wholly outside the geometry edge) or rounded
+        /// (may straddle it).
+        band: Band,
     },
     /// Map a no-grab popup parented to the first window that grows up and
     /// left from the window's geometry origin, `size` square: it lies
@@ -123,6 +127,13 @@ enum Step {
     /// draw the hollow ring but no CSD backdrop (a fill under no content
     /// would be a solid colored rect, not corner crescents).
     Uncommitted,
+}
+
+/// See [`Step::Framed`].
+#[derive(Clone, Copy, Debug)]
+enum Band {
+    Floor,
+    Round,
 }
 
 #[derive(Debug)]
@@ -466,6 +477,7 @@ fn draw_framed(
     preferred: f64,
     size: (i32, i32),
     margin: i32,
+    band: Band,
     frame: [u8; 4],
     color: [u8; 4],
 ) {
@@ -480,7 +492,10 @@ fn draw_framed(
     // buffer pixels wholly outside it. The compositor rounds the edge to the
     // nearest physical pixel, so a frame band reaching past the floor would
     // straddle the edge and no clip on whole pixels could separate it.
-    let band = (f64::from(margin) * preferred).floor() as i32;
+    let band = match band {
+        Band::Floor => (f64::from(margin) * preferred).floor(),
+        Band::Round => (f64::from(margin) * preferred).round(),
+    } as i32;
     let stride = bw * 4;
     let len = (stride * bh) as usize;
     let fd = rustix::fs::memfd_create("scoot-framed-test", rustix::fs::MemfdFlags::CLOEXEC)
@@ -590,7 +605,13 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 })?;
                 xdg.ack_configure(serial);
                 let viewport = viewporter.get_viewport(&surface, &qh, ());
-                if let Step::Framed { frame, margin, .. } = step {
+                if let Step::Framed {
+                    frame,
+                    margin,
+                    band,
+                    ..
+                } = step
+                {
                     xdg.set_window_geometry(margin, margin, w, h);
                     draw_framed(
                         &shm,
@@ -600,6 +621,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                         preferred,
                         (w, h),
                         margin,
+                        band,
                         frame,
                         color,
                     );

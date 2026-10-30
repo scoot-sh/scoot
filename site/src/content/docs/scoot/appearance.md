@@ -53,18 +53,17 @@ frame, GTK with client-side shadows) can paint outside its
 `xdg_surface` window geometry: a 1px border, a drop shadow, resize handles.
 With `corner_radius` above `0`, scoot shows only what lies inside the
 window geometry, so those pixels never show in the gap or poke out past the
-rounded corners and the ring. This applies to every toplevel that is not
-fullscreen, tiled or floating. Popups and menus are separate surfaces and
+rounded corners and the ring. This applies to every toplevel, tiled or
+floating, that is not fullscreen. Popups and menus are separate surfaces and
 extend past the geometry as they always did.
 
-With `corner_radius = 0` the window is drawn unclipped, so the border stays
-visible over the ring.
+With `corner_radius = 0` the window is drawn unclipped, so a client's frame
+stays visible over the ring's inner edge.
 
-> **Symptom:** a window with a square 1px light border pokes out past the
-> rounded ring at its four corners.
-> **Fix:** set `corner_radius` to a value above `0` (the clip comes with the
-> rounding), or turn off the client's own frame (Chrome: Settings,
-> Appearance, "Use system title bar and borders").
+> **Symptom:** with `corner_radius = 0`, a thin light line follows the
+> window's edge, drawn over the focus ring.
+> **Fix:** set `corner_radius` above `0`, or turn off the client's own frame
+> (Chrome: Settings, Appearance, "Use system title bar and borders").
 
 ## The look layer
 
