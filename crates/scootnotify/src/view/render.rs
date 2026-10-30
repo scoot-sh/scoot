@@ -7,12 +7,14 @@
 //! what the zero-allocation pin measures.
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use scootui::color::Color;
 use scootui::paint::{Canvas, Shadow, Span};
 use scootui::text::Text;
 
 use super::layout::{Card, Rect, Stack};
+use super::motion::Motion;
 use crate::bus::hints::Urgency;
 use crate::config::Config;
 use crate::look::{Look, ShadowStyle};
@@ -57,24 +59,142 @@ pub fn paint(
     shadow: Option<&Shadow>,
 ) {
     canvas.clear();
+    paint_stack(
+        canvas,
+        text,
+        stack,
+        config,
+        look,
+        urgencies,
+        hover,
+        icons,
+        shadow,
+        |_| false,
+    );
+}
+
+/// Paints `stack` while some cards are in motion: the cards at rest
+/// through the same path as [`paint`] (so a stack between animations is
+/// byte for byte the static one), the leaving and moving cards composited
+/// from their layers at `now`. A bottom-anchored surface held taller than
+/// its layout paints the static cards that much lower, where they sit.
+#[allow(clippy::too_many_arguments)] // A paint helper, as the bar's own are.
+pub fn paint_moving(
+    canvas: &mut Canvas<'_>,
+    text: &mut Text,
+    stack: &Stack,
+    config: &Config,
+    look: &Look,
+    urgencies: &HashMap<u32, Urgency>,
+    hover: Hover,
+    icons: &HashMap<u32, IconBits>,
+    shadow: Option<&Shadow>,
+    motion: &Motion,
+    now: Instant,
+) {
+    canvas.clear();
+    let shift = motion.shift(canvas.height(), stack.height);
+    {
+        let mut base = canvas.below(shift);
+        paint_stack(
+            &mut base,
+            text,
+            stack,
+            config,
+            look,
+            urgencies,
+            hover,
+            icons,
+            shadow,
+            |id| motion.moving(id),
+        );
+    }
+    motion.compose(canvas, now);
+}
+
+/// Paints one card into its own layer: `card` is at the layer's origin
+/// ([`Card::translated`](super::layout::Card::translated)), its shadow
+/// inside the layer's margin. `button` is the hovered button, if any. The
+/// layer was cleared by the caller.
+#[allow(clippy::too_many_arguments)] // A paint helper, as the bar's own are.
+pub fn paint_layer(
+    canvas: &mut Canvas<'_>,
+    text: &mut Text,
+    card: &Card,
+    config: &Config,
+    look: &Look,
+    urgency: Urgency,
+    button: Option<usize>,
+    icons: &HashMap<u32, IconBits>,
+    shadow: Option<&Shadow>,
+) {
+    let clip = Span {
+        x: 0,
+        width: canvas.width(),
+    };
+    if let Some(shadow) = shadow {
+        shadow_of(canvas, shadow, card, config, look, urgency);
+    }
+    let hover = button.map(|button| (card.id, Some(button)));
+    paint_card(
+        canvas,
+        text,
+        card,
+        config,
+        look,
+        look.font_size_px,
+        urgency,
+        clip,
+        hover,
+        icons,
+    );
+}
+
+/// The shadow under one card: black, or the card's ring color for a glow.
+fn shadow_of(
+    canvas: &mut Canvas<'_>,
+    shadow: &Shadow,
+    card: &Card,
+    config: &Config,
+    look: &Look,
+    urgency: Urgency,
+) {
+    let tint = match look.shadow {
+        // A glow is the card's own ring color, so a critical card
+        // glows in the urgent color.
+        ShadowStyle::Glow => ring_color(look, urgency),
+        _ => Color { r: 0, g: 0, b: 0 },
+    };
+    shadow.paint(canvas, region(card.rect), config.radius, tint);
+}
+
+/// [`paint`] without the clear, skipping the cards `skip` names (the ones
+/// drawn through layers). Every shadow first, then every card.
+#[allow(clippy::too_many_arguments)] // A paint helper, as the bar's own are.
+fn paint_stack(
+    canvas: &mut Canvas<'_>,
+    text: &mut Text,
+    stack: &Stack,
+    config: &Config,
+    look: &Look,
+    urgencies: &HashMap<u32, Urgency>,
+    hover: Hover,
+    icons: &HashMap<u32, IconBits>,
+    shadow: Option<&Shadow>,
+    skip: impl Fn(u32) -> bool,
+) {
     let em = look.font_size_px;
     let clip = Span {
         x: 0,
         width: canvas.width(),
     };
     if let Some(shadow) = shadow {
-        for card in &stack.cards {
+        for card in stack.cards.iter().filter(|card| !skip(card.id)) {
             let urgency = urgencies.get(&card.id).copied().unwrap_or(Urgency::Normal);
-            let tint = match look.shadow {
-                // A glow is the card's own ring color, so a critical card
-                // glows in the urgent color.
-                ShadowStyle::Glow => ring_color(look, urgency),
-                _ => Color { r: 0, g: 0, b: 0 },
-            };
-            shadow.paint(canvas, region(card.rect), config.radius, tint);
+            shadow_of(canvas, shadow, card, config, look, urgency);
         }
     }
-    for card in &stack.cards {
+    for card in stack.cards.iter().filter(|card| !skip(card.id)) {
         let urgency = urgencies.get(&card.id).copied().unwrap_or(Urgency::Normal);
         paint_card(
             canvas, text, card, config, look, em, urgency, clip, hover, icons,
@@ -451,4 +571,6 @@ fn paint_pill(
 #[cfg(test)]
 mod depth_tests;
 #[cfg(test)]
-mod tests;
+mod motion_tests;
+#[cfg(test)]
+pub(crate) mod tests;

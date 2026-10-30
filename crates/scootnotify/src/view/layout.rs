@@ -107,6 +107,39 @@ pub struct Card {
     pub tile: char,
 }
 
+impl Card {
+    /// This card with its origin moved to `(-dx, -dy)`: every rectangle
+    /// and line `dx` left and `dy` up, so a card painted into an
+    /// off-screen layer starts at the layer's corner. Nothing in a card
+    /// lies above or left of `(dx, dy)` when it is the card's own corner
+    /// (less its shadow's room); a coordinate that would go negative stops
+    /// at zero rather than wrapping. Allocates the clone: runs when a card
+    /// starts moving, never per frame.
+    pub fn translated(&self, dx: u32, dy: u32) -> Card {
+        let mut card = self.clone();
+        let back = |rect: &mut Rect| {
+            rect.x = rect.x.saturating_sub(dx);
+            rect.y = rect.y.saturating_sub(dy);
+        };
+        let back_line = |line: &mut Line| {
+            line.x -= i64::from(dx);
+            line.baseline -= i64::from(dy);
+        };
+        back(&mut card.rect);
+        back(&mut card.body_hit);
+        card.summary.iter_mut().for_each(back_line);
+        back_line(&mut card.meta);
+        card.body.iter_mut().for_each(back_line);
+        if let Some(bar) = card.progress_bar.as_mut() {
+            back(bar);
+        }
+        for button in &mut card.buttons {
+            back(&mut button.rect);
+        }
+        card
+    }
+}
+
 /// The laid-out stack: the surface size, the visible cards newest on
 /// top, the hidden count, and the input region (the cards' union, so
 /// the gaps click through).
@@ -130,6 +163,23 @@ pub struct Stack {
     /// The input region: one rectangle per card (the union, not the
     /// bounding box).
     pub input: Vec<Rect>,
+}
+
+impl Stack {
+    /// A stack with no cards: what an empty store lays out as (before
+    /// any padding).
+    #[cfg(test)]
+    pub fn default_empty() -> Stack {
+        Stack {
+            width: 0,
+            height: 0,
+            pad: Pad::ZERO,
+            cards: Vec::new(),
+            hidden: 0,
+            pill_label: String::new(),
+            input: Vec::new(),
+        }
+    }
 }
 
 /// Lays out `live` (oldest first) newest-on-top: at most

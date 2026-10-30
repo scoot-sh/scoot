@@ -44,6 +44,14 @@
 //! (`solid` or `gradient`). A value outside those is reported and the
 //! default stays.
 //!
+//! Motion is the third group, also optional and off by default: `motion`
+//! (`none`, `ease-out` or `spring`), `motion-duration-ms` (0 to 1000),
+//! `motion-bounce` (0 to 1) and, in a `[card]` table, `enter` and `exit`
+//! (`slide`, `fade`, `scale` or `drop`). With `motion` absent or `none`
+//! nothing moves and nothing is built for it. Out-of-range numbers are
+//! refused at the grammar and clamped again here, so a hand-edited
+//! fragment cannot ask for an hour-long slide.
+//!
 //! The `font` key names the look's UI family. There is no fontconfig in
 //! this stack: the daemon draws with `--font PATH`, else the first usable
 //! well-known file, as the bar does. The key is validated and kept (a
@@ -53,6 +61,7 @@
 use std::path::{Path, PathBuf};
 
 use scootui::color::Color;
+use scootui::motion::{Curve, DEFAULT_BOUNCE, DEFAULT_DURATION_MS, Timing};
 use scootui::paint::ShadowSpec;
 use scootui::theme::Theme;
 
@@ -132,6 +141,69 @@ impl FillStyle {
     }
 }
 
+/// How a card arrives (`card.enter`) or leaves (`card.exit`). Every style
+/// fades the card with the motion; the style adds a move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CardMotion {
+    /// Slides in from the edge the stack is anchored to.
+    Slide,
+    /// Fades only.
+    Fade,
+    /// Grows from a smaller card (shrinks on the way out).
+    Scale,
+    /// Drops in from above.
+    Drop,
+}
+
+impl CardMotion {
+    /// The style a `card.enter` or `card.exit` value names, if it names one.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "slide" => Some(Self::Slide),
+            "fade" => Some(Self::Fade),
+            "scale" => Some(Self::Scale),
+            "drop" => Some(Self::Drop),
+            _ => None,
+        }
+    }
+}
+
+/// The look's motion tokens as read from the fragment, before they are
+/// clamped into a [`Timing`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MotionTokens {
+    /// `motion`: `none` (the default) moves nothing.
+    pub curve: Curve,
+    /// `motion-duration-ms`.
+    pub duration_ms: u32,
+    /// `motion-bounce`, the spring's overshoot.
+    pub bounce: f32,
+    /// `card.enter`.
+    pub enter: CardMotion,
+    /// `card.exit`.
+    pub exit: CardMotion,
+}
+
+impl Default for MotionTokens {
+    fn default() -> Self {
+        Self {
+            curve: Curve::None,
+            duration_ms: DEFAULT_DURATION_MS,
+            bounce: DEFAULT_BOUNCE,
+            enter: CardMotion::Slide,
+            exit: CardMotion::Fade,
+        }
+    }
+}
+
+impl MotionTokens {
+    /// The clamped timing these tokens ask for: [`Timing::NONE`] for
+    /// `motion = none` or a zero duration.
+    pub fn timing(&self) -> Timing {
+        Timing::new(self.curve, self.duration_ms, self.bounce)
+    }
+}
+
 /// The cards' resolved look: the widget theme plus the cards' own fill,
 /// borders, size, opacity and radius.
 #[derive(Debug, Clone, PartialEq)]
@@ -160,6 +232,8 @@ pub struct Look {
     pub shadow: ShadowStyle,
     /// How the card fill is laid down (`fill`).
     pub fill: FillStyle,
+    /// How cards move: arriving, leaving and restacking.
+    pub motion: MotionTokens,
 }
 
 impl Look {
@@ -201,6 +275,7 @@ impl Default for Look {
             icon_theme: DEFAULT_ICON_THEME.to_string(),
             shadow: ShadowStyle::None,
             fill: FillStyle::Solid,
+            motion: MotionTokens::default(),
         }
     }
 }
@@ -325,6 +400,16 @@ fn apply_table(look: &mut Look, table: &toml::Table, notes: &mut Vec<String>) {
             }
             continue;
         }
+        if key == "card" {
+            let Some(card) = value.as_table() else {
+                notes.push(String::from("`card` is not a table: skipped"));
+                continue;
+            };
+            for (name, style) in card {
+                apply(look_card(look, name), "card", name, style, notes);
+            }
+            continue;
+        }
         apply(look_dotless(look, key), "", key, value, notes);
     }
 }
@@ -367,6 +452,10 @@ enum Slot<'a> {
     IconTheme(&'a mut String),
     Shadow(&'a mut ShadowStyle),
     Fill(&'a mut FillStyle),
+    Motion(&'a mut Curve),
+    MotionMs(&'a mut u32),
+    MotionBounce(&'a mut f32),
+    CardMotion(&'a mut CardMotion),
     /// An allowlisted key the cards draw nothing with (`accent-fg`):
     /// validated above, then dropped.
     Ignore,
@@ -415,6 +504,35 @@ impl Slot<'_> {
                     "`{dotted}` is not a fill style (solid or gradient): default applies"
                 )),
             },
+            Slot::Motion(slot) => match value.as_str().and_then(Curve::parse) {
+                Some(curve) => *slot = curve,
+                None => notes.push(format!(
+                    "`{dotted}` is not a motion (none, ease-out or spring): default applies"
+                )),
+            },
+            Slot::MotionMs(slot) => match value.as_integer() {
+                // The grammar bounds it; the clamp keeps a caller that
+                // skipped the grammar from asking for an unbounded wait.
+                Some(ms) => *slot = ms.clamp(0, i64::from(scootui::motion::MAX_DURATION_MS)) as u32,
+                None => notes.push(format!(
+                    "`{dotted}` is not a duration in milliseconds: default applies"
+                )),
+            },
+            Slot::MotionBounce(slot) => {
+                let bounce = value
+                    .as_float()
+                    .or_else(|| value.as_integer().map(|int| int as f64));
+                match bounce {
+                    Some(bounce) if bounce.is_finite() => *slot = bounce.clamp(0.0, 1.0) as f32,
+                    _ => notes.push(format!("`{dotted}` is not a bounce: default applies")),
+                }
+            }
+            Slot::CardMotion(slot) => match value.as_str().and_then(CardMotion::parse) {
+                Some(style) => *slot = style,
+                None => notes.push(format!(
+                    "`{dotted}` is not a card motion (slide, fade, scale or drop): default applies"
+                )),
+            },
             Slot::IconTheme(slot) => match value.as_str() {
                 Some(theme) if is_icon_theme(theme) => *slot = theme.to_owned(),
                 _ => notes.push(format!("`{dotted}` is not an icon theme: default applies")),
@@ -443,7 +561,7 @@ fn look_color<'a>(look: &'a mut Look, name: &str) -> Option<Slot<'a>> {
     }
 }
 
-/// The slot for a dotless top-level key, if it is one of the six.
+/// The slot for a dotless top-level key, if it is one of the nine.
 fn look_dotless<'a>(look: &'a mut Look, key: &str) -> Option<Slot<'a>> {
     match key {
         "font" => Some(Slot::FontFamily(&mut look.font_family)),
@@ -452,6 +570,18 @@ fn look_dotless<'a>(look: &'a mut Look, key: &str) -> Option<Slot<'a>> {
         "radius" => Some(Slot::Radius(&mut look.radius)),
         "shadow" => Some(Slot::Shadow(&mut look.shadow)),
         "fill" => Some(Slot::Fill(&mut look.fill)),
+        "motion" => Some(Slot::Motion(&mut look.motion.curve)),
+        "motion-duration-ms" => Some(Slot::MotionMs(&mut look.motion.duration_ms)),
+        "motion-bounce" => Some(Slot::MotionBounce(&mut look.motion.bounce)),
+        _ => None,
+    }
+}
+
+/// The slot for a `[card]` key: `enter` and `exit`.
+fn look_card<'a>(look: &'a mut Look, name: &str) -> Option<Slot<'a>> {
+    match name {
+        "enter" => Some(Slot::CardMotion(&mut look.motion.enter)),
+        "exit" => Some(Slot::CardMotion(&mut look.motion.exit)),
         _ => None,
     }
 }

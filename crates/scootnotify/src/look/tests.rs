@@ -189,3 +189,91 @@ fn a_gradient_puts_the_light_at_the_top_for_either_polarity() {
     let (top, bottom) = look.fill_stops();
     assert!(ink.contrast_ratio(top) > 4.5 && ink.contrast_ratio(bottom) > 4.5);
 }
+
+#[test]
+fn a_fragment_without_motion_moves_nothing() {
+    let (look, notes) = parse("radius = 8\n");
+    assert!(notes.is_empty());
+    assert_eq!(look.motion, MotionTokens::default());
+    assert_eq!(look.motion.curve, Curve::None);
+    assert_eq!(look.motion.timing(), Timing::NONE);
+}
+
+#[test]
+fn every_motion_key_lands() {
+    let (look, notes) = parse(
+        "motion = \"spring\"\nmotion-duration-ms = 380\nmotion-bounce = 0.25\n\
+         [card]\nenter = \"drop\"\nexit = \"scale\"\n",
+    );
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(look.motion.curve, Curve::Spring);
+    assert_eq!(look.motion.duration_ms, 380);
+    assert_eq!(look.motion.bounce, 0.25);
+    assert_eq!(look.motion.enter, CardMotion::Drop);
+    assert_eq!(look.motion.exit, CardMotion::Scale);
+    assert!(look.motion.timing().active());
+}
+
+#[test]
+fn an_integer_bounce_is_a_bounce() {
+    let (look, notes) = parse("motion-bounce = 1\n");
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(look.motion.bounce, 1.0);
+}
+
+#[test]
+fn bad_motion_values_are_named_and_ignored() {
+    let (look, notes) = parse(
+        "motion = \"bouncy\"\nmotion-duration-ms = 99999\nmotion-bounce = 4.0\n\
+         [card]\nenter = \"spin\"\nexit = 3\nleave = \"fade\"\n",
+    );
+    assert_eq!(look.motion, MotionTokens::default());
+    for key in [
+        "motion",
+        "motion-duration-ms",
+        "motion-bounce",
+        "card.enter",
+        "card.exit",
+        "card.leave",
+    ] {
+        assert!(
+            notes.iter().any(|note| note.contains(&format!("`{key}`"))),
+            "{key}: {notes:?}"
+        );
+    }
+    assert_eq!(notes.len(), 6, "{notes:?}");
+}
+
+#[test]
+fn card_that_is_not_a_table_is_skipped() {
+    let (look, notes) = parse("card = \"slide\"\n");
+    assert_eq!(look.motion, MotionTokens::default());
+    assert_eq!(notes.len(), 1, "{notes:?}");
+}
+
+#[test]
+fn a_zero_duration_or_none_is_no_motion() {
+    for text in [
+        "motion = \"none\"\nmotion-duration-ms = 300\n",
+        "motion = \"spring\"\nmotion-duration-ms = 0\n",
+    ] {
+        let (look, notes) = parse(text);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(look.motion.timing(), Timing::NONE, "{text}");
+    }
+}
+
+#[test]
+fn motion_tokens_clamp_even_when_built_by_hand() {
+    let tokens = MotionTokens {
+        curve: Curve::Spring,
+        duration_ms: u32::MAX,
+        bounce: f32::NAN,
+        ..MotionTokens::default()
+    };
+    let timing = tokens.timing();
+    assert_eq!(
+        timing.duration(),
+        std::time::Duration::from_millis(u64::from(scootui::motion::MAX_DURATION_MS))
+    );
+}

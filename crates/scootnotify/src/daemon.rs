@@ -218,11 +218,17 @@ fn run_loop(
     // so the socket adds no wakeups.
     let mut rest_until: Option<Instant> = None;
     let mut stall_anchor: Option<Instant> = None;
+    // The last poll woke on the Wayland fd alone (no bus, control, timer,
+    // exec or feed traffic): while cards animate, such a turn is a frame
+    // tick, and the store is exactly what the last layout saw.
+    let mut wayland_only = false;
     loop {
+        let tick = std::mem::take(&mut wayland_only);
         let (events, capped) = conn.pump();
         if conn.dead() {
             return LoopEnd::BusGone;
         }
+        let mut quiet = tick && events.is_empty() && !capped && !conn.has_staged_work();
         let now = Instant::now();
         let now_ms = now_ms();
         for event in events {
@@ -246,6 +252,7 @@ fn run_loop(
         }
         if let Some(popup) = popup.as_mut() {
             for event in popup.dispatch() {
+                quiet = false;
                 apply_popup(conn, server, event, &mut hovered);
                 if conn.dead() {
                     return LoopEnd::BusGone;
@@ -264,18 +271,25 @@ fn run_loop(
             &mut rest_until,
         );
         if let Some(applied) = applied {
+            quiet = false;
             apply_reload(&mut popup, feed, applied);
         }
         // Rule `exec`s fire here: spawn what the turn queued (bus and
         // control alike), then reap what exited. A spawn refusal is a
         // line on the log, never a wedge.
         for request in server.take_execs() {
+            quiet = false;
             if let Err(error) = server.spawn_exec(&request) {
                 warn(format_args!("scootnotify: {error}"));
             }
         }
         server.reap_exec();
-        if let Some(popup) = popup.as_mut() {
+        // A frame tick while cards animate changes nothing the layout
+        // reads, so it skips the layout (and the store's ordered view): an
+        // animated frame is a step and a paint, nothing else.
+        if let Some(popup) = popup.as_mut()
+            && !(quiet && popup.animating() && !popup.refresh_due())
+        {
             popup.refresh(&server.store().ordered(), now_ms);
         }
         server.fire_expiries(conn);
@@ -326,7 +340,7 @@ fn run_loop(
         // the fd speaks, dropped unread otherwise (the documented
         // read-after-poll shape: the next turn collects it).
         let guard = popup.as_ref().and_then(|popup| popup.prepare_read());
-        let (wayland, feed_watch) = poll_turn(
+        let (wayland, feed_watch, only_wayland) = poll_turn(
             conn.as_fd(),
             timer.as_fd(),
             popup.as_ref().map(|popup| popup.fd()),
@@ -338,6 +352,7 @@ fn run_loop(
             feed,
         );
         drain_timer(&timer);
+        wayland_only = only_wayland;
         if wayland && let Some(guard) = guard {
             let _ = guard.read();
         }
@@ -544,8 +559,8 @@ fn arm_timer(timer: &rustix::fd::OwnedFd, deadline: Option<Instant>) {
 /// and its clients, and the rule-exec pidfds, with a timeout only while
 /// a stalled peer's deadline, an exec child without a pidfd, the
 /// listener's rest, or the feed's push deadline or re-dial lapses.
-/// Returns whether the Wayland fd spoke, and
-/// whether the feed's watch did. The feed sets no timeout at idle or
+/// Returns whether the Wayland fd spoke,
+/// whether the feed's watch did, and whether the Wayland fd spoke alone. The feed sets no timeout at idle or
 /// while owed-with-no-bar (the watch alone): an idle daemon sleeps
 /// until the fds speak (all poll level-triggered). While a push is in
 /// flight or a re-dial is scheduled, its deadline bounds the sleep —
@@ -562,7 +577,7 @@ fn poll_turn(
     stall: Option<Duration>,
     server: &Server,
     feed: &Feed,
-) -> (bool, bool) {
+) -> (bool, bool, bool) {
     use rustix::event::{PollFd, PollFlags, Timespec, poll};
     let mut fds = Vec::with_capacity(8 + control.conns().len());
     fds.push(PollFd::new(&bus, PollFlags::IN));
@@ -623,9 +638,17 @@ fn poll_turn(
         tv_nsec: left.subsec_nanos() as _,
     });
     let _ = poll(&mut fds, timespec.as_ref());
+    let spoke = wayland_at.is_some_and(|at| !fds[at].revents().is_empty());
+    // Only the Wayland fd: every other source stayed quiet.
+    let alone = spoke
+        && fds
+            .iter()
+            .enumerate()
+            .all(|(at, fd)| Some(at) == wayland_at || fd.revents().is_empty());
     (
-        wayland_at.is_some_and(|at| !fds[at].revents().is_empty()),
+        spoke,
         feed_at.is_some_and(|at| !fds[at].revents().is_empty()),
+        alone,
     )
 }
 
