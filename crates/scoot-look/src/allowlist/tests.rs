@@ -372,3 +372,89 @@ fn a_bad_bounce_says_bounce_not_opacity() {
         );
     }
 }
+
+#[test]
+fn the_card_style_and_title_keys_belong_to_the_notifier_alone() {
+    for key in [
+        "card.mark",
+        "card.shape",
+        "card.app-accent",
+        "title.weight",
+        "title.spacing",
+    ] {
+        assert!(allows("scootnotify", key), "{key}");
+        for other in ["scootlaunch", "scootgreet", "scootbar", "scoot"] {
+            assert!(!allows(other, key), "{other} {key}");
+        }
+    }
+    let text = |s: &str| toml::Value::String(s.to_string());
+    for mark in CARD_MARKS {
+        assert!(check_app_value("scootnotify", "card.mark", &text(mark)).is_none());
+    }
+    for shape in CARD_SHAPES {
+        assert!(check_app_value("scootnotify", "card.shape", &text(shape)).is_none());
+    }
+    for (key, bad) in [
+        ("card.mark", "ribbon"),
+        ("card.mark", "Stripe"),
+        ("card.mark", ""),
+        ("card.shape", "round"),
+        ("card.shape", "64"),
+    ] {
+        assert!(
+            check_app_value("scootnotify", key, &text(bad)).is_some(),
+            "{key}={bad}"
+        );
+    }
+}
+
+#[test]
+fn the_app_accent_is_a_boolean_and_nothing_else() {
+    for ok in [true, false] {
+        assert!(
+            check_app_value("scootnotify", "card.app-accent", &toml::Value::Boolean(ok)).is_none()
+        );
+    }
+    for bad in [
+        toml::Value::Integer(1),
+        toml::Value::String("true".into()),
+        toml::Value::Float(1.0),
+    ] {
+        assert!(check_app_value("scootnotify", "card.app-accent", &bad).is_some());
+    }
+}
+
+#[test]
+fn title_numbers_are_range_checked() {
+    let int = toml::Value::Integer;
+    for ok in [100, 400, 700, 900] {
+        assert!(check_app_value("scootnotify", "title.weight", &int(ok)).is_none());
+    }
+    for bad in [-1, 0, 99, 901, i64::MAX, i64::MIN] {
+        assert!(
+            check_app_value("scootnotify", "title.weight", &int(bad)).is_some(),
+            "{bad}"
+        );
+    }
+    for ok in [-2, 0, 1, 8] {
+        assert!(check_app_value("scootnotify", "title.spacing", &int(ok)).is_none());
+    }
+    for bad in [-3, 9, i64::MAX, i64::MIN] {
+        assert!(
+            check_app_value("scootnotify", "title.spacing", &int(bad)).is_some(),
+            "{bad}"
+        );
+    }
+    assert!(check_app_value("scootnotify", "title.spacing", &toml::Value::Float(1.5)).is_some());
+}
+
+#[test]
+fn the_shared_radius_bound_is_unchanged_for_every_app() {
+    // Pill is a notifier token, not a wider radius: nothing that reads
+    // `radius` (the shell apps, scoot's corner_radius, the config) sees a
+    // new bound.
+    for app in ["scootnotify", "scootlaunch", "scootgreet"] {
+        assert!(check_app_value(app, "radius", &toml::Value::Integer(64)).is_none());
+        assert!(check_app_value(app, "radius", &toml::Value::Integer(65)).is_some());
+    }
+}

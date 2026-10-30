@@ -1285,3 +1285,46 @@ fn a_hand_built_look_with_a_bad_motion_value_is_refused_not_rendered() {
     // An app that never reads the keys does not look at them.
     assert!(render_launch(&look).is_ok());
 }
+
+#[test]
+fn card_style_and_title_overrides_render_into_their_tables_once() {
+    let look = with_effects(
+        "[apps.scootnotify]\n\"card.mark\" = \"badge\"\n\"card.shape\" = \"pill\"\n\"card.app-accent\" = true\n\"card.enter\" = \"fade\"\n\"title.weight\" = 600\n\"title.spacing\" = -1\n",
+    );
+    let text = render_notify(&look).expect("renders");
+    let parsed: toml::Table = toml::from_str(&text).expect("each key is emitted once");
+    assert_eq!(parsed["card"]["mark"].as_str(), Some("badge"));
+    assert_eq!(parsed["card"]["shape"].as_str(), Some("pill"));
+    assert_eq!(parsed["card"]["app-accent"].as_bool(), Some(true));
+    assert_eq!(parsed["card"]["enter"].as_str(), Some("fade"));
+    assert_eq!(parsed["title"]["weight"].as_integer(), Some(600));
+    assert_eq!(parsed["title"]["spacing"].as_integer(), Some(-1));
+}
+
+#[test]
+fn a_look_without_card_style_or_title_keys_renders_neither_table() {
+    let frag = render_notify(&moonrise()).expect("renders");
+    for key in [
+        "[card]",
+        "[title]",
+        "mark",
+        "app-accent",
+        "weight",
+        "spacing",
+    ] {
+        assert!(!frag.contains(key), "{key}: {frag}");
+    }
+}
+
+#[test]
+fn card_style_keys_reach_the_notifier_fragment_and_no_other() {
+    let look =
+        with_effects("[apps.scootnotify]\n\"card.mark\" = \"stripe\"\n\"title.weight\" = 500\n");
+    for other in [render_launch(&look), render_greet(&look)] {
+        let other = other.expect("renders");
+        assert!(
+            !other.contains("stripe") && !other.contains("[title]"),
+            "{other}"
+        );
+    }
+}

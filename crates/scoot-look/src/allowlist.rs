@@ -140,10 +140,23 @@ pub const MOTION_CURVES: &[&str] = &["none", "ease-out", "spring"];
 /// arrives and leaves.
 pub const CARD_MOTIONS: &[&str] = &["slide", "fade", "scale", "drop"];
 
+/// The `card.mark` values: the accent marker a notification card carries.
+pub const CARD_MARKS: &[&str] = &["none", "stripe", "dot", "badge"];
+
+/// The `card.shape` values: the card's outline.
+pub const CARD_SHAPES: &[&str] = &["rounded", "pill"];
+
+/// The `title.weight` range (CSS-style weights): 100 to 900.
+pub const TITLE_WEIGHT_RANGE: (i64, i64) = (100, 900);
+
+/// The `title.spacing` range, in logical pixels per character.
+pub const TITLE_SPACING_RANGE: (i64, i64) = (-2, 8);
+
 /// The longest `motion-duration-ms`, matching the shell's own clamp.
 pub const MOTION_DURATION_MAX_MS: i64 = 1000;
 
-/// The depth and motion keys only `scootnotify` reads so far, on top of
+/// The depth, motion, card-style and typography keys only `scootnotify`
+/// reads so far, on top of
 /// [`SHELL_APP_ALLOWLIST`]. They are not in the shared list because an app
 /// that never reads one would report it as an unknown look key on every
 /// load; each app joins as it learns the key.
@@ -155,6 +168,11 @@ pub const NOTIFY_DEPTH_KEYS: &[&str] = &[
     "motion-bounce",
     "card.enter",
     "card.exit",
+    "card.mark",
+    "card.shape",
+    "card.app-accent",
+    "title.weight",
+    "title.spacing",
 ];
 
 /// Whether `key` (an `[apps.<app>]` dotted key) is allowlisted for `app`.
@@ -288,7 +306,8 @@ pub enum ValueKind {
     ImagePath,
     /// At most two identifiers (the bar's `MAX_FALLBACKS`).
     FontList,
-    /// A TOML boolean. Only `workspaces.disc` takes one today; the kind
+    /// A TOML boolean. `workspaces.disc` and the notifier's
+    /// `card.app-accent` take one today; the kind
     /// exists so adding one cannot fall back to an unchecked scalar.
     Bool,
 }
@@ -395,6 +414,17 @@ pub fn value_kind(app: &str, key: &str) -> Option<ValueKind> {
             "card.enter" | "card.exit" if app == "scootnotify" => {
                 Some(ValueKind::Enum(CARD_MOTIONS))
             }
+            "card.mark" if app == "scootnotify" => Some(ValueKind::Enum(CARD_MARKS)),
+            "card.shape" if app == "scootnotify" => Some(ValueKind::Enum(CARD_SHAPES)),
+            "card.app-accent" if app == "scootnotify" => Some(ValueKind::Bool),
+            "title.weight" if app == "scootnotify" => Some(ValueKind::IntRange {
+                min: TITLE_WEIGHT_RANGE.0,
+                max: TITLE_WEIGHT_RANGE.1,
+            }),
+            "title.spacing" if app == "scootnotify" => Some(ValueKind::IntRange {
+                min: TITLE_SPACING_RANGE.0,
+                max: TITLE_SPACING_RANGE.1,
+            }),
             _ => None,
         },
         _ => None,

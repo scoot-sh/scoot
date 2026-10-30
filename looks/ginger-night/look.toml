@@ -52,6 +52,9 @@ transition = "fade"
 [night]
 temperature = 3300
 
+[apps.scootnotify]
+"card.mark" = "stripe"
+
 [apps.scootbar]
 "bar.padding" = 10
 "bar.separator" = 1
