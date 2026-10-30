@@ -51,20 +51,72 @@ impl Canvas<'_> {
             // corners, or all of it outside the corner bands.
             let (mut run_from, mut run_to) = (rect.x, x_end);
             if in_corner_band {
-                // Left corner square, then the right one, pixel by pixel.
+                // Each corner square of the row is three stretches: clear
+                // (coverage 0), the anti-aliased few, and whole (a run).
+                // Coverage grows toward the shape inward, so the two
+                // boundaries are found by search instead of evaluating
+                // every pixel: a pill's 36 px corners cost a few
+                // evaluations a row, not 36.
                 let left_end = rect.x.saturating_add(radius).min(x_end);
-                for x in rect.x..left_end {
+                let covered = |x: u32| rounded_coverage(x, y, rect, radius);
+                let seen = first_where(rect.x, left_end, |x| covered(x) > 0);
+                let whole = first_where(seen, left_end, |x| covered(x) == 255);
+                for x in seen..whole {
                     self.blend_covered(x, y, rect, radius, alpha, color);
                 }
+                self.blend_run(whole, left_end, y, alpha, color);
                 run_from = left_end;
                 let right_start = u32::try_from(right_corner).unwrap_or(u32::MAX);
-                for x in right_start.max(run_from)..x_end {
+                let first = right_start.max(run_from);
+                let whole_end = first_where(first, x_end, |x| covered(x) < 255);
+                let gone = first_where(whole_end, x_end, |x| covered(x) == 0);
+                self.blend_run(first, whole_end, y, alpha, color);
+                for x in whole_end..gone {
                     self.blend_covered(x, y, rect, radius, alpha, color);
                 }
                 run_to = right_start.min(x_end);
             }
             if run_from < run_to {
                 self.blend_run(run_from, run_to, y, alpha, color);
+            }
+        }
+    }
+
+    /// Paints the leftmost `width` columns of the rounded rectangle `rect`
+    /// (clipped to the canvas, corners of `radius` cut back to what the
+    /// rectangle holds) in `color`, opaque, shaped by the same coverage as
+    /// [`Canvas::fill_rounded_gradient`]: an accent bar down a card's
+    /// leading edge that follows the card's corners instead of spilling
+    /// past them. A `width` past the rectangle's is its whole width. The
+    /// straight rows are plain stores; only the corner rows compute
+    /// coverage. Premultiplied `ARGB8888` only. Allocates nothing.
+    pub fn fill_rounded_edge(&mut self, rect: Rect, radius: u32, width: u32, color: Color) {
+        if rect.width == 0 || rect.height == 0 || width == 0 {
+            return;
+        }
+        let radius = effective_radius(radius, rect.width, rect.height);
+        let x_end = rect
+            .x
+            .saturating_add(width.min(rect.width))
+            .min(self.width());
+        let y_end = rect.y.saturating_add(rect.height).min(self.height());
+        let clip = Span {
+            x: 0,
+            width: self.width(),
+        };
+        for y in rect.y..y_end {
+            let from_top = y - rect.y;
+            let from_bottom = rect.height - 1 - from_top;
+            if radius == 0 || (from_top >= radius && from_bottom >= radius) {
+                self.blend_run(rect.x, x_end, y, 255, color);
+                continue;
+            }
+            for x in rect.x..x_end {
+                match rounded_coverage(x, y, rect, radius) {
+                    0 => {}
+                    255 => self.blend_run(x, x + 1, y, 255, color),
+                    coverage => self.blend(i64::from(x), i64::from(y), coverage, color, clip),
+                }
             }
         }
     }
@@ -122,6 +174,22 @@ impl Canvas<'_> {
             *pad = mix(0xff, *pad);
         }
     }
+}
+
+/// The first `x` in `from..to` where `test` holds, or `to` when none does,
+/// for a `test` that is false and then true across the range (a corner's
+/// coverage is monotone along a row): a binary search.
+fn first_where(from: u32, to: u32, test: impl Fn(u32) -> bool) -> u32 {
+    let (mut low, mut high) = (from, to.max(from));
+    while low < high {
+        let mid = low + (high - low) / 2;
+        if test(mid) {
+            high = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+    low
 }
 
 /// The gradient's color at row `row` of `rows`: sampled at the row's

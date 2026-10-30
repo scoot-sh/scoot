@@ -1,0 +1,263 @@
+# Before the corner-search optimization: branch 7f06ecd02 plus bench_styles.rs (uncommitted then); main 39c0cd4b1
+### run 1 main bench_depth (39c0cd4b1)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 157.5 92.2 52.2
+Soft Solid 384x498 191232 298.2 170.0 45.8
+Deep Solid 416x530 220480 500.2 369.2 73.5
+Glow Solid 392x506 198352 463.7 157.5 43.7
+None Gradient 360x474 170640 186.0 134.6 39.5
+Soft Gradient 384x498 191232 369.0 224.2 65.1
+### run 1 branch bench_depth (7f06ecd02 + bench_styles.rs)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 213.8 133.3 63.5
+Soft Solid 384x498 191232 362.9 223.9 31.4
+Deep Solid 416x530 220480 572.7 365.7 59.7
+Glow Solid 392x506 198352 420.2 259.9 65.4
+None Gradient 360x474 170640 178.1 133.6 62.3
+Soft Gradient 384x498 191232 265.3 224.6 65.2
+### run 2 main bench_depth (39c0cd4b1)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 146.3 132.6 140.8
+Soft Solid 384x498 191232 241.4 223.1 38.3
+Deep Solid 416x530 220480 420.7 366.2 34.7
+Glow Solid 392x506 198352 300.6 258.4 39.1
+None Gradient 360x474 170640 140.9 131.8 28.1
+Soft Gradient 384x498 191232 251.1 223.8 30.4
+### run 2 branch bench_depth (7f06ecd02 + bench_styles.rs)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 149.5 134.4 58.4
+Soft Solid 384x498 191232 241.8 145.8 63.9
+Deep Solid 416x530 220480 397.6 364.2 71.8
+Glow Solid 392x506 198352 416.2 259.1 65.1
+None Gradient 360x474 170640 180.4 133.9 59.0
+Soft Gradient 384x498 191232 374.3 224.8 63.0
+### run 3 main bench_depth (39c0cd4b1)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 169.3 131.8 38.6
+Soft Solid 384x498 191232 301.2 223.2 66.2
+Deep Solid 416x530 220480 582.7 368.2 46.5
+Glow Solid 392x506 198352 372.5 257.0 65.0
+None Gradient 360x474 170640 176.4 133.4 37.3
+Soft Gradient 384x498 191232 312.0 223.0 54.5
+### run 3 branch bench_depth (7f06ecd02 + bench_styles.rs)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 164.8 132.4 51.5
+Soft Solid 384x498 191232 299.9 224.3 42.2
+Deep Solid 416x530 220480 525.0 368.9 58.6
+Glow Solid 392x506 198352 357.8 258.2 46.8
+None Gradient 360x474 170640 165.8 133.3 60.0
+Soft Gradient 384x498 191232 263.5 224.3 70.7
+### run 4 main bench_depth (39c0cd4b1)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 189.0 132.7 56.0
+Soft Solid 384x498 191232 370.0 223.8 53.1
+Deep Solid 416x530 220480 514.8 365.1 62.4
+Glow Solid 392x506 198352 376.8 259.2 43.0
+None Gradient 360x474 170640 156.8 131.8 45.1
+Soft Gradient 384x498 191232 303.6 224.0 43.7
+### run 4 branch bench_depth (7f06ecd02 + bench_styles.rs)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 181.1 134.4 61.8
+Soft Solid 384x498 191232 416.3 223.2 65.8
+Deep Solid 416x530 220480 592.8 368.1 70.3
+Glow Solid 392x506 198352 375.5 258.5 47.3
+None Gradient 360x474 170640 182.1 133.7 62.0
+Soft Gradient 384x498 191232 377.2 224.9 68.9
+### run 5 main bench_depth (39c0cd4b1)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 154.4 117.3 59.8
+Soft Solid 384x498 191232 296.6 223.4 64.0
+Deep Solid 416x530 220480 496.5 365.8 72.8
+Glow Solid 392x506 198352 424.3 257.2 55.6
+None Gradient 360x474 170640 181.7 110.0 36.0
+Soft Gradient 384x498 191232 301.6 223.6 63.1
+### run 5 branch bench_depth (7f06ecd02 + bench_styles.rs)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 186.1 134.0 51.4
+Soft Solid 384x498 191232 276.2 225.0 56.0
+Deep Solid 416x530 220480 596.8 368.0 42.5
+Glow Solid 392x506 198352 346.5 257.1 53.3
+None Gradient 360x474 170640 196.9 134.0 61.5
+Soft Gradient 384x498 191232 350.3 224.4 46.5
+### run 6 main bench_depth (39c0cd4b1)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 178.8 131.7 35.6
+Soft Solid 384x498 191232 298.2 222.8 52.6
+Deep Solid 416x530 220480 565.5 367.3 63.5
+Glow Solid 392x506 198352 341.8 256.8 69.5
+None Gradient 360x474 170640 155.2 133.2 57.0
+Soft Gradient 384x498 191232 303.5 223.4 50.0
+### run 6 branch bench_depth (7f06ecd02 + bench_styles.rs)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 180.8 133.1 51.2
+Soft Solid 384x498 191232 335.0 225.6 54.0
+Deep Solid 416x530 220480 531.4 367.9 69.7
+Glow Solid 392x506 198352 352.1 258.7 62.5
+None Gradient 360x474 170640 159.7 133.1 43.2
+Soft Gradient 384x498 191232 283.3 226.0 64.2
+### run 1 branch bench_styles
+style surface paint-median-us paint-p5-us layout-median-us (best of 9 rounds)
+default 360x474 208.0 135.3 20.2
+stripe 360x474 225.2 139.1 19.8
+dot 360x474 221.8 137.1 25.2
+badge 360x474 243.8 148.2 33.2
+badge+app-accent 360x474 197.1 147.5 42.3
+pill 360x474 644.9 471.5 22.5
+pill+soft+badge+accent 384x498 1024.6 629.1 29.5
+title-regular 360x474 152.8 127.6 22.2
+title-heavy+spacing 360x474 193.6 141.5 19.8
+### run 2 branch bench_styles
+style surface paint-median-us paint-p5-us layout-median-us (best of 9 rounds)
+default 360x474 182.5 135.5 22.9
+stripe 360x474 160.5 136.8 19.0
+dot 360x474 164.0 137.9 21.8
+badge 360x474 198.0 147.2 20.5
+badge+app-accent 360x474 238.4 148.2 30.3
+pill 360x474 636.6 470.9 19.9
+pill+soft+badge+accent 384x498 892.3 629.0 26.9
+title-regular 360x474 219.4 127.5 19.5
+title-heavy+spacing 360x474 172.7 142.2 22.3
+### run 3 branch bench_styles
+style surface paint-median-us paint-p5-us layout-median-us (best of 9 rounds)
+default 360x474 185.6 136.1 26.0
+stripe 360x474 197.6 137.1 22.0
+dot 360x474 189.0 137.5 19.6
+badge 360x474 199.8 147.9 21.3
+badge+app-accent 360x474 199.7 149.1 30.3
+pill 360x474 719.0 473.6 22.8
+pill+soft+badge+accent 384x498 1033.7 630.2 30.5
+title-regular 360x474 168.7 124.3 22.5
+title-heavy+spacing 360x474 170.4 141.8 19.5
+DONE
+
+# Final: branch 95af2f594; main 39c0cd4b1
+### run 1 main bench_depth (39c0cd4b1)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 179.6 123.5 61.1
+Soft Solid 384x498 191232 301.2 224.0 64.6
+Deep Solid 416x530 220480 492.4 368.1 49.3
+Glow Solid 392x506 198352 348.1 258.0 64.6
+None Gradient 360x474 170640 157.4 131.7 62.4
+Soft Gradient 384x498 191232 290.2 225.1 63.2
+### run 1 branch bench_depth (7f06ecd02 + bench_styles.rs)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 161.3 115.8 42.7
+Soft Solid 384x498 191232 293.8 205.0 45.5
+Deep Solid 416x530 220480 603.8 257.3 69.3
+Glow Solid 392x506 198352 427.0 256.1 65.4
+None Gradient 360x474 170640 173.7 124.5 62.3
+Soft Gradient 384x498 191232 328.3 220.7 37.5
+### run 2 main bench_depth (39c0cd4b1)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 198.4 121.8 52.7
+Soft Solid 384x498 191232 299.5 224.2 41.2
+Deep Solid 416x530 220480 586.4 368.1 46.0
+Glow Solid 392x506 198352 344.3 255.3 43.6
+None Gradient 360x474 170640 141.7 121.6 43.1
+Soft Gradient 384x498 191232 300.4 223.8 39.3
+### run 2 branch bench_depth (7f06ecd02 + bench_styles.rs)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 152.3 84.9 41.0
+Soft Solid 384x498 191232 166.8 136.8 66.2
+Deep Solid 416x530 220480 256.1 224.0 72.6
+Glow Solid 392x506 198352 245.1 156.1 70.6
+None Gradient 360x474 170640 218.0 83.9 63.3
+Soft Gradient 384x498 191232 302.4 219.7 57.6
+### run 3 main bench_depth (39c0cd4b1)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 153.9 121.9 37.8
+Soft Solid 384x498 191232 304.9 224.6 65.4
+Deep Solid 416x530 220480 543.4 367.7 30.5
+Glow Solid 392x506 198352 348.5 256.8 36.9
+None Gradient 360x474 170640 156.5 133.2 52.5
+Soft Gradient 384x498 191232 287.1 225.4 41.3
+### run 3 branch bench_depth (7f06ecd02 + bench_styles.rs)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 172.9 128.5 72.8
+Soft Solid 384x498 191232 301.1 224.4 65.3
+Deep Solid 416x530 220480 545.0 371.6 53.3
+Glow Solid 392x506 198352 381.7 259.6 67.5
+None Gradient 360x474 170640 192.3 129.9 59.7
+Soft Gradient 384x498 191232 351.0 225.1 36.5
+### run 4 main bench_depth (39c0cd4b1)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 183.0 132.3 39.2
+Soft Solid 384x498 191232 264.7 203.7 38.1
+Deep Solid 416x530 220480 566.0 308.2 49.6
+Glow Solid 392x506 198352 309.4 257.0 64.9
+None Gradient 360x474 170640 159.4 132.2 47.1
+Soft Gradient 384x498 191232 298.2 225.5 63.3
+### run 4 branch bench_depth (7f06ecd02 + bench_styles.rs)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 159.2 128.4 35.8
+Soft Solid 384x498 191232 349.8 220.9 45.5
+Deep Solid 416x530 220480 663.4 363.8 61.8
+Glow Solid 392x506 198352 370.9 254.0 467.5
+None Gradient 360x474 170640 174.9 130.2 58.5
+Soft Gradient 384x498 191232 287.8 222.4 52.4
+### run 5 main bench_depth (39c0cd4b1)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 214.7 132.6 58.6
+Soft Solid 384x498 191232 298.1 223.7 66.0
+Deep Solid 416x530 220480 533.6 366.7 60.4
+Glow Solid 392x506 198352 372.4 255.7 95.7
+None Gradient 360x474 170640 176.4 132.2 50.5
+Soft Gradient 384x498 191232 318.0 223.8 36.8
+### run 5 branch bench_depth (7f06ecd02 + bench_styles.rs)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 172.0 129.5 60.2
+Soft Solid 384x498 191232 293.2 219.3 66.3
+Deep Solid 416x530 220480 542.7 364.4 50.3
+Glow Solid 392x506 198352 413.5 253.4 65.0
+None Gradient 360x474 170640 156.0 129.2 60.0
+Soft Gradient 384x498 191232 267.0 222.5 64.8
+### run 6 main bench_depth (39c0cd4b1)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 179.1 132.1 59.2
+Soft Solid 384x498 191232 302.0 178.9 48.1
+Deep Solid 416x530 220480 450.0 366.5 61.1
+Glow Solid 392x506 198352 340.3 256.6 64.0
+None Gradient 360x474 170640 171.3 134.7 52.3
+Soft Gradient 384x498 191232 322.8 223.7 36.9
+### run 6 branch bench_depth (7f06ecd02 + bench_styles.rs)
+style fill surface surface-px median-us(best of 9 rounds) p5-us(best of 9 rounds) layout+tables-us
+None Solid 360x474 170640 176.0 130.0 60.2
+Soft Solid 384x498 191232 275.6 219.7 45.0
+Deep Solid 416x530 220480 568.9 275.0 61.3
+Glow Solid 392x506 198352 413.0 255.6 45.8
+None Gradient 360x474 170640 177.0 107.9 53.2
+Soft Gradient 384x498 191232 297.6 220.9 62.9
+### run 1 branch bench_styles
+style surface paint-median-us paint-p5-us layout-median-us (best of 9 rounds)
+default 360x474 176.8 117.3 19.8
+stripe 360x474 156.0 87.2 19.4
+dot 360x474 139.9 80.5 19.0
+badge 360x474 174.8 139.1 20.9
+badge+app-accent 360x474 225.7 84.2 27.3
+pill 360x474 108.8 103.5 19.7
+pill+soft+badge+accent 384x498 206.1 195.8 16.3
+title-regular 360x474 168.4 77.3 22.0
+title-heavy+spacing 360x474 162.0 137.5 20.2
+### run 2 branch bench_styles
+style surface paint-median-us paint-p5-us layout-median-us (best of 9 rounds)
+default 360x474 177.8 130.7 19.5
+stripe 360x474 157.1 132.6 22.8
+dot 360x474 180.5 132.6 20.7
+badge 360x474 173.4 139.8 20.6
+badge+app-accent 360x474 164.1 139.8 26.2
+pill 360x474 262.1 170.4 22.1
+pill+soft+badge+accent 384x498 470.5 323.1 27.7
+title-regular 360x474 167.7 125.0 13.1
+title-heavy+spacing 360x474 166.4 137.7 19.1
+### run 3 branch bench_styles
+style surface paint-median-us paint-p5-us layout-median-us (best of 9 rounds)
+default 360x474 175.6 131.5 25.8
+stripe 360x474 180.4 121.2 21.7
+dot 360x474 180.2 135.2 19.0
+badge 360x474 227.6 139.4 27.4
+badge+app-accent 360x474 224.1 139.0 34.2
+pill 360x474 227.2 170.8 25.5
+pill+soft+badge+accent 384x498 457.2 322.5 26.2
+title-regular 360x474 141.4 122.8 22.2
+title-heavy+spacing 360x474 192.8 139.8 19.9
+DONE

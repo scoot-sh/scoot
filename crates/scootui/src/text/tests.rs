@@ -391,3 +391,54 @@ fn the_cache_stays_bounded_under_a_fuzzed_title_stream() {
     }
     assert!(peak > 100, "the stream did not exercise the cache: {peak}");
 }
+
+#[test]
+fn tracking_widens_the_pen_and_zero_is_the_plain_draw() {
+    let mut plain = vec![0u8; 80 * 20 * 4];
+    let mut tracked = plain.clone();
+    let mut zero = plain.clone();
+    let mut text = text();
+    let clip = Span { x: 0, width: 80 };
+    text.draw(
+        &mut Canvas::new(&mut plain, 80, 20).unwrap(),
+        None,
+        "123",
+        12.0,
+        2,
+        14,
+        FG,
+        clip,
+    );
+    text.draw_tracked(
+        &mut Canvas::new(&mut zero, 80, 20).unwrap(),
+        None,
+        "123",
+        12.0,
+        0.0,
+        2,
+        14,
+        FG,
+        clip,
+    );
+    assert_eq!(plain, zero, "zero tracking draws what draw draws");
+    text.draw_tracked(
+        &mut Canvas::new(&mut tracked, 80, 20).unwrap(),
+        None,
+        "123",
+        12.0,
+        4.0,
+        2,
+        14,
+        FG,
+        clip,
+    );
+    assert_ne!(plain, tracked);
+    assert_eq!(Text::tracking_extra("123", 4.0), 12.0);
+    assert_eq!(
+        Text::tracking_extra("a\u{7}b", 2.0),
+        4.0,
+        "controls do not step"
+    );
+    assert_eq!(Text::tracking_extra("123", f32::NAN), 0.0);
+    assert_eq!(Text::tracking_extra("123", f32::INFINITY), 0.0);
+}

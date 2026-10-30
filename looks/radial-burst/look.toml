@@ -47,6 +47,11 @@ motion-bounce = 0.6
 [apps.scootnotify]
 "card.enter" = "scale"
 "card.exit" = "fade"
+"card.mark" = "badge"
+"card.shape" = "pill"
+"card.app-accent" = true
+"title.weight" = 800
+"title.spacing" = 1
 
 [cursor]
 theme = "Mocu"

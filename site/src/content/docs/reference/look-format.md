@@ -122,7 +122,8 @@ supplies them, and a fragment without one carries neither key.
 `scootnotify`, `scootlaunch` and `scootgreet` take the thirteen
 color roles plus face, size, opacity and radius. `scootnotify` also
 takes `shadow`, `fill`, `motion`, `motion-duration-ms` and `motion-bounce`
-(the `[effects]` values, per app) and `card.enter` and `card.exit`; the
+(the `[effects]` values, per app), `card.enter`, `card.exit`, `card.mark`,
+`card.shape`, `card.app-accent`, `title.weight` and `title.spacing`; the
 other two refuse them, since they would report an unknown key on every
 load.
 
@@ -152,6 +153,11 @@ no key whose value gets only a length check.
 | `scootnotify` `motion-duration-ms` | whole number, 0 to 1000 |
 | `scootnotify` `motion-bounce` | number, 0 to 1 |
 | `scootnotify` `card.enter`, `card.exit` | `slide`, `fade`, `scale` or `drop` |
+| `scootnotify` `card.mark` | `none`, `stripe`, `dot` or `badge` |
+| `scootnotify` `card.shape` | `rounded` or `pill` |
+| `scootnotify` `card.app-accent` | `true` or `false` |
+| `scootnotify` `title.weight` | whole number, 100 to 900 |
+| `scootnotify` `title.spacing` | whole number, -2 to 8 |
 
 A URL wallpaper cannot be overridden per app: its `sha256` pin has
 no place in an override, so per-app `image` values refuse URLs.
@@ -249,7 +255,10 @@ replaces the derived role, and a dotless key (`font`, `font-size`,
 once. A look that sets `[effects]` adds top-level `shadow`, `fill`,
 `motion`, `motion-duration-ms` and `motion-bounce` keys, and a `[card]`
 table for `card.enter` and `card.exit` overrides, to `notify.toml` only;
-`launch.toml` and `greet.toml` never carry them. scootlaunch reads its fragment at every open; scootnotify reads
+`launch.toml` and `greet.toml` never carry them. The notifier's other
+card keys (`card.mark`, `card.shape`, `card.app-accent`) join that `[card]`
+table and `title.weight` and `title.spacing` a `[title]` table, each only
+when the look sets them. scootlaunch reads its fragment at every open; scootnotify reads
 its own at start and on `msg reload --look` (which `scoot look apply`
 sends live). `greet.toml` carries the
 login screen's look, read at system build time only. `scoot look

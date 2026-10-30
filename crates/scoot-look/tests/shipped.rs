@@ -628,6 +628,7 @@ const SHELL_EFFECT_KEYS: &[&str] = &[
     "motion-duration-ms",
     "motion-bounce",
     "card",
+    "title",
 ];
 
 #[test]
@@ -645,9 +646,14 @@ fn only_ginger_night_and_radial_burst_opt_in_and_only_radial_burst_moves() {
                     !notify.contains_key("fill"),
                     "ginger-night keeps a solid fill"
                 );
-                for key in ["motion", "motion-duration-ms", "motion-bounce", "card"] {
+                for key in ["motion", "motion-duration-ms", "motion-bounce", "title"] {
                     assert!(!notify.contains_key(key), "ginger-night sets no `{key}`");
                 }
+                // The one card token it sets: the accent stripe (no motion,
+                // no pill, no per-app color, no title style).
+                let card = notify["card"].as_table().expect("a [card] table");
+                assert_eq!(card.len(), 1, "{card:?}");
+                assert_eq!(card["mark"].as_str(), Some("stripe"));
             }
             "radial-burst" => {
                 assert_eq!(notify["shadow"].as_str(), Some("glow"));
@@ -656,6 +662,11 @@ fn only_ginger_night_and_radial_burst_opt_in_and_only_radial_burst_moves() {
                 assert_eq!(notify["motion-bounce"].as_float(), Some(0.6));
                 assert_eq!(notify["card"]["enter"].as_str(), Some("scale"));
                 assert_eq!(notify["card"]["exit"].as_str(), Some("fade"));
+                assert_eq!(notify["card"]["mark"].as_str(), Some("badge"));
+                assert_eq!(notify["card"]["shape"].as_str(), Some("pill"));
+                assert_eq!(notify["card"]["app-accent"].as_bool(), Some(true));
+                assert_eq!(notify["title"]["weight"].as_integer(), Some(800));
+                assert_eq!(notify["title"]["spacing"].as_integer(), Some(1));
             }
             _ => {
                 // A look that does not opt in renders the fragment it always did.
