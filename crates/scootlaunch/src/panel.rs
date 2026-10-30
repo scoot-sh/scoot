@@ -2070,9 +2070,12 @@ impl Dispatch<wl_buffer::WlBuffer, ()> for App {
         _: &Connection,
         _: &QueueHandle<App>,
     ) {
+        // A release only frees the slot. A draw that found none free left
+        // `dirty` set and waits in the poll for this; setting it here
+        // redrew every frame the compositor released, so one keystroke
+        // kept the panel committing for as long as it stayed open.
         if let wl_buffer::Event::Release = event {
             app.buffers.released(buffer);
-            app.dirty = true;
         }
     }
 }
