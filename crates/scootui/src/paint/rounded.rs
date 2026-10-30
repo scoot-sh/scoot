@@ -69,6 +69,45 @@ impl Canvas<'_> {
         }
     }
 
+    /// Paints the leftmost `width` columns of the rounded rectangle `rect`
+    /// (clipped to the canvas, corners of `radius` cut back to what the
+    /// rectangle holds) in `color`, opaque, shaped by the same coverage as
+    /// [`Canvas::fill_rounded_gradient`]: an accent bar down a card's
+    /// leading edge that follows the card's corners instead of spilling
+    /// past them. A `width` past the rectangle's is its whole width. The
+    /// straight rows are plain stores; only the corner rows compute
+    /// coverage. Premultiplied `ARGB8888` only. Allocates nothing.
+    pub fn fill_rounded_edge(&mut self, rect: Rect, radius: u32, width: u32, color: Color) {
+        if rect.width == 0 || rect.height == 0 || width == 0 {
+            return;
+        }
+        let radius = effective_radius(radius, rect.width, rect.height);
+        let x_end = rect
+            .x
+            .saturating_add(width.min(rect.width))
+            .min(self.width());
+        let y_end = rect.y.saturating_add(rect.height).min(self.height());
+        let clip = Span {
+            x: 0,
+            width: self.width(),
+        };
+        for y in rect.y..y_end {
+            let from_top = y - rect.y;
+            let from_bottom = rect.height - 1 - from_top;
+            if radius == 0 || (from_top >= radius && from_bottom >= radius) {
+                self.blend_run(rect.x, x_end, y, 255, color);
+                continue;
+            }
+            for x in rect.x..x_end {
+                match rounded_coverage(x, y, rect, radius) {
+                    0 => {}
+                    255 => self.blend_run(x, x + 1, y, 255, color),
+                    coverage => self.blend(i64::from(x), i64::from(y), coverage, color, clip),
+                }
+            }
+        }
+    }
+
     /// One corner pixel: the fill's alpha times the circle's coverage,
     /// through one blend.
     fn blend_covered(&mut self, x: u32, y: u32, rect: Rect, radius: u32, alpha: u8, color: Color) {

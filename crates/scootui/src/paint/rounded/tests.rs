@@ -214,3 +214,65 @@ fn runs_match_the_pixel_by_pixel_fill_byte_for_byte() {
         );
     }
 }
+
+#[test]
+fn an_edge_stripe_covers_only_its_columns_and_follows_the_corners() {
+    let mut pixels = vec![0u8; 24 * 16 * 4];
+    let mut canvas = Canvas::new(&mut pixels, 24, 16).unwrap();
+    canvas.fill_rounded_edge(rect(2, 1, 20, 14), 6, 3, RED);
+    // The straight rows: three opaque columns and nothing past them.
+    for x in 2..5 {
+        assert_eq!(pixel(&pixels, 24, x, 8), [0, 0, 200, 255], "x {x}");
+    }
+    assert_eq!(pixel(&pixels, 24, 5, 8), [0, 0, 0, 0]);
+    assert_eq!(pixel(&pixels, 24, 1, 8), [0, 0, 0, 0]);
+    // The cut corner stays clear and its edge is anti-aliased: the stripe
+    // never leaves the rounded shape.
+    assert_eq!(pixel(&pixels, 24, 2, 1), [0, 0, 0, 0]);
+    let edge = pixel(&pixels, 24, 3, 1);
+    assert!(edge[3] < 255, "{edge:?}");
+    // Every stripe pixel lies inside the shape the fill itself would draw.
+    let mut fill = vec![0u8; 24 * 16 * 4];
+    let mut canvas = Canvas::new(&mut fill, 24, 16).unwrap();
+    canvas.fill_rounded_gradient(rect(2, 1, 20, 14), 6, RED, RED, 255);
+    for (stripe, whole) in pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(fill.as_chunks::<4>().0)
+    {
+        assert!(stripe[3] <= whole[3], "{stripe:?} outside {whole:?}");
+    }
+}
+
+#[test]
+fn an_edge_stripe_with_square_corners_or_too_wide_is_a_plain_fill() {
+    let mut pixels = vec![0u8; 10 * 6 * 4];
+    let mut canvas = Canvas::new(&mut pixels, 10, 6).unwrap();
+    canvas.fill_rounded_edge(rect(1, 1, 4, 4), 0, 99, RED);
+    for y in 1..5 {
+        for x in 1..5 {
+            assert_eq!(pixel(&pixels, 10, x, y), [0, 0, 200, 255], "{x},{y}");
+        }
+    }
+    assert_eq!(pixel(&pixels, 10, 5, 2), [0, 0, 0, 0]);
+}
+
+#[test]
+fn an_edge_stripe_is_clipped_to_the_canvas_and_ignores_empty_input() {
+    let mut pixels = vec![0u8; 8 * 8 * 4];
+    let mut canvas = Canvas::new(&mut pixels, 8, 8).unwrap();
+    canvas.fill_rounded_edge(rect(6, 6, 20, 20), 4, 3, RED);
+    canvas.fill_rounded_edge(rect(0, 0, 0, 5), 2, 3, RED);
+    canvas.fill_rounded_edge(rect(0, 0, 5, 5), 2, 0, RED);
+    canvas.fill_rounded_edge(rect(u32::MAX - 1, u32::MAX - 1, 9, 9), 4, 3, RED);
+    assert!(
+        pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .all(|p| p[3] != 255 || p[2] == 200)
+    );
+    // Nothing from the empty calls landed at the origin.
+    assert_eq!(pixel(&pixels, 8, 0, 0), [0, 0, 0, 0]);
+}

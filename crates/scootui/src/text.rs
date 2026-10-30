@@ -319,6 +319,27 @@ impl Text {
         color: Color,
         clip: Span,
     ) {
+        self.draw_tracked(canvas, icon, text, em, 0.0, x, baseline, color, clip);
+    }
+
+    /// [`Text::draw`] with `tracking` extra device pixels after every
+    /// character (letter spacing; negative tightens). A zero `tracking` is
+    /// `draw` exactly. A non-finite one counts as zero, so a bad value
+    /// cannot stall the pen or send it off to infinity.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_tracked(
+        &mut self,
+        canvas: &mut Canvas<'_>,
+        icon: Option<char>,
+        text: &str,
+        em: f32,
+        tracking: f32,
+        x: i64,
+        baseline: i64,
+        color: Color,
+        clip: Span,
+    ) {
+        let tracking = finite_tracking(tracking);
         let mut pen = x as f32;
         for c in chars(icon, text) {
             let glyph = self.resolve(c, em);
@@ -327,8 +348,16 @@ impl Text {
                 break;
             }
             self.draw_glyph(canvas, glyph, origin, baseline, color, clip);
-            pen += glyph.advance;
+            pen += glyph.advance + tracking;
         }
+    }
+
+    /// What `tracking` adds to the width of `text` drawn by
+    /// [`Text::draw_tracked`]: `tracking` per character, in device pixels
+    /// (the characters the draw steps over, so control characters add
+    /// nothing).
+    pub fn tracking_extra(text: &str, tracking: f32) -> f32 {
+        finite_tracking(tracking) * chars(None, text).count() as f32
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -452,6 +481,11 @@ fn chars(icon: Option<char>, text: &str) -> impl Iterator<Item = char> + '_ {
         .chain(gap)
         .chain(text.chars())
         .filter(|c| !c.is_control())
+}
+
+/// `tracking`, or zero when it is NaN or infinite.
+fn finite_tracking(tracking: f32) -> f32 {
+    if tracking.is_finite() { tracking } else { 0.0 }
 }
 
 /// `ab_glyph`'s coverage, 0 to 1, as a byte.
