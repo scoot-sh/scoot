@@ -122,3 +122,15 @@ entrance frame (scaled + faded present)          828x628   median   9052.0 us   
 a panel at rest: present (one copy)              828x628   median    103.6 us   p5     52.8 us
 fade-out frame (faded present)                   828x628   median  10393.5 us   p5   2693.3 us
 sliding-highlight frame (repaint + present)      828x628   median   2386.8 us   p5   1487.3 us
+
+# bench_idle_cpu, final commit 663e74586 (verification run): main's debug binary, then the branch's
+base   bench_idle_cpu: 0 ticks over 5 s idle; 473 ticks over 5 s after one keystroke (100 ticks = 1 s of CPU)
+branch bench_idle_cpu: 0 ticks over 5 s idle; 0 ticks over 5 s after one keystroke (100 ticks = 1 s of CPU)
+base   bench_idle_cpu: 0 ticks over 5 s idle; 472 ticks over 5 s after one keystroke (100 ticks = 1 s of CPU)
+branch bench_idle_cpu: 0 ticks over 5 s idle; 0 ticks over 5 s after one keystroke (100 ticks = 1 s of CPU)
+base   bench_idle_cpu: 0 ticks over 5 s idle; 472 ticks over 5 s after one keystroke (100 ticks = 1 s of CPU)
+branch bench_idle_cpu: 0 ticks over 5 s idle; 0 ticks over 5 s after one keystroke (100 ticks = 1 s of CPU)
+
+# idle.rs on main's binary before the fix (SCOOTLAUNCH_TEST_BIN, the first run, 4e8293664 + the test only)
+idle-default: a keystroke cost 109 commits; 142 commits and 0 frame requests in the 2 s after
+thread 'an_idle_default_panel_commits_nothing' panicked: commits after a keystroke settled: left 253, right 111

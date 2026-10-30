@@ -214,23 +214,26 @@ fn the_entrance_settles_on_the_frame_a_still_look_draws() {
 
 #[test]
 fn escape_fades_out_before_it_exits_and_an_outside_click_does_not_wait() {
-    let fragment = "motion = \"ease-out\"\nmotion-duration-ms = 700\n";
+    // A fade of the longest length the look allows, so "did not wait" is
+    // far from "waited" on any machine.
+    let fragment = "motion = \"ease-out\"\nmotion-duration-ms = 1000\n";
     let Some(mut panel) = start("fx-escape", fragment) else {
         return;
     };
     wait_drawn(&panel);
-    std::thread::sleep(Duration::from_millis(1000));
+    std::thread::sleep(Duration::from_millis(1200));
     let sent = Instant::now();
     panel.key("Escape");
     let status = panel.wait_exit();
     let took = sent.elapsed();
+    eprintln!("escape with a 1000 ms fade: exited after {took:?}");
     assert_eq!(status.code(), Some(1));
     assert!(
-        took >= Duration::from_millis(500),
+        took >= Duration::from_millis(800),
         "the fade plays before the exit: {took:?}"
     );
     assert!(
-        took < Duration::from_millis(2500),
+        took < Duration::from_millis(3000),
         "and is bounded: {took:?}"
     );
     panel.clean();
@@ -240,14 +243,15 @@ fn escape_fades_out_before_it_exits_and_an_outside_click_does_not_wait() {
         return;
     };
     wait_drawn(&panel);
-    std::thread::sleep(Duration::from_millis(1000));
+    std::thread::sleep(Duration::from_millis(1200));
     let sent = Instant::now();
     panel.click(10, 10);
     let status = panel.wait_exit();
     let took = sent.elapsed();
+    eprintln!("outside click with a 1000 ms fade: exited after {took:?}");
     assert_eq!(status.code(), Some(1));
     assert!(
-        took < Duration::from_millis(500),
+        took < Duration::from_millis(900),
         "an outside click does not wait for a fade: {took:?}"
     );
     panel.clean();
@@ -260,7 +264,7 @@ fn a_launch_does_not_wait_for_the_fade() {
     };
     write_look(
         &session,
-        "motion = \"ease-out\"\nmotion-duration-ms = 900\n",
+        "motion = \"ease-out\"\nmotion-duration-ms = 1000\n",
     );
     let Some(mut panel) = Panel::start_on(session, data_home, &[], &[("WAYLAND_DEBUG", "1")])
     else {
@@ -272,17 +276,18 @@ fn a_launch_does_not_wait_for_the_fade() {
     panel.key("Return");
     let launched = wait_marker(&markers[0]);
     assert!(launched.contains("alpha.sh"), "{launched}");
-    // The stub has run (wait_marker adds 200 ms for the line to land), and
-    // the panel is still fading: it exits after, with the code of a launch.
+    // The stub has run, and the panel is still fading: it has not exited.
+    // (The fade is the longest a look allows, so the stub is far ahead of
+    // it on any machine.)
+    eprintln!("the launch ran {:?} after the key", sent.elapsed());
     assert!(
-        sent.elapsed() < Duration::from_millis(850),
-        "the launch ran at once: {:?}",
-        sent.elapsed()
+        panel.child.try_wait().unwrap().is_none(),
+        "the panel is still playing its fade when the launch has run"
     );
     let status = panel.wait_exit();
     assert!(status.success(), "exit 0 on a launch: {}", panel.stderr());
     assert!(
-        sent.elapsed() >= Duration::from_millis(700),
+        sent.elapsed() >= Duration::from_millis(800),
         "and the panel played its fade: {:?}",
         sent.elapsed()
     );
@@ -305,13 +310,15 @@ fn typing_works_from_the_first_frame_of_the_entrance() {
     };
     let opened = Instant::now();
     wait_drawn(&panel);
-    // The entrance has barely begun: type and pick straight away.
+    // The entrance has barely begun (it runs a full second): type and pick
+    // straight away.
     panel.type_text("bet");
     panel.key("Return");
     let launched = wait_marker(&markers[1]);
     assert!(launched.contains("beta.sh"), "{launched}");
+    eprintln!("typed and launched {:?} after the open", opened.elapsed());
     assert!(
-        opened.elapsed() < Duration::from_millis(1500),
+        opened.elapsed() < Duration::from_millis(900),
         "the pick did not wait for the entrance: {:?}",
         opened.elapsed()
     );

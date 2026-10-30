@@ -539,7 +539,7 @@ fn a_look_with_a_shadow_and_motion_leaves_dmenu_alone() {
     fs::create_dir_all(&look_dir).unwrap();
     fs::write(
         look_dir.join("launch.toml"),
-        "shadow = \"deep\"\nfill = \"gradient\"\nmotion = \"spring\"\nmotion-duration-ms = 900\n",
+        "shadow = \"deep\"\nfill = \"gradient\"\nmotion = \"spring\"\nmotion-duration-ms = 1000\n",
     )
     .unwrap();
     let mut panel = start_dmenu(
@@ -557,8 +557,12 @@ fn a_look_with_a_shadow_and_motion_leaves_dmenu_alone() {
     let status = panel.wait_exit();
     assert!(status.success(), "{}", panel.stderr());
     assert_eq!(panel.stdout(), "alpha\n");
+    eprintln!(
+        "a dmenu pick under a 1000 ms fade: exited after {:?}",
+        sent.elapsed()
+    );
     assert!(
-        sent.elapsed() < Duration::from_millis(700),
+        sent.elapsed() < Duration::from_millis(900),
         "the pick did not wait for a fade: {:?}",
         sent.elapsed()
     );

@@ -35,9 +35,11 @@ same test against another build: here the debug binary built from `main`
 alternating, three times each.
 
 Machine: aarch64 dev VM (6 vCPU, NixOS). Raw output: [`raw.txt`](raw.txt).
-The frame numbers were captured on the working tree on top of `4e8293664`
-(uncommitted at the time); the tree committed as the PR's last commit has the
-same files.
+The frame benches ran on the working tree on top of `4e8293664`, before the
+PR's commits; the non-test sources of the final commit (`panel.rs`, `stage.rs`,
+`motion.rs`, `look.rs` and scootui's `layer.rs`) are the ones they ran, and only
+tests and docs changed afterwards. The idle and keystroke CPU numbers were
+captured by the verification run at the final commit.
 
 ## Result
 
@@ -57,12 +59,14 @@ first edit and pinned in `the_default_look_paints_the_bytes_it_always_did`.
 
 ### An open panel at rest, and after a keystroke
 
-CPU ticks (1/100 s), debug builds, three alternating runs:
+CPU ticks (1/100 s), debug builds, three alternating runs at the final commit
+(an earlier run of the same three at the tree before the last test edits gave
+471, 473 and 472 for `main`, and 0 for the branch):
 
 | | `main` | branch |
 |---|---|---|
 | 5 s idle after the open | 0, 0, 0 | 0, 0, 0 |
-| 5 s after one keystroke | 471, 473, 472 | 0, 0, 0 |
+| 5 s after one keystroke | 473, 472, 472 | 0, 0, 0 |
 
 `main` redraws forever after a keystroke (a `wl_buffer.release` marked the
 panel dirty, so each commit's release drew again): 109 commits in 1.5 s
