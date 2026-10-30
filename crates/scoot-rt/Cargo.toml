@@ -1,6 +1,6 @@
 [package]
 name = "scoot-rt"
-description = "The leaf both scootui and scoot-dbus depend on: panic-free printing and the runtime directory"
+description = "The leaf scootui, scoot-dbus and the compositor depend on: panic-free printing, the runtime directory and the shared easing curves"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

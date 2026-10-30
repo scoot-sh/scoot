@@ -978,6 +978,7 @@ dependencies = [
  "scoot-core",
  "scoot-ipc",
  "scoot-look",
+ "scoot-rt",
  "scootctl",
  "serde",
  "serde_json",
