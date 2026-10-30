@@ -320,8 +320,9 @@ fill = "gradient"    # solid | gradient
 To override one for the notifier alone, put the key in the look's
 `[apps.scootnotify]` table (`shadow = "glow"`). The look renders them as
 top-level `shadow` and `fill` keys in `notify.toml`. A value outside the
-lists is reported in the daemon log and ignored; the card keeps its
-default.
+lists is refused by `scoot look validate`; a hand-edited
+`notify.toml` with one is reported in the daemon log and ignored, and the
+card keeps its default.
 
 | `shadow` | What it draws | Room it needs |
 |---|---|---|
@@ -336,8 +337,8 @@ default.
 | `gradient` | Light at the top. On a dark `surface` the top edge is lightened about 10% toward white and fades to `surface` at the bottom; on a light one the bottom is darkened about 8%. The card keeps the look's `opacity.popups`. |
 
 The shadow's room comes out of `margin_px`: with the default 12 px
-margin and `soft`, the cards sit 12 px from the screen edge, as they do
-without a shadow. A margin smaller than the room moves the cards that
+margin and `soft`, a top-right stack sits 12 px from the screen edge, as
+it does without a shadow (a stack anchored to the bottom needs 16 px). A margin smaller than the room moves the cards that
 much further in, since a surface cannot start off screen. The shadow
 falls outside the cards only (a translucent card does not show its own
 shadow through its body), is never clickable (the gaps and the room
