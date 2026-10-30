@@ -204,11 +204,29 @@ pin of exactly 64 hex digits.
 
 Four pairs refuse below their bar: foreground on background at
 4.5, accent fill text on accent at 4.5, accent on background at
-3.0, focus on background at 3.0. `dim` and `urgent` report only.
-Who a failure stops depends on who chose the look: shipped and
-installed looks refuse, with the pair and the ratio named. A
-look the user's own configuration produced warns and never
-refuses.
+3.0, focus on background at 3.0. Four more pairs report only: `dim`
+on background at 3.0, `urgent` on background at 3.0, `dim` on
+`surface` at 4.5, and `border` on background at 3.0. A warning
+names the pair and the ratio.
+
+`dim` on `surface` is the text bar for the notification card's
+app-name line and the launcher's secondary text, both of which
+draw `dim` over `surface` (which defaults to `background`). With
+`effects.fill = "gradient"` the card's fill shifts across its
+height, so the check measures `dim` against the worse of the
+gradient's two stops. A look-level `effects.fill` is what the
+check reads; a per-app `fill` override is not checked.
+
+`border` on background is the inactive focus ring (the compositor's
+`focus_ring_inactive_color`), an outline that should read at
+3.0 so an unfocused window has a visible edge.
+
+Who a failure of a refusing pair stops depends on who chose the
+look: shipped and installed looks refuse, with the pair and the
+ratio named. A look the user's own configuration produced warns
+and never refuses. The report-only pairs warn for everyone, so
+existing looks keep installing and applying; they only gain
+warnings.
 
 ## Rendered fragments
 

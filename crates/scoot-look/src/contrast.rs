@@ -1,5 +1,5 @@
-//! Contrast (design section 3.5): the four refusing pairs, `dim` and
-//! `urgent` reported.
+//! Contrast (design section 3.5): the four refusing pairs; `dim`, `urgent`,
+//! `dim` on `surface` and the inactive ring (`border`) reported.
 //!
 //! Thresholds are the ones `nix/tests.nix:14907-14932` already applies to
 //! `gtk.css`: foreground on background ≥ 4.5, accent-fg on accent ≥ 4.5,
@@ -43,6 +43,35 @@ pub fn ratio(a: &str, b: &str) -> f64 {
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
+/// The card fill's two stops over `surface` for `effects.fill = "gradient"`,
+/// the colors `scootui::effects::FillStyle::stops` paints: a dark surface
+/// (luminance under 0.5) is lightened 26/255 toward white at the top, a light
+/// one darkened 20/255 toward black at the bottom. Kept in step with that
+/// function by hand: this crate is pure and cannot depend on `scootui`.
+fn gradient_stops(surface: &str) -> [String; 2] {
+    let channel = |i: usize| {
+        surface
+            .as_bytes()
+            .get(1 + 2 * i..3 + 2 * i)
+            .and_then(|s| std::str::from_utf8(s).ok())
+            .and_then(|s| u8::from_str_radix(s, 16).ok())
+            .unwrap_or(0) as u32
+    };
+    let (target, toward) = if luminance(surface) < 0.5 {
+        (255, 26)
+    } else {
+        (0, 20)
+    };
+    let mixed = |c: u32| (c * (255 - toward) + target * toward + 127) / 255;
+    let moved = format!(
+        "#{:02x}{:02x}{:02x}",
+        mixed(channel(0)),
+        mixed(channel(1)),
+        mixed(channel(2))
+    );
+    [surface.to_string(), moved]
+}
+
 /// One measured pair.
 #[derive(Debug, Clone)]
 pub struct ContrastPair {
@@ -76,6 +105,34 @@ impl ContrastReport {
             .iter()
             .filter(|p| !p.refuses && p.ratio < p.threshold)
             .collect()
+    }
+}
+
+/// `dim` on the look's surface; with `effects.fill = "gradient"`, on
+/// whichever of the two gradient stops it contrasts with least.
+fn dim_on_surface(look: &ResolvedLook) -> ContrastPair {
+    let p = &look.palette;
+    let stops = if look.effects.fill.as_deref() == Some("gradient") {
+        gradient_stops(&p.surface)
+    } else {
+        [p.surface.clone(), p.surface.clone()]
+    };
+    let [first, second] = stops;
+    let (background, worst) = [first, second]
+        .into_iter()
+        .map(|stop| {
+            let r = ratio(&p.dim, &stop);
+            (stop, r)
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("two stops");
+    ContrastPair {
+        name: "dim/surface",
+        foreground: p.dim.clone(),
+        background,
+        ratio: worst,
+        threshold: 4.5,
+        refuses: false,
     }
 }
 
@@ -125,6 +182,22 @@ pub fn check(look: &ResolvedLook, origin: Origin) -> ContrastReport {
             foreground: p.dim.clone(),
             background: p.background.clone(),
             ratio: ratio(&p.dim, &p.background),
+            threshold: 3.0,
+            refuses: false,
+        },
+        // `dim` draws real text on the card and the launcher panel, which
+        // sit on `surface` (the card fill), so it gets the text bar there.
+        // Reported, not refused, with the rest of the `dim` checks. A
+        // gradient fill shifts the surface across the card, so the worse
+        // of its two stops is the one measured.
+        dim_on_surface(look),
+        // The inactive focus ring is `border`: an unfocused window's edge,
+        // a UI outline held to the WCAG 3:1 floor. Reported, not refused.
+        ContrastPair {
+            name: "border/background",
+            foreground: p.border.clone(),
+            background: p.background.clone(),
+            ratio: ratio(&p.border, &p.background),
             threshold: 3.0,
             refuses: false,
         },

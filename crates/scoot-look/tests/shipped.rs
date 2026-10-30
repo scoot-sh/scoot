@@ -337,14 +337,17 @@ fn every_shipped_look_validates_and_renders() {
 }
 
 #[test]
-fn shipped_contrast_warnings_are_the_known_dim_and_urgent_pairs() {
-    // Design section 3.5: `dim` and `urgent` report but never refuse, and
-    // one shipped look sits under 3.0 (music-desk dim 1.57 and urgent
-    // 2.88; ratios round to one decimal). vinyl-sunset's 2026-10-17 retheme
-    // to the maintainer's image lifted dim to 4.4 and urgent to 5.1, so it
-    // no longer warns. Locked here so a retune shows up as a test change;
-    // the maintainer call (retune or accept) rides in the PR, not in a
-    // refusal.
+fn shipped_contrast_warnings_are_the_known_pairs() {
+    // Design section 3.5: `dim`, `dim` on `surface`, the inactive ring
+    // (`border`) and `urgent` report but never refuse. Every shipped look
+    // clears `dim` on `background` and on `surface` (4.5, the text bar: the
+    // notification card and the launcher panel draw their secondary text
+    // there) and music-desk's inactive ring clears 3.0. What remains is
+    // locked: music-desk's urgent (2.9), and the dark looks' deliberately
+    // muted inactive rings (moonrise 1.5, vinyl-sunset 2.5, ginger-night
+    // 1.5; ratios round to one decimal). Locked here so a retune shows up
+    // as a test change; the maintainer call (retune or accept) rides in
+    // the PR, not in a refusal.
     let mut below: Vec<(String, String, f64)> = Vec::new();
     for name in SHIPPED {
         let look = resolved(name);
@@ -352,15 +355,14 @@ fn shipped_contrast_warnings_are_the_known_dim_and_urgent_pairs() {
             below.push((name.to_string(), pair.name.to_string(), pair.ratio));
         }
     }
+    let known = |look: &str, pair: &str, ratio: f64| (look.to_string(), pair.to_string(), ratio);
     assert_eq!(
         below,
         vec![
-            ("music-desk".to_string(), "dim/background".to_string(), 1.6),
-            (
-                "music-desk".to_string(),
-                "urgent/background".to_string(),
-                2.9
-            ),
+            known("ginger-night", "border/background", 1.5),
+            known("moonrise", "border/background", 1.5),
+            known("music-desk", "urgent/background", 2.9),
+            known("vinyl-sunset", "border/background", 2.5),
         ]
     );
 }
