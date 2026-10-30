@@ -72,7 +72,6 @@ pub use style::{CardMark, CardShape};
 
 use scootui::color::Color;
 use scootui::motion::{Curve, DEFAULT_BOUNCE, DEFAULT_DURATION_MS, Timing};
-use scootui::paint::ShadowSpec;
 use scootui::theme::Theme;
 
 /// The default font size, in logical pixels: the contract's 10 pt
@@ -84,72 +83,7 @@ pub const DEFAULT_RADIUS: u32 = 8;
 /// looks resolve to (`Adwaita`).
 pub const DEFAULT_ICON_THEME: &str = "Adwaita";
 
-/// The depth under each card (`shadow`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ShadowStyle {
-    /// No shadow: the default, and free (nothing is built or painted).
-    #[default]
-    None,
-    /// A tight, low shadow: lifts a card off the window behind it.
-    Soft,
-    /// A wide, heavy shadow: a card floating well above the desktop.
-    Deep,
-    /// A zero-offset shadow tinted with the card's border color, so an
-    /// urgent card glows in the urgent color.
-    Glow,
-}
-
-impl ShadowStyle {
-    /// The style a `shadow` value names, if it names one.
-    pub fn parse(name: &str) -> Option<Self> {
-        match name {
-            "none" => Some(Self::None),
-            "soft" => Some(Self::Soft),
-            "deep" => Some(Self::Deep),
-            "glow" => Some(Self::Glow),
-            _ => None,
-        }
-    }
-
-    /// The geometry and strength of the style's shadow, in logical
-    /// pixels; `None` for [`ShadowStyle::None`].
-    pub fn spec(self) -> Option<ShadowSpec> {
-        let (offset_y, blur, alpha) = match self {
-            Self::None => return None,
-            Self::Soft => (4, 12, 92),
-            Self::Deep => (10, 28, 140),
-            Self::Glow => (0, 16, 130),
-        };
-        Some(ShadowSpec {
-            offset_x: 0,
-            offset_y,
-            blur,
-            alpha,
-        })
-    }
-}
-
-/// How a card's surface color is laid down (`fill`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum FillStyle {
-    /// The `surface` color, flat: the default.
-    #[default]
-    Solid,
-    /// A vertical gradient with the light at the top (see
-    /// [`Look::fill_stops`]).
-    Gradient,
-}
-
-impl FillStyle {
-    /// The style a `fill` value names, if it names one.
-    pub fn parse(name: &str) -> Option<Self> {
-        match name {
-            "solid" => Some(Self::Solid),
-            "gradient" => Some(Self::Gradient),
-            _ => None,
-        }
-    }
-}
+pub use scootui::effects::{FillStyle, ShadowStyle};
 
 /// How a card arrives (`card.enter`) or leaves (`card.exit`). Every style
 /// fades the card with the motion; the style adds a move.
@@ -282,26 +216,12 @@ impl Look {
         self.title_spacing as f32
     }
 
-    /// The card fill's top and bottom colors. Solid: `surface` twice. A
-    /// gradient puts the light at the top whatever the look's polarity: on
-    /// a dark surface the top edge is lightened a tenth of the way toward
-    /// white and the bottom is `surface`; on a light one the top is
-    /// `surface` and the bottom is darkened by a twelfth. The shift is
-    /// small enough that the text keeps its contrast across the card.
+    /// The card fill's top and bottom colors ([`FillStyle::stops`] over
+    /// `surface`): the light is at the top whatever the look's polarity,
+    /// and the shift is small enough that the text keeps its contrast
+    /// across the card.
     pub fn fill_stops(&self) -> (Color, Color) {
-        const WHITE: Color = Color {
-            r: 255,
-            g: 255,
-            b: 255,
-        };
-        const BLACK: Color = Color { r: 0, g: 0, b: 0 };
-        match self.fill {
-            FillStyle::Solid => (self.surface, self.surface),
-            FillStyle::Gradient if self.surface.luminance() < 0.5 => {
-                (self.surface.mix(WHITE, 26), self.surface)
-            }
-            FillStyle::Gradient => (self.surface, self.surface.mix(BLACK, 20)),
-        }
+        self.fill.stops(self.surface)
     }
 }
 

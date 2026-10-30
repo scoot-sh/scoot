@@ -36,6 +36,14 @@
 //! and no shipped look overrides either apart, so the shipped looks draw
 //! exactly what the table says (pinned by the goldens below).
 //!
+//! Depth and motion are optional and off by default (`shadow`, `fill`,
+//! `motion`, `motion-duration-ms`, `motion-bounce`; the shared `[effects]`
+//! of the look, or `[apps.scootlaunch]`): a fragment that sets none paints
+//! and behaves as it always did. `shadow` adds the drop shadow (a glow
+//! takes the `focus` color), `fill = "gradient"` lights the panel from the
+//! top, and a `motion` makes the panel scale and fade in, fade out when
+//! dismissed, and slide the selection between rows.
+//!
 //! The `font` key names the look's UI family. There is no fontconfig in
 //! this stack: the panel draws with `--font PATH`, else the first usable
 //! well-known file, as the bar does. The key is validated and kept (a
@@ -45,6 +53,8 @@
 use std::path::Path;
 
 use scootui::color::Color;
+use scootui::effects::{FillStyle, ShadowStyle};
+use scootui::motion::{Curve, DEFAULT_BOUNCE, MAX_DURATION_MS, Timing};
 use scootui::theme::Theme;
 
 /// The default font size, in logical pixels: the contract's 10 pt
@@ -53,6 +63,10 @@ pub const DEFAULT_FONT_SIZE_PX: f32 = 13.0;
 /// The default panel corner radius, in logical pixels (scaled with the
 /// output, as the border and the font are).
 pub const DEFAULT_RADIUS: u32 = 8;
+/// How long the panel's motion runs when a look asks for motion and names no
+/// duration, in milliseconds: shorter than the notification cards' default
+/// because the panel is large and opens on a keypress.
+pub const DEFAULT_MOTION_MS: u32 = 160;
 /// The default icon theme, when the fragment names none: what the
 /// looks resolve to (`Adwaita`).
 pub const DEFAULT_ICON_THEME: &str = "Adwaita";
@@ -80,6 +94,32 @@ pub struct Look {
     /// The icon theme the panel looks up names in (`[icons] theme`):
     /// the look's theme, `Adwaita` by default.
     pub icon_theme: String,
+    /// The depth under the panel (`shadow`).
+    pub shadow: ShadowStyle,
+    /// How the panel fill is laid down (`fill`).
+    pub fill: FillStyle,
+    /// The curve the panel's motion follows (`motion`); `none` moves
+    /// nothing.
+    pub motion: Curve,
+    /// How long one motion runs (`motion-duration-ms`, 0 to 1000).
+    pub motion_ms: u32,
+    /// The spring's overshoot (`motion-bounce`, 0 to 1).
+    pub motion_bounce: f32,
+}
+
+impl Look {
+    /// The clamped timing the motion tokens ask for: [`Timing::NONE`] for
+    /// `motion = none` or a zero duration, which paints and costs exactly
+    /// what a look without motion does.
+    pub fn timing(&self) -> Timing {
+        Timing::new(self.motion, self.motion_ms, self.motion_bounce)
+    }
+
+    /// The panel fill's top and bottom colors ([`FillStyle::stops`]): the
+    /// `surface` twice for a solid fill.
+    pub fn fill_stops(&self) -> (Color, Color) {
+        self.fill.stops(self.surface)
+    }
 }
 
 impl Default for Look {
@@ -94,6 +134,11 @@ impl Default for Look {
             radius: DEFAULT_RADIUS,
             font_family: String::new(),
             icon_theme: DEFAULT_ICON_THEME.to_string(),
+            shadow: ShadowStyle::None,
+            fill: FillStyle::Solid,
+            motion: Curve::None,
+            motion_ms: DEFAULT_MOTION_MS,
+            motion_bounce: DEFAULT_BOUNCE,
         }
     }
 }
@@ -212,6 +257,11 @@ enum Slot<'a> {
     Radius(&'a mut u32),
     FontFamily(&'a mut String),
     IconTheme(&'a mut String),
+    Shadow(&'a mut ShadowStyle),
+    Fill(&'a mut FillStyle),
+    Motion(&'a mut Curve),
+    MotionMs(&'a mut u32),
+    MotionBounce(&'a mut f32),
     /// An allowlisted key the panel draws nothing with (`border`,
     /// `accent-fg`): validated above, then dropped.
     Ignore,
@@ -248,6 +298,39 @@ impl Slot<'_> {
                 Some(family) => *slot = family.to_owned(),
                 None => notes.push(format!("`{dotted}` is not a font name: default applies")),
             },
+            Slot::Shadow(slot) => match value.as_str().and_then(ShadowStyle::parse) {
+                Some(style) => *slot = style,
+                None => notes.push(format!(
+                    "`{dotted}` is not a shadow style (none, soft, deep or glow): default applies"
+                )),
+            },
+            Slot::Fill(slot) => match value.as_str().and_then(FillStyle::parse) {
+                Some(style) => *slot = style,
+                None => notes.push(format!(
+                    "`{dotted}` is not a fill style (solid or gradient): default applies"
+                )),
+            },
+            Slot::Motion(slot) => match value.as_str().and_then(Curve::parse) {
+                Some(curve) => *slot = curve,
+                None => notes.push(format!(
+                    "`{dotted}` is not a motion (none, ease-out or spring): default applies"
+                )),
+            },
+            Slot::MotionMs(slot) => match value.as_integer() {
+                Some(ms) => *slot = ms.clamp(0, i64::from(MAX_DURATION_MS)) as u32,
+                None => notes.push(format!(
+                    "`{dotted}` is not a duration in milliseconds: default applies"
+                )),
+            },
+            Slot::MotionBounce(slot) => {
+                let bounce = value
+                    .as_float()
+                    .or_else(|| value.as_integer().map(|int| int as f64));
+                match bounce {
+                    Some(bounce) if bounce.is_finite() => *slot = bounce.clamp(0.0, 1.0) as f32,
+                    _ => notes.push(format!("`{dotted}` is not a bounce: default applies")),
+                }
+            }
             Slot::IconTheme(slot) => match value.as_str() {
                 Some(theme) if is_icon_theme(theme) => *slot = theme.to_owned(),
                 _ => notes.push(format!("`{dotted}` is not an icon theme: default applies")),
@@ -275,13 +358,18 @@ fn look_color<'a>(look: &'a mut Look, name: &str) -> Option<Slot<'a>> {
     }
 }
 
-/// The slot for a dotless top-level key, if it is one of the four.
+/// The slot for a dotless top-level key, if it is one of the nine.
 fn look_dotless<'a>(look: &'a mut Look, key: &str) -> Option<Slot<'a>> {
     match key {
         "font" => Some(Slot::FontFamily(&mut look.font_family)),
         "font-size" => Some(Slot::FontSize(&mut look.font_size_px)),
         "opacity" => Some(Slot::Opacity(&mut look.opacity)),
         "radius" => Some(Slot::Radius(&mut look.radius)),
+        "shadow" => Some(Slot::Shadow(&mut look.shadow)),
+        "fill" => Some(Slot::Fill(&mut look.fill)),
+        "motion" => Some(Slot::Motion(&mut look.motion)),
+        "motion-duration-ms" => Some(Slot::MotionMs(&mut look.motion_ms)),
+        "motion-bounce" => Some(Slot::MotionBounce(&mut look.motion_bounce)),
         _ => None,
     }
 }

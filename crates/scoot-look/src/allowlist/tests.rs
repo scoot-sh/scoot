@@ -259,12 +259,12 @@ fn scootbar_font_keys_refused() {
 }
 
 #[test]
-fn the_depth_keys_belong_to_the_notifier_alone() {
+fn the_depth_keys_belong_to_the_notifier_and_the_launcher() {
     for key in ["shadow", "fill"] {
         assert!(allows("scootnotify", key));
-        // The launcher and the greeter read neither yet: a key they would
+        assert!(allows("scootlaunch", key), "{key}");
+        // The greeter and the bar read neither yet: a key they would
         // report as unknown is refused at the look, not at every load.
-        assert!(!allows("scootlaunch", key), "{key}");
         assert!(!allows("scootgreet", key), "{key}");
         assert!(!allows("scootbar", key), "{key}");
     }
@@ -287,18 +287,31 @@ fn the_depth_keys_belong_to_the_notifier_alone() {
         );
     }
     assert!(check_app_value("scootnotify", "shadow", &toml::Value::Integer(1)).is_some());
-    assert!(check_app_value("scootlaunch", "shadow", &text("soft")).is_some());
+    // The launcher takes the same values, and refuses the same bad ones.
+    for style in SHADOW_STYLES {
+        assert!(check_app_value("scootlaunch", "shadow", &text(style)).is_none());
+    }
+    for style in FILL_STYLES {
+        assert!(check_app_value("scootlaunch", "fill", &text(style)).is_none());
+    }
+    assert!(check_app_value("scootlaunch", "shadow", &text("huge")).is_some());
+    assert!(check_app_value("scootlaunch", "fill", &text("rainbow")).is_some());
+    assert!(check_app_value("scootlaunch", "shadow", &toml::Value::Integer(1)).is_some());
+    assert!(check_app_value("scootgreet", "shadow", &text("soft")).is_some());
 }
 
 #[test]
-fn the_motion_keys_belong_to_the_notifier_alone() {
-    for key in [
-        "motion",
-        "motion-duration-ms",
-        "motion-bounce",
-        "card.enter",
-        "card.exit",
-    ] {
+fn the_motion_keys_belong_to_the_notifier_and_the_launcher() {
+    for key in ["motion", "motion-duration-ms", "motion-bounce"] {
+        for app in ["scootnotify", "scootlaunch"] {
+            assert!(allows(app, key), "{app} {key}");
+        }
+        for other in ["scootgreet", "scootbar"] {
+            assert!(!allows(other, key), "{other} {key}");
+        }
+    }
+    // The card transitions are the notifier's alone.
+    for key in ["card.enter", "card.exit"] {
         assert!(allows("scootnotify", key), "{key}");
         for other in ["scootlaunch", "scootgreet", "scootbar"] {
             assert!(!allows(other, key), "{other} {key}");
@@ -306,8 +319,11 @@ fn the_motion_keys_belong_to_the_notifier_alone() {
     }
     let text = |s: &str| toml::Value::String(s.to_string());
     for curve in MOTION_CURVES {
-        assert!(check_app_value("scootnotify", "motion", &text(curve)).is_none());
+        for app in ["scootnotify", "scootlaunch"] {
+            assert!(check_app_value(app, "motion", &text(curve)).is_none());
+        }
     }
+    assert!(check_app_value("scootlaunch", "motion", &text("bouncy")).is_some());
     for style in CARD_MOTIONS {
         for key in ["card.enter", "card.exit"] {
             assert!(check_app_value("scootnotify", key, &text(style)).is_none());
@@ -330,14 +346,18 @@ fn the_motion_keys_belong_to_the_notifier_alone() {
 fn motion_numbers_are_range_checked() {
     let int = toml::Value::Integer;
     let float = toml::Value::Float;
-    for ok in [0, 1, 380, 1000] {
-        assert!(check_app_value("scootnotify", "motion-duration-ms", &int(ok)).is_none());
-    }
-    for bad in [-1, 1001, i64::MAX, i64::MIN] {
-        assert!(
-            check_app_value("scootnotify", "motion-duration-ms", &int(bad)).is_some(),
-            "{bad}"
-        );
+    for app in ["scootnotify", "scootlaunch"] {
+        for ok in [0, 1, 380, 1000] {
+            assert!(check_app_value(app, "motion-duration-ms", &int(ok)).is_none());
+        }
+        for bad in [-1, 1001, i64::MAX, i64::MIN] {
+            assert!(
+                check_app_value(app, "motion-duration-ms", &int(bad)).is_some(),
+                "{app} {bad}"
+            );
+        }
+        assert!(check_app_value(app, "motion-bounce", &float(0.5)).is_none());
+        assert!(check_app_value(app, "motion-bounce", &float(1.5)).is_some());
     }
     assert!(
         check_app_value(

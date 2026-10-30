@@ -1182,7 +1182,7 @@ fn a_look_without_effects_renders_the_fragments_it_always_did() {
 }
 
 #[test]
-fn effects_reach_the_notifier_fragment_and_no_other() {
+fn effects_reach_the_notifier_and_launcher_fragments_and_no_other() {
     let look = with_effects("[effects]\nshadow = \"soft\"\nfill = \"gradient\"\n");
     let notify: toml::Table =
         toml::from_str(&render_notify(&look).expect("renders")).expect("TOML");
@@ -1194,15 +1194,55 @@ fn effects_reach_the_notifier_fragment_and_no_other() {
         text.find("shadow").unwrap() < text.find("[colors]").unwrap(),
         "{text}"
     );
-    // The launcher and the greeter read neither key yet: they would
-    // report it as unknown on every load.
-    for other in [render_launch(&look), render_greet(&look)] {
-        let other = other.expect("renders");
-        assert!(
-            !other.contains("shadow") && !other.contains("fill"),
-            "{other}"
-        );
+    // The launcher reads both; the greeter reads neither yet and would
+    // report them as unknown on every load.
+    let launch: toml::Table =
+        toml::from_str(&render_launch(&look).expect("renders")).expect("TOML");
+    assert_eq!(launch["shadow"].as_str(), Some("soft"));
+    assert_eq!(launch["fill"].as_str(), Some("gradient"));
+    let greet = render_greet(&look).expect("renders");
+    assert!(
+        !greet.contains("shadow") && !greet.contains("fill"),
+        "{greet}"
+    );
+}
+
+#[test]
+fn a_launcher_override_beats_the_shared_effects_and_the_notifiers_does_not_leak() {
+    let look = with_effects(
+        "[effects]\nshadow = \"soft\"\nmotion = \"spring\"\nmotion-duration-ms = 380\n\
+         [apps.scootlaunch]\n\"shadow\" = \"glow\"\n\"motion-duration-ms\" = 160\n\
+         [apps.scootnotify]\n\"shadow\" = \"deep\"\n",
+    );
+    let launch: toml::Table =
+        toml::from_str(&render_launch(&look).expect("renders")).expect("each key once");
+    assert_eq!(launch["shadow"].as_str(), Some("glow"));
+    assert_eq!(launch["motion"].as_str(), Some("spring"));
+    assert_eq!(launch["motion-duration-ms"].as_integer(), Some(160));
+    let notify: toml::Table =
+        toml::from_str(&render_notify(&look).expect("renders")).expect("each key once");
+    assert_eq!(notify["shadow"].as_str(), Some("deep"));
+    assert_eq!(notify["motion-duration-ms"].as_integer(), Some(380));
+}
+
+#[test]
+fn a_look_without_effects_renders_the_launcher_fragment_it_always_did() {
+    let frag = render_launch(&moonrise()).expect("renders");
+    for key in ["shadow", "fill", "motion"] {
+        assert!(!frag.contains(key), "{key}: {frag}");
     }
+}
+
+#[test]
+fn the_launcher_refuses_the_notifiers_card_keys() {
+    // Not allowlisted for the launcher, so a look carrying one is refused
+    // at parse, never rendered into `launch.toml`.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[apps.scootlaunch]\n\"card.mark\" = \"stripe\"\n[cursor]",
+        1,
+    );
+    assert!(parse_look_toml(text.as_bytes()).is_err());
 }
 
 #[test]
@@ -1224,8 +1264,10 @@ fn a_hand_built_look_with_a_bad_effect_value_is_refused_not_rendered() {
     look.effects.shadow = None;
     look.effects.fill = Some("rainbow".to_string());
     assert!(render_notify(&look).is_err());
+    // The launcher reads the keys, so it refuses the same bad values.
+    assert!(render_launch(&look).is_err());
     // An app that never reads the keys does not look at them.
-    assert!(render_launch(&look).is_ok());
+    assert!(render_greet(&look).is_ok());
 }
 
 #[test]
@@ -1237,7 +1279,7 @@ fn a_look_without_motion_renders_no_motion_key() {
 }
 
 #[test]
-fn motion_reaches_the_notifier_fragment_and_no_other() {
+fn motion_reaches_the_notifier_and_launcher_fragments_and_no_other() {
     let look = with_effects(
         "[effects]\nmotion = \"spring\"\nmotion-duration-ms = 380\nmotion-bounce = 0.12\n",
     );
@@ -1251,10 +1293,14 @@ fn motion_reaches_the_notifier_fragment_and_no_other() {
         text.find("motion-bounce").unwrap() < text.find("[colors]").unwrap(),
         "{text}"
     );
-    for other in [render_launch(&look), render_greet(&look)] {
-        let other = other.expect("renders");
-        assert!(!other.contains("motion"), "{other}");
-    }
+    let launch: toml::Table =
+        toml::from_str(&render_launch(&look).expect("renders")).expect("TOML");
+    assert_eq!(launch["motion"].as_str(), Some("spring"));
+    assert_eq!(launch["motion-duration-ms"].as_integer(), Some(380));
+    assert_eq!(launch["motion-bounce"].as_float(), Some(0.12));
+    assert!(launch.get("card").is_none());
+    let greet = render_greet(&look).expect("renders");
+    assert!(!greet.contains("motion"), "{greet}");
 }
 
 #[test]
@@ -1282,8 +1328,10 @@ fn a_hand_built_look_with_a_bad_motion_value_is_refused_not_rendered() {
     assert!(render_notify(&look).is_err());
     look.effects.motion_bounce = Some(7.0);
     assert!(render_notify(&look).is_err());
-    // An app that never reads the keys does not look at them.
-    assert!(render_launch(&look).is_ok());
+    // The launcher reads the same keys and refuses the same values; an app
+    // that never reads them does not look at them.
+    assert!(render_launch(&look).is_err());
+    assert!(render_greet(&look).is_ok());
 }
 
 #[test]

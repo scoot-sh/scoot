@@ -29,11 +29,13 @@ mod icons;
 mod index;
 mod layout;
 mod look;
+mod motion;
 mod panel;
 mod rank;
 mod run;
 mod socket;
 mod spawn;
+mod stage;
 mod ui;
 
 // Tests pinning the warm-query path count heap allocations through

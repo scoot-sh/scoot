@@ -20,28 +20,49 @@ use super::Canvas;
 pub const MAX_LAYER_PIXELS: usize = 2 * 1024 * 1024;
 
 /// A reusable off-screen premultiplied `ARGB8888` image.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Layer {
     pixels: Vec<u8>,
     width: u32,
     height: u32,
+    limit: usize,
+}
+
+impl Default for Layer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Layer {
     /// An empty layer: holds no pixels until [`Layer::begin`].
     pub fn new() -> Self {
-        Self::default()
+        Self::with_limit(MAX_LAYER_PIXELS)
+    }
+
+    /// An empty layer that holds up to `max_pixels` pixels instead of
+    /// [`MAX_LAYER_PIXELS`]: for a surface that is moved whatever its size
+    /// (a launcher panel at a large font on a HiDPI output), where the
+    /// layer is no larger than the buffer the surface already needs.
+    pub fn with_limit(max_pixels: usize) -> Self {
+        Self {
+            pixels: Vec::new(),
+            width: 0,
+            height: 0,
+            limit: max_pixels,
+        }
     }
 
     /// Reshapes the layer to `width` × `height` and clears it to
     /// transparent, keeping its allocation when it is large enough.
     /// Returns false (and leaves the layer empty) for a size that is zero
-    /// or larger than [`MAX_LAYER_PIXELS`].
+    /// or larger than the layer's limit ([`MAX_LAYER_PIXELS`] unless made
+    /// by [`Layer::with_limit`]).
     pub fn begin(&mut self, width: u32, height: u32) -> bool {
         self.width = 0;
         self.height = 0;
         let pixels = (width as usize).saturating_mul(height as usize);
-        if pixels == 0 || pixels > MAX_LAYER_PIXELS {
+        if pixels == 0 || pixels > self.limit {
             return false;
         }
         self.pixels.clear();
@@ -64,6 +85,21 @@ impl Layer {
     /// Whether the layer holds an image.
     pub fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
+    }
+
+    /// The layer's pixels, `width * height * 4` bytes of premultiplied
+    /// `ARGB8888` with rows packed: for a painter that takes a pixel
+    /// slice and its size rather than a [`Canvas`]. Empty while the layer
+    /// is empty.
+    pub fn pixels_mut(&mut self) -> &mut [u8] {
+        let len = (self.width as usize) * (self.height as usize) * 4;
+        self.pixels.get_mut(..len).unwrap_or_default()
+    }
+
+    /// The layer's pixels, read-only: [`Layer::pixels_mut`]'s view.
+    pub fn pixels(&self) -> &[u8] {
+        let len = (self.width as usize) * (self.height as usize) * 4;
+        self.pixels.get(..len).unwrap_or_default()
     }
 
     /// A canvas over the layer to paint the card into, in layer
@@ -135,33 +171,45 @@ impl Layer {
                 }
             } else {
                 // Bilinear in 16.16 fixed point: the source position of a
-                // destination pixel center, minus half a source pixel.
+                // destination pixel center, minus half a source pixel. The
+                // two source rows this destination row blends are sliced
+                // once, so a pixel reads four slices of four bytes.
                 let step_x = (w << 16) / dw;
                 let step_y = (h << 16) / dh;
                 let fy = (row - top) * step_y + step_y / 2 - 0x8000;
                 let (ty0, ty1, wy) = taps(fy, h);
+                let source_row = |ty: i64| {
+                    self.pixels
+                        .get(ty as usize * src_stride..)
+                        .and_then(|rest| rest.get(..src_stride))
+                };
+                let (Some(upper), Some(lower)) = (source_row(ty0), source_row(ty1)) else {
+                    continue;
+                };
                 for (offset, d) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                     let ox = x0 - left + offset as i64;
                     let fx = ox * step_x + step_x / 2 - 0x8000;
                     let (tx0, tx1, wx) = taps(fx, w);
-                    let sample = |sx: i64, sy: i64| -> [u32; 4] {
-                        let at = sy as usize * src_stride + sx as usize * 4;
-                        match self.pixels.get(at..at + 4) {
-                            Some(p) => [
-                                u32::from(p[0]),
-                                u32::from(p[1]),
-                                u32::from(p[2]),
-                                u32::from(p[3]),
-                            ],
-                            None => [0; 4],
-                        }
+                    let (at0, at1) = (tx0 as usize * 4, tx1 as usize * 4);
+                    let (Some(a), Some(b), Some(c), Some(e)) = (
+                        upper.get(at0..at0 + 4),
+                        upper.get(at1..at1 + 4),
+                        lower.get(at0..at0 + 4),
+                        lower.get(at1..at1 + 4),
+                    ) else {
+                        continue;
                     };
-                    let (a, b) = (sample(tx0, ty0), sample(tx1, ty0));
-                    let (c, e) = (sample(tx0, ty1), sample(tx1, ty1));
+                    // Four clear source pixels blend to a clear one, which
+                    // `over` leaves the destination alone for: skip the
+                    // arithmetic (a shadow's room is mostly this).
+                    if a.iter().chain(b).chain(c).chain(e).all(|byte| *byte == 0) {
+                        continue;
+                    }
                     let mut mixed = [0u8; 4];
                     for channel in 0..4 {
-                        let top = a[channel] * (256 - wx) + b[channel] * wx;
-                        let bottom = c[channel] * (256 - wx) + e[channel] * wx;
+                        let top = u32::from(a[channel]) * (256 - wx) + u32::from(b[channel]) * wx;
+                        let bottom =
+                            u32::from(c[channel]) * (256 - wx) + u32::from(e[channel]) * wx;
                         mixed[channel] = ((top * (256 - wy) + bottom * wy + 0x8000) >> 16) as u8;
                     }
                     over(d, mixed, g);

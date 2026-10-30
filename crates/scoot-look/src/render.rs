@@ -460,7 +460,7 @@ fn render_shell_fragment(look: &ResolvedLook, app: &str) -> Result<String, Gramm
     // look sets them: a look that does not opt in renders the fragment it
     // always did. A hand-built `ResolvedLook` skips the schema, so the
     // values are checked here too.
-    if app == "scootnotify" {
+    if crate::allowlist::reads_depth(app) {
         for (key, value, options) in [
             ("shadow", &look.effects.shadow, SHADOW_STYLES),
             ("fill", &look.effects.fill, FILL_STYLES),

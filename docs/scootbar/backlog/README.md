@@ -236,3 +236,5 @@ hits the wall:
 - [notify-look-radius-unread](notify-look-radius-unread.md) (medium): the look's `radius` is parsed and never read, so every card draws the config file's 8 px; found building #807 slice 3
 - [shell-font-resolution](shell-font-resolution.md) (low): resolve the look's font family to a file and use a real bold face; the shell apps draw one file with synthetic bold
 - [notify-input-region-follows-shape](notify-input-region-follows-shape.md) (low): the click area is each card's rectangle, so a pill's cut corners still take clicks; found building #807 slice 3
+- [launcher-scaled-composite-cost](launcher-scaled-composite-cost.md) (low): `Layer::composite`'s scaled path is 17 ns a pixel, so a 2x launcher entrance frame is 9 ms; found building #807 slice 4
+- [dmenu-ignores-depth-and-motion](dmenu-ignores-depth-and-motion.md) (low): `scootlaunch --dmenu` draws without the look's shadow, fill and motion; left out of #807 slice 4 on purpose

@@ -210,3 +210,34 @@ fn compositing_allocates_nothing_and_a_pooled_layer_reuses_its_buffer() {
     });
     assert_eq!(allocations, 0);
 }
+
+#[test]
+fn a_layer_with_a_larger_limit_holds_what_the_default_refuses() {
+    let side = 2048u32;
+    let mut default = Layer::new();
+    assert!(
+        !default.begin(side, side),
+        "4 Mpx is past the default limit"
+    );
+    let mut large = Layer::with_limit(side as usize * side as usize);
+    assert!(large.begin(side, side));
+    assert_eq!(large.pixels_mut().len(), side as usize * side as usize * 4);
+    assert!(!large.begin(side, side + 1), "and not one row past its own");
+    assert!(large.is_empty());
+}
+
+#[test]
+fn the_pixel_slice_is_the_layer_and_empty_when_it_is_empty() {
+    let mut layer = Layer::new();
+    assert!(layer.pixels_mut().is_empty());
+    assert!(layer.begin(3, 2));
+    assert_eq!(layer.pixels_mut().len(), 24);
+    layer.pixels_mut()[0..4].copy_from_slice(&[1, 2, 3, 4]);
+    let mut dst = vec![0u8; 3 * 2 * 4];
+    let mut canvas = Canvas::new(&mut dst, 3, 2).expect("canvas");
+    layer.composite(&mut canvas, 0, 0, 1.0, 255);
+    assert_eq!(&dst[0..4], &[1, 2, 3, 4]);
+    // A shrinking begin keeps the slice exact, not the allocation's length.
+    assert!(layer.begin(1, 1));
+    assert_eq!(layer.pixels_mut().len(), 4);
+}

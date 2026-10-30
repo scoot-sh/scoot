@@ -44,6 +44,11 @@ motion = "spring"
 motion-duration-ms = 380
 motion-bounce = 0.6
 
+# The launcher's panel is large and opens on a keypress: a shorter run than
+# the notification cards' 380 ms, the same spring.
+[apps.scootlaunch]
+"motion-duration-ms" = 220
+
 [apps.scootnotify]
 "card.enter" = "scale"
 "card.exit" = "fade"

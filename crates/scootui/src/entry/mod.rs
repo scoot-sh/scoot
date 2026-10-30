@@ -63,5 +63,6 @@ pub use line::{
 };
 pub use list::{Activate, Highlight, List, MAX_HIGHLIGHT_ROWS, MAX_SPANS_PER_ROW, Selector};
 pub use paint::{
-    Geometry, paint_entry, paint_list, paint_list_over, paint_password, paint_selector,
+    Geometry, paint_entry, paint_list, paint_list_over, paint_list_over_ink, paint_password,
+    paint_selector,
 };

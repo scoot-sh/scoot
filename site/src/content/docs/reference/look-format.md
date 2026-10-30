@@ -85,7 +85,7 @@ color = "#2B3648"
 | `fonts.nix` | Nixpkgs attribute paths: `ui`, `sans` or `mono` to one to eight `Name.segment` paths. Resolved only with `lib.attrByPath` against `pkgs`. Nix-only; a non-Nix box resolves families with `fc-match`. |
 | `opacity` | `bar`, `popups`, `terminal`: 0.0 to 1.0, each default 1.0. |
 | `shape` | `radius`: 0 to 64, default 0. `ring-width`: 0 to 64, required. `ring-inactive-width`: default = `ring-width`. No `gap` in v1: gap is layout, not presentation. |
-| `effects` | Depth and motion tokens, all optional and unset by default. `shadow`: `none`, `soft`, `deep` or `glow`. `fill`: `solid` or `gradient`. `motion`: `none`, `ease-out` or `spring`. `motion-duration-ms`: 0 to 1000. `motion-bounce`: 0.0 to 1.0. Only `scootnotify` reads them today; a look that sets none renders exactly the fragments it did before. See [notification depth](../scootnotify/configure.md#depth) and [motion](../scootnotify/configure.md#motion). |
+| `effects` | Depth and motion tokens, all optional and unset by default. `shadow`: `none`, `soft`, `deep` or `glow`. `fill`: `solid` or `gradient`. `motion`: `none`, `ease-out` or `spring`. `motion-duration-ms`: 0 to 1000. `motion-bounce`: 0.0 to 1.0. `scootnotify` and `scootlaunch` read them; a look that sets none renders exactly the fragments it did before. See [notification depth](../scootnotify/configure.md#depth) and [motion](../scootnotify/configure.md#motion), and the [launcher's](../scootlaunch/panel.md#depth-and-motion). |
 | `cursor` | `theme`: name, required. `size`: 4 to 256, default 24. `accent`: `#rrggbb` or `"none"`, default = `focus`. `body`: optional `#rrggbb`; a look leaves it alone unless set. |
 | `wallpaper` | One unit, never merged per key: `image` or `color`, never both. `image` is a path inside the look dir, or `https://` plus a required 64-hex `sha256`. `mode`: `fill`, `fit`, `stretch`, `center` or `tile` (image only; a color wallpaper carries no `mode` or `fill`). `fill`: default = `background`. `transition`: `none`, `fade`, `wipe` or `grow` (default `none`; the five shipped looks set `fade`, which animates at scootbg's defaults: 500 ms, `ease-out`). |
 | `icons` | `theme`: name. Default `Adwaita`. |
@@ -120,11 +120,12 @@ keys. The bar's `font` and `fallback-fonts` are not overrides: scootbar
 reads file paths there, so only the tool's resolved `--ui-font-file`
 supplies them, and a fragment without one carries neither key.
 `scootnotify`, `scootlaunch` and `scootgreet` take the thirteen
-color roles plus face, size, opacity and radius. `scootnotify` also
-takes `shadow`, `fill`, `motion`, `motion-duration-ms` and `motion-bounce`
-(the `[effects]` values, per app), `card.enter`, `card.exit`, `card.mark`,
-`card.shape`, `card.app-accent`, `title.weight` and `title.spacing`; the
-other two refuse them, since they would report an unknown key on every
+color roles plus face, size, opacity and radius. `scootnotify` and
+`scootlaunch` also take `shadow`, `fill`, `motion`, `motion-duration-ms`
+and `motion-bounce` (the `[effects]` values, per app). `scootnotify` alone
+takes `card.enter`, `card.exit`, `card.mark`, `card.shape`,
+`card.app-accent`, `title.weight` and `title.spacing`; the others refuse
+what they do not read, since they would report an unknown key on every
 load.
 
 Every allowlisted key has a value kind, checked at parse. There is
@@ -147,11 +148,11 @@ no key whose value gets only a length check.
 | `workspaces.display` | `numbers` or `dots` |
 | `window-title.icon` | glyph string (see Values) |
 | shell `radius` | whole number, 0 to 64 |
-| `scootnotify` `shadow` | `none`, `soft`, `deep` or `glow` |
-| `scootnotify` `fill` | `solid` or `gradient` |
-| `scootnotify` `motion` | `none`, `ease-out` or `spring` |
-| `scootnotify` `motion-duration-ms` | whole number, 0 to 1000 |
-| `scootnotify` `motion-bounce` | number, 0 to 1 |
+| `scootnotify`, `scootlaunch` `shadow` | `none`, `soft`, `deep` or `glow` |
+| `scootnotify`, `scootlaunch` `fill` | `solid` or `gradient` |
+| `scootnotify`, `scootlaunch` `motion` | `none`, `ease-out` or `spring` |
+| `scootnotify`, `scootlaunch` `motion-duration-ms` | whole number, 0 to 1000 |
+| `scootnotify`, `scootlaunch` `motion-bounce` | number, 0 to 1 |
 | `scootnotify` `card.enter`, `card.exit` | `slide`, `fade`, `scale` or `drop` |
 | `scootnotify` `card.mark` | `none`, `stripe`, `dot` or `badge` |
 | `scootnotify` `card.shape` | `rounded` or `pill` |
@@ -253,10 +254,10 @@ cards. An `[apps.scootlaunch]` (or `[apps.scootnotify]`) `colors.*` key
 replaces the derived role, and a dotless key (`font`, `font-size`,
 `opacity`, `radius`) replaces the top-level value, so each is emitted
 once. A look that sets `[effects]` adds top-level `shadow`, `fill`,
-`motion`, `motion-duration-ms` and `motion-bounce` keys, and a `[card]`
-table for `card.enter` and `card.exit` overrides, to `notify.toml` only;
-`launch.toml` and `greet.toml` never carry them. The notifier's other
-card keys (`card.mark`, `card.shape`, `card.app-accent`) join that `[card]`
+`motion`, `motion-duration-ms` and `motion-bounce` keys to `notify.toml`
+and `launch.toml`, and a `[card]` table for `card.enter` and `card.exit`
+overrides to `notify.toml` only; `greet.toml` never carries them. The
+notifier's other card keys (`card.mark`, `card.shape`, `card.app-accent`) join that `[card]`
 table and `title.weight` and `title.spacing` a `[title]` table, each only
 when the look sets them. scootlaunch reads its fragment at every open; scootnotify reads
 its own at start and on `msg reload --look` (which `scoot look apply`

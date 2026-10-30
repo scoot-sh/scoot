@@ -19,8 +19,12 @@ use scootui::test_support::{Session, Shot};
 /// The require variable turning these tests' skips into failures.
 pub const REQUIRE: &str = "SCOOTLAUNCH_REQUIRE_SCOOT";
 
+/// The binary under test: this build's, or `SCOOTLAUNCH_TEST_BIN` (the
+/// before side of an A/B run against another build).
 pub fn launch_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_scootlaunch"))
+    std::env::var_os("SCOOTLAUNCH_TEST_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_scootlaunch")))
 }
 
 /// Shared across the panel and spawn test targets; each target uses a subset.

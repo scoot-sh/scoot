@@ -56,6 +56,7 @@ pub mod bar;
 pub mod class;
 pub mod color;
 pub mod density;
+pub mod effects;
 pub mod ellipsis;
 pub mod font;
 pub mod motion;
