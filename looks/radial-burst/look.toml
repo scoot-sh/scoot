@@ -38,6 +38,16 @@ radius = 16
 ring-width = 2
 ring-inactive-width = 2
 
+[effects]
+shadow = "glow"
+motion = "spring"
+motion-duration-ms = 380
+motion-bounce = 0.6
+
+[apps.scootnotify]
+"card.enter" = "scale"
+"card.exit" = "fade"
+
 [cursor]
 theme = "Mocu"
 size = 24

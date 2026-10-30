@@ -60,7 +60,8 @@ use crate::bus::hints::Urgency;
 use crate::config::{Anchor as StackAnchor, Config};
 use crate::look::Look;
 use crate::model::store::Notification;
-use crate::view::layout::{self, Stack};
+use crate::view::layout::{self, Rect, Stack};
+use crate::view::motion::Motion;
 use crate::view::render::{self, Hover, ICON_SIDE, IconBits};
 
 /// evdev button codes: wayland-client names no button codes.
@@ -140,6 +141,17 @@ pub struct App {
     /// a busy loop at full CPU).
     draw_skipped: bool,
     stack: Stack,
+    /// Cards in flight between layouts (entrances, exits, restacks); empty
+    /// and memory-free whenever the look moves nothing or nothing moves.
+    motion: Motion,
+    /// An animation frame callback is outstanding: a draw made meanwhile
+    /// (a hover) asks for no second one, and the last animated frame asks
+    /// for none at all, which is what makes an idle stack cost nothing.
+    frame_pending: bool,
+    /// The compositor changed something under the stack (a surface closed,
+    /// an output came or went): the next turn must lay out again even when
+    /// it carries no bus event.
+    refresh_due: bool,
     /// The look's shadow tables (`None` for `shadow = "none"`, which
     /// builds, paints and pads nothing). Built with the look, sized to the
     /// stack's corner radii whenever either changes: the repaint only
@@ -176,11 +188,15 @@ struct Click {
 
 impl App {
     fn new(config: Config, look: Look) -> Self {
+        let config_anchor = config.anchor;
         Self {
             config,
             shadow: shadow_of(&look),
             shadow_stale: true,
             margin_sent: [0; 4],
+            motion: Motion::new(&look.motion, config_anchor),
+            frame_pending: false,
+            refresh_due: true,
             look,
             text: None,
             compositor: None,
@@ -316,6 +332,10 @@ impl App {
         self.configured_size = None;
         self.sized_to = None;
         self.draw_skipped = false;
+        // Nothing moves on a surface that is gone, and a callback for it
+        // never comes.
+        self.motion.reset();
+        self.frame_pending = false;
     }
 
     /// The layer margins: `margin_px` from the screen edge to the cards, so
@@ -332,6 +352,12 @@ impl App {
     /// when a radius is new: runs when the content, the look or the config
     /// changed, never in a repaint.
     fn prepare_shadow(&mut self) {
+        // An empty stack sizes no corners: keep the tables, because the
+        // cards still leaving are painted with them.
+        if self.stack.cards.is_empty() {
+            self.shadow_stale = false;
+            return;
+        }
         if let Some(shadow) = self.shadow.as_mut() {
             shadow.prepare(
                 self.config.radius,
@@ -365,25 +391,42 @@ impl App {
         self.hover = None;
     }
 
-    /// The laid-out card under the pointer, and the button within it.
+    /// The surface's height in logical pixels: what the layout is drawn
+    /// onto (taller than the layout while a bottom-anchored stack moves).
+    fn surface_height(&self) -> u32 {
+        self.content_size
+            .or(self.configured_size)
+            .map_or(self.stack.height, |size| size.height)
+    }
+
+    /// The laid-out card under the pointer, and the button within it. A
+    /// card in motion is hit where it is seen, not where the layout will
+    /// put it: the pointer is mapped back through the card's pose first.
     fn hit(&self) -> Option<(u32, Option<usize>)> {
         if !self.pointer_in {
             return None;
         }
+        let moving = self.motion.active();
+        let now = moving.then(Instant::now);
+        let shift = if moving {
+            self.motion.shift(self.surface_height(), self.stack.height)
+        } else {
+            0
+        };
         for card in &self.stack.cards {
-            let r = card.rect;
-            if self.pointer_x >= r.x
-                && self.pointer_x < r.x + r.width
-                && self.pointer_y >= r.y
-                && self.pointer_y < r.y + r.height
-            {
+            let (px, py) = match now {
+                Some(now) => self.motion.unproject(
+                    card,
+                    i64::from(self.pointer_x),
+                    i64::from(self.pointer_y),
+                    shift,
+                    now,
+                ),
+                None => (i64::from(self.pointer_x), i64::from(self.pointer_y)),
+            };
+            if inside(card.rect, px, py) {
                 for (index, button) in card.buttons.iter().enumerate() {
-                    let b = button.rect;
-                    if self.pointer_x >= b.x
-                        && self.pointer_x < b.x + b.width
-                        && self.pointer_y >= b.y
-                        && self.pointer_y < b.y + b.height
-                    {
+                    if inside(button.rect, px, py) {
                         return Some((card.id, Some(index)));
                     }
                 }
@@ -408,6 +451,49 @@ impl App {
         }
     }
 
+    /// Moves the motion to `now`: what has landed is dropped, the surface
+    /// returns to the layout's height when the last card stops, and the
+    /// surface goes away once the last leaving card is gone from an empty
+    /// stack. The hover follows the cards as they move under the pointer.
+    fn advance(&mut self, now: Instant) {
+        // Something that landed changes what is drawn (a card at rest
+        // paints through the static path), so it redraws.
+        if self.motion.settle(now) {
+            self.dirty = true;
+        }
+        if self.stack.cards.is_empty() && !self.motion.active() {
+            self.hide();
+            return;
+        }
+        self.sync_content_size();
+        if self.pointer_in {
+            self.rehover();
+        }
+    }
+
+    /// The surface size the stack and the motion in flight need: the
+    /// layout's, or taller while a card travels beyond it. `None` for an
+    /// empty stack with nothing leaving.
+    fn wanted_size(&self) -> Option<Size> {
+        if self.stack.cards.is_empty() && !self.motion.active() {
+            return None;
+        }
+        Some(Size {
+            width: self.stack.width,
+            height: self.stack.height.max(self.motion.hold()).max(1),
+        })
+    }
+
+    /// Follows [`wanted_size`](Self::wanted_size), redrawing when it moved.
+    fn sync_content_size(&mut self) {
+        let wanted = self.wanted_size();
+        if wanted != self.content_size {
+            self.content_size = wanted;
+            self.dirty = true;
+        }
+        self.motion.fit(wanted.map_or(0, |size| size.height));
+    }
+
     /// Draws the stack into a pooled buffer and commits it, requesting a
     /// frame callback for cards this commit first contains.
     fn draw(&mut self, qh: &QueueHandle<Self>) {
@@ -421,6 +507,12 @@ impl App {
         // `dirty`, so the very next turn draws.
         if self.configured_size.is_none() {
             return;
+        }
+        if self.motion.active() {
+            self.advance(Instant::now());
+            if self.live.is_none() {
+                return;
+            }
         }
         // The content sizes the surface (the compositor echoes explicit
         // sizes back, so resolving 0-axes against the configured size
@@ -499,17 +591,50 @@ impl App {
             // demand's scale is always 1; a HiDPI output upscales the
             // buffer (correct size, softer text). Sharp fractional
             // rendering is a follow-up, said so in the site docs.
-            render::paint(
-                &mut canvas,
-                text,
-                &self.stack,
-                &self.config,
-                &self.look,
-                &self.urgencies,
-                self.hover,
-                &self.icons,
-                self.shadow.as_ref(),
-            );
+            // A surface still taller than its layout (the compositor has
+            // not yet honored the shrink) paints through the same path, so
+            // a bottom-anchored stack stays where it sits.
+            if self.motion.active() || (self.motion.enabled() && dims.1 != self.stack.height) {
+                // Cards in flight composite from their layers; a layer
+                // repaints only when its card's hover changed.
+                let (config, look, urgencies, icons, shadow) = (
+                    &self.config,
+                    &self.look,
+                    &self.urgencies,
+                    &self.icons,
+                    self.shadow.as_ref(),
+                );
+                self.motion.paint_layers(self.hover, |card, layer, button| {
+                    paint_picture(
+                        layer, text, card, config, look, urgencies, button, icons, shadow,
+                    );
+                });
+                render::paint_moving(
+                    &mut canvas,
+                    text,
+                    &self.stack,
+                    &self.config,
+                    &self.look,
+                    &self.urgencies,
+                    self.hover,
+                    &self.icons,
+                    self.shadow.as_ref(),
+                    &self.motion,
+                    Instant::now(),
+                );
+            } else {
+                render::paint(
+                    &mut canvas,
+                    text,
+                    &self.stack,
+                    &self.config,
+                    &self.look,
+                    &self.urgencies,
+                    self.hover,
+                    &self.icons,
+                    self.shadow.as_ref(),
+                );
+            }
         }
         let Some(live) = self.live.as_mut() else {
             return false;
@@ -537,11 +662,23 @@ impl App {
             .damage_buffer(0, 0, dims.0 as i32, dims.1 as i32);
         live.prepare(frame.size, frame.scale);
         // The frame callback starts the clocks of the cards this commit
-        // first contains. Steady-state repaints (hover, expiry redraws)
-        // carry nothing: no request, no allocation.
-        if !self.unpresented.is_empty() {
-            let fresh = std::mem::take(&mut self.unpresented);
-            live.surface().frame(qh, fresh);
+        // first contains, and (while cards move) paces the animation:
+        // the next frame is drawn when the compositor says this one was
+        // shown, one callback outstanding at a time. Steady-state
+        // repaints (hover, expiry redraws) carry nothing: no request, no
+        // allocation. The last animated frame asks for none, so an idle
+        // stack has no timer and no callback in flight.
+        let animating = self.motion.active();
+        if !self.unpresented.is_empty() || (animating && !self.frame_pending) {
+            let cards = std::mem::take(&mut self.unpresented);
+            live.surface().frame(
+                qh,
+                Tick {
+                    cards,
+                    animation: animating && !self.frame_pending,
+                },
+            );
+            self.frame_pending |= animating;
         }
         live.surface().commit();
         slot.mark_committed();
@@ -559,9 +696,26 @@ impl App {
         // A layer surface without a region takes input everywhere; an
         // empty stack never reaches here (it hides instead).
         let region = compositor.create_region(qh, ());
-        for card in &self.stack.cards {
-            let r = card.rect;
-            region.add(r.x as i32, r.y as i32, r.width as i32, r.height as i32);
+        if self.motion.active() {
+            // Where the cards are seen, not where the layout will put
+            // them; a card leaving takes no input.
+            let height = self
+                .content_size
+                .or(self.configured_size)
+                .map_or(self.stack.height, |size| size.height);
+            let width = self.stack.width;
+            let shift = self.motion.shift(height, self.stack.height);
+            let now = Instant::now();
+            for card in &self.stack.cards {
+                if let Some(r) = self.motion.input_rect(card, shift, (width, height), now) {
+                    region.add(r.x as i32, r.y as i32, r.width as i32, r.height as i32);
+                }
+            }
+        } else {
+            for card in &self.stack.cards {
+                let r = card.rect;
+                region.add(r.x as i32, r.y as i32, r.width as i32, r.height as i32);
+            }
         }
         live.surface().set_input_region(Some(&region));
         region.destroy();
@@ -576,6 +730,10 @@ impl App {
             self.shadow = shadow_of(&look);
         }
         self.shadow_stale = true;
+        // A new look's motion starts from rest: whatever was in flight
+        // snaps, and `none` leaves nothing behind.
+        self.motion = Motion::new(&look.motion, self.config.anchor);
+        self.refresh_due = true;
         self.look = look;
         // The layout's sizes depend on the text size: force a rebuild
         // on the next refresh (the stack comparison would call equal
@@ -589,7 +747,12 @@ impl App {
     /// idle period changed, so the caller can re-arm it.
     fn apply_config(&mut self, config: Config) -> bool {
         let idle_changed = self.config.pause_when_idle_secs != config.pause_when_idle_secs;
+        if self.config.anchor != config.anchor {
+            // The edge cards enter from moved: restart the motion there.
+            self.motion = Motion::new(&self.look.motion, config.anchor);
+        }
         self.config = config;
+        self.refresh_due = true;
         // The card radius is the config's: the shadow's corners follow it.
         self.shadow_stale = true;
         // The layout's sizes depend on the config: force a rebuild on
@@ -624,6 +787,14 @@ impl App {
         let note = notifier.get_input_idle_notification(secs * 1000, seat, qh, ());
         self.idle = Some(note);
     }
+}
+
+/// Whether `(x, y)` lies in `rect`.
+fn inside(rect: Rect, x: i64, y: i64) -> bool {
+    x >= i64::from(rect.x)
+        && x < i64::from(rect.x) + i64::from(rect.width)
+        && y >= i64::from(rect.y)
+        && y < i64::from(rect.y) + i64::from(rect.height)
 }
 
 /// The shadow tables for `look`'s style (none for `shadow = "none"`).
@@ -698,6 +869,19 @@ impl Popup {
         self.app.live.is_some()
     }
 
+    /// Whether cards are moving: the stack is drawing frames paced by the
+    /// compositor's frame callbacks, and only those.
+    pub fn animating(&self) -> bool {
+        self.app.motion.active()
+    }
+
+    /// Whether the next turn must lay out even without a bus or control
+    /// event: the compositor changed something under the stack, or the
+    /// look or the config did.
+    pub fn refresh_due(&self) -> bool {
+        self.app.refresh_due
+    }
+
     /// Whether the compositor went away: the daemon exits 1 (the unit
     /// goes with the session), like the bus-gone path.
     pub fn gone(&self) -> bool {
@@ -715,26 +899,18 @@ impl Popup {
             Some(text) => text,
             None => return,
         };
+        app.refresh_due = false;
         let pad = app.shadow.as_ref().map_or(Pad::ZERO, Shadow::pad);
-        let stack = layout::inset(layout::layout(live, &app.config, text, em, now_ms), pad);
-        let changed = stack != app.stack;
-        if changed {
-            app.stack = stack;
-            app.content_size = if app.stack.cards.is_empty() {
-                None
-            } else {
-                Some(Size {
-                    width: app.stack.width,
-                    height: app.stack.height.max(1),
-                })
-            };
-            app.dirty = true;
-        }
-        if changed || app.shadow_stale {
-            app.prepare_shadow();
-        }
+        let mut stack = layout::inset(layout::layout(live, &app.config, text, em, now_ms), pad);
+        // Two empty stacks are the same stack, whatever their widths.
+        let changed = if stack.cards.is_empty() && app.stack.cards.is_empty() {
+            false
+        } else {
+            stack != app.stack
+        };
         // Urgencies follow the live set (the paint reads them per card).
-        app.urgencies.clear();
+        // Those of cards that just left stay until the pictures of those
+        // cards are painted below.
         app.urgencies
             .extend(live.iter().map(|note| (note.id, note.urgency)));
         // Decode icons for cards without any (arrival-priced, once).
@@ -748,8 +924,53 @@ impl Popup {
                 app.icons.insert(note.id, bits);
             }
         }
+        if changed {
+            if app.motion.enabled() {
+                if stack.cards.is_empty() && app.live.is_none() {
+                    // Nothing was ever drawn: nothing leaves.
+                } else {
+                    app.motion.retarget(&app.stack, &stack, Instant::now());
+                }
+                if stack.cards.is_empty() && app.motion.active() {
+                    // The last cards are leaving: the surface keeps the
+                    // stack's size until they are gone.
+                    stack.width = app.stack.width;
+                    stack.pad = app.stack.pad;
+                }
+            }
+            app.stack = stack;
+            app.dirty = true;
+        }
+        // Whatever moved the size (this layout, a re-theme that dropped
+        // the held height, a new look): the surface follows the stack and
+        // the motion in flight, and tells the motion how tall it is.
+        app.sync_content_size();
+        if changed || app.shadow_stale {
+            app.prepare_shadow();
+        }
+        // Paint the pictures of the cards that now move or leave, while
+        // the leaving cards' urgencies and icons are still known.
+        if app.motion.active()
+            && let Some(text) = app.text.as_mut()
+        {
+            let (config, look, urgencies, icons, shadow, hover) = (
+                &app.config,
+                &app.look,
+                &app.urgencies,
+                &app.icons,
+                app.shadow.as_ref(),
+                app.hover,
+            );
+            app.motion.paint_layers(hover, |card, layer, button| {
+                paint_picture(
+                    layer, text, card, config, look, urgencies, button, icons, shadow,
+                );
+            });
+        }
         // Forget what left (a close frees its pixels with its card,
         // and drops its presentation: a re-arrival presents afresh).
+        app.urgencies
+            .retain(|id, _| live.iter().any(|note| note.id == *id));
         app.icons
             .retain(|id, _| live.iter().any(|note| note.id == *id));
         app.unpresented
@@ -758,7 +979,9 @@ impl Popup {
             .retain(|id| live.iter().any(|note| note.id == *id));
         let qh = self.queue.handle();
         if app.stack.cards.is_empty() {
-            if app.live.is_some() {
+            // Cards still leaving keep the surface until the last one is
+            // gone (`advance` hides it then).
+            if app.live.is_some() && !app.motion.active() {
                 app.hide();
             }
             return;
@@ -931,6 +1154,38 @@ impl Popup {
     }
 }
 
+/// Paints one moving card into its layer: the card, its shadow and its
+/// icon, with the urgency its notification has (or had, for a card that is
+/// leaving).
+#[allow(clippy::too_many_arguments)] // A paint helper, as the bar's own are.
+fn paint_picture(
+    layer: &mut scootui::paint::Layer,
+    text: &mut Text,
+    card: &layout::Card,
+    config: &Config,
+    look: &Look,
+    urgencies: &HashMap<u32, Urgency>,
+    button: Option<usize>,
+    icons: &HashMap<u32, IconBits>,
+    shadow: Option<&Shadow>,
+) {
+    let Some(mut canvas) = layer.canvas() else {
+        return;
+    };
+    let urgency = urgencies.get(&card.id).copied().unwrap_or(Urgency::Normal);
+    render::paint_layer(
+        &mut canvas,
+        text,
+        card,
+        config,
+        look,
+        urgency,
+        button,
+        icons,
+        shadow,
+    );
+}
+
 /// Decodes a card's icon once, at arrival scale: `image-data` is
 /// premultiplied and fitted into the decoded square, a path reads
 /// through the tray's icon discipline (regular files only, capped), a
@@ -1052,6 +1307,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                 "wl_output" => {
                     let output: wl_output::WlOutput = registry.bind(name, 4.min(version), qh, ());
                     app.outputs.push((name, output, String::new()));
+                    app.refresh_due = true;
                 }
                 "wl_seat" => {
                     app.seat_proxy = Some(registry.bind(name, 7.min(version), qh, ()));
@@ -1082,6 +1338,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                 // follows the compositor; a named one falls back), and
                 // with zero outputs the cards wait.
                 app.outputs.retain(|(global, _, _)| *global != name);
+                app.refresh_due = true;
                 if app.outputs.is_empty() && app.live.is_some() {
                     app.destroy_live();
                 }
@@ -1280,6 +1537,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
                     Effect::Ack(_) | Effect::None | Effect::Create => {}
                     Effect::Destroy | Effect::DestroyAndGiveUp | Effect::DestroyAndRetry => {
                         app.destroy_live();
+                        app.refresh_due = true;
                     }
                 }
                 app.configured_size = Some(Size { width, height });
@@ -1295,6 +1553,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
                 // at its own event rate, like every other client it
                 // closes). The panel exits here instead; the daemon
                 // runs until killed, so it re-shows.
+                app.refresh_due = true;
                 match app.demand.closed() {
                     Effect::DestroyAndRetry | Effect::DestroyAndGiveUp | Effect::Destroy => {
                         app.hide();
@@ -1308,20 +1567,37 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
     }
 }
 
-impl Dispatch<wl_callback::WlCallback, Vec<u32>> for App {
+/// What a `wl_surface.frame` callback carries: the cards its commit first
+/// showed, and whether it also paces the animation.
+pub struct Tick {
+    cards: Vec<u32>,
+    animation: bool,
+}
+
+impl Dispatch<wl_callback::WlCallback, Tick> for App {
     fn event(
         app: &mut App,
         _: &wl_callback::WlCallback,
         event: wl_callback::Event,
-        batch: &Vec<u32>,
+        tick: &Tick,
         _: &Connection,
         _: &QueueHandle<App>,
     ) {
+        // The commit was shown: draw the next animated frame, if cards
+        // are still moving (and none otherwise: nothing more is asked).
+        if let wl_callback::Event::Done { .. } = event
+            && tick.animation
+        {
+            app.frame_pending = false;
+            if app.motion.active() {
+                app.dirty = true;
+            }
+        }
         // The commit's cards are on screen: their clocks start now (a
         // card that left meanwhile presents to nothing — the daemon's
         // call is a no-op for unknown ids).
         if let wl_callback::Event::Done { .. } = event {
-            let shown: Vec<u32> = batch.to_vec();
+            let shown: Vec<u32> = tick.cards.clone();
             app.unpresented.retain(|id| !shown.contains(id));
             app.presented.extend(shown.iter().copied());
             if !shown.is_empty() {

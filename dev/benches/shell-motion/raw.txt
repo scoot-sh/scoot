@@ -1,0 +1,112 @@
+# Raw output. Commit 46edad482 (code f1403b973), aarch64 dev VM, release profile, taskset -c 3.
+# bench_motion --font DejaVuSans.ttf --iters 400, five runs
+== run 1
+scenario surface-px median-us p5-us
+static repaint, 5 cards 384x498 98.6 97.4
+enter slide, arrival on 5: frame 384x522 230.8 227.0
+enter slide, arrival on 5: start (retarget + layers) 384x522 259.3 259.3
+enter scale, arrival on 5: frame 384x522 329.1 231.3
+enter scale, arrival on 5: start (retarget + layers) 384x522 267.7 267.7
+restack, close middle of 5: frame 384x508 152.1 151.5
+restack, close middle of 5: start (retarget + layers) 384x508 148.2 148.2
+restack, bottom anchor: frame 384x508 158.8 158.5
+restack, bottom anchor: start (retarget + layers) 384x508 66.9 66.9
+== run 2
+scenario surface-px median-us p5-us
+static repaint, 5 cards 384x498 262.2 225.4
+enter slide, arrival on 5: frame 384x522 625.6 457.5
+enter slide, arrival on 5: start (retarget + layers) 384x522 686.8 686.8
+enter scale, arrival on 5: frame 384x522 1190.6 658.9
+enter scale, arrival on 5: start (retarget + layers) 384x522 716.2 716.2
+restack, close middle of 5: frame 384x508 412.7 317.8
+restack, close middle of 5: start (retarget + layers) 384x508 317.0 317.0
+restack, bottom anchor: frame 384x508 440.9 329.4
+restack, bottom anchor: start (retarget + layers) 384x508 167.6 167.6
+== run 3
+scenario surface-px median-us p5-us
+static repaint, 5 cards 384x498 262.8 223.7
+enter slide, arrival on 5: frame 384x522 657.3 459.3
+enter slide, arrival on 5: start (retarget + layers) 384x522 984.5 984.5
+enter scale, arrival on 5: frame 384x522 1137.8 541.6
+enter scale, arrival on 5: start (retarget + layers) 384x522 715.8 715.8
+restack, close middle of 5: frame 384x508 386.4 317.5
+restack, close middle of 5: start (retarget + layers) 384x508 291.9 291.9
+restack, bottom anchor: frame 384x508 437.5 328.2
+restack, bottom anchor: start (retarget + layers) 384x508 155.3 155.3
+== run 4
+scenario surface-px median-us p5-us
+static repaint, 5 cards 384x498 243.3 152.8
+enter slide, arrival on 5: frame 384x522 624.1 462.5
+enter slide, arrival on 5: start (retarget + layers) 384x522 822.0 822.0
+enter scale, arrival on 5: frame 384x522 1123.8 618.5
+enter scale, arrival on 5: start (retarget + layers) 384x522 733.4 733.4
+restack, close middle of 5: frame 384x508 398.5 317.1
+restack, close middle of 5: start (retarget + layers) 384x508 320.0 320.0
+restack, bottom anchor: frame 384x508 453.0 328.2
+restack, bottom anchor: start (retarget + layers) 384x508 176.8 176.8
+== run 5
+scenario surface-px median-us p5-us
+static repaint, 5 cards 384x498 302.7 226.7
+enter slide, arrival on 5: frame 384x522 668.7 461.6
+enter slide, arrival on 5: start (retarget + layers) 384x522 600.7 600.7
+enter scale, arrival on 5: frame 384x522 1185.9 606.0
+enter scale, arrival on 5: start (retarget + layers) 384x522 674.7 674.7
+restack, close middle of 5: frame 384x508 445.2 318.0
+restack, close middle of 5: start (retarget + layers) 384x508 290.6 290.6
+restack, bottom anchor: frame 384x508 449.9 328.6
+restack, bottom anchor: start (retarget + layers) 384x508 201.8 201.8
+
+# bench_depth A/B: main (20a758eab, own target dir) vs this branch, alternating, --iters 500
+main 1 None 360x474 median=182.2 p5=131.7; Soft 384x498 median=301.2 p5=223.3; 
+branch 1 None 360x474 median=161.6 p5=132.3; Soft 384x498 median=267.8 p5=223.2; 
+main 2 None 360x474 median=154.3 p5=130.8; Soft 384x498 median=296.1 p5=223.5; 
+branch 2 None 360x474 median=100.8 p5=81.5; Soft 384x498 median=158.8 p5=137.3; 
+main 3 None 360x474 median=176.5 p5=132.6; Soft 384x498 median=363.2 p5=223.9; 
+branch 3 None 360x474 median=176.8 p5=133.2; Soft 384x498 median=302.8 p5=225.6; 
+main 4 None 360x474 median=140.2 p5=132.0; Soft 384x498 median=311.2 p5=226.8; 
+branch 4 None 360x474 median=134.8 p5=132.3; Soft 384x498 median=227.3 p5=221.5; 
+main 5 None 360x474 median=178.9 p5=132.2; Soft 384x498 median=302.0 p5=222.7; 
+branch 5 None 360x474 median=179.7 p5=133.7; Soft 384x498 median=294.4 p5=224.7; 
+main 6 None 360x474 median=176.9 p5=132.8; Soft 384x498 median=261.6 p5=224.0; 
+branch 6 None 360x474 median=180.8 p5=133.6; Soft 384x498 median=340.5 p5=223.5; 
+
+# Frame-tick relayout gate, scootnotify daemon in a headless scoot, one card sliding in over 300 ms
+# (a temporary eprintln! in Popup::refresh, counted from the daemon log; instrumented working tree
+#  as of commit f1403b973 less the later layer-refit fix, never committed)
+# gate on : frame requests=14 commits=16 refresh calls=7
+# gate off: frame requests=14 commits=16 refresh calls=35
+
+# bench_motion rerun at the head after the clippy fix, three runs, busy VM
+== run 1
+scenario surface-px median-us p5-us
+static repaint, 5 cards 384x498 307.9 226.9
+enter slide, arrival on 5: frame 384x522 624.1 461.4
+enter slide, arrival on 5: start (retarget + layers) 384x522 1063.1 1063.1
+enter scale, arrival on 5: frame 384x522 1208.0 619.0
+enter scale, arrival on 5: start (retarget + layers) 384x522 694.0 694.0
+restack, close middle of 5: frame 384x508 512.8 319.8
+restack, close middle of 5: start (retarget + layers) 384x508 276.5 276.5
+restack, bottom anchor: frame 384x508 442.2 329.8
+restack, bottom anchor: start (retarget + layers) 384x508 199.1 199.1
+== run 2
+scenario surface-px median-us p5-us
+static repaint, 5 cards 384x498 305.5 225.4
+enter slide, arrival on 5: frame 384x522 627.8 459.1
+enter slide, arrival on 5: start (retarget + layers) 384x522 853.8 853.8
+enter scale, arrival on 5: frame 384x522 1178.2 583.9
+enter scale, arrival on 5: start (retarget + layers) 384x522 773.2 773.2
+restack, close middle of 5: frame 384x508 512.2 295.2
+restack, close middle of 5: start (retarget + layers) 384x508 324.9 324.9
+restack, bottom anchor: frame 384x508 444.1 329.1
+restack, bottom anchor: start (retarget + layers) 384x508 176.5 176.5
+== run 3
+scenario surface-px median-us p5-us
+static repaint, 5 cards 384x498 311.0 227.3
+enter slide, arrival on 5: frame 384x522 662.8 458.7
+enter slide, arrival on 5: start (retarget + layers) 384x522 850.6 850.6
+enter scale, arrival on 5: frame 384x522 1187.8 651.0
+enter scale, arrival on 5: start (retarget + layers) 384x522 746.4 746.4
+restack, close middle of 5: frame 384x508 392.8 319.9
+restack, close middle of 5: start (retarget + layers) 384x508 386.1 386.1
+restack, bottom anchor: frame 384x508 493.0 332.5
+restack, bottom anchor: start (retarget + layers) 384x508 217.0 217.0

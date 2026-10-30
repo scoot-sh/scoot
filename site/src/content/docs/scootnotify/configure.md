@@ -271,7 +271,7 @@ the file — a look swap under a half-edited file.
 
 ## The look layer
 
-Colors, font, opacity, corners and depth come from the active look, under the
+Colors, font, opacity, corners, depth and motion come from the active look, under the
 cards — never from this file. The daemon reads
 `<state>/look/notify.toml` at start (a dangling or missing link means
 no layer, plus a warning), with the user's file winning per key over
@@ -304,6 +304,7 @@ false`](../../desktop/notifications/) writes.
 | Font | `fonts.ui` at `fonts.popup-size` |
 | Corners | `shape.radius` |
 | Shadow, fill | `effects.shadow`, `effects.fill` (see [Depth](#depth)) |
+| Motion | `effects.motion`, `effects.motion-duration-ms`, `effects.motion-bounce`, and `card.enter`, `card.exit` (see [Motion](#motion)) |
 
 ### Depth
 
@@ -364,6 +365,89 @@ refuses at validation.
 > The shadow needs room that comes out of the margin. With `margin_px`
 > below the room (for a top-right stack, 12 px for `soft` and 28 px for
 > `deep`), the cards sit that much further in. Raise `margin_px`, or pick a lighter `shadow`.
+
+### Motion
+
+By default cards appear and disappear at once and the stack jumps when a
+card closes. A look can make them move: a new card slides, fades, grows
+or drops in, a closed card fades out, and the cards beside it spring into
+the space it left. Motion is off by default, and a look that does not set
+it paints and behaves exactly as before.
+
+```toml
+[effects]
+motion = "spring"          # none | ease-out | spring
+motion-duration-ms = 380   # 0 to 1000
+motion-bounce = 0.6        # 0 to 1, spring only
+
+[apps.scootnotify]
+"card.enter" = "slide"     # slide | fade | scale | drop
+"card.exit" = "fade"       # slide | fade | scale | drop
+```
+
+| Key | Value | Default | What it does |
+|---|---|---|---|
+| `motion` | `none`, `ease-out` or `spring` | `none` | The curve every move follows. `none` moves nothing and costs nothing. |
+| `motion-duration-ms` | whole number, 0 to 1000 | `250` | How long one move takes. `0` is the same as `none`. |
+| `motion-bounce` | number, 0 to 1 | `1` | How far a `spring` overshoots its target: `0` is the `ease-out` curve, `1` is the compositor's own spring (about 9% past the target before it settles). Ignored by `ease-out`. |
+| `card.enter` | `slide`, `fade`, `scale` or `drop` | `slide` | How a new card arrives. |
+| `card.exit` | `slide`, `fade`, `scale` or `drop` | `fade` | How a closed or expired card leaves. |
+
+Every style fades the card; the style adds a move. `slide` comes in from
+the edge the stack is anchored to (40 px), `scale` grows from 88% of its
+size, `drop` falls 24 px from above. A card leaving runs its style
+backwards, always without overshoot, whatever `motion` is.
+
+`motion`, `motion-duration-ms` and `motion-bounce` go in `[effects]` to
+apply to every app that reads them, or in `[apps.scootnotify]` to
+override them for the notifier alone. `card.enter` and `card.exit` are
+notifier keys: they go in `[apps.scootnotify]`, quoted. The look renders
+them into `notify.toml` as `motion`, `motion-duration-ms` and
+`motion-bounce` at the top level and `enter` and `exit` in a `[card]`
+table, only when the look sets them. A value outside its list or range is
+refused by `scoot look validate`; a hand-edited `notify.toml` with one is
+reported in the daemon log and ignored, and that key keeps its default.
+
+Cards move on the compositor's frame callbacks, so the motion is as
+smooth as the display and costs nothing while the stack sits still: no
+timer runs and no frame is requested once the last card lands. A close
+only changes what is drawn: the notification is closed, and its
+`NotificationClosed` signal sent, at the moment of the close, not when the
+card has faded out. A card that is leaving cannot be clicked. A card that
+is moving is clicked where it is drawn, not where it is going.
+
+While a card travels, the surface stays as tall as the motion needs
+(up to the distance a card moves, plus a little for a spring's overshoot)
+and returns to the stack's height when it lands. A spring settling toward
+the screen edge the stack is anchored to stops at the edge instead of
+overshooting off it. Cards that were not moving paint exactly as they do
+without motion.
+
+The `radial-burst` look ships with a glow shadow, a spring and a scale entrance;
+`ginger-night`, the default look, sets no motion.
+
+There is no reduced-motion setting to follow: scoot has none yet, and the
+compositor's `[animation] enabled` is a separate opt-in for window
+slides. To turn card motion off, set `motion = "none"` in the look or in
+`[apps.scootnotify]`, then `scoot look apply` (or `scootnotify msg reload
+--look`).
+
+> **Symptom:** a look sets `motion` and the cards still jump.
+> The daemon logs `motion refused ... default applies` or `motion is not
+> a motion` for a value outside `none`, `ease-out` and `spring`.
+> Check `<state>/look/notify.toml` for a `motion` line, that
+> `motion-duration-ms` is not `0`, and that the config has no `look =
+> false`.
+
+> **Symptom:** a card slides in with no overshoot.
+> `motion-bounce` only shapes a `spring`. With `ease-out`, or a bounce of
+> `0`, the card lands without passing its place.
+
+> **Symptom:** the stack stutters while cards move.
+> Motion repaints at the compositor's frame rate, so a compositor that
+> serves few frames (a software-rendered session over a slow link) shows
+> few. A shorter `motion-duration-ms` or `motion = "ease-out"` finishes
+> sooner; `motion = "none"` moves nothing.
 
 > **Symptom:** the cards ignore a look swap.
 > `scoot look apply` reloads the running daemon live (plain `msg

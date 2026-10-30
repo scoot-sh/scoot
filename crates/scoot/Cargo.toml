@@ -61,6 +61,8 @@ xwayland = ["smithay/xwayland"]
 
 [dependencies]
 scoot-core.workspace = true
+# The easing curves the compositor's window slides share with the shell apps.
+scoot-rt.workspace = true
 scoot-ipc = { workspace = true, features = ["core"] }
 scootctl.workspace = true
 serde_json.workspace = true

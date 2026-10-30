@@ -1,7 +1,8 @@
-//! `scoot-rt`: the leaf both `scootui` and `scoot-dbus` depend on.
+//! `scoot-rt`: the leaf `scootui`, `scoot-dbus` and the compositor depend on.
 //!
-//! Panic-free printing and the runtime directory, with `std` and `rustix`
-//! only. Extracted from `scootbar` (`src/print.rs`, `src/control/paths.rs`'s
+//! Panic-free printing, the runtime directory and the easing curves the
+//! compositor's window slides and the shell apps' card motion share, with
+//! `std` and `rustix` only. Extracted from `scootbar` (`src/print.rs`, `src/control/paths.rs`'s
 //! `runtime_dir`) so the drawing crate and the D-Bus crate share one copy
 //! instead of each carrying its own.
 //!
@@ -11,6 +12,7 @@
 
 use std::path::PathBuf;
 
+pub mod easing;
 pub mod print;
 
 /// The runtime directory: `$XDG_RUNTIME_DIR`, or its conventional

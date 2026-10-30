@@ -262,6 +262,15 @@ impl Partial {
         if raw.effects.fill.is_some() {
             self.effects.fill = raw.effects.fill.clone();
         }
+        if raw.effects.motion.is_some() {
+            self.effects.motion = raw.effects.motion.clone();
+        }
+        if raw.effects.motion_duration_ms.is_some() {
+            self.effects.motion_duration_ms = raw.effects.motion_duration_ms;
+        }
+        if raw.effects.motion_bounce.is_some() {
+            self.effects.motion_bounce = raw.effects.motion_bounce;
+        }
         if raw.cursor.theme.is_some() {
             self.cursor.theme = raw.cursor.theme.clone();
         }

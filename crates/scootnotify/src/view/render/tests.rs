@@ -17,13 +17,13 @@ use crate::model::expiry::Clock;
 use crate::model::store::{Icon, Notification};
 use crate::view::layout;
 
-pub(super) fn make_text() -> Text {
+pub(crate) fn make_text() -> Text {
     Text::new(FontArc::new(
         FontVec::try_from_vec(scootui::testfont::build()).unwrap(),
     ))
 }
 
-pub(super) fn note(id: u32, summary: &str, body: &str) -> Notification {
+pub(crate) fn note(id: u32, summary: &str, body: &str) -> Notification {
     Notification {
         id,
         app_name: "test".to_owned(),
@@ -222,7 +222,7 @@ fn fingerprint(bytes: &[u8]) -> u64 {
 /// Seven notifications: three urgencies, a body, a progress bar and two
 /// buttons on the newest, and more than `max_visible` for the "+N more"
 /// pill.
-pub(super) fn busy_notes() -> Vec<Notification> {
+pub(crate) fn busy_notes() -> Vec<Notification> {
     let mut notes: Vec<Notification> = (1..=7)
         .map(|id| {
             note(

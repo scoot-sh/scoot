@@ -1431,7 +1431,7 @@ fn run_show(look: &Look, name: &str) -> Result<(), String> {
                 },
                 "opacity": {"bar": merged.opacity.bar, "popups": merged.opacity.popups, "terminal": merged.opacity.terminal},
                 "shape": {"radius": merged.shape.radius, "ring-width": merged.shape.ring_width, "ring-inactive-width": merged.shape.ring_inactive_width},
-                "effects": {"shadow": merged.effects.shadow, "fill": merged.effects.fill},
+                "effects": {"shadow": merged.effects.shadow, "fill": merged.effects.fill, "motion": merged.effects.motion, "motion-duration-ms": merged.effects.motion_duration_ms, "motion-bounce": merged.effects.motion_bounce},
                 "cursor": {"theme": merged.cursor.theme, "size": merged.cursor.size, "accent": merged.cursor.accent},
                 "wallpaper": merged.wallpaper.as_ref().map(|wallpaper| serde_json::json!({
                     "image": wallpaper.image, "color": wallpaper.color,
@@ -1497,6 +1497,23 @@ fn run_show(look: &Look, name: &str) -> Result<(), String> {
                 "effects: shadow {} fill {}",
                 merged.effects.shadow.as_deref().unwrap_or("-"),
                 merged.effects.fill.as_deref().unwrap_or("-")
+            ))?;
+        }
+        if merged.effects.motion.is_some()
+            || merged.effects.motion_duration_ms.is_some()
+            || merged.effects.motion_bounce.is_some()
+        {
+            print(&format!(
+                "motion: {} {} ms bounce {}",
+                merged.effects.motion.as_deref().unwrap_or("-"),
+                merged
+                    .effects
+                    .motion_duration_ms
+                    .map_or_else(|| "-".to_string(), |ms| ms.to_string()),
+                merged
+                    .effects
+                    .motion_bounce
+                    .map_or_else(|| "-".to_string(), |bounce| format!("{bounce}"))
             ))?;
         }
         print(&format!(

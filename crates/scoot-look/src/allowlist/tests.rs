@@ -289,3 +289,86 @@ fn the_depth_keys_belong_to_the_notifier_alone() {
     assert!(check_app_value("scootnotify", "shadow", &toml::Value::Integer(1)).is_some());
     assert!(check_app_value("scootlaunch", "shadow", &text("soft")).is_some());
 }
+
+#[test]
+fn the_motion_keys_belong_to_the_notifier_alone() {
+    for key in [
+        "motion",
+        "motion-duration-ms",
+        "motion-bounce",
+        "card.enter",
+        "card.exit",
+    ] {
+        assert!(allows("scootnotify", key), "{key}");
+        for other in ["scootlaunch", "scootgreet", "scootbar"] {
+            assert!(!allows(other, key), "{other} {key}");
+        }
+    }
+    let text = |s: &str| toml::Value::String(s.to_string());
+    for curve in MOTION_CURVES {
+        assert!(check_app_value("scootnotify", "motion", &text(curve)).is_none());
+    }
+    for style in CARD_MOTIONS {
+        for key in ["card.enter", "card.exit"] {
+            assert!(check_app_value("scootnotify", key, &text(style)).is_none());
+        }
+    }
+    for (key, bad) in [
+        ("motion", "bouncy"),
+        ("motion", "Spring"),
+        ("card.enter", "none"),
+        ("card.exit", "spin"),
+    ] {
+        assert!(
+            check_app_value("scootnotify", key, &text(bad)).is_some(),
+            "{key}={bad}"
+        );
+    }
+}
+
+#[test]
+fn motion_numbers_are_range_checked() {
+    let int = toml::Value::Integer;
+    let float = toml::Value::Float;
+    for ok in [0, 1, 380, 1000] {
+        assert!(check_app_value("scootnotify", "motion-duration-ms", &int(ok)).is_none());
+    }
+    for bad in [-1, 1001, i64::MAX, i64::MIN] {
+        assert!(
+            check_app_value("scootnotify", "motion-duration-ms", &int(bad)).is_some(),
+            "{bad}"
+        );
+    }
+    assert!(
+        check_app_value(
+            "scootnotify",
+            "motion-duration-ms",
+            &toml::Value::String("fast".into())
+        )
+        .is_some()
+    );
+    for ok in [0.0, 0.12, 1.0] {
+        assert!(check_app_value("scootnotify", "motion-bounce", &float(ok)).is_none());
+    }
+    for bad in [-0.1, 1.01, f64::NAN, f64::INFINITY] {
+        assert!(
+            check_app_value("scootnotify", "motion-bounce", &float(bad)).is_some(),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn a_bad_bounce_says_bounce_not_opacity() {
+    let reason = check_app_value("scootnotify", "motion-bounce", &toml::Value::Integer(2))
+        .expect("refused")
+        .to_string();
+    assert!(reason.contains("0 to 1"), "{reason}");
+    assert!(!reason.contains("opaque"), "{reason}");
+    // The bounds are the same as an opacity's: whole 0 and 1 pass.
+    for ok in [0, 1] {
+        assert!(
+            check_app_value("scootnotify", "motion-bounce", &toml::Value::Integer(ok)).is_none()
+        );
+    }
+}

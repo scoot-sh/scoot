@@ -58,6 +58,7 @@ pub mod color;
 pub mod density;
 pub mod ellipsis;
 pub mod font;
+pub mod motion;
 pub mod output;
 pub mod outputs;
 pub mod paint;
