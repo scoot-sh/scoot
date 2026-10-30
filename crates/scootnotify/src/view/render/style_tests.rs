@@ -577,3 +577,126 @@ fn a_progress_bar_starts_below_a_taller_icon_slot() {
             >= card.rect.y + config.border_px + layout::PAD + layout::ICON_PX
     );
 }
+
+/// A look that moves and marks: the mark is in the card's layer, so a card
+/// in flight carries it (and it stays inside the pill and the shadow's
+/// room), and the frame where everything has landed is the static paint.
+#[test]
+fn a_mark_travels_with_a_card_in_flight_and_lands_on_the_static_paint() {
+    use std::time::{Duration, Instant};
+
+    use scootui::motion::Curve;
+
+    use crate::config::Anchor;
+    use crate::look::{CardMotion, MotionTokens};
+    use crate::view::motion::Motion;
+
+    let config = Config::default();
+    let notes = vec![note(1, "Card", "A body that wraps a few times")];
+    let tokens = MotionTokens {
+        curve: Curve::EaseOut,
+        duration_ms: 200,
+        bounce: 1.0,
+        enter: CardMotion::Slide,
+        exit: CardMotion::Fade,
+    };
+    let frame = |look: &Look, ms: u64| -> (Vec<u8>, layout::Stack) {
+        let mut look = look.clone();
+        look.motion = tokens;
+        let (stack, tables) = styled(&look, &config, &notes);
+        let empty = layout::Stack::default_empty();
+        let t0 = Instant::now();
+        let mut motion = Motion::new(&look.motion, Anchor::TopRight);
+        motion.retarget(&empty, &stack, t0);
+        let now = t0 + Duration::from_millis(ms);
+        motion.settle(now);
+        let (w, h) = (stack.width, stack.height.max(motion.hold()).max(1));
+        let urgencies: HashMap<u32, Urgency> = notes.iter().map(|n| (n.id, n.urgency)).collect();
+        let mut text = make_text();
+        let icons = HashMap::new();
+        let mut pixels = vec![0u8; w as usize * h as usize * 4];
+        let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
+        if motion.active() {
+            motion.paint_layers(None, |card, layer, button| {
+                let urgency = urgencies.get(&card.id).copied().unwrap_or(Urgency::Normal);
+                let mut canvas = layer.canvas().expect("layer");
+                paint_layer(
+                    &mut canvas,
+                    &mut text,
+                    card,
+                    &config,
+                    &look,
+                    urgency,
+                    button,
+                    &icons,
+                    tables.as_ref(),
+                );
+            });
+            paint_moving(
+                &mut canvas,
+                &mut text,
+                &stack,
+                &config,
+                &look,
+                &urgencies,
+                None,
+                &icons,
+                tables.as_ref(),
+                &motion,
+                now,
+            );
+        } else {
+            paint(
+                &mut canvas,
+                &mut text,
+                &stack,
+                &config,
+                &look,
+                &urgencies,
+                None,
+                &icons,
+                tables.as_ref(),
+            );
+        }
+        (pixels, stack)
+    };
+    let plain = look_with(|l| {
+        l.shape = CardShape::Pill;
+        l.shadow = ShadowStyle::Soft;
+    });
+    let marked = look_with(|l| {
+        l.shape = CardShape::Pill;
+        l.shadow = ShadowStyle::Soft;
+        l.mark = CardMark::Stripe;
+    });
+    // In flight: the two frames differ, only in a thin band down the
+    // card's leading edge, and nowhere near the shadow's room.
+    let (a, stack) = frame(&plain, 100);
+    let (b, _) = frame(&marked, 100);
+    assert_eq!(a.len(), b.len());
+    let width = stack.width as usize;
+    let (mut left, mut right, mut any) = (usize::MAX, 0usize, false);
+    for (index, (x, y)) in a
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.as_chunks::<4>().0)
+        .enumerate()
+    {
+        if x != y {
+            any = true;
+            left = left.min(index % width);
+            right = right.max(index % width);
+        }
+    }
+    assert!(any, "the stripe is drawn while the card moves");
+    assert!(
+        right - left <= STRIPE_PX as usize + 2,
+        "the difference is the stripe's band: columns {left}..={right}"
+    );
+    // Landed: the static paint, byte for byte.
+    let (landed, _) = frame(&marked, 5_000);
+    let (laid_out, tables) = styled(&marked, &config, &notes);
+    let reference = paint_styled(&marked, &config, &notes, &laid_out, tables.as_ref());
+    assert!(landed == reference, "a landed card is the static paint");
+}
