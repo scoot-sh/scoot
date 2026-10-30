@@ -308,7 +308,7 @@ false`](../../desktop/notifications/) writes.
 | Accent marker, outline, per-app color | `card.mark`, `card.shape`, `card.app-accent` (see [Card styles](#card-styles)) |
 | Summary weight and spacing | `title.weight`, `title.spacing` (see [Title weight and spacing](#title-weight-and-spacing)) |
 
-The corner radius is the file's `radius` (see [the keys above](#config)),
+The corner radius is the file's `radius` (see [Limits](#limits)),
 not the look's `shape.radius`: the layer carries it, but the cards do not
 read it yet, so a look cannot round the cards except through `card.shape`.
 
