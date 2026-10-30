@@ -276,3 +276,65 @@ fn an_edge_stripe_is_clipped_to_the_canvas_and_ignores_empty_input() {
     // Nothing from the empty calls landed at the origin.
     assert_eq!(pixel(&pixels, 8, 0, 0), [0, 0, 0, 0]);
 }
+
+#[test]
+fn large_corners_match_the_pixel_by_pixel_fill_byte_for_byte() {
+    // The pill's radii: corner squares far wider than the anti-aliased
+    // edge, in rectangles that hold them, are cut back, or sit partly off
+    // the canvas.
+    let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut next = |bound: u32| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % u64::from(bound)) as u32
+    };
+    for case in 0..120 {
+        let (cw, ch) = (60 + next(180), 40 + next(140));
+        let mut seed = vec![0u8; cw as usize * ch as usize * 4];
+        for byte in &mut seed {
+            *byte = next(256) as u8;
+        }
+        for pixel in seed.as_chunks_mut::<4>().0 {
+            let a = pixel[3];
+            pixel[..3].iter_mut().for_each(|c| *c = (*c).min(a));
+        }
+        let r = rect(next(60), next(40), 20 + next(220), 20 + next(160));
+        let radius = [8, 24, 36, 64, 400][next(5) as usize];
+        let top = Color {
+            r: next(256) as u8,
+            g: next(256) as u8,
+            b: next(256) as u8,
+        };
+        let bottom = if next(2) == 0 { top } else { RED };
+        let alpha = [1, 90, 200, 255][next(4) as usize];
+        let mut want = seed.clone();
+        reference_fill(
+            &mut Canvas::new(&mut want, cw, ch).unwrap(),
+            r,
+            radius,
+            top,
+            bottom,
+            alpha,
+        );
+        let mut got = seed;
+        Canvas::new(&mut got, cw, ch)
+            .unwrap()
+            .fill_rounded_gradient(r, radius, top, bottom, alpha);
+        assert_eq!(
+            got, want,
+            "case {case}: {r:?} radius {radius} alpha {alpha}"
+        );
+    }
+}
+
+#[test]
+fn the_corner_search_finds_each_boundary() {
+    let from = |lo: u32, hi: u32, at: u32| first_where(lo, hi, |x| x >= at);
+    assert_eq!(from(0, 10, 0), 0);
+    assert_eq!(from(0, 10, 7), 7);
+    assert_eq!(from(0, 10, 10), 10);
+    assert_eq!(from(0, 10, 99), 10, "no x holds: the end");
+    assert_eq!(from(5, 5, 0), 5, "an empty range");
+    assert_eq!(first_where(9, 3, |_| true), 9, "a reversed range is empty");
+}
