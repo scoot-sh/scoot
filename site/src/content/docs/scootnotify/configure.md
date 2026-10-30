@@ -418,8 +418,13 @@ is moving is clicked where it is drawn, not where it is going.
 
 While a card travels, the surface stays as tall as the motion needs
 (up to the distance a card moves, plus a little for a spring's overshoot)
-and returns to the stack's height when it lands. Cards that were not
-moving paint exactly as they do without motion.
+and returns to the stack's height when it lands. A spring settling toward
+the screen edge the stack is anchored to stops at the edge instead of
+overshooting off it. Cards that were not moving paint exactly as they do
+without motion.
+
+The `radial-burst` look ships with a spring and a scale entrance;
+`ginger-night`, the default look, sets no motion.
 
 There is no reduced-motion setting to follow: scoot has none yet, and the
 compositor's `[animation] enabled` is a separate opt-in for window
