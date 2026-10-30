@@ -6,7 +6,7 @@ use super::*;
 const PANEL: [u8; 4] = [30, 20, 10, 255];
 
 fn solid(pixels: &mut [u8], _: (u32, u32)) {
-    for pixel in pixels.chunks_exact_mut(4) {
+    for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&PANEL);
     }
 }
@@ -101,7 +101,7 @@ fn a_translucent_panel_does_not_show_its_own_shadow_through() {
     let mut stage = Stage::new(ShadowStyle::Deep);
     let at = scene_of((80, 60), room(ShadowStyle::Deep));
     assert!(stage.compose(&at, |pixels, _| {
-        for pixel in pixels.chunks_exact_mut(4) {
+        for pixel in pixels.as_chunks_mut::<4>().0 {
             pixel.copy_from_slice(&half);
         }
     }));

@@ -110,7 +110,7 @@ fn dump(name: &str, pixels: &[u8], dims: (u32, u32)) {
         return;
     };
     let mut rgba = Vec::with_capacity(pixels.len());
-    for pixel in pixels.chunks_exact(4) {
+    for pixel in pixels.as_chunks::<4>().0 {
         // Premultiplied BGRA over mid-gray.
         let inverse = 255 - u32::from(pixel[3]);
         let over = |c: u8| (u32::from(c) + 128 * inverse / 255).min(255) as u8;

@@ -223,9 +223,14 @@ fn escape_fades_out_before_it_exits_and_an_outside_click_does_not_wait() {
     wait_drawn(&panel);
     std::thread::sleep(Duration::from_millis(1200));
     let sent = Instant::now();
+    let before = requests(&panel, "commit");
     panel.key("Escape");
     let status = panel.wait_exit();
     let took = sent.elapsed();
+    // The fade is drawn, not just waited out: a frame per callback.
+    let frames = requests(&panel, "commit") - before;
+    eprintln!("escape with a 1000 ms fade: {frames} commits");
+    assert!(frames > 2, "the fade drew {frames} frames");
     eprintln!("escape with a 1000 ms fade: exited after {took:?}");
     assert_eq!(status.code(), Some(1));
     assert!(
@@ -273,6 +278,7 @@ fn a_launch_does_not_wait_for_the_fade() {
     wait_drawn(&panel);
     std::thread::sleep(Duration::from_millis(1200));
     let sent = Instant::now();
+    let before = requests(&panel, "commit");
     panel.key("Return");
     let launched = wait_marker(&markers[0]);
     assert!(launched.contains("alpha.sh"), "{launched}");
@@ -291,6 +297,8 @@ fn a_launch_does_not_wait_for_the_fade() {
         "and the panel played its fade: {:?}",
         sent.elapsed()
     );
+    let frames = requests(&panel, "commit") - before;
+    assert!(frames > 2, "the launch's fade drew {frames} frames");
     panel.clean();
 }
 

@@ -1864,13 +1864,16 @@ impl Pump {
             if app.exit.is_some() || app.fx.motion.exit_done(now) || now >= deadline {
                 return;
             }
+            // Dispatch first, as the drive loop does: it is what turns a
+            // `wl_callback.done` into `frame_due`, so a draw checked
+            // before it would sleep in the poll with a frame already due.
+            if self.queue.dispatch_pending(app).is_err() || app.exit.is_some() {
+                return;
+            }
             if app.frame_due {
                 app.draw(text, look, &qh);
             }
-            if self.queue.flush().is_err() || self.queue.dispatch_pending(app).is_err() {
-                return;
-            }
-            if self.queue.flush().is_err() || app.exit.is_some() {
+            if self.queue.flush().is_err() {
                 return;
             }
             let Some(guard) = self.queue.prepare_read() else {
