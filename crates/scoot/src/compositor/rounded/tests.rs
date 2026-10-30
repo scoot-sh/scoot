@@ -46,6 +46,7 @@ use crate::compositor::test_support::{Harness, assert_pixel, find_color, pixel, 
 mod committed;
 mod csd;
 mod inactive_width;
+mod margin;
 
 /// The framebuffer these tests render into.
 const CANVAS: i32 = 400;
@@ -104,10 +105,35 @@ enum Step {
     /// prior `SelfRounded { decorate: true }`): the `prefer_no_csd = false`
     /// half of the CSD rule.
     RequestClientSide,
+    /// Map a toplevel whose buffer is `margin` logical pixels larger than
+    /// its `xdg_surface` window geometry on every side, the margin painted
+    /// `frame` and the geometry `color` -- Chrome's custom frame (a 1px
+    /// square border outside the geometry) made exact. Never negotiates
+    /// decorations: Chrome ignores `prefer_no_csd`.
+    Framed {
+        color: [u8; 4],
+        frame: [u8; 4],
+        margin: i32,
+        /// How the band is quantized into buffer pixels at a fractional
+        /// scale: floored (wholly outside the geometry edge) or rounded
+        /// (may straddle it).
+        band: Band,
+    },
+    /// Map a no-grab popup parented to the first window that grows up and
+    /// left from the window's geometry origin, `size` square: it lies
+    /// wholly outside the geometry, in the margin and the layout gap.
+    PopupOutside { color: [u8; 4], size: i32 },
     /// Map a toplevel and never commit a buffer to it: the ring path must
     /// draw the hollow ring but no CSD backdrop (a fill under no content
     /// would be a solid colored rect, not corner crescents).
     Uncommitted,
+}
+
+/// See [`Step::Framed`].
+#[derive(Clone, Copy, Debug)]
+enum Band {
+    Floor,
+    Round,
 }
 
 #[derive(Debug)]
@@ -437,6 +463,60 @@ fn draw_rounded(
     surface.commit();
 }
 
+/// Commits one frame whose buffer is `margin` logical pixels larger than the
+/// `size` window geometry on every side: `frame` over the margin band,
+/// `color` inside it. The geometry is what the compositor lays out; the band
+/// is what a client's CSD draws outside it. Same viewport path as
+/// [`draw_short`]; the band is `margin` scaled and floored into buffer pixels.
+#[allow(clippy::too_many_arguments)]
+fn draw_framed(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<TestClient>,
+    surface: &wl_surface::WlSurface,
+    viewport: &wp_viewport::WpViewport,
+    preferred: f64,
+    size: (i32, i32),
+    margin: i32,
+    band: Band,
+    frame: [u8; 4],
+    color: [u8; 4],
+) {
+    let (w, h) = (size.0 + 2 * margin, size.1 + 2 * margin);
+    viewport.set_destination(w, h);
+    let (bw, bh) = (
+        (f64::from(w) * preferred).round() as i32,
+        (f64::from(h) * preferred).round() as i32,
+    );
+    // Floored, not rounded: at a fractional scale the geometry edge falls
+    // between two buffer pixels, and a toolkit draws its frame in whole
+    // buffer pixels wholly outside it. The compositor rounds the edge to the
+    // nearest physical pixel, so a frame band reaching past the floor would
+    // straddle the edge and no clip on whole pixels could separate it.
+    let band = match band {
+        Band::Floor => (f64::from(margin) * preferred).floor(),
+        Band::Round => (f64::from(margin) * preferred).round(),
+    } as i32;
+    let stride = bw * 4;
+    let len = (stride * bh) as usize;
+    let fd = rustix::fs::memfd_create("scoot-framed-test", rustix::fs::MemfdFlags::CLOEXEC)
+        .expect("a memfd");
+    let mut file = std::fs::File::from(fd);
+    let mut bytes = Vec::with_capacity(len);
+    for y in 0..bh {
+        for x in 0..bw {
+            let inside = x >= band && x < bw - band && y >= band && y < bh - band;
+            bytes.extend_from_slice(if inside { &color } else { &frame });
+        }
+    }
+    file.write_all(&bytes).expect("a filled pool file");
+    let pool = shm.create_pool(file.as_fd(), len as i32, qh, ());
+    let buffer = pool.create_buffer(0, bw, bh, stride, wl_shm::Format::Argb8888, qh, ());
+    pool.destroy();
+    surface.attach(Some(&buffer), 0, 0);
+    surface.damage_buffer(0, 0, bw, bh);
+    surface.commit();
+}
+
 fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
     let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
     let mut queue = conn.new_event_queue();
@@ -472,6 +552,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
         match step {
             Step::Window { color }
             | Step::ShortWindow { color, .. }
+            | Step::Framed { color, .. }
             | Step::SelfRounded { color, .. } => {
                 let shrink = match step {
                     Step::ShortWindow { shrink, .. } => shrink,
@@ -485,7 +566,7 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     Step::SelfRounded {
                         decorate: false,
                         ..
-                    }
+                    } | Step::Framed { .. }
                 );
                 let self_rounded = matches!(step, Step::SelfRounded { .. });
                 let index = client.window_serials.len();
@@ -524,7 +605,27 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 })?;
                 xdg.ack_configure(serial);
                 let viewport = viewporter.get_viewport(&surface, &qh, ());
-                if self_rounded {
+                if let Step::Framed {
+                    frame,
+                    margin,
+                    band,
+                    ..
+                } = step
+                {
+                    xdg.set_window_geometry(margin, margin, w, h);
+                    draw_framed(
+                        &shm,
+                        &qh,
+                        &surface,
+                        &viewport,
+                        preferred,
+                        (w, h),
+                        margin,
+                        band,
+                        frame,
+                        color,
+                    );
+                } else if self_rounded {
                     draw_rounded(&shm, &qh, &surface, &viewport, preferred, (w, h), color);
                 } else {
                     draw_short(
@@ -589,6 +690,32 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 surfaces.push(surface);
                 roles.push(xdg);
+                acks.send(Ack::Done).map_err(|e| e.to_string())?;
+            }
+            Step::PopupOutside { color, size } => {
+                let parent = parent.clone().ok_or("no parent window")?;
+                let surface = compositor.create_surface(&qh, ());
+                let xdg = wm_base.get_xdg_surface(&surface, &qh, SurfaceKind::Popup);
+                let positioner = wm_base.create_positioner(&qh, ());
+                positioner.set_size(size, size);
+                positioner.set_anchor_rect(0, 0, 1, 1);
+                positioner.set_anchor(xdg_positioner::Anchor::TopLeft);
+                positioner.set_gravity(xdg_positioner::Gravity::TopLeft);
+                let popup = xdg.get_popup(Some(&parent), &positioner, &qh, ());
+                drop(positioner);
+                drop(popup);
+                surface.commit();
+                let serial = wait_for(&mut queue, &mut client, "a popup configure", |client| {
+                    client.popup_serial
+                })?;
+                xdg.ack_configure(serial);
+                let buffer = solid_buffer(&shm, &qh, size, size, color);
+                surface.attach(Some(&buffer), 0, 0);
+                surface.damage_buffer(0, 0, size, size);
+                surface.commit();
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                roles.push(xdg);
+                surfaces.push(surface);
                 acks.send(Ack::Done).map_err(|e| e.to_string())?;
             }
             Step::Popup { color, w, h } => {

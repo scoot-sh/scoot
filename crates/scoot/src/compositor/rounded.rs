@@ -39,6 +39,30 @@
 //! pixel-center rule applied uniformly, not a special case, and it is pinned
 //! by test.
 //!
+//! # The client's margin
+//!
+//! A client that draws its own decorations can paint outside its
+//! `xdg_surface` window geometry: Chrome's custom frame is a 1px square
+//! border one pixel outside it, GTK's is a shadow. The corner cut and the
+//! ring are both computed from the geometry, so the margin used to show in
+//! the layout gap, square, past the ring's curve (gh #818).
+//! [`Rounded::clipped_to`] therefore also clips the draw, and the opaque
+//! region, to the geometry rect. The two halves are one atomic change for
+//! the same reason as the corners: an opaque claim reaching past the bounds
+//! would let the damage tracker skip what is below pixels the draw leaves
+//! untouched.
+//!
+//! Only the window's own surface tree is clipped (popups are never
+//! wrapped), and only where the radius is non-zero, because that is the one
+//! case that already pays for a wrapper. A session with `corner_radius = 0`
+//! keeps the unwrapped fast path and draws the margin as it always did.
+//! The bounds are the geometry as laid out (`clip_rect` of the mapped
+//! location and the committed geometry size), not the drawn rect: a client
+//! whose geometry overhangs its slot for a frame or two (see `drawn.rs`)
+//! keeps drawing that overhang over the ring, exactly as before. At a
+//! fractional scale the geometry edge is rounded to the nearest physical
+//! pixel, the same rounding the ring's inner edge uses, so the two meet.
+//!
 //! # One truth, two consumers
 //!
 //! The window clip ([`Rounded`]) and the focus-ring paint ([`paint_ring`])
@@ -358,6 +382,10 @@ pub struct Rounded<E> {
     inner: E,
     clip: Rectangle<i32, Physical>,
     radius: i32,
+    /// The window geometry in output-physical pixels, when the draw is also
+    /// clipped to it (see [`Rounded::clipped_to`]): nothing the client drew
+    /// outside this rect is painted, and none of it is claimed opaque.
+    bounds: Option<Rectangle<i32, Physical>>,
     /// The corner-filtered damage, reused across frames: `draw` takes `&self`
     /// but must hand the inner draw a filtered `&[Rectangle]`, so the storage
     /// has to live here. `take`n and restored per draw -- capacity persists,
@@ -377,8 +405,20 @@ impl<E> Rounded<E> {
             inner,
             clip,
             radius,
+            bounds: None,
             scratch: RefCell::new(Vec::new()),
         }
+    }
+
+    /// Also clips the draw to `bounds` (output-physical pixels): the window
+    /// geometry, so a client's CSD margin -- the 1px frame Chrome draws
+    /// outside its `xdg_surface` geometry, a drop shadow, a resize handle --
+    /// never reaches the screen. See the module doc's margin section. An
+    /// empty `bounds` clips nothing rather than everything: a window with no
+    /// usable geometry is drawn as before.
+    pub fn clipped_to(mut self, bounds: Rectangle<i32, Physical>) -> Self {
+        self.bounds = (bounds.size.w > 0 && bounds.size.h > 0).then_some(bounds);
+        self
     }
 
     /// This wrapper moved by `by` physical pixels: the inner element wrapped
@@ -402,13 +442,18 @@ impl<E> Rounded<E> {
             inner,
             mut clip,
             radius,
+            mut bounds,
             scratch,
         } = self;
         clip.loc += by;
+        if let Some(bounds) = &mut bounds {
+            bounds.loc += by;
+        }
         Rounded {
             inner: RelocateRenderElement::from_element(inner, by, Relocate::Relative),
             clip,
             radius,
+            bounds,
             scratch,
         }
     }
@@ -455,7 +500,7 @@ impl<E: Element> Element for Rounded<E> {
     }
 
     fn opaque_regions(&self, scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
-        if self.radius <= 0 {
+        if self.radius <= 0 && self.bounds.is_none() {
             return self.inner.opaque_regions(scale);
         }
         let opaque = self.inner.opaque_regions(scale);
@@ -465,13 +510,23 @@ impl<E: Element> Element for Rounded<E> {
         // Element-relative corner squares: the opaque regions are relative
         // to the element, the clip is in output coordinates.
         let offset = self.inner.geometry(scale).loc;
+        // The draw never paints outside the bounds, so neither may the
+        // opaque claim: a region reaching past them would let the damage
+        // tracker skip what is below pixels this element leaves untouched.
+        let bounds = self.bounds.map(|mut bounds| {
+            bounds.loc -= offset;
+            bounds
+        });
+        let opaque = opaque
+            .iter()
+            .filter_map(|rect| bounds.map_or(Some(*rect), |bounds| rect.intersection(bounds)));
         let squares = corner_squares(self.clip, self.radius)
             .into_iter()
             .map(|mut rect| {
                 rect.loc -= offset;
                 rect
             });
-        Rectangle::subtract_rects_many(opaque.iter().copied(), squares)
+        Rectangle::subtract_rects_many(opaque, squares)
             .into_iter()
             .collect()
     }
@@ -499,7 +554,7 @@ impl<R: Renderer, E: RenderElement<R>> RenderElement<R> for Rounded<E> {
         opaque_regions: &[Rectangle<i32, Physical>],
         cache: Option<&UserDataMap>,
     ) -> Result<(), R::Error> {
-        if self.radius <= 0 {
+        if self.radius <= 0 && self.bounds.is_none() {
             return self
                 .inner
                 .draw(frame, src, dst, damage, opaque_regions, cache);
@@ -516,7 +571,15 @@ impl<R: Renderer, E: RenderElement<R>> RenderElement<R> for Rounded<E> {
             rect
         });
         let mut filtered = std::mem::take(&mut *self.scratch.borrow_mut());
-        filtered.extend(damage.iter().copied());
+        match self.bounds {
+            // Damage outside the window geometry is dropped, not clamped to
+            // an empty rect: the inner draw sees only what it may paint.
+            Some(mut bounds) => {
+                bounds.loc -= offset;
+                filtered.extend(damage.iter().filter_map(|rect| rect.intersection(bounds)));
+            }
+            None => filtered.extend(damage.iter().copied()),
+        }
         filtered = Rectangle::subtract_rects_many_in_place(filtered, rows);
         let result = self
             .inner
