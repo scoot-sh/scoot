@@ -71,6 +71,7 @@ main 6 None 360x474 median=176.9 p5=132.8; Soft 384x498 median=261.6 p5=224.0;
 branch 6 None 360x474 median=180.8 p5=133.6; Soft 384x498 median=340.5 p5=223.5; 
 
 # Frame-tick relayout gate, scootnotify daemon in a headless scoot, one card sliding in over 300 ms
-# (a temporary eprintln! in Popup::refresh, counted from the daemon log; instrumented tree, not committed)
+# (a temporary eprintln! in Popup::refresh, counted from the daemon log; instrumented working tree
+#  as of commit f1403b973 less the later layer-refit fix, never committed)
 # gate on : frame requests=14 commits=16 refresh calls=7
 # gate off: frame requests=14 commits=16 refresh calls=35
