@@ -422,10 +422,7 @@ let
         launcherRun = "spawn ${launcherScript}/bin/scoot-launcher --list-executables-in-path";
         clipboard = "spawn ${clipboardPick}/bin/scoot-clipboard-pick";
         notifDismiss =
-          if isScootNotify then
-            "spawn ${scootNotifyBin} msg dismiss --all"
-          else
-            "spawn ${makoctl} dismiss";
+          if isScootNotify then "spawn ${scootNotifyBin} msg dismiss --all" else "spawn ${makoctl} dismiss";
         notifDnd =
           if isScootNotify then
             "spawn ${scootNotifyBin} msg dnd toggle"
