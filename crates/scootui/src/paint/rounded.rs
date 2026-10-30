@@ -195,7 +195,7 @@ fn first_where(from: u32, to: u32, test: impl Fn(u32) -> bool) -> u32 {
 /// The gradient's color at row `row` of `rows`: sampled at the row's
 /// center, so a two-row fill is not the stops themselves and a one-row
 /// fill is their midpoint. Equal stops short-circuit to the stop.
-fn row_color(top: Color, bottom: Color, row: u32, rows: u32) -> Color {
+pub fn row_color(top: Color, bottom: Color, row: u32, rows: u32) -> Color {
     if top == bottom {
         return top;
     }

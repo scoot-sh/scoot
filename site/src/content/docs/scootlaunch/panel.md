@@ -78,7 +78,7 @@ index-only 1053368-byte row predates icons).
 | Page Up / Page Down, Ctrl+Home / Ctrl+End | by page, to the ends |
 | Enter | launch the selection |
 | Ctrl+Enter | run the typed text as a command |
-| Escape, or a click outside the panel | dismiss (exit 1) |
+| Escape, or a click outside the panel | dismiss (exit 1); with a [motion](#motion) set, Escape fades out first |
 
 Left/Right, Home/End, BackSpace, Delete, Ctrl+W, Ctrl+U and Ctrl+A
 edit the query. In dmenu mode Enter prints the selection (or the
@@ -145,7 +145,8 @@ command's name).
 
 The panel reads `<state>/look/launch.toml` at every open: the
 thirteen shell-app color roles plus `font`, `font-size`, `opacity`,
-`radius` and `[icons] theme`, merged per key as flags, then this file,
+`radius`, `[icons] theme` and the optional depth and motion keys (see
+[Depth and motion](#depth-and-motion)), merged per key as flags, then this file,
 then the look, then the built-ins. A refused key keeps its default
 and is reported; a missing layer is the defaults with one warning.
 
@@ -162,6 +163,8 @@ and is reported; a missing layer is the defaults with one warning.
 | Corners | `radius`, for the panel and for the selection highlight (at most half a row) |
 | Size | `font-size` (the look's popup size) |
 | Spacing | derived from `font-size` and `radius`: no keys |
+| Shadow, fill | `shadow`, `fill` (see [Depth](#depth)) |
+| Entrance, fade-out, sliding selection | `motion`, `motion-duration-ms`, `motion-bounce` (see [Motion](#motion)) |
 | Icon theme | `[icons] theme` (default `Adwaita`) |
 
 The search field and the rows share one inner padding from the panel
@@ -178,6 +181,124 @@ name beside it and its match highlighted. A light look draws the same
 panel from the same roles:
 
 ![The launcher panel in music-desk, with a terminal PNG icon, a browser SVG icon, and a letter tile, light look](../../../assets/scootlaunch-music-desk.png)
+
+## Depth and motion
+
+A look can give the panel a shadow, a gradient fill and motion. All are
+off by default, and a look that sets none draws and behaves exactly as
+before. Set them in `look.toml`:
+
+```toml
+[effects]
+shadow = "soft"           # none | soft | deep | glow
+fill = "gradient"         # solid | gradient
+motion = "spring"         # none | ease-out | spring
+motion-duration-ms = 160  # 0 to 1000
+motion-bounce = 0.6       # 0 to 1, spring only
+```
+
+To change one for the launcher alone, put the key in the look's
+`[apps.scootlaunch]` table (`"motion-duration-ms" = 220`). The look
+renders them as top-level keys in `launch.toml`, only when it sets them. A
+value outside its list or range is refused by `scoot look validate`; a
+hand-edited `launch.toml` with one is reported on stderr and ignored, and
+that key keeps its default. The keys apply to the apps and run panels:
+`--dmenu` draws with its fixed painter and exits the moment it prints.
+Notification cards read the same `[effects]`; see their
+[depth](../scootnotify/configure.md#depth) and
+[motion](../scootnotify/configure.md#motion).
+
+### Depth
+
+| `shadow` | What it draws | Room around the panel |
+|---|---|---|
+| `none` | Nothing. The default. | none |
+| `soft` | A low shadow: 4 px down, 12 px blur, 36% black. | 12 px at the sides, 16 px above and below |
+| `deep` | A heavy shadow: 10 px down, 28 px blur, 55% black. | 28 px at the sides, 38 px above and below |
+| `glow` | A 16 px halo, centered, in the `focus` color, at 51%. | 16 px on every side |
+
+| `fill` | What it draws |
+|---|---|
+| `solid` | The `surface` color, flat. The default. |
+| `gradient` | Light at the top. On a dark `surface` the top edge is lightened about 10% toward white and fades to `surface` at the bottom; on a light one the bottom is darkened about 8%. The panel keeps the look's `opacity.popups`. |
+
+The shadow needs room, so the panel's surface is that much larger on
+every side, equal on both sides of an axis: the panel stays centered
+exactly where it is without a shadow. The room is the larger of the
+two sides, even where the shadow reaches further one way (a `soft` shadow
+needs 8 px above and 16 px below, so the room above is 8 px more than it
+needs). The
+shadow falls outside the panel only: a translucent panel does not show its
+own shadow through its body. The room is not part of the panel for the
+pointer: a click on the shadow is a click outside the panel, so it
+dismisses it and goes on to what is under it.
+
+On an output too small for the room, the shadow shrinks to what fits; the
+panel never moves.
+
+`soft` and `deep` are black, so they show over light and mid-tone
+backgrounds and nearly vanish over a near-black wallpaper; `glow` reads on
+any background.
+
+### Motion
+
+| Key | Value | Default | What it does |
+|---|---|---|---|
+| `motion` | `none`, `ease-out` or `spring` | `none` | The curve every move follows. `none` moves nothing and costs nothing. |
+| `motion-duration-ms` | whole number, 0 to 1000 | `160` | How long one move takes. `0` is the same as `none`. |
+| `motion-bounce` | number, 0 to 1 | `1` | How far a `spring` overshoots: `0` is `ease-out`, `1` is the compositor's own spring. Ignored by `ease-out`. |
+
+With a motion set, the panel moves three ways:
+
+- **Opening.** The panel grows from 96% of its size and fades in. Keys
+  and clicks work from the first frame, before it has finished.
+- **Closing.** Escape, a second `scootlaunch` and a launch fade the panel
+  out (to 97% of its size) before the process exits. The keyboard is
+  released and clicks pass through at the first frame of the fade, so the
+  window you go back to takes keys at once, and a launch runs before the
+  fade starts, not after. A second invocation during the fade opens a new
+  panel. The exit comes after the fade: up to `motion-duration-ms` later
+  (plus at most 100 ms if the compositor stops sending frames), so a
+  script that waits on `scootlaunch` waits that long. A click outside is
+  different: the compositor asks the panel to close and ignores anything
+  it does after that, so it exits at once with no fade.
+- **Selection.** The highlight slides to the new row when the selection
+  moves, and carries on from where it is when it moves again before it
+  lands. Typing, which reorders the rows, snaps it. The row text takes the
+  selected color once the highlight is over more than half of that row,
+  so it stays readable on the way.
+
+The panel moves on the compositor's frame callbacks: no timer runs, and
+once it has come to rest it asks the compositor for nothing, so an open
+panel costs nothing while you read it. A click lands on the row where the
+panel will be, not where it is drawn while it grows.
+
+There is no reduced-motion setting to follow: scoot has none yet. To turn
+the panel's motion off, set `motion = "none"` in the look or in
+`[apps.scootlaunch]`, then `scoot look apply`; the next open reads it.
+
+`ginger-night`, the default look, sets a `soft` shadow and no motion.
+`radial-burst` sets a `glow`, a spring and a 220 ms run.
+
+> **Symptom:** a look sets `shadow` and the panel has none.
+> The panel warns on stderr, `shadow is not a shadow style` for a value
+> outside `none`, `soft`, `deep` and `glow`. Check
+> `<state>/look/launch.toml` for a `shadow` line; `--dmenu` never draws
+> one.
+
+> **Symptom:** a click next to the panel closes it.
+> The shadow is part of the surface but not of the panel: a click on it
+> dismisses, like a click anywhere else outside. With `shadow = "none"`
+> there is no such margin.
+
+> **Symptom:** the panel takes a moment to go away after Escape.
+> That is the fade, `motion-duration-ms` long. Shorten it or set
+> `motion = "none"`.
+
+> **Symptom:** a look sets `motion` and the panel still appears at once.
+> The panel warns on stderr, `motion is not a motion` for a value outside
+> `none`, `ease-out` and `spring`. Check that `motion-duration-ms` is not
+> `0` and `<state>/look/launch.toml` has a `motion` line.
 
 ## Troubleshooting
 

@@ -356,9 +356,9 @@ not while it is idle.
 backgrounds and nearly vanish over a near-black wallpaper; `glow` reads on
 any background.
 
-Only `scootnotify` reads these tokens today. `scootlaunch` and
-`scootbar` ignore `[effects]`, and an `[apps.scootlaunch]` `shadow` key
-refuses at validation.
+`scootnotify` and `scootlaunch` read these tokens (see the launcher's
+[depth](../scootlaunch/panel.md#depth)); `scootbar` ignores `[effects]`,
+and an `[apps.scootbar]` `shadow` key refuses at validation.
 
 > **Symptom:** a look sets `shadow` and the cards have none.
 > The daemon logs `shadow refused ... default applies` or `shadow is not

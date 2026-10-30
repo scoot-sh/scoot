@@ -155,11 +155,12 @@ pub const TITLE_SPACING_RANGE: (i64, i64) = (-2, 8);
 /// The longest `motion-duration-ms`, matching the shell's own clamp.
 pub const MOTION_DURATION_MAX_MS: i64 = 1000;
 
-/// The depth, motion, card-style and typography keys only `scootnotify`
-/// reads so far, on top of
+/// The depth, motion, card-style and typography keys `scootnotify` reads,
+/// on top of
 /// [`SHELL_APP_ALLOWLIST`]. They are not in the shared list because an app
 /// that never reads one would report it as an unknown look key on every
-/// load; each app joins as it learns the key.
+/// load; each app joins as it learns the key (`scootlaunch` reads the
+/// first five: [`LAUNCH_DEPTH_KEYS`]).
 pub const NOTIFY_DEPTH_KEYS: &[&str] = &[
     "shadow",
     "fill",
@@ -175,6 +176,25 @@ pub const NOTIFY_DEPTH_KEYS: &[&str] = &[
     "title.spacing",
 ];
 
+/// The depth and motion keys `scootlaunch` reads, a subset of
+/// [`NOTIFY_DEPTH_KEYS`]: the shadow, the panel fill and the motion. The
+/// card and title keys are the notifier's and stay refused here.
+pub const LAUNCH_DEPTH_KEYS: &[&str] = &[
+    "shadow",
+    "fill",
+    "motion",
+    "motion-duration-ms",
+    "motion-bounce",
+];
+
+/// Whether `app` reads the shared depth and motion keys
+/// ([`LAUNCH_DEPTH_KEYS`]): the apps that draw a surface of their own with
+/// a shadow and a fill. The renderer and the value kinds both ask this, so
+/// an app joins in one place.
+pub fn reads_depth(app: &str) -> bool {
+    matches!(app, "scootnotify" | "scootlaunch")
+}
+
 /// Whether `key` (an `[apps.<app>]` dotted key) is allowlisted for `app`.
 /// Unknown apps are refused: only the apps below read look layers.
 pub fn allows(app: &str, key: &str) -> bool {
@@ -185,7 +205,8 @@ pub fn allows(app: &str, key: &str) -> bool {
         "scoot" => SCOOT_ALLOWLIST.contains(&key) || is_wallpaper_override_key(key),
         "scootbar" => SCOOTBAR_ALLOWLIST.contains(&key),
         "scootnotify" => SHELL_APP_ALLOWLIST.contains(&key) || NOTIFY_DEPTH_KEYS.contains(&key),
-        "scootlaunch" | "scootgreet" => SHELL_APP_ALLOWLIST.contains(&key),
+        "scootlaunch" => SHELL_APP_ALLOWLIST.contains(&key) || LAUNCH_DEPTH_KEYS.contains(&key),
+        "scootgreet" => SHELL_APP_ALLOWLIST.contains(&key),
         _ => false,
     }
 }
@@ -403,14 +424,14 @@ pub fn value_kind(app: &str, key: &str) -> Option<ValueKind> {
             "font-size" => Some(ValueKind::IntRange { min: 1, max: 256 }),
             "opacity" => Some(ValueKind::Opacity),
             "radius" => Some(ValueKind::IntRange { min: 0, max: 64 }),
-            "shadow" if app == "scootnotify" => Some(ValueKind::Enum(SHADOW_STYLES)),
-            "fill" if app == "scootnotify" => Some(ValueKind::Enum(FILL_STYLES)),
-            "motion" if app == "scootnotify" => Some(ValueKind::Enum(MOTION_CURVES)),
-            "motion-duration-ms" if app == "scootnotify" => Some(ValueKind::IntRange {
+            "shadow" if reads_depth(app) => Some(ValueKind::Enum(SHADOW_STYLES)),
+            "fill" if reads_depth(app) => Some(ValueKind::Enum(FILL_STYLES)),
+            "motion" if reads_depth(app) => Some(ValueKind::Enum(MOTION_CURVES)),
+            "motion-duration-ms" if reads_depth(app) => Some(ValueKind::IntRange {
                 min: 0,
                 max: MOTION_DURATION_MAX_MS,
             }),
-            "motion-bounce" if app == "scootnotify" => Some(ValueKind::Unit),
+            "motion-bounce" if reads_depth(app) => Some(ValueKind::Unit),
             "card.enter" | "card.exit" if app == "scootnotify" => {
                 Some(ValueKind::Enum(CARD_MOTIONS))
             }

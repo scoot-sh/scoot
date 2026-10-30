@@ -79,6 +79,72 @@ fn hostile_input_never_panics() {
     }
 }
 
+#[test]
+fn the_depth_and_motion_keys_land_and_a_default_look_asks_for_none() {
+    let (look, notes) = parse(
+        "shadow = \"deep\"\nfill = \"gradient\"\nmotion = \"spring\"\n\
+         motion-duration-ms = 220\nmotion-bounce = 0.5\n",
+    );
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(look.shadow, ShadowStyle::Deep);
+    assert_eq!(look.fill, FillStyle::Gradient);
+    assert_eq!(look.motion, Curve::Spring);
+    assert_eq!(look.motion_ms, 220);
+    assert_eq!(look.motion_bounce, 0.5);
+    assert!(look.timing().active());
+    assert_eq!(look.timing().duration().as_millis(), 220);
+    // Nothing set: no shadow, a solid fill, no motion.
+    let defaults = Look::default();
+    assert_eq!(defaults.shadow, ShadowStyle::None);
+    assert_eq!(defaults.fill_stops(), (defaults.surface, defaults.surface));
+    assert!(!defaults.timing().active());
+    // A duration or a curve alone does not start anything: `motion` does.
+    let (look, _) = parse("motion-duration-ms = 300\n");
+    assert!(!look.timing().active());
+    let (look, _) = parse("motion = \"ease-out\"\nmotion-duration-ms = 0\n");
+    assert!(!look.timing().active(), "a zero duration is no motion");
+    let (look, _) = parse("motion = \"ease-out\"\n");
+    assert_eq!(
+        look.timing().duration().as_millis(),
+        u128::from(DEFAULT_MOTION_MS)
+    );
+}
+
+#[test]
+fn bad_depth_and_motion_values_are_noted_and_ignored() {
+    for (text, key) in [
+        ("shadow = \"huge\"\n", "shadow"),
+        ("shadow = 3\n", "shadow"),
+        ("fill = \"rainbow\"\n", "fill"),
+        ("motion = \"bouncy\"\n", "motion"),
+        ("motion-duration-ms = 5000\n", "motion-duration-ms"),
+        ("motion-duration-ms = -1\n", "motion-duration-ms"),
+        ("motion-duration-ms = \"fast\"\n", "motion-duration-ms"),
+        ("motion-bounce = 2.0\n", "motion-bounce"),
+        ("motion-bounce = \"lots\"\n", "motion-bounce"),
+    ] {
+        let (look, notes) = parse(text);
+        assert_eq!(look, Look::default(), "{text:?}");
+        assert_eq!(notes.len(), 1, "{text:?}: {notes:?}");
+        assert!(notes[0].contains(key), "{notes:?}");
+    }
+}
+
+#[test]
+fn the_notifiers_card_keys_are_refused_here() {
+    let (look, notes) = parse("card = { mark = \"stripe\" }\n[title]\nweight = 600\n");
+    assert_eq!(look, Look::default());
+    assert_eq!(notes.len(), 2, "{notes:?}");
+}
+
+#[test]
+fn a_gradient_fill_lights_the_top_of_a_dark_panel() {
+    let (look, _) = parse("fill = \"gradient\"\n[colors]\nsurface = \"#1e1e2e\"\n");
+    let (top, bottom) = look.fill_stops();
+    assert_eq!(bottom, look.surface);
+    assert!(top.luminance() > look.surface.luminance());
+}
+
 // The goldens: every shipped look draws what fuzzel draws for it today.
 // Each row pairs the launch fragment's role with the fuzzel fragment's
 // key for the same element (dev/design/scootlaunch.md, Stylix and look

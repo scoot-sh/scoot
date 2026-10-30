@@ -28,6 +28,19 @@
 //! panel (a locker taking the keyboard) keeps drawing and waits for
 //! focus, as the design's failure table says.
 //!
+//! A look can add a shadow and motion ([`crate::stage`], [`crate::motion`]).
+//! The surface is then the panel plus the shadow's room, equal on both
+//! sides, and its input region the panel alone, so a press on the shadow is
+//! a press outside. The apps and run panels compose on the stage; dmenu
+//! never does. With a motion the panel scales and fades in, slides its
+//! selection highlight, and fades out when it is dismissed (Escape, the
+//! toggle) or has launched, with the keyboard released and the input
+//! region emptied from the first fade frame. A `closed` from the compositor
+//! and a keyboard leave with the pointer outside exit at once instead: the
+//! protocol ignores everything a client does to a surface after `closed`.
+//! The motion runs on frame callbacks, one outstanding at a time, and none
+//! once the panel is at rest.
+//!
 //! Control tracking comes off the `wl_keyboard.modifiers` depressed
 //! mask's Control bit (`0x4`, the XKB core bit): the seat reports a
 //! release with the same keysym and empty text as a navigation press,
@@ -39,7 +52,9 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use scoot_rt::print::{print, warn};
-use scootui::entry::{Geometry, paint_entry, paint_list, paint_list_over, paint_password};
+use scootui::entry::{
+    Geometry, paint_entry, paint_list, paint_list_over, paint_list_over_ink, paint_password,
+};
 use scootui::keyboard::{
     KeyOutput, KeyboardSeat, MIN_TEXT_BYTES, dispatch_keyboard, negotiate_version,
 };
@@ -48,8 +63,8 @@ use scootui::paint::Canvas;
 use scootui::surfaces::{Buffers, Demand, Effect, Globals, LayerLive, LayerSpec, Plan};
 use scootui::text::Text;
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_registry, wl_seat, wl_shm,
-    wl_shm_pool, wl_surface,
+    wl_buffer, wl_callback, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_region,
+    wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum};
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
@@ -61,7 +76,9 @@ use wayland_protocols::xdg::activation::v1::client::xdg_activation_token_v1::{
 };
 use wayland_protocols::xdg::activation::v1::client::xdg_activation_v1::XdgActivationV1;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
-use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{self, Anchor};
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
+    self, Anchor, KeyboardInteractivity,
+};
 
 use crate::cli::ColorOverrides;
 use crate::dmenu::{DmenuUi, Outcome as DmenuOutcome, Print as DmenuPrint};
@@ -69,7 +86,9 @@ use crate::highlight::fill_round_rect;
 use crate::index::{Action, Entry};
 use crate::layout::{BORDER, Layout, Rect};
 use crate::look::Look;
+use crate::motion::Slide;
 use crate::spawn::{self, Token};
+use crate::stage::Effects;
 use crate::ui::{Outcome, Ui};
 use scootui::outputs::Frame;
 
@@ -284,6 +303,14 @@ pub fn open(opts: Options) -> i32 {
     let height = layout.height(list_rows);
     let icon_theme = look.icon_theme.clone();
     let icon_bases = crate::icons::theme_bases();
+    // The shadow and the motion are the apps and run panel's: dmenu keeps
+    // its fixed painter, and a script waiting on its pick never waits on a
+    // fade.
+    let fx = if dmenu.is_some() {
+        Effects::off()
+    } else {
+        Effects::from_look(&look)
+    };
     run_panel(
         claim,
         model,
@@ -299,6 +326,7 @@ pub fn open(opts: Options) -> i32 {
             empty_text,
             icon_theme,
             icon_bases,
+            fx,
         },
     )
 }
@@ -356,6 +384,7 @@ struct PanelSpec {
     empty_text: &'static str,
     icon_theme: String,
     icon_bases: Vec<PathBuf>,
+    fx: Effects,
 }
 
 /// The dmenu presentation: resolved in [`open`] before the model moves
@@ -441,6 +470,7 @@ fn run_panel(
         spec.empty_text,
         spec.icon_theme,
         spec.icon_bases,
+        spec.fx,
     );
     // The registry sweep: globals, then outputs, keyboard and pointer.
     if !pump.wait_until(PATIENCE, &mut app, |app| app.ready()) {
@@ -480,8 +510,13 @@ enum Exit {
     /// A dmenu pick: printed on the way out (the line, its index, or
     /// the typed text), never launched.
     Print(String),
-    /// Dismissed (Escape, outside click, toggle, compositor close).
+    /// Dismissed by the user: Escape or the toggle. The panel fades out
+    /// when the look has motion.
     Dismiss,
+    /// The compositor took the panel away (an outside click, an unplugged
+    /// output) or focus left it with the pointer outside: it is gone now,
+    /// so there is nothing to fade and no surface to commit to.
+    Closed,
     /// A runtime failure, already warned about.
     Failed,
 }
@@ -584,6 +619,31 @@ struct App {
     icon_theme: String,
     icon_bases: Vec<PathBuf>,
     icons: crate::icons::Cache,
+    /// The look's shadow room, stage and motion; all off for a plain panel.
+    fx: Effects,
+    /// Where the panel's top-left corner sits in the surface, in logical
+    /// pixels: the shadow's room as last drawn. Pointer positions arrive in
+    /// surface coordinates, so every hit test subtracts it.
+    origin: (u32, u32),
+    /// A `wl_surface.frame` callback is outstanding: at most one, so a
+    /// slow compositor is never asked for a queue of frames.
+    frame_requested: bool,
+    /// The callback fired: the next frame of a motion may be drawn.
+    frame_due: bool,
+    /// The input region last sent.
+    region: Option<Region>,
+    /// The panel is fading out: the keyboard is released and the input
+    /// region is empty, so it takes nothing while it plays.
+    fading: bool,
+}
+
+/// An input region the panel set: the whole surface (the default), the
+/// panel's rectangle inside its shadow's room, or nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Region {
+    Surface,
+    Panel(Rect),
+    Nothing,
 }
 
 impl App {
@@ -599,7 +659,9 @@ impl App {
         empty_text: &'static str,
         icon_theme: String,
         icon_bases: Vec<PathBuf>,
+        fx: Effects,
     ) -> Self {
+        let origin = fx.room;
         Self {
             claim,
             model,
@@ -639,7 +701,23 @@ impl App {
             icon_theme,
             icon_bases,
             icons: crate::icons::Cache::default(),
+            fx,
+            origin,
+            frame_requested: false,
+            frame_due: false,
+            region: None,
+            fading: false,
         }
+    }
+
+    /// The surface's size in logical pixels: the panel plus its shadow's
+    /// room on every side.
+    fn surface_size(&self) -> (u32, u32) {
+        let (rx, ry) = self.fx.room;
+        (
+            self.width.saturating_add(rx.saturating_mul(2)),
+            self.height.saturating_add(ry.saturating_mul(2)),
+        )
     }
 
     fn ready(&self) -> bool {
@@ -691,12 +769,13 @@ impl App {
             Effect::Create => {}
             _ => return,
         }
+        let (width, height) = self.surface_size();
         let spec = LayerSpec {
             namespace: "scootlaunch",
             exclusive_keyboard: true,
             anchor: Anchor::empty(),
-            width: self.width,
-            height: self.height,
+            width,
+            height,
             margin: [0, 0, 0, 0],
             exclusive_zone: 0,
         };
@@ -729,7 +808,19 @@ impl App {
     /// Whether the pointer rests outside the panel: a keyboard leave
     /// then is an outside click, not a locker.
     fn pointer_outside(&self) -> bool {
-        !self.pointer_in || self.pointer_x >= self.width || self.pointer_y >= self.height
+        self.panel_point().is_none()
+    }
+
+    /// The pointer in the panel's own coordinates (logical pixels from its
+    /// top-left corner), or `None` when it is off the panel: outside the
+    /// surface, or over the shadow's room, which is not the panel.
+    fn panel_point(&self) -> Option<(u32, u32)> {
+        if !self.pointer_in {
+            return None;
+        }
+        let x = self.pointer_x.checked_sub(self.origin.0)?;
+        let y = self.pointer_y.checked_sub(self.origin.1)?;
+        (x < self.width && y < self.height).then_some((x, y))
     }
 
     /// Whether the toggle's `close` arrived (apps/run only; dmenu
@@ -742,9 +833,7 @@ impl App {
 
     /// The shown list row under the pointer, if the pointer is over one.
     fn hit_row(&self) -> Option<usize> {
-        if !self.pointer_in || self.pointer_x >= self.width {
-            return None;
-        }
+        let (_, pointer_y) = self.panel_point()?;
         let list = match &self.model {
             Model::Apps(ui) | Model::Run(ui) => ui.list(),
             Model::Dmenu(dui) => dui.list(),
@@ -752,7 +841,7 @@ impl App {
         let (layout, factor) = self.drawn.unwrap_or((self.layout, 1.0));
         // The pointer is in surface (logical) pixels, the drawn rows in
         // device pixels.
-        let y = (f64::from(self.pointer_y) * factor) as u32;
+        let y = (f64::from(pointer_y) * factor) as u32;
         let list_y = layout.list_y();
         if y < list_y || layout.row_h == 0 {
             return None;
@@ -767,11 +856,15 @@ impl App {
         let Some(size) = self.configured_size else {
             return;
         };
+        // A zero axis is the client's to choose: the size it asked for.
+        let (wanted_w, wanted_h) = self.surface_size();
         let size = Size {
-            width: if size.0 == 0 { self.width } else { size.0 },
-            height: if size.1 == 0 { self.height } else { size.1 },
+            width: if size.0 == 0 { wanted_w } else { size.0 },
+            height: if size.1 == 0 { wanted_h } else { size.1 },
         };
-        match self.demand.plan(Some(size), self.dirty) {
+        // A frame of a motion changes no content, but it is a draw: the
+        // plan only draws what it is told has changed.
+        match self.demand.plan(Some(size), self.dirty || self.frame_due) {
             Plan::Draw(frame) => self.draw_frame(frame, text, look, qh),
             Plan::Commit => {
                 if let Some(live) = self.live.as_ref() {
@@ -806,29 +899,54 @@ impl App {
         // A fresh spawn failure, drawn instead of the list until it
         // clears (the drive expires it after 2 s): the failed pick
         // stays visible, and the panel stays open.
-        let error = self.spawn_error.as_ref().map(|(text, _)| text.clone());
+        let error = self.spawn_error.as_ref().map(|(text, _)| text.as_str());
         let dmenu = self.dmenu.as_ref();
+        let now = Instant::now();
+        let mut region = Region::Surface;
         match &self.model {
             Model::Apps(ui) | Model::Run(ui) => {
-                self.drawn = Some((
-                    device_layout(look, frame.scale),
-                    frame.scale.factor().max(MIN_FACTOR),
-                ));
-                paint_panel(
-                    slot.pixels_mut(),
-                    dims,
+                let layout = device_layout(look, frame.scale);
+                let factor = frame.scale.factor().max(MIN_FACTOR);
+                self.drawn = Some((layout, factor));
+                let view = PanelView {
                     ui,
-                    text,
                     look,
-                    self.width,
-                    self.height,
-                    error.as_deref(),
-                    self.empty_text,
-                    frame.scale,
-                    &self.icon_theme,
-                    &self.icon_bases,
-                    &mut self.icons,
-                );
+                    width: self.width,
+                    height: self.height,
+                    error,
+                    empty_text: self.empty_text,
+                    scale: frame.scale,
+                    icon_theme: &self.icon_theme,
+                    icon_bases: &self.icon_bases,
+                };
+                if self.fx.stage.is_some() {
+                    let origin = staged::paint_staged(
+                        &mut self.fx,
+                        &view,
+                        text,
+                        &mut self.icons,
+                        slot.pixels_mut(),
+                        dims,
+                        frame.size,
+                        self.dirty,
+                        now,
+                    );
+                    self.origin = origin;
+                    region = if self.fading {
+                        Region::Nothing
+                    } else if origin == (0, 0) {
+                        Region::Surface
+                    } else {
+                        Region::Panel(Rect {
+                            x: origin.0,
+                            y: origin.1,
+                            width: self.width,
+                            height: self.height,
+                        })
+                    };
+                } else {
+                    paint_panel(slot.pixels_mut(), dims, &view, text, &mut self.icons, None);
+                }
             }
             Model::Dmenu(dui) => {
                 let Some(dmenu) = dmenu else {
@@ -850,6 +968,20 @@ impl App {
         let Some(live) = self.live.as_mut() else {
             return;
         };
+        sync_region(
+            &mut self.region,
+            self.compositor.as_ref(),
+            live.surface(),
+            region,
+            qh,
+        );
+        // Another frame while something moves: one callback at a time, and
+        // none once it has come to rest, so a still panel asks for nothing.
+        if self.fx.motion.animating(now) && !self.frame_requested {
+            live.surface().frame(qh, ());
+            self.frame_requested = true;
+        }
+        self.frame_due = false;
         live.surface().attach(Some(slot.buffer()), 0, 0);
         // Full damage, every draw: the bar's shape (exact buffer rect,
         // as its canvas does). Without it the compositor keeps showing
@@ -894,6 +1026,11 @@ impl App {
     }
 
     fn apply_press(&mut self, keysym: u32, decoded: &str) {
+        // A fading panel takes nothing: a key queued before the keyboard
+        // was released must not launch what the user already dismissed.
+        if self.fading {
+            return;
+        }
         match &mut self.model {
             Model::Apps(ui) => match ui.key(keysym, self.ctrl, decoded) {
                 Outcome::Ignored => {}
@@ -988,6 +1125,34 @@ impl App {
     }
 }
 
+/// What one apps panel draw reads, apart from the pixels and the caches.
+struct PanelView<'a> {
+    ui: &'a Ui,
+    look: &'a Look,
+    /// The panel's logical size.
+    width: u32,
+    height: u32,
+    /// A fresh spawn failure, drawn instead of the list.
+    error: Option<&'a str>,
+    empty_text: &'a str,
+    scale: scootui::density::Scale,
+    icon_theme: &'a str,
+    icon_bases: &'a [PathBuf],
+}
+
+/// `logical` pixels at output scale `factor`, at least one for a nonzero
+/// length.
+fn scale_len(logical: u32, factor: f64) -> u32 {
+    if logical == 0 {
+        0
+    } else {
+        ((f64::from(logical) * factor)
+            .round()
+            .max(1.0)
+            .min(f64::from(u32::MAX))) as u32
+    }
+}
+
 /// Paints the panel: the rounded chrome (border ring in `focus`, fill in
 /// `surface` at `opacity`), the entry line, and the list's visible rows.
 /// `dims` is the buffer size; the logical `width`/`height` size the panel
@@ -1001,38 +1166,33 @@ impl App {
 /// line carries no icon. Only visible rows resolve or decode (one file
 /// each, bounded by [`crate::icons`]); the keystroke path never touches
 /// the cache.
-#[allow(clippy::too_many_arguments)]
+/// `slide` places the highlight between rows during a motion; `None` draws
+/// it on the selected row.
 fn paint_panel(
     pixels: &mut [u8],
     dims: (u32, u32),
-    ui: &Ui,
+    view: &PanelView<'_>,
     text: &mut Text,
-    look: &Look,
-    width: u32,
-    height: u32,
-    error: Option<&str>,
-    empty_text: &str,
-    scale: scootui::density::Scale,
-    icon_theme: &str,
-    icon_bases: &[PathBuf],
     icons: &mut crate::icons::Cache,
+    slide: Option<Slide>,
 ) {
+    let PanelView {
+        ui,
+        look,
+        width,
+        height,
+        error,
+        empty_text,
+        scale,
+        icon_theme,
+        icon_bases,
+    } = *view;
     let (buffer_w, buffer_h) = dims;
     let factor = scale.factor().max(MIN_FACTOR);
-    let scale_len = |logical: u32| -> u32 {
-        if logical == 0 {
-            0
-        } else {
-            ((logical as f64 * factor)
-                .round()
-                .max(1.0)
-                .min(u32::MAX as f64)) as u32
-        }
-    };
-    let width_d = scale_len(width).min(buffer_w).max(1);
-    let height_d = scale_len(height).min(buffer_h).max(1);
+    let width_d = scale_len(width, factor).min(buffer_w).max(1);
+    let height_d = scale_len(height, factor).min(buffer_h).max(1);
     let layout = device_layout(look, scale);
-    let (em, radius_d) = (layout.em, scale_len(look.radius));
+    let (em, radius_d) = (layout.em, scale_len(look.radius, factor));
     chrome_scaled(
         pixels,
         buffer_w,
@@ -1041,6 +1201,7 @@ fn paint_panel(
         layout.border,
         radius_d,
         look,
+        look.fill_stops(),
     );
     let Some(mut canvas) = Canvas::new(pixels, buffer_w, buffer_h) else {
         return;
@@ -1080,25 +1241,53 @@ fn paint_panel(
         return;
     }
     // The selection highlight first, full row width and the panel's
-    // corner radius, so the icon and text draw on top of it.
+    // corner radius, so the icon and text draw on top of it. A look with
+    // motion slides it between rows (and moves the selected-row ink with
+    // it); without, it sits on the selected row.
     let selected = ui.list().selected();
-    for (slot, row) in ui.list().visible_range().enumerate() {
-        if selected == Some(row) {
-            let rect = layout.row(width_d, slot as u32);
+    let range = ui.list().visible_range();
+    match slide {
+        Some(slide) => {
+            let rect = Rect {
+                y: layout.list_y().saturating_add(slide.offset),
+                ..layout.row(width_d, 0)
+            };
             fill_round_rect(&mut canvas, rect, layout.radius, look.theme.accent);
+            paint_list_over_ink(
+                &mut canvas,
+                text,
+                &look.theme,
+                ui.list(),
+                &list_geo,
+                &|row| ui.row_text(row),
+                Some(range.start.saturating_add(slide.ink_slot)),
+            );
+        }
+        None => {
+            for (slot, row) in range.clone().enumerate() {
+                if selected == Some(row) {
+                    let rect = layout.row(width_d, slot as u32);
+                    fill_round_rect(&mut canvas, rect, layout.radius, look.theme.accent);
+                }
+            }
+            paint_list_over(
+                &mut canvas,
+                text,
+                &look.theme,
+                ui.list(),
+                &list_geo,
+                &|row| ui.row_text(row),
+            );
         }
     }
-    paint_list_over(
-        &mut canvas,
-        text,
-        &look.theme,
-        ui.list(),
-        &list_geo,
-        &|row| ui.row_text(row),
-    );
     // The visible rows' icons, after the text (so a slow filesystem
-    // never moves the text): one bounded load each, cached per open.
-    for (slot, row) in ui.list().visible_range().enumerate() {
+    // never moves the text): one bounded load each, cached per open. A
+    // letter tile inverts on the row the highlight covers.
+    let inked = match slide {
+        Some(slide) => Some(range.start.saturating_add(slide.ink_slot)),
+        None => selected,
+    };
+    for (slot, row) in range.enumerate() {
         let rect = layout.icon(layout.row(width_d, slot as u32));
         draw_icon(
             &mut canvas,
@@ -1110,9 +1299,49 @@ fn paint_panel(
             ui.row_icon(row),
             ui.row_label(row),
             rect,
-            selected == Some(row),
+            inked == Some(row),
         );
     }
+}
+
+/// Sends `want` as the surface's input region when it is not what was last
+/// sent. A panel inside a shadow's room takes pointer input on the panel
+/// alone: a press on the shadow lands on the desktop, which the compositor
+/// reads as a press outside the launcher (its hit test follows the input
+/// region), so the shadow never counts as the panel.
+fn sync_region(
+    sent: &mut Option<Region>,
+    compositor: Option<&wl_compositor::WlCompositor>,
+    surface: &wl_surface::WlSurface,
+    want: Region,
+    qh: &QueueHandle<App>,
+) {
+    if *sent == Some(want) || (sent.is_none() && want == Region::Surface) {
+        *sent = Some(want);
+        return;
+    }
+    let Some(compositor) = compositor else {
+        return;
+    };
+    match want {
+        // The default region: the whole surface.
+        Region::Surface => surface.set_input_region(None),
+        Region::Nothing | Region::Panel(_) => {
+            let region = compositor.create_region(qh, ());
+            if let Region::Panel(rect) = want {
+                let side = |value: u32| i32::try_from(value).unwrap_or(i32::MAX);
+                region.add(
+                    side(rect.x),
+                    side(rect.y),
+                    side(rect.width),
+                    side(rect.height),
+                );
+            }
+            surface.set_input_region(Some(&region));
+            region.destroy();
+        }
+    }
+    *sent = Some(want);
 }
 
 /// The smallest output scale the draw honors.
@@ -1317,12 +1546,24 @@ fn paint_dmenu(
 /// over the panel's pixels; redraws happen on state changes, never per
 /// frame.
 fn chrome(pixels: &mut [u8], buffer_w: u32, width: u32, height: u32, look: &Look) {
-    chrome_scaled(pixels, buffer_w, width, height, BORDER, look.radius, look);
+    chrome_scaled(
+        pixels,
+        buffer_w,
+        width,
+        height,
+        BORDER,
+        look.radius,
+        look,
+        (look.surface, look.surface),
+    );
 }
 
 /// The chrome at a device border width: the fractional draw scales the
 /// border with the rest, so a 1.5 output keeps a 3-device-pixel ring
-/// instead of a stretched 2-pixel one.
+/// instead of a stretched 2-pixel one. The fill runs from `stops.0` at the
+/// top row to `stops.1` at the bottom; equal stops are the flat `surface`
+/// fill, written as it always was.
+#[allow(clippy::too_many_arguments)]
 fn chrome_scaled(
     pixels: &mut [u8],
     buffer_w: u32,
@@ -1331,12 +1572,14 @@ fn chrome_scaled(
     border: u32,
     radius: u32,
     look: &Look,
+    stops: (scootui::color::Color, scootui::color::Color),
 ) {
     let radius = radius
         .min(width.saturating_div(2))
         .min(height.saturating_div(2)) as f32;
     let alpha = (look.opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
-    let surface = look.surface.argb8888(alpha);
+    let flat = stops.0 == stops.1;
+    let surface_flat = stops.0.argb8888(alpha);
     let focus = look.focus.argb8888(255);
     let stride = buffer_w as usize * 4;
     let half_w = width as f32 / 2.0;
@@ -1344,6 +1587,11 @@ fn chrome_scaled(
     for y in 0..height {
         let Some(row) = pixels.chunks_exact_mut(stride).nth(y as usize) else {
             break;
+        };
+        let surface = if flat {
+            surface_flat
+        } else {
+            scootui::paint::row_color(stops.0, stops.1, y, height).argb8888(alpha)
         };
         for x in 0..width {
             // The rounded box's signed distance: negative inside.
@@ -1477,6 +1725,7 @@ impl Pump {
             }
             app.drain_repeats();
             if app.accept_close() {
+                self.fade_out(&mut app, text, look);
                 return self.finish(app, 1, Some(Exit::Dismiss));
             }
             // A spawn failure clears after 2 s, redrawing the list
@@ -1487,7 +1736,7 @@ impl Pump {
                 app.spawn_error = None;
                 app.dirty = true;
             }
-            if app.exit.is_none() && app.dirty {
+            if app.exit.is_none() && (app.dirty || app.frame_due) {
                 app.draw(text, look, &qh);
                 // Flush the draw at once: the poll below blocks until
                 // the compositor, the repeat timer or the toggle speaks,
@@ -1542,8 +1791,19 @@ impl Pump {
             match exit {
                 Exit::Launch(request) => {
                     match self.launch_request(&mut app, &request) {
-                        LaunchDone::Launched => return self.finish(app, 0, None),
-                        LaunchDone::Dismissed => return self.finish(app, 1, Some(Exit::Dismiss)),
+                        // The launch has run: the panel fades while the
+                        // app opens, with the keyboard already released.
+                        LaunchDone::Launched => {
+                            self.fade_out(&mut app, text, look);
+                            // Whatever closed the fading panel, the pick
+                            // launched: the exit code is the launch's.
+                            app.exit = None;
+                            return self.finish(app, 0, None);
+                        }
+                        LaunchDone::Dismissed => {
+                            self.fade_out(&mut app, text, look);
+                            return self.finish(app, 1, Some(Exit::Dismiss));
+                        }
                         // A failed spawn draws its error and stays
                         // open: no frecency, no exit.
                         LaunchDone::Failed(error) => {
@@ -1552,9 +1812,83 @@ impl Pump {
                         }
                     }
                 }
-                Exit::Dismiss => return self.finish(app, 1, Some(Exit::Dismiss)),
+                Exit::Dismiss => {
+                    self.fade_out(&mut app, text, look);
+                    return self.finish(app, 1, Some(Exit::Dismiss));
+                }
+                Exit::Closed => return self.finish(app, 1, Some(Exit::Closed)),
                 Exit::Failed => return self.finish(app, 1, Some(Exit::Failed)),
                 Exit::Print(text) => return self.finish(app, 0, Some(Exit::Print(text))),
+            }
+        }
+    }
+}
+
+/// How long past the fade's own length it may take before the panel goes
+/// regardless: frame callbacks stop when the surface is hidden (a locked
+/// session, an occluded output), and a fade waiting on one would never end.
+const FADE_SLACK: Duration = Duration::from_millis(100);
+
+impl Pump {
+    /// Plays the fade-out of a dismissed or launched panel, then returns
+    /// for the caller to tear the session down. Nothing waits on it that
+    /// should not: it is the last thing before the exit and bounded by the
+    /// wall clock, not by frame callbacks.
+    ///
+    /// The panel is a picture from the first fade frame. That frame
+    /// releases the keyboard (so the window the user returns to takes keys
+    /// at once, not after the fade) and empties the input region (so a
+    /// click lands on the desktop), the toggle's claim goes (a second
+    /// invocation opens a fresh panel rather than signalling one that is
+    /// leaving), and keys and buttons already queued are ignored. A look
+    /// without motion, a dmenu panel and a panel the compositor already
+    /// closed skip it.
+    fn fade_out(&mut self, app: &mut App, text: &mut Text, look: &Look) {
+        let begun = Instant::now();
+        if app.live.is_none() || app.fx.stage.is_none() || !app.fx.motion.begin_exit(begun) {
+            return;
+        }
+        app.fading = true;
+        if let Some(live) = app.live.as_ref() {
+            live.role()
+                .set_keyboard_interactivity(KeyboardInteractivity::None);
+        }
+        app.claim = None;
+        app.frame_due = true;
+        let qh = self.qh.clone();
+        let deadline = begun + look.timing().duration() + FADE_SLACK;
+        loop {
+            let now = Instant::now();
+            // A closed or failed surface ends it too: `exit` is only set
+            // by the compositor or a failed draw while the panel fades.
+            if app.exit.is_some() || app.fx.motion.exit_done(now) || now >= deadline {
+                return;
+            }
+            if app.frame_due {
+                app.draw(text, look, &qh);
+            }
+            if self.queue.flush().is_err() || self.queue.dispatch_pending(app).is_err() {
+                return;
+            }
+            if self.queue.flush().is_err() || app.exit.is_some() {
+                return;
+            }
+            let Some(guard) = self.queue.prepare_read() else {
+                continue;
+            };
+            let wait = deadline.saturating_duration_since(Instant::now());
+            let timespec = rustix::time::Timespec {
+                tv_sec: wait.as_secs() as _,
+                tv_nsec: wait.subsec_nanos() as _,
+            };
+            let wayland = guard.connection_fd();
+            let mut polls = [rustix::event::PollFd::new(
+                &wayland,
+                rustix::event::PollFlags::IN,
+            )];
+            let _ = rustix::event::poll(&mut polls, Some(&timespec));
+            if !polls[0].revents().is_empty() {
+                let _ = guard.read();
             }
         }
     }
@@ -1727,7 +2061,7 @@ impl Pump {
                     }
                 }
             }
-            Some(Exit::Dismiss) => 1,
+            Some(Exit::Dismiss | Exit::Closed) => 1,
             // A dmenu pick, printed once on the way out: the line, its
             // index, or the typed text. Nothing launches.
             Some(Exit::Print(text)) => match print(&text) {
@@ -1764,6 +2098,7 @@ empty_dispatch!(wl_compositor::WlCompositor);
 empty_dispatch!(wl_surface::WlSurface);
 empty_dispatch!(wl_shm::WlShm);
 empty_dispatch!(wl_shm_pool::WlShmPool);
+empty_dispatch!(wl_region::WlRegion);
 empty_dispatch!(wl_output::WlOutput);
 empty_dispatch!(WpViewport);
 empty_dispatch!(WpViewporter);
@@ -1771,6 +2106,22 @@ empty_dispatch!(WpFractionalScaleManagerV1);
 empty_dispatch!(WpFractionalScaleV1);
 empty_dispatch!(ZwlrLayerShellV1);
 empty_dispatch!(XdgActivationV1);
+
+impl Dispatch<wl_callback::WlCallback, ()> for App {
+    fn event(
+        app: &mut App,
+        _: &wl_callback::WlCallback,
+        event: wl_callback::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<App>,
+    ) {
+        if let wl_callback::Event::Done { .. } = event {
+            app.frame_requested = false;
+            app.frame_due = true;
+        }
+    }
+}
 
 impl Dispatch<XdgActivationTokenV1, ()> for App {
     fn event(
@@ -1902,16 +2253,17 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for App {
                 // A keyboard leave while the pointer rests outside the
                 // panel is an outside click: dismiss. A leave with the
                 // pointer still over the panel (a locker) waits for
-                // focus, drawing as before.
-                if !app.seat.has_focus() && focused_before && app.pointer_outside() {
-                    app.exit = Some(Exit::Dismiss);
+                // focus, drawing as before. A panel fading out has released
+                // the keyboard itself: that leave is its own doing.
+                if !app.seat.has_focus() && focused_before && !app.fading && app.pointer_outside() {
+                    app.exit = Some(Exit::Closed);
                     return;
                 }
                 app.feed(output, &text);
             }
             Ok(None) => {
-                if !app.seat.has_focus() && focused_before && app.pointer_outside() {
-                    app.exit = Some(Exit::Dismiss);
+                if !app.seat.has_focus() && focused_before && !app.fading && app.pointer_outside() {
+                    app.exit = Some(Exit::Closed);
                 }
             }
             Err(error) => {
@@ -1967,7 +2319,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                 if matches!(state, WEnum::Value(wl_pointer::ButtonState::Pressed)) {
                     app.button_serial = Some(serial);
                 }
-                if button != BTN_LEFT {
+                if button != BTN_LEFT || app.fading {
                     return;
                 }
                 if !matches!(state, WEnum::Value(wl_pointer::ButtonState::Pressed)) {
@@ -2109,7 +2461,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
                 match app.demand.configure(serial, width, height) {
                     Effect::Ack(_) | Effect::None | Effect::Create => {}
                     Effect::Destroy | Effect::DestroyAndGiveUp | Effect::DestroyAndRetry => {
-                        app.exit = Some(Exit::Dismiss);
+                        app.exit = Some(Exit::Closed);
                     }
                 }
                 app.configured_size = Some((width, height));
@@ -2122,13 +2474,22 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
                 // The compositor no longer wants the panel: an unplugged
                 // output, or a click outside it (scoot closes an exclusive
                 // launcher that way). A transient panel is not re-created,
-                // unlike a bar, which retries once.
-                app.exit = Some(Exit::Dismiss);
+                // unlike a bar, which retries once. Further changes to the
+                // surface are ignored after `closed`, so there is nothing to
+                // fade: it exits at once.
+                app.exit = Some(Exit::Closed);
             }
             _ => {}
         }
     }
 }
+
+mod staged;
+
+#[cfg(test)]
+mod bytes_tests;
+#[cfg(test)]
+mod staged_tests;
 
 #[cfg(test)]
 mod tests {
@@ -2201,20 +2562,25 @@ mod tests {
         let height_d = (f64::from(height) * 1.5).round() as u32;
         let mut pixels = vec![0u8; width_d as usize * height_d as usize * 4];
         let mut icons = crate::icons::Cache::default();
+        let bases = [dir.path().join("icons")];
+        let view = PanelView {
+            ui: &ui,
+            look: &look,
+            width,
+            height,
+            error: None,
+            empty_text: "empty",
+            scale,
+            icon_theme: "Fixture",
+            icon_bases: &bases,
+        };
         paint_panel(
             &mut pixels,
             (width_d, height_d),
-            &ui,
+            &view,
             &mut text,
-            &look,
-            width,
-            height,
-            None,
-            "empty",
-            scale,
-            "Fixture",
-            &[dir.path().join("icons")],
             &mut icons,
+            None,
         );
         // The 1.5x icon side from the scaled em, as `paint_panel`
         // derives it: above the 1x side a scale-1 draw would use.
@@ -2287,20 +2653,24 @@ mod tests {
                     let width_d = (f64::from(width) * factor).round() as u32;
                     let height_d = (f64::from(height) * factor).round() as u32;
                     let mut pixels = vec![0u8; width_d as usize * height_d as usize * 4];
+                    let view = PanelView {
+                        ui: &ui,
+                        look: &look,
+                        width,
+                        height,
+                        error: None,
+                        empty_text: "empty",
+                        scale,
+                        icon_theme: "Fixture",
+                        icon_bases: &[],
+                    };
                     paint_panel(
                         &mut pixels,
                         (width_d, height_d),
-                        &ui,
+                        &view,
                         &mut text,
-                        &look,
-                        width,
-                        height,
-                        None,
-                        "empty",
-                        scale,
-                        "Fixture",
-                        &[],
                         &mut icons,
+                        None,
                     );
                     if count == 0 {
                         continue;

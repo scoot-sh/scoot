@@ -13,6 +13,7 @@ mod rounded;
 
 pub use depth::{MAX_BLUR, MAX_OFFSET, Pad, Shadow, ShadowSpec};
 pub use layer::{Layer, MAX_LAYER_PIXELS};
+pub use rounded::row_color;
 
 #[cfg(test)]
 mod tests;

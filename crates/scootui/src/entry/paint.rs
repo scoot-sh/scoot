@@ -234,7 +234,17 @@ pub fn paint_list<'a, 'b>(
     if !geo.usable() {
         return;
     }
-    paint_rows(canvas, text, theme, list, geo, geo.y, row_text, true);
+    paint_rows(
+        canvas,
+        text,
+        theme,
+        list,
+        geo,
+        geo.y,
+        row_text,
+        true,
+        list.selected(),
+    );
     if focused {
         let rows = list.visible_range().len() as u32;
         let tall = rows.saturating_mul(geo.row_height);
@@ -307,6 +317,7 @@ pub fn paint_selector<'a, 'b>(
             geo.y.saturating_add(geo.row_height),
             row_text,
             true,
+            selector.list().selected(),
         );
     }
 }
@@ -323,16 +334,36 @@ pub fn paint_list_over<'a, 'b>(
     geo: &Geometry,
     row_text: &'b (dyn Fn(usize) -> &'a str + 'b),
 ) {
+    paint_list_over_ink(canvas, text, theme, list, geo, row_text, list.selected());
+}
+
+/// [`paint_list_over`] with the selected-row ink on `ink_row` instead of
+/// the list's selection: a caller that slides its own highlight between
+/// rows moves the ink with it, so the text on the highlight stays
+/// legible while it is between two rows. `None` inks every row plain.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_list_over_ink<'a, 'b>(
+    canvas: &mut Canvas<'_>,
+    text: &mut Text,
+    theme: &Theme,
+    list: &List,
+    geo: &Geometry,
+    row_text: &'b (dyn Fn(usize) -> &'a str + 'b),
+    ink_row: Option<usize>,
+) {
     if !geo.usable() {
         return;
     }
-    paint_rows(canvas, text, theme, list, geo, geo.y, row_text, false);
+    paint_rows(
+        canvas, text, theme, list, geo, geo.y, row_text, false, ink_row,
+    );
 }
 
 /// The rows `list` shows, one [`Geometry::row_height`] each from `y0`.
 /// Shared by the list and the expanded selector: one code path means
 /// one golden covers both. `fill` draws the selected row's square
-/// `accent` fill.
+/// `accent` fill; `ink_row` is the row drawn in the selected-row ink (the
+/// list's selection, except for [`paint_list_over_ink`]).
 #[allow(clippy::too_many_arguments)]
 fn paint_rows<'a, 'b>(
     canvas: &mut Canvas<'_>,
@@ -343,6 +374,7 @@ fn paint_rows<'a, 'b>(
     y0: u32,
     row_text: &'b (dyn Fn(usize) -> &'a str + 'b),
     fill: bool,
+    ink_row: Option<usize>,
 ) {
     let clip = geo.clip();
     let metrics = text.metrics(geo.em);
@@ -366,7 +398,7 @@ fn paint_rows<'a, 'b>(
                 theme.accent,
             );
         }
-        let base = if selected == Some(row) {
+        let base = if ink_row == Some(row) {
             theme.background
         } else {
             theme.foreground
@@ -381,7 +413,7 @@ fn paint_rows<'a, 'b>(
             base,
             clip,
         );
-        let is_selected = selected == Some(row);
+        let is_selected = ink_row == Some(row);
         let match_ink = if is_selected {
             match on_selection {
                 SelectedMatch::Ink(ink) => ink,

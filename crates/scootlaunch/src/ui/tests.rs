@@ -278,3 +278,17 @@ fn an_action_row_win_reports_its_action() {
         Some("new-window")
     );
 }
+
+#[test]
+fn the_generation_moves_with_the_rows_and_not_with_the_selection() {
+    let mut ui = three();
+    let opened = ui.generation();
+    // A selection move and a scroll leave the rows as they were.
+    ui.key(scootui::entry::KEY_DOWN, false, "");
+    ui.key(scootui::entry::KEY_TAB, false, "");
+    ui.scroll(false);
+    assert_eq!(ui.generation(), opened);
+    // A typed character rebuilds them.
+    ui.key(0, false, "t");
+    assert_ne!(ui.generation(), opened);
+}

@@ -18,7 +18,10 @@ use ab_glyph::{FontArc, FontVec};
 
 use super::line::{Entry, InsertOutcome, PasswordEntry};
 use super::list::{List, Selector};
-use super::paint::{Geometry, paint_entry, paint_list, paint_password, paint_selector};
+use super::paint::{
+    Geometry, paint_entry, paint_list, paint_list_over, paint_list_over_ink, paint_password,
+    paint_selector,
+};
 use crate::color::Color;
 use crate::paint::{Canvas, Span};
 use crate::testfont;
@@ -500,4 +503,38 @@ fn hostile_spans_and_tiny_canvases_never_panic_the_draw() {
             true,
         );
     }
+}
+
+/// The over-paint with the ink on a chosen row: the same bytes as the
+/// list selected there, and plain ink everywhere for `None`.
+#[test]
+fn the_selected_ink_follows_the_row_asked_for() {
+    let height = 8 + ROW_H * 4 + 8;
+    let paint = |selected: usize, ink: Option<Option<usize>>| -> Vec<u8> {
+        let mut pixels = vec![0u8; (WIDTH * height) as usize * 4];
+        let mut canvas = washed_canvas(&mut pixels, WIDTH, height);
+        let mut text = text();
+        let mut list = List::new(4);
+        list.set_count(ROWS.len() * 10);
+        list.select(selected);
+        let theme = theme();
+        let geo = list_geo();
+        let rows = |row: usize| ROWS[row % ROWS.len()];
+        match ink {
+            None => paint_list_over(&mut canvas, &mut text, &theme, &list, &geo, &rows),
+            Some(ink) => {
+                paint_list_over_ink(&mut canvas, &mut text, &theme, &list, &geo, &rows, ink)
+            }
+        }
+        pixels
+    };
+    // The list selects row 1; the ink asks for row 2: the bytes of a
+    // list that selected row 2.
+    assert_eq!(paint(1, Some(Some(2))), paint(2, None));
+    // Asking for the selection itself is the plain over-paint.
+    assert_eq!(paint(1, Some(Some(1))), paint(1, None));
+    // No ink row differs from both: nothing is drawn in the selected ink.
+    let none = paint(1, Some(None));
+    assert_ne!(none, paint(1, None));
+    assert_ne!(none, paint(2, None));
 }

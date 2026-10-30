@@ -396,6 +396,14 @@ fn golden_one(name: &str) {
     let em = table["font-size"].as_integer().expect("font-size") as f32;
     let opacity = table["opacity"].as_float().unwrap_or(1.0);
     panel.wait_shown(focus);
+    // A look with motion is still arriving when its border first shows:
+    // the golden is the settled panel.
+    if let Some(ms) = table
+        .get("motion-duration-ms")
+        .and_then(|value| value.as_integer())
+    {
+        std::thread::sleep(Duration::from_millis(ms as u64 + 400));
+    }
     panel.save(&format!("golden-{name}"));
     let shot = panel.shot();
     // Finds the panel through its opaque border ring, whatever the
@@ -443,6 +451,30 @@ fn golden_one(name: &str) {
         selected, selection,
         "{name}: first row {selected:?} for selection {selection:?}"
     );
+    // The shadow a look opts in to is under the panel, and only there: a
+    // soft or deep one darkens the backdrop just below the border, a glow
+    // tints it with the look's `focus`.
+    let backdrop = shot.at(4, 4);
+    let below = shot.at((x0 + x1) / 2, y1 + 3);
+    match table.get("shadow").and_then(|value| value.as_str()) {
+        Some("soft" | "deep") => {
+            let sum = |pixel: [u8; 3]| pixel.iter().map(|c| u32::from(*c)).sum::<u32>();
+            assert!(
+                sum(below) < sum(backdrop),
+                "{name}: a shadow below the panel: {below:?} over {backdrop:?}"
+            );
+        }
+        Some("glow") => {
+            assert_ne!(below, backdrop, "{name}: a glow below the panel");
+            let hue = |pixel: [u8; 3], channel: usize| i32::from(pixel[channel]);
+            let brightest = (0..3).max_by_key(|c| focus[*c]).unwrap();
+            assert!(
+                hue(below, brightest) > hue(backdrop, brightest),
+                "{name}: the glow carries the focus color: {below:?} over {backdrop:?}"
+            );
+        }
+        _ => assert_eq!(below, backdrop, "{name}: no shadow without a look for it"),
+    }
     panel.key("Escape");
     panel.wait_exit();
     panel.clean();

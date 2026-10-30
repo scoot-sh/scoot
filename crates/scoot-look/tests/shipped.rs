@@ -620,7 +620,7 @@ fn nvim_colorscheme_reloads_live() {
     server.wait().ok();
 }
 
-/// The depth and motion keys a notifier fragment may carry.
+/// The depth and motion keys a shell-app fragment may carry.
 const SHELL_EFFECT_KEYS: &[&str] = &[
     "shadow",
     "fill",
@@ -678,15 +678,48 @@ fn only_ginger_night_and_radial_burst_opt_in_and_only_radial_burst_moves() {
                 }
             }
         }
-        // The launcher and the greeter never carry the keys.
-        for (what, fragment) in [
-            ("launch.toml", render_launch(&look)),
-            ("greet.toml", render_greet(&look)),
-        ] {
-            let table: toml::Table = toml::from_str(&fragment.expect("renders")).expect("TOML");
-            for key in SHELL_EFFECT_KEYS {
-                assert!(!table.contains_key(*key), "{name}: {what} carries `{key}`");
+        // The launcher carries the shared depth and motion keys and none of
+        // the notifier's card and title tables; a look that does not opt in
+        // renders the launcher fragment it always did.
+        let launch = render_launch(&look).unwrap_or_else(|e| panic!("{name}: launch.toml: {e}"));
+        let launch: toml::Table = toml::from_str(&launch).expect("launch.toml reparses");
+        for key in ["card", "title"] {
+            assert!(!launch.contains_key(key), "{name}: launch.toml has `{key}`");
+        }
+        match *name {
+            "ginger-night" => {
+                assert_eq!(launch["shadow"].as_str(), Some("soft"));
+                for key in ["fill", "motion", "motion-duration-ms", "motion-bounce"] {
+                    assert!(
+                        !launch.contains_key(key),
+                        "ginger-night launcher has `{key}`"
+                    );
+                }
             }
+            "radial-burst" => {
+                assert_eq!(launch["shadow"].as_str(), Some("glow"));
+                assert_eq!(launch["motion"].as_str(), Some("spring"));
+                // The panel's own, shorter run than the cards' 380 ms.
+                assert_eq!(launch["motion-duration-ms"].as_integer(), Some(220));
+                assert_eq!(launch["motion-bounce"].as_float(), Some(0.6));
+            }
+            _ => {
+                for key in SHELL_EFFECT_KEYS {
+                    assert!(
+                        !launch.contains_key(*key),
+                        "{name}: launch.toml carries `{key}` without an opt-in"
+                    );
+                }
+            }
+        }
+        // The greeter never carries the keys.
+        let greet = render_greet(&look).expect("renders");
+        let table: toml::Table = toml::from_str(&greet).expect("TOML");
+        for key in SHELL_EFFECT_KEYS {
+            assert!(
+                !table.contains_key(*key),
+                "{name}: greet.toml carries `{key}`"
+            );
         }
     }
 }

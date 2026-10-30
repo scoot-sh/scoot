@@ -526,3 +526,41 @@ impl StdoutBytes for Panel {
         out
     }
 }
+
+/// The look's shadow and motion are the apps and run panel's: a dmenu
+/// panel under the same look draws with its fixed painter, prints at once
+/// and exits at once (a script waiting on its pick never waits on a fade).
+#[test]
+fn a_look_with_a_shadow_and_motion_leaves_dmenu_alone() {
+    let Some((session, data_home)) = dmenu_session("dmenu-effects") else {
+        return;
+    };
+    let look_dir = session.scratch.state_home().join("scoot").join("look");
+    fs::create_dir_all(&look_dir).unwrap();
+    fs::write(
+        look_dir.join("launch.toml"),
+        "shadow = \"deep\"\nfill = \"gradient\"\nmotion = \"spring\"\nmotion-duration-ms = 900\n",
+    )
+    .unwrap();
+    let mut panel = start_dmenu(
+        session,
+        data_home,
+        b"alpha\nbeta\ngamma\n",
+        &["--dmenu"],
+        &[],
+    );
+    // The border is there at full strength at once: no entrance.
+    panel.wait_shown(rgb("#f9e2af"));
+    std::thread::sleep(Duration::from_millis(300));
+    let sent = std::time::Instant::now();
+    panel.key("Return");
+    let status = panel.wait_exit();
+    assert!(status.success(), "{}", panel.stderr());
+    assert_eq!(panel.stdout(), "alpha\n");
+    assert!(
+        sent.elapsed() < Duration::from_millis(700),
+        "the pick did not wait for a fade: {:?}",
+        sent.elapsed()
+    );
+    panel.clean();
+}

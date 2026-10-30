@@ -73,6 +73,10 @@ pub struct Ui {
     span_scratch: Vec<(u32, u32)>,
     /// One highlight span buffer per visible slot, reused every rerank.
     highlight_slots: Vec<Vec<(u32, u32)>>,
+    /// How many times the shown rows were rebuilt (the open counts): a
+    /// painter compares it between draws to tell a selection that moved
+    /// within the same rows from rows that changed under it.
+    generation: u64,
 }
 
 /// One shown row: the entry, and which of its actions won the rank
@@ -113,9 +117,16 @@ impl Ui {
             fold_scratch: String::new(),
             span_scratch: Vec::new(),
             highlight_slots: vec![Vec::new(); slots],
+            generation: 0,
         };
         ui.rerank();
         ui
+    }
+
+    /// The count of row rebuilds so far. It changes when the query (or its
+    /// caret) does and never for a selection move or a scroll.
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     /// The query text (tests: what the last keys typed).
@@ -258,6 +269,7 @@ impl Ui {
     /// visible highlights, and selects the top row. Reuses every buffer:
     /// a warmed-up call allocates nothing (pinned by the test below).
     fn rerank(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
         crate::rank::fuzzy::fold_into(self.entry.text(), &mut self.fold_scratch);
         self.query_codes.clear();
         self.query_codes

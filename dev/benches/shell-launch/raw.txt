@@ -1,0 +1,124 @@
+# bench_effects, main's paint_panel (4e8293664, git archive, own target dir)
+### main run 1
+test panel::tests::bench_main_paint ... main none/none: paint straight   390x282   median    311.9 us   p5    162.0 us
+main none/none: paint straight   780x564   median   1179.4 us   p5    676.0 us
+### main run 2
+test panel::tests::bench_main_paint ... main none/none: paint straight   390x282   median    292.5 us   p5    158.0 us
+main none/none: paint straight   780x564   median   1173.6 us   p5    612.7 us
+### main run 3
+test panel::tests::bench_main_paint ... main none/none: paint straight   390x282   median    311.4 us   p5    158.5 us
+main none/none: paint straight   780x564   median   1115.4 us   p5    621.0 us
+
+# bench_effects before the Layer::composite change (working tree on 4e8293664)
+4e8293664
+### run 1
+none/none: paint straight (any open, any key)    390x282   median    311.7 us   p5    158.2 us
+soft, still: repaint (a key)                     414x314   median    670.8 us   p5    349.8 us
+deep, still: repaint (a key)                     446x358   median    736.3 us   p5    417.0 us
+glow, still: repaint (a key)                     422x314   median    695.9 us   p5    357.5 us
+entrance frame (scaled + faded present)          414x314   median   2622.0 us   p5    458.9 us
+a panel at rest: present (one copy)              414x314   median     26.2 us   p5     13.4 us
+fade-out frame (faded present)                   414x314   median   2706.0 us   p5    619.8 us
+sliding-highlight frame (repaint + present)      414x314   median    559.8 us   p5     22.0 us
+-- scale 2
+none/none: paint straight (any open, any key)    780x564   median   1106.4 us   p5    630.5 us
+soft, still: repaint (a key)                     828x628   median   2488.5 us   p5   1469.0 us
+deep, still: repaint (a key)                     892x716   median   3011.5 us   p5   1711.5 us
+glow, still: repaint (a key)                     844x628   median   2608.8 us   p5   1561.2 us
+entrance frame (scaled + faded present)          828x628   median  10420.4 us   p5   1878.3 us
+a panel at rest: present (one copy)              828x628   median    104.1 us   p5     70.8 us
+fade-out frame (faded present)                   828x628   median  11339.5 us   p5   2581.9 us
+sliding-highlight frame (repaint + present)      828x628   median   2471.1 us   p5   1490.8 us
+### run 2
+none/none: paint straight (any open, any key)    390x282   median    271.5 us   p5    158.5 us
+soft, still: repaint (a key)                     414x314   median    684.8 us   p5    364.8 us
+deep, still: repaint (a key)                     446x358   median    773.0 us   p5    392.0 us
+glow, still: repaint (a key)                     422x314   median    699.9 us   p5    358.3 us
+entrance frame (scaled + faded present)          414x314   median   2410.3 us   p5    411.5 us
+a panel at rest: present (one copy)              414x314   median     17.8 us   p5     13.3 us
+fade-out frame (faded present)                   414x314   median   2923.5 us   p5    680.9 us
+sliding-highlight frame (repaint + present)      414x314   median    565.6 us   p5     26.4 us
+-- scale 2
+none/none: paint straight (any open, any key)    780x564   median   1014.6 us   p5    599.3 us
+soft, still: repaint (a key)                     828x628   median   2183.2 us   p5   1424.0 us
+deep, still: repaint (a key)                     892x716   median   2922.0 us   p5   1789.4 us
+glow, still: repaint (a key)                     844x628   median   2351.8 us   p5   1490.2 us
+entrance frame (scaled + faded present)          828x628   median  10112.0 us   p5   1884.1 us
+a panel at rest: present (one copy)              828x628   median     86.2 us   p5     52.9 us
+fade-out frame (faded present)                   828x628   median  11078.4 us   p5   2429.2 us
+sliding-highlight frame (repaint + present)      828x628   median   2541.3 us   p5   1545.7 us
+### run 3
+none/none: paint straight (any open, any key)    390x282   median    311.6 us   p5    159.2 us
+soft, still: repaint (a key)                     414x314   median    680.2 us   p5    355.1 us
+deep, still: repaint (a key)                     446x358   median    771.0 us   p5    450.0 us
+glow, still: repaint (a key)                     422x314   median    696.9 us   p5    355.7 us
+entrance frame (scaled + faded present)          414x314   median   2345.7 us   p5    399.2 us
+a panel at rest: present (one copy)              414x314   median     26.5 us   p5     12.2 us
+fade-out frame (faded present)                   414x314   median   2721.2 us   p5    681.1 us
+sliding-highlight frame (repaint + present)      414x314   median    462.7 us   p5     21.8 us
+-- scale 2
+none/none: paint straight (any open, any key)    780x564   median   1050.5 us   p5    598.3 us
+soft, still: repaint (a key)                     828x628   median   2442.5 us   p5   1451.3 us
+deep, still: repaint (a key)                     892x716   median   2649.2 us   p5   1660.0 us
+glow, still: repaint (a key)                     844x628   median   2493.5 us   p5   1310.3 us
+entrance frame (scaled + faded present)          828x628   median  10033.3 us   p5   1852.2 us
+a panel at rest: present (one copy)              828x628   median    104.0 us   p5     52.8 us
+fade-out frame (faded present)                   828x628   median  10575.2 us   p5   2490.4 us
+sliding-highlight frame (repaint + present)      828x628   median   2345.3 us   p5   1456.2 us
+
+# bench_effects after it (working tree on 4e8293664)
+4e8293664
+### run 1
+none/none: paint straight (any open, any key)    390x282   median    311.8 us   p5    168.1 us
+soft, still: repaint (a key)                     414x314   median    682.6 us   p5    396.2 us
+deep, still: repaint (a key)                     446x358   median    771.2 us   p5    421.5 us
+glow, still: repaint (a key)                     422x314   median    696.3 us   p5    369.7 us
+entrance frame (scaled + faded present)          414x314   median   2427.0 us   p5    460.5 us
+a panel at rest: present (one copy)              414x314   median     18.0 us   p5     15.5 us
+fade-out frame (faded present)                   414x314   median   2648.8 us   p5    679.4 us
+sliding-highlight frame (repaint + present)      414x314   median    684.8 us   p5     26.5 us
+-- scale 2
+none/none: paint straight (any open, any key)    780x564   median   1177.2 us   p5    657.6 us
+soft, still: repaint (a key)                     828x628   median   2341.5 us   p5   1517.2 us
+deep, still: repaint (a key)                     892x716   median   2906.5 us   p5   1682.5 us
+glow, still: repaint (a key)                     844x628   median   2482.4 us   p5   1484.9 us
+entrance frame (scaled + faded present)          828x628   median   9050.8 us   p5   1750.3 us
+a panel at rest: present (one copy)              828x628   median    104.5 us   p5     52.8 us
+fade-out frame (faded present)                   828x628   median   9983.9 us   p5   2547.4 us
+sliding-highlight frame (repaint + present)      828x628   median   2378.8 us   p5   1414.5 us
+### run 2
+none/none: paint straight (any open, any key)    390x282   median    311.6 us   p5    158.2 us
+soft, still: repaint (a key)                     414x314   median    556.0 us   p5    347.0 us
+deep, still: repaint (a key)                     446x358   median    768.9 us   p5    391.8 us
+glow, still: repaint (a key)                     422x314   median    635.7 us   p5    360.5 us
+entrance frame (scaled + faded present)          414x314   median   2317.0 us   p5    414.0 us
+a panel at rest: present (one copy)              414x314   median     21.0 us   p5     13.5 us
+fade-out frame (faded present)                   414x314   median   2670.6 us   p5    680.6 us
+sliding-highlight frame (repaint + present)      414x314   median    657.1 us   p5     26.5 us
+-- scale 2
+none/none: paint straight (any open, any key)    780x564   median   1043.5 us   p5    598.0 us
+soft, still: repaint (a key)                     828x628   median   2570.1 us   p5   1437.1 us
+deep, still: repaint (a key)                     892x716   median   2626.2 us   p5   1660.4 us
+glow, still: repaint (a key)                     844x628   median   2417.5 us   p5   1592.3 us
+entrance frame (scaled + faded present)          828x628   median   9036.1 us   p5   1792.5 us
+a panel at rest: present (one copy)              828x628   median     94.7 us   p5     52.7 us
+fade-out frame (faded present)                   828x628   median  10271.7 us   p5   2558.7 us
+sliding-highlight frame (repaint + present)      828x628   median   2137.1 us   p5    876.5 us
+### run 3
+none/none: paint straight (any open, any key)    390x282   median    311.4 us   p5    157.9 us
+soft, still: repaint (a key)                     414x314   median    589.6 us   p5    349.2 us
+deep, still: repaint (a key)                     446x358   median    652.3 us   p5    391.2 us
+glow, still: repaint (a key)                     422x314   median    695.6 us   p5    360.2 us
+entrance frame (scaled + faded present)          414x314   median   2225.4 us   p5    405.5 us
+a panel at rest: present (one copy)              414x314   median     15.5 us   p5     13.5 us
+fade-out frame (faded present)                   414x314   median   2452.6 us   p5    592.4 us
+sliding-highlight frame (repaint + present)      414x314   median    673.5 us   p5     26.5 us
+-- scale 2
+none/none: paint straight (any open, any key)    780x564   median   1059.1 us   p5    598.0 us
+soft, still: repaint (a key)                     828x628   median   2473.5 us   p5   1418.2 us
+deep, still: repaint (a key)                     892x716   median   2912.5 us   p5   1784.2 us
+glow, still: repaint (a key)                     844x628   median   2498.9 us   p5   1559.7 us
+entrance frame (scaled + faded present)          828x628   median   9052.0 us   p5   1867.9 us
+a panel at rest: present (one copy)              828x628   median    103.6 us   p5     52.8 us
+fade-out frame (faded present)                   828x628   median  10393.5 us   p5   2693.3 us
+sliding-highlight frame (repaint + present)      828x628   median   2386.8 us   p5   1487.3 us
