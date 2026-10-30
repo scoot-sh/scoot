@@ -2181,6 +2181,15 @@ let
     desktop.theme.targets.cursor.enable = false;
     desktop.theme.targets.fonts.enable = false;
   };
+  # ...and with the metric-compatible families cleared: the look's own
+  # faces stay, the two extra packages go.
+  osLookNoCompat = evalNixos {
+    enable = true;
+    package = fakePkg;
+    desktop.enable = true;
+    look = "moonrise";
+    desktop.theme.fonts.compatPackages = [ ];
+  };
   # Explicitly unthemed: `look = null` opts out of the default look
   # (no appearance, no wallpaper, every themed slot inert).
   hmDeskLookNull = evalHome {
@@ -8358,7 +8367,7 @@ let
     # agent and the secrets client, the terminal and its `xdg-open`
     # plumbing, both pickers' tools and their scripts, the
     # automounter, and the keymap's three,
-    # and the theme's seven (cursor, icon, all three faces, qt6ct and
+    # and the theme's nine (cursor, icon, all three faces plus the two metric-compatible families, qt6ct and
     # its Adwaita style), all on with the profile).
     (
       assert hmDeskLookMusic.config.programs.scoot.wallpaper.enable;
@@ -8423,6 +8432,8 @@ let
           pkgs.nerd-fonts.droid-sans-mono
           pkgs.dejavu_fonts.minimal
           pkgs.nerd-fonts.fira-code
+          pkgs.liberation_ttf
+          pkgs.gyre-fonts
           pkgs.qt6Packages.qt6ct
           pkgs.adwaita-qt6
         ];
@@ -9426,13 +9437,13 @@ let
     # tool, the OSD and its four scripts, the displays watcher, the
     # terminal and its `xdg-open` plumbing, both pickers' tools and
     # their scripts, the automounter, the agent and the secrets
-    # client, the theme's seven -- no scoot package
+    # client, the theme's nine -- no scoot package
     # set here, so nothing else -- plus the keymap's brightness,
     # volume and media tools; `brightnessctl` serves two features, so
     # it appears twice, and `scootlaunch` five (the clipboard picker, the
     # launcher, the capture chooser and both pickers' menus).
     (
-      assert builtins.length hmIdle.config.home.packages == 48;
+      assert builtins.length hmIdle.config.home.packages == 50;
       true
     )
     (
@@ -9484,6 +9495,8 @@ let
           pkgs.nerd-fonts.droid-sans-mono
           pkgs.dejavu_fonts.minimal
           pkgs.nerd-fonts.fira-code
+          pkgs.liberation_ttf
+          pkgs.gyre-fonts
           pkgs.qt6Packages.qt6ct
           pkgs.adwaita-qt6
         ];
@@ -9579,13 +9592,15 @@ let
           pkgs.brightnessctl
           pkgs.wireplumber
           pkgs.playerctl
-          # ...and the default look's theme seven (cursor, icon, all
+          # ...and the default look's theme nine (cursor, icon, all
           # three faces, qt6ct and its Adwaita style).
           mocuTheme
           pkgs.adwaita-icon-theme
           pkgs.nerd-fonts.droid-sans-mono
           pkgs.dejavu_fonts.minimal
           pkgs.nerd-fonts.fira-code
+          pkgs.liberation_ttf
+          pkgs.gyre-fonts
           pkgs.qt6Packages.qt6ct
           pkgs.adwaita-qt6
         ];
@@ -9613,9 +9628,9 @@ let
       assert !(hmLockOff.config.xdg.configFile ? "swaylock/config");
       true
     )
-    # 39 slot packages plus the default look's theme seven.
+    # 39 slot packages plus the default look's theme nine (the two metric-compatible families included).
     (
-      assert builtins.length hmLockOff.config.home.packages == 46;
+      assert builtins.length hmLockOff.config.home.packages == 48;
       true
     )
     # The inhibitor off: the policy without the audio hold (four
@@ -9634,10 +9649,10 @@ let
       assert !(hmInhibitOff.config.systemd.user.services ? scoot-audio-inhibit);
       true
     )
-    # 39 slot packages plus the default look's theme seven, and the
+    # 39 slot packages plus the default look's theme nine, and the
     # locker script beside the locker.
     (
-      assert builtins.length hmInhibitOff.config.home.packages == 47;
+      assert builtins.length hmInhibitOff.config.home.packages == 49;
       true
     )
     # Retimed, zeroed, rebound and recolored: every assertion still
@@ -13496,6 +13511,14 @@ let
       assert hmTheme.config.fonts.fontconfig.enable;
       true
     )
+    # ...and the home half installs the metric-compatible families too.
+    (
+      assert lib.all (
+        p: builtins.elem p hmTheme.config.home.packages
+      ) hmTheme.config.programs.scoot.desktop.theme.fonts.compatPackages;
+      assert builtins.length hmTheme.config.programs.scoot.desktop.theme.fonts.compatPackages == 2;
+      true
+    )
     (
       assert hmTheme.config.xdg.configFile ? "foot/foot.ini";
       true
@@ -14596,6 +14619,25 @@ let
     (
       assert builtins.elem osLookCatalog.config.programs.scoot.desktop.theme.fonts.monoPackage
         osLookCatalog.config.fonts.packages;
+      true
+    )
+    # ...the metric-compatible families web pages name (Liberation for
+    # Arial/Times New Roman/Courier New, Gyre for Helvetica/Times/Courier)
+    # sit beside them, and clearing the option leaves only the look's three...
+    (
+      assert builtins.length osLookCatalog.config.programs.scoot.desktop.theme.fonts.compatPackages == 2;
+      assert lib.all (
+        p: builtins.elem p osLookCatalog.config.fonts.packages
+      ) osLookCatalog.config.programs.scoot.desktop.theme.fonts.compatPackages;
+      true
+    )
+    (
+      assert
+        osLookNoCompat.config.fonts.packages == [
+          osLookCatalog.config.programs.scoot.desktop.theme.fonts.uiPackage
+          osLookCatalog.config.programs.scoot.desktop.theme.fonts.sansPackage
+          osLookCatalog.config.programs.scoot.desktop.theme.fonts.monoPackage
+        ];
       true
     )
     # ...opting the fonts target out installs none of them...
@@ -18106,6 +18148,16 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -F "<string>DejaVu Sans</string>" ${themeFontsConf}
     grep -F "<string>FiraCode Nerd Font</string>" ${themeFontsConf}
     grep -F 'binding="strong"' ${themeFontsConf}
+    # ...each rule only for a generic asked for first (an unqualified
+    # test turns an explicit "Arial" into the look's face), with
+    # system-ui following the sans.
+    grep -F '<test name="family" qual="first"><string>sans-serif</string></test>' ${themeFontsConf}
+    grep -F '<test name="family" qual="first"><string>system-ui</string></test>' ${themeFontsConf}
+    grep -F '<test name="family" qual="first"><string>monospace</string></test>' ${themeFontsConf}
+    if grep -F '<test name="family"><string>' ${themeFontsConf}; then
+      echo "FAIL: an unqualified family test hijacks named families" >&2
+      exit 1
+    fi
     echo "ok: fontconfig defaults to the look's faces"
 
     # 13l2. The GTK named colors, one accent per look (measured in

@@ -1070,6 +1070,27 @@ in
           '';
         };
 
+        fonts.compatPackages = lib.mkOption {
+          type = lib.types.listOf lib.types.package;
+          default =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              lib.filter (p: p != null) [
+                (pkgs.liberation_ttf or null)
+                (pkgs.gyre-fonts or null)
+              ]
+            else
+              [ ];
+          defaultText = lib.literalExpression "if pkgs.stdenv.hostPlatform.isLinux then [ pkgs.liberation_ttf pkgs.gyre-fonts ] else [ ]";
+          example = lib.literalExpression "[ pkgs.liberation_ttf ]";
+          description = ''
+            The metric-compatible families to install system-wide
+            (Liberation for Arial, Times New Roman and Courier New,
+            TeX Gyre for Helvetica, Times and Courier), with the
+            fonts target. The same default as the home-manager side;
+            `[ ]` skips them. Linux-only: empty off Linux.
+          '';
+        };
+
         qt.package = lib.mkOption {
           type = lib.types.nullOr lib.types.package;
           default = if pkgs.stdenv.hostPlatform.isLinux then (pkgs.qt6Packages.qt6ct or null) else null;
@@ -2787,7 +2808,8 @@ in
       fonts.packages =
         lib.optional (cfg.desktop.theme.fonts.uiPackage != null) cfg.desktop.theme.fonts.uiPackage
         ++ lib.optional (cfg.desktop.theme.fonts.sansPackage != null) cfg.desktop.theme.fonts.sansPackage
-        ++ lib.optional (cfg.desktop.theme.fonts.monoPackage != null) cfg.desktop.theme.fonts.monoPackage;
+        ++ lib.optional (cfg.desktop.theme.fonts.monoPackage != null) cfg.desktop.theme.fonts.monoPackage
+        ++ cfg.desktop.theme.fonts.compatPackages;
     })
     # The bar half lives in the bar module (`nix/modules/scootbar.nix`
     # reads this profile): a set of `programs.scootbar` here would need
