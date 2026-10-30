@@ -211,8 +211,8 @@ pub struct RawShape {
     pub ring_inactive_width: Option<i64>,
 }
 
-/// The depth tokens (`[effects]`): the shell apps' shadow and card fill.
-/// Both are unset by default, which renders no key at all, so a look that
+/// The depth and motion tokens (`[effects]`): the shell apps' shadow, card
+/// fill and motion. All are unset by default, which renders no key at all, so a look that
 /// does not opt in produces the fragments it always did.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -223,6 +223,15 @@ pub struct Effects {
     /// `solid` or `gradient` ([`crate::allowlist::FILL_STYLES`]).
     #[serde(default)]
     pub fill: Option<String>,
+    /// `none`, `ease-out` or `spring` ([`crate::allowlist::MOTION_CURVES`]).
+    #[serde(default)]
+    pub motion: Option<String>,
+    /// How long one motion runs, 0 to 1000 ms.
+    #[serde(default, rename = "motion-duration-ms")]
+    pub motion_duration_ms: Option<i64>,
+    /// The spring's overshoot, 0 (none) to 1 (the compositor's spring).
+    #[serde(default, rename = "motion-bounce")]
+    pub motion_bounce: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -559,9 +568,29 @@ fn validate_shape(shape: &RawShape, errors: &mut Vec<GrammarError>) {
 }
 
 fn validate_effects(effects: &Effects, errors: &mut Vec<GrammarError>) {
+    if let Some(ms) = effects.motion_duration_ms
+        && !(0..=allowlist::MOTION_DURATION_MAX_MS).contains(&ms)
+    {
+        errors.push(GrammarError::new(
+            "effects.motion-duration-ms",
+            format!(
+                "must be a whole number from 0 to {}",
+                allowlist::MOTION_DURATION_MAX_MS
+            ),
+        ));
+    }
+    if let Some(bounce) = effects.motion_bounce
+        && !(0.0..=1.0).contains(&bounce)
+    {
+        errors.push(GrammarError::new(
+            "effects.motion-bounce",
+            "must be a number from 0 (no overshoot) to 1 (the compositor's spring)",
+        ));
+    }
     for (field, value, options) in [
         ("effects.shadow", &effects.shadow, allowlist::SHADOW_STYLES),
         ("effects.fill", &effects.fill, allowlist::FILL_STYLES),
+        ("effects.motion", &effects.motion, allowlist::MOTION_CURVES),
     ] {
         if let Some(value) = value
             && !options.contains(&value.as_str())

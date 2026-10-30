@@ -1227,3 +1227,61 @@ fn a_hand_built_look_with_a_bad_effect_value_is_refused_not_rendered() {
     // An app that never reads the keys does not look at them.
     assert!(render_launch(&look).is_ok());
 }
+
+#[test]
+fn a_look_without_motion_renders_no_motion_key() {
+    let frag = render_notify(&moonrise()).expect("renders");
+    for key in ["motion", "card"] {
+        assert!(!frag.contains(key), "{key}: {frag}");
+    }
+}
+
+#[test]
+fn motion_reaches_the_notifier_fragment_and_no_other() {
+    let look = with_effects(
+        "[effects]\nmotion = \"spring\"\nmotion-duration-ms = 380\nmotion-bounce = 0.12\n",
+    );
+    let text = render_notify(&look).expect("renders");
+    let notify: toml::Table = toml::from_str(&text).expect("TOML");
+    assert_eq!(notify["motion"].as_str(), Some("spring"));
+    assert_eq!(notify["motion-duration-ms"].as_integer(), Some(380));
+    assert_eq!(notify["motion-bounce"].as_float(), Some(0.12));
+    // Top-level keys come before any table, like `radius`.
+    assert!(
+        text.find("motion-bounce").unwrap() < text.find("[colors]").unwrap(),
+        "{text}"
+    );
+    for other in [render_launch(&look), render_greet(&look)] {
+        let other = other.expect("renders");
+        assert!(!other.contains("motion"), "{other}");
+    }
+}
+
+#[test]
+fn card_overrides_render_as_a_card_table_and_beat_the_shared_motion() {
+    let look = with_effects(
+        "[effects]\nmotion = \"ease-out\"\n[apps.scootnotify]\n\"motion\" = \"spring\"\n\"card.enter\" = \"drop\"\n\"card.exit\" = \"fade\"\n",
+    );
+    let text = render_notify(&look).expect("renders");
+    let parsed: toml::Table = toml::from_str(&text).expect("each key is emitted once");
+    assert_eq!(parsed["motion"].as_str(), Some("spring"));
+    assert_eq!(parsed["card"]["enter"].as_str(), Some("drop"));
+    assert_eq!(parsed["card"]["exit"].as_str(), Some("fade"));
+}
+
+#[test]
+fn a_hand_built_look_with_a_bad_motion_value_is_refused_not_rendered() {
+    let mut look = moonrise();
+    look.effects.motion = Some("spring\"\n[autostart]".to_string());
+    assert!(render_notify(&look).is_err());
+    look.effects.motion = None;
+    look.effects.motion_duration_ms = Some(60_000);
+    assert!(render_notify(&look).is_err());
+    look.effects.motion_duration_ms = None;
+    look.effects.motion_bounce = Some(f64::NAN);
+    assert!(render_notify(&look).is_err());
+    look.effects.motion_bounce = Some(7.0);
+    assert!(render_notify(&look).is_err());
+    // An app that never reads the keys does not look at them.
+    assert!(render_launch(&look).is_ok());
+}

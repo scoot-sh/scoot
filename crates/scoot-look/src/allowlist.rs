@@ -132,11 +132,30 @@ pub const SHADOW_STYLES: &[&str] = &["none", "soft", "deep", "glow"];
 /// how a card's surface color is laid down.
 pub const FILL_STYLES: &[&str] = &["solid", "gradient"];
 
-/// The depth keys only `scootnotify` reads so far, on top of
+/// The `motion` values (`[effects] motion`, and the notifier's `motion`
+/// override): the curve the shell apps' motion follows.
+pub const MOTION_CURVES: &[&str] = &["none", "ease-out", "spring"];
+
+/// The `card.enter` and `card.exit` values: how a notification card
+/// arrives and leaves.
+pub const CARD_MOTIONS: &[&str] = &["slide", "fade", "scale", "drop"];
+
+/// The longest `motion-duration-ms`, matching the shell's own clamp.
+pub const MOTION_DURATION_MAX_MS: i64 = 1000;
+
+/// The depth and motion keys only `scootnotify` reads so far, on top of
 /// [`SHELL_APP_ALLOWLIST`]. They are not in the shared list because an app
 /// that never reads one would report it as an unknown look key on every
 /// load; each app joins as it learns the key.
-pub const NOTIFY_DEPTH_KEYS: &[&str] = &["shadow", "fill"];
+pub const NOTIFY_DEPTH_KEYS: &[&str] = &[
+    "shadow",
+    "fill",
+    "motion",
+    "motion-duration-ms",
+    "motion-bounce",
+    "card.enter",
+    "card.exit",
+];
 
 /// Whether `key` (an `[apps.<app>]` dotted key) is allowlisted for `app`.
 /// Unknown apps are refused: only the apps below read look layers.
@@ -363,6 +382,15 @@ pub fn value_kind(app: &str, key: &str) -> Option<ValueKind> {
             "radius" => Some(ValueKind::IntRange { min: 0, max: 64 }),
             "shadow" if app == "scootnotify" => Some(ValueKind::Enum(SHADOW_STYLES)),
             "fill" if app == "scootnotify" => Some(ValueKind::Enum(FILL_STYLES)),
+            "motion" if app == "scootnotify" => Some(ValueKind::Enum(MOTION_CURVES)),
+            "motion-duration-ms" if app == "scootnotify" => Some(ValueKind::IntRange {
+                min: 0,
+                max: MOTION_DURATION_MAX_MS,
+            }),
+            "motion-bounce" if app == "scootnotify" => Some(ValueKind::Opacity),
+            "card.enter" | "card.exit" if app == "scootnotify" => {
+                Some(ValueKind::Enum(CARD_MOTIONS))
+            }
             _ => None,
         },
         _ => None,

@@ -55,3 +55,24 @@ fn effects_inherit_and_a_child_overrides_per_key() {
     assert_eq!(look.effects.shadow.as_deref(), Some("none"));
     assert_eq!(look.effects.fill.as_deref(), Some("gradient"));
 }
+
+#[test]
+fn motion_inherits_and_a_child_overrides_per_key() {
+    let base_text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[effects]\nmotion = \"spring\"\nmotion-duration-ms = 400\nmotion-bounce = 0.5\n[cursor]",
+        1,
+    );
+    let base = parse_look_toml(base_text.as_bytes()).expect("base parses");
+    let child_text = "schema = 1\nname = \"child\"\nextends = \"base\"\n[effects]\nmotion = \"none\"\nmotion-bounce = 0.0\n";
+    let child = parse_look_toml(child_text.as_bytes()).expect("child parses");
+    let map = BTreeMap::from([
+        ("base".to_string(), (base, Origin::User)),
+        ("child".to_string(), (child, Origin::User)),
+    ]);
+    let look = resolve(&map, "child").expect("resolves");
+    // `none` and `0.0` are values, not absences.
+    assert_eq!(look.effects.motion.as_deref(), Some("none"));
+    assert_eq!(look.effects.motion_bounce, Some(0.0));
+    assert_eq!(look.effects.motion_duration_ms, Some(400));
+}

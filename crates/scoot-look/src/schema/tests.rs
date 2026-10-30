@@ -402,3 +402,37 @@ fn effects_refuse_an_unknown_value_or_key_by_name() {
         "an unknown [effects] key refuses"
     );
 }
+
+#[test]
+fn motion_tokens_parse_and_default_to_unset() {
+    let none = parse_look_toml(minimal_toml().as_bytes()).expect("parses");
+    assert!(none.effects.motion.is_none());
+    assert!(none.effects.motion_duration_ms.is_none() && none.effects.motion_bounce.is_none());
+    let text = minimal_toml().replacen(
+        "[cursor]",
+        "[effects]\nmotion = \"spring\"\nmotion-duration-ms = 380\nmotion-bounce = 0.12\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    assert_eq!(raw.effects.motion.as_deref(), Some("spring"));
+    assert_eq!(raw.effects.motion_duration_ms, Some(380));
+    assert_eq!(raw.effects.motion_bounce, Some(0.12));
+}
+
+#[test]
+fn a_bad_motion_value_refuses_by_name() {
+    for (extra, field) in [
+        ("motion = \"bouncy\"", "effects.motion"),
+        ("motion-duration-ms = 1001", "effects.motion-duration-ms"),
+        ("motion-duration-ms = -5", "effects.motion-duration-ms"),
+        ("motion-bounce = 1.5", "effects.motion-bounce"),
+        ("motion-bounce = -0.5", "effects.motion-bounce"),
+    ] {
+        let text = minimal_toml().replacen("[cursor]", &format!("[effects]\n{extra}\n[cursor]"), 1);
+        let errors = parse_look_toml(text.as_bytes()).expect_err("refused");
+        assert!(
+            errors.iter().any(|e| e.to_string().contains(field)),
+            "{extra}: {errors:?}"
+        );
+    }
+}

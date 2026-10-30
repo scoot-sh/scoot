@@ -12,7 +12,9 @@
 
 use std::collections::BTreeMap;
 
-use crate::allowlist::{FILL_STYLES, SHADOW_STYLES, check_app_value};
+use crate::allowlist::{
+    FILL_STYLES, MOTION_CURVES, MOTION_DURATION_MAX_MS, SHADOW_STYLES, check_app_value,
+};
 use crate::grammar::{GrammarError, is_hex_color};
 use crate::resolved::{ResolvedLook, pt_to_px};
 use crate::schema::Polarity;
@@ -462,6 +464,7 @@ fn render_shell_fragment(look: &ResolvedLook, app: &str) -> Result<String, Gramm
         for (key, value, options) in [
             ("shadow", &look.effects.shadow, SHADOW_STYLES),
             ("fill", &look.effects.fill, FILL_STYLES),
+            ("motion", &look.effects.motion, MOTION_CURVES),
         ] {
             if let Some(value) = value {
                 if !options.contains(&value.as_str()) {
@@ -472,6 +475,24 @@ fn render_shell_fragment(look: &ResolvedLook, app: &str) -> Result<String, Gramm
                 }
                 top.insert(key.to_string(), toml_str(value));
             }
+        }
+        if let Some(ms) = look.effects.motion_duration_ms {
+            if !(0..=MOTION_DURATION_MAX_MS).contains(&ms) {
+                return Err(GrammarError::new(
+                    "effects.motion-duration-ms",
+                    format!("must be a whole number from 0 to {MOTION_DURATION_MAX_MS}"),
+                ));
+            }
+            top.insert("motion-duration-ms".to_string(), ms.to_string());
+        }
+        if let Some(bounce) = look.effects.motion_bounce {
+            if !(0.0..=1.0).contains(&bounce) {
+                return Err(GrammarError::new(
+                    "effects.motion-bounce",
+                    "must be a number from 0 to 1",
+                ));
+            }
+            top.insert("motion-bounce".to_string(), format!("{bounce:?}"));
         }
     }
     let mut colors: BTreeMap<String, String> = BTreeMap::new();
@@ -506,9 +527,9 @@ fn render_shell_fragment(look: &ResolvedLook, app: &str) -> Result<String, Gramm
         } else if section == "icons" {
             icons.extend(keys);
         } else {
-            // Unreachable today: the allowlist holds only `colors.*`,
-            // `icons.theme` and the four dotless keys. Emit rather than
-            // drop, so a future key is visible instead of silently lost.
+            // The notifier's `card.*` keys land here (`[card]`). Emit any
+            // other section rather than drop it, so a future key is
+            // visible instead of silently lost.
             sections.entry(section).or_default().extend(keys);
         }
     }
