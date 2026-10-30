@@ -244,7 +244,7 @@ fn dump(name: &str, pixels: &[u8], w: u32, h: u32) {
         return;
     };
     let mut out = format!("P6\n{w} {h}\n255\n").into_bytes();
-    for chunk in pixels.chunks_exact(4) {
+    for chunk in pixels.as_chunks::<4>().0 {
         // Over a mid-gray desktop, straight from premultiplied.
         let a = u32::from(chunk[3]);
         for c in [chunk[2], chunk[1], chunk[0]] {
@@ -366,7 +366,14 @@ fn a_leaving_card_is_in_the_frame_until_it_lands_and_not_after() {
     empty.width = before.width;
     let (first, w, h) = frame(&mut scene, &empty, &mut motion, t0, 0);
     assert_eq!((w, h), (before.width, before.height));
-    let covered = |bytes: &[u8]| bytes.chunks_exact(4).filter(|px| px[3] != 0).count();
+    let covered = |bytes: &[u8]| {
+        bytes
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|px| px[3] != 0)
+            .count()
+    };
     assert!(
         covered(&first) > 10_000,
         "the card is still on screen at 0 ms"
