@@ -30,8 +30,9 @@ first set of runs taken before the corner-search change: [`raw.txt`](raw.txt).
 
 ## Result
 
-Repaint of the stack, microseconds, p5 over six runs (median of the runs'
-best-round figures; the range is the best and worst run):
+Repaint of the stack, microseconds, p5 (median of the runs' best-round
+figures; the range is the best and worst run). Main and the branch's
+`bench_depth` rows are six runs; the `bench_styles` rows are three:
 
 | Style | Surface | p5 µs (range) |
 |---|---|---|

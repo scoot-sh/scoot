@@ -235,3 +235,4 @@ hits the wall:
 - [check scootbar for the glibc 2.44 huge-page arena](thp-arena-check.md)
 - [notify-look-radius-unread](notify-look-radius-unread.md) (medium): the look's `radius` is parsed and never read, so every card draws the config file's 8 px; found building #807 slice 3
 - [shell-font-resolution](shell-font-resolution.md) (low): resolve the look's font family to a file and use a real bold face; the shell apps draw one file with synthetic bold
+- [notify-input-region-follows-shape](notify-input-region-follows-shape.md) (low): the click area is each card's rectangle, so a pill's cut corners still take clicks; found building #807 slice 3

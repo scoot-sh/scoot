@@ -1,6 +1,10 @@
 //! Card styles and typography: the accent marker, the pill outline, the
 //! per-app accent color, and the summary's weight and spacing.
 //!
+//! Sizes are logical pixels, like every other length in the stack. The popup
+//! renders at scale 1 (the fractional-scale globals are unbound, so a HiDPI
+//! output upscales the buffer), which makes them device pixels too.
+//!
 //! Everything here is read once with the look and applied at layout, never
 //! per frame. A look that sets none of it paints and lays out exactly what
 //! it always did.

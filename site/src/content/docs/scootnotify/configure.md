@@ -419,10 +419,6 @@ draws nothing.
 | `rounded` | The corner radius from the config file. The default. |
 | `pill` | Ends rounded to half the card's height, to at most a 36 px radius: a one- or two-line card is a true pill, a tall one keeps round ends of that size. The content moves 8 px further in on each side so text, the progress bar and the buttons stay clear of the curve. The shadow follows the shape. |
 
-`card.shape` is a keyword and not a larger `radius` because the look's
-`radius` is limited to 64 for every app, and a radius does not say "as
-round as this card can be" for cards of different heights.
-
 A `stripe` on a `pill` shows only where the curved end is nearly
 straight, a short sliver at its middle; `dot` and `badge` suit a pill
 better.
@@ -430,6 +426,10 @@ better.
 A card that is moving carries its marker with it, and the marker, the
 tile and the pill are all inside the card's shadow and clipped by its
 shape.
+
+The click area is still each card's rectangle, as with rounded corners: a
+click in the cut corner of a pill invokes or dismisses the card instead of
+reaching the window behind it.
 
 > **Symptom:** a look sets `card.mark` and the cards have none.
 > The daemon logs `card.mark refused ... default applies` or
