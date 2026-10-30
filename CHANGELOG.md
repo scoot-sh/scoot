@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.17](https://github.com/scoot-sh/scoot/compare/v0.6.16...v0.6.17) - 2026-10-30
+
+### scoot-look
+
+- fixed: check dim on surface and the inactive ring; lift three looks' dim ([#824](https://github.com/scoot-sh/scoot/pull/824))
+
 ## [0.6.16](https://github.com/scoot-sh/scoot/compare/v0.6.15...v0.6.16) - 2026-10-30
 
 ### scootlaunch,scootui,scoot-look,scootnotify
