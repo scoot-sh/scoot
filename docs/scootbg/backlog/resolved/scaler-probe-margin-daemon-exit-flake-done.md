@@ -1,9 +1,10 @@
 ---
 title: "scaler_probe a_limit_just_above_the_full_draw_budget_still_draws: the daemon closes without replying under CPU load"
-status: "open"
-area: "scootbg"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-30"
 ---
 
 # scaler_probe a_limit_just_above_the_full_draw_budget_still_draws: the daemon closes without replying under CPU load
@@ -27,3 +28,9 @@ Capture the daemon's exit status and `scootbg.log` on that failure (the session 
 ## Not in this ticket
 
 Any other test.
+
+## Resolution
+
+Cause, captured 2026-10-30 on the dev VM (16 busy loops beside `-p scootbg`; 3 failures in 19 runs of the test alone): a test race, not a scaler probe bug. `set #102030` replies before the daemon's `scootbg-save` thread has even started. That thread maps its stack and a 64 MiB malloc arena when it runs, so the `VmSize` the test read was 11.4 MB (before the thread ran) in some runs and 78.6 MB (after) in others; the limits came out at 78,063,492 and 145,192,836 bytes. With the small one, the saver thread (spawned again by the draw's own `set`) and the decoding thread competed for the 64 MiB the limit left, and the loser aborted: `failed to allocate an alternative stack: Cannot allocate memory (os error 12)`, daemon exit 134, which is the "closed the connection without replying" the client saw. A second shape, a draw refused with `out of memory: cannot allocate 25320948 bytes for scaling` or `shared memory: Cannot allocate memory`, came from the same size moving between the read and the draw.
+
+Fixed in the tests: `common::wait_for_saver_idle` waits until the daemon is down to one thread before `VmSize` is read (here and in `animated_oom.rs`, `draw_failed.rs` and the other `scaler_probe.rs` test, which read it the same way), and the margin test's failure now prints the daemon's exit status and log. 100 reads of the margin test's limit under the same load were all 145,172,356 bytes.

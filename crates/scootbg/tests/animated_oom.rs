@@ -153,6 +153,8 @@ fn animation_canvases_refuse_under_a_tight_limit() {
     assert!(done.status.success(), "{done:?}");
 
     let pid = daemon.id();
+    // The state saver's thread may not have run yet: let it end first.
+    common::wait_for_saver_idle(pid);
     let limit = vm_size(pid) + MARGIN;
     let (soft, hard) = address_limits(pid);
     // Without room between the limit and what the daemon maps plus the

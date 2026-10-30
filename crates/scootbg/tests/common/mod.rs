@@ -624,6 +624,29 @@ pub fn wait_exit(child: &mut Child) -> ExitStatus {
     }
 }
 
+/// Waits until the daemon is down to its one thread, failing the test after
+/// [`PATIENCE`]. A `set` replies before the thread that saves its state has
+/// even started, and when it does it maps its stack and a 64 MiB malloc
+/// arena: a test that reads the daemon's `VmSize` first and lowers
+/// `RLIMIT_AS` to just above it then leaves that thread (or the decoding
+/// thread, whichever the scheduler runs first) without room, and the daemon
+/// aborts. Once the thread has ended its arena is free for the next thread to
+/// reuse, so the size read afterwards is the one a draw starts from.
+pub fn wait_for_saver_idle(pid: u32) {
+    let deadline = Instant::now() + PATIENCE;
+    loop {
+        let busy = fs::read_dir(format!("/proc/{pid}/task")).is_ok_and(|tasks| tasks.count() > 1);
+        if !busy {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the saver thread did not end within {PATIENCE:?}"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 /// Whatever the child wrote to stderr (it must have been piped and have
 /// exited).
 pub fn stderr_of(child: &mut Child) -> String {

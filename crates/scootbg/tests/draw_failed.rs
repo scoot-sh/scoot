@@ -152,6 +152,8 @@ fn a_live_set_that_cannot_be_drawn_says_why_in_query() {
     assert_eq!(before["draw_error"], Value::Null);
 
     let pid = daemon.id();
+    // The state saver's thread may not have run yet: let it end first.
+    common::wait_for_saver_idle(pid);
     let limit = vm_size(pid) + MARGIN;
     let (soft, hard) = address_limits(pid);
     // The premise: the limit can be lowered to `limit`, and is back, once

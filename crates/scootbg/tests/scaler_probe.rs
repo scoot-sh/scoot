@@ -157,6 +157,8 @@ fn scaling_draws_refuse_under_a_tight_limit() {
     assert_eq!(before["draw_error"], Value::Null);
 
     let pid = daemon.id();
+    // The state saver's thread may not have run yet: let it end first.
+    common::wait_for_saver_idle(pid);
     let limit = vm_size(pid) + MARGIN;
     let (soft, hard) = address_limits(pid);
     // As in `draw_failed.rs`: without room between the limit, the 33 MB
@@ -246,6 +248,8 @@ fn a_limit_just_above_the_full_draw_budget_still_draws() {
         assert!(done.status.success(), "{filter}: {done:?}");
 
         let pid = daemon.id();
+        // The state saver's thread may not have run yet: let it end first.
+        common::wait_for_saver_idle(pid);
         let limit = vm_size(pid) + LANCZOS_BUDGET + SHM_BYTES + HEADROOM;
         let (soft, hard) = address_limits(pid);
         eprintln!("address space: limit {limit}, soft {soft:?}, hard {hard:?}");
@@ -284,7 +288,13 @@ fn a_limit_just_above_the_full_draw_budget_still_draws() {
             let _ = common::wait_exit(&mut daemon);
             continue;
         }
-        assert!(drawn.status.success(), "{filter}: {stderr}");
+        if !drawn.status.success() {
+            // How the daemon ended and what it said, for a failure that
+            // only shows under load.
+            let exit = daemon.try_wait();
+            let log = std::fs::read_to_string(session.daemon_log()).unwrap_or_default();
+            panic!("{filter}: {stderr}\nlimit {limit}\ndaemon exit {exit:?}\nlog:\n{log}");
+        }
         let now = output(&session);
         assert_eq!(now["draw_failed"], false, "{filter}: {now}");
         assert_eq!(now["shows"]["mode"], "fill", "{filter}: {now}");
