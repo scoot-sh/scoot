@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.15](https://github.com/scoot-sh/scoot/compare/v0.6.14...v0.6.15) - 2026-10-30
+
+### scootui,scootnotify,scoot-look,scoot-rt,scootctl
+
+- added: card motion for notifications ([#811](https://github.com/scoot-sh/scoot/pull/811))
+
+### scootui,scootnotify,scoot-look,scootctl
+
+- added: shadow and gradient depth for notification cards ([#810](https://github.com/scoot-sh/scoot/pull/810))
+
 ## [0.6.14](https://github.com/scoot-sh/scoot/compare/v0.6.13...v0.6.14) - 2026-10-29
 
 ### scoot,scootlaunch
