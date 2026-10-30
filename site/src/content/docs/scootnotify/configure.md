@@ -376,7 +376,10 @@ refuses at validation.
 
 A look can mark each card with an accent, give the cards a pill outline
 and color each app's cards differently. All three are off by default, and
-a look that sets none paints and lays out exactly what it did before.
+a look that sets none paints what it did before. One layout fix
+applies to every look: a progress bar or buttons on a card with an icon now
+start below the icon, not through it, so such a card (a volume OSD, say) is
+up to 24 px taller.
 They are notifier keys, in the look's `[apps.scootnotify]` table, quoted:
 
 ```toml

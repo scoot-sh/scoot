@@ -6,8 +6,9 @@
 //! output upscales the buffer), which makes them device pixels too.
 //!
 //! Everything here is read once with the look and applied at layout, never
-//! per frame. A look that sets none of it paints and lays out exactly what
-//! it always did.
+//! per frame. A look that sets none of it paints what it always did;
+//! the one layout change that reaches every look is that a bar or buttons
+//! now start below a taller icon slot.
 
 use scootui::color::Color;
 

@@ -55,8 +55,9 @@ the app accent (the hash and the contrast search, once per card), 22.1 pill.
 Reading it:
 
 - **A look that sets none of the tokens costs what it did.** The default look's
-  repaint is 128 µs p5 on main and 128 µs on the branch, byte-identical output
-  (every existing golden is unchanged).
+  repaint is 128 µs p5 on main and 128 µs on the branch, the same pixels for a card without an icon
+  under a bar or buttons (every existing golden is unchanged; none has one).
+  An icon card with a bar or buttons grows up to 24 px, deliberately.
 - **A mark costs nothing measurable at the p5.** A stripe is three columns of
   stores, a dot one small fill, a badge a different plate color; the badge's
   extra 10 µs is the icon slot every card now shows.
