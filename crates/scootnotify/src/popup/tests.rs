@@ -486,3 +486,98 @@ fn a_retheme_mid_motion_returns_the_surface_to_the_layouts_height() {
     );
     assert!(app.dirty);
 }
+
+// --- input region ---------------------------------------------------------
+
+use scootui::region::Rect as Row;
+
+fn covers(rows: &[Row], x: u32, y: u32) -> bool {
+    rows.iter()
+        .any(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
+}
+
+#[test]
+fn a_card_at_rest_takes_clicks_in_its_shape_not_its_cut_corners() {
+    let app = App::new(Config::default(), Look::default());
+    let stack = stack_of(&app, &[1]);
+    let card = &stack.cards[0];
+    let own = card.rect;
+    let (right, bottom) = (own.x + own.width - 1, own.y + own.height - 1);
+    let mut rows = Vec::new();
+    // Square: the whole rectangle, one row.
+    region::push_at_rest(card, 0, &mut rows);
+    assert_eq!(rows.len(), 1);
+    assert!(covers(&rows, own.x, own.y) && covers(&rows, right, bottom));
+    // A pill: the corner pixels are the desktop's, the middle is the card's,
+    // and nothing lies outside the card's own rectangle.
+    rows.clear();
+    region::push_at_rest(card, crate::look::style::PILL_RADIUS, &mut rows);
+    for (x, y) in [
+        (own.x, own.y),
+        (right, own.y),
+        (own.x, bottom),
+        (right, bottom),
+    ] {
+        assert!(!covers(&rows, x, y), "corner ({x},{y}) takes the click");
+    }
+    assert!(covers(&rows, own.x + own.width / 2, own.y + own.height / 2));
+    assert!(covers(&rows, own.x + own.width / 2, own.y));
+    for r in &rows {
+        assert!(r.width > 0 && r.height > 0, "{r:?}");
+        assert!(r.x >= own.x && r.x + r.width <= own.x + own.width, "{r:?}");
+        assert!(
+            r.y >= own.y && r.y + r.height <= own.y + own.height,
+            "{r:?}"
+        );
+    }
+    // Two cards append, each at its own place.
+    let two = stack_of(&app, &[1, 2]);
+    rows.clear();
+    for card in &two.cards {
+        region::push_at_rest(card, 8, &mut rows);
+    }
+    for card in &two.cards {
+        let r = card.rect;
+        assert!(covers(&rows, r.x + r.width / 2, r.y + r.height / 2));
+    }
+}
+
+#[test]
+fn the_region_is_resent_only_when_it_changes_and_again_on_a_new_surface() {
+    let mut region = region::InputRegion::default();
+    let a = Row {
+        x: 1,
+        y: 2,
+        width: 3,
+        height: 4,
+    };
+    // The first list is sent even when empty: a surface with no region at
+    // all takes input everywhere.
+    region.begin();
+    assert!(region.stale());
+    region.sent();
+    region.begin();
+    assert!(!region.stale(), "an empty list the surface already has");
+    region.begin().push(a);
+    assert!(region.stale());
+    region.sent();
+    region.begin().push(a);
+    assert!(!region.stale(), "the same rectangles");
+    region.begin().push(Row { x: 2, ..a });
+    assert!(region.stale());
+    region.sent();
+    region.begin().push(Row { x: 2, ..a });
+    region.forget();
+    assert!(region.stale(), "a new surface has no region");
+}
+
+#[test]
+fn a_surface_that_goes_away_forgets_the_region_it_was_given() {
+    let mut app = App::new(Config::default(), Look::default());
+    app.region.begin();
+    app.region.sent();
+    assert!(!app.region.stale());
+    app.destroy_live();
+    app.region.begin();
+    assert!(app.region.stale());
+}

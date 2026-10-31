@@ -325,6 +325,27 @@ fn a_scaled_card_is_hit_through_its_scale() {
     assert!((x - (cx + i64::from(rect.width) / 2)).abs() <= 1, "{x}");
 }
 
+/// The rectangles `push_input_rects` gives for one card.
+fn shape_of(
+    motion: &Motion,
+    card: &Card,
+    radius: u32,
+    shift: u32,
+    surface: (u32, u32),
+    now: Instant,
+) -> Vec<scootui::region::Rect> {
+    let mut out = Vec::new();
+    motion.push_input_rects(card, radius, shift, surface, now, &mut out);
+    out
+}
+
+/// Whether the point is inside any of the rectangles.
+fn covers(rects: &[scootui::region::Rect], x: u32, y: u32) -> bool {
+    rects
+        .iter()
+        .any(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
+}
+
 #[test]
 fn the_input_region_is_where_the_cards_are_seen_and_nothing_for_a_ghost() {
     let t0 = Instant::now();
@@ -335,16 +356,79 @@ fn the_input_region_is_where_the_cards_are_seen_and_nothing_for_a_ghost() {
     let surface = (after.width, after.height.max(motion.hold()));
     let card = &after.cards[0];
     // Card 1 is still drawn where it was (below its target).
-    let seen = motion.input_rect(card, 0, surface, t0).unwrap();
-    assert_eq!(seen.y, before.cards[1].rect.y);
+    let seen = shape_of(&motion, card, 0, 0, surface, t0);
+    assert_eq!(seen.len(), 1, "a square card is one rectangle: {seen:?}");
+    assert_eq!(seen[0].y, before.cards[1].rect.y);
     // The ghost has no card in the stack, so no rectangle is asked for it.
     assert!(motion.ghosts.len() == 1 && motion.pose(2, t0).is_none());
     // Fully off the surface: nothing.
-    assert_eq!(motion.input_rect(card, 10_000, surface, t0), None);
+    assert!(shape_of(&motion, card, 0, 10_000, surface, t0).is_empty());
     // At rest the rectangle is the layout's own.
     assert!(motion.settle(at(t0, 5_000)));
-    let rest = motion.input_rect(card, 0, surface, at(t0, 5_000)).unwrap();
-    assert_eq!(rest, card.rect);
+    let rest = shape_of(&motion, card, 0, 0, surface, at(t0, 5_000));
+    let own = card.rect;
+    assert_eq!(
+        rest,
+        [scootui::region::Rect {
+            x: own.x,
+            y: own.y,
+            width: own.width,
+            height: own.height
+        }]
+    );
+}
+
+#[test]
+fn a_rounded_card_in_motion_leaves_its_cut_corner_to_the_desktop() {
+    let t0 = Instant::now();
+    let mut motion = Motion::new(&tokens(Curve::EaseOut, CardMotion::Scale), Anchor::TopRight);
+    let one = stack_of(&[1], Pad::ZERO);
+    motion.retarget(&empty(), &one, t0);
+    let surface = (one.width, one.height.max(motion.hold()));
+    let card = &one.cards[0];
+    let pose = motion.pose(1, t0).unwrap();
+    assert!(pose.scale < 1.0, "the card is mid-scale: {}", pose.scale);
+    let radius = 20;
+    let shape = shape_of(&motion, card, radius, 0, surface, t0);
+    let square = shape_of(&motion, card, 0, 0, surface, t0);
+    assert_eq!(square.len(), 1);
+    let sq = square[0];
+    // The pill-sized corner takes no click at the seen card's corner, and
+    // does at its middle; the unrounded one takes both.
+    assert!(!covers(&shape, sq.x, sq.y), "{shape:?}");
+    assert!(covers(&square, sq.x, sq.y));
+    assert!(covers(&shape, sq.x + sq.width / 2, sq.y + sq.height / 2));
+    assert!(!covers(&shape, sq.x + sq.width - 1, sq.y + sq.height - 1));
+    // Nothing leaves the seen card's box, and nothing is empty.
+    for r in &shape {
+        assert!(r.width > 0 && r.height > 0, "{r:?}");
+        assert!(r.x >= sq.x && r.x + r.width <= sq.x + sq.width, "{r:?}");
+        assert!(r.y >= sq.y && r.y + r.height <= sq.y + sq.height, "{r:?}");
+    }
+}
+
+#[test]
+fn a_shape_clipped_by_the_surface_drops_the_rows_outside_it() {
+    let t0 = Instant::now();
+    let mut motion = Motion::new(&tokens(Curve::EaseOut, CardMotion::Slide), Anchor::TopRight);
+    let one = stack_of(&[1], Pad::ZERO);
+    motion.retarget(&empty(), &one, t0);
+    let card = &one.cards[0];
+    // A surface cut through the card's corner rows keeps only what is on
+    // it; appending keeps what the list already held.
+    let surface = (one.width, 6);
+    let mut out = vec![scootui::region::Rect {
+        x: 1,
+        y: 2,
+        width: 3,
+        height: 4,
+    }];
+    motion.push_input_rects(card, 30, 0, surface, t0, &mut out);
+    assert_eq!(out[0].x, 1);
+    assert!(out.len() > 1);
+    for r in &out[1..] {
+        assert!(r.y + r.height <= 6 && r.x + r.width <= one.width, "{r:?}");
+    }
 }
 
 #[test]
@@ -413,13 +497,16 @@ fn stepping_and_composing_allocate_nothing() {
     let (w, h) = (after.width, after.height.max(motion.hold()));
     let mut pixels = vec![0u8; w as usize * h as usize * 4];
     let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
-    // Warm: the first compose touches nothing it has not already.
+    // Warm: the first compose touches nothing it has not already, and the
+    // list has the room the rows take.
     motion.compose(&mut canvas, at(t0, 20));
+    let mut out = Vec::with_capacity(128);
     let ((), allocations) = scootbg_mem::count_allocations(|| {
         for ms in (0..190).step_by(16) {
             let now = at(t0, ms);
             let _ = motion.pose(3, now);
-            let _ = motion.input_rect(&after.cards[0], 0, (w, h), now);
+            out.clear();
+            motion.push_input_rects(&after.cards[0], 12, 0, (w, h), now, &mut out);
             let _ = motion.unproject(&after.cards[0], 5, 5, 0, now);
             motion.compose(&mut canvas, now);
         }

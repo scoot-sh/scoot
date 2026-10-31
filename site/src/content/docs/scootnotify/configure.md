@@ -501,9 +501,9 @@ A card that is moving carries its marker with it, and the marker, the
 tile and the pill are all inside the card's shadow and clipped by its
 shape.
 
-The click area is still each card's rectangle, as with rounded corners: a
-click in the cut corner of a pill invokes or dismisses the card instead of
-reaching the window behind it.
+A card takes clicks only where it is drawn: a click in the cut corner of a
+pill, or of a rounded card, reaches the window behind it instead of invoking
+or dismissing the card. The card's shadow takes none either.
 
 > **Symptom:** a look sets `card.mark` and the cards have none.
 > The daemon logs `card.mark refused ... value ignored` or
