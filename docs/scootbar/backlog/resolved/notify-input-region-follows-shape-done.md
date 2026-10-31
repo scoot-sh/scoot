@@ -1,9 +1,10 @@
 ---
 title: "scootnotify's click area is each card's rectangle: a pill's cut corners still take clicks"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-31"
 ---
 
 # scootnotify's click area is each card's rectangle: a pill's cut corners still take clicks
@@ -34,3 +35,23 @@ behind.
 
 The hit test for pointer hover (`Popup::hit`), which should follow the same
 shape once the region does.
+
+## Resolution
+
+Landed 2026-10-31 (PR for #807, follow-up). The input region is each card's
+outline, `Look::card_radius(file)` (the one source the paint also uses), as
+the rows of `scootui::region::push_input_rects`: at rest offset to the
+card's origin, in motion through the pose (`Motion::push_input_rects`: the
+card's scaled size, translation and shift, the radius scaled with it, clipped
+to the surface). Into one pooled list; the `wl_region` is created and sent
+only when the list differs from the surface's (`popup/region.rs`), which
+also stops the per-draw region churn at rest.
+
+Pinned by `a_click_in_a_cut_corner_reaches_the_window_behind` in
+`crates/scootnotify/tests/popups.rs` (headless scoot, a pill's corner click
+focuses the window behind; a `radius = 0` card keeps the click and is
+dismissed), and by unit tests on the rows.
+
+`Popup::hit` is unchanged: a real pointer never enters a cut corner now (the
+compositor delivers it to the window behind), so only the pose-unprojected
+hover mid-motion could still count a corner as the card's.

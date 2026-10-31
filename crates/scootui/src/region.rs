@@ -51,6 +51,13 @@ fn cut(radius: u32, y: u32) -> u32 {
 /// 0 is the one whole rectangle.
 pub fn input_rects(width: u32, height: u32, radius: u32, out: &mut Vec<Rect>) {
     out.clear();
+    push_input_rects(width, height, radius, out);
+}
+
+/// [`input_rects`] appended to `out` instead of replacing it: several
+/// shapes (a stack of cards) in one list. Positions are relative to the
+/// shape's own top-left corner.
+pub fn push_input_rects(width: u32, height: u32, radius: u32, out: &mut Vec<Rect>) {
     if width == 0 || height == 0 {
         return;
     }

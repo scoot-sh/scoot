@@ -93,3 +93,21 @@ fn a_radius_too_big_for_the_bar_is_cut_back_and_nothing_underflows() {
     }
     assert!(rects(0, 5, 3).is_empty());
 }
+
+#[test]
+fn pushing_appends_after_what_the_list_already_holds() {
+    let mut out = vec![Rect {
+        x: 9,
+        y: 9,
+        width: 1,
+        height: 1,
+    }];
+    push_input_rects(40, 40, 10, &mut out);
+    let mut alone = Vec::new();
+    input_rects(40, 40, 10, &mut alone);
+    assert_eq!(out[0].x, 9);
+    assert_eq!(&out[1..], &alone[..]);
+    // The clearing form still replaces.
+    input_rects(40, 40, 10, &mut out);
+    assert_eq!(out, alone);
+}

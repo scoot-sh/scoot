@@ -432,6 +432,142 @@ fn a_card_style_look_marks_the_card_without_moving_it() {
     kill(server);
 }
 
+/// Whether `foot`, the one client these tests map a window with, is
+/// missing from `PATH`: a skip, unless `SCOOTNOTIFY_REQUIRE_SCOOT` asks
+/// for everything.
+fn foot_missing() -> bool {
+    let found = std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join("foot").is_file()));
+    if !found {
+        assert!(
+            std::env::var_os(REQUIRE_SCOOT).is_none(),
+            "{REQUIRE_SCOOT} is set but there is no foot on PATH"
+        );
+        eprintln!("skipped: no foot on PATH");
+    }
+    !found
+}
+
+/// The windows scoot lists, newest last in no particular order.
+fn windows(session: &Session) -> Vec<serde_json::Value> {
+    let reply = session.scoot_ipc(r#"{"type":"windows"}"#);
+    reply["windows"].as_array().cloned().unwrap_or_default()
+}
+
+fn focused_window(session: &Session) -> Option<u64> {
+    windows(session)
+        .iter()
+        .find(|w| w["focused"] == true)
+        .and_then(|w| w["id"].as_u64())
+}
+
+/// A click in the corner a card's shape cuts reaches the window behind
+/// it (scoot honors the surface's input region), while the same click on
+/// a card whose corner is square is the card's: it dismisses it and
+/// focus stays. The pill is the shape under test; `radius = 0` in the
+/// file is the control (a pill wins over the file, so the control has no
+/// look).
+#[test]
+fn a_click_in_a_cut_corner_reaches_the_window_behind() {
+    if foot_missing() {
+        return;
+    }
+    for (pill, reaches) in [(true, true), (false, false)] {
+        let Some(bus) = bus_or_skip() else { return };
+        let Some(session) = scoot_or_skip(&format!("corner-{pill}"), 1) else {
+            return;
+        };
+        if pill {
+            let look_dir = session.scratch.state_home().join("scoot").join("look");
+            std::fs::create_dir_all(&look_dir).unwrap();
+            std::fs::write(look_dir.join("notify.toml"), "[card]\nshape = \"pill\"\n").unwrap();
+        }
+        // Top-left, so the card lies over the left of two windows.
+        let config = if pill {
+            "anchor = \"top-left\"\n"
+        } else {
+            "anchor = \"top-left\"\nradius = 0\n"
+        };
+        for _ in 0..2 {
+            let want = windows(&session).len() + 1;
+            let reply =
+                session.scoot_ipc(r#"{"type":"action","action":"spawn","command":["foot"]}"#);
+            assert_eq!(reply["type"], "ok", "{reply}");
+            let start = Instant::now();
+            while windows(&session).len() < want {
+                assert!(
+                    start.elapsed() < Duration::from_secs(15),
+                    "no window mapped"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+        let all = windows(&session);
+        let left = all
+            .iter()
+            .min_by_key(|w| w["rect"]["x"].as_i64())
+            .unwrap()
+            .clone();
+        let right = focused_window(&session).expect("a focused window");
+        assert_ne!(left["id"].as_u64(), Some(right), "{all:?}");
+        let (wx, wy) = (
+            left["rect"]["x"].as_i64().unwrap(),
+            left["rect"]["y"].as_i64().unwrap(),
+        );
+        let (mut server, log) = spawn_popup(&session, &bus, config);
+        let mut client = conn::connect(&bus.path()).expect("the bus accepts");
+        wait_serving(&mut client, &mut server, &log);
+        let _ = notify(
+            &mut client,
+            &mut server,
+            &log,
+            "a",
+            0,
+            "Hello",
+            "World",
+            &[],
+            &[],
+            0,
+            301,
+        );
+        // The stack's top-left corner: 12 px margin.
+        let (x0, y0) = (12u32, 12u32);
+        let card_up =
+            |session: &Session| session.scoot_screenshot(1).at(x0 + 180, y0 + 1) == rgb(FOCUS);
+        wait_shown(&mut server, &log, "the card", || card_up(&session));
+        assert!(
+            wx <= i64::from(x0) && wy <= i64::from(y0),
+            "the left window ({wx},{wy}) does not lie under the card's corner"
+        );
+        let reply = session.scoot_ipc(&format!(
+            r#"{{"type":"click","x":{x0},"y":{y0},"button":"left"}}"#
+        ));
+        assert_eq!(reply["type"], "ok", "{reply}");
+        if reaches {
+            let start = Instant::now();
+            while focused_window(&session) != left["id"].as_u64() {
+                assert!(
+                    start.elapsed() < Duration::from_secs(10),
+                    "the click in the cut corner never reached the window behind"
+                );
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(card_up(&session), "the card is not the click's");
+        } else {
+            // The square corner is the card's: it dismisses.
+            wait_shown(&mut server, &log, "the card dismissed", || {
+                !card_up(&session)
+            });
+            assert_eq!(
+                focused_window(&session),
+                Some(right),
+                "the window got the click"
+            );
+        }
+        kill(server);
+    }
+}
+
 /// The card's top edge reads the urgency ring: low the `border` role,
 /// normal `focus`, critical `urgent`.
 #[test]

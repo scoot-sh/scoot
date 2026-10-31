@@ -44,7 +44,7 @@
 //! [`settle`](Motion::settle) (while something is still moving),
 //! [`pose`](Motion::pose), [`paint_layers`](Motion::paint_layers) when no
 //! layer is stale, [`compose`](Motion::compose),
-//! [`input_rect`](Motion::input_rect) and [`unproject`](Motion::unproject).
+//! [`push_input_rects`](Motion::push_input_rects) and [`unproject`](Motion::unproject).
 //! Landing frees the pool once, on the frame after the last card stops.
 //!
 //! Nothing is read from a clock: every query takes `now`. The popup passes
@@ -55,8 +55,9 @@ use std::time::Instant;
 
 use scootui::motion::{Settle, Timing};
 use scootui::paint::{Canvas, Layer};
+use scootui::region;
 
-use super::layout::{Card, Rect, Stack};
+use super::layout::{Card, Stack};
 use crate::config::Anchor;
 use crate::look::{CardMotion, MotionTokens};
 
@@ -629,17 +630,21 @@ impl Motion {
         (unscale(px, cx, pose.dx), unscale(py, cy, pose.dy))
     }
 
-    /// The rectangle `card` covers on the surface at `now`, clipped to
-    /// `surface` (width, height), for the input region: the pose applied
-    /// to the layout rectangle, plus a bottom anchor's shift. `None` when
-    /// nothing of it is on the surface.
-    pub fn input_rect(
+    /// Appends to `out` the rectangles `card`'s shape covers on the
+    /// surface at `now`, clipped to `surface` (width, height), for the
+    /// input region: the pose applied to the card's rounded outline
+    /// (`radius`, scaled with the card), plus a bottom anchor's shift.
+    /// Appends nothing when none of it is on the surface. No allocation
+    /// once `out` has its capacity.
+    pub fn push_input_rects(
         &self,
         card: &Card,
+        radius: u32,
         shift: u32,
         surface: (u32, u32),
         now: Instant,
-    ) -> Option<Rect> {
+        out: &mut Vec<region::Rect>,
+    ) {
         let rect = card.rect;
         let pose = self.pose(card.id, now).unwrap_or(Pose::REST);
         let scale = f64::from(pose.scale).max(0.05);
@@ -652,20 +657,34 @@ impl Motion {
             + i64::from(pose.dy)
             + i64::from(shift)
             + (i64::from(rect.height) - h) / 2;
-        let (x0, y0) = (x.max(0), y.max(0));
-        let (x1, y1) = (
-            (x + w).min(i64::from(surface.0)),
-            (y + h).min(i64::from(surface.1)),
+        let radius = (f64::from(radius) * scale).round() as u32;
+        let start = out.len();
+        region::push_input_rects(
+            u32::try_from(w).unwrap_or(0),
+            u32::try_from(h).unwrap_or(0),
+            radius,
+            out,
         );
-        if x0 >= x1 || y0 >= y1 {
-            return None;
+        // Move each row to where the card is seen and clip it to the
+        // surface, in place, dropping the rows that fall outside.
+        let mut kept = start;
+        for read in start..out.len() {
+            let row = out[read];
+            let x0 = (x + i64::from(row.x)).max(0);
+            let y0 = (y + i64::from(row.y)).max(0);
+            let x1 = (x + i64::from(row.x) + i64::from(row.width)).min(i64::from(surface.0));
+            let y1 = (y + i64::from(row.y) + i64::from(row.height)).min(i64::from(surface.1));
+            if x0 < x1 && y0 < y1 {
+                out[kept] = region::Rect {
+                    x: x0 as u32,
+                    y: y0 as u32,
+                    width: (x1 - x0) as u32,
+                    height: (y1 - y0) as u32,
+                };
+                kept += 1;
+            }
         }
-        Some(Rect {
-            x: x0 as u32,
-            y: y0 as u32,
-            width: (x1 - x0) as u32,
-            height: (y1 - y0) as u32,
-        })
+        out.truncate(kept);
     }
 }
 

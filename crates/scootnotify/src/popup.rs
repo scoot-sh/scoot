@@ -164,6 +164,8 @@ pub struct App {
     /// The layer margins last handed to the compositor: a shadow's room
     /// comes out of the margin, so the margins follow the stack.
     margin_sent: [u32; 4],
+    /// The input region's rectangles, built and sent only on a change.
+    region: region::InputRegion,
     icons: HashMap<u32, IconBits>,
     urgencies: HashMap<u32, Urgency>,
     /// Cards in the last commit(s), awaiting their frame callback.
@@ -194,6 +196,7 @@ impl App {
             shadow: shadow_of(&look),
             shadow_stale: true,
             margin_sent: [0; 4],
+            region: region::InputRegion::default(),
             motion: Motion::new(&look.motion, config_anchor),
             frame_pending: false,
             refresh_due: true,
@@ -309,6 +312,7 @@ impl App {
         match LayerLive::create(&globals, output.as_ref(), &spec, qh, ()) {
             Ok(live) => {
                 self.live = Some(live);
+                self.region.forget();
                 self.configured_size = None;
                 self.dirty = true;
             }
@@ -332,6 +336,7 @@ impl App {
         self.configured_size = None;
         self.sized_to = None;
         self.draw_skipped = false;
+        self.region.forget();
         // Nothing moves on a surface that is gone, and a callback for it
         // never comes.
         self.motion.reset();
@@ -687,15 +692,15 @@ impl App {
         true
     }
 
-    /// Sets the input region to the cards' union: the gaps click
-    /// through to whatever is behind.
+    /// Sets the input region to the cards' shapes: the gaps and the
+    /// corners the cards cut click through to whatever is behind. Sends
+    /// nothing when the surface already has these rectangles.
     fn set_input_region(&mut self, qh: &QueueHandle<Self>) {
         let (Some(live), Some(compositor)) = (self.live.as_ref(), self.compositor.as_ref()) else {
             return;
         };
-        // A layer surface without a region takes input everywhere; an
-        // empty stack never reaches here (it hides instead).
-        let region = compositor.create_region(qh, ());
+        let radius = self.look.card_radius(self.config.radius);
+        let rects = self.region.begin();
         if self.motion.active() {
             // Where the cards are seen, not where the layout will put
             // them; a card leaving takes no input.
@@ -707,18 +712,27 @@ impl App {
             let shift = self.motion.shift(height, self.stack.height);
             let now = Instant::now();
             for card in &self.stack.cards {
-                if let Some(r) = self.motion.input_rect(card, shift, (width, height), now) {
-                    region.add(r.x as i32, r.y as i32, r.width as i32, r.height as i32);
-                }
+                self.motion
+                    .push_input_rects(card, radius, shift, (width, height), now, rects);
             }
         } else {
             for card in &self.stack.cards {
-                let r = card.rect;
-                region.add(r.x as i32, r.y as i32, r.width as i32, r.height as i32);
+                region::push_at_rest(card, radius, rects);
             }
         }
-        live.surface().set_input_region(Some(&region));
-        region.destroy();
+        if !self.region.stale() {
+            return;
+        }
+        // A layer surface without a region takes input everywhere; an
+        // empty stack never reaches here (it hides instead), and a list
+        // with nothing on the surface is an empty region, not none.
+        let wl_region = compositor.create_region(qh, ());
+        for r in self.region.rects() {
+            wl_region.add(r.x as i32, r.y as i32, r.width as i32, r.height as i32);
+        }
+        live.surface().set_input_region(Some(&wl_region));
+        wl_region.destroy();
+        self.region.sent();
     }
 
     /// Re-themes in place: the new look over the live cards, which keep
@@ -1631,6 +1645,8 @@ impl Dispatch<ExtIdleNotificationV1, ()> for App {
         }
     }
 }
+
+mod region;
 
 #[cfg(test)]
 mod tests;
