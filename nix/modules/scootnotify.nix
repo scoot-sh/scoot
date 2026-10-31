@@ -18,7 +18,7 @@
 # false` adds `look = false` at `mkDefault` (rung 2), which tells the
 # daemon to ignore the layer. The layer carries colors, font size,
 # opacity and the icon theme; the file carries geometry, timeouts and
-# rules (the card corner radius is drawn from the file's `radius`). So
+# rules (the card corner radius is the look's `shape.radius`, unless the file sets `radius`). So
 # there is no per-key merge of the two: the switch is all-or-nothing,
 # and the per-key override of a look value is the look's own
 # `[apps.scootnotify]` table. The exception is the depth, motion and card
