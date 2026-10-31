@@ -47,7 +47,9 @@ but a launch prints nothing anymore.
 
 `--dmenu` reads lines on stdin and prints the pick on stdout, with
 fuzzel's meaning for every flag the repo's call sites pass. A dmenu
-pick prints and launches nothing.
+pick prints and launches nothing. The panel is drawn with the look's
+shadow, fill and opening ([Depth and motion](./panel.md#depth-and-motion)), and exits
+the moment it prints, with no fade.
 
 ```sh
 printf 'wifi-a\nwifi-b\n' | scootlaunch --dmenu --prompt='wifi: ' --no-run-if-empty --only-match

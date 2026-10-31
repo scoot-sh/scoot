@@ -31,11 +31,13 @@
 //! A look can add a shadow and motion ([`crate::stage`], [`crate::motion`]).
 //! The surface is then the panel plus the shadow's room, equal on both
 //! sides, and its input region the panel alone, so a press on the shadow is
-//! a press outside. The apps and run panels compose on the stage; dmenu
-//! never does. With a motion the panel scales and fades in, slides its
-//! selection highlight, and fades out when it is dismissed (Escape, the
-//! toggle) or has launched, with the keyboard released and the input
-//! region emptied from the first fade frame. A `closed` from the compositor
+//! a press outside. Every mode composes on the stage. With a motion the
+//! panel scales and fades in, and the apps and run panels slide their
+//! selection highlight and fade out when dismissed (Escape, the toggle)
+//! or launched, with the keyboard released and the input region emptied
+//! from the first fade frame. A dmenu panel has the shadow, the fill and
+//! the entrance but no exit fade and no sliding highlight: it prints and
+//! exits at once, so a script waiting on its pick never waits on motion. A `closed` from the compositor
 //! and a keyboard leave with the pointer outside exit at once instead: the
 //! protocol ignores everything a client does to a surface after `closed`.
 //! The motion runs on frame callbacks, one outstanding at a time, and none
@@ -84,7 +86,7 @@ use crate::cli::ColorOverrides;
 use crate::dmenu::{DmenuUi, Outcome as DmenuOutcome, Print as DmenuPrint};
 use crate::highlight::fill_round_rect;
 use crate::index::{Action, Entry};
-use crate::layout::{BORDER, Layout, Rect};
+use crate::layout::{Layout, Rect};
 use crate::look::Look;
 use crate::motion::Slide;
 use crate::spawn::{self, Token};
@@ -95,10 +97,6 @@ use scootui::outputs::Frame;
 /// How long the registry sweep and the first configure may take: a local
 /// compositor answers in milliseconds, so this only bounds a wedge.
 const PATIENCE: Duration = Duration::from_secs(10);
-/// The padding between the border and the widgets, in device pixels.
-const PAD: u32 = crate::layout::DMENU_PAD;
-/// The gap between the entry line and the list, in device pixels.
-const GAP: u32 = crate::layout::DMENU_GAP;
 /// The entry's placeholder, in `dim`.
 const PLACEHOLDER: &str = "Type to search";
 /// evdev `BTN_LEFT`: wayland-client names no button codes.
@@ -321,14 +319,10 @@ pub fn open(opts: Options) -> i32 {
     let height = layout.height(list_rows);
     let icon_theme = look.icon_theme.clone();
     let icon_bases = crate::icons::theme_bases();
-    // The shadow and the motion are the apps and run panel's: dmenu keeps
-    // its fixed painter, and a script waiting on its pick never waits on a
-    // fade.
-    let fx = if dmenu.is_some() {
-        Effects::off()
-    } else {
-        Effects::from_look(&look)
-    };
+    // The look's shadow, fill and entrance apply to every mode. A dmenu
+    // panel has no exit fade (see `Pump::fade_out`): a script waiting on
+    // its pick never waits on one.
+    let fx = Effects::from_look(&look);
     run_panel(
         claim,
         model,
@@ -588,10 +582,10 @@ struct App {
     width: u32,
     height: u32,
     layout: Layout,
-    /// The apps panel's geometry as last drawn (device pixels) and the
-    /// scale it was drawn at, so a click lands on the row the pixels
-    /// show at a fractional scale; `None` before the first draw and in
-    /// dmenu mode (drawn at scale 1 from `layout`).
+    /// The panel's geometry as last drawn (device pixels) and the scale
+    /// it was drawn at, so a click lands on the row the pixels show at a
+    /// fractional scale; `None` before the first draw (`layout`, at scale
+    /// 1, stands in).
     drawn: Option<(Layout, f64)>,
     launch: LaunchCtx,
     dmenu: Option<DmenuSpec>,
@@ -950,18 +944,7 @@ impl App {
                         now,
                     );
                     self.origin = origin;
-                    region = if self.fading {
-                        Region::Nothing
-                    } else if origin == (0, 0) {
-                        Region::Surface
-                    } else {
-                        Region::Panel(Rect {
-                            x: origin.0,
-                            y: origin.1,
-                            width: self.width,
-                            height: self.height,
-                        })
-                    };
+                    region = staged_region(self.fading, origin, (self.width, self.height));
                 } else {
                     paint_panel(slot.pixels_mut(), dims, &view, text, &mut self.icons, None);
                 }
@@ -970,17 +953,45 @@ impl App {
                 let Some(dmenu) = dmenu else {
                     return;
                 };
-                paint_dmenu(
-                    slot.pixels_mut(),
-                    dims,
-                    dui,
-                    text,
-                    look,
-                    self.width,
-                    self.height,
-                    self.layout.row_h,
-                    dmenu,
-                );
+                let layout = dmenu_layout(look, frame.scale);
+                let factor = frame.scale.factor().max(MIN_FACTOR);
+                self.drawn = Some((layout, factor));
+                let mut paint = |pixels: &mut [u8], panel_dims: (u32, u32)| {
+                    paint_dmenu(
+                        pixels,
+                        panel_dims,
+                        dui,
+                        text,
+                        look,
+                        self.width,
+                        self.height,
+                        frame.scale,
+                        dmenu,
+                    );
+                };
+                if self.fx.stage.is_some() {
+                    let shape = staged::Shape {
+                        size: (self.width, self.height),
+                        radius: look.radius,
+                        tint: look.focus,
+                        scale: frame.scale,
+                    };
+                    let origin = staged::stage_frame(
+                        &mut self.fx,
+                        &shape,
+                        None,
+                        slot.pixels_mut(),
+                        dims,
+                        frame.size,
+                        self.dirty,
+                        now,
+                        |pixels, panel_dims, _| paint(pixels, panel_dims),
+                    );
+                    self.origin = origin;
+                    region = staged_region(self.fading, origin, (self.width, self.height));
+                } else {
+                    paint(slot.pixels_mut(), dims);
+                }
             }
         }
         let Some(live) = self.live.as_mut() else {
@@ -1322,6 +1333,23 @@ fn paint_panel(
     }
 }
 
+/// The input region of a staged frame: nothing while the panel fades, the
+/// whole surface when the panel fills it, else the panel's rectangle.
+fn staged_region(fading: bool, origin: (u32, u32), panel: (u32, u32)) -> Region {
+    if fading {
+        Region::Nothing
+    } else if origin == (0, 0) {
+        Region::Surface
+    } else {
+        Region::Panel(Rect {
+            x: origin.0,
+            y: origin.1,
+            width: panel.0,
+            height: panel.1,
+        })
+    }
+}
+
 /// Sends `want` as the surface's input region when it is not what was last
 /// sent. A panel inside a shadow's room takes pointer input on the panel
 /// alone: a press on the shadow lands on the desktop, which the compositor
@@ -1376,6 +1404,14 @@ fn device_layout(look: &Look, scale: scootui::density::Scale) -> Layout {
         .round()
         .clamp(0.0, f64::from(u32::MAX)) as u32;
     Layout::new(em, radius, factor)
+}
+
+/// The dmenu panel's geometry in device pixels at `scale`: the one place
+/// the draw and the pointer's row hit read it from.
+fn dmenu_layout(look: &Look, scale: scootui::density::Scale) -> Layout {
+    let factor = scale.factor().max(MIN_FACTOR);
+    let em = f64::from(look.font_size_px.clamp(1.0, 256.0)) * factor;
+    Layout::dmenu_scaled(em as f32, factor)
 }
 
 /// Draws one row's icon into `rect` (a square, `rect.width` device pixels
@@ -1460,13 +1496,17 @@ fn tile_em(side: u32) -> f32 {
     (side as f32 * 0.72).clamp(1.0, 512.0)
 }
 
-/// Paints the dmenu panel: the same chrome, the prompt at the entry's
-/// text start (in the prompt color), the entry beside it, and the
-/// list's visible rows below — or nothing below in prompt-only mode.
-/// In password mode the entry draws masked (`*` per character, never
-/// the secret); an error never draws here (a dmenu pick prints, and
-/// printing cannot fail into the panel). Anything drawn beside the
-/// entry starts at [`Geometry::text_x`], aligned with the widgets.
+/// Paints the dmenu panel: the same chrome (fill gradient included), the
+/// prompt at the entry's text start (in the prompt color), the entry
+/// beside it, and the list's visible rows below, or nothing below in
+/// prompt-only mode. In password mode the entry draws masked (`*` per
+/// character, never the secret); an error never draws here (a dmenu pick
+/// prints, and printing cannot fail into the panel). Anything drawn beside
+/// the entry starts at [`Geometry::text_x`], aligned with the widgets.
+///
+/// `width` and `height` are the panel's logical size and `dims` the
+/// buffer's in device pixels; everything is measured by [`dmenu_layout`] at
+/// `scale`, which at scale 1 is the bytes the panel always drew.
 #[allow(clippy::too_many_arguments)]
 fn paint_dmenu(
     pixels: &mut [u8],
@@ -1476,21 +1516,33 @@ fn paint_dmenu(
     look: &Look,
     width: u32,
     height: u32,
-    row_h: u32,
+    scale: scootui::density::Scale,
     spec: &DmenuSpec,
 ) {
     let (buffer_w, buffer_h) = dims;
-    let width = width.min(buffer_w);
-    let height = height.min(buffer_h);
+    let factor = scale.factor().max(MIN_FACTOR);
+    let width = scale_len(width, factor).min(buffer_w);
+    let height = scale_len(height, factor).min(buffer_h);
+    let layout = dmenu_layout(look, scale);
+    let row_h = layout.row_h;
     if width == 0 || height == 0 || row_h == 0 {
         return;
     }
-    chrome(pixels, buffer_w, width, height, look);
+    chrome_scaled(
+        pixels,
+        buffer_w,
+        width,
+        height,
+        layout.border,
+        scale_len(look.radius, factor),
+        look,
+        look.fill_stops(),
+    );
     let Some(mut canvas) = Canvas::new(pixels, buffer_w, buffer_h) else {
         return;
     };
-    let em = look.font_size_px.clamp(1.0, 256.0);
-    let inner = BORDER.saturating_add(PAD);
+    let em = layout.em;
+    let inner = layout.inner();
     let entry_geo = Geometry {
         x: inner,
         y: inner,
@@ -1542,7 +1594,7 @@ fn paint_dmenu(
     }
     let list_geo = Geometry {
         x: inner,
-        y: inner.saturating_add(row_h).saturating_add(GAP),
+        y: inner.saturating_add(row_h).saturating_add(layout.gap),
         width: width.saturating_sub(inner.saturating_mul(2)),
         row_height: row_h,
         em,
@@ -1555,24 +1607,6 @@ fn paint_dmenu(
         &list_geo,
         &|row| dui.row_text(row),
         false,
-    );
-}
-
-/// The chrome: a rounded rect in `focus` with the `surface` fill inset by
-/// [`BORDER`], premultiplied at `opacity`. Outside the rounded rect the
-/// buffer stays transparent, so the corners show the desktop. One pass
-/// over the panel's pixels; redraws happen on state changes, never per
-/// frame.
-fn chrome(pixels: &mut [u8], buffer_w: u32, width: u32, height: u32, look: &Look) {
-    chrome_scaled(
-        pixels,
-        buffer_w,
-        width,
-        height,
-        BORDER,
-        look.radius,
-        look,
-        (look.surface, look.surface),
     );
 }
 
@@ -1859,10 +1893,15 @@ impl Pump {
     /// click lands on the desktop), the toggle's claim goes (a second
     /// invocation opens a fresh panel rather than signalling one that is
     /// leaving), and keys and buttons already queued are ignored. A look
-    /// without motion, a dmenu panel and a panel the compositor already
-    /// closed skip it.
+    /// without motion, a dmenu panel (it has no exit fade) and a panel the
+    /// compositor already closed skip it.
     fn fade_out(&mut self, app: &mut App, text: &mut Text, look: &Look) {
         let begun = Instant::now();
+        // A dmenu pick prints and exits at once, so a script waiting for
+        // its stdout to close never waits on a fade; Escape the same.
+        if matches!(app.model, Model::Dmenu(_)) {
+            return;
+        }
         if app.live.is_none() || app.fx.stage.is_none() || !app.fx.motion.begin_exit(begun) {
             return;
         }
@@ -2509,6 +2548,8 @@ mod staged;
 
 #[cfg(test)]
 mod bytes_tests;
+#[cfg(test)]
+mod dmenu_staged_tests;
 #[cfg(test)]
 mod staged_tests;
 

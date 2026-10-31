@@ -236,5 +236,6 @@ hits the wall:
 - [notify-look-radius-unread](resolved/notify-look-radius-unread-done.md): the look's `radius` now reaches the cards, the config file's `radius` winning when set
 - [shell-font-resolution](resolved/shell-font-resolution-done.md): scootnotify and scootlaunch resolve the look's font family to a file, and scootnotify draws a real bold face beside it
 - [launcher-scaled-composite-cost](launcher-scaled-composite-cost.md) (low): `Layer::composite`'s scaled path is 17 ns a pixel, so a 2x launcher entrance frame is 9 ms; found building #807 slice 4
-- [dmenu-ignores-depth-and-motion](dmenu-ignores-depth-and-motion.md) (low): `scootlaunch --dmenu` draws without the look's shadow, fill and motion; left out of #807 slice 4 on purpose
+- [**scootlaunch --dmenu takes the look's depth and motion**](resolved/dmenu-ignores-depth-and-motion-done.md) — RESOLVED 2026-10-31: the dmenu panel composes on the stage with the look's shadow, fill gradient and entrance, no exit fade and no sliding highlight; a pick prints and exits at once
 - [look-font-file-at-apply](look-font-file-at-apply.md) (medium): resolve the look's font family to a file at `scoot look apply` instead of walking font directories at every scootlaunch open and notify load
+- [launch-ignores-preferred-scale](launch-ignores-preferred-scale.md) (medium): scootlaunch handles no scale event, so every mode draws a 1x buffer on a HiDPI output
