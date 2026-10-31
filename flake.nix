@@ -492,6 +492,14 @@
               # `vm/compositor-deps.nix` does it: gbm moved out of the mesa
               # attribute in newer nixpkgs.
               postFixup = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+                # Loud if the chosen attribute holds no libgbm at all:
+                # `--add-rpath` would otherwise add a dead entry and hand back
+                # exactly the silent CPU-tier session this block exists to
+                # prevent. Both attributes are right for the pinned nixpkgs,
+                # but consumers are told to point this flake's nixpkgs at
+                # their own (site/src/content/docs/reference/nix.md), and no
+                # CI run on a pinned rev can see that case.
+                test -e ${pkgs.libgbm or pkgs.mesa}/lib/libgbm.so.1
                 patchelf --add-rpath ${pkgs.libgbm or pkgs.mesa}/lib $out/bin/scoot
 
                 wrapProgram $out/bin/scoot \

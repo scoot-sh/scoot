@@ -225,10 +225,11 @@ jobs:
           # `fixupPhase`'s `patchelf --shrink-rpath` drops the buildInput's
           # dir unless `postFixup` puts it back, and NixOS has no ld.so
           # cache and no libgbm under /run/opengl-driver/lib to fall back
-          # on. Shipped that way from the tier landing until v0.6.22: every
-          # `--tty` session on a GPU box quietly took the CPU tier
-          # (`reason=no-gbm`). Resolve the soname the way the loader would
-          # rather than grepping for a store path.
+          # on. Shipped that way from the tier landing through v0.6.22, the
+          # last release without this check: every `--tty` session on a GPU
+          # box quietly took the CPU tier (`reason=no-gbm`). Resolve the
+          # soname the way the loader would rather than grepping for a
+          # store path.
           if ! readelf -d "$scootbin" | grep -E 'RUNPATH|RPATH' \
                | grep -oP '(?<=\[).*(?=\])' | tr ':' '\n' \
                | grep -q . ; then
