@@ -29,7 +29,7 @@ Every request, `type` vs `key`, and what the replies carry. All of these work as
 | `pointer move X Y` | Move the pointer to logical coordinates. |
 | `pointer click X Y [left\|right\|middle\|back\|forward]` | Move, then press and release (default button `left`). |
 | `pointer button left\|right\|middle\|back\|forward press\|release` | Half a click, for drags. |
-| `pointer scroll DX DY` | Scroll by a delta. Sent as a wheel scroll that also carries its detents (eight v120 units per delta unit, so `pointer scroll 0 15` is exactly one detent) -- clients that only listen for steps still see it. |
+| `pointer scroll DX DY` | Scroll by a delta. Sent as a wheel scroll that also carries its detents (eight v120 units per delta unit, so `pointer scroll 0 15` is exactly one detent) -- clients that only listen for steps still see it. Runs [scroll binds](../scoot/keybindings.md#scroll-binds) the way a wheel does, so a bind a held modifier (or none) matches takes the scroll and no client sees it; the request presses no modifier of its own, so it fires a scroll bind with no modifier (or one whose modifier is physically held). |
 | `key COMBO` | Press one key combination — see [`type` vs `key`](#type-vs-key). |
 | `type TEXT` | Type text on the active keyboard layout. |
 | `wait-idle [--quiet-ms N] [--timeout-ms N]` | Block until nothing on screen has redrawn for `--quiet-ms` (default 200), giving up after `--timeout-ms` (default 5000). |

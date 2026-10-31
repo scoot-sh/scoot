@@ -71,7 +71,7 @@ use crate::cli::{RendererRequest, renamed_renderer};
 use super::decorations::{Appearance, Color};
 use super::global_shortcuts::{GlobalShortcuts, parse_global_key};
 use super::input::keysym_named;
-use super::keybindings::{BindFlags, Bound, Keybindings, Modifiers};
+use super::keybindings::{BindFlags, Bound, Keybindings, Modifiers, ScrollDir, Trigger};
 use super::output_config::{OutputEntries, OutputEntryConfig};
 use super::output_scale::{MAX_SCALE, MIN_SCALE, clamp_scale, clamp_scale_range};
 use super::wallpaper::{Table as WallpaperTable, WallpaperConfig, WallpaperSetting};
@@ -535,6 +535,50 @@ impl AnimationConfig {
     }
 }
 
+/// `[scroll]`: how scroll binds count continuous motion into steps (see
+/// `scroll_binds.rs`). `step` is a number (integer or float) of scroll units
+/// per step; kept as a raw value so a wrong type warns and falls back to the
+/// default instead of failing the file.
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct ScrollConfig {
+    step: Option<toml::Value>,
+}
+
+impl ScrollConfig {
+    /// The step in force: the default when unset, a warned default when not a
+    /// finite number, a warned clamp into range when out of it.
+    fn step(&self) -> f64 {
+        use super::scroll_binds::{DEFAULT_STEP, MAX_STEP, MIN_STEP};
+        let Some(value) = &self.step else {
+            return DEFAULT_STEP;
+        };
+        let number = match value {
+            toml::Value::Float(number) => *number,
+            toml::Value::Integer(number) => *number as f64,
+            other => {
+                tracing::warn!(step = %other, "[scroll] step must be a number; using the default");
+                return DEFAULT_STEP;
+            }
+        };
+        if !number.is_finite() {
+            tracing::warn!(
+                step = number,
+                "[scroll] step must be finite; using the default"
+            );
+            return DEFAULT_STEP;
+        }
+        let clamped = number.clamp(MIN_STEP, MAX_STEP);
+        if clamped != number {
+            tracing::warn!(
+                step = number,
+                "[scroll] step is outside {MIN_STEP}..={MAX_STEP}; clamped"
+            );
+        }
+        clamped
+    }
+}
+
 /// The whole file. `binds`' values and `autostart`'s entries are parsed
 /// lazily, one at a time (see [`apply_binds`] and
 /// [`AutostartConfig::into_actions`]), so one bad bind or entry can't take
@@ -564,6 +608,8 @@ struct FileConfig {
     autostart: Option<AutostartConfig>,
     #[serde(default)]
     animation: Option<AnimationConfig>,
+    #[serde(default)]
+    scroll: Option<ScrollConfig>,
     #[serde(default)]
     floating: Option<FloatingConfig>,
     /// `[[window_rule]]`, an array of tables: see `window_rules.rs`.
@@ -707,6 +753,9 @@ pub struct LoadedConfig {
     /// `[animation]`: the optional window slide, disabled by default.
     /// Re-applied live by a reload; disabling snaps any live slide.
     pub animation: super::animation::AnimationSettings,
+    /// `[scroll] step`: continuous scroll units per scroll-bind step, already
+    /// clamped (see `scroll_binds.rs`). Re-applied live by a reload.
+    pub scroll_step: f64,
 }
 
 impl LoadedConfig {
@@ -733,6 +782,7 @@ impl LoadedConfig {
             invalid_floating_modifier: None,
             wallpaper: WallpaperSetting::Absent,
             animation: super::animation::AnimationSettings::default(),
+            scroll_step: super::scroll_binds::DEFAULT_STEP,
         }
     }
 
@@ -825,6 +875,7 @@ impl LoadedConfig {
         let (floating, skipped_rules) =
             FloatingRules::from_config(file.floating, &file.window_rule);
         let animation = file.animation.unwrap_or_default().into_settings();
+        let scroll_step = file.scroll.unwrap_or_default().step();
         let wallpaper =
             WallpaperSetting::resolve(file.wallpaper, path, std::env::var_os("HOME").as_deref());
         for skipped in &skipped_rules {
@@ -853,6 +904,7 @@ impl LoadedConfig {
                 invalid_floating_modifier,
                 wallpaper,
                 animation,
+                scroll_step,
             },
             shadowed,
             invalid,
@@ -1705,8 +1757,8 @@ pub fn default_config_toml() -> String {
          #\n\
          # Gap, column widths, the output scale, the ring/background/cursor\n\
          # appearance fields, binds, [floating] and [[window_rule]], new\n\
-         # [autostart] spawn entries, [wallpaper], [xwayland] fractional
-# and [animation]\n\
+         # [autostart] spawn entries, [wallpaper], [xwayland] fractional,\n\
+         # [scroll] and [animation]\n\
          # re-apply live with `scoot msg reload`; [tty] gpu, [renderer]\n\
          # backend, [xwayland] enabled, [virtual_input] enabled and\n\
          # [virtual_input] binds take effect on restart and a reload\n\
@@ -1850,6 +1902,19 @@ pub fn default_config_toml() -> String {
     ));
     out.push_str("# easing = \"ease-out\"  # \"linear\" or \"spring\"\n");
 
+    out.push_str("\n[scroll]\n");
+    out.push_str(
+        "# Scroll binds (\"super+scroll-down\" = \"focus-window down\" in [binds]) fire once\n\
+         # per wheel click, and once per `step` units of continuous scroll (touchpad\n\
+         # two-finger scroll; a wheel click is 15 units). Re-applies live on reload.\n",
+    );
+    out.push_str(&format!(
+        "# step = {}  # clamped {}..={}\n",
+        super::scroll_binds::DEFAULT_STEP,
+        super::scroll_binds::MIN_STEP,
+        super::scroll_binds::MAX_STEP,
+    ));
+
     out.push_str("\n[virtual_input]\n");
     out.push_str(
         "# Offer the virtual-pointer and virtual-keyboard globals a remote-control\n\
@@ -1986,6 +2051,12 @@ fn hex(color: Color) -> String {
 /// `pub(crate)`: the live-keymap reply (`binds.rs`) spells combos the same
 /// way, so the two cannot disagree about the canonical form.
 pub(crate) fn combo_string(mods: Modifiers, keysym: Keysym) -> String {
+    trigger_string(mods, Trigger::Key(keysym))
+}
+
+/// [`combo_string`] for any trigger: a scroll direction spells as its
+/// `scroll-*` name, which `parse_combo` reads back.
+pub(crate) fn trigger_string(mods: Modifiers, trigger: Trigger) -> String {
     let mut combo = String::new();
     if mods.super_ {
         combo.push_str("super+");
@@ -1999,7 +2070,10 @@ pub(crate) fn combo_string(mods: Modifiers, keysym: Keysym) -> String {
     if mods.alt {
         combo.push_str("alt+");
     }
-    combo.push_str(&xkb::keysym_get_name(keysym));
+    match trigger {
+        Trigger::Key(keysym) => combo.push_str(&xkb::keysym_get_name(keysym)),
+        Trigger::Scroll(dir) => combo.push_str(dir.name()),
+    }
     combo
 }
 
@@ -2450,11 +2524,11 @@ fn apply_binds(
     skipped: &mut Vec<scoot_ipc::SkippedBind>,
     vt: bool,
 ) {
-    let mut parsed: Vec<(String, Modifiers, Keysym, ParsedBind, BindFlags)> = Vec::new();
+    let mut parsed: Vec<(String, Modifiers, Trigger, ParsedBind, BindFlags)> = Vec::new();
     for (raw, value) in binds {
         match parse_bind(raw, value) {
-            Ok((mods, keysym, bind, flags)) => {
-                parsed.push((raw.clone(), mods, keysym, bind, flags));
+            Ok((mods, trigger, bind, flags)) => {
+                parsed.push((raw.clone(), mods, trigger, bind, flags));
             }
             Err(reason) => {
                 tracing::warn!(
@@ -2470,18 +2544,17 @@ fn apply_binds(
         }
     }
 
-    // Group by the resolved combo (keyed on the keysym's raw code rather
-    // than the `Keysym` itself, which doesn't implement `Hash`) so
-    // collisions are found regardless of `HashMap`'s iteration order.
-    let mut groups: HashMap<(Modifiers, u32), BindGroup> = HashMap::new();
-    for (raw, mods, keysym, bind, flags) in parsed {
+    // Group by the resolved combo so collisions are found regardless of
+    // `HashMap`'s iteration order.
+    let mut groups: HashMap<(Modifiers, Trigger), BindGroup> = HashMap::new();
+    for (raw, mods, trigger, bind, flags) in parsed {
         groups
-            .entry((mods, keysym.raw()))
+            .entry((mods, trigger))
             .or_default()
             .push((raw, bind, flags));
     }
 
-    for ((mods, keysym_raw), group) in groups {
+    for ((mods, trigger), group) in groups {
         if group.len() > 1 {
             let mut names: Vec<&str> = group.iter().map(|(raw, _, _)| raw.as_str()).collect();
             names.sort_unstable();
@@ -2512,19 +2585,20 @@ fn apply_binds(
             continue;
         }
         let (raw, bind, flags) = group.into_iter().next().expect("group.len() == 1");
-        let keysym = Keysym::from(keysym_raw);
         match bind {
             ParsedBind::Bind(bound) => {
-                keybindings.insert(mods, keysym, bound, flags);
+                keybindings.insert_trigger(mods, trigger, bound, flags);
             }
             ParsedBind::Unbind => {
-                if keybindings.remove(mods, keysym).is_none() {
+                if keybindings.remove_trigger(mods, trigger).is_none() {
                     // Unbinding a `--tty` VT-switch combo lands here -- the
                     // VT bindings layer on after this file's binds (see
                     // `keybindings_for`), so at this point the combo holds
                     // nothing. Say the recovery bind stays, rather than the
                     // "unbinds nothing" the combo would otherwise report.
-                    let reason = if vt && is_vt_combo(mods, keysym) {
+                    let reason = if vt
+                        && matches!(trigger, Trigger::Key(keysym) if is_vt_combo(mods, keysym))
+                    {
                         "this combo is one of --tty's VT-switch bindings, which are \
                          always enforced and cannot be unbound"
                             .to_owned()
@@ -2584,8 +2658,8 @@ enum ParsedBind {
 fn parse_bind(
     key: &str,
     value: &toml::Value,
-) -> Result<(Modifiers, Keysym, ParsedBind, BindFlags), String> {
-    let (mods, keysym) = parse_combo(key)?;
+) -> Result<(Modifiers, Trigger, ParsedBind, BindFlags), String> {
+    let (mods, trigger) = parse_combo(key)?;
     let (action_text, mut flags) = parse_bind_value(key, value)?;
     // The unbind: `none` is not an action (`scootctl::action` has no such
     // verb), in either the string (`"super+h" = "none"`) or the table
@@ -2600,7 +2674,7 @@ fn parse_bind(
                 "`none` removes a bind: `repeat`/`allow_when_locked` beside it are ignored"
             );
         }
-        return Ok((mods, keysym, ParsedBind::Unbind, BindFlags::default()));
+        return Ok((mods, trigger, ParsedBind::Unbind, BindFlags::default()));
     }
     let mut tokens = action_text.split_whitespace().map(str::to_owned);
     let action = scootctl::action(&mut tokens).map_err(|error| error.to_string())?;
@@ -2626,6 +2700,15 @@ fn parse_bind(
         );
         flags.repeat = false;
     }
+    // A scroll has no held key to repeat while: it already fires once per
+    // step. Clamped loudly rather than half-honored.
+    if flags.repeat && matches!(trigger, Trigger::Scroll(_)) {
+        tracing::warn!(
+            bind = key,
+            "`repeat` on a scroll bind is ignored: it already fires once per scroll step"
+        );
+        flags.repeat = false;
+    }
     if flags.allow_when_locked && !matches!(action, Action::Spawn(_)) {
         tracing::warn!(
             bind = key,
@@ -2634,7 +2717,12 @@ fn parse_bind(
         );
         flags.allow_when_locked = false;
     }
-    Ok((mods, keysym, ParsedBind::Bind(Bound::Action(action)), flags))
+    Ok((
+        mods,
+        trigger,
+        ParsedBind::Bind(Bound::Action(action)),
+        flags,
+    ))
 }
 
 /// Splits one `[binds]` value into its action string and its flags (see
@@ -2751,7 +2839,7 @@ fn parse_autostart(value: &str) -> Result<Action, String> {
 /// With Shift named (`"shift+A"`) there is no question what was meant --
 /// the chord is shift+a either way -- so folding warns about nothing. A
 /// lone lowercase letter needs no warning either: nothing was changed.
-fn parse_combo(s: &str) -> Result<(Modifiers, Keysym), String> {
+fn parse_combo(s: &str) -> Result<(Modifiers, Trigger), String> {
     let combo: scoot_ipc::KeyCombo =
         s.parse().map_err(|error: scoot_ipc::ParseKeyComboError| {
             format!("invalid key combination `{s}`: {error}")
@@ -2764,6 +2852,23 @@ fn parse_combo(s: &str) -> Result<(Modifiers, Keysym), String> {
             scoot_ipc::Modifier::Ctrl => mods.ctrl = true,
             scoot_ipc::Modifier::Alt => mods.alt = true,
         }
+    }
+    // A scroll direction is a trigger of its own, not a keysym: no xkb name
+    // starts `scroll-`, so the prefix claims the namespace and a typo gets a
+    // message naming the four spellings instead of "unknown key".
+    if combo
+        .key
+        .get(..SCROLL_PREFIX.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(SCROLL_PREFIX))
+    {
+        let dir = ScrollDir::parse(&combo.key).ok_or_else(|| {
+            format!(
+                "unknown scroll direction `{}`: expected scroll-left, scroll-right, \
+                 scroll-up or scroll-down",
+                combo.key
+            )
+        })?;
+        return Ok((mods, Trigger::Scroll(dir)));
     }
     let (name, warn) = fold_letter(&combo.key, mods.shift);
     if warn {
@@ -2778,8 +2883,11 @@ fn parse_combo(s: &str) -> Result<(Modifiers, Keysym), String> {
         );
     }
     let keysym = keysym_named(&name).ok_or_else(|| format!("unknown key `{}`", combo.key))?;
-    Ok((mods, keysym))
+    Ok((mods, Trigger::Key(keysym)))
 }
+
+/// What every scroll-direction key name starts with.
+const SCROLL_PREFIX: &str = "scroll-";
 
 /// Folds a single ASCII letter to lowercase for `[binds]` matching (see
 /// `parse_combo`), reporting alongside whether the fold is worth a warning.
@@ -2807,6 +2915,8 @@ fn fold_letter(key: &str, shift_held: bool) -> (Cow<'_, str>, bool) {
 
 #[cfg(test)]
 mod tests {
+    mod scroll;
+
     use std::io::Write;
 
     use scoot_core::{Action, Horizontal};
@@ -3550,11 +3660,11 @@ mod tests {
         // never work through every window -- the bind still applies, firing
         // once, with the flag cleared.
         for action in ["quit", "close"] {
-            let (mods, keysym, bind, flags) =
+            let (mods, trigger, bind, flags) =
                 parse_bind("super+q", &table_value(action, true, false))
                     .expect("a valid bind with a clamped flag");
             assert_eq!(
-                (mods, keysym),
+                (mods, trigger),
                 parse_combo("super+q").expect("the combo parses")
             );
             assert!(matches!(
@@ -3768,11 +3878,14 @@ mod tests {
     fn only_a_single_ascii_letter_is_case_folded() {
         // The fold is scoped to single ASCII letters: `"A"` folds to `a`,
         // and an already-lowercase `"a"` resolves identically.
-        assert_eq!(parse_combo("A").unwrap().1, Keysym::a);
-        assert_eq!(parse_combo("a").unwrap().1, Keysym::a);
-        assert_eq!(parse_combo("Z").unwrap().1, Keysym::z);
+        assert_eq!(parse_combo("A").unwrap().1, Trigger::Key(Keysym::a));
+        assert_eq!(parse_combo("a").unwrap().1, Trigger::Key(Keysym::a));
+        assert_eq!(parse_combo("Z").unwrap().1, Trigger::Key(Keysym::z));
         // Digits and symbols pass through untouched.
-        assert_eq!(parse_combo("1").unwrap().1, keysym_named("1").unwrap());
+        assert_eq!(
+            parse_combo("1").unwrap().1,
+            Trigger::Key(keysym_named("1").unwrap())
+        );
         // Multi-character names resolve exactly as written -- including via
         // the case-insensitive fallback -- never folded first. That matters
         // because some are cased pairs of distinct keysyms: folding the
@@ -3782,10 +3895,19 @@ mod tests {
             keysym_named("oe"),
             "premise: OE/oe must really be distinct keysyms for this test to mean anything"
         );
-        assert_eq!(parse_combo("OE").unwrap().1, keysym_named("OE").unwrap());
-        assert_eq!(parse_combo("F1").unwrap().1, Keysym::F1);
-        assert_eq!(parse_combo("Return").unwrap().1, Keysym::Return);
-        assert_eq!(parse_combo("RETURN").unwrap().1, Keysym::Return);
+        assert_eq!(
+            parse_combo("OE").unwrap().1,
+            Trigger::Key(keysym_named("OE").unwrap())
+        );
+        assert_eq!(parse_combo("F1").unwrap().1, Trigger::Key(Keysym::F1));
+        assert_eq!(
+            parse_combo("Return").unwrap().1,
+            Trigger::Key(Keysym::Return)
+        );
+        assert_eq!(
+            parse_combo("RETURN").unwrap().1,
+            Trigger::Key(Keysym::Return)
+        );
         // Non-ASCII passes through unfolded: keysym case semantics outside
         // ASCII are murky (e.g. Turkish dotted/dotless I), so a name the
         // lookup doesn't know stays an unknown key -- skipped with a warning
@@ -5318,11 +5440,11 @@ mod tests {
                     .any(|line| line.trim() == format!("# \"{combo}\" = \"{spelling}\"")),
                 "default bind {combo} = {spelling} is missing from the emission"
             );
-            let (parsed_mods, parsed_keysym) =
+            let (parsed_mods, parsed_trigger) =
                 parse_combo(&combo).expect("an emitted combo must parse");
             assert_eq!(
-                (parsed_mods, parsed_keysym),
-                (mods, keysym),
+                (parsed_mods, parsed_trigger),
+                (mods, Trigger::Key(keysym)),
                 "emitted combo {combo} does not resolve back"
             );
             let mut tokens = spelling.split_whitespace().map(str::to_owned);

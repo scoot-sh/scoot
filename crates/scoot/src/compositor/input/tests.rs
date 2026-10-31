@@ -2057,3 +2057,5 @@ fn a_finger_scroll_arrives_with_its_source_and_stop() {
     assert_eq!(seen.axes, vec![(wl_pointer::Axis::VerticalScroll, 12.0)]);
     assert_eq!(seen.stops, vec![wl_pointer::Axis::VerticalScroll]);
 }
+
+mod scroll_binds;

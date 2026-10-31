@@ -1123,6 +1123,9 @@ pub struct State {
     pub interaction_serials: input::interaction::Recent,
 
     pub keybindings: Keybindings,
+    /// Scroll-bind accumulators and the live `[scroll] step` (see
+    /// `scroll_binds.rs`).
+    pub(super) scroll_binds: super::scroll_binds::ScrollBinds,
     /// Every config `[binds]` entry that never made it into
     /// [`State::keybindings`], each with its reason (see
     /// [`scoot_ipc::SkippedBind`]): what `scoot msg binds` lists beside the
@@ -1567,6 +1570,7 @@ impl State {
             seat,
             interaction_serials: input::interaction::Recent::default(),
             keybindings,
+            scroll_binds: Default::default(),
             skipped_binds: Vec::new(),
             global_shortcuts: GlobalShortcuts::new(),
             current_conn: 0,

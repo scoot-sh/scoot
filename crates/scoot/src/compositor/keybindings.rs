@@ -110,13 +110,79 @@ pub struct BindFlags {
     pub allow_when_locked: bool,
 }
 
+/// A direction a scroll bind can name: the sign of the axis value clients
+/// receive (positive vertical is `Down`, positive horizontal `Right`), so
+/// "scroll-down" is whatever scrolls the user's apps down -- the natural-scroll
+/// setting included, with no second knob here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ScrollDir {
+    Left,
+    Right,
+    Up,
+    Down,
+}
+
+impl ScrollDir {
+    /// The spelling a `[binds]` key uses, which is also the key name
+    /// `scoot msg binds` prints.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Left => "scroll-left",
+            Self::Right => "scroll-right",
+            Self::Up => "scroll-up",
+            Self::Down => "scroll-down",
+        }
+    }
+
+    /// `scroll-left|right|up|down`, case-insensitively. No xkb keysym has one
+    /// of these names (a test pins that), so the namespace is free.
+    pub fn parse(name: &str) -> Option<Self> {
+        [Self::Left, Self::Right, Self::Up, Self::Down]
+            .into_iter()
+            .find(|dir| name.eq_ignore_ascii_case(dir.name()))
+    }
+}
+
+/// What a binding is triggered by: a key, or a scroll direction. The table
+/// keeps both in one list so collision detection, unbinding, reload diffs and
+/// the `binds` reply handle scroll binds the same way as key binds -- a second
+/// table would need its own copy of each.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Trigger {
+    Key(Keysym),
+    Scroll(ScrollDir),
+}
+
+// `Keysym` does not implement `Hash`; `config.rs`'s collision grouping needs
+// one, and the raw code is the identity `Keysym`'s own equality uses.
+impl std::hash::Hash for Trigger {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::Key(keysym) => {
+                0u8.hash(state);
+                keysym.raw().hash(state);
+            }
+            Self::Scroll(dir) => {
+                1u8.hash(state);
+                dir.hash(state);
+            }
+        }
+    }
+}
+
 /// The default vim-motions-plus-Super table, `Vec` rather than a `HashMap`:
 /// a couple dozen entries at most, checked once per keypress -- a linear
 /// scan is simpler and not measurably slower. `config.rs` builds on this
 /// directly (via `insert`/`extend`) to layer a config file's `[binds]` on
 /// top, using `scoot_ipc::KeyCombo` to parse the string form.
 #[derive(Clone, Debug)]
-pub struct Keybindings(Vec<(Modifiers, Keysym, Bound, BindFlags)>);
+pub struct Keybindings {
+    table: Vec<(Modifiers, Trigger, Bound, BindFlags)>,
+    /// How many entries of `table` are scroll triggers. Kept by `insert` and
+    /// `remove` so the scroll path pays one integer test per event when no
+    /// scroll bind exists (the default), instead of a table scan.
+    scrolls: usize,
+}
 
 impl Default for Keybindings {
     fn default() -> Self {
@@ -312,39 +378,84 @@ impl Default for Keybindings {
         // stays fire-once and locked-out, and the hardware binds that do
         // opt in live in the desktop profile's keymap (`keys-home.nix`),
         // not in every scoot session.
-        Self(
-            bindings
+        Self {
+            table: bindings
                 .into_iter()
-                .map(|(mods, keysym, bound)| (mods, keysym, bound, BindFlags::default()))
+                .map(|(mods, keysym, bound)| {
+                    (mods, Trigger::Key(keysym), bound, BindFlags::default())
+                })
                 .collect(),
-        )
+            scrolls: 0,
+        }
     }
 }
 
 impl Keybindings {
-    /// Every binding in table order: the modifiers, the unshifted keysym,
-    /// and what the combo is bound to.
-    ///
-    /// What `--print-default-config` iterates to spell the default `[binds]`
-    /// table back out (see `config::default_config_toml`): table order is
-    /// the hardcoded `Default` order, so the emitted file is byte-stable
-    /// from run to run -- unlike the `HashMap` the file loader reads, which
-    /// is why the loader refuses to arbitrate collisions rather than pick a
-    /// file-order winner it cannot truthfully name.
+    /// Every *key* binding in table order: the modifiers, the unshifted
+    /// keysym, and what the combo is bound to. Scroll binds are left out
+    /// (see [`Keybindings::iter_triggers`]); the built-in defaults hold none,
+    /// so `--print-default-config` iterates this to spell the default
+    /// `[binds]` table back out (see `config::default_config_toml`): table
+    /// order is the hardcoded `Default` order, so the emitted file is
+    /// byte-stable from run to run -- unlike the `HashMap` the file loader
+    /// reads, which is why the loader refuses to arbitrate collisions rather
+    /// than pick a file-order winner it cannot truthfully name.
     pub fn iter(&self) -> impl Iterator<Item = (Modifiers, Keysym, &Bound, BindFlags)> + '_ {
-        self.0
+        self.table
             .iter()
-            .map(|(mods, keysym, bound, flags)| (*mods, *keysym, bound, *flags))
+            .filter_map(|(mods, trigger, bound, flags)| match trigger {
+                Trigger::Key(keysym) => Some((*mods, *keysym, bound, *flags)),
+                Trigger::Scroll(_) => None,
+            })
+    }
+
+    /// Every binding, key and scroll, in table order -- what the `binds`
+    /// reply lists.
+    pub fn iter_triggers(
+        &self,
+    ) -> impl Iterator<Item = (Modifiers, Trigger, &Bound, BindFlags)> + '_ {
+        self.table
+            .iter()
+            .map(|(mods, trigger, bound, flags)| (*mods, *trigger, bound, *flags))
     }
 
     /// What `keysym` held with exactly `mods` is bound to, if anything --
     /// the action and its per-bind flags together. One lookup, so the
-    /// per-keypress hot path pays no second scan for the flags.
+    /// per-keypress hot path pays no second scan for the flags. Key binds
+    /// only: a scroll bind never matches here, so the keymap pager's
+    /// `Super+Return` lookup and the global-shortcut shadow check cannot see
+    /// one.
     pub fn match_key(&self, keysym: Keysym, mods: Modifiers) -> Option<(Bound, BindFlags)> {
-        self.0
+        self.lookup(Trigger::Key(keysym), mods)
+    }
+
+    /// [`Keybindings::match_key`] for any trigger, cloning the bound action.
+    pub fn lookup(&self, trigger: Trigger, mods: Modifiers) -> Option<(Bound, BindFlags)> {
+        self.find(trigger, mods)
+            .map(|(bound, flags)| (bound.clone(), flags))
+    }
+
+    /// What scrolling `dir` with exactly `mods` held is bound to. Borrowed:
+    /// this runs per scroll event, and a `spawn` bind's command must not be
+    /// cloned for an event that fires nothing.
+    pub fn match_scroll(&self, dir: ScrollDir, mods: Modifiers) -> Option<(&Bound, BindFlags)> {
+        if self.scrolls == 0 {
+            return None;
+        }
+        self.find(Trigger::Scroll(dir), mods)
+    }
+
+    /// Whether any scroll bind exists: the scroll path's whole cost when
+    /// none does.
+    pub fn has_scroll_binds(&self) -> bool {
+        self.scrolls != 0
+    }
+
+    fn find(&self, trigger: Trigger, mods: Modifiers) -> Option<(&Bound, BindFlags)> {
+        self.table
             .iter()
-            .find(|(m, k, _, _)| *m == mods && *k == keysym)
-            .map(|(_, _, bound, flags)| (bound.clone(), *flags))
+            .find(|(m, t, _, _)| *m == mods && *t == trigger)
+            .map(|(_, _, bound, flags)| (bound, *flags))
     }
 
     /// Inserts a binding for this exact combo, in place of whatever (if
@@ -364,16 +475,28 @@ impl Keybindings {
         bound: Bound,
         flags: BindFlags,
     ) -> Option<(Bound, BindFlags)> {
+        self.insert_trigger(mods, Trigger::Key(keysym), bound, flags)
+    }
+
+    /// [`Keybindings::insert`] for any trigger.
+    pub fn insert_trigger(
+        &mut self,
+        mods: Modifiers,
+        trigger: Trigger,
+        bound: Bound,
+        flags: BindFlags,
+    ) -> Option<(Bound, BindFlags)> {
         if let Some(slot) = self
-            .0
+            .table
             .iter_mut()
-            .find(|(m, k, _, _)| *m == mods && *k == keysym)
+            .find(|(m, t, _, _)| *m == mods && *t == trigger)
         {
             let previous = (std::mem::replace(&mut slot.2, bound), slot.3);
             slot.3 = flags;
             Some(previous)
         } else {
-            self.0.push((mods, keysym, bound, flags));
+            self.scrolls += usize::from(matches!(trigger, Trigger::Scroll(_)));
+            self.table.push((mods, trigger, bound, flags));
             None
         }
     }
@@ -407,11 +530,21 @@ impl Keybindings {
     /// a combo nothing holds is a no-op the caller reports loudly (see
     /// `apply_binds`), not an error here.
     pub fn remove(&mut self, mods: Modifiers, keysym: Keysym) -> Option<(Bound, BindFlags)> {
-        self.0
+        self.remove_trigger(mods, Trigger::Key(keysym))
+    }
+
+    /// [`Keybindings::remove`] for any trigger.
+    pub fn remove_trigger(
+        &mut self,
+        mods: Modifiers,
+        trigger: Trigger,
+    ) -> Option<(Bound, BindFlags)> {
+        self.table
             .iter()
-            .position(|(m, k, _, _)| *m == mods && *k == keysym)
+            .position(|(m, t, _, _)| *m == mods && *t == trigger)
             .map(|index| {
-                let (_, _, bound, flags) = self.0.remove(index);
+                let (_, _, bound, flags) = self.table.remove(index);
+                self.scrolls -= usize::from(matches!(trigger, Trigger::Scroll(_)));
                 (bound, flags)
             })
     }
@@ -438,9 +571,9 @@ impl Keybindings {
     /// `allow_when_locked` must report `binds` as applied, not agree
     /// silently.
     pub fn same_bindings_as(&self, other: &Self) -> bool {
-        self.0.len() == other.0.len()
-            && self.0.iter().all(|(mods, keysym, bound, flags)| {
-                other.match_key(*keysym, *mods) == Some((bound.clone(), *flags))
+        self.table.len() == other.table.len()
+            && self.table.iter().all(|(mods, trigger, bound, flags)| {
+                other.lookup(*trigger, *mods) == Some((bound.clone(), *flags))
             })
     }
 
@@ -483,25 +616,25 @@ mod tests {
     #[test]
     fn every_default_binding_matches_itself() {
         let table = Keybindings::default();
-        for (mods, keysym, bound, _) in &table.0 {
-            assert_eq!(matched(&table, *keysym, *mods), Some(bound.clone()));
+        for (mods, keysym, bound, _) in table.iter() {
+            assert_eq!(matched(&table, keysym, mods), Some(bound.clone()));
         }
     }
 
     #[test]
     fn extend_adds_bindings_without_touching_the_defaults() {
         let mut table = Keybindings::default();
-        let default_len = table.0.len();
+        let default_len = table.table.len();
         let displaced = table.extend(Keybindings::vt_switch_bindings());
-        assert_eq!(table.0.len(), default_len + 12);
+        assert_eq!(table.table.len(), default_len + 12);
         assert!(displaced.is_empty(), "disjoint combos displace nothing");
         assert_eq!(
             matched(&table, Keysym::F2, CTRL_ALT),
             Some(Bound::ChangeVt(2))
         );
         // Every original binding is still there, unchanged.
-        for (mods, keysym, bound, _) in Keybindings::default().0 {
-            assert_eq!(matched(&table, keysym, mods), Some(bound));
+        for (mods, keysym, bound, _) in Keybindings::default().iter() {
+            assert_eq!(matched(&table, keysym, mods), Some(bound.clone()));
         }
     }
 
@@ -526,13 +659,13 @@ mod tests {
             Some(Bound::Action(Action::CloseFocused))
         );
         // Nothing was appended -- the table grew by zero entries.
-        assert_eq!(table.0.len(), Keybindings::default().0.len());
+        assert_eq!(table.table.len(), Keybindings::default().table.len());
     }
 
     #[test]
     fn insert_on_a_fresh_combo_adds_it_and_returns_none() {
         let mut table = Keybindings::default();
-        let default_len = table.0.len();
+        let default_len = table.table.len();
         let previous = table.insert(
             CTRL_ALT,
             Keysym::F2,
@@ -540,7 +673,7 @@ mod tests {
             BindFlags::default(),
         );
         assert_eq!(previous, None);
-        assert_eq!(table.0.len(), default_len + 1);
+        assert_eq!(table.table.len(), default_len + 1);
     }
 
     #[test]
@@ -771,7 +904,7 @@ mod tests {
     #[test]
     fn remove_takes_the_binding_out_and_returns_it() {
         let mut table = Keybindings::default();
-        let default_len = table.0.len();
+        let default_len = table.table.len();
         assert_eq!(
             table.remove(SUPER, Keysym::h),
             Some((
@@ -780,15 +913,15 @@ mod tests {
             ))
         );
         assert_eq!(matched(&table, Keysym::h, SUPER), None);
-        assert_eq!(table.0.len(), default_len - 1);
+        assert_eq!(table.table.len(), default_len - 1);
     }
 
     #[test]
     fn remove_on_an_unbound_combo_returns_none_and_changes_nothing() {
         let mut table = Keybindings::default();
-        let default_len = table.0.len();
+        let default_len = table.table.len();
         assert_eq!(table.remove(SUPER, Keysym::x), None);
-        assert_eq!(table.0.len(), default_len);
+        assert_eq!(table.table.len(), default_len);
     }
 
     #[test]

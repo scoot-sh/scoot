@@ -153,6 +153,9 @@ if [ -n "$SMOKE_PREFIX" ]; then
     CONFIG_LOG="$SMOKE_PREFIX-config.log"
     CAPITAL_SOCK="$SMOKE_PREFIX-capital.sock"
     CAPITAL_LOG="$SMOKE_PREFIX-capital.log"
+    SCROLL_SOCK="$SMOKE_PREFIX-scroll.sock"
+    SCROLL_LOG="$SMOKE_PREFIX-scroll.log"
+    SCROLL_TEMPLATE="$SMOKE_PREFIX-scroll-XXXXXX.toml"
     BROKEN_SOCK="$SMOKE_PREFIX-broken.sock"
     BROKEN_LOG="$SMOKE_PREFIX-broken.log"
     CONFIG_TEMPLATE="$SMOKE_PREFIX-config-XXXXXX.toml"
@@ -180,6 +183,9 @@ else
     CONFIG_LOG=/tmp/scoot-smoke-config.log
     CAPITAL_SOCK="/run/user/$(id -u)/scoot-smoke-capital.sock"
     CAPITAL_LOG=/tmp/scoot-smoke-capital.log
+    SCROLL_SOCK="/run/user/$(id -u)/scoot-smoke-scroll.sock"
+    SCROLL_LOG=/tmp/scoot-smoke-scroll.log
+    SCROLL_TEMPLATE=/tmp/scoot-smoke-scroll-XXXXXX.toml
     BROKEN_SOCK="/run/user/$(id -u)/scoot-smoke-broken.sock"
     BROKEN_LOG=/tmp/scoot-smoke-broken.log
     CONFIG_TEMPLATE=/tmp/scoot-smoke-config-XXXXXX.toml
@@ -800,6 +806,93 @@ EOF
     echo "ok: the config file's \"A\" bind (close) fired on an unshifted 'a'"
 }
 ( run_capital_bind_test ) || exit 1
+
+echo "=== config file: scroll binds fire on an injected scroll and swallow it ==="
+run_scroll_bind_test() {
+    local socket="$SCROLL_SOCK"
+    local log="$SCROLL_LOG"
+    local cfg
+    cfg=$(mktemp "$SCROLL_TEMPLATE")
+    # Bare scroll binds: `pointer scroll` presses no modifier, so a bind
+    # that needs one could not be driven from here. The misspelt direction
+    # must be skipped and listed, not take the file down.
+    cat >"$cfg" <<'EOF'
+[binds]
+"scroll-left" = "focus-column left"
+"scroll-right" = "focus-column right"
+"super+scroll-sideways" = "close"
+EOF
+    rm -f "$socket" "$log"
+
+    "$SCOOT" --headless --width 1200 --height 800 --socket "$socket" --config "$cfg" \
+        >"$log" 2>&1 &
+    # Not `local`, EXIT not RETURN: see run_config_bind_test's trap.
+    pid=$!
+    trap 'kill "$pid" 2>/dev/null || true' EXIT
+    export SCOOT_SOCKET="$socket"
+
+    for _ in $(seq 1 60); do
+        [ -S "$socket" ] && break
+        sleep 0.1
+    done
+    if [ ! -S "$socket" ]; then
+        echo "scroll-bind test: the control socket never appeared; compositor log:"
+        tail -20 "$log"
+        return 1
+    fi
+
+    local binds
+    binds=$("$SCOOT" msg binds --json)
+    if [ "$(echo "$binds" | jq -r '[.bindings[] | select(.combo == "scroll-left" and .source == "config")] | length')" -ne 1 ]; then
+        echo "BUG: the scroll-left bind is not listed as a config bind"
+        echo "$binds"
+        return 1
+    fi
+    if [ "$(echo "$binds" | jq -r '[.skipped[] | select(.bind == "super+scroll-sideways")] | length')" -ne 1 ]; then
+        echo "BUG: the misspelt scroll direction was not listed as skipped"
+        echo "$binds"
+        return 1
+    fi
+    echo "ok: scroll binds are listed, and the misspelt direction is skipped with a reason"
+
+    "$SCOOT" msg action spawn foot
+    "$SCOOT" msg action spawn foot
+    local mapped=0
+    for _ in $(seq 1 100); do
+        if [ "$("$SCOOT" msg windows | jq '.windows | length')" -eq 2 ]; then
+            mapped=1
+            break
+        fi
+        sleep 0.2
+    done
+    if [ "$mapped" -ne 1 ]; then
+        echo "scroll-bind test: the two windows never mapped; compositor log:"
+        tail -30 "$log"
+        return 1
+    fi
+    local right_id left_id
+    right_id=$("$SCOOT" msg windows | jq -r '.windows[] | select(.focused) | .id')
+    left_id=$("$SCOOT" msg windows | jq -r --argjson id "$right_id" '.windows[] | select(.id != $id) | .id')
+
+    # One wheel click left (15 units = one detent): focus moves left. It is
+    # a scroll, not a key, so only the scroll bind can have done it.
+    "$SCOOT" msg pointer scroll -15 0
+    "$SCOOT" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+    if [ "$(focused_window)" != "$left_id" ]; then
+        echo "BUG: scroll-left did not move focus left"
+        "$SCOOT" msg windows
+        return 1
+    fi
+    "$SCOOT" msg pointer scroll 15 0
+    "$SCOOT" msg wait-idle --quiet-ms 300 --timeout-ms 10000
+    if [ "$(focused_window)" != "$right_id" ]; then
+        echo "BUG: scroll-right did not move focus right"
+        "$SCOOT" msg windows
+        return 1
+    fi
+    echo "ok: scroll-left / scroll-right moved focus, one step per wheel click"
+}
+( run_scroll_bind_test ) || exit 1
 
 echo "=== config file: a malformed file falls back to defaults instead of blocking startup ==="
 run_broken_config_test() {

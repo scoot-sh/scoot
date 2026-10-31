@@ -284,6 +284,7 @@ mod field {
     pub const ANIMATION_ENABLED: &str = "animation.enabled";
     pub const ANIMATION_DURATION: &str = "animation.duration_ms";
     pub const ANIMATION_EASING: &str = "animation.easing";
+    pub const SCROLL_STEP: &str = "scroll.step";
     pub const GLOBAL_SHORTCUTS: &str = "global_shortcuts";
     pub const WALLPAPER: &str = "wallpaper";
     pub const WALLPAPER_COMMAND: &str = "wallpaper.command";
@@ -566,6 +567,7 @@ impl State {
         self.apply_floating_reload(fresh, &mut report);
         self.apply_binds_reload(fresh, &mut report);
         self.apply_animation_reload(fresh, &mut report);
+        self.apply_scroll_reload(fresh, &mut report);
         self.apply_global_shortcuts_reload(fresh, &mut report);
         self.apply_wallpaper_reload(fresh, &mut report);
 
@@ -1319,6 +1321,8 @@ impl State {
         {
             self.keybindings = fresh.keybindings.clone();
             self.skipped_binds = fresh.skipped_binds.clone();
+            // A half-counted scroll step belonged to the old table.
+            self.scroll_binds.reset_partial_steps();
             // The in-flight repeat's action and flags came from the old
             // table: it ends here rather than re-firing something the file
             // no longer binds. (The held key itself neither wedges nor
@@ -1348,6 +1352,16 @@ impl State {
         self.global_shortcuts.apply_config();
         self.emit_shortcuts_changed();
         report.applied.push(field::GLOBAL_SHORTCUTS.to_owned());
+    }
+
+    /// `[scroll]`: swaps the live step. A half-counted step is forgotten, so
+    /// the new threshold never inherits motion measured against the old one.
+    fn apply_scroll_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
+        if self.scroll_binds.step != fresh.scroll_step {
+            self.scroll_binds.step = fresh.scroll_step;
+            self.scroll_binds.reset_partial_steps();
+            report.applied.push(field::SCROLL_STEP.to_owned());
+        }
     }
 
     /// `[animation]`: swaps the live setting. Disabling snaps any live

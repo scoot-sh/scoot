@@ -14,7 +14,7 @@
 
 use scoot_ipc::{BindRow, Response, SkippedBind};
 
-use super::config::{bound_string, combo_string};
+use super::config::{bound_string, trigger_string};
 use super::keybindings::{Bound, Keybindings};
 
 /// Builds the [`Response::Binds`] reply for the live table plus the config
@@ -35,10 +35,10 @@ pub fn snapshot(keybindings: &Keybindings, skipped: &[SkippedBind]) -> Response 
     let mut default_rows: Vec<BindRow> = Vec::new();
     let mut config_rows: Vec<BindRow> = Vec::new();
     let mut session_rows: Vec<BindRow> = Vec::new();
-    for (mods, keysym, bound, flags) in keybindings.iter() {
+    for (mods, trigger, bound, flags) in keybindings.iter_triggers() {
         let (action, source) = match bound {
             Bound::ChangeVt(_) => (bound_string(bound), "session (VT switch)".to_owned()),
-            Bound::Action(_) => match defaults.match_key(keysym, mods) {
+            Bound::Action(_) => match defaults.lookup(trigger, mods) {
                 None => (bound_string(bound), "config".to_owned()),
                 Some((previous, previous_flags)) => {
                     if previous == *bound && previous_flags == flags {
@@ -53,7 +53,7 @@ pub fn snapshot(keybindings: &Keybindings, skipped: &[SkippedBind]) -> Response 
             },
         };
         let row = BindRow {
-            combo: combo_string(mods, keysym),
+            combo: trigger_string(mods, trigger),
             action,
             source,
             repeat: flags.repeat,
@@ -77,11 +77,11 @@ pub fn snapshot(keybindings: &Keybindings, skipped: &[SkippedBind]) -> Response 
     // removed (nothing else deletes rows -- `--tty` only replaces). The
     // `action` names what was removed, so the row reads as a removal rather
     // than a binding.
-    for (mods, keysym, bound, _) in defaults.iter() {
-        if keybindings.match_key(keysym, mods).is_none() {
+    for (mods, trigger, bound, _) in defaults.iter_triggers() {
+        if keybindings.lookup(trigger, mods).is_none() {
             let old = bound_string(bound);
             bindings.push(BindRow {
-                combo: combo_string(mods, keysym),
+                combo: trigger_string(mods, trigger),
                 action: old.clone(),
                 source: format!("config (unbinds default: {old})"),
                 repeat: false,
