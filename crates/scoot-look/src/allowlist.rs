@@ -187,6 +187,43 @@ pub const LAUNCH_DEPTH_KEYS: &[&str] = &[
     "motion-bounce",
 ];
 
+/// The keys of a look's `[effects]` table, and of the `[effects]` table in
+/// a shell app's own config file: the five depth and motion tokens. A
+/// subset of every dotless allowlist entry the apps read, so `[effects]`
+/// can never reach `font-size`, `opacity` or `radius`.
+pub const EFFECTS_TABLE_KEYS: &[&str] = &[
+    "shadow",
+    "fill",
+    "motion",
+    "motion-duration-ms",
+    "motion-bounce",
+];
+
+/// The dotted look key a user-file table entry stands for: `[effects] k`
+/// is `k`, `[card] k` is `card.k` and `[title] k` is `title.k`. `None`
+/// when `app` does not read that key, or `table` is not one of the three
+/// (`[colors]` and `[icons]` belong to the look and are unreachable
+/// here). The user-file layer of `scootnotify` and `scootlaunch` asks this
+/// so its tables share the look's allowlist, never a copy of it.
+pub fn user_effect_key(app: &str, table: &str, key: &str) -> Option<&'static str> {
+    if !reads_depth(app) || key.len() > 64 || !key.is_ascii() {
+        return None;
+    }
+    let reads = |dotted: &str| match app {
+        "scootnotify" => NOTIFY_DEPTH_KEYS.iter().copied().find(|k| *k == dotted),
+        _ => LAUNCH_DEPTH_KEYS.iter().copied().find(|k| *k == dotted),
+    };
+    match table {
+        "effects" => EFFECTS_TABLE_KEYS
+            .iter()
+            .copied()
+            .find(|k| *k == key)
+            .and_then(reads),
+        "card" | "title" => reads(&format!("{table}.{key}")),
+        _ => None,
+    }
+}
+
 /// Whether `app` reads the shared depth and motion keys
 /// ([`LAUNCH_DEPTH_KEYS`]): the apps that draw a surface of their own with
 /// a shadow and a fill. The renderer and the value kinds both ask this, so

@@ -113,6 +113,71 @@ fn a_glow_paints_its_color_around_the_panel_and_not_on_it() {
     panel.wait_exit();
 }
 
+/// A panel whose look layer says `fragment` and whose own `launch.toml`
+/// says `user`.
+fn start_with_user_file(tag: &str, fragment: &str, user: &str) -> Option<Panel> {
+    let bodies = [("alpha.desktop", desktop("Alpha", "/usr/bin/alpha"))];
+    let refs: Vec<(&str, &str)> = bodies.iter().map(|(f, b)| (*f, b.as_str())).collect();
+    let (session, data_home) = session_with_apps(tag, &refs)?;
+    write_look(&session, fragment);
+    let config_dir = session.scratch.config_home().join("scoot");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("launch.toml"), user).unwrap();
+    Panel::start_on(session, data_home, &[], &[])
+}
+
+#[test]
+fn the_users_effects_win_over_the_look_and_the_rest_stays_the_looks() {
+    // The look asks for a soft shadow; the user's file says glow. The
+    // glow's warm tint under the panel is the user's value winning.
+    let Some(mut panel) =
+        start_with_user_file("fx-user-glow", SOFT, "[effects]\nshadow = \"glow\"\n")
+    else {
+        return;
+    };
+    panel.wait_shown(rgb(BORDER));
+    std::thread::sleep(Duration::from_millis(300));
+    panel.save("fx-user-glow");
+    let (x0, _, x1, y1) = bounds(&panel);
+    let shot = panel.shot();
+    let backdrop = shot.at(5, 5);
+    let near = shot.at((x0 + x1) / 2, y1 + 4);
+    assert!(
+        near[0] > backdrop[0] + 20 && near[0] > near[2],
+        "the user's glow under the panel: {near:?} over {backdrop:?}"
+    );
+    panel.key("Escape");
+    panel.wait_exit();
+}
+
+#[test]
+fn a_bad_user_effect_is_ignored_and_the_look_stands() {
+    // The user's value is refused, so the look's glow draws, and the
+    // panel opens (a bad value never refuses the open).
+    let Some(mut panel) =
+        start_with_user_file("fx-user-bad", GLOW, "[effects]\nshadow = \"bogus\"\n")
+    else {
+        return;
+    };
+    panel.wait_shown(rgb(BORDER));
+    std::thread::sleep(Duration::from_millis(300));
+    let (x0, _, x1, y1) = bounds(&panel);
+    let shot = panel.shot();
+    let backdrop = shot.at(5, 5);
+    let near = shot.at((x0 + x1) / 2, y1 + 4);
+    assert!(
+        near[0] > backdrop[0] + 20,
+        "the look's glow stands: {near:?}"
+    );
+    assert!(
+        panel.stderr().contains("refused"),
+        "the refusal is reported: {}",
+        panel.stderr()
+    );
+    panel.key("Escape");
+    panel.wait_exit();
+}
+
 #[test]
 fn a_press_on_the_shadow_dismisses_and_a_press_on_the_panel_does_not() {
     let Some(mut panel) = start("fx-press", SOFT) else {

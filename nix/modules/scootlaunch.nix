@@ -13,7 +13,9 @@
 # The look is not a rung here at evaluation time at all: it arrives as a
 # runtime layer under the user's own file (see `scoot look sync`), merged
 # per key below every `settings` value above. So the rendered file holds
-# only the user's `settings`, verbatim.
+# only the user's `settings`, verbatim. The exception is the profile's
+# `theme.overrides.effects`, which fills the file's `[effects]` table at
+# `mkDefault`: those keys win per key over the look at runtime.
 #
 # Everything else the launcher reads has its own default in the binary,
 # so an absent key is that default.
@@ -39,6 +41,12 @@ let
   profileOn = desktopProfile.enable or false;
   launcherOn = (desktopProfile.launcher or { }).enable or false;
   daemonIsScootLaunch = ((desktopProfile.launcher or { }).daemon or "fuzzel") == "scootlaunch";
+  # The profile's look-independent depth and motion tokens
+  # (`theme.overrides.effects`), written into the file's `[effects]`
+  # table, which wins per key over the look. The notifier's card and title
+  # tables are not the launcher's: the launcher refuses a file that
+  # carries them.
+  effectsOverride = ((desktopProfile.theme or { }).overrides or { }).effects or { };
 in
 {
   options.programs.scootlaunch = {
@@ -148,6 +156,12 @@ in
           '';
         }
       ];
+    })
+
+    # `theme.overrides.effects`: per key at `mkDefault`, so an explicit
+    # `settings.effects.<key>` wins. Unset writes nothing.
+    (lib.mkIf (effectsOverride != { }) {
+      programs.scootlaunch.settings.effects = lib.mapAttrs (_: lib.mkDefault) effectsOverride;
     })
 
     # The desktop profile's launcher half: with the profile on, the

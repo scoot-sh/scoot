@@ -306,6 +306,8 @@ struct Harness {
     dir: PathBuf,
     /// The look the last request applied (`None` if it applied none).
     applied_look: Option<Look>,
+    /// The notes the last request's reload reported.
+    applied_notes: Vec<String>,
 }
 
 /// One scratch dir per harness: tests share a process under `cargo
@@ -325,6 +327,7 @@ impl Harness {
             server: NotifyServer::new(Config::default(), IdFile::open(None)),
             conn,
             applied_look: None,
+            applied_notes: Vec::new(),
             _peer: peer,
             config_path: dir.join("notify.toml"),
             dir,
@@ -405,7 +408,12 @@ impl Harness {
         );
         let mut out = Vec::new();
         responder.handle(line.as_bytes(), &mut out);
-        self.applied_look = responder.applied.take().map(|applied| applied.look);
+        let applied = responder.applied.take();
+        self.applied_notes = applied
+            .as_ref()
+            .map(|applied| applied.notes.clone())
+            .unwrap_or_default();
+        self.applied_look = applied.map(|applied| applied.look);
         serde_json::from_slice(&out).expect("the reply is JSON")
     }
 
@@ -1138,4 +1146,138 @@ impl Drop for Harness {
     fn drop(&mut self) {
         std::fs::remove_dir_all(&self.dir).ok();
     }
+}
+
+/// A user file with `[effects]`/`[card]`/`[title]` over a look layer that
+/// sets `shadow = "soft"` and `card.mark = "dot"`.
+fn write_user_tables(harness: &Harness, extra: &str) {
+    std::fs::write(
+        &harness.config_path,
+        format!("{extra}[effects]\nmotion = \"spring\"\n[card]\nmark = \"badge\"\n"),
+    )
+    .unwrap();
+}
+
+fn write_layer(state: &Path, text: &str) {
+    std::fs::create_dir_all(state.join("look")).unwrap();
+    std::fs::write(state.join("look").join("notify.toml"), text).unwrap();
+}
+
+#[test]
+fn a_reload_layers_the_user_tables_over_the_look() {
+    let mut harness = Harness::new();
+    let state = harness.dir.join("state");
+    write_layer(
+        &state,
+        "shadow = \"soft\"\n[card]\nmark = \"dot\"\nshape = \"pill\"\n",
+    );
+    write_user_tables(&harness, "");
+    let reply = harness.ask_with_look(&Request::Reload { scope: None }.line(), Some(&state));
+    assert_eq!(reply["type"], "ok");
+    let look = harness.applied_look().unwrap();
+    // The user's keys win; the look's other keys stand.
+    assert_eq!(look.motion.curve, scootui::motion::Curve::Spring);
+    assert_eq!(look.mark, crate::look::CardMark::Badge);
+    assert_eq!(look.shadow, crate::look::ShadowStyle::Soft);
+    assert_eq!(look.shape, crate::look::CardShape::Pill);
+    assert!(
+        harness.applied_notes.is_empty(),
+        "{:?}",
+        harness.applied_notes
+    );
+}
+
+#[test]
+fn a_look_swap_keeps_the_users_keys_over_the_new_look() {
+    let mut harness = Harness::new();
+    let state = harness.dir.join("state");
+    write_layer(&state, "shadow = \"soft\"\n[card]\nmark = \"dot\"\n");
+    write_user_tables(&harness, "");
+    harness.ask_with_look(&Request::Reload { scope: None }.line(), Some(&state));
+    // `scoot look apply` swaps the layer and sends the scoped reload,
+    // which never re-reads the user file: the running config's tables
+    // must still win over the new look.
+    write_layer(
+        &state,
+        "shadow = \"deep\"\nmotion = \"ease-out\"\n[card]\nmark = \"stripe\"\n",
+    );
+    let scoped = Request::Reload {
+        scope: Some(ReloadScope::Look),
+    }
+    .line();
+    let reply = harness.ask_with_look(&scoped, Some(&state));
+    assert_eq!(reply["type"], "ok");
+    let look = harness.applied_look().unwrap();
+    assert_eq!(look.shadow, crate::look::ShadowStyle::Deep, "the new look");
+    assert_eq!(look.motion.curve, scootui::motion::Curve::Spring, "user");
+    assert_eq!(look.mark, crate::look::CardMark::Badge, "user");
+}
+
+#[test]
+fn the_user_tables_still_apply_with_look_false() {
+    let mut harness = Harness::new();
+    let state = state_with_layer(&harness);
+    write_user_tables(&harness, "look = false\n");
+    let plain = Request::Reload { scope: None }.line();
+    harness.ask_with_look(&plain, Some(&state));
+    let look = harness.applied_look().unwrap();
+    // The layer is off (built-in colors), the user's keys are on.
+    assert_eq!(look.surface, Look::default().surface);
+    assert_eq!(look.motion.curve, scootui::motion::Curve::Spring);
+    assert_eq!(look.mark, crate::look::CardMark::Badge);
+    // And through the scoped reload, which has no layer to read.
+    let scoped = Request::Reload {
+        scope: Some(ReloadScope::Look),
+    }
+    .line();
+    let reply = harness.ask_with_look(&scoped, Some(&state));
+    assert_eq!(reply["type"], "ok");
+    let look = harness.applied_look().unwrap();
+    assert_eq!(look.motion.curve, scootui::motion::Curve::Spring);
+    assert_eq!(look.mark, crate::look::CardMark::Badge);
+}
+
+#[test]
+fn a_bad_user_value_is_a_note_and_the_reload_still_applies() {
+    let mut harness = Harness::new();
+    let state = harness.dir.join("state");
+    write_layer(&state, "shadow = \"soft\"\n");
+    std::fs::write(
+        &harness.config_path,
+        "[effects]\nshadow = \"bogus\"\nmotion = \"spring\"\n",
+    )
+    .unwrap();
+    let reply = harness.ask_with_look(&Request::Reload { scope: None }.line(), Some(&state));
+    assert_eq!(reply["type"], "ok", "a bad value never refuses the reload");
+    let look = harness.applied_look().unwrap();
+    assert_eq!(
+        look.shadow,
+        crate::look::ShadowStyle::Soft,
+        "the look's value"
+    );
+    assert_eq!(look.motion.curve, scootui::motion::Curve::Spring);
+    assert_eq!(
+        harness.applied_notes.len(),
+        1,
+        "{:?}",
+        harness.applied_notes
+    );
+    assert!(harness.applied_notes[0].contains("`shadow` refused"));
+    assert!(harness.applied_notes[0].contains("notify.toml"));
+}
+
+#[test]
+fn a_typo_in_a_user_table_refuses_the_reload_and_keeps_the_running_look() {
+    let mut harness = Harness::new();
+    write_user_tables(&harness, "");
+    harness.ask(&Request::Reload { scope: None }.line());
+    std::fs::write(&harness.config_path, "[effects]\nmotoin = \"spring\"\n").unwrap();
+    let reply = harness.ask(&Request::Reload { scope: None }.line());
+    assert_eq!(reply["type"], "error");
+    assert!(reply["message"].as_str().unwrap().contains("motoin"));
+    assert_eq!(
+        harness.server.store().config().effects.get("motion"),
+        Some(&toml::Value::String(String::from("spring"))),
+        "the running config stands"
+    );
 }

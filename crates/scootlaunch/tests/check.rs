@@ -65,3 +65,37 @@ fn a_missing_default_is_the_defaults() {
         "{out:?}"
     );
 }
+
+#[test]
+fn a_bad_effects_value_is_reported_and_still_valid() {
+    let dir = scratch("effects-value");
+    let file = dir.path().join("launch.toml");
+    fs::write(
+        &file,
+        b"[effects]\nshadow = \"bogus\"\nmotion = \"spring\"\n",
+    )
+    .unwrap();
+    let out = check(&dir, &["--check", "--config", file.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(0), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("valid"),
+        "{out:?}"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("`shadow` refused"),
+        "{out:?}"
+    );
+}
+
+#[test]
+fn an_unknown_effects_key_is_refused() {
+    let dir = scratch("effects-key");
+    let file = dir.path().join("launch.toml");
+    fs::write(&file, b"[effects]\nfont-size = 40\n").unwrap();
+    let out = check(&dir, &["--check", "--config", file.to_str().unwrap()]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("font-size"),
+        "{out:?}"
+    );
+}

@@ -393,6 +393,11 @@ impl Store {
         self.history.truncate(self.config.history_max);
     }
 
+    /// The running config.
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
     /// Whether the running config lets the look layer theme the cards.
     pub fn look_enabled(&self) -> bool {
         self.config.look

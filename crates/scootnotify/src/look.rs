@@ -59,6 +59,9 @@
 //! `weight` (100 to 900) and `spacing` (-2 to 8 px per character) for the
 //! summary line. See [`style`].
 //!
+//! The user's own `[effects]`, `[card]` and `[title]` tables in
+//! `notify.toml` win per key over all of this ([`user`]).
+//!
 //! The `font` key names the look's UI family. There is no fontconfig in
 //! this stack: the daemon draws with `--font PATH`, else the first usable
 //! well-known file, as the bar does. The key is validated and kept (a
@@ -68,7 +71,9 @@
 use std::path::{Path, PathBuf};
 
 pub mod style;
+pub mod user;
 pub use style::{CardMark, CardShape};
+pub use user::apply_user;
 
 use scootui::color::Color;
 use scootui::motion::{Curve, DEFAULT_BOUNCE, DEFAULT_DURATION_MS, Timing};
@@ -413,7 +418,7 @@ fn apply(
         return;
     };
     if let Some(refused) = scoot_look::allowlist::check_app_value("scootnotify", &dotted, value) {
-        notes.push(format!("`{dotted}` refused ({refused}): default applies"));
+        notes.push(format!("`{dotted}` refused ({refused}): value ignored"));
         return;
     }
     slot.set(value, &dotted, notes);
@@ -454,11 +459,11 @@ impl Slot<'_> {
             }
             Slot::Color(slot) => match value.as_str().and_then(|text| Color::parse(text).ok()) {
                 Some(color) => *slot = color,
-                None => notes.push(format!("`{dotted}` is not a color: default applies")),
+                None => notes.push(format!("`{dotted}` is not a color: value ignored")),
             },
             Slot::FontSize(slot) => match value.as_integer() {
                 Some(size) => *slot = size as f32,
-                None => notes.push(format!("`{dotted}` is not a size: default applies")),
+                None => notes.push(format!("`{dotted}` is not a size: value ignored")),
             },
             Slot::Opacity(slot) => {
                 let alpha = value
@@ -466,33 +471,33 @@ impl Slot<'_> {
                     .or_else(|| value.as_integer().map(|int| int as f64));
                 match alpha {
                     Some(alpha) => *slot = alpha as f32,
-                    None => notes.push(format!("`{dotted}` is not an opacity: default applies")),
+                    None => notes.push(format!("`{dotted}` is not an opacity: value ignored")),
                 }
             }
             Slot::Radius(slot) => match value.as_integer() {
                 Some(radius) => *slot = radius.max(0) as u32,
-                None => notes.push(format!("`{dotted}` is not a radius: default applies")),
+                None => notes.push(format!("`{dotted}` is not a radius: value ignored")),
             },
             Slot::FontFamily(slot) => match value.as_str() {
                 Some(family) => *slot = family.to_owned(),
-                None => notes.push(format!("`{dotted}` is not a font name: default applies")),
+                None => notes.push(format!("`{dotted}` is not a font name: value ignored")),
             },
             Slot::Shadow(slot) => match value.as_str().and_then(ShadowStyle::parse) {
                 Some(style) => *slot = style,
                 None => notes.push(format!(
-                    "`{dotted}` is not a shadow style (none, soft, deep or glow): default applies"
+                    "`{dotted}` is not a shadow style (none, soft, deep or glow): value ignored"
                 )),
             },
             Slot::Fill(slot) => match value.as_str().and_then(FillStyle::parse) {
                 Some(style) => *slot = style,
                 None => notes.push(format!(
-                    "`{dotted}` is not a fill style (solid or gradient): default applies"
+                    "`{dotted}` is not a fill style (solid or gradient): value ignored"
                 )),
             },
             Slot::Motion(slot) => match value.as_str().and_then(Curve::parse) {
                 Some(curve) => *slot = curve,
                 None => notes.push(format!(
-                    "`{dotted}` is not a motion (none, ease-out or spring): default applies"
+                    "`{dotted}` is not a motion (none, ease-out or spring): value ignored"
                 )),
             },
             Slot::MotionMs(slot) => match value.as_integer() {
@@ -500,7 +505,7 @@ impl Slot<'_> {
                 // skipped the grammar from asking for an unbounded wait.
                 Some(ms) => *slot = ms.clamp(0, i64::from(scootui::motion::MAX_DURATION_MS)) as u32,
                 None => notes.push(format!(
-                    "`{dotted}` is not a duration in milliseconds: default applies"
+                    "`{dotted}` is not a duration in milliseconds: value ignored"
                 )),
             },
             Slot::MotionBounce(slot) => {
@@ -509,46 +514,46 @@ impl Slot<'_> {
                     .or_else(|| value.as_integer().map(|int| int as f64));
                 match bounce {
                     Some(bounce) if bounce.is_finite() => *slot = bounce.clamp(0.0, 1.0) as f32,
-                    _ => notes.push(format!("`{dotted}` is not a bounce: default applies")),
+                    _ => notes.push(format!("`{dotted}` is not a bounce: value ignored")),
                 }
             }
             Slot::CardMotion(slot) => match value.as_str().and_then(CardMotion::parse) {
                 Some(style) => *slot = style,
                 None => notes.push(format!(
-                    "`{dotted}` is not a card motion (slide, fade, scale or drop): default applies"
+                    "`{dotted}` is not a card motion (slide, fade, scale or drop): value ignored"
                 )),
             },
             Slot::Mark(slot) => match value.as_str().and_then(CardMark::parse) {
                 Some(mark) => *slot = mark,
                 None => notes.push(format!(
-                    "`{dotted}` is not a card mark (none, stripe, dot or badge): default applies"
+                    "`{dotted}` is not a card mark (none, stripe, dot or badge): value ignored"
                 )),
             },
             Slot::Shape(slot) => match value.as_str().and_then(CardShape::parse) {
                 Some(shape) => *slot = shape,
                 None => notes.push(format!(
-                    "`{dotted}` is not a card shape (rounded or pill): default applies"
+                    "`{dotted}` is not a card shape (rounded or pill): value ignored"
                 )),
             },
             Slot::Flag(slot) => match value.as_bool() {
                 Some(flag) => *slot = flag,
-                None => notes.push(format!("`{dotted}` is not true or false: default applies")),
+                None => notes.push(format!("`{dotted}` is not true or false: value ignored")),
             },
             // The grammar bounds both; the clamps keep a caller that
             // skipped it from asking for an absurd weight or spacing.
             Slot::TitleWeight(slot) => match value.as_integer() {
                 Some(weight) => *slot = weight.clamp(100, 900) as u16,
-                None => notes.push(format!("`{dotted}` is not a weight: default applies")),
+                None => notes.push(format!("`{dotted}` is not a weight: value ignored")),
             },
             Slot::TitleSpacing(slot) => match value.as_integer() {
                 Some(spacing) => *slot = spacing.clamp(-2, 8) as i32,
                 None => notes.push(format!(
-                    "`{dotted}` is not a spacing in pixels: default applies"
+                    "`{dotted}` is not a spacing in pixels: value ignored"
                 )),
             },
             Slot::IconTheme(slot) => match value.as_str() {
                 Some(theme) if is_icon_theme(theme) => *slot = theme.to_owned(),
-                _ => notes.push(format!("`{dotted}` is not an icon theme: default applies")),
+                _ => notes.push(format!("`{dotted}` is not an icon theme: value ignored")),
             },
         }
     }

@@ -10,6 +10,7 @@ fn an_empty_file_is_the_defaults() {
             font: None,
             width_em: 40,
             rows: 10,
+            effects: toml::Table::new(),
         }
     );
 }

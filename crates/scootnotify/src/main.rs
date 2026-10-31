@@ -87,7 +87,20 @@ fn cmd_check(config: Option<&str>) -> i32 {
             1
         }
         Ok(bytes) => match config::parse(&bytes) {
-            Ok(_) => {
+            Ok(config) => {
+                // A bad `[effects]`, `[card]` or `[title]` value is a note
+                // and not a refusal (the running daemon ignores it the
+                // same way), so `--check` reports it and still exits 0.
+                let mut notes = Vec::new();
+                scootnotify::look::apply_user(
+                    &mut scootnotify::look::Look::default(),
+                    &config,
+                    &path,
+                    &mut notes,
+                );
+                for note in &notes {
+                    warn(format_args!("scootnotify: {note}"));
+                }
                 let _ = std::io::stdout().write_fmt(format_args!("{}: valid\n", path.display()));
                 0
             }

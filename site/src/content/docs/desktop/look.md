@@ -200,6 +200,48 @@ no settings daemon runs for them. The theme deliberately sets no
 `Xft.dpi`: the compositor publishes the output scale and XWayland
 follows it, and a theme dpi would fight that.
 
+## Look-independent effects
+
+Effects (shadow, fill, motion, card style, title weight) belong to the look,
+and the daemons also take them from their own files, where they win per key
+over any look. `desktop.theme.overrides` writes those file tables for you, so
+one setting applies to every look, shipped or your own:
+
+```nix title="home.nix"
+programs.scoot.desktop.theme.overrides = {
+  effects = { shadow = "soft"; motion = "spring"; };
+  card.mark = "stripe";
+  title.weight = 600;
+};
+```
+
+| Option | Type / default | Written to |
+|---|---|---|
+| `desktop.theme.overrides.effects` | attrs of strings, numbers and booleans, `{ }` | `[effects]` of `notify.toml` and `launch.toml` |
+| `desktop.theme.overrides.card` | same | `[card]` of `notify.toml` |
+| `desktop.theme.overrides.title` | same | `[title]` of `notify.toml` |
+
+The keys and values are the ones in the notifier's
+[Effects over any look](../scootnotify/configure.md#effects-over-any-look)
+and the launcher's
+[Effects over any look](../scootlaunch/panel.md#effects-over-any-look); the
+daemons check them, and a bad value is ignored with a log line. A table left
+empty writes nothing, so a profile that sets none renders the same files as
+before. Each key is set at `mkDefault`, so `programs.scootnotify.settings.effects.motion`
+(or `programs.scootlaunch.settings`) still wins for that key. Changing an
+option reloads the running notifier in place; the launcher reads it at its
+next open.
+
+The launcher's file is written only when `programs.scootlaunch` is imported
+(`homeModules.scootlaunch` or `nixosModules.scootlaunch`) and enabled; the
+profile does not import it. `card` and `title` never reach `launch.toml`.
+
+> **Symptom:** the overrides are set and the launcher ignores them.
+>
+> `programs.scootlaunch.enable` is off, or its module is not imported, so no
+> `launch.toml` is generated. Import the module and enable it (the profile
+> enables it for you when `desktop.launcher.daemon = "scootlaunch"`).
+
 ## Wallpaper from a link
 
 The session wallpaper ([scootbg](../scootbg/index.md)) can be a link:

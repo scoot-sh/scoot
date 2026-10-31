@@ -110,6 +110,9 @@ opening.
 
 Unknown keys are refused, never ignored.
 
+The file also takes an `[effects]` table, which wins per key over the
+look: see [Effects over any look](#effects-over-any-look).
+
 ## What a pick launches
 
 Enter (or a click) on an entry launches it, then the panel closes:
@@ -207,6 +210,45 @@ that key keeps its default. The keys apply to the apps and run panels:
 Notification cards read the same `[effects]`; see their
 [depth](../scootnotify/configure.md#depth) and
 [motion](../scootnotify/configure.md#motion).
+
+### Effects over any look
+
+To turn a shadow or a spring on for every look, set it in `launch.toml`
+instead of copying a look. The `[effects]` table wins per key over the
+active look:
+
+```toml
+[effects]
+shadow = "soft"
+motion = "spring"
+motion-duration-ms = 160
+```
+
+| Key | Value |
+|---|---|
+| `shadow` | `none`, `soft`, `deep` or `glow` |
+| `fill` | `solid` or `gradient` |
+| `motion` | `none`, `ease-out` or `spring` |
+| `motion-duration-ms` | whole number, 0 to 1000 |
+| `motion-bounce` | number, 0 to 1 |
+
+All keys are optional and unset by default, and mean what they do in the
+look. A key the file does not set stays the look's. Any other key in
+`[effects]` (`font-size`, a color), and a `[card]` or `[title]` table (the
+notifier's), refuses the file like any other typo.
+
+A value outside its list or range does not refuse the open: the panel
+warns on stderr, `launch.toml: ... refused ...: value ignored`, and that key
+keeps the look's value. `--check` prints the same warning and exits 0. The
+panel reads the file at every open, so an edit shows on the next one.
+
+With the Nix profile, `programs.scoot.desktop.theme.overrides.effects`
+writes this table (see
+[Look and theme](../../desktop/look/#look-independent-effects)).
+
+> **Symptom:** `--check` says `config refused: [effects] has no key`.
+> `[effects]` takes only `shadow`, `fill`, `motion`, `motion-duration-ms`
+> and `motion-bounce`.
 
 ### Depth
 
