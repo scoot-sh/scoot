@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.21](https://github.com/scoot-sh/scoot/compare/v0.6.20...v0.6.21) - 2026-10-31
+
+### scootlaunch
+
+- added: --dmenu takes the look's shadow, fill and entrance ([#838](https://github.com/scoot-sh/scoot/pull/838))
+
+### scootui,scootnotify,scootlaunch
+
+- added: resolve the look's font family to a file and draw a real bold face ([#836](https://github.com/scoot-sh/scoot/pull/836))
+
 ## [0.6.20](https://github.com/scoot-sh/scoot/compare/v0.6.19...v0.6.20) - 2026-10-31
 
 ### scootnotify
