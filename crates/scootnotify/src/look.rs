@@ -198,14 +198,15 @@ pub struct Look {
 }
 
 impl Look {
-    /// The corner radius cards are drawn with: `configured` (the config's
-    /// `radius`) for a rounded card, [`style::PILL_RADIUS`] for a pill.
+    /// The corner radius cards are drawn with: `configured` (the config
+    /// file's `radius`, when it sets one) over the look's own for a rounded
+    /// card, [`style::PILL_RADIUS`] for a pill.
     /// Every paint cuts it back to half the card's own size, so a short
     /// card under a pill look is a true pill. The one place the outline
     /// is chosen: paint, shadow and its corner tables all read it.
-    pub fn card_radius(&self, configured: u32) -> u32 {
+    pub fn card_radius(&self, configured: Option<u32>) -> u32 {
         match self.shape {
-            CardShape::Rounded => configured,
+            CardShape::Rounded => configured.unwrap_or(self.radius),
             CardShape::Pill => style::PILL_RADIUS,
         }
     }

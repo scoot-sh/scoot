@@ -46,7 +46,7 @@ fn every_key_sets() {
     assert_eq!(config.output.as_deref(), Some("HDMI-1"));
     assert_eq!(config.body_lines, 3);
     assert_eq!(config.border_px, 1);
-    assert_eq!(config.radius, 4);
+    assert_eq!(config.radius, Some(4));
     assert_eq!(config.pause_when_idle_secs, 30);
     assert_eq!(config.bar_icon_unread, "●");
     assert_eq!(config.bar_icon_dnd, "☾");
@@ -245,4 +245,13 @@ fn the_default_path_sits_beside_the_bars() {
 fn a_missing_file_is_an_error_for_the_caller_to_treat_as_defaults() {
     let missing = std::path::Path::new("/nonexistent-dir-7f3a/notify.toml");
     assert!(load(missing).is_err());
+}
+
+/// An unset `radius` is `None`, so the look's shows; a file that sets one,
+/// even `0`, is a key and wins.
+#[test]
+fn an_unset_radius_is_left_to_the_look() {
+    assert_eq!(parse(b"").unwrap().radius, None);
+    assert_eq!(parse(b"radius = 0\n").unwrap().radius, Some(0));
+    assert_eq!(parse(b"radius = 64\n").unwrap().radius, Some(64));
 }

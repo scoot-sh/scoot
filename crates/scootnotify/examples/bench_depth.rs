@@ -141,7 +141,7 @@ fn main() {
             );
             if let Some(shadow) = shadow.as_mut() {
                 shadow.prepare(
-                    config.radius,
+                    look.card_radius(config.radius),
                     stack.cards.iter().map(|c| (c.rect.width, c.rect.height)),
                 );
             }

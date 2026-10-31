@@ -753,8 +753,8 @@ impl App {
         }
         self.config = config;
         self.refresh_due = true;
-        // The card radius is the config's (or the pill's): the shadow's
-        // corners follow it.
+        // The card radius is the config's, else the look's (or the
+        // pill's): the shadow's corners follow it.
         self.shadow_stale = true;
         // The layout's sizes depend on the config: force a rebuild on
         // the next refresh, as `retheme` does.

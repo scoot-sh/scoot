@@ -233,7 +233,7 @@ hits the wall:
 - [notify-popups-review-notes](notify-popups-review-notes.md)
 - [packaging-workflows-red-on-main](resolved/packaging-workflows-red-on-main-done.md)
 - [check scootbar for the glibc 2.44 huge-page arena](thp-arena-check.md)
-- [notify-look-radius-unread](notify-look-radius-unread.md) (medium): the look's `radius` is parsed and never read, so every card draws the config file's 8 px; found building #807 slice 3
+- [notify-look-radius-unread](resolved/notify-look-radius-unread-done.md): the look's `radius` now reaches the cards, the config file's `radius` winning when set
 - [shell-font-resolution](shell-font-resolution.md) (low): resolve the look's font family to a file and use a real bold face; the shell apps draw one file with synthetic bold
 - [notify-input-region-follows-shape](notify-input-region-follows-shape.md) (low): the click area is each card's rectangle, so a pill's cut corners still take clicks; found building #807 slice 3
 - [launcher-scaled-composite-cost](launcher-scaled-composite-cost.md) (low): `Layer::composite`'s scaled path is 17 ns a pixel, so a 2x launcher entrance frame is 9 ms; found building #807 slice 4

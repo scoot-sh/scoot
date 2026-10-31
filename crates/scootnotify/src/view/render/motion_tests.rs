@@ -71,7 +71,7 @@ fn stack(scene: &mut Scene, ids: &[u32]) -> layout::Stack {
     // An empty stack sizes no corners and would drop the tables in use.
     if let Some(shadow) = scene.shadow.as_mut().filter(|_| !stack.cards.is_empty()) {
         shadow.prepare(
-            scene.config.radius,
+            scene.look.card_radius(scene.config.radius),
             stack
                 .cards
                 .iter()

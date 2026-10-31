@@ -435,8 +435,8 @@ fn the_badge_tile_is_the_accent_with_readable_ink() {
 #[test]
 fn a_pill_card_is_cut_to_half_its_height_up_to_the_cap() {
     let look = look_with(|l| l.shape = CardShape::Pill);
-    assert_eq!(look.card_radius(8), PILL_RADIUS);
-    assert_eq!(Look::default().card_radius(8), 8);
+    assert_eq!(look.card_radius(Some(8)), PILL_RADIUS);
+    assert_eq!(Look::default().card_radius(Some(8)), 8);
     let config = Config::default();
     let notes = apps();
     let (stack, _) = styled(&look, &config, &notes);
