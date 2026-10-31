@@ -684,9 +684,28 @@ impl State {
     /// Every scroll source (libinput, the nested host pointer, injected
     /// [`State::scroll`]) funnels through here, so there is exactly one
     /// place that decides the frame boundary: one frame per event.
+    ///
+    /// The frame is offered to the scroll binds first (see
+    /// `scroll_binds.rs`): whatever a bind claims never reaches the client,
+    /// and a scroll nothing claims goes on exactly as it came.
     pub(super) fn emit_scroll(&mut self, frame: AxisFrame) {
+        self.emit_scroll_with(frame, true);
+    }
+
+    /// [`State::emit_scroll`], with the scroll binds on or off. A virtual
+    /// pointer's scroll runs them only where `[virtual_input] binds` lets
+    /// virtual input run binds at all (see `virtual_input.rs`).
+    pub(super) fn emit_scroll_with(&mut self, frame: AxisFrame, binds: bool) {
         self.announce_activity();
         self.note_pointer_activity();
+        let frame = if binds {
+            match self.filter_scroll(frame) {
+                Some(frame) => frame,
+                None => return,
+            }
+        } else {
+            frame
+        };
         let Some(pointer) = self.seat.get_pointer() else {
             return;
         };

@@ -866,7 +866,11 @@ fn pointer_frame(state: &mut State, resource: &ZwlrVirtualPointerV1) {
     let mut pending = std::mem::take(&mut device.pending);
     let time = InputTime::from_millis(state.millis());
     if let Some(frame) = pending.finish(time) {
-        state.emit_scroll(frame);
+        // A virtual pointer runs scroll binds only where virtual keyboards
+        // run key binds: the same trust boundary, one flag (`[virtual_input]
+        // binds`, default off).
+        let binds = state.virtual_input_binds;
+        state.emit_scroll_with(frame, binds);
     }
 }
 

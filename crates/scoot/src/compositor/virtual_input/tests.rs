@@ -2715,3 +2715,5 @@ fn virtual_bind_with_repeat_flag_fires_once_and_arms_nothing() {
         "nothing re-fires after the release either"
     );
 }
+
+mod scroll_binds;

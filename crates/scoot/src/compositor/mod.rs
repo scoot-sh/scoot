@@ -66,6 +66,7 @@ pub(crate) mod render;
 mod rounded;
 mod screencopy;
 mod screenshot;
+mod scroll_binds;
 mod selection;
 mod session_env;
 mod session_lock;
@@ -478,6 +479,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     state.startup_virtual_input = loaded.virtual_input;
     state.virtual_input_binds = loaded.virtual_input_binds;
     state.animation = loaded.animation;
+    state.scroll_binds.step = loaded.scroll_step;
     virtual_input::init(&mut state, loaded.virtual_input);
     if xwayland {
         #[cfg(feature = "xwayland")]

@@ -13,8 +13,8 @@ re-applies live with `scoot msg reload`. No config file yet?
 `--config PATH` loads a TOML file explicitly. Without it, scoot looks
 for `$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
 `~/.config/scoot/config.toml`, and runs on built-in defaults if
-neither exists. Fourteen optional tables: `[layout]`, `[appearance]`,
-`[animation]`, `[output]`, `[[outputs]]`, `[renderer]`, `[tty]`, `[xwayland]`, `[virtual_input]`,
+neither exists. Fifteen optional tables: `[layout]`, `[appearance]`,
+`[animation]`, `[scroll]`, `[output]`, `[[outputs]]`, `[renderer]`, `[tty]`, `[xwayland]`, `[virtual_input]`,
 `[autostart]`, `[floating]`, `[wallpaper]`, `[binds]`, `[global_shortcuts]` — plus any number of
 `[[window_rule]]` entries. Every field in every table is itself
 optional and defaults independently, so a config that only sets `gap`
@@ -75,8 +75,8 @@ both triggers above say exactly when.
 **Applied live:** layout (gap, column widths, default width), output
 scales and positions, `[[outputs]]` modes (a live resize per backend —
 `--nested` refuses them, the host owns the size), appearance (ring, background, corners, cursor), animation
-(enabled, duration, easing), the whole
-`[binds]` table, the `[global_shortcuts]` chords, new `[autostart]` spawn entries, `[floating]` and the
+(enabled, duration, easing), `[scroll] step`, the whole
+`[binds]` table (scroll binds included), the `[global_shortcuts]` chords, new `[autostart]` spawn entries, `[floating]` and the
 `[[window_rule]]`s (for windows that map after the reload), `[wallpaper]`
 (handed to scootbg again), `[xwayland] fractional`. The reply names
 each applied field:
@@ -229,6 +229,24 @@ one table lookup and a lerp per window per frame (no `exp`/`sin` on the
 frame path); the clamped duration still bounds its settle, and a frame
 past its deadline still snaps instead of queuing.
 
+## Scroll
+
+`[scroll]` tunes [scroll binds](./keybindings.md#scroll-binds), the
+`"super+scroll-down" = "..."` entries of `[binds]`. It has one field.
+
+| Field | Type | Default | Reload | Meaning |
+|---|---|---|---|---|
+| `step` | number | `60` | live | Units of continuous scroll (two-finger touchpad scroll) per bind step. A wheel click is 15 units, so the default is four clicks' worth. Clamped `1..=10000`; a non-number or non-finite value warns and uses the default. Wheels that report clicks ignore it: one click is one step. |
+
+```toml
+[scroll]
+step = 40
+```
+
+A smaller step fires more often per swipe. A reload forgets any
+half-counted step, so the new value never inherits motion measured against
+the old one.
+
 ## Example config.toml
 
 ```toml
@@ -270,6 +288,10 @@ scale = 1.0
 # enabled = false
 # duration_ms = 150
 # easing = "ease-out"  # "linear" or "spring"
+
+# [scroll]
+# Continuous scroll units per scroll-bind step (a wheel click is 15). Live on reload.
+# step = 60
 
 # [renderer]
 # Type string, default "auto". One of "auto" (the default: the GPU

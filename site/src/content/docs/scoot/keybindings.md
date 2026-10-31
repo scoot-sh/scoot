@@ -169,7 +169,7 @@ modifier (`"Return" = "close"` — legal, intercepting every press of that
 key with no modifier held). Whitespace around `+` is ignored. Modifier
 names are case-insensitive: `ctrl`/`control`, `shift`, `alt`,
 `super`/`logo`/`meta`/`cmd`. The key is an xkb keysym name, tried
-exactly then case-insensitively — and binds match a key's *unshifted*
+exactly then case-insensitively (or one of the four [scroll directions](#scroll-binds)) — and binds match a key's *unshifted*
 symbol, so `"A"` means plain `a`, exactly like `"a"`: write
 `"shift+a"` for the Shift chord.
 
@@ -235,6 +235,79 @@ layer hide under it; `overlay` and the lock screen stay above.
 `Super+m` fills the usable area instead (bar visible, gaps and ring
 kept). Both restore the layout exactly on leave; moving the window, or
 focusing a window stacked in the same column, ends them.
+
+## Scroll binds
+
+A bind can name a scroll direction instead of a key: `scroll-left`,
+`scroll-right`, `scroll-up` or `scroll-down`, with any modifiers.
+
+```toml
+[binds]
+"super+scroll-left"  = "focus-column left"
+"super+scroll-right" = "focus-column right"
+"super+scroll-up"    = "focus-window up"
+"super+scroll-down"  = "focus-window down"
+```
+
+This is how a mouse wheel, a tilt wheel or a two-finger touchpad scroll
+moves the strip. It works anywhere scoot sees an ordinary pointer: a
+VM guest (vfkit, UTM, QEMU) gets the host trackpad as a plain pointer with
+no multi-finger gestures, but its two-finger scroll arrives. A remote
+desktop served through wayvnc sends its scrolls through a virtual pointer
+instead, which needs `[virtual_input] binds = true` (the
+"Virtual pointers" note below). Scroll binds reload live.
+
+- **Direction is what the apps see.** `scroll-down` is the direction that
+  scrolls your apps down, with your natural-scroll setting already
+  applied. There is no second switch here: if scrolling feels backwards, fix
+  the device setting, or swap the two binds.
+- **Steps.** A wheel fires once per click; a high-resolution wheel that
+  reports fractions of a click adds them up to a click. A touchpad (or any
+  source that reports motion, not clicks) fires once per `step` units
+  of motion, `60` by default; see [`[scroll]`](./configure.md#scroll). What is
+  left after a step carries into the next, so a long swipe fires at an even
+  pace. One event fires at most 8 steps, and `close`, `quit` and
+  `show-keymap` at most one, so a fast flick cannot run away.
+- **Starting over.** The partial step is dropped when the direction
+  reverses, when an event matches no bind (the modifier let go, or the
+  other direction), when a touchpad scroll ends, and after 300 ms
+  without an event.
+- **The client never sees a scroll a bind took.** With the modifier held
+  and a bind for that direction, the event is removed before any window
+  receives it. With no matching bind, the scroll reaches the window exactly
+  as it did before, so a bind on `super+scroll-down` leaves plain scrolling
+  alone. A scroll that moves both ways is taken one axis at a time: bind
+  only the vertical directions and the sideways half still reaches the
+  window.
+- **A touchpad scroll is all or nothing.** One that a bind took is taken
+  to its end, even if you let go of the modifier or reverse partway, so
+  the window never sees the middle of a scroll it did not see begin. One
+  that already reached the window is never taken partway when you press
+  the modifier mid-scroll.
+- **Not while locked.** Like other binds, scroll binds do nothing on a
+  locked session; the scroll goes to the lock screen. A `spawn` bind with
+  `allow_when_locked = true` still fires.
+- **Virtual pointers.** A scroll from a virtual pointer (wayvnc and other
+  remote-control tools) runs scroll binds only with
+  `[virtual_input] binds = true`, the same switch that lets virtual
+  keyboards run key binds.
+- **Flags.** `repeat` is ignored on a scroll bind (a warning says so);
+  it already fires once per step.
+- **Bare scroll binds.** `"scroll-down" = "..."` with no modifier takes
+  every downward scroll everywhere; legal, rarely what you want.
+
+A bad direction name (`"super+scroll-sideways"`) is skipped with a
+warning naming the four valid ones, and listed in `scoot msg binds`. The
+four names are not key names, so `scoot msg key super+scroll-down` is
+refused as an unknown key. `scoot msg binds` lists scroll binds with
+the combos spelled the same way. `scoot msg pointer scroll 0 15` is one
+wheel click for testing; it holds no modifier, so over IPC only a bind
+with no modifier can be driven.
+
+No scroll binds are set by default, and the desktop profile adds none:
+plain scrolling is the first thing apps need, and the right modifier for
+sideways movement depends on what else your setup already puts on
+<kbd>Super</kbd>.
 
 ## Global shortcuts
 
