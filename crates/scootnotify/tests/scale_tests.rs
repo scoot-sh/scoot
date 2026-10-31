@@ -72,9 +72,9 @@ fn scoot_at(tag: &str, scale: &str) -> Option<Session> {
     session
 }
 
-/// Starts the daemon under `look` (a `notify.toml` look fragment, or empty)
-/// with the Wayland wire log on.
-fn spawn_popup(session: &Session, bus: &Daemon, look: &str) -> (Child, PathBuf) {
+/// Starts the daemon with `config` as its `notify.toml` under `look` (a
+/// look fragment, or empty), with the Wayland wire log on.
+fn spawn_popup(session: &Session, bus: &Daemon, config: &str, look: &str) -> (Child, PathBuf) {
     let look_dir = session.scratch.state_home().join("scoot").join("look");
     std::fs::create_dir_all(&look_dir).unwrap();
     std::fs::write(look_dir.join("notify.toml"), look).unwrap();
@@ -85,7 +85,7 @@ fn spawn_popup(session: &Session, bus: &Daemon, look: &str) -> (Child, PathBuf) 
         .join("scoot")
         .join("notify.toml");
     std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-    std::fs::write(&config_path, "").unwrap();
+    std::fs::write(&config_path, config).unwrap();
     let log = session.scratch.0.join("scootnotify.log");
     let log_file = std::fs::File::create(&log).expect("the daemon log creates");
     let child = Command::new(env!("CARGO_BIN_EXE_scootnotify"))
@@ -309,9 +309,19 @@ fn ring_box(session: &Session) -> Option<(u32, u32, u32, u32)> {
 
 /// Starts the daemon on an output at `scale` and shows one card.
 fn show_one(tag: &str, scale: &str, look: &str) -> Option<(Daemon, Session, Child, PathBuf, Conn)> {
+    show_configured(tag, scale, "", look)
+}
+
+/// [`show_one`] with a `notify.toml`.
+fn show_configured(
+    tag: &str,
+    scale: &str,
+    config: &str,
+    look: &str,
+) -> Option<(Daemon, Session, Child, PathBuf, Conn)> {
     let bus = bus_or_skip()?;
     let session = scoot_at(tag, scale)?;
-    let (mut server, log) = spawn_popup(&session, &bus, look);
+    let (mut server, log) = spawn_popup(&session, &bus, config, look);
     let mut client = conn::connect(&bus.path()).expect("the bus accepts");
     support::wait_serving(&mut client, &mut server, support::LogSource::File(&log));
     let _ = notify(&mut client, &mut server, &log, "Hello", 501);
@@ -514,4 +524,49 @@ fn a_sliding_card_lands_on_the_static_pixels_at_a_fractional_scale() {
     // 12 logical px from the top edge, at 1.5x.
     assert_eq!(y0, scaled(12, 180), "the card's top edge");
     kill(server);
+}
+
+/// A stack whose size does not divide by the scale (an odd width, a border
+/// of 3 px, a shadow) still fits its buffer to the pixel at the fractional
+/// scales: the buffer is the rounded product, the card is as wide as the
+/// rounded product on screen, and the input region is inside the surface.
+#[test]
+fn an_odd_sized_stack_fits_its_buffer_at_fractional_scales() {
+    for (scale, v120) in [("1.25", 150u32), ("1.5", 180), ("1.75", 210)] {
+        let Some((_bus, session, server, log, _client)) = show_configured(
+            &format!("scale-odd-{scale}"),
+            scale,
+            "width_px = 361\nborder_px = 3\n",
+            "shadow = \"soft\"\n",
+        ) else {
+            return;
+        };
+        let (width, height) = destination(&log).expect("a destination");
+        eprintln!("odd {scale}: {width}x{height} logical -> {:?}", drawn(&log));
+        assert_eq!(width % 2, 1, "an odd surface width: {width}");
+        assert_eq!(
+            drawn(&log),
+            Some((scaled(width, v120), scaled(height, v120)))
+        );
+        for buffer in buffers(&log) {
+            assert_eq!(
+                buffer,
+                (scaled(width, v120), scaled(height, v120)),
+                "{scale}"
+            );
+        }
+        let (x0, _, x1, _) = ring_box(&session).expect("the card");
+        assert!(
+            (x1 - x0 + 1).abs_diff(scaled(361, v120)) <= 2,
+            "{scale}: {} px wide",
+            x1 - x0 + 1
+        );
+        for (x, y, w, h) in input_region(&log) {
+            assert!(
+                x >= 0 && y >= 0 && x + w <= i64::from(width) && y + h <= i64::from(height),
+                "{scale}: {x},{y} {w}x{h} outside {width}x{height}"
+            );
+        }
+        kill(server);
+    }
 }

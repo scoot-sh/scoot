@@ -38,12 +38,14 @@ frame at the same 17 ns, over the 60 Hz budget; unmeasured, filed from the
 
 The notification cards pay the same
 ([notify-ignores-preferred-scale](resolved/notify-ignores-preferred-scale-done.md)):
-`bench_motion` (release, `taskset -c 3`, three runs, dev VM, a stack of five
-cards, medians) gives an entrance frame with the `scale` style of 1.0 to
-1.3 ms at 1x (384x522), 2.5 to 3.0 ms at 1.5x, 3.5 to 4.9 ms at 2x and 7.5
-to 11.3 ms at 3x (1152x1566): under 16.6 ms at every scale, with the 3x
-case the one with least room. The slide frames, which composite
-unscaled, are 0.4 to 0.7 ms at 1x and 2.9 to 3.1 ms at 2x.
+`bench_motion --scale N` (release, `taskset -c 3`, dev VM, a stack of five
+cards, the median of 400 frames per run, six runs per scale) gives an
+`enter scale` frame of 0.6 to 1.3 ms at 1x (384x522), 2.5 to 3.0 ms at 1.5x,
+1.3 to 5.0 ms at 2x and 2.8 to 11.3 ms at 3x (1152x1566): under 16.6 ms at
+every scale, the 3x case with least room. (The VM's CPU runs in two speeds,
+so runs of the same binary differ by up to 3x; the 3x worst case is the one
+to read.) The slide frames, which composite unscaled, are 0.4 to 0.7 ms at
+1x and 1.6 to 3.1 ms at 2x.
 
 ## What to do
 
