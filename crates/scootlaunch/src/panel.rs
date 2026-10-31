@@ -601,7 +601,7 @@ struct App {
     fractional: Option<WpFractionalScaleManagerV1>,
     /// Each bound output's integer scale and the ones the surface is on:
     /// the fallback under the surface's own scale events.
-    scales: scale::OutputScales<wl_output::WlOutput>,
+    scales: scootui::density::outputs::OutputScales<wl_output::WlOutput>,
     seat_proxy: Option<wl_seat::WlSeat>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
@@ -698,7 +698,7 @@ impl App {
             activation: None,
             viewporter: None,
             fractional: None,
-            scales: scale::OutputScales::default(),
+            scales: scootui::density::outputs::OutputScales::default(),
             seat_proxy: None,
             keyboard: None,
             pointer: None,

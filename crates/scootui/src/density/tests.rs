@@ -146,3 +146,57 @@ fn a_scale_is_a_number() {
     assert_eq!(Scale::Fractional(150).factor(), 1.25);
     assert_eq!(Scale::Integer(0).factor(), 1.0);
 }
+
+#[test]
+fn a_device_position_rounds_as_the_protocol_rounds_a_size() {
+    // The compositor's own rounding, and `scaled_length`'s wherever that
+    // does not floor a side at 1: the far edge of a stack is the buffer's.
+    for v120 in 30..=1920 {
+        for logical in 0..=400u32 {
+            let device = Scale::Fractional(v120).to_device(i64::from(logical));
+            assert_eq!(
+                device,
+                i64::from(compositor_dst(logical, v120)),
+                "{logical} at {v120}/120"
+            );
+            if device >= 1 {
+                assert_eq!(
+                    scaled_length(logical, v120),
+                    Some(device as u32),
+                    "{logical} at {v120}/120"
+                );
+            }
+        }
+    }
+    for factor in 1..=4u32 {
+        for logical in 0..=400u32 {
+            assert_eq!(
+                Scale::Integer(factor).to_device(i64::from(logical)),
+                i64::from(logical * factor)
+            );
+        }
+    }
+}
+
+#[test]
+fn a_device_position_is_exact_at_scale_one_and_safe_at_the_extremes() {
+    for logical in [i64::MIN, -3, -1, 0, 1, 7, i64::MAX] {
+        assert_eq!(Scale::Integer(1).to_device(logical), logical);
+    }
+    // Negative offsets (a pose's) round half up and are monotonic.
+    assert_eq!(Scale::Fractional(150).to_device(-1), -1);
+    assert_eq!(Scale::Fractional(150).to_device(-2), -2);
+    assert_eq!(Scale::Fractional(180).to_device(-1), -1);
+    assert_eq!(Scale::Fractional(180).to_device(-3), -4);
+    let mut last = i64::MIN;
+    for logical in -50..=50 {
+        let device = Scale::Fractional(150).to_device(logical);
+        assert!(device >= last);
+        last = device;
+    }
+    // Saturates, never wraps.
+    assert_eq!(Scale::Integer(3).to_device(i64::MAX), i64::MAX);
+    assert_eq!(Scale::Integer(3).to_device(i64::MIN), i64::MIN);
+    assert_eq!(Scale::Fractional(480).to_device(i64::MAX), i64::MAX);
+    assert_eq!(Scale::Fractional(480).to_device(i64::MIN), i64::MIN);
+}

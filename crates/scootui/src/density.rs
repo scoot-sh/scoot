@@ -27,6 +27,7 @@
 //! compare its height with; and a bar, unlike a wallpaper, is on screen
 //! whenever it is drawn, which is what makes wlroots re-send the scale.
 
+pub mod outputs;
 #[cfg(test)]
 mod tests;
 
@@ -64,6 +65,24 @@ impl Scale {
                 scaled_length(size.width, v120)?,
                 scaled_length(size.height, v120)?,
             )),
+        }
+    }
+
+    /// `logical` pixels as device pixels, rounded half up as
+    /// [`scaled_length`] rounds a size (so a stack's far edge lands on the
+    /// buffer's), without that function's floor of 1 and for any sign: a
+    /// position, or a pose's offset. Saturates instead of wrapping. At
+    /// scale 1 it is the identity.
+    pub fn to_device(self, logical: i64) -> i64 {
+        match self {
+            Self::Integer(1) => logical,
+            Self::Integer(factor) => logical.saturating_mul(i64::from(factor.max(1))),
+            Self::Fractional(v120) => {
+                let product = i128::from(logical) * i128::from(v120.max(1));
+                let half = i128::from(DENOMINATOR / 2);
+                let rounded = (product + half).div_euclid(i128::from(DENOMINATOR));
+                rounded.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
+            }
         }
     }
 

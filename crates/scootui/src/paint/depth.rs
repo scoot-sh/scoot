@@ -26,8 +26,9 @@ use crate::color::Color;
 use crate::region::{Rect, effective_radius};
 
 /// The largest blur radius, in pixels: past it a table is bigger than any
-/// shadow could want and the surface padding would be absurd.
-pub const MAX_BLUR: u32 = 64;
+/// shadow could want and the surface padding would be absurd. The deepest
+/// style's 28 px blur at a 3x output is 84 of them.
+pub const MAX_BLUR: u32 = 128;
 /// The largest offset on either axis, in pixels.
 pub const MAX_OFFSET: i32 = 64;
 
