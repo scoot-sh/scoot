@@ -36,6 +36,15 @@ A 3x output (about 1240x940) extrapolates to roughly 20 ms an entrance
 frame at the same 17 ns, over the 60 Hz budget; unmeasured, filed from the
 #839 review as [launch-fit-remainder-and-scale-len](launch-fit-remainder-and-scale-len.md).
 
+The notification cards pay the same
+([notify-ignores-preferred-scale](resolved/notify-ignores-preferred-scale-done.md)):
+`bench_motion` (release, `taskset -c 3`, three runs, dev VM, a stack of five
+cards, medians) gives an entrance frame with the `scale` style of 1.0 to
+1.3 ms at 1x (384x522), 2.5 to 3.0 ms at 1.5x, 3.5 to 4.9 ms at 2x and 7.5
+to 11.3 ms at 3x (1152x1566): under 16.6 ms at every scale, with the 3x
+case the one with least room. The slide frames, which composite
+unscaled, are 0.4 to 0.7 ms at 1x and 2.9 to 3.1 ms at 2x.
+
 ## What to do
 
 Make the per-pixel work cheaper without changing a byte of output (the

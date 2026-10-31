@@ -3,8 +3,8 @@ title: scootnotify troubleshooting
 description: "Notification symptoms and their fixes — popups, fullscreen, DND, history."
 ---
 
-No card, a card under fullscreen, DND that never clears, or history
-that never comes back. Each fix below names the command that proves it.
+No card, a card under fullscreen, soft text on a HiDPI screen, DND that
+never clears, or history that never comes back. Each fix below names the command that proves it.
 What the daemon does is in [Overview](./index.md); placement, timeouts
 and rules are in [Configure](./configure.md); every command is in the
 [CLI reference](./cli.md). The profile setup (units, bar module, mako
@@ -41,6 +41,26 @@ With the mako escape hatch, something set `layer` back to `top` —
 read the generated mako config, the first content line is the layer.
 scootnotify has no layer knob to mis-set. See
 [Desktop notifications](../../desktop/notifications/).
+
+> **Symptom:** cards look soft on a HiDPI screen.
+
+The stack follows the scale the compositor asks for:
+`wp_fractional_scale_v1` (with `wp_viewporter`), else
+`wl_surface.preferred_buffer_scale`, else the `wl_output.scale` of the
+output it is on. Compare what it was told with what it drew:
+
+```sh
+WAYLAND_DEBUG=1 scootnotify daemon 2>&1 | grep -E 'preferred|create_buffer|set_destination'
+```
+
+`preferred_scale` is in 120ths (240 is 2x). The `create_buffer` size
+should be the `set_destination` size times that scale. A buffer the same
+size as the destination under a scale above 1 means the compositor sent
+none of the three, and the stack has nothing to follow. Without
+`wp_viewporter` the stack follows whole scales only, the fraction
+rounded up. A pooled buffer of the right size is attached again without
+being created again, so after a scale change read the last
+`damage_buffer` for the size on screen.
 
 > **Symptom:** DND is stuck on, or the unread count never drops.
 
