@@ -133,7 +133,7 @@ pub(super) fn fingerprint() -> u64 {
         &look,
         width,
         height,
-        layout.row_h,
+        scootui::density::Scale::Integer(1),
         &spec,
     );
     fnv(&mut hash, &pixels);

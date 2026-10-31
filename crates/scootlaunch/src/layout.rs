@@ -22,10 +22,12 @@ use scootui::entry::Geometry;
 /// The panel border, in logical pixels (scaled with the output).
 pub const BORDER: u32 = 2;
 
-/// The dmenu panel's padding and list gap, in pixels: its painter is
-/// unchanged and keeps the fixed spacing.
+/// The dmenu panel's padding, list gap and the room a row adds to the
+/// text's height, in logical pixels: it keeps fixed spacing, which scales
+/// with the output.
 pub const DMENU_PAD: u32 = 8;
 pub const DMENU_GAP: u32 = 4;
+pub const DMENU_ROW_SLACK: u32 = 8;
 
 /// A pixel rectangle: top-left corner and size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,16 +134,34 @@ impl Layout {
         }
     }
 
-    /// The dmenu panel's fixed geometry (its own painter is unchanged:
-    /// no icons, rows hugging the text).
+    /// The dmenu panel's geometry at scale 1: no icons, rows hugging the
+    /// text.
     pub fn dmenu(em: f32) -> Self {
-        let em = em.clamp(1.0, 256.0);
+        Self::dmenu_scaled(em, 1.0)
+    }
+
+    /// The dmenu panel's geometry at output scale `factor`: `em` is in
+    /// device pixels, and the border, padding and gap (fixed logical
+    /// numbers) scale with the output so a 2x output keeps the shape. At
+    /// `factor` 1.0 these are the numbers the panel always had.
+    pub fn dmenu_scaled(em: f32, factor: f64) -> Self {
+        let em = if em.is_finite() {
+            em.clamp(1.0, 512.0)
+        } else {
+            1.0
+        };
+        let factor = if factor.is_finite() {
+            factor.clamp(0.25, 16.0)
+        } else {
+            1.0
+        };
+        let scaled = |logical: u32| (f64::from(logical) * factor).round() as u32;
         Self {
             em,
-            border: BORDER,
-            pad: DMENU_PAD,
-            gap: DMENU_GAP,
-            row_h: em.ceil() as u32 + 8,
+            border: scaled(BORDER).max(1),
+            pad: scaled(DMENU_PAD),
+            gap: scaled(DMENU_GAP),
+            row_h: (em.ceil() as u32).saturating_add(scaled(DMENU_ROW_SLACK)),
             side: 0,
             icon_gap: 0,
             lead: 0,

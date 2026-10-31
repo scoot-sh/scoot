@@ -62,8 +62,9 @@ most 20000 nodes, rendered at most 256 device pixels a side with no
 network and no system fonts; file hrefs resolve to nothing drawable
 unless a valid image. A corrupt file, a huge header, a symlink loop
 and a missing theme all fall back to the tile. Icons render at device
-pixels: the side is about 1.2 times the font size, times the surface
-scale, so a 1.5 output draws a 1.5x bitmap through the viewport.
+pixels: the side is about 1.2 times the font size. The launcher does not
+yet follow the output's scale, so it draws at 1x and the compositor scales
+it up.
 
 The stripped release is 1446648 bytes without `svg` (budget 1.8 MB)
 and 2167544 bytes with it (the `svg` row, for the waiver ruling; the
@@ -174,8 +175,8 @@ The search field and the rows share one inner padding from the panel
 edge. The selection fill runs the full width of that box with the
 panel's corner radius, and the icon sits inside it, never against its
 edge. Every measurement (padding, row height, icon size, the gaps)
-scales with `font-size` and `radius`, so a larger font or an output
-scale gives the same shape bigger.
+scales with `font-size` and `radius`, so a larger font gives the same
+shape bigger.
 
 The `font` key names the look's UI family. There is no fontconfig in
 this stack: the panel draws with `--font PATH` or the file `font` in
@@ -210,9 +211,11 @@ To change one for the launcher alone, put the key in the look's
 renders them as top-level keys in `launch.toml`, only when it sets them. A
 value outside its list or range is refused by `scoot look validate`; a
 hand-edited `launch.toml` with one is reported on stderr and ignored, and
-that key keeps its default. The keys apply to the apps and run panels:
-`--dmenu` draws with its fixed painter and exits the moment it prints.
-Notification cards read the same `[effects]`; see their
+that key keeps its default. The keys apply to every mode. A `--dmenu`
+panel gets the shadow, the fill and the opening, but no closing fade and no
+sliding highlight: a pick or Escape prints and exits at once, so a script
+that waits on `scootlaunch --dmenu` never waits on motion. Notification
+cards read the same `[effects]`; see their
 [depth](../scootnotify/configure.md#depth) and
 [motion](../scootnotify/configure.md#motion).
 
@@ -308,7 +311,8 @@ With a motion set, the panel moves three ways:
   (plus at most 100 ms if the compositor stops sending frames), so a
   script that waits on `scootlaunch` waits that long. A click outside is
   different: the compositor asks the panel to close and ignores anything
-  it does after that, so it exits at once with no fade.
+  it does after that, so it exits at once with no fade. `--dmenu` never
+  fades out: it exits as soon as it has printed or been dismissed.
 - **Selection.** The highlight slides to the new row when the selection
   moves, and carries on from where it is when it moves again before it
   lands. Typing, which reorders the rows, snaps it. The row text takes the
@@ -330,8 +334,7 @@ the panel's motion off, set `motion = "none"` in the look or in
 > **Symptom:** a look sets `shadow` and the panel has none.
 > The panel warns on stderr, `shadow is not a shadow style` for a value
 > outside `none`, `soft`, `deep` and `glow`. Check
-> `<state>/look/launch.toml` for a `shadow` line; `--dmenu` never draws
-> one.
+> `<state>/look/launch.toml` for a `shadow` line.
 
 > **Symptom:** a click next to the panel closes it.
 > The shadow is part of the surface but not of the panel: a click on it

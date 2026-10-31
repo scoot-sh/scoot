@@ -20,7 +20,9 @@ use std::time::Duration;
 
 use scootui::test_support::{Session, Shot};
 
-use harness::{Panel, launch_bin, rgb, session_with_apps, session_with_stubs, wait_marker};
+use harness::{
+    Panel, launch_bin, rgb, session_with_apps, session_with_stubs, wait_for, wait_marker,
+};
 
 /// Starts a dmenu panel on `session` with `stdin_bytes` already
 /// written and closed (small inputs fit the pipe buffer, so the write
@@ -527,44 +529,177 @@ impl StdoutBytes for Panel {
     }
 }
 
-/// The look's shadow and motion are the apps and run panel's: a dmenu
-/// panel under the same look draws with its fixed painter, prints at once
-/// and exits at once (a script waiting on its pick never waits on a fade).
-#[test]
-fn a_look_with_a_shadow_and_motion_leaves_dmenu_alone() {
-    let Some((session, data_home)) = dmenu_session("dmenu-effects") else {
-        return;
-    };
+/// The border color of the default look, which finds the panel on screen.
+const BORDER: &str = "#f9e2af";
+
+/// A dmenu panel under a look layer saying `fragment`, with the client's
+/// wire log on (`WAYLAND_DEBUG`), for the tests below.
+fn start_under_look(tag: &str, fragment: &str, args: &[&str]) -> Option<Panel> {
+    let (session, data_home) = dmenu_session(tag)?;
     let look_dir = session.scratch.state_home().join("scoot").join("look");
     fs::create_dir_all(&look_dir).unwrap();
-    fs::write(
-        look_dir.join("launch.toml"),
-        "shadow = \"deep\"\nfill = \"gradient\"\nmotion = \"spring\"\nmotion-duration-ms = 1000\n",
-    )
-    .unwrap();
-    let mut panel = start_dmenu(
+    fs::write(look_dir.join("launch.toml"), fragment).unwrap();
+    let mut flags = vec!["--dmenu"];
+    flags.extend_from_slice(args);
+    Some(start_dmenu(
         session,
         data_home,
         b"alpha\nbeta\ngamma\n",
-        &["--dmenu"],
-        &[],
-    );
-    // The border is there at full strength at once: no entrance.
-    panel.wait_shown(rgb("#f9e2af"));
+        &flags,
+        &[("WAYLAND_DEBUG", "1")],
+    ))
+}
+
+/// How many requests of `name` (`commit`, `frame`) the client has logged
+/// on a surface.
+fn requests(panel: &Panel, name: &str) -> usize {
+    panel
+        .stderr()
+        .lines()
+        .filter(|line| line.contains("-> wl_surface@") && line.contains(&format!(".{name}(")))
+        .count()
+}
+
+fn luma(pixel: [u8; 3]) -> u32 {
+    pixel.iter().map(|c| u32::from(*c)).sum()
+}
+
+const SOFT: &str = "shadow = \"soft\"\n";
+const DEEP_GRADIENT: &str = "shadow = \"deep\"\nfill = \"gradient\"\n";
+const MOVING: &str =
+    "shadow = \"soft\"\nfill = \"gradient\"\nmotion = \"spring\"\nmotion-duration-ms = 1000\n";
+
+/// The look's shadow and fill reach a dmenu panel: a darker band under the
+/// border, the panel exactly where a plain dmenu puts it, and a fill that
+/// is lighter at the top than at the bottom.
+#[test]
+fn a_look_gives_a_dmenu_its_shadow_and_fill() {
+    let Some(mut plain) = start_under_look("dmenu-fx-plain", "", &[]) else {
+        return;
+    };
+    plain.wait_shown(rgb(BORDER));
     std::thread::sleep(Duration::from_millis(300));
+    let before = plain.find_panel(rgb(BORDER));
+    let flat = plain.shot();
+    plain.key("Escape");
+    plain.wait_exit();
+    let Some(mut panel) = start_under_look("dmenu-fx-deep", DEEP_GRADIENT, &[]) else {
+        return;
+    };
+    panel.wait_shown(rgb(BORDER));
+    std::thread::sleep(Duration::from_millis(300));
+    panel.save("dmenu-shadow-gradient");
+    let bounds = panel.find_panel(rgb(BORDER));
+    assert_eq!(bounds, before, "the shadow does not move the panel");
+    let (x0, y0, x1, y1) = bounds;
+    let shot = panel.shot();
+    let backdrop = shot.at(5, 5);
+    let mid = (x0 + x1) / 2;
+    assert!(
+        luma(shot.at(mid, y1 + 4)) < luma(backdrop),
+        "a shadow under the panel: {:?} over {backdrop:?}",
+        shot.at(mid, y1 + 4)
+    );
+    assert_eq!(shot.at(mid, y1 + 120), backdrop, "and none far away");
+    // The fill: the top inner row is lighter than the bottom, and unlike
+    // the flat panel's.
+    let (top, bottom) = (y0 + 5, y1 - 5);
+    assert!(
+        luma(shot.at(x0 + 4, top)) > luma(shot.at(x0 + 4, bottom)),
+        "the light is at the top: {:?} over {:?}",
+        shot.at(x0 + 4, top),
+        shot.at(x0 + 4, bottom)
+    );
+    assert_ne!(shot.at(x0 + 4, top), flat.at(x0 + 4, top));
+    panel.key("Escape");
+    panel.wait_exit();
+}
+
+/// With a shadow the surface is bigger than the panel, so a press on the
+/// shadow is a press outside (dismiss, exit 1, nothing printed), a click
+/// on a row still picks that row, and the row hit follows the panel, not
+/// the surface.
+#[test]
+fn under_a_shadow_a_press_on_it_dismisses_and_a_row_click_still_picks() {
+    let Some(mut panel) = start_under_look("dmenu-fx-press", SOFT, &[]) else {
+        return;
+    };
+    panel.wait_shown(rgb(BORDER));
+    std::thread::sleep(Duration::from_millis(300));
+    let (x0, y0, _, y1) = panel.find_panel(rgb(BORDER));
+    // 6 px outside the border is inside the soft shadow's room.
+    panel.click(x0 - 6, (y0 + y1) / 2);
+    let status = panel.wait_exit();
+    assert_eq!(status.code(), Some(1), "a press on the shadow dismisses");
+    assert_eq!(panel.stdout(), "", "and prints nothing");
+    panel.clean();
+
+    let Some(mut panel) = start_under_look("dmenu-fx-row", SOFT, &[]) else {
+        return;
+    };
+    panel.wait_shown(rgb(BORDER));
+    std::thread::sleep(Duration::from_millis(300));
+    let (x0, y0, x1, _) = panel.find_panel(rgb(BORDER));
+    // The third row's middle: rows start 35 px under the border box.
+    panel.click((x0 + x1) / 2, y0 + 35 + 2 * 21 + 10);
+    let status = panel.wait_exit();
+    assert!(status.success(), "{}", panel.stderr());
+    assert_eq!(panel.stdout(), "gamma\n", "the row under the pointer");
+    panel.clean();
+}
+
+/// A look with motion enters a dmenu panel, and the panel then asks for
+/// nothing; a pick and Escape exit at once instead of fading (a script
+/// waiting on its pick never waits on a fade, whatever the look's length),
+/// the pick printed before the exit.
+#[test]
+fn a_dmenu_enters_with_the_look_and_never_fades_out() {
+    let Some(mut panel) = start_under_look("dmenu-fx-moving", MOVING, &[]) else {
+        return;
+    };
+    wait_for("the first frame", Duration::from_secs(10), || {
+        requests(&panel, "commit") >= 2
+    });
+    // Past the 1000 ms entrance.
+    std::thread::sleep(Duration::from_millis(1600));
+    let (commits, frames) = (requests(&panel, "commit"), requests(&panel, "frame"));
+    assert!(frames > 2, "the entrance asked for frames: {frames}");
+    panel.wait_shown(rgb(BORDER));
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(requests(&panel, "commit"), commits, "commits at rest");
+    assert_eq!(requests(&panel, "frame"), frames, "frame requests at rest");
+    eprintln!("dmenu entrance: {commits} commits, {frames} frame requests, then none for 2 s");
+    // A keystroke repaints once and asks for no frame callback.
+    panel.key("Down");
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(requests(&panel, "frame"), frames, "no sliding highlight");
     let sent = std::time::Instant::now();
     panel.key("Return");
     let status = panel.wait_exit();
+    let took = sent.elapsed();
+    eprintln!("a dmenu pick under a 1000 ms entrance: exited after {took:?}");
     assert!(status.success(), "{}", panel.stderr());
-    assert_eq!(panel.stdout(), "alpha\n");
-    eprintln!(
-        "a dmenu pick under a 1000 ms fade: exited after {:?}",
-        sent.elapsed()
-    );
+    assert_eq!(panel.stdout(), "beta\n");
     assert!(
-        sent.elapsed() < Duration::from_millis(900),
-        "the pick did not wait for a fade: {:?}",
-        sent.elapsed()
+        took < Duration::from_millis(900),
+        "the pick did not wait for a fade: {took:?}"
+    );
+    panel.clean();
+
+    let Some(mut panel) = start_under_look("dmenu-fx-escape", MOVING, &[]) else {
+        return;
+    };
+    panel.wait_shown(rgb(BORDER));
+    let sent = std::time::Instant::now();
+    panel.key("Escape");
+    let status = panel.wait_exit();
+    let took = sent.elapsed();
+    eprintln!("a dmenu Escape under a 1000 ms entrance: exited after {took:?}");
+    assert_eq!(status.code(), Some(1));
+    assert_eq!(panel.stdout(), "");
+    assert!(
+        took < Duration::from_millis(900),
+        "Escape did not wait for a fade: {took:?}"
     );
     panel.clean();
 }

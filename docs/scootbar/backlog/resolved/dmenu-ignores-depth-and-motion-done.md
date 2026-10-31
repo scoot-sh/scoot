@@ -1,9 +1,10 @@
 ---
 title: "scootlaunch --dmenu ignores the look's shadow, fill and motion"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-31"
 ---
 
 # scootlaunch --dmenu ignores the look's shadow, fill and motion
@@ -33,3 +34,20 @@ what that draws on a 2x output before building on it.
 
 The sliding selection highlight in dmenu lists (the shared list widget draws
 its own selection fill).
+
+## Resolution
+
+Landed 2026-10-31 (follow-up to #807). The dmenu panel composes on the same
+stage as the apps panel: `paint_dmenu` paints into the panel-sized slice the
+stage hands it, at a device scale (`dmenu_layout`), through the same chrome
+as the apps panel so the `fill` gradient applies. Shadow, fill and the
+entrance apply; there is no exit fade (`Pump::fade_out` returns at once for
+dmenu) and no sliding highlight, so a pick or Escape prints and exits as
+before and a script waiting on the pick never waits on motion.
+
+The "check what that draws on a 2x output" question found a larger gap:
+scootlaunch handles no scale event in any mode, so it draws 1x on every
+output and the compositor scales it. Filed as
+[launch-ignores-preferred-scale](../launch-ignores-preferred-scale.md); the
+dmenu painter is scale-correct and unit-tested at 1.5x, 2x and 3x so that fix
+does not need to touch it.

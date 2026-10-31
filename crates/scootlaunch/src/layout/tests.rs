@@ -200,3 +200,22 @@ fn the_dmenu_layout_keeps_the_old_numbers() {
     assert_eq!(layout.row_h, 21);
     assert_eq!(layout.height(11), 2 * 10 + 21 * 12 + 4);
 }
+
+#[test]
+fn the_dmenu_layout_scales_its_fixed_spacing_with_the_output() {
+    // 13 px text at 2x is 26 device pixels: the border, padding, gap and
+    // row slack double with it.
+    let layout = Layout::dmenu_scaled(26.0, 2.0);
+    assert_eq!((layout.border, layout.pad, layout.gap), (4, 16, 8));
+    assert_eq!(layout.row_h, 26 + 16);
+    // At 1.5 the rounding is the apps panel's: round, never zero border.
+    let layout = Layout::dmenu_scaled(19.5, 1.5);
+    assert_eq!((layout.border, layout.pad, layout.gap), (3, 12, 6));
+    assert_eq!(layout.row_h, 20 + 12);
+    // Hostile values stay finite and nonzero.
+    for (em, factor) in [(f32::NAN, 1.0), (1.0, f64::NAN), (0.0, 0.0), (1e9, 1e9)] {
+        let layout = Layout::dmenu_scaled(em, factor);
+        assert!(layout.border >= 1 && layout.row_h >= 1, "{em} {factor}");
+        assert!(layout.height(64) < u32::MAX, "{em} {factor}");
+    }
+}
