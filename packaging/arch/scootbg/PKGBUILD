@@ -11,7 +11,7 @@
 # this exact file against a same-layout tarball of HEAD.
 
 pkgname=scootbg
-pkgver=0.6.18
+pkgver=0.6.19
 pkgrel=1
 pkgdesc='Wallpaper daemon for the scoot compositor'
 arch=('x86_64' 'aarch64')

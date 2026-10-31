@@ -17,6 +17,13 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.19](https://github.com/scoot-sh/scoot/compare/v0.6.18...v0.6.19) - 2026-10-31
+
+### scoot
+
+- added: scroll binds, "super+scroll-down" = "focus-window down" ([#830](https://github.com/scoot-sh/scoot/pull/830))
+- added: touchpad swipe gestures, three fingers scroll the strip ([#832](https://github.com/scoot-sh/scoot/pull/832))
+
 ## [0.6.18](https://github.com/scoot-sh/scoot/compare/v0.6.17...v0.6.18) - 2026-10-31
 
 ### scoot
