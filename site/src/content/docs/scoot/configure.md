@@ -13,8 +13,8 @@ re-applies live with `scoot msg reload`. No config file yet?
 `--config PATH` loads a TOML file explicitly. Without it, scoot looks
 for `$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
 `~/.config/scoot/config.toml`, and runs on built-in defaults if
-neither exists. Fifteen optional tables: `[layout]`, `[appearance]`,
-`[animation]`, `[scroll]`, `[output]`, `[[outputs]]`, `[renderer]`, `[tty]`, `[xwayland]`, `[virtual_input]`,
+neither exists. Sixteen optional tables: `[layout]`, `[appearance]`,
+`[animation]`, `[scroll]`, `[gestures]`, `[output]`, `[[outputs]]`, `[renderer]`, `[tty]`, `[xwayland]`, `[virtual_input]`,
 `[autostart]`, `[floating]`, `[wallpaper]`, `[binds]`, `[global_shortcuts]` — plus any number of
 `[[window_rule]]` entries. Every field in every table is itself
 optional and defaults independently, so a config that only sets `gap`
@@ -75,7 +75,7 @@ both triggers above say exactly when.
 **Applied live:** layout (gap, column widths, default width), output
 scales and positions, `[[outputs]]` modes (a live resize per backend —
 `--nested` refuses them, the host owns the size), appearance (ring, background, corners, cursor), animation
-(enabled, duration, easing), `[scroll] step`, the whole
+(enabled, duration, easing), `[scroll] step`, `[gestures]`, the whole
 `[binds]` table (scroll binds included), the `[global_shortcuts]` chords, new `[autostart]` spawn entries, `[floating]` and the
 `[[window_rule]]`s (for windows that map after the reload), `[wallpaper]`
 (handed to scootbg again), `[xwayland] fractional`. The reply names
@@ -247,6 +247,32 @@ A smaller step fires more often per swipe. A reload forgets any
 half-counted step, so the new value never inherits motion measured against
 the old one.
 
+## Gestures
+
+`[gestures]` sets what a multi-finger touchpad swipe does. A swipe with
+exactly `swipe_fingers` fingers is scoot's. Behaviour, edge cases and what to try when nothing happens
+are in [Touchpad gestures](./keybindings.md#touchpad-gestures).
+
+| Field | Type | Default | Reload | Meaning |
+|---|---|---|---|---|
+| `swipe_fingers` | `3` or `4` | `3` | live | How many fingers make a swipe scoot's. Anything else warns and uses `3`. |
+| `horizontal` | string | `"focus-column"` | live | `"focus-column"` scrolls the strip under the fingers and focuses the column it settles on. `"none"` turns the horizontal swipe off. |
+| `vertical` | string | `"focus-workspace"` | live | `"focus-workspace"` or `"focus-window"` fires one step when a vertical swipe ends. `"none"` turns it off. |
+| `natural` | bool | `true` | live | The content follows the fingers, as on macOS. `false` reverses both axes. |
+| `sensitivity` | number | `1.0` | live | Scales how far the strip follows the fingers; `1.0` is one logical pixel per libinput swipe unit, about 10 pixels per millimetre of finger travel on the pad this was measured on, and a real pad may differ. Raise it if swipes feel short. Clamped `0.1..=10`; a non-number or non-finite value warns and uses `1.0`. |
+
+```toml
+[gestures]
+swipe_fingers = 4
+vertical = "focus-window"
+natural = false
+```
+
+Each bad value falls back to its own default and leaves the rest of the
+table alone. With `horizontal` and `vertical` both `"none"`, swipes are not
+scoot's at all. A reload applies from the next swipe: one already under
+way finishes with the values it began with.
+
 ## Example config.toml
 
 ```toml
@@ -292,6 +318,14 @@ scale = 1.0
 # [scroll]
 # Continuous scroll units per scroll-bind step (a wheel click is 15). Live on reload.
 # step = 60
+
+# [gestures]
+# Multi-finger touchpad swipes. Live on reload.
+# swipe_fingers = 3             # 3 or 4
+# horizontal = "focus-column"   # or "none"
+# vertical = "focus-workspace"  # "focus-window" or "none"
+# natural = true                # content follows the fingers
+# sensitivity = 1.0             # how far the strip follows the fingers, 0.1..=10
 
 # [renderer]
 # Type string, default "auto". One of "auto" (the default: the GPU

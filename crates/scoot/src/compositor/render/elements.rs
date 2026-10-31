@@ -122,6 +122,11 @@ pub(super) struct FrameContext {
     /// clear color and frame callbacks are all answering the same question
     /// about the same frame.
     pub(super) locked: bool,
+    /// How far a touchpad swipe has pulled this output's tiled strip from
+    /// its targets right now, in logical pixels (see `gesture.rs`). Zero
+    /// unless a swipe or its settle is on this output. Added to the
+    /// workspace-switch viewport offset wherever that is applied.
+    pub(super) gesture_dx: i32,
 }
 
 impl FrameContext {
@@ -311,6 +316,7 @@ impl State {
             geometry,
             output: output_id,
             locked,
+            gesture_dx,
         } = *frame;
         // The client-supplied cursor surface this frame drew from, if any.
         let mut cursor_surface: Option<WlSurface> = None;
@@ -390,7 +396,8 @@ impl State {
             // per frame: zero when idle. One branch covers disabled/idle.
             let viewport_dx = output_id
                 .map(|id| viewport_delta(&self.viewport_slides, id, now))
-                .unwrap_or(0);
+                .unwrap_or(0)
+                .saturating_add(gesture_dx);
             let window_elements: Vec<Elements<R>> = match (geometry, arrangement, output_id) {
                 (Some(region), Some(arranged), Some(output_id)) => window_elements(
                     &self.space,
@@ -501,7 +508,8 @@ where
     let viewport_dx = frame
         .output
         .map(|id| viewport_delta(viewport, id, now))
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .saturating_add(frame.gesture_dx);
     let drawn = |placement: &Placement| {
         let mut rect = drawn_rect(placement.rect, windows.get(&placement.id));
         // One branch on empty covers the disabled and idle cases; the

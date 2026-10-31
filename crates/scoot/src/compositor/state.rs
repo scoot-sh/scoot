@@ -1126,6 +1126,10 @@ pub struct State {
     /// Scroll-bind accumulators and the live `[scroll] step` (see
     /// `scroll_binds.rs`).
     pub(super) scroll_binds: super::scroll_binds::ScrollBinds,
+    /// Touchpad swipe gestures: the live `[gestures]` config, the swipe in
+    /// progress and the settle after it (see `gesture.rs`). Idle, one
+    /// `Option` test per frame.
+    pub(super) gestures: super::gesture::Gestures,
     /// Every config `[binds]` entry that never made it into
     /// [`State::keybindings`], each with its reason (see
     /// [`scoot_ipc::SkippedBind`]): what `scoot msg binds` lists beside the
@@ -1571,6 +1575,7 @@ impl State {
             interaction_serials: input::interaction::Recent::default(),
             keybindings,
             scroll_binds: Default::default(),
+            gestures: Default::default(),
             skipped_binds: Vec::new(),
             global_shortcuts: GlobalShortcuts::new(),
             current_conn: 0,

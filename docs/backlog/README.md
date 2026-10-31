@@ -269,6 +269,7 @@ falsify. Read `flexwm` there as `scoot`.
   mouse having to move; recognition is one branch plus one typemap probe,
   zero new state
 - [`ext-workspace-v1` `urgent` state bit](./protocols/ext-workspace-urgent-state.md) — low, filed 2026-09-29 (scootbar planning); needs a policy decision first, since an xdg-activation request always focuses today
+- [`zwp_pointer_gestures_v1`](./protocols/pointer-gestures-v1.md) — low, filed 2026-10-30 (touchpad swipes, #820): the global is not advertised, so swipes, pinches and holds reach no client; the swipe forwarding is already in place behind it
 - [Portal global-shortcuts backend (stage 2)](./resolved/global-shortcuts-portal-backend-done.md) — RESOLVED 2026-10-22: `scoot-globalshortcuts-portal` serves `impl.portal.GlobalShortcuts` v2 over the stage-1 grab, with `.portal` file, packaging, Nix wiring and live proof (Activated/Deactivated with timestamps, heal across a compositor restart)
 - [Deferred: hyprland-global-shortcuts-v1 and xx-hotkey-v1](./protocols/global-shortcuts-deferred-wayland.md) — low, filed 2026-10-22 (W43): the two protocol paths not taken, and what would make either worthwhile; revisit once the portal backend exists
 - [Pointer cursor session follow-ups from the #774 review](./protocols/cursor-session-followups.md) — low, filed 2026-10-27: scale-change test, a real-GPU run, hotspot rounding at fractional scale, a session cap

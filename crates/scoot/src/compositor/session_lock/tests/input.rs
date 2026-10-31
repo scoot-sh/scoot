@@ -407,6 +407,50 @@ fn scroll_binds_follow_the_lock_rule() {
     assert_ne!(width(&mut fixture), before, "the bind never worked");
 }
 
+/// A swipe is decided once at its begin. Begun behind the lock screen it is
+/// the lock client's (forwarded whole, never claimed); begun before the lock
+/// and claimed, the lock drops its visuals and it ends without acting.
+#[test]
+fn swipes_follow_the_lock_rule_and_never_straddle_it() {
+    use crate::compositor::gesture::Route;
+
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    let focused = |fixture: &Fixture| fixture.state.world.focused_window();
+
+    // Claimed first, then the session locks mid-swipe.
+    fixture.state.gesture_swipe_begin(3, 1000);
+    assert_eq!(fixture.state.gestures.route, Route::Claimed);
+    fixture.state.gesture_swipe_update(-80.0, 0.0, 1010);
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    fixture.state.gesture_swipe_update(-80.0, 0.0, 1020);
+    assert_eq!(
+        fixture
+            .state
+            .gesture_shift(fixture.state.outputs.primary_id()),
+        0,
+        "a locked session still draws a swipe offset"
+    );
+    let before = focused(&fixture);
+    fixture.state.gesture_swipe_end(false, 1030);
+    assert_eq!(fixture.state.gestures.route, Route::Idle);
+    assert_eq!(focused(&fixture), before, "the swipe acted behind the lock");
+
+    // Begun while locked: forwarded, so claimed never.
+    fixture.state.gesture_swipe_begin(3, 2000);
+    assert_eq!(fixture.state.gestures.route, Route::Forwarded);
+    fixture.state.gesture_swipe_update(-300.0, 0.0, 2010);
+    fixture.state.gesture_swipe_end(false, 2020);
+    assert_eq!(focused(&fixture), before);
+
+    // Unlocked, the same swipe is scoot's again.
+    fixture.run(Step::Unlock { lock: 0 });
+    fixture.state.gesture_swipe_begin(3, 3000);
+    assert_eq!(fixture.state.gestures.route, Route::Claimed);
+    fixture.state.gesture_swipe_end(true, 3010);
+}
+
 /// A `spawn` bind *without* the flag stays refused while locked: the
 /// keystroke goes to the lock client like any other, and nothing runs. A
 /// terminal from behind the lock screen would be a complete bypass, so the

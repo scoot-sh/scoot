@@ -28,6 +28,7 @@ mod foreign_toplevel;
 mod foreign_toplevel_management;
 mod fullscreen;
 mod gamma_control;
+mod gesture;
 mod global_shortcuts;
 mod handlers;
 pub(crate) mod headless;
@@ -480,6 +481,7 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     state.virtual_input_binds = loaded.virtual_input_binds;
     state.animation = loaded.animation;
     state.scroll_binds.step = loaded.scroll_step;
+    state.gestures.config = loaded.gestures;
     virtual_input::init(&mut state, loaded.virtual_input);
     if xwayland {
         #[cfg(feature = "xwayland")]

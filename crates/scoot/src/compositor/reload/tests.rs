@@ -30,6 +30,7 @@ use super::{ScaleReload, autostart_delta, field, output_refusals, scale_reload};
 use crate::cli::{RendererKind, RendererRequest};
 use crate::compositor::config;
 use crate::compositor::decorations::{Appearance, Color};
+use crate::compositor::gesture::{GestureConfig, HorizontalMode, Route, VerticalMode};
 use crate::compositor::headless;
 use crate::compositor::keybindings::{BindFlags, Bound, Keybindings, Modifiers};
 use crate::compositor::output_config::EntriesDiff;
@@ -969,6 +970,53 @@ fn a_hide_delay_reload_applies_live_and_re_arms() {
     assert!(
         applied(&second).is_empty() && refused(&second).is_empty(),
         "the second reload changed nothing it was asked to -- and says so: {second:?}"
+    );
+}
+
+#[test]
+fn a_gestures_reload_applies_each_key_live_and_a_swipe_in_flight_keeps_its_own() {
+    let mut fixture = Fixture::with_config("");
+    assert_eq!(fixture.state.gestures.config, GestureConfig::default());
+    // A swipe is open and claimed when the file changes under it.
+    fixture.state.gesture_swipe_begin(3, 1000);
+    assert_eq!(fixture.state.gestures.route, Route::Claimed);
+    fixture.rewrite(
+        r##"
+        [gestures]
+        swipe_fingers = 4
+        horizontal = "none"
+        vertical = "focus-window"
+        natural = false
+        sensitivity = 2.5
+        "##,
+    );
+    let response = fixture.reload();
+    assert_eq!(
+        applied(&response),
+        &[
+            field::GESTURES_SWIPE_FINGERS.to_owned(),
+            field::GESTURES_HORIZONTAL.to_owned(),
+            field::GESTURES_VERTICAL.to_owned(),
+            field::GESTURES_NATURAL.to_owned(),
+            field::GESTURES_SENSITIVITY.to_owned(),
+        ]
+    );
+    assert!(refused(&response).is_empty(), "{response:?}");
+    let live = fixture.state.gestures.config;
+    assert_eq!(live.fingers, 4);
+    assert_eq!(live.horizontal, HorizontalMode::None);
+    assert_eq!(live.vertical, VerticalMode::FocusWindow);
+    assert!(!live.natural);
+    assert_eq!(live.sensitivity, 2.5);
+    // The open swipe is still the claim it began as: no half sequence.
+    assert_eq!(fixture.state.gestures.route, Route::Claimed);
+    fixture.state.gesture_swipe_end(true, 1100);
+    assert_eq!(fixture.state.gestures.route, Route::Idle);
+    // And a second reload with nothing new says so.
+    let second = fixture.reload();
+    assert!(
+        applied(&second).is_empty() && refused(&second).is_empty(),
+        "{second:?}"
     );
 }
 

@@ -341,11 +341,12 @@ impl State {
         }
         // Drop slides for windows that are gone or no longer slide. Linear in
         // both lists, no allocation: the common case is a handful of slides.
+        let gestures = &self.gestures;
         self.slides.retain(|slide| {
             arrangement
                 .placements
                 .iter()
-                .any(|p| p.id == slide.id && should_slide(p))
+                .any(|p| p.id == slide.id && should_slide(p) && !gestures.owns(p.output))
         });
         let duration = self.animation.duration;
         let easing = self.animation.easing;
@@ -366,7 +367,9 @@ impl State {
             return;
         }
         for placement in &arrangement.placements {
-            if !should_slide(placement) {
+            // A swipe's own offset animates this output's strip (see
+            // `gesture.rs`): a slide on top would move it twice.
+            if !should_slide(placement) || self.gestures.owns(placement.output) {
                 continue;
             }
             let target_x = placement.rect.x;

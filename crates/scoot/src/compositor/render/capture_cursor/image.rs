@@ -144,6 +144,8 @@ where
         geometry: state.space.output_geometry(output),
         output: state.outputs.id_of(output),
         locked: state.session_lock.is_locked(),
+        // Only the cursor is gathered from this context.
+        gesture_dx: 0,
     };
     let scale = Scale::from(frame.scale);
     pool.cursor.clear();
