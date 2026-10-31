@@ -21,7 +21,8 @@ use std::time::Duration;
 use scootui::test_support::{Session, Shot};
 
 use harness::{
-    Panel, launch_bin, rgb, session_with_apps, session_with_stubs, wait_for, wait_marker,
+    Panel, calls, created_buffers, launch_bin, rgb, scaled, session_with_apps,
+    session_with_apps_config, session_with_stubs, wait_for, wait_marker,
 };
 
 /// Starts a dmenu panel on `session` with `stdin_bytes` already
@@ -535,7 +536,12 @@ const BORDER: &str = "#f9e2af";
 /// A dmenu panel under a look layer saying `fragment`, with the client's
 /// wire log on (`WAYLAND_DEBUG`), for the tests below.
 fn start_under_look(tag: &str, fragment: &str, args: &[&str]) -> Option<Panel> {
-    let (session, data_home) = dmenu_session(tag)?;
+    start_under_look_at(tag, "", fragment, args)
+}
+
+/// [`start_under_look`] on a compositor saying `config` (an output scale).
+fn start_under_look_at(tag: &str, config: &str, fragment: &str, args: &[&str]) -> Option<Panel> {
+    let (session, data_home) = session_with_apps_config(tag, &[], config)?;
     let look_dir = session.scratch.state_home().join("scoot").join("look");
     fs::create_dir_all(&look_dir).unwrap();
     fs::write(look_dir.join("launch.toml"), fragment).unwrap();
@@ -702,4 +708,69 @@ fn a_dmenu_enters_with_the_look_and_never_fades_out() {
         "Escape did not wait for a fade: {took:?}"
     );
     panel.clean();
+}
+
+/// The same on HiDPI outputs, 1.25x to 2x: the buffer is the surface (the
+/// shadow's room included) times the scale to the pixel, a press on the
+/// shadow still dismisses, and a click on the third row still picks it.
+/// The device layout rounds each measurement on its own (3 px taller than
+/// the scaled logical height at 1.5x unfitted), so the click lands where the
+/// rows are drawn, not where the 1x layout would put them.
+#[test]
+fn a_scaled_dmenu_under_a_shadow_fills_its_buffer_and_still_picks() {
+    for (scale, v120) in [("1.25", 150u32), ("1.5", 180), ("1.75", 210), ("2", 240)] {
+        let factor = f64::from(v120) / 120.0;
+        let config = format!("[output]\nscale = {scale}\n");
+        let tag = format!("dmenu-fx-scale-{scale}");
+        let Some(mut panel) = start_under_look_at(&format!("{tag}-press"), &config, SOFT, &[])
+        else {
+            return;
+        };
+        panel.wait_shown(rgb(BORDER));
+        std::thread::sleep(Duration::from_millis(300));
+        let log = panel.stderr();
+        let destination = calls(&log, "set_destination").pop().expect("a destination");
+        let want = (scaled(destination[0], v120), scaled(destination[1], v120));
+        assert_eq!(
+            created_buffers(&log),
+            vec![want; created_buffers(&log).len()],
+            "{scale}x: every buffer is the surface {destination:?} scaled"
+        );
+        assert!(!created_buffers(&log).is_empty());
+        let (x0, y0, _, y1) = panel.find_panel(rgb(BORDER));
+        // 6 logical px outside the border is inside the soft shadow's room.
+        let logical = |device: u32| (f64::from(device) / factor) as u32;
+        panel.click(logical(x0) - 6, logical((y0 + y1) / 2));
+        let status = panel.wait_exit();
+        assert_eq!(
+            status.code(),
+            Some(1),
+            "{scale}x: a press on the shadow dismisses"
+        );
+        assert_eq!(panel.stdout(), "", "and prints nothing");
+        panel.clean();
+
+        let Some(mut panel) = start_under_look_at(&format!("{tag}-row"), &config, SOFT, &[]) else {
+            return;
+        };
+        panel.wait_shown(rgb(BORDER));
+        std::thread::sleep(Duration::from_millis(300));
+        let (x0, y0, x1, _) = panel.find_panel(rgb(BORDER));
+        // The third row's middle, in device pixels from the border box: the
+        // border and padding, the search row and the gap, two rows and half
+        // of the third. A row is its text plus 8 logical px of slack.
+        let round = |v: f64| v.round();
+        let inner = round(2.0 * factor) + round(8.0 * factor);
+        let row = (13.0 * factor).ceil() + round(8.0 * factor);
+        let mid = inner + row + round(4.0 * factor) + 2.0 * row + row / 2.0;
+        panel.click(logical((x0 + x1) / 2), logical(y0 + mid as u32));
+        let status = panel.wait_exit();
+        assert!(status.success(), "{scale}x: {}", panel.stderr());
+        assert_eq!(
+            panel.stdout(),
+            "gamma\n",
+            "{scale}x: the row under the pointer"
+        );
+        panel.clean();
+    }
 }

@@ -36,6 +36,9 @@ fn look(shadow: ShadowStyle, fill: FillStyle, motion: Curve) -> Look {
     }
 }
 
+/// How many list rows the rig's panel holds.
+const ROWS: u32 = 6;
+
 /// A dmenu panel, its look and its effects, ready to draw frames of.
 struct Rig {
     _dir: tempfile::TempDir,
@@ -47,6 +50,8 @@ struct Rig {
     scale: Scale,
     width: u32,
     height: u32,
+    /// The list rows `height` holds.
+    rows: u32,
 }
 
 impl Rig {
@@ -54,10 +59,10 @@ impl Rig {
         let dir = tempfile::tempdir().expect("tmp");
         let text = super::bytes_tests::test_text(dir.path());
         let lines: Vec<String> = (0..8).map(|n| format!("line {n}")).collect();
-        let dui = DmenuUi::open(lines, 6, false, false);
+        let dui = DmenuUi::open(lines, ROWS as usize, false, false);
         let layout = Layout::dmenu(look.font_size_px);
         let width = (30.0 * look.font_size_px) as u32;
-        let height = layout.height(6);
+        let height = layout.height(ROWS);
         let spec = DmenuSpec {
             prompt: String::from("> "),
             placeholder: String::new(),
@@ -76,6 +81,7 @@ impl Rig {
             scale,
             width,
             height,
+            rows: ROWS,
         }
     }
 
@@ -104,7 +110,7 @@ impl Rig {
             scale: self.scale,
         };
         let (dui, text, look, spec) = (&self.dui, &mut self.text, &self.look, &self.spec);
-        let (width, height, scale) = (self.width, self.height, self.scale);
+        let (width, height, rows, scale) = (self.width, self.height, self.rows, self.scale);
         stage_frame(
             &mut self.fx,
             &shape,
@@ -116,7 +122,7 @@ impl Rig {
             now,
             |pixels, panel_dims, _| {
                 paint_dmenu(
-                    pixels, panel_dims, dui, text, look, width, height, scale, spec,
+                    pixels, panel_dims, dui, text, look, width, height, rows, scale, spec,
                 );
             },
         )
@@ -147,6 +153,7 @@ impl Rig {
             &self.look,
             self.width,
             self.height,
+            self.rows,
             self.scale,
             &self.spec,
         );
@@ -343,11 +350,28 @@ fn a_frame_that_only_advances_the_entrance_does_not_repaint_the_panel() {
 
 #[test]
 fn a_warm_dmenu_frame_allocates_nothing_in_the_entrance_and_at_rest() {
+    // At every scale a compositor sends, and after the scale moved: the
+    // layers and tables are rebuilt once for the new size, then reused.
+    for (first, scale) in [
+        (Scale::Integer(1), Scale::Integer(1)),
+        (Scale::Integer(1), Scale::Fractional(180)),
+        (Scale::Fractional(150), Scale::Integer(2)),
+        (Scale::Integer(2), Scale::Fractional(210)),
+    ] {
+        let mut rig = Rig::new(
+            look(ShadowStyle::Soft, FillStyle::Gradient, Curve::EaseOut),
+            first,
+        );
+        let (_, dims) = rig.surface();
+        let mut out = vec![0u8; dims.0 as usize * dims.1 as usize * 4];
+        rig.frame_into(&mut out, true, Instant::now());
+        rig.scale = scale;
+        warm_dmenu_frames_allocate_nothing(rig);
+    }
+}
+
+fn warm_dmenu_frames_allocate_nothing(mut rig: Rig) {
     let base = Instant::now();
-    let mut rig = Rig::new(
-        look(ShadowStyle::Soft, FillStyle::Gradient, Curve::EaseOut),
-        Scale::Integer(1),
-    );
     let (_, dims) = rig.surface();
     let mut out = vec![0u8; dims.0 as usize * dims.1 as usize * 4];
     // Warm up: the layers, the shadow tables, the glyph cache.
@@ -411,7 +435,7 @@ fn the_dmenu_draws_at_a_device_scale_with_the_border_scaled() {
         // The prompt and entry are drawn, so the top row of widgets has
         // ink: the text is scaled too (a 1x draw in the corner would leave
         // the lower right of a scaled buffer empty).
-        let layout = dmenu_layout(&rig.look, scale);
+        let layout = dmenu_layout(&rig.look, scale, rig.height, rig.rows);
         let last_row_y = layout.list_y() + 5 * layout.row_h + layout.row_h / 2;
         assert!(last_row_y < dims.1, "{factor}x: the rows fit the buffer");
         let selected_row_y = layout.list_y() + layout.row_h / 2;
@@ -463,7 +487,8 @@ fn an_empty_prompt_only_or_tiny_dmenu_draws_without_a_panic() {
         );
         rig.dui = DmenuUi::open(lines, 6, false, prompt_only);
         rig.spec.prompt_only = prompt_only;
-        rig.height = Layout::dmenu(rig.look.font_size_px).height(if prompt_only { 0 } else { 6 });
+        rig.rows = if prompt_only { 0 } else { 6 };
+        rig.height = Layout::dmenu(rig.look.font_size_px).height(rig.rows);
         for ms in [0, 30, 90, 600] {
             let (_, _, origin) = rig.frame(ms == 0, at(base, ms));
             assert_eq!(origin, rig.fx.room);
@@ -505,6 +530,7 @@ fn an_empty_prompt_only_or_tiny_dmenu_draws_without_a_panic() {
                 look,
                 shape.size.0,
                 shape.size.1,
+                rig.rows,
                 Scale::Integer(1),
                 spec,
             );

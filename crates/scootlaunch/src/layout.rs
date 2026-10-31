@@ -67,6 +67,14 @@ impl Rect {
     }
 }
 
+/// A height the rows are held to: `rows` list rows (plus the search line)
+/// and the padding around them fit in `height` device pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fit {
+    pub height: u32,
+    pub rows: u32,
+}
+
 /// The panel's measurements in device pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Layout {
@@ -89,6 +97,18 @@ pub struct Layout {
     pub radius: u32,
 }
 
+/// `row_h`, or less when `fit` says the panel would stand taller than its
+/// height: the rows share what is left after the padding and the gap.
+/// Never more than `row_h`, and never under the text's own height.
+fn fit_row(row_h: u32, inner: u32, gap: u32, em: f32, fit: Option<Fit>) -> u32 {
+    let Some(fit) = fit else {
+        return row_h;
+    };
+    let fixed = inner.saturating_mul(2).saturating_add(gap);
+    let each = fit.height.saturating_sub(fixed) / fit.rows.saturating_add(1);
+    row_h.min(each.max(em.ceil() as u32))
+}
+
 fn round(value: f32) -> u32 {
     value.round().clamp(0.0, 4096.0) as u32
 }
@@ -98,6 +118,15 @@ impl Layout {
     /// at output scale `factor` (1.0 for logical pixels). `em` and
     /// `radius` are already in device pixels.
     pub fn new(em: f32, radius: u32, factor: f64) -> Self {
+        Self::fitted(em, radius, factor, None)
+    }
+
+    /// [`Layout::new`] with the rows held to `fit`: the layout rounds each
+    /// measurement on its own, so at a fractional scale its height can come
+    /// out a few pixels over the logical height scaled (11 px at worst over
+    /// a tall list), and a buffer of the scaled size would clip it. The
+    /// rows give up the pixels, never below the text's own height.
+    pub fn fitted(em: f32, radius: u32, factor: f64, fit: Option<Fit>) -> Self {
         let em = if em.is_finite() {
             em.clamp(1.0, 512.0)
         } else {
@@ -114,7 +143,13 @@ impl Layout {
         // corner: a circle's corner cut is r (1 - 1/sqrt 2) = 0.293 r.
         let pad = round(em * 0.75).max((radius * 3).div_ceil(10)).max(1);
         let gap = round(em * 0.4).max(1);
-        let row_h = (em * 1.75).ceil().min(4096.0) as u32;
+        let row_h = fit_row(
+            (em * 1.75).ceil().min(4096.0) as u32,
+            border.saturating_add(pad),
+            gap,
+            em,
+            fit,
+        );
         let side = round(em * 1.2)
             .clamp(1, row_h.saturating_sub(4).max(1))
             .min(MAX_RENDER_SIDE);
@@ -145,6 +180,12 @@ impl Layout {
     /// numbers) scale with the output so a 2x output keeps the shape. At
     /// `factor` 1.0 these are the numbers the panel always had.
     pub fn dmenu_scaled(em: f32, factor: f64) -> Self {
+        Self::dmenu_fitted(em, factor, None)
+    }
+
+    /// [`Layout::dmenu_scaled`] with the rows held to `fit` (see
+    /// [`Layout::fitted`]).
+    pub fn dmenu_fitted(em: f32, factor: f64, fit: Option<Fit>) -> Self {
         let em = if em.is_finite() {
             em.clamp(1.0, 512.0)
         } else {
@@ -156,12 +197,19 @@ impl Layout {
             1.0
         };
         let scaled = |logical: u32| (f64::from(logical) * factor).round() as u32;
+        let (border, pad, gap) = (scaled(BORDER).max(1), scaled(DMENU_PAD), scaled(DMENU_GAP));
         Self {
             em,
-            border: scaled(BORDER).max(1),
-            pad: scaled(DMENU_PAD),
-            gap: scaled(DMENU_GAP),
-            row_h: (em.ceil() as u32).saturating_add(scaled(DMENU_ROW_SLACK)),
+            border,
+            pad,
+            gap,
+            row_h: fit_row(
+                (em.ceil() as u32).saturating_add(scaled(DMENU_ROW_SLACK)),
+                border.saturating_add(pad),
+                gap,
+                em,
+                fit,
+            ),
             side: 0,
             icon_gap: 0,
             lead: 0,

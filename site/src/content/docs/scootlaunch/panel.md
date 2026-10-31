@@ -28,6 +28,14 @@ launch replaces the id the panel used to print. The panel links
 `libxkbcommon.so.0` for its keyboard (the reference
 XKB implementation); a scoot desktop already carries it.
 
+The panel draws at the output's real device pixels, fractional scales
+included (`wp_fractional_scale_v1` with `wp_viewporter`): on a 2x output
+its buffer is twice the panel's size, so text and border are sharp
+instead of a 1x image the compositor scales up. A compositor with only an
+integer scale gets the panel drawn at that scale. If the scale changes
+while the panel is open (the output's scale set, or a monitor swapped), it
+redraws at the new one. Sizes in this page are logical pixels.
+
 ## Icons
 
 Each row shows one icon before its name. The entry shows the
@@ -62,9 +70,8 @@ most 20000 nodes, rendered at most 256 device pixels a side with no
 network and no system fonts; file hrefs resolve to nothing drawable
 unless a valid image. A corrupt file, a huge header, a symlink loop
 and a missing theme all fall back to the tile. Icons render at device
-pixels: the side is about 1.2 times the font size. The launcher does not
-yet follow the output's scale, so it draws at 1x and the compositor scales
-it up.
+pixels: the side is about 1.2 times the font size, times the surface
+scale, so a 1.5 output draws a 1.5x bitmap through the viewport.
 
 The stripped release is 1446648 bytes without `svg` (budget 1.8 MB)
 and 2167544 bytes with it (the `svg` row, for the waiver ruling; the
@@ -175,8 +182,8 @@ The search field and the rows share one inner padding from the panel
 edge. The selection fill runs the full width of that box with the
 panel's corner radius, and the icon sits inside it, never against its
 edge. Every measurement (padding, row height, icon size, the gaps)
-scales with `font-size` and `radius`, so a larger font gives the same
-shape bigger.
+scales with `font-size` and `radius`, so a larger font or an output
+scale gives the same shape bigger.
 
 The `font` key names the look's UI family. There is no fontconfig in
 this stack: the panel draws with `--font PATH` or the file `font` in

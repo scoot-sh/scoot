@@ -48,6 +48,6 @@ before and a script waiting on the pick never waits on motion.
 The "check what that draws on a 2x output" question found a larger gap:
 scootlaunch handles no scale event in any mode, so it draws 1x on every
 output and the compositor scales it. Filed as
-[launch-ignores-preferred-scale](../launch-ignores-preferred-scale.md); the
+[launch-ignores-preferred-scale](launch-ignores-preferred-scale-done.md); the
 dmenu painter is scale-correct and unit-tested at 1.5x, 2x and 3x so that fix
 does not need to touch it.

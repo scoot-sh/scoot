@@ -605,6 +605,13 @@ impl LayerLive {
         &self.layer
     }
 
+    /// The fractional-scale object, if the surface has one: what the app's
+    /// `Dispatch` matches a `preferred_scale` against, so an event for a
+    /// destroyed surface's object (in flight when it went) is dropped.
+    pub fn fractional(&self) -> Option<&WpFractionalScaleV1> {
+        self.fractional.as_ref()
+    }
+
     /// Resizes the surface: the compositor answers with a new `configure`.
     pub fn set_size(&self, width: u32, height: u32) {
         self.layer.set_size(width, height);

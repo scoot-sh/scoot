@@ -78,7 +78,7 @@ pub(super) fn paint_staged(
             .filter(|row| visible.contains(row))
             .map(|row| row - visible.start),
         slots: visible.len(),
-        row_h: super::device_layout(view.look, view.scale).row_h,
+        row_h: super::device_layout(view.look, view.scale, view.height, view.rows).row_h,
         generation: view.ui.generation(),
     };
     stage_frame(

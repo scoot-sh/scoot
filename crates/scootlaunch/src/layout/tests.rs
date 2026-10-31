@@ -219,3 +219,66 @@ fn the_dmenu_layout_scales_its_fixed_spacing_with_the_output() {
         assert!(layout.height(64) < u32::MAX, "{em} {factor}");
     }
 }
+
+#[test]
+fn rows_held_to_a_height_give_up_only_what_rounding_added() {
+    // 1.25x of the 13 px dmenu over four rows: each measurement rounds on
+    // its own, and the unfitted layout stands 3 px past the scaled height.
+    let logical = Layout::dmenu(13.0);
+    let target = (f64::from(logical.height(4)) * 1.25).round() as u32;
+    let natural = Layout::dmenu_scaled(16.25, 1.25);
+    assert!(
+        natural.height(4) > target,
+        "the premise: it stands too tall"
+    );
+    let fitted = Layout::dmenu_fitted(
+        16.25,
+        1.25,
+        Some(Fit {
+            height: target,
+            rows: 4,
+        }),
+    );
+    assert!(
+        fitted.height(4) <= target,
+        "{} over {target}",
+        fitted.height(4)
+    );
+    assert!(natural.row_h - fitted.row_h <= 1, "a row gives up a pixel");
+    assert_eq!(
+        (fitted.pad, fitted.gap, fitted.border),
+        (natural.pad, natural.gap, natural.border)
+    );
+
+    // A height it already fits changes nothing; no height changes nothing.
+    let roomy = Fit {
+        height: natural.height(4) + 50,
+        rows: 4,
+    };
+    assert_eq!(Layout::dmenu_fitted(16.25, 1.25, Some(roomy)), natural);
+    assert_eq!(Layout::dmenu_fitted(16.25, 1.25, None), natural);
+    let apps = Layout::new(16.25, 15, 1.25);
+    assert_eq!(Layout::fitted(16.25, 15, 1.25, None), apps);
+}
+
+#[test]
+fn a_height_too_small_for_the_text_never_squeezes_the_rows_below_it() {
+    for rows in [0, 1, 10, u32::MAX] {
+        for height in [0, 1, 40] {
+            let fit = Some(Fit { height, rows });
+            let dmenu = Layout::dmenu_fitted(20.0, 2.0, fit);
+            assert!(
+                dmenu.row_h >= 20,
+                "rows {rows} height {height}: {}",
+                dmenu.row_h
+            );
+            let apps = Layout::fitted(20.0, 12, 2.0, fit);
+            assert!(
+                apps.row_h >= 20,
+                "rows {rows} height {height}: {}",
+                apps.row_h
+            );
+            assert!(apps.side >= 1 && apps.side <= apps.row_h.max(1));
+        }
+    }
+}
