@@ -17,6 +17,20 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.18](https://github.com/scoot-sh/scoot/compare/v0.6.17...v0.6.18) - 2026-10-31
+
+### scoot
+
+- fixed: clip a window's surface tree to its geometry under corner_radius ([#825](https://github.com/scoot-sh/scoot/pull/825))
+
+### scoot-look,nix
+
+- fixed: leave named font families to fontconfig; ship metric-compatible fonts ([#827](https://github.com/scoot-sh/scoot/pull/827))
+
+### scootnotify,scootlaunch,scoot-look,nix
+
+- added: user effect overrides over any look ([#829](https://github.com/scoot-sh/scoot/pull/829))
+
 ## [0.6.17](https://github.com/scoot-sh/scoot/compare/v0.6.16...v0.6.17) - 2026-10-30
 
 ### scoot-look
