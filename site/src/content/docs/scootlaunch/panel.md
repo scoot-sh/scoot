@@ -104,7 +104,7 @@ opening.
 
 | Key | Type / default | Example |
 |---|---|---|
-| `font` | path, none (first well-known file) | `font = "/usr/share/fonts/TTF/DejaVuSans.ttf"` |
+| `font` | path, none (the look's family, else the first well-known file) | `font = "/usr/share/fonts/TTF/DejaVuSans.ttf"` |
 | `width_em` | integer 10–200, `40` | `width_em = 50` |
 | `rows` | integer 1–64, `10` | `rows = 8` |
 
@@ -178,8 +178,13 @@ scales with `font-size` and `radius`, so a larger font or an output
 scale gives the same shape bigger.
 
 The `font` key names the look's UI family. There is no fontconfig in
-this stack: the panel draws with `--font PATH`, else the first usable
-well-known file, as the bar does. Rows show the entry icon with the
+this stack: the panel draws with `--font PATH` or the file `font` in
+`launch.toml` names, else the look's family, found by file name in the
+usual font directories (the list is under
+[Fonts](../scootnotify/configure.md#fonts)), else the first usable
+well-known file. The panel draws no bold, so it loads only the regular
+file. A family it cannot find is a warning on stderr and the well-known
+file. Rows show the entry icon with the
 name beside it and its match highlighted. A light look draws the same
 panel from the same roles:
 
@@ -356,8 +361,9 @@ the surface maps, and does not move it afterwards.
 > **Symptom:** the panel refuses to start over a font.
 
 Give it a file with `--font PATH` (a `.ttf` or `.otf`, such as
-DejaVuSans.ttf). Without one it tries a short list of well-known
-paths and refuses, naming what it tried.
+DejaVuSans.ttf). Without one it looks for the look's font family, then
+tries a short list of well-known paths, and refuses, naming what it
+tried.
 
 > **Symptom:** the panel ignores the look.
 

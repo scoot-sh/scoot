@@ -305,7 +305,7 @@ false`](../../desktop/notifications/) writes.
 | Progress bar | `selection` (default `accent`) |
 | Action button outline / hovered fill | `focus` / `hover` |
 | Link text (underlined, never clickable in v1) | `accent` |
-| Font | `fonts.ui` at `fonts.popup-size` |
+| Font | `fonts.ui`, found by name (see [Fonts](#fonts)), at `fonts.popup-size` |
 | Corners | the file's `radius` if set, else `shape.radius`; or `card.shape` |
 | Shadow, fill | `effects.shadow`, `effects.fill` (see [Depth](#depth)) |
 | Motion | `effects.motion`, `effects.motion-duration-ms`, `effects.motion-bounce`, and `card.enter`, `card.exit` (see [Motion](#motion)) |
@@ -520,12 +520,47 @@ or dismissing the card. The card's shadow takes none either.
 > re-laid out the cards: `scoot look apply` does, and plain `msg reload
 > --look` does too.
 
+### Fonts
+
+scootnotify has no fontconfig. It picks the card font in this order:
+
+1. `--font PATH`.
+2. The look's `font` family (`fonts.ui`), found by file name in
+   `$XDG_DATA_HOME/fonts` (`~/.local/share/fonts`), `~/.fonts`,
+   `$XDG_DATA_DIRS/fonts`, `~/.nix-profile/share/fonts`,
+   `/etc/profiles/per-user/$USER/share/fonts`, `/usr/share/fonts`,
+   `/usr/local/share/fonts` and NixOS's
+   `/run/current-system/sw/share/X11/fonts` and `.../share/fonts`, up to
+   six directories deep. `DroidSansM Nerd Font Propo` finds
+   `DroidSansMNerdFontPropo-Regular.otf`; case, spaces and hyphens do not
+   matter, and only `.ttf` and `.otf` files named exactly the family,
+   the family plus `Regular`, or the family plus `Bold` count.
+3. The first well-known file (DejaVu Sans, then Noto Sans).
+
+The bold face is the `Bold` file found next to the regular one (in the
+same font directory), for a `--font` file too: `DejaVuSans.ttf` or
+`NotoSans-Regular.ttf` take `DejaVuSans-Bold.ttf` or `NotoSans-Bold.ttf`.
+It draws the summary and `<b>` runs, and wraps and ellipsizes them with
+their own width. A family with no bold file keeps the old look: the regular
+face drawn twice, 1 px apart.
+
+The files are read at start and when a `msg reload --look` changes the
+family, never when a card draws. A `--font` file keeps its font through a
+look reload.
+
+> **Symptom:** the cards ignore the look's font.
+> The daemon logs `the look's font ... has no .ttf or .otf file in the font
+> directories` and draws with the default font. Install the family as a
+> `.ttf` or `.otf` file in one of the directories above (a font that only
+> fontconfig knows by a differently named file is not found), or point
+> `--font` at the file.
+
 ### Title weight and spacing
 
 The summary (the first, bold line of a card) can be set apart from the
 body. `title.weight` and `title.spacing` apply to the summary only; the
 `app · age` line and the body keep their weight, and bold inside a body
-keeps drawing as it always did.
+keeps drawing bold.
 
 ```toml
 [apps.scootnotify]
@@ -540,13 +575,13 @@ The look renders them into `notify.toml` as a `[title]` table with
 |---|---|
 | 100 to 500 | The summary in the regular weight, like the body. |
 | 501 to 700 | Bold, as the summary always was. The default is 700. |
-| 701 to 900 | Heavier: one more strike, so the strokes are a pixel thicker again. |
+| 701 to 900 | Heavier: the bold face drawn once more, 1 px to the right, so the strokes are a pixel thicker again. |
 
-scootnotify has no fontconfig and no variable-font support: it draws with
-one font file (`--font PATH`, else the first well-known file) and makes
-bold by drawing a run again 1 px to the right. So a weight is three steps
-and not nine, and it does not pick another font file. `font` in the look
-is validated and still does not choose the file.
+A weight is three steps, not nine: scootnotify has no variable-font
+support. With a bold file beside the regular one (see [Fonts](#fonts)) the
+bold steps draw that face; without one they draw the regular face again,
+1 px to the right, once for bold and twice for heavier. Weights 100 to
+500 never use the bold file.
 
 `title.spacing` adds that many logical pixels after every character of the
 summary (negative tightens). The summary wraps and ellipsizes with the

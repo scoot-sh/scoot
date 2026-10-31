@@ -3,7 +3,7 @@
 
 use ab_glyph::FontVec;
 
-use super::{MAX_ARENA, MAX_GLYPHS, Text};
+use super::{Face, MAX_ARENA, MAX_GLYPHS, Text};
 use crate::color::Color;
 use crate::paint::{Canvas, Span};
 use crate::testfont;
@@ -413,8 +413,7 @@ fn tracking_widens_the_pen_and_zero_is_the_plain_draw() {
         &mut Canvas::new(&mut zero, 80, 20).unwrap(),
         None,
         "123",
-        12.0,
-        0.0,
+        (12.0, Face::Regular, 0.0),
         2,
         14,
         FG,
@@ -425,8 +424,7 @@ fn tracking_widens_the_pen_and_zero_is_the_plain_draw() {
         &mut Canvas::new(&mut tracked, 80, 20).unwrap(),
         None,
         "123",
-        12.0,
-        4.0,
+        (12.0, Face::Regular, 4.0),
         2,
         14,
         FG,
@@ -441,4 +439,80 @@ fn tracking_widens_the_pen_and_zero_is_the_plain_draw() {
     );
     assert_eq!(Text::tracking_extra("123", f32::NAN), 0.0);
     assert_eq!(Text::tracking_extra("123", f32::INFINITY), 0.0);
+}
+
+fn arc(bytes: Vec<u8>) -> ab_glyph::FontArc {
+    ab_glyph::FontArc::new(FontVec::try_from_vec(bytes).unwrap())
+}
+
+/// The test font with a bold face 900 units wide holding `3` and `x`.
+fn with_bold() -> Text {
+    text().with_bold(arc(testfont::build_symbols_advance(['3', 'x'], 900)))
+}
+
+#[test]
+fn bold_text_is_measured_with_the_bold_face() {
+    let text = with_bold();
+    assert!(text.has_bold());
+    // Regular `3` is 600 units, bold 900: 30 and 45 pixels at a 50 em.
+    assert_eq!(text.measure(None, "3", 50.0), 30);
+    assert_eq!(text.measure_face(None, "3", 50.0, Face::Bold), 45);
+    assert!((text.advance_face('3', 50.0, Face::Bold) - 45.0).abs() < 1e-3);
+    // The bold file lacks `1`: that character keeps the regular glyph and
+    // advance, so a bold run never loses a character to a thin bold file.
+    assert_eq!(text.measure_face(None, "1", 50.0, Face::Bold), 30);
+    assert_eq!(text.measure_face(None, "31", 50.0, Face::Bold), 75);
+    // `x` is only in the bold file: bold finds it, regular draws `.notdef`.
+    assert_eq!(text.measure_face(None, "x", 50.0, Face::Bold), 45);
+    assert_eq!(text.measure(None, "x", 50.0), 30);
+}
+
+#[test]
+fn bold_without_a_bold_face_is_the_regular_face() {
+    let text = text();
+    assert!(!text.has_bold());
+    assert_eq!(
+        text.measure_face(None, "3:07", 50.0, Face::Bold),
+        text.measure(None, "3:07", 50.0)
+    );
+    assert_eq!(
+        text.advance_face('3', 50.0, Face::Bold),
+        text.advance('3', 50.0)
+    );
+}
+
+#[test]
+fn bold_falls_back_through_the_chain_and_keeps_its_own_cache_slot() {
+    // A character neither the bold file nor the primary has comes from the
+    // fallback, as it does in regular.
+    let fallback = arc(testfont::build_symbols_advance(['y'], 700));
+    let mut text = Text::with_fallbacks(arc(testfont::build()), vec![fallback])
+        .with_bold(arc(testfont::build_symbols_advance(['3'], 900)));
+    assert_eq!(text.measure_face(None, "y", 50.0, Face::Bold), 35);
+    // The same glyph in two faces is two cache entries, drawn differently.
+    let mut regular = vec![0u8; 80 * 60 * 4];
+    let mut bold = vec![0u8; 80 * 60 * 4];
+    let clip = Span { x: 0, width: 80 };
+    text.draw(
+        &mut Canvas::new(&mut regular, 80, 60).unwrap(),
+        None,
+        "3",
+        50.0,
+        2,
+        45,
+        FG,
+        clip,
+    );
+    text.draw_tracked(
+        &mut Canvas::new(&mut bold, 80, 60).unwrap(),
+        None,
+        "3",
+        (50.0, Face::Bold, 0.0),
+        2,
+        45,
+        FG,
+        clip,
+    );
+    assert_ne!(regular, bold, "the bold file's `3` is its own glyph");
+    assert_eq!(text.cached().0, 2);
 }

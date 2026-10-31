@@ -8,7 +8,7 @@
 //! the meta line) is frozen at layout, so no tick wakes the loop.
 
 use scootui::paint::Pad;
-use scootui::text::Text;
+use scootui::text::{Face, Text};
 
 use scootui::color::Color;
 
@@ -49,9 +49,9 @@ pub struct Rect {
 pub struct Run {
     /// The text.
     pub text: String,
-    /// `b`: drawn twice, 1 px apart (synthetic emboldening: this stack
-    /// has no bold face, and the spec's shaping gate kept rustybuzz out
-    /// of v1).
+    /// `b`: drawn in the bold face when the look's family has one (measured
+    /// with it too), else struck again 1 px to the right (synthetic
+    /// emboldening). See [`face`].
     pub bold: bool,
     /// `u` (and `a`): a 1 px rule under the baseline.
     pub underline: bool,
@@ -247,7 +247,7 @@ pub fn layout_styled(
         let text_x = content_x + icon_w;
         let mut card_y = y + border + PAD;
         let summary = wrap_spans(
-            &summary_runs(&note.summary),
+            &summary_runs(&note.summary, look.title_strikes() > 1),
             text,
             em,
             text_w,
@@ -459,11 +459,17 @@ fn has_icon_slot(note: &Notification) -> bool {
     !matches!(note.icon, crate::model::store::Icon::None)
 }
 
-/// The summary as one bold run.
-fn summary_runs(summary: &str) -> Vec<crate::markup::Span> {
+/// The face a run is drawn and measured in.
+pub fn face(bold: bool) -> Face {
+    if bold { Face::Bold } else { Face::Regular }
+}
+
+/// The summary as one run, bold when `title.weight` asks for weight above
+/// regular (a regular weight has no strike to add either way).
+fn summary_runs(summary: &str, bold: bool) -> Vec<crate::markup::Span> {
     vec![crate::markup::Span {
         text: summary.to_owned(),
-        bold: true,
+        bold,
         italic: false,
         underline: false,
     }]
@@ -607,11 +613,11 @@ fn take_line(
     let mut break_at: Option<usize> = None;
     let mut i = at;
     while i < chars.len() {
-        let (c, _, _, _) = chars[i];
+        let (c, bold, _, _) = chars[i];
         if c == '\n' {
             return (i, i + 1 < chars.len());
         }
-        pen += text.advance(c, em) + tracking;
+        pen += text.advance_face(c, em, face(bold)) + tracking;
         if pen.round() > max_width as f32 {
             // Over the edge: break at the last opportunity, else here
             // (a hard break: an overlong word still shows).
@@ -643,7 +649,11 @@ fn is_cjk(c: char) -> bool {
 /// Ellipsizes the last run to fit `max_width`: appends "…" to the
 /// longest fitting prefix.
 fn ellipsize_runs(runs: &mut Vec<Run>, text: &Text, em: f32, max_width: u32, tracking: f32) {
-    let ellipsis_w = text.measure(None, "…", em) + tracking.max(0.0).ceil() as u32;
+    // The "…" joins whichever run the cut lands in: reserve the wider face.
+    let ellipsis_w = text
+        .measure_face(None, "…", em, Face::Regular)
+        .max(text.measure_face(None, "…", em, Face::Bold))
+        + tracking.max(0.0).ceil() as u32;
     if ellipsis_w > max_width {
         runs.clear();
         return;
@@ -654,7 +664,7 @@ fn ellipsize_runs(runs: &mut Vec<Run>, text: &Text, em: f32, max_width: u32, tra
     let mut end_char = 0usize;
     'outer: for (r, run) in runs.iter().enumerate() {
         for (k, c) in run.text.chars().enumerate() {
-            pen += text.advance(c, em) + tracking;
+            pen += text.advance_face(c, em, face(run.bold)) + tracking;
             if pen.round() > budget as f32 {
                 end_run = r;
                 end_char = k;

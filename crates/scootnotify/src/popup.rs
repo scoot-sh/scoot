@@ -31,7 +31,7 @@
 
 use std::collections::HashMap;
 use std::os::fd::BorrowedFd;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use scoot_rt::print::warn;
@@ -109,6 +109,9 @@ pub struct App {
     config: Config,
     look: Look,
     text: Option<Text>,
+    /// The `--font` file, which wins over the look's family: a look reload
+    /// that changes the family rebuilds the text only without it.
+    font_path: Option<PathBuf>,
     compositor: Option<wl_compositor::WlCompositor>,
     shm: Option<wl_shm::WlShm>,
     layer_shell: Option<ZwlrLayerShellV1>,
@@ -179,6 +182,23 @@ pub struct App {
     gone: bool,
 }
 
+/// The cards' text: `--font`, else the look's family, else the default
+/// font, with the family's bold face beside the regular one (the summary
+/// and `<b>` runs draw it). A note about the family goes to stderr.
+fn build_text(given: Option<&Path>, family: &str) -> Result<Text, scootui::font::Error> {
+    let spec = scootui::font::Spec {
+        given,
+        family,
+        fallbacks: &[],
+        bold: true,
+    };
+    let (text, note) = scootui::font::text_with(&spec)?;
+    if let Some(note) = note {
+        warn(format_args!("scootnotify: {note}"));
+    }
+    Ok(text)
+}
+
 /// A click waiting for its token: resolved by the popup (which owns the
 /// queue) before the daemon invokes.
 #[derive(Debug, Clone)]
@@ -202,6 +222,7 @@ impl App {
             refresh_due: true,
             look,
             text: None,
+            font_path: None,
             compositor: None,
             shm: None,
             layer_shell: None,
@@ -748,6 +769,17 @@ impl App {
         // snaps, and `none` leaves nothing behind.
         self.motion = Motion::new(&look.motion, self.config.anchor);
         self.refresh_due = true;
+        // A new family loads its own files, now and not at the next draw;
+        // a family that cannot be built keeps the running text.
+        if look.font_family != self.look.font_family
+            && self.font_path.is_none()
+            && self.text.is_some()
+        {
+            match build_text(None, &look.font_family) {
+                Ok(text) => self.text = Some(text),
+                Err(error) => warn(format_args!("scootnotify: keeping the font: {error}")),
+            }
+        }
         self.look = look;
         // The layout's sizes depend on the text size: force a rebuild
         // on the next refresh (the stack comparison would call equal
@@ -861,7 +893,8 @@ impl Popup {
         if !app.ready() {
             return Err(String::from("no layer surface to draw on: headless"));
         }
-        app.text = match scootui::font::text(font_path.map(|path| path.as_path()), &[]) {
+        app.font_path = font_path.cloned();
+        app.text = match build_text(font_path.map(|path| path.as_path()), &look.font_family) {
             Ok(text) => Some(text),
             Err(error) => return Err(format!("no font ({error}): headless")),
         };

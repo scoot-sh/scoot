@@ -288,10 +288,22 @@ pub fn open(opts: Options) -> i32 {
         home: std::env::var_os("HOME").map(PathBuf::from),
         display_set: std::env::var_os("DISPLAY").is_some(),
     };
-    // The typeface: the flag, then the file, then the well-known ones.
+    // The typeface: the flag, then the file, then the look's family, then
+    // the well-known ones. The panel draws no bold, so no bold face loads.
     let given = opts.font.clone().or_else(|| config.font.map(PathBuf::from));
-    let mut text = match scootui::font::text(given.as_deref(), &[]) {
-        Ok(text) => text,
+    let spec = scootui::font::Spec {
+        given: given.as_deref(),
+        family: &look.font_family,
+        fallbacks: &[],
+        bold: false,
+    };
+    let mut text = match scootui::font::text_with(&spec) {
+        Ok((text, note)) => {
+            if let Some(note) = note {
+                warn(format_args!("scootlaunch: {note}"));
+            }
+            text
+        }
         Err(error) => {
             warn(format_args!("scootlaunch: {error}"));
             return 1;

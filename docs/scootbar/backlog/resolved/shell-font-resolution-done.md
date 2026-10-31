@@ -1,9 +1,10 @@
 ---
 title: "Resolve the look's font family to a file and use a real bold face (shell apps draw one font file, synthetic bold)"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-31"
 ---
 
 # Resolve the look's font family to a file and use a real bold face
@@ -47,3 +48,15 @@ mapped), so load it only when a look asks for weight above regular.
 
 Shaping, kerning, ligatures (see `crates/scootui/src/text.rs`); per-app
 font overrides beyond what `[apps.*] font` already validates.
+
+## Resolved
+
+scootnotify and scootlaunch resolve the look's family through
+`scootui::font::family` (file-name match in the usual font directories;
+`--font` and the config's `font` still win), scootnotify loads the bold
+file beside the regular one and measures and draws summary and `<b>` runs
+with it (`title.weight` above 700 strikes the bold face once more), and a
+look reload that changes the family rebuilds the text. scootbar needed
+neither: `scoot look apply` already hands it the family's file as
+`bar.font`, and the bar draws no bold. Variable fonts stay out: `ab_glyph`
+exposes no axis on `FontArc`.

@@ -209,6 +209,33 @@ fn retheme_swaps_the_look_and_marks_dirty() {
 }
 
 #[test]
+fn a_new_family_leaves_a_given_font_file_alone() {
+    // `--font` wins over the look's family, so a reload that changes the
+    // family must not replace the text; without a text yet (no surface)
+    // there is nothing to rebuild either.
+    let text = || {
+        scootui::text::Text::new(ab_glyph::FontArc::new(
+            ab_glyph::FontVec::try_from_vec(scootui::testfont::build()).unwrap(),
+        ))
+    };
+    let named = Look {
+        font_family: "Brand".to_owned(),
+        ..Look::default()
+    };
+    let mut app = App::new(Config::default(), Look::default());
+    app.text = Some(text());
+    app.font_path = Some(PathBuf::from("/fonts/given.ttf"));
+    app.retheme(named.clone());
+    assert_eq!(app.look.font_family, "Brand");
+    // The test font is 30 pixels a digit at a 50-pixel em; any other text
+    // (the default font) would measure otherwise.
+    assert_eq!(app.text.as_ref().unwrap().measure(None, "3", 50.0), 30);
+    let mut bare = App::new(Config::default(), Look::default());
+    bare.retheme(named);
+    assert!(bare.text.is_none());
+}
+
+#[test]
 fn the_default_look_has_no_shadow_and_the_configured_margins() {
     let app = App::new(Config::default(), Look::default());
     assert!(app.shadow.is_none());
