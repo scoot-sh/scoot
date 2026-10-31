@@ -23,15 +23,16 @@ Three small findings, none a crash and none a blur.
    pixels are dead space under the last row: 8 px for the apps panel at 1.25x,
    9 px for dmenu at 1.75x with 12 rows. The `Layout::fitted` doc and the
    #839 commit message say a row gives up "at most 2 px", which overclaims:
-   the per-row loss is bounded, but a font at 8 rows with a remainder of 0
+   the per-row loss is bounded, but a font size of 8 with zero list rows
    still measured 3 px.
 2. **Two rounding rules for one length.** `scale_len`
    (`crates/scootlaunch/src/panel.rs`, `f64::round`) and
    `scootui::density::scaled_length` (integer arithmetic on the v120 scale)
    differ by 1 px for about 39 non-dyadic v120 values: 122, 123, 130, 131,
    138, 145, 146, 153, 161, 183, 191, 206, 244 to 247 and 260 to 262. The
-   buffer is sized by one and the compositor's logical-to-buffer mapping by
-   the other.
+   buffer itself is sized by `scaled_length` (through `Demand::buffer_dims`)
+   while the panel's device size inside it comes from `scale_len`, clamped
+   to the buffer with `.min(buffer_w)`: one rule would do.
 3. **A 3x entrance frame is probably over budget.** At 17 ns a destination
    pixel
    ([launcher-scaled-composite-cost](launcher-scaled-composite-cost.md)) a

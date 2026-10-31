@@ -3,7 +3,9 @@ title: Configure scootnotify
 description: "Popup placement, timeouts, urgency, and the look layer."
 ---
 
-How the cards look, where they land, and how long they stay. The file
+How the cards look, where they land, and how long they stay. Every size
+here is in logical pixels, drawn at the output's scale: `width_px = 360`
+is 360 pixels on a 1x output and 720 on a 2x one. The file
 is `$XDG_CONFIG_HOME/scoot/notify.toml`; every key is optional, and a
 missing file is the built-in defaults. A typo'd key refuses the whole
 file at start (the daemon runs on defaults and says why); `daemon
