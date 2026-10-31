@@ -204,9 +204,9 @@ jobs:
           # the stub is linked in (build.rs compiles it exactly when the
           # `gpu-scanout` feature is on, so the literal also proves the
           # tier rode along).
-          # `readelf` matches are scoped to NEEDED: the RUNPATH names every
-          # buildInput lib dir, including mesa-libgbm's, and a bare match
-          # would trip on that path while needing nothing.)
+          # `readelf` matches are scoped to NEEDED: the RUNPATH carries
+          # mesa-libgbm's lib dir on purpose (the third check below), and a
+          # bare match would trip on that path while needing nothing.)
           scootbin=./result-scoot/bin/.scoot-wrapped
           if [ ! -x "$scootbin" ]; then
             scootbin=./result-scoot/bin/scoot
@@ -219,7 +219,36 @@ jobs:
             echo "::error title=packaged scoot lost its libgbm stub::the scanout tier reaches libgbm through the in-tree stub's dlopen; without that literal the tier could never load."
             exit 1
           fi
-          echo "ok: packaged scoot references no libgbm and carries the run-time stub"
+          # ...and the RUNPATH has to name a dir holding libgbm.so.1, or
+          # that dlopen resolves nothing on a Nix host: nothing links libgbm
+          # (the two checks above are what keep it that way), so
+          # `fixupPhase`'s `patchelf --shrink-rpath` drops the buildInput's
+          # dir unless `postFixup` puts it back, and NixOS has no ld.so
+          # cache and no libgbm under /run/opengl-driver/lib to fall back
+          # on. Shipped that way from the tier landing through v0.6.22, the
+          # last release without this check: every `--tty` session on a GPU
+          # box quietly took the CPU tier (`reason=no-gbm`). Resolve the
+          # soname the way the loader would rather than grepping for a
+          # store path.
+          if ! readelf -d "$scootbin" | grep -E 'RUNPATH|RPATH' \
+               | grep -oP '(?<=\[).*(?=\])' | tr ':' '\n' \
+               | grep -q . ; then
+            echo "::error title=packaged scoot has no RUNPATH::expected the cc wrapper's RUNPATH on this binary."
+            exit 1
+          fi
+          found=no
+          for dir in $(readelf -d "$scootbin" | grep -E 'RUNPATH|RPATH' \
+                       | grep -oP '(?<=\[).*(?=\])' | tr ':' '\n'); do
+            if [ -e "$dir/libgbm.so.1" ]; then
+              found=yes
+              break
+            fi
+          done
+          if [ "$found" != yes ]; then
+            echo "::error title=packaged scoot cannot reach libgbm::no RUNPATH entry holds libgbm.so.1, so the scanout tier's dlopen fails and every --tty session falls back to the cpu renderer. See the postFixup patchelf --add-rpath in flake.nix."
+            exit 1
+          fi
+          echo "ok: packaged scoot references no libgbm, carries the run-time stub, and can reach libgbm.so.1 through its RUNPATH"
           ./result-scootbg/bin/scootbg --version | grep -qF "scootbg $ver (protocol "
 
       - name: nix build .#scootbar .#scootbar-demo, what it links, its closure, a feature override

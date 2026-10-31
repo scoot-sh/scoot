@@ -17,6 +17,39 @@ release, entries were dated.
 
 ## Unreleased
 
+### nix
+
+- fixed: the packaged `scoot` can reach libgbm, so the GPU scanout tier is
+  available to a `--tty` session on a Nix host at all. Until now it never was:
+  the tier calls libgbm through the in-tree stub's
+  `dlopen("libgbm.so.1")` and links nothing — a `DT_NEEDED libgbm` is what
+  GPU-free operation forbids — so `fixupPhase`'s `patchelf --shrink-rpath`
+  was dropping mesa-libgbm's lib dir straight back out of the RUNPATH the cc
+  wrapper had built from `buildInputs`. With no ld.so cache and no libgbm
+  under `/run/opengl-driver/lib` (which carries the gbm *backend*,
+  `gbm/dri_gbm.so`, not the library), that `dlopen` found nothing: every
+  session logged `renderer chosen ... tier=cpu reason=no-gbm`, and a forced
+  `--renderer gpu` failed `GbmDevice::new` with `Function not implemented` —
+  the stub's own fail-closed `ENOSYS`. `postFixup` now adds the one entry
+  back, after the shrink. Found on an Asahi M2 running the published flake,
+  where `--nested --renderer gpu` had been reaching `GL Renderer: "Apple M2
+  (G14G B0)"` all along: EGL was never the broken half. The packaging audit
+  in `nix-build.yml` gains a third check — that some RUNPATH entry really
+  holds `libgbm.so.1` — so this cannot regress silently again.
+
+  What is measured so far is the loader half: the RUNPATH resolves
+  `libgbm.so.1`, and `gbm_create_device` succeeds on that host's render node
+  and KMS node. A `--tty` session logging `tier=gpu` from this package has
+  not been captured yet.
+
+  One behaviour note for GPU hosts whose Mesa is broken or absent rather than
+  missing: `auto` used to stop at the `no-gbm` branch before loading
+  anything, and now proceeds to probe EGL and the device, so such a box falls
+  back later in the sequence and reports a different `reason=` than before.
+  The short-circuit for virtual and display-only devices is unchanged, so
+  VM, container and webtop sessions still resolve to the CPU renderer without
+  loading a thing. Not breaking: no CLI, config schema or protocol changed.
+
 ## [0.6.22](https://github.com/scoot-sh/scoot/compare/v0.6.21...v0.6.22) - 2026-10-31
 
 ### scootlaunch,scootui
