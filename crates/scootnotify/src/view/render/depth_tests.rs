@@ -55,6 +55,7 @@ fn paint_styled(
         None,
         &HashMap::new(),
         shadow,
+        Dev::UNIT,
     );
     pixels
 }
@@ -304,6 +305,7 @@ fn a_repaint_with_depth_allocates_nothing_after_warm_up() {
                 None,
                 &HashMap::new(),
                 tables.as_ref(),
+                Dev::UNIT,
             );
         };
         for _ in 0..3 {

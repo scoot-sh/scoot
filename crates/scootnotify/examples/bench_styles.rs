@@ -227,6 +227,7 @@ fn main() {
                     None,
                     &icons,
                     shadow.as_ref(),
+                    scootnotify::view::dev::Dev::UNIT,
                 );
             };
             for _ in 0..20 {

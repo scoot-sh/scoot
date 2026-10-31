@@ -40,6 +40,7 @@ fn paint_with(text: &mut Text, stack: &layout::Stack, look: &Look) -> Vec<u8> {
         None,
         &HashMap::new(),
         None,
+        Dev::UNIT,
     );
     pixels
 }
