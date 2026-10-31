@@ -439,7 +439,61 @@
               # closure). `ldd` shows no new library: the feature links
               # nothing new (pure-Rust `x11rb`). No wrapper on Darwin: there
               # is no X server, or compositor, there.
+              #
+              # And libgbm back in the RUNPATH, which is what makes the GPU
+              # scanout tier reachable at all on a Nix host. The tier calls
+              # libgbm through the in-tree stub's `dlopen("libgbm.so.1")`
+              # (`crates/scoot/gbm-stub/gbm_stub.c`) -- deliberately, because
+              # a `DT_NEEDED libgbm` is exactly what GPU-free operation
+              # forbids and what CI's audit fails on. But the cc wrapper
+              # builds the RUNPATH from `buildInputs` and `fixupPhase` then
+              # runs `patchelf --shrink-rpath`, which drops every entry no
+              # `DT_NEEDED` library resolves from -- so mesa-libgbm's lib
+              # dir, a `buildInput` since the tier landed
+              # (`vm/compositor-deps.nix`), was being stripped right back
+              # out of the shipped binary. Measured on v0.6.21 aarch64: the
+              # surviving RUNPATH named libinput, seatd, systemd (libudev),
+              # pixman, libxkbcommon, libglvnd, glibc and libgcc -- one dir
+              # per `DT_NEEDED` soname and nothing else, with libgbm,
+              # libdrm, libdisplay-info and dbus all gone.
+              #
+              # The consequence was silent and total on NixOS, where the
+              # loader has nowhere else to look: `/run/opengl-driver/lib`
+              # carries the vendor ICDs and the gbm *backend*
+              # (`gbm/dri_gbm.so`), never libgbm itself, and there is no
+              # ld.so cache. Every `--tty` session took the CPU tier on
+              # hardware with a working GPU -- `renderer chosen ... tier=cpu
+              # reason=no-gbm` under `auto`, and under a forced `gpu` a
+              # `GbmDevice::new` failure with `Function not implemented`,
+              # which is the stub's own fail-closed `errno = ENOSYS` when
+              # the `dlopen` returned NULL. Seen on an Asahi M2 running the
+              # published flake (2026-10-31), where `--nested --renderer
+              # gpu` reaches `GL Renderer: "Apple M2 (G14G B0)"` perfectly
+              # well: EGL was never the broken half.
+              #
+              # The `-lEGL` injection above cannot be reused here (it works
+              # by creating the very `DT_NEEDED` entry the no-GPU
+              # requirement rules out), so this is the hand-computed store
+              # path that comment calls the alternative -- and it has to run
+              # after `fixupPhase`, which `postFixup` does. Not
+              # `LD_LIBRARY_PATH` on a wrapper: RUNPATH is read by this
+              # binary alone, while the variable would leak into every
+              # client the compositor spawns and shadow each one's own
+              # libgbm. It also keeps the override order right -- the loader
+              # reads `LD_LIBRARY_PATH` ahead of `DT_RUNPATH`, so a host
+              # libgbm still wins where one exists. No driver is shadowed by
+              # this: libgbm loads the backend out of the host's own
+              # `/run/opengl-driver/lib/gbm` at run time, which is why
+              # nixpkgs' libgbm 26.1.3 drives this box's Mesa 26.2.2 backend
+              # (`gbm_create_device` succeeds on `/dev/dri/renderD128` and
+              # on the KMS node `card2`, backend `drm`).
+              #
+              # `pkgs.libgbm or pkgs.mesa` for the same reason
+              # `vm/compositor-deps.nix` does it: gbm moved out of the mesa
+              # attribute in newer nixpkgs.
               postFixup = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+                patchelf --add-rpath ${pkgs.libgbm or pkgs.mesa}/lib $out/bin/scoot
+
                 wrapProgram $out/bin/scoot \
                   --suffix PATH : ${pkgs.lib.makeBinPath [ pkgs.xwayland ]}
               '';
