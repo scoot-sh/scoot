@@ -237,3 +237,4 @@ hits the wall:
 - [shell-font-resolution](resolved/shell-font-resolution-done.md): scootnotify and scootlaunch resolve the look's font family to a file, and scootnotify draws a real bold face beside it
 - [launcher-scaled-composite-cost](launcher-scaled-composite-cost.md) (low): `Layer::composite`'s scaled path is 17 ns a pixel, so a 2x launcher entrance frame is 9 ms; found building #807 slice 4
 - [dmenu-ignores-depth-and-motion](dmenu-ignores-depth-and-motion.md) (low): `scootlaunch --dmenu` draws without the look's shadow, fill and motion; left out of #807 slice 4 on purpose
+- [look-font-file-at-apply](look-font-file-at-apply.md) (medium): resolve the look's font family to a file at `scoot look apply` instead of walking font directories at every scootlaunch open and notify load
