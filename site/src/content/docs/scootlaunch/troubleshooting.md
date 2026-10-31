@@ -45,6 +45,24 @@ windows use. Move the pointer onto the monitor you want first: the
 compositor picks the output once, when the surface maps, and does not
 move it afterwards.
 
+> **Symptom:** the panel looks soft on a HiDPI screen.
+
+The panel follows the scale the compositor asks for: `wp_fractional_scale_v1`
+(with `wp_viewporter`), else `wl_surface.preferred_buffer_scale`, else the
+`wl_output.scale` of the output it is on. Compare what it was told with
+what it drew:
+
+```sh
+WAYLAND_DEBUG=1 scootlaunch 2>&1 | grep -E 'preferred|create_buffer|set_destination'
+```
+
+`preferred_scale` is in 120ths (240 is 2x). The `create_buffer` size
+should be the `set_destination` size times that scale. A buffer the same
+size as the destination under a scale above 1 means the compositor sent
+none of the three, and the panel has nothing to follow. Without
+`wp_viewporter` the panel follows whole scales only, the fraction rounded
+up.
+
 > **Symptom:** ranking surprises — the wrong app is first.
 
 The query matches case-insensitively over name, generic name,

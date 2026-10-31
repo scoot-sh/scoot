@@ -70,7 +70,6 @@ use wayland_client::protocol::{
 };
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum};
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
-use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::WpFractionalScaleV1;
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::xdg::activation::v1::client::xdg_activation_token_v1::{
@@ -86,7 +85,7 @@ use crate::cli::ColorOverrides;
 use crate::dmenu::{DmenuUi, Outcome as DmenuOutcome, Print as DmenuPrint};
 use crate::highlight::fill_round_rect;
 use crate::index::{Action, Entry};
-use crate::layout::{Layout, Rect};
+use crate::layout::{Fit, Layout, Rect};
 use crate::look::Look;
 use crate::motion::Slide;
 use crate::spawn::{self, Token};
@@ -332,7 +331,7 @@ pub fn open(opts: Options) -> i32 {
             width,
             height,
             layout,
-            rows: list_rows as usize,
+            rows: list_rows,
             launch,
             dmenu,
             empty_text,
@@ -390,7 +389,7 @@ struct PanelSpec {
     width: u32,
     height: u32,
     layout: Layout,
-    rows: usize,
+    rows: u32,
     launch: LaunchCtx,
     dmenu: Option<DmenuSpec>,
     empty_text: &'static str,
@@ -467,8 +466,8 @@ fn run_panel(
             prompt_only,
             password,
         } => Model::Dmenu(match password {
-            true => DmenuUi::open_secret(lines, spec.rows, only_match, prompt_only),
-            false => DmenuUi::open(lines, spec.rows, only_match, prompt_only),
+            true => DmenuUi::open_secret(lines, spec.rows as usize, only_match, prompt_only),
+            false => DmenuUi::open(lines, spec.rows as usize, only_match, prompt_only),
         }),
     };
     let mut app = App::new(
@@ -477,6 +476,7 @@ fn run_panel(
         spec.width,
         spec.height,
         spec.layout,
+        spec.rows,
         spec.launch,
         spec.dmenu,
         spec.empty_text,
@@ -582,6 +582,9 @@ struct App {
     width: u32,
     height: u32,
     layout: Layout,
+    /// How many list rows the panel's height holds (0 for a prompt-only
+    /// dmenu): the device layout is held to that height.
+    rows: u32,
     /// The panel's geometry as last drawn (device pixels) and the scale
     /// it was drawn at, so a click lands on the row the pixels show at a
     /// fractional scale; `None` before the first draw (`layout`, at scale
@@ -596,6 +599,9 @@ struct App {
     activation: Option<XdgActivationV1>,
     viewporter: Option<WpViewporter>,
     fractional: Option<WpFractionalScaleManagerV1>,
+    /// Each bound output's integer scale and the ones the surface is on:
+    /// the fallback under the surface's own scale events.
+    scales: scale::OutputScales<wl_output::WlOutput>,
     seat_proxy: Option<wl_seat::WlSeat>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
@@ -666,6 +672,7 @@ impl App {
         width: u32,
         height: u32,
         layout: Layout,
+        rows: u32,
         launch: LaunchCtx,
         dmenu: Option<DmenuSpec>,
         empty_text: &'static str,
@@ -680,6 +687,7 @@ impl App {
             width,
             height,
             layout,
+            rows,
             drawn: None,
             launch,
             dmenu,
@@ -690,6 +698,7 @@ impl App {
             activation: None,
             viewporter: None,
             fractional: None,
+            scales: scale::OutputScales::default(),
             seat_proxy: None,
             keyboard: None,
             pointer: None,
@@ -767,7 +776,10 @@ impl App {
             layer_shell: self.layer_shell.as_ref(),
             xdg_wm_base: None,
             viewporter: self.viewporter.as_ref(),
-            fractional_scale: self.fractional.as_ref(),
+            // A fraction is only acted on through a viewport: without one
+            // the surface asks for no fractional scale and follows the
+            // integer ones.
+            fractional_scale: self.viewporter.as_ref().and(self.fractional.as_ref()),
         })
     }
 
@@ -812,6 +824,7 @@ impl App {
 
     fn destroy_live(&mut self) {
         self.buffers.clear();
+        self.scales.leave_all();
         if let Some(live) = self.live.take() {
             live.destroy();
         }
@@ -851,16 +864,7 @@ impl App {
             Model::Dmenu(dui) => dui.list(),
         };
         let (layout, factor) = self.drawn.unwrap_or((self.layout, 1.0));
-        // The pointer is in surface (logical) pixels, the drawn rows in
-        // device pixels.
-        let y = (f64::from(pointer_y) * factor) as u32;
-        let list_y = layout.list_y();
-        if y < list_y || layout.row_h == 0 {
-            return None;
-        }
-        let row = (y - list_y) / layout.row_h;
-        let row = row as usize;
-        (row < list.visible_range().len()).then_some(row)
+        row_at(&layout, factor, pointer_y, list.visible_range().len())
     }
 
     /// Draws the panel into a pooled buffer and commits it.
@@ -888,11 +892,22 @@ impl App {
         }
     }
 
+    /// The panel's geometry in device pixels at `scale`.
+    fn layout_at(&self, look: &Look, scale: scootui::density::Scale) -> Layout {
+        match self.model {
+            Model::Dmenu(_) => dmenu_layout(look, scale, self.height, self.rows),
+            Model::Apps(_) | Model::Run(_) => device_layout(look, scale, self.height, self.rows),
+        }
+    }
+
     fn draw_frame(&mut self, frame: Frame, text: &mut Text, look: &Look, qh: &QueueHandle<Self>) {
-        let dims = match self.demand.buffer_dims(frame.size) {
-            Some(dims) => dims,
-            None => return,
+        // The buffer is the surface's logical size scaled, exactly: the
+        // compositor maps it one to one onto the output's pixels, which a
+        // buffer of any other size would resample.
+        let Some(dims) = self.demand.buffer_dims(frame.size) else {
+            return;
         };
+        let layout = self.layout_at(look, frame.scale);
         let Some(shm) = self.shm.as_ref() else {
             return;
         };
@@ -908,6 +923,8 @@ impl App {
                 return;
             }
         };
+        // What a click now lands on is what this frame shows.
+        self.drawn = Some((layout, frame.scale.factor().max(MIN_FACTOR)));
         // A fresh spawn failure, drawn instead of the list until it
         // clears (the drive expires it after 2 s): the failed pick
         // stays visible, and the panel stays open.
@@ -917,14 +934,12 @@ impl App {
         let mut region = Region::Surface;
         match &self.model {
             Model::Apps(ui) | Model::Run(ui) => {
-                let layout = device_layout(look, frame.scale);
-                let factor = frame.scale.factor().max(MIN_FACTOR);
-                self.drawn = Some((layout, factor));
                 let view = PanelView {
                     ui,
                     look,
                     width: self.width,
                     height: self.height,
+                    rows: self.rows,
                     error,
                     empty_text: self.empty_text,
                     scale: frame.scale,
@@ -953,9 +968,6 @@ impl App {
                 let Some(dmenu) = dmenu else {
                     return;
                 };
-                let layout = dmenu_layout(look, frame.scale);
-                let factor = frame.scale.factor().max(MIN_FACTOR);
-                self.drawn = Some((layout, factor));
                 let mut paint = |pixels: &mut [u8], panel_dims: (u32, u32)| {
                     paint_dmenu(
                         pixels,
@@ -965,6 +977,7 @@ impl App {
                         look,
                         self.width,
                         self.height,
+                        self.rows,
                         frame.scale,
                         dmenu,
                     );
@@ -1161,6 +1174,8 @@ struct PanelView<'a> {
     /// The panel's logical size.
     width: u32,
     height: u32,
+    /// How many list rows `height` holds.
+    rows: u32,
     /// A fresh spawn failure, drawn instead of the list.
     error: Option<&'a str>,
     empty_text: &'a str,
@@ -1180,6 +1195,20 @@ fn scale_len(logical: u32, factor: f64) -> u32 {
             .max(1.0)
             .min(f64::from(u32::MAX))) as u32
     }
+}
+
+/// The list row at `pointer_y` logical pixels down the panel, of `shown`
+/// rows drawn from `layout` (device pixels) at `factor` device pixels per
+/// logical one down the panel. The pointer is a whole logical pixel, so it
+/// is taken at that pixel's middle.
+fn row_at(layout: &Layout, factor: f64, pointer_y: u32, shown: usize) -> Option<usize> {
+    let y = ((f64::from(pointer_y) + 0.5) * factor) as u32;
+    let list_y = layout.list_y();
+    if y < list_y || layout.row_h == 0 {
+        return None;
+    }
+    let row = ((y - list_y) / layout.row_h) as usize;
+    (row < shown).then_some(row)
 }
 
 /// Paints the panel: the rounded chrome (border ring in `focus`, fill in
@@ -1210,6 +1239,7 @@ fn paint_panel(
         look,
         width,
         height,
+        rows,
         error,
         empty_text,
         scale,
@@ -1220,7 +1250,7 @@ fn paint_panel(
     let factor = scale.factor().max(MIN_FACTOR);
     let width_d = scale_len(width, factor).min(buffer_w).max(1);
     let height_d = scale_len(height, factor).min(buffer_h).max(1);
-    let layout = device_layout(look, scale);
+    let layout = device_layout(look, scale, height, rows);
     let (em, radius_d) = (layout.em, scale_len(look.radius, factor));
     chrome_scaled(
         pixels,
@@ -1395,23 +1425,32 @@ const MIN_FACTOR: f64 = 0.25;
 
 /// The apps panel's geometry in device pixels at `scale`: all of it
 /// derives from the device em and radius, so the shape is the same at
-/// every font size and scale. The one place the draw and the pointer's
-/// row hit-test take it from.
-fn device_layout(look: &Look, scale: scootui::density::Scale) -> Layout {
+/// every font size and scale, with its `rows` held to the `height` (logical)
+/// the panel is, scaled. The one place the draw and the pointer's row
+/// hit-test take it from.
+fn device_layout(look: &Look, scale: scootui::density::Scale, height: u32, rows: u32) -> Layout {
     let factor = scale.factor().max(MIN_FACTOR);
     let em = ((f64::from(look.font_size_px) * factor) as f32).clamp(1.0, 512.0);
     let radius = (f64::from(look.radius) * factor)
         .round()
         .clamp(0.0, f64::from(u32::MAX)) as u32;
-    Layout::new(em, radius, factor)
+    let fit = Fit {
+        height: scale_len(height, factor),
+        rows,
+    };
+    Layout::fitted(em, radius, factor, Some(fit))
 }
 
 /// The dmenu panel's geometry in device pixels at `scale`: the one place
 /// the draw and the pointer's row hit read it from.
-fn dmenu_layout(look: &Look, scale: scootui::density::Scale) -> Layout {
+fn dmenu_layout(look: &Look, scale: scootui::density::Scale, height: u32, rows: u32) -> Layout {
     let factor = scale.factor().max(MIN_FACTOR);
     let em = f64::from(look.font_size_px.clamp(1.0, 256.0)) * factor;
-    Layout::dmenu_scaled(em as f32, factor)
+    let fit = Fit {
+        height: scale_len(height, factor),
+        rows,
+    };
+    Layout::dmenu_fitted(em as f32, factor, Some(fit))
 }
 
 /// Draws one row's icon into `rect` (a square, `rect.width` device pixels
@@ -1504,9 +1543,10 @@ fn tile_em(side: u32) -> f32 {
 /// prints, and printing cannot fail into the panel). Anything drawn beside
 /// the entry starts at [`Geometry::text_x`], aligned with the widgets.
 ///
-/// `width` and `height` are the panel's logical size and `dims` the
-/// buffer's in device pixels; everything is measured by [`dmenu_layout`] at
-/// `scale`, which at scale 1 is the bytes the panel always drew.
+/// `width` and `height` are the panel's logical size (`rows` list rows
+/// tall) and `dims` the buffer's in device pixels; everything is measured
+/// by [`dmenu_layout`] at `scale`, which at scale 1 is the bytes the panel
+/// always drew.
 #[allow(clippy::too_many_arguments)]
 fn paint_dmenu(
     pixels: &mut [u8],
@@ -1516,14 +1556,15 @@ fn paint_dmenu(
     look: &Look,
     width: u32,
     height: u32,
+    rows: u32,
     scale: scootui::density::Scale,
     spec: &DmenuSpec,
 ) {
     let (buffer_w, buffer_h) = dims;
     let factor = scale.factor().max(MIN_FACTOR);
+    let layout = dmenu_layout(look, scale, height, rows);
     let width = scale_len(width, factor).min(buffer_w);
     let height = scale_len(height, factor).min(buffer_h);
-    let layout = dmenu_layout(look, scale);
     let row_h = layout.row_h;
     if width == 0 || height == 0 || row_h == 0 {
         return;
@@ -2155,15 +2196,12 @@ macro_rules! empty_dispatch {
 }
 
 empty_dispatch!(wl_compositor::WlCompositor);
-empty_dispatch!(wl_surface::WlSurface);
 empty_dispatch!(wl_shm::WlShm);
 empty_dispatch!(wl_shm_pool::WlShmPool);
 empty_dispatch!(wl_region::WlRegion);
-empty_dispatch!(wl_output::WlOutput);
 empty_dispatch!(WpViewport);
 empty_dispatch!(WpViewporter);
 empty_dispatch!(WpFractionalScaleManagerV1);
-empty_dispatch!(WpFractionalScaleV1);
 empty_dispatch!(ZwlrLayerShellV1);
 empty_dispatch!(XdgActivationV1);
 
@@ -2221,7 +2259,8 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                     app.shm = Some(registry.bind(name, 1.min(version), qh, ()));
                 }
                 "wl_output" => {
-                    let _output: wl_output::WlOutput = registry.bind(name, 4.min(version), qh, ());
+                    let output: wl_output::WlOutput = registry.bind(name, 4.min(version), qh, ());
+                    app.scales.bound(output);
                     app.outputs = app.outputs.saturating_add(1);
                 }
                 "wl_seat" => {
@@ -2544,6 +2583,7 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
     }
 }
 
+mod scale;
 mod staged;
 
 #[cfg(test)]
@@ -2630,6 +2670,7 @@ mod tests {
             look: &look,
             width,
             height,
+            rows: 10,
             error: None,
             empty_text: "empty",
             scale,
@@ -2646,8 +2687,7 @@ mod tests {
         );
         // The 1.5x icon side from the scaled em, as `paint_panel`
         // derives it: above the 1x side a scale-1 draw would use.
-        let em = (f64::from(look.font_size_px) * 1.5) as f32;
-        let device = Layout::new(em, (f64::from(look.radius) * 1.5).round() as u32, 1.5);
+        let device = device_layout(&look, scale, height, 10);
         let side = device.side;
         assert!(side > logical.side, "a 1.5x side {side} above the 1x side");
         // The first row's icon square, as `paint_panel` places it.
@@ -2720,6 +2760,7 @@ mod tests {
                         look: &look,
                         width,
                         height,
+                        rows: 10,
                         error: None,
                         empty_text: "empty",
                         scale,
@@ -2737,9 +2778,7 @@ mod tests {
                     if count == 0 {
                         continue;
                     }
-                    let em = (f64::from(font) * factor) as f32;
-                    let radius = (f64::from(look.radius) * factor).round() as u32;
-                    let device = Layout::new(em, radius, factor);
+                    let device = device_layout(&look, scale, height, 10);
                     let row = device.row(width_d, 0);
                     let accent = look.theme.accent.argb8888(255).to_le_bytes();
                     let at = |x: u32, y: u32| {

@@ -25,6 +25,9 @@ fn entries(count: usize) -> Vec<Entry> {
     super::bytes_tests::entries(count)
 }
 
+/// How many list rows the rig's panel holds.
+const ROWS: u32 = 10;
+
 /// A panel, its look and its effects, ready to draw frames of.
 struct Rig {
     _dir: tempfile::TempDir,
@@ -84,6 +87,7 @@ impl Rig {
             look: &self.look,
             width: self.width,
             height: self.height,
+            rows: ROWS,
             error: None,
             empty_text: "empty",
             scale: self.scale,
@@ -295,8 +299,23 @@ fn a_frame_that_only_advances_the_motion_does_not_repaint_the_panel() {
 
 #[test]
 fn an_advancing_frame_allocates_nothing() {
+    // At every scale a compositor sends, and after the scale moved: the
+    // layers and tables are rebuilt once for the new size, then reused.
+    for (first, scale) in [
+        (Scale::Integer(1), Scale::Integer(1)),
+        (Scale::Integer(1), Scale::Fractional(180)),
+        (Scale::Fractional(150), Scale::Integer(2)),
+        (Scale::Integer(2), Scale::Fractional(210)),
+    ] {
+        let mut rig = Rig::new(moving(), first);
+        rig.frame(true, Instant::now());
+        rig.scale = scale;
+        warm_frames_allocate_nothing(rig);
+    }
+}
+
+fn warm_frames_allocate_nothing(mut rig: Rig) {
     let base = Instant::now();
-    let mut rig = Rig::new(moving(), Scale::Integer(1));
     // Warm up: the layers, the shadow tables, the glyph cache.
     rig.frame(true, base);
     rig.frame(false, at(base, 20));
@@ -307,6 +326,7 @@ fn an_advancing_frame_allocates_nothing() {
         look: &rig.look,
         width: rig.width,
         height: rig.height,
+        rows: ROWS,
         error: None,
         empty_text: "empty",
         scale: rig.scale,
@@ -363,7 +383,7 @@ fn selected_slot_pixel(
     origin: (u32, u32),
     slot: u32,
 ) -> [u8; 4] {
-    let layout = device_layout(&rig.look, rig.scale);
+    let layout = device_layout(&rig.look, rig.scale, rig.height, ROWS);
     let row = layout.row(scale_len(rig.width, rig.scale.factor()), slot);
     // Left of the icon column, inside the highlight: nothing but fill.
     pixel_at(
@@ -494,6 +514,7 @@ fn every_scale_and_a_tiny_surface_draw_without_a_panic() {
         look: &rig.look,
         width: rig.width,
         height: rig.height,
+        rows: ROWS,
         error: None,
         empty_text: "empty",
         scale: rig.scale,
@@ -565,6 +586,7 @@ fn time_frame(
         look: &rig.look,
         width: rig.width,
         height: rig.height,
+        rows: ROWS,
         error: None,
         empty_text: "empty",
         scale: rig.scale,
@@ -639,6 +661,7 @@ fn bench_effects() {
                     look: &rig.look,
                     width: rig.width,
                     height: rig.height,
+                    rows: ROWS,
                     error: None,
                     empty_text: "empty",
                     scale: rig.scale,

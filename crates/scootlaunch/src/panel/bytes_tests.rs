@@ -65,19 +65,15 @@ fn looks() -> Vec<Look> {
     vec![Look::default(), translucent, square]
 }
 
-/// The fingerprint of every apps panel draw (three looks, three scales,
-/// four list sizes, an error line) and one dmenu draw.
-pub(super) fn fingerprint() -> u64 {
+/// The fingerprint of every apps panel draw (three looks, the given
+/// scales, four list sizes, an error line) and, if asked, one dmenu draw.
+pub(super) fn fingerprint(scales: &[scootui::density::Scale], dmenu: bool) -> u64 {
     let dir = tempfile::tempdir().expect("tmp");
     let mut text = test_text(dir.path());
     let mut icons = crate::icons::Cache::default();
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for look in looks() {
-        for scale in [
-            scootui::density::Scale::Integer(1),
-            scootui::density::Scale::Fractional(180),
-            scootui::density::Scale::Integer(2),
-        ] {
+        for scale in scales.iter().copied() {
             for count in [0usize, 1, 5, 40] {
                 let ui = Ui::open(entries(count), Frecency::empty(), 0, 10);
                 let logical = Layout::new(look.font_size_px, look.radius, 1.0);
@@ -93,6 +89,7 @@ pub(super) fn fingerprint() -> u64 {
                         look: &look,
                         width,
                         height,
+                        rows: 10,
                         error,
                         empty_text: "empty",
                         scale,
@@ -111,6 +108,9 @@ pub(super) fn fingerprint() -> u64 {
                 }
             }
         }
+    }
+    if !dmenu {
+        return hash;
     }
     let look = Look::default();
     let lines: Vec<String> = (0..12).map(|n| format!("line {n}")).collect();
@@ -133,6 +133,7 @@ pub(super) fn fingerprint() -> u64 {
         &look,
         width,
         height,
+        6,
         scootui::density::Scale::Integer(1),
         &spec,
     );
@@ -140,8 +141,30 @@ pub(super) fn fingerprint() -> u64 {
     hash
 }
 
+/// The 1x draws: recorded on `4e8293664`, before depth and motion, and
+/// unchanged since (the fingerprint then covered the scaled draws too, so
+/// this is that value's 1x half, taken on the commit before the launcher
+/// followed the compositor's scale).
 #[test]
 fn the_default_look_paints_the_bytes_it_always_did() {
-    let hash = fingerprint();
-    assert_eq!(hash, 0x2deb_24c4_e626_e226, "recorded on 4e8293664");
+    let hash = fingerprint(&[scootui::density::Scale::Integer(1)], true);
+    assert_eq!(hash, ONE_X, "recorded on 4e8293664");
 }
+
+/// The scaled draws, with the rows held to the scaled height: recorded
+/// when the launcher began drawing at the compositor's scale, which is the
+/// first time a scaled draw reached a screen.
+#[test]
+fn the_scaled_panel_paints_the_bytes_recorded_with_the_fit() {
+    let hash = fingerprint(
+        &[
+            scootui::density::Scale::Fractional(180),
+            scootui::density::Scale::Integer(2),
+        ],
+        false,
+    );
+    assert_eq!(hash, SCALED, "recorded with the rows held to the height");
+}
+
+const ONE_X: u64 = 0x6226_31d1_2e84_8874;
+const SCALED: u64 = 0xa352_c849_814f_5f69;

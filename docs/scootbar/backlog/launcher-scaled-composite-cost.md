@@ -23,6 +23,11 @@ run cost 15 to 100 us. The budget at 60 Hz is 16.6 ms, so it fits, but it
 is the heaviest thing the launcher does and the notification cards pay the
 same per pixel.
 
+Since 2026-10-31 ([launch-ignores-preferred-scale](resolved/launch-ignores-preferred-scale-done.md)) the launcher draws at the
+output's scale, so the 2x case is no longer hypothetical: `bench_effects`
+(release, `taskset -c 3`, three runs) gives an entrance frame of 8.85 to
+8.98 ms median at 828x628, against 2.04 to 2.33 ms at 414x314.
+
 ## What to do
 
 Make the per-pixel work cheaper without changing a byte of output (the

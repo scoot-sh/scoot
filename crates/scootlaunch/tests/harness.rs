@@ -149,7 +149,17 @@ fn browser_svg() -> String {
 /// A session with a fixture applications tree: `apps` holds
 /// `name.desktop` files, and nothing else is indexed.
 pub fn session_with_apps(tag: &str, apps: &[(&str, &str)]) -> Option<(Session, PathBuf)> {
-    let session = Session::scoot_requiring(&launch_bin(), tag, 1, "", REQUIRE)?;
+    session_with_apps_config(tag, apps, "")
+}
+
+/// [`session_with_apps`] under a compositor config (`[output]\nscale = 2\n`
+/// for a HiDPI output).
+pub fn session_with_apps_config(
+    tag: &str,
+    apps: &[(&str, &str)],
+    config: &str,
+) -> Option<(Session, PathBuf)> {
+    let session = Session::scoot_requiring(&launch_bin(), tag, 1, config, REQUIRE)?;
     let data_home = session.scratch.0.join("data-home");
     let applications = data_home.join("applications");
     fs::create_dir_all(&applications).unwrap();
@@ -506,4 +516,41 @@ pub fn add_blank_icon(data_home: &std::path::Path) {
     writer.write_image_data(&vec![0u8; 48 * 48 * 4]).unwrap();
     drop(writer);
     fs::write(dir.join("blank.png"), buf).unwrap();
+}
+
+/// The numbers inside the parentheses of every `WAYLAND_DEBUG` line
+/// calling `method` (`create_buffer`, `set_destination`,
+/// `preferred_scale`), in order. Names such as `wl_buffer@18` are not
+/// numbers and are skipped.
+pub fn calls(log: &str, method: &str) -> Vec<Vec<u32>> {
+    let needle = format!(".{method}");
+    log.lines()
+        .filter_map(|line| {
+            let at = line.find(&needle)? + needle.len();
+            let rest = &line[at..];
+            let open = rest.find('(')?;
+            let close = rest.rfind(')')?;
+            let inner = rest.get(open + 1..close)?;
+            Some(
+                inner
+                    .split(',')
+                    .filter_map(|part| part.trim().parse::<u32>().ok())
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+/// The `(width, height)` of every buffer the client created, in order.
+pub fn created_buffers(log: &str) -> Vec<(u32, u32)> {
+    calls(log, "create_buffer")
+        .iter()
+        .filter_map(|n| Some((*n.get(1)?, *n.get(2)?)))
+        .collect()
+}
+
+/// A buffer side for `logical` pixels at `v120`/120, rounded half away from
+/// zero as `wp_fractional_scale_v1` says.
+pub fn scaled(logical: u32, v120: u32) -> u32 {
+    ((u64::from(logical) * u64::from(v120) + 60) / 120).max(1) as u32
 }
