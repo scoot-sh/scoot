@@ -45,6 +45,7 @@ const CONFIG_SECTIONS: &[&str] = &[
     "[appearance]",
     "[animation]",
     "[scroll]",
+    "[gestures]",
     "[output]",
     "[[outputs]]",
     "[renderer]",

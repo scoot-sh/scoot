@@ -111,6 +111,44 @@ fn one_event_fires_at_most_the_cap() {
 }
 
 #[test]
+fn a_huge_delta_leaves_less_than_one_step_behind() {
+    // The step count is capped, but the remainder is a separate promise: it
+    // must be under one step with the delta's sign, not the rounding error of
+    // `whole * threshold` at 1e300 (which left a residual of the same order
+    // and made every later event fire at the cap).
+    for delta in [
+        1e300,
+        -1e300,
+        f64::MAX,
+        f64::MIN,
+        6.0e5 + 17.0,
+        -6.0e5 - 17.0,
+    ] {
+        let mut axis = Accumulator::default();
+        let t = clock();
+        assert_eq!(axis.feed(delta, Unit::Motion, 60.0, 8, t), 8, "{delta}");
+        assert!(
+            axis.amount.abs() < 60.0,
+            "{delta} left a remainder of {}",
+            axis.amount
+        );
+        assert!(
+            axis.amount == 0.0 || axis.amount.signum() == delta.signum(),
+            "{delta} flipped the remainder's sign: {}",
+            axis.amount
+        );
+        // And the next small event behaves as on a fresh axis.
+        let fresh = Accumulator::default().feed(10.0, Unit::Motion, 60.0, 8, t);
+        let after = axis.feed(delta.signum() * 10.0, Unit::Motion, 60.0, 8, t);
+        assert!(after <= 1 && fresh == 0, "{delta}: {after} steps after");
+    }
+    // An exact multiple leaves exactly nothing.
+    let mut axis = Accumulator::default();
+    assert_eq!(axis.feed(120.0, Unit::Motion, 60.0, 8, clock()), 2);
+    assert_eq!(axis.amount, 0.0);
+}
+
+#[test]
 fn hostile_values_fire_nothing() {
     let mut axis = Accumulator::default();
     let t = clock();

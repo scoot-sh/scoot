@@ -309,6 +309,57 @@ plain scrolling is the first thing apps need, and the right modifier for
 sideways movement depends on what else your setup already puts on
 <kbd>Super</kbd>.
 
+## Touchpad gestures
+
+A swipe with three fingers (the default; `swipe_fingers` in
+[`[gestures]`](./configure.md#gestures) makes it four) moves the strip.
+Two-finger scrolling is not a gesture and stays the window's. A swipe with
+any other number of fingers is not scoot's, and scoot does not yet hand
+multi-finger swipes to windows (it does not offer the pointer-gestures
+protocol), so those do nothing.
+
+- **Sideways.** The strip follows your fingers one to one, with the columns
+  that were off screen sliding in. Lift and the nearest column takes the
+  focus. A quick flick goes one column further in its direction, however
+  short. The view then eases into place with your
+  [`[animation]`](./configure.md#animation) curve (spring included); with
+  animation off it snaps. Past the first or last column the strip stretches
+  and springs back.
+- **Up and down.** One step when the swipe ends, if it travelled far enough:
+  the next or previous workspace, or window in the column, as `vertical`
+  says. Nothing tracks the fingers.
+- **One direction per swipe.** The first bit of travel decides whether it is
+  sideways or vertical, and the other direction is ignored for the rest of
+  the swipe.
+- **`natural`.** With the default `true` the content follows the fingers: swipe
+  left and the columns to the right come into view. `natural = false`
+  reverses both directions. This is separate from the device's own
+  natural-scroll setting, which governs two-finger scrolling only.
+- **Whole swipes only.** A swipe is scoot's or the window's from its first
+  touch to the last. Changing `swipe_fingers`, turning a direction off or
+  locking the session mid-swipe never gives a window half of one. A claimed
+  swipe that is cut short (a finger lifted early) settles back to where it
+  began and changes nothing.
+- **Not while locked, not over a fullscreen window.** On a locked session a
+  swipe goes to the lock screen and nothing moves. With a fullscreen window
+  covering the output, scoot leaves the swipe alone and no window receives
+  it either, so nothing happens.
+- **What is drawn is not where the windows are.** While you swipe, and
+  while the view settles, the windows are drawn shifted. Clicks, `scoot msg
+  windows` and focus go by where the windows will be once it settles.
+- **After a settle the view may not move.** Focus follows the column you
+  stopped on, and scoot scrolls the view only as far as it needs to show that
+  column. If it was already fully visible, the strip eases back to where it
+  was and only the focus ring moves.
+
+> **Symptom:** nothing happens on a swipe in a VM or over remote desktop.
+> The host keeps multi-finger swipes, so the guest never receives them (a
+> vfkit, UTM or VNC guest sees a plain pointer). Use
+> [scroll binds](#scroll-binds) there.
+
+Swipes come from libinput, so they work on `--tty` sessions. A `--nested`
+scoot does not receive its host's swipes; use scroll binds there too.
+
 ## Global shortcuts
 
 Some apps want a key that works no matter which window holds focus — a

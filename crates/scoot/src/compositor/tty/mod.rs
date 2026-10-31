@@ -74,6 +74,9 @@ use smithay::backend::input::{
     TabletToolButtonEvent, TabletToolEvent, TabletToolProximityEvent, TabletToolTipEvent,
     TabletToolTipState,
 };
+use smithay::backend::input::{
+    GestureBeginEvent, GestureEndEvent, GestureSwipeUpdateEvent as SwipeUpdateEvent,
+};
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
@@ -2358,6 +2361,30 @@ fn libinput_event(event: InputEvent<LibinputInputBackend>, _: &mut (), state: &m
             if let Some(frame) = frame {
                 state.emit_scroll(frame);
             }
+        }
+        // Multi-finger touchpad swipes (`gesture.rs`): scoot's own when the
+        // finger count matches `[gestures] swipe_fingers`, the pointer
+        // focus's otherwise -- decided once at `begin`, kept to `end`.
+        // Fully qualified: the libinput event types carry inherent methods
+        // of the same names (as the tablet arms below).
+        InputEvent::GestureSwipeBegin { event } => {
+            state.gesture_swipe_begin(
+                GestureBeginEvent::<LibinputInputBackend>::fingers(&event),
+                event.time().millis(),
+            );
+        }
+        InputEvent::GestureSwipeUpdate { event } => {
+            state.gesture_swipe_update(
+                SwipeUpdateEvent::<LibinputInputBackend>::delta_x(&event),
+                SwipeUpdateEvent::<LibinputInputBackend>::delta_y(&event),
+                event.time().millis(),
+            );
+        }
+        InputEvent::GestureSwipeEnd { event } => {
+            state.gesture_swipe_end(
+                GestureEndEvent::<LibinputInputBackend>::cancelled(&event),
+                event.time().millis(),
+            );
         }
         // Drawing-tablet tools, the `tablet.rs` half: positions map onto
         // the output's *logical* size exactly like the absolute-pointer

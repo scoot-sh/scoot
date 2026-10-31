@@ -611,6 +611,8 @@ struct FileConfig {
     #[serde(default)]
     scroll: Option<ScrollConfig>,
     #[serde(default)]
+    gestures: Option<super::gesture::GesturesFile>,
+    #[serde(default)]
     floating: Option<FloatingConfig>,
     /// `[[window_rule]]`, an array of tables: see `window_rules.rs`.
     #[serde(default)]
@@ -756,6 +758,9 @@ pub struct LoadedConfig {
     /// `[scroll] step`: continuous scroll units per scroll-bind step, already
     /// clamped (see `scroll_binds.rs`). Re-applied live by a reload.
     pub scroll_step: f64,
+    /// `[gestures]`: touchpad swipes (see `gesture.rs`). Re-applied live by a
+    /// reload; a swipe already in progress finishes under the old values.
+    pub gestures: super::gesture::GestureConfig,
 }
 
 impl LoadedConfig {
@@ -783,6 +788,7 @@ impl LoadedConfig {
             wallpaper: WallpaperSetting::Absent,
             animation: super::animation::AnimationSettings::default(),
             scroll_step: super::scroll_binds::DEFAULT_STEP,
+            gestures: super::gesture::GestureConfig::default(),
         }
     }
 
@@ -876,6 +882,7 @@ impl LoadedConfig {
             FloatingRules::from_config(file.floating, &file.window_rule);
         let animation = file.animation.unwrap_or_default().into_settings();
         let scroll_step = file.scroll.unwrap_or_default().step();
+        let gestures = file.gestures.unwrap_or_default().resolve();
         let wallpaper =
             WallpaperSetting::resolve(file.wallpaper, path, std::env::var_os("HOME").as_deref());
         for skipped in &skipped_rules {
@@ -905,6 +912,7 @@ impl LoadedConfig {
                 wallpaper,
                 animation,
                 scroll_step,
+                gestures,
             },
             shadowed,
             invalid,
@@ -1758,7 +1766,7 @@ pub fn default_config_toml() -> String {
          # Gap, column widths, the output scale, the ring/background/cursor\n\
          # appearance fields, binds, [floating] and [[window_rule]], new\n\
          # [autostart] spawn entries, [wallpaper], [xwayland] fractional,\n\
-         # [scroll] and [animation]\n\
+         # [scroll], [gestures] and [animation]\n\
          # re-apply live with `scoot msg reload`; [tty] gpu, [renderer]\n\
          # backend, [xwayland] enabled, [virtual_input] enabled and\n\
          # [virtual_input] binds take effect on restart and a reload\n\
@@ -1913,6 +1921,38 @@ pub fn default_config_toml() -> String {
         super::scroll_binds::DEFAULT_STEP,
         super::scroll_binds::MIN_STEP,
         super::scroll_binds::MAX_STEP,
+    ));
+
+    out.push_str("\n[gestures]\n");
+    out.push_str(
+        "# Multi-finger touchpad swipes. Exactly `swipe_fingers` fingers (3 or 4) are\n\
+         # scoot's: a horizontal swipe scrolls the strip under the fingers and focuses\n\
+         # the column it settles on, a vertical one steps workspaces or windows.\n\
+         # Fewer or more fingers stay the client's. Both axes \"none\" turns swipes off.\n\
+         # Re-applies live on reload; a swipe in progress finishes under the old values.\n",
+    );
+    let gestures = super::gesture::GestureConfig::default();
+    out.push_str(&format!(
+        "# swipe_fingers = {}  # 3 or 4\n",
+        gestures.fingers
+    ));
+    out.push_str(&format!(
+        "# horizontal = \"{}\"  # or \"none\"\n",
+        gestures.horizontal.name()
+    ));
+    out.push_str(&format!(
+        "# vertical = \"{}\"  # \"focus-window\" or \"none\"\n",
+        gestures.vertical.name()
+    ));
+    out.push_str(&format!(
+        "# natural = {}  # content follows the fingers; false reverses both axes\n",
+        gestures.natural
+    ));
+    out.push_str(&format!(
+        "# sensitivity = {:?}  # how far the strip follows the fingers, clamped {}..={}\n",
+        gestures.sensitivity,
+        super::gesture::MIN_SENSITIVITY,
+        super::gesture::MAX_SENSITIVITY,
     ));
 
     out.push_str("\n[virtual_input]\n");
@@ -2915,6 +2955,7 @@ fn fold_letter(key: &str, shift_held: bool) -> (Cow<'_, str>, bool) {
 
 #[cfg(test)]
 mod tests {
+    mod gestures;
     mod scroll;
 
     use std::io::Write;

@@ -347,6 +347,110 @@ fn an_allowed_spawn_bind_fires_while_locked() {
     );
 }
 
+/// Scroll binds follow the key-bind rule end to end, through the real
+/// `emit_scroll` -> `filter_scroll` path: an action bind does not fire from
+/// behind the lock screen, an `allow_when_locked` spawn does, and the same
+/// scroll fires the action bind once unlocked (so the first half is a gate,
+/// not a bind that never worked).
+#[test]
+fn scroll_binds_follow_the_lock_rule() {
+    use crate::compositor::keybindings::{BindFlags, Bound, Modifiers, ScrollDir, Trigger};
+
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    fixture.state.keybindings.insert_trigger(
+        Modifiers::default(),
+        Trigger::Scroll(ScrollDir::Down),
+        Bound::Action(scoot_core::Action::CycleColumnWidth),
+        BindFlags::default(),
+    );
+    fixture.state.keybindings.insert_trigger(
+        Modifiers::default(),
+        Trigger::Scroll(ScrollDir::Up),
+        Bound::Action(scoot_core::Action::Spawn(vec!["true".into()])),
+        BindFlags {
+            repeat: false,
+            allow_when_locked: true,
+        },
+    );
+    let width = |fixture: &mut Fixture| {
+        let arrangement = fixture.state.world.arrange();
+        let focused = arrangement.focused.expect("a focused window");
+        arrangement
+            .get(focused)
+            .expect("the focused window is placed")
+            .rect
+            .w
+    };
+    let before = width(&mut fixture);
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    let spawns = fixture.state.spawned_children.len();
+
+    fixture.state.scroll(0.0, 15.0);
+    assert_eq!(
+        width(&mut fixture),
+        before,
+        "a scroll bind ran an action from behind the lock screen"
+    );
+    assert_eq!(fixture.state.spawned_children.len(), spawns);
+
+    fixture.state.scroll(0.0, -15.0);
+    assert_eq!(
+        fixture.state.spawned_children.len(),
+        spawns + 1,
+        "an allow_when_locked spawn scroll bind did not fire"
+    );
+
+    fixture.run(Step::Unlock { lock: 0 });
+    fixture.state.scroll(0.0, 15.0);
+    assert_ne!(width(&mut fixture), before, "the bind never worked");
+}
+
+/// A swipe is decided once at its begin. Begun behind the lock screen it is
+/// the lock client's (forwarded whole, never claimed); begun before the lock
+/// and claimed, the lock drops its visuals and it ends without acting.
+#[test]
+fn swipes_follow_the_lock_rule_and_never_straddle_it() {
+    use crate::compositor::gesture::Route;
+
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    let focused = |fixture: &Fixture| fixture.state.world.focused_window();
+
+    // Claimed first, then the session locks mid-swipe.
+    fixture.state.gesture_swipe_begin(3, 1000);
+    assert_eq!(fixture.state.gestures.route, Route::Claimed);
+    fixture.state.gesture_swipe_update(-80.0, 0.0, 1010);
+    fixture.run(Step::Lock);
+    fixture.run(Step::map_lock_surface(0));
+    fixture.state.gesture_swipe_update(-80.0, 0.0, 1020);
+    assert_eq!(
+        fixture
+            .state
+            .gesture_shift(fixture.state.outputs.primary_id()),
+        0,
+        "a locked session still draws a swipe offset"
+    );
+    let before = focused(&fixture);
+    fixture.state.gesture_swipe_end(false, 1030);
+    assert_eq!(fixture.state.gestures.route, Route::Idle);
+    assert_eq!(focused(&fixture), before, "the swipe acted behind the lock");
+
+    // Begun while locked: forwarded, so claimed never.
+    fixture.state.gesture_swipe_begin(3, 2000);
+    assert_eq!(fixture.state.gestures.route, Route::Forwarded);
+    fixture.state.gesture_swipe_update(-300.0, 0.0, 2010);
+    fixture.state.gesture_swipe_end(false, 2020);
+    assert_eq!(focused(&fixture), before);
+
+    // Unlocked, the same swipe is scoot's again.
+    fixture.run(Step::Unlock { lock: 0 });
+    fixture.state.gesture_swipe_begin(3, 3000);
+    assert_eq!(fixture.state.gestures.route, Route::Claimed);
+    fixture.state.gesture_swipe_end(true, 3010);
+}
+
 /// A `spawn` bind *without* the flag stays refused while locked: the
 /// keystroke goes to the lock client like any other, and nothing runs. A
 /// terminal from behind the lock screen would be a complete bypass, so the

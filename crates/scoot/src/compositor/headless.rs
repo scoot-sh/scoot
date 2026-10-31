@@ -676,7 +676,7 @@ impl State {
         // then, so laying the windows out would be work for frames that
         // cannot show it. `apply()` still runs the layout on every change
         // underneath, so nothing is lost by the time it unlocks.
-        let arrangement = (!locked).then(|| self.world.arrange());
+        let arrangement = (!locked).then(|| self.frame_arrangement());
         #[cfg(test)]
         self.arrange_calls_for_test
             .set(self.arrange_calls_for_test.get() + usize::from(arrangement.is_some()));
@@ -1046,6 +1046,13 @@ impl State {
         // there is nothing to slide (no windows draw), so any slide snaps.
         // Covers the per-window slides, the per-output workspace-switch
         // viewport slides, and the open fades.
+        //
+        // A swipe's settle is the same kind of thing: frames while it eases,
+        // then it lands and unmaps the columns it had revealed. Idle, this is
+        // one `Option` test.
+        if self.gesture_tick() {
+            self.needs_render = true;
+        }
         if self.session_lock.is_locked() {
             if !self.slides.is_empty() {
                 self.slides.clear();

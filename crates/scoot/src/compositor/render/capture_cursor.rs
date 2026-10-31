@@ -795,6 +795,7 @@ where
         geometry: state.space.output_geometry(output),
         output: state.outputs.id_of(output),
         locked,
+        gesture_dx: state.gesture_shift(state.outputs.id_of(output)),
     };
     let scale = Scale::from(frame.scale);
     let bounds = Rectangle::from_size(size.into());
@@ -811,7 +812,7 @@ where
     let arrangement = if locked {
         None
     } else {
-        Some(state.world.arrange())
+        Some(state.frame_arrangement())
     };
     let now = std::time::Instant::now();
     let ring = ring_elements(

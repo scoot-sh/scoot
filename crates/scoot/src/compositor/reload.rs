@@ -285,6 +285,11 @@ mod field {
     pub const ANIMATION_DURATION: &str = "animation.duration_ms";
     pub const ANIMATION_EASING: &str = "animation.easing";
     pub const SCROLL_STEP: &str = "scroll.step";
+    pub const GESTURES_SWIPE_FINGERS: &str = "gestures.swipe_fingers";
+    pub const GESTURES_HORIZONTAL: &str = "gestures.horizontal";
+    pub const GESTURES_VERTICAL: &str = "gestures.vertical";
+    pub const GESTURES_NATURAL: &str = "gestures.natural";
+    pub const GESTURES_SENSITIVITY: &str = "gestures.sensitivity";
     pub const GLOBAL_SHORTCUTS: &str = "global_shortcuts";
     pub const WALLPAPER: &str = "wallpaper";
     pub const WALLPAPER_COMMAND: &str = "wallpaper.command";
@@ -568,6 +573,7 @@ impl State {
         self.apply_binds_reload(fresh, &mut report);
         self.apply_animation_reload(fresh, &mut report);
         self.apply_scroll_reload(fresh, &mut report);
+        self.apply_gestures_reload(fresh, &mut report);
         self.apply_global_shortcuts_reload(fresh, &mut report);
         self.apply_wallpaper_reload(fresh, &mut report);
 
@@ -1362,6 +1368,35 @@ impl State {
             self.scroll_binds.reset_partial_steps();
             report.applied.push(field::SCROLL_STEP.to_owned());
         }
+    }
+
+    /// `[gestures]`: swaps the live setting, key by key. A swipe in progress
+    /// keeps the values it began with (and its route, so a client never gets
+    /// half a sequence); the next one uses these.
+    fn apply_gestures_reload(&mut self, fresh: &LoadedConfig, report: &mut Report) {
+        let live = self.gestures.config;
+        let next = fresh.gestures;
+        if live == next {
+            return;
+        }
+        if live.fingers != next.fingers {
+            report
+                .applied
+                .push(field::GESTURES_SWIPE_FINGERS.to_owned());
+        }
+        if live.horizontal != next.horizontal {
+            report.applied.push(field::GESTURES_HORIZONTAL.to_owned());
+        }
+        if live.vertical != next.vertical {
+            report.applied.push(field::GESTURES_VERTICAL.to_owned());
+        }
+        if live.natural != next.natural {
+            report.applied.push(field::GESTURES_NATURAL.to_owned());
+        }
+        if live.sensitivity != next.sensitivity {
+            report.applied.push(field::GESTURES_SENSITIVITY.to_owned());
+        }
+        self.gestures.config = next;
     }
 
     /// `[animation]`: swaps the live setting. Disabling snaps any live

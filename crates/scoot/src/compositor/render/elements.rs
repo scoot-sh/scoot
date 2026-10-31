@@ -122,6 +122,11 @@ pub(super) struct FrameContext {
     /// clear color and frame callbacks are all answering the same question
     /// about the same frame.
     pub(super) locked: bool,
+    /// How far a touchpad swipe has pulled this output's tiled strip from
+    /// its targets right now, in logical pixels (see `gesture.rs`). Zero
+    /// unless a swipe or its settle is on this output. Added to the
+    /// workspace-switch viewport offset wherever that is applied.
+    pub(super) gesture_dx: i32,
 }
 
 impl FrameContext {
@@ -311,6 +316,7 @@ impl State {
             geometry,
             output: output_id,
             locked,
+            gesture_dx,
         } = *frame;
         // The client-supplied cursor surface this frame drew from, if any.
         let mut cursor_surface: Option<WlSurface> = None;
@@ -408,6 +414,7 @@ impl State {
                     },
                     &self.slides,
                     viewport_dx,
+                    gesture_dx,
                     &self.fades,
                     now,
                 ),
@@ -502,6 +509,8 @@ where
         .output
         .map(|id| viewport_delta(viewport, id, now))
         .unwrap_or(0);
+    // A swipe scrolls the strip only: floating windows stay where they are.
+    let gesture_dx = frame.gesture_dx;
     let drawn = |placement: &Placement| {
         let mut rect = drawn_rect(placement.rect, windows.get(&placement.id));
         // One branch on empty covers the disabled and idle cases; the
@@ -515,6 +524,11 @@ where
             now,
         );
         let dx = dx.saturating_add(viewport_dx);
+        let dx = if placement.floating {
+            dx
+        } else {
+            dx.saturating_add(gesture_dx)
+        };
         if dx != 0 {
             rect.x = rect.x.saturating_add(dx);
         }
@@ -727,6 +741,7 @@ fn window_elements<R>(
     floating_rings: FloatingRings<R>,
     slides: &[Slide],
     viewport_dx: i32,
+    gesture_dx: i32,
     fades: &[Fade],
     now: std::time::Instant,
 ) -> Vec<Elements<R>>
@@ -783,6 +798,12 @@ where
                 now,
             );
             let dx = dx.saturating_add(viewport_dx);
+            // The strip only: a swipe does not carry floating windows.
+            let dx = if placement.floating {
+                dx
+            } else {
+                dx.saturating_add(gesture_dx)
+            };
             let mapped = if dx != 0 || dy != 0 {
                 Point::from((mapped.x.saturating_add(dx), mapped.y.saturating_add(dy)))
             } else {

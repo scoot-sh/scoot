@@ -402,7 +402,9 @@ impl State {
             if let Some(x11) = window.x11_surface() {
                 super::xwayland::manage::configure_x11(x11, placement, self.x11_scale());
             }
-            if placement.visible {
+            // A swipe in progress also keeps the columns it has scrolled out
+            // of view mapped (see `gesture.rs`); one empty-list test when none.
+            if placement.visible || self.gestures.reveals(placement) {
                 self.space
                     .map_element(window.clone(), (placement.rect.x, placement.rect.y), false);
                 // Beside the position, from the same placement: what the hit

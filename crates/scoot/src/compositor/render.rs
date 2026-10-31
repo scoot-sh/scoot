@@ -1674,6 +1674,7 @@ where
         geometry: state.space.output_geometry(output),
         output: state.outputs.id_of(output),
         locked,
+        gesture_dx: state.gesture_shift(state.outputs.id_of(output)),
     };
     let now = std::time::Instant::now();
     let ring_elements: Rings<R> = ring_elements(
@@ -1730,7 +1731,7 @@ impl State {
         let locked = self.session_lock.is_locked();
         let size = backend.size;
         let clear_color = frame_clear_color(self, locked);
-        let arrangement = (!locked).then(|| self.world.arrange());
+        let arrangement = (!locked).then(|| self.frame_arrangement());
         let mut scratch = primary_direct::JudgeScratch::default();
         let direct = match &mut backend.pipeline {
             Pipeline::Pixman(cpu) => {
@@ -1786,7 +1787,7 @@ impl State {
         let locked = self.session_lock.is_locked();
         let size = backend.size;
         let clear_color = frame_clear_color(self, locked);
-        let arrangement = (!locked).then(|| self.world.arrange());
+        let arrangement = (!locked).then(|| self.frame_arrangement());
         let mut scratch = primary_direct::JudgeScratch::default();
         let Pipeline::Pixman(cpu) = &mut backend.pipeline else {
             unreachable!("the cost harness runs on pixman");
@@ -1841,7 +1842,7 @@ impl State {
         let locked = self.session_lock.is_locked();
         let size = backend.size;
         let clear_color = frame_clear_color(self, locked);
-        let arrangement = (!locked).then(|| self.world.arrange());
+        let arrangement = (!locked).then(|| self.frame_arrangement());
         let covered = self.covered_by_fullscreen(&output);
         let output_id = self.outputs.id_of(&output);
         let mut scratch = primary_direct::JudgeScratch::default();
@@ -1939,7 +1940,7 @@ impl State {
         let locked = self.session_lock.is_locked();
         let size = backend.size;
         let clear_color = frame_clear_color(self, locked);
-        let arrangement = (!locked).then(|| self.world.arrange());
+        let arrangement = (!locked).then(|| self.frame_arrangement());
         let covered = self.covered_by_fullscreen(&output);
         let output_id = self.outputs.id_of(&output).expect("a harness output");
         let mut scratch = primary_direct::JudgeScratch::default();
@@ -2025,6 +2026,7 @@ where
         geometry: state.space.output_geometry(output),
         output: state.outputs.id_of(output),
         locked,
+        gesture_dx: state.gesture_shift(state.outputs.id_of(output)),
     };
     // The core's arrangement, and this frame's ring segments built from it --
     // the tick's one shared layout (see `draw_frame`), gathered into per-output
