@@ -241,6 +241,122 @@ fn a_reversal_inside_a_claimed_swipe_is_swallowed() {
     nothing_arrived(&s.seen());
 }
 
+/// A wheel click between a claimed swipe's motion and its stop is its own
+/// event: it must neither pass for the swipe's stop nor end the claim, or
+/// the swipe's real stop reaches a client that never saw its start.
+#[test]
+fn a_bound_wheel_click_mid_claimed_swipe_leaves_the_claim_alone() {
+    let mut s = ScrollFixture::new();
+    s.bind(SUPER, ScrollDir::Down);
+    s.press_super();
+    s.finger_vertical(70.0);
+    let fired = s.width();
+    // Matches the bind, so it fires on its own...
+    s.fixture.state.scroll(0.0, 15.0);
+    assert_ne!(s.width(), fired, "the wheel click did not fire");
+    // ...and the swipe is still ours to its stop (no further motion to
+    // re-claim it: the stop alone must be swallowed).
+    s.finger_stop();
+    nothing_arrived(&s.seen());
+}
+
+#[test]
+fn an_unbound_wheel_click_mid_claimed_swipe_reaches_the_client_whole() {
+    let mut s = ScrollFixture::new();
+    s.bind(SUPER, ScrollDir::Down);
+    s.press_super();
+    s.finger_vertical(70.0);
+    // The other direction matches nothing: a wheel click belongs to the
+    // client, whatever finger sequence is claimed beside it.
+    s.fixture.state.scroll(0.0, -15.0);
+    s.finger_stop();
+    let seen = s.seen();
+    assert_eq!(seen.sources, vec![wl_pointer::AxisSource::Wheel]);
+    assert_eq!(seen.axes, vec![(wl_pointer::Axis::VerticalScroll, -15.0)]);
+    assert!(
+        seen.stops.is_empty(),
+        "the claimed swipe's stop leaked: {seen:?}"
+    );
+}
+
+#[test]
+fn a_wheel_click_mid_passing_swipe_does_not_open_it_to_a_claim() {
+    let mut s = ScrollFixture::new();
+    s.bind(SUPER, ScrollDir::Down);
+    let before = s.width();
+    // The client has seen the start of this swipe.
+    s.finger_vertical(10.0);
+    s.press_super();
+    // A wheel click on the same axis, then the swipe goes on.
+    s.fixture.state.scroll(0.0, 15.0);
+    s.finger_vertical(200.0);
+    s.finger_stop();
+    let after_wheel = s.width();
+    let seen = s.seen();
+    assert_eq!(
+        seen.stops,
+        vec![wl_pointer::Axis::VerticalScroll],
+        "the client began the swipe, so it must get its stop"
+    );
+    assert!(
+        seen.axes
+            .contains(&(wl_pointer::Axis::VerticalScroll, 200.0)),
+        "the swipe was claimed midway: {seen:?}"
+    );
+    // Only the wheel click may have fired the bind.
+    assert_ne!(after_wheel, before, "the Super+wheel click did not fire");
+}
+
+/// The no-scroll-bind fast path still tracks the sequence: a bind a reload
+/// adds mid-swipe must not claim a swipe the client has begun.
+#[test]
+fn a_bind_added_mid_swipe_cannot_claim_it() {
+    let mut s = ScrollFixture::new();
+    let before = s.width();
+    s.finger_vertical(10.0);
+    // The reload lands: a scroll bind now exists, and Super is down.
+    s.bind(SUPER, ScrollDir::Down);
+    s.press_super();
+    s.finger_vertical(200.0);
+    s.finger_stop();
+    assert_eq!(s.width(), before, "claimed a sequence the client had begun");
+    let seen = s.seen();
+    assert_eq!(
+        seen.axes,
+        vec![
+            (wl_pointer::Axis::VerticalScroll, 10.0),
+            (wl_pointer::Axis::VerticalScroll, 200.0)
+        ]
+    );
+    assert_eq!(seen.stops, vec![wl_pointer::Axis::VerticalScroll]);
+}
+
+/// The other direction: a swipe passing while the last scroll bind goes away
+/// must not leave `passing` set, or the next swipe would be unclaimable.
+#[test]
+fn a_bind_removed_mid_swipe_does_not_strand_the_next_swipe() {
+    let mut s = ScrollFixture::new();
+    s.bind(SUPER, ScrollDir::Down);
+    // Passing: Super is not held, so the bind does not match.
+    s.finger_vertical(10.0);
+    s.fixture
+        .state
+        .keybindings
+        .remove_trigger(SUPER, Trigger::Scroll(ScrollDir::Down));
+    s.finger_stop();
+    // The bind comes back (another reload) and a fresh swipe starts.
+    s.bind(SUPER, ScrollDir::Down);
+    let before = s.width();
+    s.press_super();
+    s.finger_vertical(70.0);
+    assert_ne!(
+        s.width(),
+        before,
+        "the previous swipe's `passing` outlived its stop"
+    );
+    s.finger_stop();
+}
+
 #[test]
 fn a_scroll_emitted_with_binds_off_passes_a_bound_scroll_through() {
     let mut s = ScrollFixture::new();

@@ -140,7 +140,11 @@ impl Accumulator {
         if whole < 1.0 {
             return 0;
         }
-        self.amount -= self.amount.signum() * whole * threshold;
+        // `fmod` is exact and keeps the dividend's sign, so the remainder is
+        // always under one step -- where `amount - whole * threshold` would
+        // carry the rounding error of a huge `whole` (a finite 1e300 delta)
+        // into every later step.
+        self.amount %= threshold;
         // `whole` can be astronomically large for a hostile delta; compare in
         // f64 before narrowing.
         if whole >= f64::from(cap) {
@@ -188,6 +192,28 @@ impl Default for ScrollBinds {
 impl ScrollBinds {
     fn any_claimed(&self) -> bool {
         self.axes.iter().any(|axis| axis.claimed_at.is_some())
+    }
+
+    /// The fast path's whole job (no scroll bind, no claimed sequence): keep
+    /// `passing` true across a finger sequence the client is being sent, so a
+    /// bind that arrives mid-swipe (a reload) cannot claim it midway and a
+    /// bind that leaves (a reload) cannot strand the flag. A handful of
+    /// branches, no allocation; anything but a finger frame returns at once.
+    fn track_passing(&mut self, frame: &AxisFrame) {
+        if frame.source != Some(AxisSource::Finger) {
+            return;
+        }
+        let (h120, v120) = frame.v120.unwrap_or((0, 0));
+        let moved = [
+            frame.axis.0 != 0.0 || h120 != 0,
+            frame.axis.1 != 0.0 || v120 != 0,
+        ];
+        let stopped = [frame.stop.0, frame.stop.1];
+        for ((axis, moved), stopped) in self.axes.iter_mut().zip(moved).zip(stopped) {
+            // Motion first, then the stop that may close it, as the full
+            // path orders them.
+            axis.passing = (axis.passing || moved) && !stopped;
+        }
     }
 
     /// Forgets every partial step, as a reload of the table must: a step
@@ -299,6 +325,7 @@ impl State {
     /// took all of it. A frame no bind claims comes back untouched.
     pub(super) fn filter_scroll(&mut self, mut frame: AxisFrame) -> Option<AxisFrame> {
         if !self.keybindings.has_scroll_binds() && !self.scroll_binds.any_claimed() {
+            self.scroll_binds.track_passing(&frame);
             return Some(frame);
         }
         let locked = self.session_lock.is_locked();
@@ -321,10 +348,13 @@ impl State {
             if let Some(dir) = reading.direction(vertical) {
                 // A finger sequence the client has already seen part of is
                 // never claimed midway (see the module doc).
+                // Only a finger sequence has a middle to be claimed in; a
+                // wheel click is decided on its own and never disturbs the
+                // sequence state of the axis it shares.
                 let usable = self
                     .keybindings
                     .match_scroll(dir, mods)
-                    .filter(|_| !axis.passing)
+                    .filter(|_| !(sequence && axis.passing))
                     .and_then(|(bound, flags)| match bound {
                         Bound::Action(action) => {
                             bind_fires(locked, action, flags).then_some((action, flags))
@@ -334,7 +364,9 @@ impl State {
                 match usable {
                     Some((action, flags)) => {
                         consume = true;
-                        axis.claimed_at = sequence.then_some(now);
+                        if sequence {
+                            axis.claimed_at = Some(now);
+                        }
                         let (delta, unit, threshold) = if reading.v120 != 0 {
                             (f64::from(reading.v120), Unit::Detents, DETENT)
                         } else {
@@ -355,23 +387,26 @@ impl State {
                             });
                         }
                     }
-                    None if axis.claimed_at.is_some() => {
+                    None if sequence && axis.claimed_at.is_some() => {
                         consume = true;
                         axis.claimed_at = Some(now);
                     }
                     None => {
                         axis.reset();
-                        axis.passing = sequence;
+                        axis.passing |= sequence;
                     }
                 }
             }
             if reading.stop {
-                // The sequence's end: swallowed if its start was, and either
-                // way the next sequence starts from nothing.
-                consume |= axis.claimed_at.is_some();
-                axis.claimed_at = None;
-                axis.passing = false;
                 axis.reset();
+                // A finger sequence's end: swallowed if its start was, and
+                // either way the next sequence starts from nothing. Another
+                // source's stop is not that sequence's.
+                if sequence {
+                    consume |= axis.claimed_at.is_some();
+                    axis.claimed_at = None;
+                    axis.passing = false;
+                }
             }
             if consume {
                 strip(&mut frame, vertical);
