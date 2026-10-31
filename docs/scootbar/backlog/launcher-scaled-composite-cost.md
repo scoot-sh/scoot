@@ -28,6 +28,14 @@ output's scale, so the 2x case is no longer hypothetical: `bench_effects`
 (release, `taskset -c 3`, three runs) gives an entrance frame of 8.85 to
 8.98 ms median at 828x628, against 2.04 to 2.33 ms at 414x314.
 
+A 3x output (about 1240x940) extrapolates to roughly 20 ms an entrance
+frame at the same 17 ns, over the 60 Hz budget; unmeasured, filed from the
+#839 review as [launch-fit-remainder-and-scale-len](launch-fit-remainder-and-scale-len.md).
+
+A 3x output (about 1240x940) extrapolates to roughly 20 ms an entrance
+frame at the same 17 ns, over the 60 Hz budget; unmeasured, filed from the
+#839 review as [launch-fit-remainder-and-scale-len](launch-fit-remainder-and-scale-len.md).
+
 ## What to do
 
 Make the per-pixel work cheaper without changing a byte of output (the
