@@ -542,7 +542,9 @@ same font directory), for a `--font` file too: `DejaVuSans.ttf` or
 `NotoSans-Regular.ttf` take `DejaVuSans-Bold.ttf` or `NotoSans-Bold.ttf`.
 It draws the summary and `<b>` runs, and wraps and ellipsizes them with
 their own width. A family with no bold file keeps the old look: the regular
-face drawn twice, 1 px apart.
+face drawn twice, 1 px apart. This applies with no look font set too: a
+`DejaVuSans-Bold.ttf` beside the well-known `DejaVuSans.ttf` is used, so
+summaries are a little wider than they were.
 
 The files are read at start and when a `msg reload --look` changes the
 family, never when a card draws. A `--font` file keeps its font through a
