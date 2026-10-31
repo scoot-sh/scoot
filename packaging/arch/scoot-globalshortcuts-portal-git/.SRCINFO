@@ -1,6 +1,6 @@
 pkgbase = scoot-globalshortcuts-portal-git
 	pkgdesc = GlobalShortcuts portal backend for the scoot compositor (git)
-	pkgver = 0.6.18.r0.g0000000
+	pkgver = 0.6.19.r0.g0000000
 	pkgrel = 1
 	url = https://github.com/scoot-sh/scoot
 	install = scoot-globalshortcuts-portal.install
