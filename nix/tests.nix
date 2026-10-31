@@ -5765,7 +5765,8 @@ let
     desktop.enable = true;
     look = null;
   };
-  # ...the policy off: the rule untouched, no PAM, the profile's own
+  # ...the policy off: the rule untouched, the PAM service staying
+  # (the home side can lock on its own), the profile's own
   # packages only.
   osIdleOff = evalNixos {
     enable = true;
@@ -5775,7 +5776,8 @@ let
     desktop.idle.lock.enable = false;
     desktop.idle.mediaInhibit.enable = false;
   };
-  # ...the lock off: no PAM and no locker, the lid rule still locking
+  # ...the lock off: the PAM service staying (the home side can lock
+  # on its own) and no locker, the lid rule still locking
   # (dim and screens-off still run from the home-manager side).
   osLockOff = evalNixos {
     enable = true;
@@ -5783,6 +5785,15 @@ let
     desktop.enable = true;
     desktop.idle.lock.enable = false;
   };
+  # The locker's PAM service with scoot on but the desktop profile off
+  # at NixOS level: the home-manager side can enable the lock on its
+  # own, so the service must already be there. And with scoot off: no
+  # service (nothing can lock).
+  osPamHomeLock = evalNixos {
+    enable = true;
+    package = fakePkg;
+  };
+  osPamOff = evalNixos { enable = false; };
   # ...with an explicit lid rule: the user's value wins over the
   # profile's docked-lock default (a separate module, the way the
   # greeter's overrides ride along -- the evaluation above can only
@@ -9845,12 +9856,24 @@ let
       assert osIdle.config.security.pam.services ? swaylock;
       true
     )
+    # ...scoot on with the desktop profile off at NixOS level: the
+    # PAM service is still there (the home-manager side can enable
+    # the lock on its own) -- and with scoot off: no service.
+    (
+      assert osPamHomeLock.config.security.pam.services ? swaylock;
+      true
+    )
+    (
+      assert !(osPamOff.config.security.pam.services ? swaylock);
+      true
+    )
     (
       assert osIdle.config.services.displayManager.defaultSession == null;
       true
     )
     # ...the policy off: the rule untouched (logind's own default
-    # applies), no PAM -- but the daemon stays (its switch is its
+    # applies), the PAM service staying (the home side can lock on its
+    # own) -- but the daemon stays (its switch is its
     # own), the clipboard slot stays too (its switch is its own as
     # well), the launcher stays too and the keymap stays too (the
     # other child), so the notification daemon, the launcher, the
@@ -9865,7 +9888,7 @@ let
       true
     )
     (
-      assert !(osIdleOff.config.security.pam.services ? swaylock);
+      assert osIdleOff.config.security.pam.services ? swaylock;
       true
     )
     (
@@ -9901,7 +9924,8 @@ let
         ];
       true
     )
-    # ...the lock off: no PAM and no locker, the lid rule still
+    # ...the lock off: the PAM service staying (the home side can
+    # lock on its own) and no locker, the lid rule still
     # locking (dim and screens-off still run from the home-manager
     # side, the launcher, the clipboard tools and the keymap's tools
     # beside them)...
@@ -9910,7 +9934,7 @@ let
       true
     )
     (
-      assert !(osLockOff.config.security.pam.services ? swaylock);
+      assert osLockOff.config.security.pam.services ? swaylock;
       true
     )
     (

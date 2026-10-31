@@ -45,6 +45,16 @@ If you set `desktop.idle.lock.package` yourself, it must match
 config stops reading it there and locks with what it parsed, which can
 be a flat color with no message.
 
+Unlock checks your password through PAM, as `swaylock`. On NixOS the
+scoot module names that service itself, so unlocking works with no
+extra setup. On any other Linux, home-manager cannot provide it: set
+up `/etc/pam.d/swaylock` wherever PAM is configured, or no password
+will ever unlock.
+
+```nix title="configuration.nix"
+security.pam.services.swaylock = {};
+```
+
 Every value is an option, applied on rebuild/switch (the units restart
 into the new config; no re-login):
 
@@ -78,6 +88,18 @@ programs.scoot.desktop = {
 
 Troubleshooting, by symptom:
 
+> **Symptom:** Lock screen rejects the right password.
+>
+> No `swaylock` PAM service exists, so PAM falls back to `other`,
+> which denies everything. On NixOS set
+> `security.pam.services.swaylock = {};` (automatic with the scoot
+> NixOS module); on any other Linux provide `/etc/pam.d/swaylock`
+> wherever PAM is configured. A locker already running keeps failing:
+> it reads PAM once at launch. Kill it (`pkill -x swaylock`); the
+> session stays locked behind a red screen, and the next lock starts a
+> new locker that reads the new service. Check Caps Lock second — the
+> indicator shows its state while you type.
+
 - *Screens never dim or power off.* Check the unit is running:
   `systemctl --user status scoot-idle` — and that it started with the
   display (a hand-started session must reach `scoot-session.target`
@@ -86,10 +108,6 @@ Troubleshooting, by symptom:
   specifically needs the seat: logind grants the *active* login
   backlight access, so dim works in the seat session and logs EPERM
   anywhere else (over ssh, from a timer with no session).
-- *The locker appears but no password works.* Unlock needs PAM: the
-  NixOS side names it itself, but a home-manager-only setup needs it set
-  wherever PAM is configured. Check Caps Lock second — the indicator
-  shows its state while you type.
 - *The timeout passes and the session never locks.* The locker is
   probably exiting immediately: run `swaylock -f -C
   ~/.config/swaylock/config` by hand — if it drops straight back to the

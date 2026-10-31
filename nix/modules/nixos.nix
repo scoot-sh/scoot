@@ -2599,20 +2599,22 @@ in
     # The locker's PAM service (password auth for the locker): without
     # it neither locker can validate, loud here instead of a locker
     # that never unlocks. Both daemons validate through the same
-    # `swaylock` service name (the fork keeps upstream's). Kept in its
-    # own element (not under `idle.enable`): with `enable` off and
-    # `lock.enable` on, the refusal below must still fire rather than
-    # going quiet.
+    # `swaylock` service name (the fork keeps upstream's). Declared
+    # whenever scoot itself is on and the locker could be a
+    # swaylock-family one: the home-manager side can enable the lock
+    # on its own (NixOS-level `desktop.idle.*` off, home `idle.lock`
+    # on), so a gate on the NixOS-level idle switches would miss a
+    # home-enabled lock and leave a locker that never unlocks.
+    # `mkDefault`, so a user's own service still wins.
     (lib.mkIf
       (
-        cfg.desktop.idle.enable
-        && cfg.desktop.idle.lock.enable
+        cfg.enable
         && (
           cfg.desktop.idle.lock.daemon == "swaylock" || cfg.desktop.idle.lock.daemon == "swaylock-effects"
         )
       )
       {
-        security.pam.services.swaylock = { };
+        security.pam.services.swaylock = lib.mkDefault { };
       }
     )
     # Refusals that must fire whatever else is on (kept outside
