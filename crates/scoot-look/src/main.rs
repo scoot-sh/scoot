@@ -618,14 +618,14 @@ fn build_dir(
     });
     // The launcher fragment scootlaunch reads at every open: beside the
     // first-party ones, so every catalog render carries the panel's look.
-    let launch = render_launch(&look).unwrap_or_else(|e| {
+    let launch = render_launch(&look, inputs).unwrap_or_else(|e| {
         eprintln!("error: {e}");
         std::process::exit(1);
     });
     // The notification fragment scootnotify reads at start and on
     // re-theme: beside the first-party ones, so every catalog render
     // carries the stack's look.
-    let notify = render_notify(&look).unwrap_or_else(|e| {
+    let notify = render_notify(&look, inputs).unwrap_or_else(|e| {
         eprintln!("error: {e}");
         std::process::exit(1);
     });

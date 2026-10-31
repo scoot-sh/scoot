@@ -99,9 +99,14 @@ fn a_given_font_that_fails_is_an_error_naming_it() {
 
 #[test]
 fn with_none_found_the_refusal_says_how_to_give_one() {
-    let message = Error::NoneFound { tried: Vec::new() }.to_string();
+    let message = Error::NoneFound {
+        named: Vec::new(),
+        tried: Vec::new(),
+    }
+    .to_string();
     assert!(message.contains("--font PATH"), "{message}");
     let message = Error::NoneFound {
+        named: Vec::new(),
         tried: vec![(PathBuf::from("/x/DejaVuSans.ttf"), FileError::NotAFont)],
     }
     .to_string();

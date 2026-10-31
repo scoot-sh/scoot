@@ -225,8 +225,9 @@ mod goldens {
     fn every_shipped_look_matches_fuzzel() {
         for name in SHIPPED {
             let look = resolved(name);
-            let launch_fragment = scoot_look::render_launch(&look)
-                .unwrap_or_else(|e| panic!("{name}: launch.toml does not render: {e}"));
+            let launch_fragment =
+                scoot_look::render_launch(&look, &scoot_look::RenderInputs::default())
+                    .unwrap_or_else(|e| panic!("{name}: launch.toml does not render: {e}"));
             let fuzzel = scoot_look::render_fuzzel(&look)
                 .unwrap_or_else(|e| panic!("{name}: fuzzel.ini does not render: {e}"));
             let launch = launch_colors(&launch_fragment);
@@ -255,4 +256,40 @@ mod goldens {
             assert_eq!(read.focus, rgb(&launch["focus"]), "{name}");
         }
     }
+}
+
+#[test]
+fn the_resolved_font_file_lands_as_a_path() {
+    let (look, notes) =
+        parse("font = \"DejaVu Sans\"\nfont-file = \"/store/fonts/DejaVu Sans.ttf\"\n");
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(look.font_family, "DejaVu Sans");
+    assert_eq!(
+        look.font_file.as_deref(),
+        Some(std::path::Path::new("/store/fonts/DejaVu Sans.ttf"))
+    );
+    // Absent: none, and the family is looked for in the directories.
+    let (look, notes) = parse("font = \"DejaVu Sans\"\n");
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(look.font_file, None);
+}
+
+#[test]
+fn a_bad_font_file_is_a_note_and_no_file() {
+    for hostile in [
+        "font-file = \"relative.ttf\"\n",
+        "font-file = \"\"\n",
+        "font-file = 3\n",
+        "font-file = [\"/a.ttf\"]\n",
+        "font-file = \"/a\\u0000b.ttf\"\n",
+    ] {
+        let (look, notes) = parse(hostile);
+        assert_eq!(look.font_file, None, "{hostile:?}");
+        assert_eq!(notes.len(), 1, "{hostile:?}: {notes:?}");
+        assert!(notes[0].contains("font-file"), "{notes:?}");
+    }
+    let long = format!("font-file = \"/{}\"\n", "a".repeat(5000));
+    let (look, notes) = parse(&long);
+    assert_eq!(look.font_file, None);
+    assert_eq!(notes.len(), 1, "{notes:?}");
 }

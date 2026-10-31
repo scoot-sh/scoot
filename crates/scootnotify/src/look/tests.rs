@@ -367,3 +367,39 @@ fn the_card_radius_is_the_files_over_the_looks() {
     assert_eq!(pill.card_radius(None), style::PILL_RADIUS);
     assert_eq!(pill.card_radius(Some(3)), style::PILL_RADIUS);
 }
+
+#[test]
+fn the_resolved_font_file_lands_as_a_path() {
+    let (look, notes) =
+        parse("font = \"DejaVu Sans\"\nfont-file = \"/store/fonts/DejaVu Sans.ttf\"\n");
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(look.font_family, "DejaVu Sans");
+    assert_eq!(
+        look.font_file.as_deref(),
+        Some(std::path::Path::new("/store/fonts/DejaVu Sans.ttf"))
+    );
+    // Absent: none, and the family is looked for in the directories.
+    let (look, notes) = parse("font = \"DejaVu Sans\"\n");
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(look.font_file, None);
+}
+
+#[test]
+fn a_bad_font_file_is_a_note_and_no_file() {
+    for hostile in [
+        "font-file = \"relative.ttf\"\n",
+        "font-file = \"\"\n",
+        "font-file = 3\n",
+        "font-file = [\"/a.ttf\"]\n",
+        "font-file = \"/a\\u0000b.ttf\"\n",
+    ] {
+        let (look, notes) = parse(hostile);
+        assert_eq!(look.font_file, None, "{hostile:?}");
+        assert_eq!(notes.len(), 1, "{hostile:?}: {notes:?}");
+        assert!(notes[0].contains("font-file"), "{notes:?}");
+    }
+    let long = format!("font-file = \"/{}\"\n", "a".repeat(5000));
+    let (look, notes) = parse(&long);
+    assert_eq!(look.font_file, None);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+}

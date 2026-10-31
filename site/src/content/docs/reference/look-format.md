@@ -264,14 +264,23 @@ with the user's lines after (later lines win). The user's own keys
 always survive a swap; the look only fills the colors.
 
 `launch.toml` carries the launcher panel's look: the thirteen shell-app
-color roles as a `[colors]` table, the look's UI family as `font`, its
-popup size as `font-size`, the popups opacity as `opacity`, the shape
+color roles as a `[colors]` table, the look's UI family as `font` and,
+when the tool resolved one, the file it resolved to as `font-file` (see
+below), its popup size as `font-size`, the popups opacity as `opacity`, the shape
 radius as `radius`, and the icon theme as `[icons] theme`. `notify.toml`
 carries the same thirteen roles and dotless keys for the notification
 cards. An `[apps.scootlaunch]` (or `[apps.scootnotify]`) `colors.*` key
 replaces the derived role, and a dotless key (`font`, `font-size`,
 `opacity`, `radius`) replaces the top-level value, so each is emitted
-once. A look that sets `[effects]` adds top-level `shadow`, `fill`,
+once. `font-file` is the tool's own key, like the bar's `font`: the
+file `scoot look apply` resolved `fonts.ui` to (`fc-match`'s answer, or the
+look's `[fonts.files]` entry; the fallback file its note names when the
+family is not installed, as for the bar's `font`), an absolute path the apps read without
+walking any font directory. It is not an override (`[apps.*]` refuses it)
+and it is left out when the app overrides `font`, or when no file was
+resolved (no `fc-match`); the apps then look the family up by file name.
+`scoot-look build` writes it from `--ui-font-file`, as for the bar.
+A look that sets `[effects]` adds top-level `shadow`, `fill`,
 `motion`, `motion-duration-ms` and `motion-bounce` keys to `notify.toml`
 and `launch.toml`, and a `[card]` table for `card.enter` and `card.exit`
 overrides to `notify.toml` only; `greet.toml` never carries them. The

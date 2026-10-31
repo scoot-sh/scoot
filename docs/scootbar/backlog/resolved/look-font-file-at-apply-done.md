@@ -1,9 +1,10 @@
 ---
 title: "Resolve the look's font family to a file at scoot look apply, not at every open"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-31"
 ---
 
 # Resolve the look's font family to a file at scoot look apply, not at every open
@@ -38,3 +39,25 @@ what the code does.
 ## Not in this ticket
 
 Drawing bold in scootbar, which draws none.
+
+## Resolution
+
+Landed 2026-10-31. `scoot look apply` resolves `fonts.ui` once (fc-match
+with an exact `%{family}` match, as `bar.font` already did, plus the look's
+own `[fonts.files]` entries) and renders the file as `font-file` into
+`notify.toml` and `launch.toml`; the apps try `--font`, then `font-file`,
+then the family walk, then the well-known files. `RENDER_VERSION` 14 -> 15
+so cached renders pick the key up. A missing family is named in the apply
+notes and in the app's stderr note and error. Bold with a resolved file is
+the `-Bold` sibling in the same folder; the font-directory-root-wide search
+applies only to the family walk.
+
+Evidence (dev VM, CPU tier): a user look with `fonts.ui = "Space Mono"`
+(a font only fontconfig knows, via a scratch `FONTCONFIG_FILE` dir, absent
+from every `font_dirs()` dir) applies with `font-file` in both fragments
+on the branch and without it on main. Before: both apps fail headless
+(`no font: none of the usual font files is usable`), empty screenshots.
+After: the notify card and the launcher panel draw in Space Mono, silent
+logs. At launcher open, strace shows the walk (26 `openat`, 4
+`getdents64`, including the `~/.fonts` open and 8 well-known misses) reduce
+to a single open of the resolved file.

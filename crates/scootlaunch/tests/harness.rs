@@ -496,7 +496,8 @@ pub fn render_launch_fragment(name: &str) -> String {
     let map =
         std::collections::BTreeMap::from([(name.to_string(), (raw, scoot_look::Origin::Shipped))]);
     let look = scoot_look::resolve(&map, name).unwrap_or_else(|e| panic!("{name}: {e}"));
-    scoot_look::render_launch(&look).unwrap_or_else(|e| panic!("{name}: {e}"))
+    scoot_look::render_launch(&look, &scoot_look::RenderInputs::default())
+        .unwrap_or_else(|e| panic!("{name}: {e}"))
 }
 
 /// A fully transparent `blank.png` in the fixture theme: an icon that

@@ -275,7 +275,7 @@ pub fn validate_entry(
         // Foot's own parser over its fragment, as `apply` runs it.
         check_foot_fragment(name, &merged, &inputs.inputs, checks, &mut validation);
         // The launcher and locker leaves, as `apply` writes them.
-        check_leaf_fragments(name, &merged, &mut validation);
+        check_leaf_fragments(name, &merged, &inputs.inputs, &mut validation);
         // The terminal static leaves, as `apply` renders them (or drops
         // them, for an installed look without `trust`).
         check_static_fragments(&chain, trust, &mut validation);
@@ -397,7 +397,7 @@ pub fn validate_dir(
             checks,
             &mut validation,
         );
-        check_leaf_fragments(&merged.name, &merged, &mut validation);
+        check_leaf_fragments(&merged.name, &merged, &inputs.inputs, &mut validation);
         check_static_fragments(&chain, trust, &mut validation);
         return Ok(validation);
     }
@@ -991,6 +991,7 @@ fn check_foot_for_swap(
 fn check_leaf_fragments(
     name: &str,
     merged: &scoot_look::ResolvedLook,
+    inputs: &RenderInputs,
     validation: &mut Validation,
 ) {
     for (file, fragment) in [
@@ -1015,8 +1016,8 @@ fn check_leaf_fragments(
     }
     for (file, fragment) in [
         ("greet.toml", render_greet(merged)),
-        ("launch.toml", render_launch(merged)),
-        ("notify.toml", render_notify(merged)),
+        ("launch.toml", render_launch(merged, inputs)),
+        ("notify.toml", render_notify(merged, inputs)),
     ] {
         let fragment = match fragment {
             Ok(fragment) => fragment,
@@ -1839,8 +1840,10 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 /// refuses them without an image), so an unchanged look re-renders; 14
 /// adds the Neovim colorscheme static leaf (`apps/nvim.lua`, dropped
 /// from installed looks without `--trust` like the other terminal
-/// leaves), so an unchanged look re-renders with it.
-pub const RENDER_VERSION: u32 = 14;
+/// leaves), so an unchanged look re-renders with it; 15 adds `font-file`
+/// (the resolved UI font) to `launch.toml` and `notify.toml`, so an
+/// unchanged look re-renders with it.
+pub const RENDER_VERSION: u32 = 15;
 
 /// The cache key for a render: the chain's names and bytes plus the
 /// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
@@ -1966,8 +1969,10 @@ fn render_all_fragments(
     let swaylock =
         render_swaylock(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     let greet = render_greet(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
-    let launch = render_launch(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
-    let notify = render_notify(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let launch =
+        render_launch(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
+    let notify =
+        render_notify(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
     let leaves =
         render_leaf_files(merged).map_err(|error| format!("cannot render {name}: {error}"))?;
     for (file, text) in [
@@ -3858,10 +3863,10 @@ pub fn build_to_out(
             render_swaylock(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
         let greet =
             render_greet(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
-        let launch =
-            render_launch(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
-        let notify =
-            render_notify(&merged).map_err(|error| format!("cannot render {name}: {error}"))?;
+        let launch = render_launch(&merged, render_inputs)
+            .map_err(|error| format!("cannot render {name}: {error}"))?;
+        let notify = render_notify(&merged, render_inputs)
+            .map_err(|error| format!("cannot render {name}: {error}"))?;
         for (file, text) in [
             ("scoot.toml", &scoot),
             ("bar.toml", &bar),

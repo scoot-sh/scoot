@@ -3,7 +3,7 @@
 //! A look names a family (`DejaVu Sans`, `DroidSansM Nerd Font Propo`); the
 //! shell apps draw from files. This walks the usual font directories once,
 //! at load or reload, for a file whose name is the family's: the regular
-//! face and, beside it, the bold. It is a match on file names, not a
+//! face and, from the same font directory root, the bold. It is a match on file names, not a
 //! reading of font tables, so it opens nothing it does not use.
 //!
 //! A name matches when, with case, spaces, hyphens and underscores dropped,
@@ -31,8 +31,9 @@ pub const MAX_ENTRIES: usize = 100_000;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Family {
     pub regular: PathBuf,
-    /// The bold file found beside the regular one (in the same font
-    /// directory), if one was asked for and exists.
+    /// The bold file found with the regular one: in the same font directory
+    /// root, not necessarily the same folder; if one was asked for and
+    /// exists.
     pub bold: Option<PathBuf>,
 }
 
@@ -121,8 +122,8 @@ struct Search {
 }
 
 /// The files of `family` in `dirs` (in priority order): the regular face
-/// from the first directory that has one, the bold from that same
-/// directory when `want_bold`. `None` when no directory has a regular
+/// from the first font directory (root) that has one, the bold from that
+/// same root when `want_bold`, in whatever folder below it. `None` when no directory has a regular
 /// face. An unreadable directory, entry or symlink is skipped, never an
 /// error.
 pub fn find_family(family: &str, dirs: &[PathBuf], want_bold: bool) -> Option<Family> {

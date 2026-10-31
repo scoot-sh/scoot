@@ -527,7 +527,15 @@ or dismissing the card. The card's shadow takes none either.
 scootnotify has no fontconfig. It picks the card font in this order:
 
 1. `--font PATH`.
-2. The look's `font` family (`fonts.ui`), found by file name in
+2. The look's `font-file`: the file `scoot look apply` resolved the
+   look's UI family to (with `fc-match`, or the look's own
+   `[fonts.files]` entry), written into `notify.toml`. When the family is
+   not installed it is the fallback file the apply note names. It is read
+   as given: no directory is walked, so it works for a font installed in a
+   directory only fontconfig was configured with, and for a font carried
+   in the look. A `[apps.scootnotify] font` override drops the key, since
+   it names a different family.
+3. The look's `font` family (`fonts.ui`), found by file name in
    `$XDG_DATA_HOME/fonts` (`~/.local/share/fonts`), `~/.fonts`,
    `$XDG_DATA_DIRS/fonts`, `~/.nix-profile/share/fonts`,
    `/etc/profiles/per-user/$USER/share/fonts`, `/usr/share/fonts`,
@@ -537,11 +545,18 @@ scootnotify has no fontconfig. It picks the card font in this order:
    `DroidSansMNerdFontPropo-Regular.otf`; case, spaces and hyphens do not
    matter, and only `.ttf` and `.otf` files named exactly the family,
    the family plus `Regular`, or the family plus `Bold` count.
-3. The first well-known file (DejaVu Sans, then Noto Sans).
+4. The first well-known file (DejaVu Sans, then Noto Sans).
 
-The bold face is the `Bold` file found next to the regular one (in the
-same font directory), for a `--font` file too: `DejaVuSans.ttf` or
-`NotoSans-Regular.ttf` take `DejaVuSans-Bold.ttf` or `NotoSans-Bold.ttf`.
+Steps 3 and 4 are the fallbacks for a `notify.toml` with no `font-file`
+(one you wrote by hand, or a look applied by an older `scoot`), and for a
+`font-file` that cannot be used; the log says which.
+
+The bold face is the `Bold` file next to the regular one. For a family
+found in the font directories (step 3) it is the `Bold` file anywhere
+under the same font directory root as the regular file. For every other
+file (`--font`, `font-file`, a well-known file) it is the `Bold` file in
+the same folder: `DejaVuSans.ttf` or `NotoSans-Regular.ttf` take
+`DejaVuSans-Bold.ttf` or `NotoSans-Bold.ttf`.
 It draws the summary and `<b>` runs, and wraps and ellipsizes them with
 their own width. A family with no bold file keeps the old look: the regular
 face drawn twice, 1 px apart. This applies with no look font set too: a
@@ -549,15 +564,17 @@ face drawn twice, 1 px apart. This applies with no look font set too: a
 summaries are a little wider than they were.
 
 The files are read at start and when a `msg reload --look` changes the
-family, never when a card draws. A `--font` file keeps its font through a
+family or the file, never when a card draws. A `--font` file keeps its font through a
 look reload.
 
 > **Symptom:** the cards ignore the look's font.
 > The daemon logs `the look's font ... has no .ttf or .otf file in the font
-> directories` and draws with the default font. Install the family as a
-> `.ttf` or `.otf` file in one of the directories above (a font that only
-> fontconfig knows by a differently named file is not found), or point
-> `--font` at the file.
+> directories` and draws with the default font, so `notify.toml` has no
+> `font-file`. Run `scoot look apply` again (it resolves the family with
+> `fc-match` and writes `font-file`), or install the family as a `.ttf` or
+> `.otf` file in one of the directories above, or point `--font` at the
+> file. With no default font on the machine either, the daemon runs
+> headless and the log names the family.
 
 ### Title weight and spacing
 

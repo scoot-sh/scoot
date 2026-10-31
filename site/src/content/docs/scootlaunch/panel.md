@@ -185,14 +185,19 @@ edge. Every measurement (padding, row height, icon size, the gaps)
 scales with `font-size` and `radius`, so a larger font or an output
 scale gives the same shape bigger.
 
-The `font` key names the look's UI family. There is no fontconfig in
-this stack: the panel draws with `--font PATH` or the file `font` in
-`launch.toml` names, else the look's family, found by file name in the
-usual font directories (the list is under
-[Fonts](../scootnotify/configure.md#fonts)), else the first usable
-well-known file. The panel draws no bold, so it loads only the regular
-file. A family it cannot find is a warning on stderr and the well-known
-file. Rows show the entry icon with the
+The `font` key names the look's UI family and `font-file` the file
+`scoot look apply` resolved it to (with `fc-match`, or the look's own
+`[fonts.files]` entry; the fallback its note names when the family is not
+installed). The panel has no fontconfig: it draws with
+`--font PATH` or the file `font` in your own `launch.toml` names, else the
+`font-file`, read as given, else the look's family, found by file name in
+the usual font directories (the list is under
+[Fonts](../scootnotify/configure.md#fonts); this is the path for a
+`launch.toml` written by hand or applied by an older `scoot`), else the
+first usable well-known file. A `[apps.scootlaunch] font` override drops
+`font-file`, since it names a different family. The panel draws no bold, so
+it loads only the regular file. A file or family it cannot use is a warning
+on stderr and the next choice. Rows show the entry icon with the
 name beside it and its match highlighted. A light look draws the same
 panel from the same roles:
 

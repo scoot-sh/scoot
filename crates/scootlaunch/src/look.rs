@@ -44,13 +44,16 @@
 //! top, and a `motion` makes the panel scale and fade in, fade out when
 //! dismissed, and slide the selection between rows.
 //!
-//! The `font` key names the look's UI family. There is no fontconfig in
-//! this stack: the panel draws with `--font PATH` or the config's `font`
-//! file, else the family's file found by name in the usual font directories
-//! (`scootui::font::family`), else the first usable well-known file.
+//! The `font` key names the look's UI family and `font-file` the file
+//! `scoot look apply` resolved it to (fontconfig, or the look's own font
+//! file). There is no fontconfig in this stack: the panel draws with
+//! `--font PATH` or the config's `font` file, else `font-file` as given,
+//! else the family's file found by name in the usual font directories
+//! (`scootui::font::family`; the way a hand-edited fragment, or one applied
+//! by an older tool, still works), else the first usable well-known file.
 //! There is no bold face: the panel draws none.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub mod user;
 pub use user::apply_user;
@@ -92,8 +95,12 @@ pub struct Look {
     /// The panel corner radius in logical pixels (`radius`, 0 to 64), scaled
     /// by the output's scale when drawn.
     pub radius: u32,
-    /// The look's UI family (`font`), looked for as a font file at each open.
+    /// The look's UI family (`font`), looked for as a font file at each open
+    /// when [`Look::font_file`] names none or cannot be used.
     pub font_family: String,
+    /// The file `scoot look apply` resolved the family to (`font-file`):
+    /// read as given, no font directory walked.
+    pub font_file: Option<PathBuf>,
     /// The icon theme the panel looks up names in (`[icons] theme`):
     /// the look's theme, `Adwaita` by default.
     pub icon_theme: String,
@@ -136,6 +143,7 @@ impl Default for Look {
             opacity: 1.0,
             radius: DEFAULT_RADIUS,
             font_family: String::new(),
+            font_file: None,
             icon_theme: DEFAULT_ICON_THEME.to_string(),
             shadow: ShadowStyle::None,
             fill: FillStyle::Solid,
@@ -242,7 +250,15 @@ fn apply(
         notes.push(format!("`{dotted}` is not a launcher look key: skipped"));
         return;
     };
-    if let Some(refused) = scoot_look::allowlist::check_app_value("scootlaunch", &dotted, value) {
+    // `font-file` is the tool's own key (`scoot look apply` resolves the
+    // family), so it is not in the allowlist an `[apps.scootlaunch]` table may
+    // set; it has its own check.
+    let refused = if dotted == scoot_look::allowlist::FONT_FILE_KEY {
+        scoot_look::allowlist::check_font_file(value)
+    } else {
+        scoot_look::allowlist::check_app_value("scootlaunch", &dotted, value)
+    };
+    if let Some(refused) = refused {
         notes.push(format!("`{dotted}` refused ({refused}): value ignored"));
         return;
     }
@@ -259,6 +275,7 @@ enum Slot<'a> {
     Opacity(&'a mut f32),
     Radius(&'a mut u32),
     FontFamily(&'a mut String),
+    FontFile(&'a mut Option<PathBuf>),
     IconTheme(&'a mut String),
     Shadow(&'a mut ShadowStyle),
     Fill(&'a mut FillStyle),
@@ -300,6 +317,10 @@ impl Slot<'_> {
             Slot::FontFamily(slot) => match value.as_str() {
                 Some(family) => *slot = family.to_owned(),
                 None => notes.push(format!("`{dotted}` is not a font name: value ignored")),
+            },
+            Slot::FontFile(slot) => match value.as_str() {
+                Some(path) => *slot = Some(PathBuf::from(path)),
+                None => notes.push(format!("`{dotted}` is not a path: value ignored")),
             },
             Slot::Shadow(slot) => match value.as_str().and_then(ShadowStyle::parse) {
                 Some(style) => *slot = style,
@@ -365,6 +386,7 @@ fn look_color<'a>(look: &'a mut Look, name: &str) -> Option<Slot<'a>> {
 fn look_dotless<'a>(look: &'a mut Look, key: &str) -> Option<Slot<'a>> {
     match key {
         "font" => Some(Slot::FontFamily(&mut look.font_family)),
+        "font-file" => Some(Slot::FontFile(&mut look.font_file)),
         "font-size" => Some(Slot::FontSize(&mut look.font_size_px)),
         "opacity" => Some(Slot::Opacity(&mut look.opacity)),
         "radius" => Some(Slot::Radius(&mut look.radius)),
