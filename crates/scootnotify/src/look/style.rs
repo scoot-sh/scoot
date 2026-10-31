@@ -62,7 +62,7 @@ impl CardMark {
 /// The card's outline (`card.shape`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CardShape {
-    /// The config's `radius`: the default.
+    /// The config file's `radius`, else the look's: the default.
     #[default]
     Rounded,
     /// Ends rounded to half the card's height ([`PILL_RADIUS`] at most).

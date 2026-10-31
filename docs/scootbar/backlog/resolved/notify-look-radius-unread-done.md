@@ -1,9 +1,10 @@
 ---
 title: "scootnotify ignores the look's radius: cards draw the config file's radius"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-31"
 ---
 
 # scootnotify ignores the look's radius: cards draw the config file's radius
@@ -49,3 +50,20 @@ along with a styling slice.
 
 Radii above 64 (`card.shape = "pill"` is the pill); scootlaunch's panel
 radius, which reads its fragment's `radius` already.
+
+## Resolution
+
+Landed 2026-10-31. `Config::radius` is now an `Option<u32>` (unset by
+default); a card's radius is the file's key when set, else the look's
+`radius`, else the built-in 8 (`Look::card_radius`). The paint, the shadow's
+corner tables and the stack's tests all read that one function, and a
+re-theme already marked the tables stale. `card.shape = "pill"` still wins.
+
+One edge case was not done as written. The ticket asked the renderer to emit
+`radius` only when the look sets `shape.radius`. `ResolvedLook` carries
+`shape.radius` as a plain `0` for an unset one, the same `0` the bar's
+`radius`, the window `corner_radius` and the launcher's panel take, so a look
+that never set one is square on every surface. Emitting it only for
+scootnotify would need a new "was set" field on the resolved look and would
+make the cards the one rounded surface of a square look. The cards follow
+the look; the site page says so.

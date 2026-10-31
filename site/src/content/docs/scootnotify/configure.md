@@ -21,7 +21,7 @@ anchor = "top-right"
 # output = "HDMI-1"
 body_lines = 5
 border_px = 2
-radius = 8
+# radius = 8
 pause_when_idle_secs = 60
 timeout_low_ms = 5000
 timeout_normal_ms = 10000
@@ -99,7 +99,9 @@ through a manual lock.
   3`. Reload: `msg reload`. Low draws `border`, normal `focus`, critical
   `urgent`.
 - `radius`: the card corner radius in logical pixels. Type: integer, 0
-  to 64. Default: `8`. Example: `radius = 12`. Reload: `msg reload`.
+  to 64. Default: unset, which shows the look's `shape.radius` (`8` when
+  no look is on). Example: `radius = 12`. Reload: `msg reload`. A value
+  set here wins over the look.
 - `max_live`: live notifications at most; past it the oldest
   non-critical one closes with reason 4. Type: integer, 1 to 1024.
   Default: `128`. Example: `max_live = 64`. Reload: `msg reload`.
@@ -304,15 +306,16 @@ false`](../../desktop/notifications/) writes.
 | Action button outline / hovered fill | `focus` / `hover` |
 | Link text (underlined, never clickable in v1) | `accent` |
 | Font | `fonts.ui` at `fonts.popup-size` |
-| Corners | the file's `radius` (see the note below), or `card.shape` |
+| Corners | the file's `radius` if set, else `shape.radius`; or `card.shape` |
 | Shadow, fill | `effects.shadow`, `effects.fill` (see [Depth](#depth)) |
 | Motion | `effects.motion`, `effects.motion-duration-ms`, `effects.motion-bounce`, and `card.enter`, `card.exit` (see [Motion](#motion)) |
 | Accent marker, outline, per-app color | `card.mark`, `card.shape`, `card.app-accent` (see [Card styles](#card-styles)) |
 | Summary weight and spacing | `title.weight`, `title.spacing` (see [Title weight and spacing](#title-weight-and-spacing)) |
 
-The corner radius is the file's `radius` (see [Limits](#limits)),
-not the look's `shape.radius`: the layer carries it, but the cards do not
-read it yet, so a look cannot round the cards except through `card.shape`.
+The corner radius is the look's `shape.radius`, unless the file sets
+`radius` (see [Limits](#limits)), which wins. A look that sets no
+`shape.radius` has radius 0, so its cards are square, as its bar and
+launcher are.
 
 ### Effects over any look
 
@@ -487,7 +490,7 @@ draws nothing.
 
 | `card.shape` | What it draws |
 |---|---|
-| `rounded` | The corner radius from the config file. The default. |
+| `rounded` | The corner radius from the config file, else the look's. The default. |
 | `pill` | Ends rounded to half the card's height, to at most a 36 px radius: a one- or two-line card is a true pill, a tall one keeps round ends of that size. The content moves 8 px further in on each side so text, the progress bar and the buttons stay clear of the curve. The shadow follows the shape. |
 
 A `stripe` on a `pill` shows only where the curved end is nearly

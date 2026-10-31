@@ -25,7 +25,7 @@ fn styled(look: &Look, config: &Config, notes: &[Notification]) -> (layout::Stac
     );
     if let Some(shadow) = shadow.as_mut() {
         shadow.prepare(
-            config.radius,
+            look.card_radius(config.radius),
             stack
                 .cards
                 .iter()
@@ -140,7 +140,7 @@ fn a_shadow_never_lands_on_a_card() {
         let with = paint_styled(&look, &config, &notes, &stack, tables.as_ref());
         let without = paint_styled(&look, &config, &notes, &stack, None);
         assert_ne!(with, without, "the shadow painted something");
-        let radius = config.radius;
+        let radius = look.card_radius(config.radius);
         for card in &stack.cards {
             let r = card.rect;
             for y in r.y..r.y + r.height {

@@ -282,7 +282,7 @@ fn a_config_reload_resizes_the_shadow_for_the_new_radius() {
     );
     app.shadow_stale = false;
     app.apply_config(Config {
-        radius: 20,
+        radius: Some(20),
         ..Config::default()
     });
     assert!(app.shadow_stale);

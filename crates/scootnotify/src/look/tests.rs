@@ -287,7 +287,7 @@ fn a_fragment_without_card_styles_or_a_title_table_styles_nothing() {
     assert!(!look.app_accent);
     assert_eq!(look.title_weight, 700);
     assert_eq!(look.title_spacing, 0);
-    assert_eq!(look.card_radius(8), 8);
+    assert_eq!(look.card_radius(Some(8)), 8);
     assert_eq!(look.title_strikes(), 2);
 }
 
@@ -304,7 +304,7 @@ fn every_card_style_and_title_key_lands() {
     assert_eq!(look.title_weight, 800);
     assert_eq!(look.title_spacing, 2);
     // The pill ignores the configured radius; the paint cuts it to the card.
-    assert_eq!(look.card_radius(8), style::PILL_RADIUS);
+    assert_eq!(look.card_radius(Some(8)), style::PILL_RADIUS);
     assert_eq!(look.title_strikes(), 3);
     assert_eq!(look.title_tracking(), 2.0);
 }
@@ -354,4 +354,16 @@ fn title_numbers_clamp_even_when_the_grammar_is_skipped() {
         );
         assert_eq!((look.title_weight, look.title_spacing), (weight, spacing));
     }
+}
+
+#[test]
+fn the_card_radius_is_the_files_over_the_looks() {
+    let (look, _) = parse("radius = 14\n");
+    assert_eq!(look.card_radius(None), 14, "the look's, with no file key");
+    assert_eq!(look.card_radius(Some(3)), 3, "the file's key wins");
+    assert_eq!(look.card_radius(Some(0)), 0, "a square file key is a key");
+    assert_eq!(Look::default().card_radius(None), DEFAULT_RADIUS);
+    let (pill, _) = parse("radius = 14\n[card]\nshape = \"pill\"\n");
+    assert_eq!(pill.card_radius(None), style::PILL_RADIUS);
+    assert_eq!(pill.card_radius(Some(3)), style::PILL_RADIUS);
 }

@@ -120,7 +120,7 @@ impl Scene {
         );
         if let Some(shadow) = self.shadow.as_mut().filter(|_| !stack.cards.is_empty()) {
             shadow.prepare(
-                self.config.radius,
+                self.look.card_radius(self.config.radius),
                 stack.cards.iter().map(|c| (c.rect.width, c.rect.height)),
             );
         }

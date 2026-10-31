@@ -50,8 +50,11 @@ pub(crate) fn note(id: u32, summary: &str, body: &str) -> Notification {
 }
 
 fn painted(stack: &layout::Stack, look: &Look) -> (Vec<u8>, u32, u32) {
+    painted_with(stack, look, &Config::default())
+}
+
+fn painted_with(stack: &layout::Stack, look: &Look, config: &Config) -> (Vec<u8>, u32, u32) {
     let mut paint_text = make_text();
-    let config = Config::default();
     let urgencies = HashMap::from([(1, Urgency::Normal)]);
     // Device pixels at scale 1: the buffer is the logical size.
     let mut pixels = vec![0u8; stack.width as usize * stack.height as usize * 4];
@@ -62,7 +65,7 @@ fn painted(stack: &layout::Stack, look: &Look) -> (Vec<u8>, u32, u32) {
             &mut canvas,
             &mut paint_text,
             stack,
-            &config,
+            config,
             look,
             &urgencies,
             None,
@@ -105,6 +108,37 @@ fn a_card_has_its_ring_fill_and_ink() {
         at(&pixels, width, x, row.saturating_sub(4)) == [foreground.r, foreground.g, foreground.b]
     });
     assert!(ink, "the summary draws foreground ink");
+}
+
+/// The corner radius is the look's, unless the config file sets one: the
+/// pixel 5 px in and 1 px down from the corner is the ring at radius 8
+/// (the built-in) and the desktop behind it at radius 40.
+#[test]
+fn the_cards_radius_is_the_looks_unless_the_file_sets_one() {
+    let font_text = make_text();
+    let single = note(1, "Hello", "World");
+    let corner = |look: &Look, file: Option<u32>| {
+        let config = Config {
+            radius: file,
+            ..Config::default()
+        };
+        let stack = layout::layout(&[&single], &config, &font_text, look.font_size_px, 2_000);
+        let (pixels, width, _) = painted_with(&stack, look, &config);
+        let ring = look.focus;
+        at(&pixels, width, 5, 1) == [ring.r, ring.g, ring.b]
+    };
+    let built_in = Look::default();
+    let round = Look {
+        radius: 40,
+        ..Look::default()
+    };
+    assert!(corner(&built_in, None), "radius 8 reaches in by 5 px");
+    assert!(
+        !corner(&round, None),
+        "the look's radius 40 cuts the corner"
+    );
+    assert!(corner(&round, Some(8)), "the file's key wins over the look");
+    assert!(!corner(&built_in, Some(40)), "and over the built-in");
 }
 
 #[test]

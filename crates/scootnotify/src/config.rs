@@ -77,8 +77,11 @@ pub struct Config {
     pub body_lines: u32,
     /// The urgency border width, in logical pixels (0 draws none).
     pub border_px: u32,
-    /// The card corner radius, in logical pixels.
-    pub radius: u32,
+    /// The card corner radius, in logical pixels, when the file sets one:
+    /// `None` leaves it to the look (`Look::radius`), and the built-in 8
+    /// when no look is on. The file wins per key, so an unset key must not
+    /// stand in for a value.
+    pub radius: Option<u32>,
     /// Seconds without input after which every expiry clock pauses (0
     /// disables): `ext-idle-notify` v2 counts only real input, so a
     /// playing video does not count as presence. Someone who walked
@@ -304,7 +307,7 @@ impl Default for Config {
             output: None,
             body_lines: 5,
             border_px: 2,
-            radius: 8,
+            radius: None,
             pause_when_idle_secs: 60,
             bar_icon_unread: String::new(),
             bar_icon_dnd: String::new(),
@@ -436,11 +439,8 @@ impl Config {
                 self.border_px
             ));
         }
-        if self.radius > 64 {
-            return Err(format!(
-                "config refused: radius is {} (0 to 64)",
-                self.radius
-            ));
+        if let Some(radius) = self.radius.filter(|radius| *radius > 64) {
+            return Err(format!("config refused: radius is {radius} (0 to 64)"));
         }
         if self.pause_when_idle_secs > 3600 {
             return Err(format!(
