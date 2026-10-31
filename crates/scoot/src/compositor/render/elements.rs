@@ -396,8 +396,7 @@ impl State {
             // per frame: zero when idle. One branch covers disabled/idle.
             let viewport_dx = output_id
                 .map(|id| viewport_delta(&self.viewport_slides, id, now))
-                .unwrap_or(0)
-                .saturating_add(gesture_dx);
+                .unwrap_or(0);
             let window_elements: Vec<Elements<R>> = match (geometry, arrangement, output_id) {
                 (Some(region), Some(arranged), Some(output_id)) => window_elements(
                     &self.space,
@@ -415,6 +414,7 @@ impl State {
                     },
                     &self.slides,
                     viewport_dx,
+                    gesture_dx,
                     &self.fades,
                     now,
                 ),
@@ -508,8 +508,9 @@ where
     let viewport_dx = frame
         .output
         .map(|id| viewport_delta(viewport, id, now))
-        .unwrap_or(0)
-        .saturating_add(frame.gesture_dx);
+        .unwrap_or(0);
+    // A swipe scrolls the strip only: floating windows stay where they are.
+    let gesture_dx = frame.gesture_dx;
     let drawn = |placement: &Placement| {
         let mut rect = drawn_rect(placement.rect, windows.get(&placement.id));
         // One branch on empty covers the disabled and idle cases; the
@@ -523,6 +524,11 @@ where
             now,
         );
         let dx = dx.saturating_add(viewport_dx);
+        let dx = if placement.floating {
+            dx
+        } else {
+            dx.saturating_add(gesture_dx)
+        };
         if dx != 0 {
             rect.x = rect.x.saturating_add(dx);
         }
@@ -735,6 +741,7 @@ fn window_elements<R>(
     floating_rings: FloatingRings<R>,
     slides: &[Slide],
     viewport_dx: i32,
+    gesture_dx: i32,
     fades: &[Fade],
     now: std::time::Instant,
 ) -> Vec<Elements<R>>
@@ -791,6 +798,12 @@ where
                 now,
             );
             let dx = dx.saturating_add(viewport_dx);
+            // The strip only: a swipe does not carry floating windows.
+            let dx = if placement.floating {
+                dx
+            } else {
+                dx.saturating_add(gesture_dx)
+            };
             let mapped = if dx != 0 || dy != 0 {
                 Point::from((mapped.x.saturating_add(dx), mapped.y.saturating_add(dy)))
             } else {

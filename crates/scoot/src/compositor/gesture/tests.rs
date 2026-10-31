@@ -261,11 +261,25 @@ fn both_axes_off_forwards_even_the_configured_fingers() {
 }
 
 #[test]
-fn a_claimed_swipe_reveals_the_columns_scrolled_out_of_view() {
+fn a_claimed_swipe_reveals_the_columns_scrolled_out_of_view_once_it_locks_horizontal() {
     let mut fixture = fixture(4);
     fixture.state.gesture_swipe_begin(3, 10);
     assert_eq!(fixture.state.gestures.route, Route::Claimed);
     assert_eq!(fixture.state.gestures.reveal.len(), 4);
+    // Not yet: nothing is mapped before the axis is known.
+    assert!(!fixture.state.gestures.revealing);
+    assert!(
+        fixture
+            .state
+            .frame_arrangement()
+            .placements
+            .iter()
+            .any(|p| !p.visible)
+    );
+    fixture.state.gesture_swipe_update(-5.0, 0.0, 20);
+    assert!(!fixture.state.gestures.revealing);
+    fixture.state.gesture_swipe_update(-30.0, 0.0, 30);
+    assert!(fixture.state.gestures.revealing);
     let all = placements(&fixture);
     let hidden: Vec<_> = all.iter().filter(|p| !p.visible).collect();
     assert!(!hidden.is_empty(), "the premise needs a column out of view");
@@ -275,16 +289,16 @@ fn a_claimed_swipe_reveals_the_columns_scrolled_out_of_view() {
             "{placement:?} is not revealed"
         );
     }
-    let mut arrangement = fixture.state.frame_arrangement();
+    let arrangement = fixture.state.frame_arrangement();
     assert!(arrangement.placements.iter().all(|p| p.visible));
     // Only the frame's copy changes: the core still reports the truth.
     assert!(placements(&fixture).iter().any(|p| !p.visible));
-    arrangement.placements.clear();
-    fixture.state.gesture_swipe_end(true, 20);
+    fixture.state.gesture_swipe_end(true, 40);
     assert!(
         fixture.state.gestures.reveal.is_empty(),
         "revealed windows leaked past the swipe"
     );
+    assert!(!fixture.state.gestures.revealing);
     assert!(
         fixture
             .state
@@ -293,6 +307,27 @@ fn a_claimed_swipe_reveals_the_columns_scrolled_out_of_view() {
             .iter()
             .any(|p| !p.visible)
     );
+}
+
+#[test]
+fn a_vertical_or_inert_swipe_never_maps_the_hidden_columns() {
+    let mut fixture = fixture(4);
+    fixture.state.gesture_swipe_begin(3, 10);
+    fixture.state.gesture_swipe_update(0.0, -40.0, 20);
+    fixture.state.gesture_swipe_update(0.0, -40.0, 30);
+    assert!(!fixture.state.gestures.revealing);
+    assert!(
+        placements(&fixture)
+            .iter()
+            .any(|p| !p.visible && !fixture.state.gestures.reveals(p))
+    );
+    fixture.state.gesture_swipe_end(true, 40);
+    // Horizontal off: a sideways swipe is swallowed but reveals nothing.
+    fixture.state.gestures.config.horizontal = HorizontalMode::None;
+    fixture.state.gesture_swipe_begin(3, 100);
+    fixture.state.gesture_swipe_update(-80.0, 0.0, 110);
+    assert!(!fixture.state.gestures.revealing);
+    fixture.state.gesture_swipe_end(false, 120);
 }
 
 #[test]
@@ -996,4 +1031,71 @@ fn bench_gesture() {
     }
     per("update, forwarded                ", started, ROUNDS);
     fixture.state.gesture_swipe_end(false, time + 1);
+}
+
+#[test]
+fn a_floating_window_and_its_ring_stay_put_while_the_strip_is_pulled() {
+    use scoot_core::Size;
+    let mut fixture = fixture(1);
+    fixture.state.world.handle_event(CoreEvent::WindowOpened {
+        id: WindowId(2),
+        info: WindowInfo::default(),
+        output: None,
+        focus: true,
+    });
+    fixture
+        .state
+        .world
+        .handle_event(CoreEvent::FloatingRequested {
+            id: WindowId(2),
+            floating: true,
+            size: Some(Size::new(90, 90)),
+        });
+    fixture.state.apply();
+    let all = placements(&fixture);
+    let float = all
+        .iter()
+        .find(|p| p.floating)
+        .expect("a floating placement");
+    assert!(
+        float.visible,
+        "premise: the floating window is placed: {float:?}"
+    );
+    let strip = all.iter().find(|p| !p.floating).expect("a strip window");
+    // The floating window's right ring, well clear of the strip's own edges
+    // both at rest and after a pull of 60 (the strip's right edge is at 194 -> 134).
+    let edge = float.rect.x + float.rect.w;
+    let mid = float.rect.y + float.rect.h / 2;
+    assert!(
+        (edge - (strip.rect.x + strip.rect.w)).abs() > 40 && (edge - strip.rect.x).abs() > 40,
+        "premise: the strip's edges stay clear of x={edge}: {strip:?} {float:?}"
+    );
+    let band = |frame: &[u8]| -> Vec<[u8; 4]> {
+        (edge - 8..=edge + 2)
+            .map(|x| pixel(frame, x, mid))
+            .collect()
+    };
+    fixture.state.request_render();
+    fixture.state.render();
+    let rest = band(&fixture.pixels_of(OutputId(1)));
+    let background = pixel(&fixture.pixels_of(OutputId(1)), 3, CANVAS - 3);
+    assert!(
+        rest.iter().any(|p| *p != background),
+        "premise: the ring is drawn at rest"
+    );
+    fixture.state.gesture_swipe_begin(3, 1000);
+    fixture.state.gesture_swipe_update(-60.0, 0.0, 1010);
+    assert_ne!(
+        fixture.state.gesture_shift(Some(OutputId(1))),
+        0,
+        "premise: pulled"
+    );
+    fixture.state.request_render();
+    fixture.state.render();
+    let during = band(&fixture.pixels_of(OutputId(1)));
+    assert_eq!(
+        rest, during,
+        "the floating window's ring moved with the strip"
+    );
+    fixture.state.gesture_swipe_end(true, 1020);
 }

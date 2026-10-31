@@ -37,7 +37,9 @@
 //! idea as the slide animation -- the committed buffers move, no client is
 //! asked to resize, the core's arrangement and hit-testing stay at the
 //! targets). Columns scrolled out of view are drawn too while the swipe
-//! lasts ([`Gestures::reveal`]), or the strip would open onto bare background.
+//! lasts ([`Gestures::reveal`], from the moment the swipe locks horizontal, so
+//! a vertical swipe maps nothing), or the strip would open onto bare
+//! background.
 //! Past the ends of the strip the shift is rubber-banded.
 //!
 //! On release the nearest column to the view -- or, past [`FLICK_VELOCITY`],
@@ -267,6 +269,10 @@ pub(super) struct Gestures {
     /// Every tiled window of the output's active workspace: drawn (and kept
     /// mapped) while the swipe lasts, even scrolled out of view. Pooled.
     reveal: Vec<WindowId>,
+    /// Whether [`Gestures::reveal`] is in force: set once a swipe locks
+    /// horizontal, so a vertical or inert swipe never maps (and unmaps) the
+    /// strip's off-screen columns.
+    revealing: bool,
 }
 
 impl Default for Gestures {
@@ -279,6 +285,7 @@ impl Default for Gestures {
             output: None,
             columns: Vec::new(),
             reveal: Vec::new(),
+            revealing: false,
         }
     }
 }
@@ -286,7 +293,8 @@ impl Default for Gestures {
 impl Gestures {
     /// Whether `placement` is drawn only because a swipe reveals it.
     pub(super) fn reveals(&self, placement: &Placement) -> bool {
-        !self.reveal.is_empty()
+        self.revealing
+            && !self.reveal.is_empty()
             && !placement.visible
             && !placement.floating
             && !placement.fullscreen
@@ -325,7 +333,8 @@ impl Gestures {
     /// Forgets the swipe's visuals. The route stays: a claimed swipe is still
     /// consumed to its `end`.
     fn clear_visuals(&mut self) -> bool {
-        let had_reveal = self.output.is_some() || !self.reveal.is_empty();
+        let had_reveal = self.revealing;
+        self.revealing = false;
         self.claim = None;
         self.settle = None;
         self.output = None;
@@ -505,6 +514,11 @@ impl State {
 
     // -- forwarding --
 
+    // The three forwarders send no `wl_pointer.frame`: with no
+    // `zwp_pointer_gestures_v1` global there is no gesture event to close, and
+    // a bare frame would wake the focused client at update rate for nothing.
+    // Add `pointer.frame(self)` back with the global.
+
     fn forward_swipe_begin(&mut self, fingers: u32, time: u32) {
         let Some(pointer) = self.seat.get_pointer() else {
             return;
@@ -515,7 +529,6 @@ impl State {
             fingers,
         };
         pointer.gesture_swipe_begin(self, &event);
-        pointer.frame(self);
     }
 
     fn forward_swipe_update(&mut self, dx: f64, dy: f64, time: u32) {
@@ -527,7 +540,6 @@ impl State {
             delta: (dx, dy).into(),
         };
         pointer.gesture_swipe_update(self, &event);
-        pointer.frame(self);
     }
 
     fn forward_swipe_end(&mut self, time: u32, cancelled: bool) {
@@ -540,7 +552,6 @@ impl State {
             cancelled,
         };
         pointer.gesture_swipe_end(self, &event);
-        pointer.frame(self);
     }
 
     // -- claiming --
@@ -563,6 +574,9 @@ impl State {
         } else {
             0.0
         };
+        let was_revealing = self.gestures.revealing;
+        let same_output = self.gestures.output == Some(snapshot.output);
+        self.gestures.revealing = was_revealing && same_output;
         self.gestures.settle = None;
         self.gestures.output = Some(snapshot.output);
         self.gestures.claim = Some(Claim {
@@ -578,8 +592,11 @@ impl State {
             velocity: 0.0,
             last_time: time,
         });
-        // The columns scrolled out of view are mapped for the swipe's length.
-        self.apply();
+        // A settle caught on another output unmaps what it had revealed; a
+        // fresh swipe maps nothing until it locks horizontal.
+        if was_revealing && !same_output {
+            self.apply();
+        }
         true
     }
 
@@ -667,6 +684,7 @@ impl State {
         let (sx, sy) = (dx * scale, dy * scale);
         claim.motion.0 = (claim.motion.0 + sx).clamp(-MAX_MOTION, MAX_MOTION);
         claim.motion.1 = (claim.motion.1 + sy).clamp(-MAX_MOTION, MAX_MOTION);
+        let mut tracking = false;
         let just_locked = claim.axis.is_none() && {
             claim.axis = pick_axis(claim.motion);
             claim.axis.is_some()
@@ -689,9 +707,18 @@ impl State {
                 claim.velocity = blend_velocity(claim.velocity, claim.shift - before, since);
             }
             claim.last_time = time;
-            self.request_render();
+            tracking = true;
         } else {
             claim.last_time = time;
+        }
+        if tracking {
+            // The first horizontal event maps the columns scrolled out of
+            // view, for as long as the swipe and its settle last.
+            if !self.gestures.revealing {
+                self.gestures.revealing = true;
+                self.apply();
+            }
+            self.request_render();
         }
     }
 
@@ -850,7 +877,7 @@ impl State {
     /// are drawn. The same arrangement when idle (one empty-list test).
     pub(super) fn frame_arrangement(&self) -> Arrangement {
         let mut arrangement = self.world.arrange();
-        if !self.gestures.reveal.is_empty() {
+        if self.gestures.revealing {
             for placement in &mut arrangement.placements {
                 if self.gestures.reveals(placement) {
                     placement.visible = true;

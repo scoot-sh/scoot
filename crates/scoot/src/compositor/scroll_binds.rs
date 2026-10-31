@@ -35,7 +35,10 @@
 //!   binds: the scroll passes through (to the lock client), except that a
 //!   `spawn` flagged `allow_when_locked` fires, as it does for keys.
 //! - **Cost.** With no scroll bind in the table (the default) and no claimed
-//!   sequence, the filter is two integer tests.
+//!   sequence, the filter is two integer tests, plus for a finger frame a few
+//!   branches keeping each axis's `passing` flag current (so a bind a reload
+//!   adds mid-swipe cannot claim a swipe the client already saw). No
+//!   allocation either way.
 
 use std::time::{Duration, Instant};
 

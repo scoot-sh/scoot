@@ -260,6 +260,9 @@ struct Scrolled {
     /// no scroll at all, and every scroll assertion below would pass
     /// vacuously on empty vecs -- the same guard `focused` is for keys.
     entered: bool,
+    /// `wl_pointer.frame` events: a client woken by an empty frame is a
+    /// client a swipe reached.
+    frames: u32,
 }
 
 #[derive(Default)]
@@ -472,6 +475,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for TestClient {
         let seen = &mut client.typed.scroll;
         match event {
             wl_pointer::Event::Enter { .. } => seen.entered = true,
+            wl_pointer::Event::Frame => seen.frames += 1,
             wl_pointer::Event::AxisSource {
                 axis_source: WEnum::Value(source),
             } => seen.sources.push(source),
@@ -2058,4 +2062,5 @@ fn a_finger_scroll_arrives_with_its_source_and_stop() {
     assert_eq!(seen.stops, vec![wl_pointer::Axis::VerticalScroll]);
 }
 
+mod gesture;
 mod scroll_binds;

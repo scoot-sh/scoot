@@ -422,6 +422,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [look_ipc second-swap test flakes when the lock holder exits early](./resolved/look-second-swap-timing-flake-done.md) — RESOLVED 2026-10-27 (test-only: in-process exclusive lock held until the second request is answered, 300 ms grace removed; 50/50 green).
 
 ### Core / config / rendering
+- [A core action that scrolls the view to a column](./core/scroll-view-to-column.md) — medium, filed 2026-10-31 (touchpad swipes, #820): a swipe follows the fingers then eases back when the target column is already fully visible; only the focus ring moves
 - [Slide animation follow-up: open/close fade](./resolved/animation-open-close-fade-done.md) — RESOLVED 2026-10-26: tiled windows fade in on open and out on close behind the same gate (fade-only, no scale; closes retain last buffers bounded at 8 × one duration)
 - [Slide animation follow-up: workspace-switch slide](./resolved/animation-workspace-switch-slide-done.md) — RESOLVED 2026-10-26: workspace switches slide the incoming strip as one viewport offset (no new option; per-output, lock/reload snap, empty snaps)
 - [Slide animation follow-up: vertical slide](./resolved/animation-vertical-slide-done.md) — RESOLVED 2026-10-26: the slide interpolates y with the same curve, retarget-from-visual and damage discipline (PR #749); stacked-column y moves glide instead of jumping

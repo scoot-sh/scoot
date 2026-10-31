@@ -259,7 +259,7 @@ are in [Touchpad gestures](./keybindings.md#touchpad-gestures).
 | `horizontal` | string | `"focus-column"` | live | `"focus-column"` scrolls the strip under the fingers and focuses the column it settles on. `"none"` turns the horizontal swipe off. |
 | `vertical` | string | `"focus-workspace"` | live | `"focus-workspace"` or `"focus-window"` fires one step when a vertical swipe ends. `"none"` turns it off. |
 | `natural` | bool | `true` | live | The content follows the fingers, as on macOS. `false` reverses both axes. |
-| `sensitivity` | number | `1.0` | live | Scales how far the strip follows the fingers; `1.0` is one logical pixel per libinput swipe unit, about 10 pixels per millimetre of finger travel on the pad this was measured on, and a real pad may differ. Raise it if swipes feel short. Clamped `0.1..=10`; a non-number or non-finite value warns and uses `1.0`. |
+| `sensitivity` | number | `1.0` | live | Scales how far the strip follows the fingers; `1.0` is one logical pixel per libinput swipe unit, about 10 pixels per millimetre of finger travel on the pad this was measured on, and a real pad may differ. The defaults here, this one included, were tuned on a synthetic touchpad, not a real one. Raise it if swipes feel short. Clamped `0.1..=10`; a non-number or non-finite value warns and uses `1.0`. |
 
 ```toml
 [gestures]
