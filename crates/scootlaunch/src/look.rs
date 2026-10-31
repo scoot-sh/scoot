@@ -45,10 +45,10 @@
 //! dismissed, and slide the selection between rows.
 //!
 //! The `font` key names the look's UI family. There is no fontconfig in
-//! this stack: the panel draws with `--font PATH`, else the first usable
-//! well-known file, as the bar does. The key is validated and kept (a
-//! later ticket may resolve it); v1 documents that it does not pick the
-//! file.
+//! this stack: the panel draws with `--font PATH` or the config's `font`
+//! file, else the family's file found by name in the usual font directories
+//! (`scootui::font::family`), else the first usable well-known file.
+//! There is no bold face: the panel draws none.
 
 use std::path::Path;
 
@@ -92,7 +92,7 @@ pub struct Look {
     /// The panel corner radius in logical pixels (`radius`, 0 to 64), scaled
     /// by the output's scale when drawn.
     pub radius: u32,
-    /// The look's UI family (`font`): validated, informational in v1.
+    /// The look's UI family (`font`), looked for as a font file at each open.
     pub font_family: String,
     /// The icon theme the panel looks up names in (`[icons] theme`):
     /// the look's theme, `Adwaita` by default.

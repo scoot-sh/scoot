@@ -126,7 +126,8 @@ Troubleshooting, by symptom:
   (`rm ~/.local/state/scootlaunch/history` with the menu closed).
 - *My `launch.toml` font is ignored.* The file is read whole at every
   open — a bad file refuses loudly instead (`scootlaunch --check`
-  names the key). With no file the first well-known font file wins;
+  names the key). With no file the look's font family is looked for in
+  the usual font directories, then the first well-known font file wins;
   install DejaVu or set `font` to a file you have.
 - *Two menus stack.* They cannot from these binds: the second press
   dismisses the open panel. A second menu means a

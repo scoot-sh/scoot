@@ -80,10 +80,11 @@ impl CardShape {
     }
 }
 
-/// How many times the summary's bold runs are struck. This stack has no
-/// bold face (see `view::layout::Run::bold`), so a weight is a number of
-/// strikes 1 px apart: `title.weight` 100 to 500 is one (regular), 501 to
-/// 700 two (bold: what a summary always was), 701 to 900 three.
+/// How many times the summary's bold runs are struck, 1 px apart, when the
+/// text has no bold face: `title.weight` 100 to 500 is one (regular), 501 to
+/// 700 two (bold: what a summary always was), 701 to 900 three. With a bold
+/// face the face is the second strike: 501 to 700 draw the bold face once,
+/// 701 to 900 draw it twice, 1 px apart.
 pub fn title_strikes(weight: u16) -> u8 {
     match weight {
         0..=500 => 1,

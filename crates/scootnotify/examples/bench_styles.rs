@@ -4,7 +4,7 @@
 //! and a style costs a few microseconds a repaint".
 //!
 //! ```sh
-//! cargo run --release -p scootnotify --example bench_styles -- --font /path/to/font.ttf
+//! cargo run --release -p scootnotify --example bench_styles -- --font /path/to/font.ttf [--bold-font /path/to/bold.ttf]
 //! ```
 //!
 //! Dev tooling only: never part of the shipped binary. Release builds only:
@@ -91,10 +91,12 @@ fn median_and_p5(samples: &mut [Duration]) -> (Duration, Duration) {
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut font_path = None;
+    let mut bold_path = None;
     let mut iters = 1000usize;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--font" => font_path = args.next(),
+            "--bold-font" => bold_path = args.next(),
             "--iters" => iters = args.next().and_then(|v| v.parse().ok()).unwrap_or(iters),
             other => panic!("unknown argument {other}"),
         }
@@ -104,6 +106,15 @@ fn main() {
         None => scootui::testfont::build(),
     };
     let font = FontArc::new(FontVec::try_from_vec(font_bytes).expect("a usable font"));
+    let bold = bold_path.map(|path| {
+        let bytes = std::fs::read(path).expect("the bold font reads");
+        FontArc::new(FontVec::try_from_vec(bytes).expect("a usable bold font"))
+    });
+    // A text with the bold face when one was given, as the daemon builds it.
+    let text_of = |font: &FontArc| match &bold {
+        Some(bold) => Text::new(font.clone()).with_bold(bold.clone()),
+        None => Text::new(font.clone()),
+    };
     let config = Config::default();
     let notes = notes();
     let live: Vec<&Notification> = notes.iter().collect();
@@ -179,7 +190,7 @@ fn main() {
     let mut size = vec![(0u32, 0u32); styles.len()];
     for _round in 0..9 {
         for (slot, (_, look)) in styles.iter().enumerate() {
-            let text = Text::new(font.clone());
+            let text = text_of(&font);
             let mut shadow = look.shadow.spec().map(Shadow::new);
             let pad = shadow.as_ref().map_or(Pad::ZERO, Shadow::pad);
             // Layout: what a content change costs (the accent's hash and
@@ -202,7 +213,7 @@ fn main() {
                     stack.cards.iter().map(|c| (c.rect.width, c.rect.height)),
                 );
             }
-            let mut text = Text::new(font.clone());
+            let mut text = text_of(&font);
             let mut pixels = vec![0u8; stack.width as usize * stack.height as usize * 4];
             let mut run = |pixels: &mut Vec<u8>| {
                 let mut canvas = Canvas::new(pixels, stack.width, stack.height).expect("canvas");

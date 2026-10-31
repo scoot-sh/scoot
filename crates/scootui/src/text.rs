@@ -15,6 +15,15 @@
 //! ascent overflows its row rather than moving the bar's text. The cache key
 //! carries the font, so two fonts' glyph ids never collide.
 //!
+//! ## A bold face
+//!
+//! [`Text::with_bold`] adds a bold face of the primary's family. A character
+//! asked for in [`Face::Bold`] is drawn from it when it has a glyph, else
+//! from the regular chain above, so a bold file missing a character (or no
+//! bold file at all) costs the character its weight, never its glyph. Bold
+//! text is measured with the face it is drawn with. The face is loaded by
+//! the caller once, at load or reload; nothing here reads a file.
+//!
 //! Out of scope, stated: shaping (ligatures, complex scripts, marks that
 //! combine), right-to-left and bidirectional layout, and color emoji (the
 //! rasterizer draws outlines in one color). A title in such a script draws
@@ -74,6 +83,18 @@ pub const MAX_RASTER_SIDE: u32 = 4096;
 /// rasterizer's buffer is 4 bytes each, so at most 16 MiB, transiently.
 pub const MAX_RASTER: usize = 4 * 1024 * 1024;
 
+/// The bold face's font index: past the fallbacks, so no key collides.
+const BOLD: usize = MAX_FALLBACKS + 1;
+
+/// Which face of the family a run is drawn in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Face {
+    #[default]
+    Regular,
+    /// The bold file if the text has one, else the regular face.
+    Bold,
+}
+
 /// One cached glyph: its coverage at `arena[offset..offset + w × h]`, and
 /// where its top-left pixel sits from the pen on the baseline.
 #[derive(Debug, Clone, Copy)]
@@ -120,6 +141,8 @@ pub struct Text {
     primary: FontArc,
     /// At most [`MAX_FALLBACKS`], in the order they are tried.
     fallbacks: Vec<FontArc>,
+    /// The primary family's bold face, if one was found.
+    bold: Option<FontArc>,
     /// Sorted by `key`.
     entries: Vec<Cached>,
     arena: Vec<u8>,
@@ -161,6 +184,7 @@ impl Text {
         Self {
             primary,
             fallbacks,
+            bold: None,
             entries: Vec::new(),
             arena: Vec::new(),
             #[cfg(feature = "icons")]
@@ -168,9 +192,24 @@ impl Text {
         }
     }
 
-    /// Font `index`: 0 the primary, then the fallbacks. An index past them
-    /// is the primary (none is ever made).
+    /// This text with `bold` as the bold face of its family.
+    pub fn with_bold(mut self, bold: FontArc) -> Self {
+        self.bold = Some(bold);
+        self
+    }
+
+    /// Whether [`Face::Bold`] is a real face (else it draws regular, and a
+    /// caller that wants weight strikes the glyphs again).
+    pub fn has_bold(&self) -> bool {
+        self.bold.is_some()
+    }
+
+    /// Font `index`: 0 the primary, then the fallbacks, then [`BOLD`]. An
+    /// index with no font behind it is the primary (none is ever made).
     fn face(&self, index: usize) -> &FontArc {
+        if index == BOLD {
+            return self.bold.as_ref().unwrap_or(&self.primary);
+        }
         match index.checked_sub(1) {
             None => &self.primary,
             Some(i) => self.fallbacks.get(i).unwrap_or(&self.primary),
@@ -184,9 +223,17 @@ impl Text {
 
     /// The font that draws `c` at `em`, with its glyph, scale and advance:
     /// the first with a glyph for it, else the primary's `.notdef`.
-    fn resolve(&self, c: char, em: f32) -> Resolved {
+    fn resolve(&self, c: char, em: f32, face: Face) -> Resolved {
         let mut index = 0;
         let mut id = self.primary.glyph_id(c);
+        if face == Face::Bold
+            && let Some(bold) = &self.bold
+        {
+            let found = bold.glyph_id(c);
+            if found.0 != 0 {
+                (index, id) = (BOLD, found);
+            }
+        }
         if id.0 == 0 {
             for (i, font) in self.fallbacks.iter().enumerate() {
                 let found = font.glyph_id(c);
@@ -217,9 +264,14 @@ impl Text {
     /// The width, in device pixels rounded up, of `icon` (then a space)
     /// and `text` at `em`.
     pub fn measure(&self, icon: Option<char>, text: &str, em: f32) -> u32 {
+        self.measure_face(icon, text, em, Face::Regular)
+    }
+
+    /// [`Text::measure`] in `face`.
+    pub fn measure_face(&self, icon: Option<char>, text: &str, em: f32, face: Face) -> u32 {
         let mut width = 0.0f32;
         for c in chars(icon, text) {
-            width += self.resolve(c, em).advance;
+            width += self.resolve(c, em, face).advance;
         }
         // Finite and non-negative for any real font; `as` saturates the
         // rest.
@@ -233,7 +285,12 @@ impl Text {
     /// match its ink.
     #[allow(dead_code)] // Only the workspaces module walks advances.
     pub fn advance(&self, c: char, em: f32) -> f32 {
-        self.resolve(c, em).advance
+        self.advance_face(c, em, Face::Regular)
+    }
+
+    /// [`Text::advance`] in `face`.
+    pub fn advance_face(&self, c: char, em: f32, face: Face) -> f32 {
+        self.resolve(c, em, face).advance
     }
 
     /// The side, in device pixels, of a path or image icon at `em`: the
@@ -319,21 +376,30 @@ impl Text {
         color: Color,
         clip: Span,
     ) {
-        self.draw_tracked(canvas, icon, text, em, 0.0, x, baseline, color, clip);
+        self.draw_tracked(
+            canvas,
+            icon,
+            text,
+            (em, Face::Regular, 0.0),
+            x,
+            baseline,
+            color,
+            clip,
+        );
     }
 
-    /// [`Text::draw`] with `tracking` extra device pixels after every
-    /// character (letter spacing; negative tightens). A zero `tracking` is
-    /// `draw` exactly. A non-finite one counts as zero, so a bad value
-    /// cannot stall the pen or send it off to infinity.
+    /// [`Text::draw`] in `face`, with `tracking` extra device pixels after
+    /// every character (letter spacing; negative tightens): `style` is
+    /// `(em, face, tracking)`. A regular face and zero `tracking` is `draw`
+    /// exactly. A non-finite tracking counts as zero, so a bad value cannot
+    /// stall the pen or send it off to infinity.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_tracked(
         &mut self,
         canvas: &mut Canvas<'_>,
         icon: Option<char>,
         text: &str,
-        em: f32,
-        tracking: f32,
+        (em, face, tracking): (f32, Face, f32),
         x: i64,
         baseline: i64,
         color: Color,
@@ -342,7 +408,7 @@ impl Text {
         let tracking = finite_tracking(tracking);
         let mut pen = x as f32;
         for c in chars(icon, text) {
-            let glyph = self.resolve(c, em);
+            let glyph = self.resolve(c, em, face);
             let origin = pen.round() as i64;
             if origin >= i64::from(clip.end()) {
                 break;
@@ -372,7 +438,7 @@ impl Text {
         color: Color,
         clip: Span,
     ) {
-        // Font, glyph id and size: the font's index (at most 2) above the
+        // Font, glyph id and size: the font's index (at most 3) above the
         // id's 16 bits above the size's 32.
         let key = (font as u64) << 48 | u64::from(id.0) << 32 | u64::from(scale.y.to_bits());
         let found = match self.entries.binary_search_by_key(&key, |e| e.key) {

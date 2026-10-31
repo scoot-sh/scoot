@@ -21,8 +21,8 @@ scootlaunch --font /path/to/font.ttf
 
 `--check` validates the config file without opening (`launch.toml`
 beside the bar's, or `--config PATH`; unknown keys are refused by
-name). Without `--font` it tries a short list of well-known paths and
-refuses, naming what it tried. A missing `libxkbcommon.so.0` refuses
+name). Without `--font` it looks for the look's font family, then tries a
+short list of well-known paths, and refuses, naming what it tried. A missing `libxkbcommon.so.0` refuses
 the same way. Full paths and the per-distro packages are in
 [Overview](./index.md#install). The panel holds no surface when
 closed: a second `scootlaunch` while it is open dismisses it, so one

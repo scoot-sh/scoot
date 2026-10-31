@@ -20,7 +20,7 @@ pub const MAX_SPANS: usize = 64;
 pub struct Span {
     /// The text, entities decoded, tags stripped.
     pub text: String,
-    /// `b`: bold face if configured, else synthetic emboldening.
+    /// `b`: the bold face if the family has one, else synthetic emboldening.
     pub bold: bool,
     /// `i`: italic face if configured, else upright.
     pub italic: bool,

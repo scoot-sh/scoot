@@ -63,10 +63,10 @@
 //! `notify.toml` win per key over all of this ([`user`]).
 //!
 //! The `font` key names the look's UI family. There is no fontconfig in
-//! this stack: the daemon draws with `--font PATH`, else the first usable
-//! well-known file, as the bar does. The key is validated and kept (a
-//! later ticket may resolve it); v1 documents that it does not pick the
-//! file.
+//! this stack: the daemon draws with `--font PATH`, else the family's file
+//! found by name in the usual font directories (`scootui::font::family`,
+//! with a bold file beside it), else the first usable well-known file. A
+//! reload that changes the family builds the text again (see `popup::App::retheme`).
 
 use std::path::{Path, PathBuf};
 
@@ -172,7 +172,8 @@ pub struct Look {
     pub opacity: f32,
     /// The card corner radius in logical pixels (`radius`, 0 to 64).
     pub radius: u32,
-    /// The look's UI family (`font`): validated, informational in v1.
+    /// The look's UI family (`font`), looked for as a font file at start and
+    /// when a reload changes it.
     pub font_family: String,
     /// The icon theme names resolve in (`[icons] theme`): the look's
     /// theme, `Adwaita` by default.

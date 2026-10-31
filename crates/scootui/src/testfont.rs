@@ -128,7 +128,7 @@ fn glyph(rects: &[Rect]) -> Vec<u8> {
 
 /// The font file's bytes.
 pub fn build() -> Vec<u8> {
-    build_from(glyphs(), UNITS_PER_EM)
+    build_from(glyphs(), UNITS_PER_EM, ADVANCE)
 }
 
 /// A hostile font: 16 units to the em, and `8` a square 32,000 units on a
@@ -141,19 +141,25 @@ pub fn build_hostile() -> Vec<u8> {
             *rects = vec![(0, 0, 32_000, 32_000)];
         }
     }
-    build_from(glyphs, 16)
+    build_from(glyphs, 16, ADVANCE)
 }
 
 /// A symbol font: `.notdef` (the same solid block) and one glyph for each
 /// of `chars`, a horizontal bar, so a test can tell which font drew a
 /// character. Every glyph is [`ADVANCE`] wide, as in [`build`].
 pub fn build_symbols(chars: impl IntoIterator<Item = char>) -> Vec<u8> {
-    let mut glyphs = vec![(None, vec![NOTDEF])];
-    glyphs.extend(chars.into_iter().map(|c| (Some(c), vec![BAR])));
-    build_from(glyphs, UNITS_PER_EM)
+    build_symbols_advance(chars, ADVANCE)
 }
 
-fn build_from(glyphs: Vec<(Option<char>, Vec<Rect>)>, units_per_em: u16) -> Vec<u8> {
+/// [`build_symbols`] with every glyph `advance` units wide, so a test can
+/// tell a second face of the same family (a bold, wider one) by width.
+pub fn build_symbols_advance(chars: impl IntoIterator<Item = char>, advance: u16) -> Vec<u8> {
+    let mut glyphs = vec![(None, vec![NOTDEF])];
+    glyphs.extend(chars.into_iter().map(|c| (Some(c), vec![BAR])));
+    build_from(glyphs, UNITS_PER_EM, advance)
+}
+
+fn build_from(glyphs: Vec<(Option<char>, Vec<Rect>)>, units_per_em: u16, advance: u16) -> Vec<u8> {
     let count = glyphs.len() as u16;
 
     let mut glyf = Vec::new();
@@ -173,7 +179,7 @@ fn build_from(glyphs: Vec<(Option<char>, Vec<Rect>)>, units_per_em: u16) -> Vec<
     u16be(&mut head, 0x000B); // flags
     u16be(&mut head, units_per_em);
     head.extend_from_slice(&[0; 16]); // created, modified
-    for v in [0, DESCENT, ADVANCE as i16, ASCENT] {
+    for v in [0, DESCENT, advance as i16, ASCENT] {
         i16be(&mut head, v);
     }
     u16be(&mut head, 0); // mac style
@@ -188,7 +194,7 @@ fn build_from(glyphs: Vec<(Option<char>, Vec<Rect>)>, units_per_em: u16) -> Vec<
     i16be(&mut hhea, ASCENT);
     i16be(&mut hhea, DESCENT);
     i16be(&mut hhea, 0); // line gap
-    u16be(&mut hhea, ADVANCE);
+    u16be(&mut hhea, advance);
     i16be(&mut hhea, 100); // min left side bearing
     i16be(&mut hhea, 100); // min right side bearing
     i16be(&mut hhea, 500); // x max extent
@@ -198,7 +204,7 @@ fn build_from(glyphs: Vec<(Option<char>, Vec<Rect>)>, units_per_em: u16) -> Vec<
 
     let mut hmtx = Vec::new();
     for (_, rects) in &glyphs {
-        u16be(&mut hmtx, ADVANCE);
+        u16be(&mut hmtx, advance);
         i16be(&mut hmtx, rects.iter().map(|r| r.0).min().unwrap_or(0));
     }
 

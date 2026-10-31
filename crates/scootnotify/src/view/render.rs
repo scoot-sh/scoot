@@ -492,9 +492,10 @@ fn blit(canvas: &mut Canvas<'_>, bits: &IconBits, ix: u32, iy: u32, side: u32, c
     }
 }
 
-/// Paints one wrapped line in `base` (`accent` for `a` runs): bold runs
-/// struck `ink.strikes` times 1 px apart, underlines ruled under the
-/// baseline, every character stepped `ink.tracking` extra.
+/// Paints one wrapped line in `base` (`accent` for `a` runs): bold runs in
+/// the bold face if the text has one (struck once more for each strike past
+/// two), else struck `ink.strikes` times 1 px apart; underlines ruled under
+/// the baseline, every character stepped `ink.tracking` extra.
 #[allow(clippy::too_many_arguments)] // A paint helper, as the bar's own are.
 fn paint_line(
     text: &mut Text,
@@ -509,14 +510,19 @@ fn paint_line(
     let mut pen = line.x;
     for run in &line.runs {
         let color = if run.link { look.theme.accent } else { base };
-        let strikes = if run.bold { ink.strikes.max(1) } else { 1 };
+        let strikes = match (run.bold, text.has_bold()) {
+            (false, _) => 1,
+            (true, false) => ink.strikes.max(1),
+            // The face is the first strike of a two-strike bold.
+            (true, true) => ink.strikes.saturating_sub(1).max(1),
+        };
+        let face = super::layout::face(run.bold);
         for strike in 0..strikes {
             text.draw_tracked(
                 canvas,
                 None,
                 &run.text,
-                em,
-                ink.tracking,
+                (em, face, ink.tracking),
                 pen + i64::from(strike),
                 line.baseline,
                 color,
@@ -524,8 +530,9 @@ fn paint_line(
             );
         }
         let extra = Text::tracking_extra(&run.text, ink.tracking).round() as i64;
-        let width =
-            text.measure(None, &run.text, em) as i64 + extra + i64::from(strikes.saturating_sub(1));
+        let width = text.measure_face(None, &run.text, em, face) as i64
+            + extra
+            + i64::from(strikes.saturating_sub(1));
         if run.underline {
             canvas.fill_rect(
                 Span {
@@ -671,6 +678,8 @@ fn paint_pill(
     );
 }
 
+#[cfg(test)]
+mod bold_tests;
 #[cfg(test)]
 mod depth_tests;
 #[cfg(test)]
