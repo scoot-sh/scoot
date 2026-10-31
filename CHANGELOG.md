@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.22](https://github.com/scoot-sh/scoot/compare/v0.6.21...v0.6.22) - 2026-10-31
+
+### scootlaunch,scootui
+
+- fixed: draw at the compositor's scale instead of a 1x buffer ([#839](https://github.com/scoot-sh/scoot/pull/839))
+
 ## [0.6.21](https://github.com/scoot-sh/scoot/compare/v0.6.20...v0.6.21) - 2026-10-31
 
 ### scootlaunch
