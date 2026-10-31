@@ -208,6 +208,9 @@ name everywhere below.
 Your other sessions stay. To undo, set `desktop.enable = false;` in
 both files and rebuild, or boot the previous generation.
 
+Unlocking works with no extra setup: the NixOS module names the
+locker's PAM service itself.
+
 Every snippet on this site is titled with the file it goes in. Most
 desktop options are titled **configuration.nix and home.nix**: each
 side does its half (the system installs the service, your user runs
@@ -288,8 +291,9 @@ session entry, and home-manager keeps the bar and the config. The
 login entry then runs the script's scoot, not the flake's, so keep the
 two on one version (the flake follows `main`; the script installs the
 newest tagged release, so they can differ). Two
-pieces need your distro rather than home-manager: the lock screen's PAM
-service and backlight access (see [home-manager setup on the desktop page](../../desktop/#home-manager)).
+pieces need your distro rather than home-manager: a `/etc/pam.d/swaylock`
+service for the lock screen (or no password will ever unlock — see
+[Idle and lock](../../desktop/idle-lock/)) and backlight access (see [home-manager setup on the desktop page](../../desktop/#home-manager)).
 
 </TabItem>
 <TabItem label="Any Linux">

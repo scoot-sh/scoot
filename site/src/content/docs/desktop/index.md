@@ -126,8 +126,9 @@ The flake for it is on [Install](../start/install.md#use-it-every-day),
 under **Nix on another Linux**.
 
 A home-manager-only setup still needs two things from wherever PAM
-and the seat are configured: the locker's PAM service (else no
-password unlocks it), and backlight rights for dimming (else the dim
+and the seat are configured: a `/etc/pam.d/swaylock` service for the
+locker (else no password unlocks it — see [Idle and
+lock](./idle-lock.md)), and backlight rights for dimming (else the dim
 step logs EPERM and does nothing).
 
 ## Which sessions start the units

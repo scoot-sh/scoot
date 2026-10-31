@@ -3,12 +3,20 @@
 # event. The option shapes live in `./desktop.nix` (shared with the NixOS
 # side); the `package`/`command` defaults live here because only this side
 # has `pkgs`. See site/src/content/docs/desktop/idle-lock.md ("Idle and lock").
+#
+# The NixOS system config, when this runs as home-manager inside NixOS:
+# read off `args` (home-manager passes it as a special arg) or
+# `config._module.args`, never as a named module argument (the module
+# system resolves named arguments strictly against `_module.args`,
+# which bypasses the `?` default and fails the evaluation where
+# nothing provides it -- standalone home-manager, and the hermetic
+# `lib.evalModules` checks in `nix/tests.nix`).
 {
   config,
   lib,
   pkgs,
   ...
-}:
+}@args:
 
 let
   cfg = config.programs.scoot;
@@ -537,6 +545,38 @@ in
       ];
 
       xdg.configFile."swaylock/config".source = swaylockConfig;
+    })
+
+    # The locker's PAM service, seen from the NixOS side when this
+    # home configuration runs inside NixOS (invisible standalone):
+    # a swaylock-family lock with no
+    # `swaylock` service rejects every password (PAM falls back to
+    # `other`, which denies everything). A warning, not an assertion:
+    # the system side may simply not have switched yet, and failing
+    # the home switch would strand a working session over a service
+    # the next system switch provides. Linux-only, and only while the
+    # lock itself is on with a swaylock-family daemon, so a standalone
+    # setup (no `osConfig`), a non-Linux box, or any other locker
+    # stays quiet.
+    (lib.mkIf (idle.enable && idle.lock.enable) {
+      warnings =
+        let
+          swaylockFamily = idle.lock.daemon == "swaylock" || idle.lock.daemon == "swaylock-effects";
+          # The system side, if visible: `null` standalone (and in the
+          # hermetic checks). `pamServices` is null there too -- and on
+          # any `osConfig` without the NixOS PAM tree (standalone
+          # home-manager provides no `security`), which reads as "not
+          # NixOS" and stays quiet rather than warning falsely.
+          osCfg = args.osConfig or (config._module.args.osConfig or null);
+          pamServices =
+            if osCfg == null then null else lib.attrByPath [ "security" "pam" "services" ] null osCfg;
+          pamPresent = pamServices != null && pamServices ? swaylock;
+        in
+        lib.optional
+          (swaylockFamily && pkgs.stdenv.hostPlatform.isLinux && pamServices != null && !pamPresent)
+          ''
+            programs.scoot.desktop.idle.lock.enable is set with daemon "${idle.lock.daemon}", but the NixOS system has no `security.pam.services.swaylock`: no password will ever unlock (PAM falls back to `other`, which denies everything). Set `security.pam.services.swaylock = {};` on the system side (automatic with the scoot NixOS module), then restart any running locker: it reads PAM once at launch, so a service added later does not unlock a running lock.
+          '';
     })
 
     # The lock action's shape, wherever it renders (the swayidle
