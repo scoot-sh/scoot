@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.20](https://github.com/scoot-sh/scoot/compare/v0.6.19...v0.6.20) - 2026-10-31
+
+### scootnotify
+
+- fixed: cards draw the look's radius; the file's radius wins when set ([#833](https://github.com/scoot-sh/scoot/pull/833))
+
+### scootnotify,scootui
+
+- added: a card's input region follows its rounded or pill outline ([#835](https://github.com/scoot-sh/scoot/pull/835))
+
 ## [0.6.19](https://github.com/scoot-sh/scoot/compare/v0.6.18...v0.6.19) - 2026-10-31
 
 ### scoot
