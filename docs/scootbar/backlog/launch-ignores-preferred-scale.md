@@ -33,8 +33,14 @@ Measured 2026-10-31 on the dev VM, headless `scoot` with
 
 A 2x output should get a 1040x564 buffer. The device-scale painters and
 their tests exist (`paint_panel` at `Scale::Fractional`), so only the event
-wiring is missing. `site/src/content/docs/scootlaunch/panel.md` says "a 1.5
-output draws a 1.5x bitmap", which is not what happens live.
+wiring is missing. `site/src/content/docs/scootlaunch/panel.md` says the
+launcher draws at 1x; restore the icon-scale and output-scale sentences when
+this lands.
+
+dmenu at 1.5x: the device layout is up to 3 px taller than
+round(logical x 1.5); derive the buffer height from the device layout. The
+live test `under_a_shadow_a_press_on_it_dismisses_and_a_row_click_still_picks`
+hardcodes the 1x row geometry and needs updating then.
 
 ## What to do
 
