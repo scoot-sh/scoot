@@ -499,7 +499,7 @@ fn stepping_and_composing_allocate_nothing() {
     let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
     // Warm: the first compose touches nothing it has not already, and the
     // list has the room the rows take.
-    motion.compose(&mut canvas, at(t0, 20));
+    motion.compose(&mut canvas, after.height, at(t0, 20));
     let mut out = Vec::with_capacity(128);
     let ((), allocations) = scootbg_mem::count_allocations(|| {
         for ms in (0..190).step_by(16) {
@@ -508,7 +508,7 @@ fn stepping_and_composing_allocate_nothing() {
             out.clear();
             motion.push_input_rects(&after.cards[0], 12, 0, (w, h), now, &mut out);
             let _ = motion.unproject(&after.cards[0], 5, 5, 0, now);
-            motion.compose(&mut canvas, now);
+            motion.compose(&mut canvas, after.height, now);
         }
     });
     assert_eq!(allocations, 0);

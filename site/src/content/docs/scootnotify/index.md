@@ -140,8 +140,14 @@ Against version 1.3 of the Desktop Notifications Specification:
 | Categories (§6) | Stored; `[[rule]]` tables match on them ([configure](./configure.md)), JSON carries them |
 | `desktop-entry` (§8) | Stored; rules match on it, JSON carries it |
 
-Popups draw at scale 1 in v1: on a HiDPI output the compositor
-upscales the buffer (right size, softer text). Arabic, Hebrew and
+Cards draw at the output's real device pixels, fractional scales
+included (`wp_fractional_scale_v1` with `wp_viewporter`): on a 2x output
+the buffer is twice the stack's size, so text and borders are sharp
+instead of a 1x image the compositor scales up. A compositor with only
+an integer scale gets the cards drawn at that scale. If the scale
+changes while cards are open (the output's scale set, or a monitor
+swapped), they redraw at the new one. Sizes, margins and click areas
+are logical pixels at every scale. Arabic, Hebrew and
 Devanagari draw wrong until shaping lands; Latin, Cyrillic, CJK and
 monochrome-fallback emoji are acceptable. There is no sound: the
 `sound` capability is not advertised.

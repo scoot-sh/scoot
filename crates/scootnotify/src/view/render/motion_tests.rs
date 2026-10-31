@@ -100,7 +100,7 @@ fn paint_layers(scene: &mut Scene, motion: &mut Motion) {
         urgencies,
         icons,
     } = scene;
-    motion.paint_layers(None, |card, layer, button| {
+    motion.paint_layers(None, |card, layer, button, dev| {
         let urgency = urgencies.get(&card.id).copied().unwrap_or(Urgency::Normal);
         let mut canvas = layer.canvas().expect("layer");
         paint_layer(
@@ -113,6 +113,7 @@ fn paint_layers(scene: &mut Scene, motion: &mut Motion) {
             button,
             icons,
             shadow.as_ref(),
+            dev,
         );
     });
 }
@@ -157,6 +158,7 @@ fn frame(
             None,
             &scene.icons,
             scene.shadow.as_ref(),
+            Dev::UNIT,
         );
     }
     (pixels, w, h)
@@ -430,7 +432,7 @@ fn a_hovered_button_repaints_a_moving_card_once() {
     motion.retarget(&stack_empty(&mut scene), &stack, t0);
     let painted = std::cell::Cell::new(0);
     let run = |motion: &mut Motion, hover| {
-        motion.paint_layers(hover, |_, layer, _| {
+        motion.paint_layers(hover, |_, layer, _, _| {
             painted.set(painted.get() + 1);
             assert!(layer.canvas().is_some());
         });
@@ -467,7 +469,7 @@ fn an_animated_frame_allocates_nothing() {
         motion.settle(now);
         // A whole tick: the layers (none stale), the static cards and the
         // composites.
-        motion.paint_layers(None, |_, _, _| unreachable!("nothing is stale"));
+        motion.paint_layers(None, |_, _, _, _| unreachable!("nothing is stale"));
         paint_moving(
             canvas,
             &mut scene.text,

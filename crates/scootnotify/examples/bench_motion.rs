@@ -5,8 +5,12 @@
 //! budget on pixman".
 //!
 //! ```sh
-//! cargo run --release -p scootnotify --example bench_motion -- --font /path/to/font.ttf
+//! cargo run --release -p scootnotify --example bench_motion -- --font /path/to/font.ttf [--scale 240]
 //! ```
+//!
+//! `--scale` is the output scale in 120ths (120 is 1x, the default; 240 is
+//! 2x): the layout stays in logical pixels and the surfaces are the
+//! buffer sizes the compositor would be sent.
 //!
 //! Dev tooling only: never part of the shipped binary. Release builds only:
 //! a debug build says nothing about a frame.
@@ -21,9 +25,11 @@ use scootnotify::config::{Anchor, Config};
 use scootnotify::look::{CardMotion, Look, MotionTokens, ShadowStyle};
 use scootnotify::model::expiry::Clock;
 use scootnotify::model::store::{Icon, Notification};
+use scootnotify::view::dev::Dev;
 use scootnotify::view::layout::{self, Stack};
 use scootnotify::view::motion::Motion;
 use scootnotify::view::render::{paint, paint_layer, paint_moving};
+use scootui::density::Scale;
 use scootui::motion::Curve;
 use scootui::paint::{Canvas, Pad, Shadow};
 use scootui::text::Text;
@@ -98,6 +104,7 @@ struct Scene {
     shadow: Option<Shadow>,
     urgencies: HashMap<u32, Urgency>,
     icons: HashMap<u32, scootnotify::view::render::IconBits>,
+    dev: Dev,
 }
 
 impl Scene {
@@ -107,7 +114,13 @@ impl Scene {
         for n in &notes {
             self.urgencies.insert(n.id, n.urgency);
         }
-        let pad = self.shadow.as_ref().map_or(Pad::ZERO, Shadow::pad);
+        let pad = self
+            .look
+            .shadow
+            .spec()
+            .map(Shadow::new)
+            .as_ref()
+            .map_or(Pad::ZERO, Shadow::pad);
         let stack = layout::inset(
             layout::layout(
                 &live,
@@ -119,9 +132,13 @@ impl Scene {
             pad,
         );
         if let Some(shadow) = self.shadow.as_mut().filter(|_| !stack.cards.is_empty()) {
+            let dev = self.dev;
             shadow.prepare(
-                self.look.card_radius(self.config.radius),
-                stack.cards.iter().map(|c| (c.rect.width, c.rect.height)),
+                dev.len(self.look.card_radius(self.config.radius)),
+                stack
+                    .cards
+                    .iter()
+                    .map(|c| (dev.len(c.rect.width), dev.len(c.rect.height))),
             );
         }
         stack
@@ -135,8 +152,9 @@ impl Scene {
             shadow,
             urgencies,
             icons,
+            dev: _,
         } = self;
-        motion.paint_layers(None, |card, layer, button| {
+        motion.paint_layers(None, |card, layer, button, dev| {
             let urgency = urgencies.get(&card.id).copied().unwrap_or(Urgency::Normal);
             let mut canvas = layer.canvas().expect("layer");
             paint_layer(
@@ -149,6 +167,7 @@ impl Scene {
                 button,
                 icons,
                 shadow.as_ref(),
+                dev,
             );
         });
     }
@@ -158,9 +177,11 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let mut font_path = None;
     let mut iters = 400usize;
+    let mut v120 = 120u32;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--font" => font_path = args.next(),
+            "--scale" => v120 = args.next().and_then(|v| v.parse().ok()).unwrap_or(v120),
             "--iters" => iters = args.next().and_then(|v| v.parse().ok()).unwrap_or(iters),
             other => panic!("unknown argument {other}"),
         }
@@ -174,10 +195,18 @@ fn main() {
         shadow: ShadowStyle::Soft,
         ..Look::default()
     };
+    let scale = if v120.is_multiple_of(120) {
+        Scale::Integer(v120 / 120)
+    } else {
+        Scale::Fractional(v120)
+    };
+    let dev = Dev::new(scale);
+    let buffer = |w: u32, h: u32| (dev.x_at(w), dev.y_at(h));
     let mut scene = Scene {
         text: Text::new(font),
         config: Config::default(),
-        shadow: look.shadow.spec().map(Shadow::new),
+        shadow: look.shadow.spec().map(|spec| Shadow::new(dev.shadow(spec))),
+        dev,
         look,
         urgencies: HashMap::new(),
         icons: HashMap::new(),
@@ -206,7 +235,7 @@ fn main() {
         };
 
         let five = scene.stack(&[1, 2, 3, 4, 5]);
-        let (w, h) = (five.width, five.height);
+        let (w, h) = buffer(five.width, five.height);
 
         // The plain repaint: what a stack at rest, or any look with motion
         // none, pays per repaint.
@@ -225,6 +254,7 @@ fn main() {
                 None,
                 &scene.icons,
                 scene.shadow.as_ref(),
+                dev,
             );
             if i >= 20 {
                 samples.push(start.elapsed());
@@ -267,12 +297,14 @@ fn main() {
         ] {
             let t0 = Instant::now();
             let mut motion = Motion::new(&tokens(enter), anchor);
+            motion.set_scale(scale);
             // Start cost: retarget plus the layers' rasterization.
             let start = Instant::now();
             motion.retarget(before, after, t0);
             scene.paint_layers(&mut motion);
             let started = start.elapsed();
-            let (w, h) = (after.width, after.height.max(motion.hold()));
+            let surface = after.height.max(motion.hold());
+            let (w, h) = buffer(after.width, surface);
             let mut pixels = vec![0u8; w as usize * h as usize * 4];
             let mut samples = Vec::with_capacity(iters);
             for i in 0..iters + 20 {

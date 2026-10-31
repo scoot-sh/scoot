@@ -71,6 +71,7 @@ fn painted_with(stack: &layout::Stack, look: &Look, config: &Config) -> (Vec<u8>
             None,
             &HashMap::new(),
             None,
+            Dev::UNIT,
         );
     }
     (pixels, dims.0, dims.1)
@@ -170,6 +171,7 @@ fn urgency_colors_the_ring() {
                 None,
                 &HashMap::new(),
                 None,
+                Dev::UNIT,
             );
         }
         assert_eq!(
@@ -227,6 +229,7 @@ fn a_repaint_allocates_nothing_after_warm_up() {
             None,
             &HashMap::new(),
             None,
+            Dev::UNIT,
         );
     }
     let (_, allocs) = scootbg_mem::count_allocations(|| {
@@ -241,6 +244,7 @@ fn a_repaint_allocates_nothing_after_warm_up() {
             None,
             &HashMap::new(),
             None,
+            Dev::UNIT,
         );
     });
     assert_eq!(allocs, 0, "a repaint allocates");
@@ -306,6 +310,7 @@ fn default_look_stack() -> (Vec<u8>, u32, u32) {
             Some((7, Some(0))),
             &HashMap::new(),
             None,
+            Dev::UNIT,
         );
     }
     (pixels, stack.width, stack.height)

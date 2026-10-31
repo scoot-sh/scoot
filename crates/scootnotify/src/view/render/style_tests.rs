@@ -78,6 +78,7 @@ fn paint_styled(
         None,
         &HashMap::new(),
         shadow,
+        Dev::UNIT,
     );
     pixels
 }
@@ -335,6 +336,7 @@ fn a_mark_is_painted_with_its_card_into_a_motion_layer() {
             None,
             &HashMap::new(),
             None,
+            Dev::UNIT,
         );
         // Compare the card's rows away from the neighbors' shadows (none
         // painted here): the first card is the newest, painted last, so
@@ -541,6 +543,7 @@ fn a_repaint_with_every_style_allocates_nothing_after_warm_up() {
                 None,
                 &HashMap::new(),
                 tables.as_ref(),
+                Dev::UNIT,
             );
         };
         for _ in 0..3 {
@@ -617,7 +620,7 @@ fn a_mark_travels_with_a_card_in_flight_and_lands_on_the_static_paint() {
         let mut pixels = vec![0u8; w as usize * h as usize * 4];
         let mut canvas = Canvas::new(&mut pixels, w, h).unwrap();
         if motion.active() {
-            motion.paint_layers(None, |card, layer, button| {
+            motion.paint_layers(None, |card, layer, button, dev| {
                 let urgency = urgencies.get(&card.id).copied().unwrap_or(Urgency::Normal);
                 let mut canvas = layer.canvas().expect("layer");
                 paint_layer(
@@ -630,6 +633,7 @@ fn a_mark_travels_with_a_card_in_flight_and_lands_on_the_static_paint() {
                     button,
                     &icons,
                     tables.as_ref(),
+                    dev,
                 );
             });
             paint_moving(
@@ -656,6 +660,7 @@ fn a_mark_travels_with_a_card_in_flight_and_lands_on_the_static_paint() {
                 None,
                 &icons,
                 tables.as_ref(),
+                Dev::UNIT,
             );
         }
         (pixels, stack)

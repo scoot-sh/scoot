@@ -5,6 +5,7 @@
 use super::*;
 use crate::bus::hints::Urgency;
 use crate::config::Anchor as StackAnchor;
+use crate::view::render::ICON_SIDE;
 
 #[test]
 fn anchors_map_to_their_corners() {
@@ -49,27 +50,27 @@ fn icon_decode_refuses_garbage() {
         clock: crate::model::expiry::Clock::waiting(),
     };
     // No icon, and a theme name, decode to the tile (nothing).
-    assert_eq!(decode_icon(&note), None);
+    assert_eq!(decode_icon(&note, ICON_SIDE), None);
     note.icon = crate::model::store::Icon::Name("firefox".to_owned());
-    assert_eq!(decode_icon(&note), None);
+    assert_eq!(decode_icon(&note, ICON_SIDE), None);
     // Truncated pixels are refused, not read past the end.
     note.icon = crate::model::store::Icon::Data(crate::bus::image::Image {
         width: 4,
         height: 4,
         pixels: vec![255u8; 10],
     });
-    assert_eq!(decode_icon(&note), None);
+    assert_eq!(decode_icon(&note, ICON_SIDE), None);
     // Absurd dimensions are refused before any allocation.
     note.icon = crate::model::store::Icon::Data(crate::bus::image::Image {
         width: 5000,
         height: 5000,
         pixels: Vec::new(),
     });
-    assert_eq!(decode_icon(&note), None);
+    assert_eq!(decode_icon(&note, ICON_SIDE), None);
     // A missing path is a tile, not an error.
     note.icon =
         crate::model::store::Icon::Path("/nonexistent/scootnotify-test-icon.png".to_owned());
-    assert_eq!(decode_icon(&note), None);
+    assert_eq!(decode_icon(&note, ICON_SIDE), None);
 }
 
 #[test]
@@ -104,7 +105,7 @@ fn a_2x2_image_decodes_to_the_square() {
         shown_ms: None,
         clock: crate::model::expiry::Clock::waiting(),
     };
-    let bits = decode_icon(&note).expect("a tiny image decodes");
+    let bits = decode_icon(&note, ICON_SIDE).expect("a tiny image decodes");
     assert_eq!(bits.side, ICON_SIDE);
     assert_eq!(
         bits.pixels.len(),

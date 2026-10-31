@@ -2,8 +2,8 @@
 //! per-app accent color, and the summary's weight and spacing.
 //!
 //! Sizes are logical pixels, like every other length in the stack. The popup
-//! renders at scale 1 (the fractional-scale globals are unbound, so a HiDPI
-//! output upscales the buffer), which makes them device pixels too.
+//! draws them at the compositor's scale (`view::dev`): a 3 px stripe is 3
+//! device pixels at 1x and 6 at 2x.
 //!
 //! Everything here is read once with the look and applied at layout, never
 //! per frame. A look that sets none of it paints what it always did;

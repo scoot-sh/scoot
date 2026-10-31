@@ -25,6 +25,13 @@
 //! (`get_input_idle_notification`, which ignores inhibitors by design,
 //! so a playing video does not count as presence).
 //!
+//! The cards are drawn at the compositor's scale: `wp_fractional_scale_v1`
+//! (with a `wp_viewporter`), else `wl_surface.preferred_buffer_scale`, else
+//! the `wl_output.scale` of the outputs the surface is on ([`scale`]). The
+//! layout, the input region and the pointer stay in logical pixels at every
+//! scale; the buffer is exactly the surface's logical size times the scale
+//! and the viewport maps it one to one.
+//!
 //! No `unwrap`/`expect`/`panic` on any runtime path: a missing global, a
 //! refused bind, a failed draw or a gone compositor reads as a degraded
 //! mode or a clean exit, never a crash.
@@ -35,6 +42,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use scoot_rt::print::warn;
+use scootui::density::Scale;
+use scootui::density::outputs::OutputScales;
 use scootui::output::Size;
 use scootui::outputs::Frame;
 use scootui::paint::{Canvas, Pad, Shadow};
@@ -42,13 +51,14 @@ use scootui::surfaces::{Buffers, Demand, Effect, Globals, LayerLive, LayerSpec, 
 use scootui::text::Text;
 use wayland_client::protocol::{
     wl_buffer, wl_callback, wl_compositor, wl_output, wl_pointer, wl_region, wl_registry, wl_seat,
-    wl_shm, wl_shm_pool, wl_surface,
+    wl_shm, wl_shm_pool,
 };
 use wayland_client::{Connection, Dispatch, EventQueue, Proxy, QueueHandle, WEnum};
 use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notification_v1::ExtIdleNotificationV1;
 use wayland_protocols::ext::idle_notify::v1::client::ext_idle_notifier_v1::ExtIdleNotifierV1;
-use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::WpFractionalScaleV1;
+use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
+use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::xdg::activation::v1::client::xdg_activation_token_v1::{
     self, XdgActivationTokenV1,
 };
@@ -60,9 +70,10 @@ use crate::bus::hints::Urgency;
 use crate::config::{Anchor as StackAnchor, Config};
 use crate::look::Look;
 use crate::model::store::Notification;
+use crate::view::dev::Dev;
 use crate::view::layout::{self, Rect, Stack};
 use crate::view::motion::Motion;
-use crate::view::render::{self, Hover, ICON_SIDE, IconBits};
+use crate::view::render::{self, Hover, IconBits};
 
 /// evdev button codes: wayland-client names no button codes.
 const BTN_LEFT: u32 = 0x110;
@@ -116,12 +127,19 @@ pub struct App {
     shm: Option<wl_shm::WlShm>,
     layer_shell: Option<ZwlrLayerShellV1>,
     activation: Option<XdgActivationV1>,
+    /// Bound with the fractional manager below; the manager is only handed
+    /// to a surface together with it, the one way to act on a fraction.
+    viewporter: Option<WpViewporter>,
+    fractional: Option<WpFractionalScaleManagerV1>,
     idle_notifier: Option<ExtIdleNotifierV1>,
     idle: Option<ExtIdleNotificationV1>,
     idle_warned: bool,
     seat_proxy: Option<wl_seat::WlSeat>,
     pointer: Option<wl_pointer::WlPointer>,
     outputs: Vec<(u32, wl_output::WlOutput, String)>,
+    /// The integer scale of each output and which the surface is on: the
+    /// fallback under the surface's own scale events.
+    scales: OutputScales<wl_output::WlOutput>,
     named_output_warned: bool,
     button_serial: Option<u32>,
     token_done: Option<String>,
@@ -155,11 +173,17 @@ pub struct App {
     /// an output came or went): the next turn must lay out again even when
     /// it carries no bus event.
     refresh_due: bool,
-    /// The look's shadow tables (`None` for `shadow = "none"`, which
-    /// builds, paints and pads nothing). Built with the look, sized to the
-    /// stack's corner radii whenever either changes: the repaint only
-    /// reads them.
+    /// The look's shadow at scale 1 (`None` for `shadow = "none"`, which
+    /// builds, paints and pads nothing): the layout's room for it, in
+    /// logical pixels. It paints nothing, so it holds no corner tables.
     shadow: Option<Shadow>,
+    /// The same shadow at the scale the cards are drawn at, with the corner
+    /// tables the repaint reads: built with the look and sized to the
+    /// stack's device-pixel corner radii whenever either changes, or the
+    /// scale does ([`sync_scale`](App::sync_scale)).
+    shadow_at: Option<Shadow>,
+    /// The scale `shadow_at` and the motion's layers were built for.
+    shadow_scale: Scale,
     /// Set when the look or the config changed under a stack that may
     /// compare equal: the shadow's corner tables are rebuilt on the next
     /// refresh.
@@ -214,6 +238,8 @@ impl App {
         Self {
             config,
             shadow: shadow_of(&look),
+            shadow_at: shadow_at(&look, Scale::Integer(1)),
+            shadow_scale: Scale::Integer(1),
             shadow_stale: true,
             margin_sent: [0; 4],
             region: region::InputRegion::default(),
@@ -227,12 +253,15 @@ impl App {
             shm: None,
             layer_shell: None,
             activation: None,
+            viewporter: None,
+            fractional: None,
             idle_notifier: None,
             idle: None,
             idle_warned: false,
             seat_proxy: None,
             pointer: None,
             outputs: Vec::new(),
+            scales: OutputScales::default(),
             named_output_warned: false,
             button_serial: None,
             token_done: None,
@@ -278,10 +307,11 @@ impl App {
             compositor: self.compositor.as_ref()?,
             layer_shell: self.layer_shell.as_ref(),
             xdg_wm_base: None,
-            // Unbound in v1 (scale-1 rendering, said in `draw_frame`):
-            // the compositor upscales the buffer on HiDPI outputs.
-            viewporter: None,
-            fractional_scale: None,
+            viewporter: self.viewporter.as_ref(),
+            // A fraction can only be acted on through a viewport: without a
+            // viewporter the surface asks for none and follows the integer
+            // scale.
+            fractional_scale: self.viewporter.as_ref().and(self.fractional.as_ref()),
         })
     }
 
@@ -358,6 +388,9 @@ impl App {
         self.sized_to = None;
         self.draw_skipped = false;
         self.region.forget();
+        // A surface that is gone is on no output; its successor's own
+        // events say which.
+        self.scales.leave_all();
         // Nothing moves on a surface that is gone, and a callback for it
         // never comes.
         self.motion.reset();
@@ -374,6 +407,14 @@ impl App {
         [pad.top, pad.right, pad.bottom, pad.left].map(|room| margin.saturating_sub(room))
     }
 
+    /// A motion for `tokens` and `anchor` at the scale being drawn at: what
+    /// a re-theme or a new anchor starts from.
+    fn new_motion(&self, tokens: &crate::look::MotionTokens, anchor: StackAnchor) -> Motion {
+        let mut motion = Motion::new(tokens, anchor);
+        motion.set_scale(self.shadow_scale);
+        motion
+    }
+
     /// Sizes the shadow's corner tables to the stack's cards. Allocates
     /// when a radius is new: runs when the content, the look or the config
     /// changed, never in a repaint.
@@ -384,16 +425,34 @@ impl App {
             self.shadow_stale = false;
             return;
         }
-        if let Some(shadow) = self.shadow.as_mut() {
+        // The tables are in device pixels: the corner radius and the cards'
+        // sizes as the paint maps them (a length does not depend on where
+        // the card sits).
+        let dev = Dev::new(self.shadow_scale);
+        if let Some(shadow) = self.shadow_at.as_mut() {
             shadow.prepare(
-                self.look.card_radius(self.config.radius),
+                dev.len(self.look.card_radius(self.config.radius)),
                 self.stack
                     .cards
                     .iter()
-                    .map(|card| (card.rect.width, card.rect.height)),
+                    .map(|card| (dev.len(card.rect.width), dev.len(card.rect.height))),
             );
         }
         self.shadow_stale = false;
+    }
+
+    /// Follows the scale the cards are drawn at: the shadow's tables and
+    /// the motion's layers are built for one scale, and a different one
+    /// builds them again before anything is painted with them. Runs on a
+    /// change of scale only; a repaint at the same scale does nothing.
+    fn sync_scale(&mut self, scale: Scale) {
+        if self.shadow_scale == scale {
+            return;
+        }
+        self.shadow_scale = scale;
+        self.shadow_at = shadow_at(&self.look, scale);
+        self.motion.set_scale(scale);
+        self.prepare_shadow();
     }
 
     /// Hides an emptied stack: no surface, no buffers, no input region.
@@ -575,6 +634,8 @@ impl App {
         if dims.0 == 0 || dims.1 == 0 {
             return false;
         }
+        self.sync_scale(frame.scale);
+        let dev = Dev::new(frame.scale);
         // The room a shadow takes comes out of the margin: follow the
         // stack (a re-theme can change it under a live surface).
         let margin = self.margins();
@@ -611,16 +672,16 @@ impl App {
             let Some(mut canvas) = Canvas::new(slot.pixels_mut(), dims.0, dims.1) else {
                 return false;
             };
-            // Scale 1 in v1: the layout is logical pixels, and the
-            // buffer is the logical size. The fractional globals stay
-            // unbound and surface scale events are dropped, so the
-            // demand's scale is always 1; a HiDPI output upscales the
-            // buffer (correct size, softer text). Sharp fractional
-            // rendering is a follow-up, said so in the site docs.
+            // The layout is logical pixels at every scale and the buffer is
+            // the logical size times the scale: the paint maps one to the
+            // other (`dev`), so the viewport shows it one to one.
             // A surface still taller than its layout (the compositor has
             // not yet honored the shrink) paints through the same path, so
-            // a bottom-anchored stack stays where it sits.
-            if self.motion.active() || (self.motion.enabled() && dims.1 != self.stack.height) {
+            // a bottom-anchored stack stays where it sits. The comparison
+            // is in logical pixels: the buffer's height is not the layout's.
+            if self.motion.active()
+                || (self.motion.enabled() && frame.size.height != self.stack.height)
+            {
                 // Cards in flight composite from their layers; a layer
                 // repaints only when its card's hover changed.
                 let (config, look, urgencies, icons, shadow) = (
@@ -628,13 +689,14 @@ impl App {
                     &self.look,
                     &self.urgencies,
                     &self.icons,
-                    self.shadow.as_ref(),
+                    self.shadow_at.as_ref(),
                 );
-                self.motion.paint_layers(self.hover, |card, layer, button| {
-                    paint_picture(
-                        layer, text, card, config, look, urgencies, button, icons, shadow,
-                    );
-                });
+                self.motion
+                    .paint_layers(self.hover, |card, layer, button, dev| {
+                        paint_picture(
+                            layer, text, card, config, look, urgencies, button, icons, shadow, dev,
+                        );
+                    });
                 render::paint_moving(
                     &mut canvas,
                     text,
@@ -644,7 +706,7 @@ impl App {
                     &self.urgencies,
                     self.hover,
                     &self.icons,
-                    self.shadow.as_ref(),
+                    self.shadow_at.as_ref(),
                     &self.motion,
                     Instant::now(),
                 );
@@ -658,7 +720,8 @@ impl App {
                     &self.urgencies,
                     self.hover,
                     &self.icons,
-                    self.shadow.as_ref(),
+                    self.shadow_at.as_ref(),
+                    dev,
                 );
             }
         }
@@ -763,11 +826,12 @@ impl App {
         // sized at the next refresh.
         if look.shadow != self.look.shadow {
             self.shadow = shadow_of(&look);
+            self.shadow_at = shadow_at(&look, self.shadow_scale);
         }
         self.shadow_stale = true;
         // A new look's motion starts from rest: whatever was in flight
         // snaps, and `none` leaves nothing behind.
-        self.motion = Motion::new(&look.motion, self.config.anchor);
+        self.motion = self.new_motion(&look.motion, self.config.anchor);
         self.refresh_due = true;
         // A new family loads its own files, now and not at the next draw;
         // a family that cannot be built keeps the running text.
@@ -795,7 +859,7 @@ impl App {
         let idle_changed = self.config.pause_when_idle_secs != config.pause_when_idle_secs;
         if self.config.anchor != config.anchor {
             // The edge cards enter from moved: restart the motion there.
-            self.motion = Motion::new(&self.look.motion, config.anchor);
+            self.motion = self.new_motion(&self.look.motion, config.anchor);
         }
         self.config = config;
         self.refresh_due = true;
@@ -847,6 +911,14 @@ fn inside(rect: Rect, x: i64, y: i64) -> bool {
 /// The shadow tables for `look`'s style (none for `shadow = "none"`).
 fn shadow_of(look: &Look) -> Option<Shadow> {
     look.shadow.spec().map(Shadow::new)
+}
+
+/// The same shadow at `scale`, for the repaint: its blur and offsets in
+/// device pixels. Its corner tables come with
+/// [`prepare_shadow`](App::prepare_shadow).
+fn shadow_at(look: &Look, scale: Scale) -> Option<Shadow> {
+    let dev = Dev::new(scale);
+    look.shadow.spec().map(|spec| Shadow::new(dev.shadow(spec)))
 }
 
 /// The layer-shell anchor for the configured corner.
@@ -942,6 +1014,10 @@ impl Popup {
     /// the repaint stays allocation-free.
     pub fn refresh(&mut self, live: &[&Notification], now_ms: u64) {
         let app = &mut self.app;
+        // The tables and layers below are built for the scale the cards are
+        // about to be drawn at.
+        let scale = app.demand.scale();
+        app.sync_scale(scale);
         let em = app.look.font_size_px;
         let text = match app.text.as_ref() {
             Some(text) => text,
@@ -964,14 +1040,20 @@ impl Popup {
         // cards are painted below.
         app.urgencies
             .extend(live.iter().map(|note| (note.id, note.urgency)));
-        // Decode icons for cards without any (arrival-priced, once).
+        // Decode icons for cards without any (arrival-priced, once), at
+        // the size the scale draws them: a change of scale decodes again.
+        let side = render::icon_side(scale);
         for note in live {
             if matches!(note.icon, crate::model::store::Icon::None)
-                || app.icons.contains_key(&note.id)
+                || app
+                    .icons
+                    .get(&note.id)
+                    .is_some_and(|bits| bits.side == side)
             {
                 continue;
             }
-            if let Some(bits) = decode_icon(note) {
+            // A refused image at the new size keeps the one it had.
+            if let Some(bits) = decode_icon(note, side) {
                 app.icons.insert(note.id, bits);
             }
         }
@@ -1009,12 +1091,12 @@ impl Popup {
                 &app.look,
                 &app.urgencies,
                 &app.icons,
-                app.shadow.as_ref(),
+                app.shadow_at.as_ref(),
                 app.hover,
             );
-            app.motion.paint_layers(hover, |card, layer, button| {
+            app.motion.paint_layers(hover, |card, layer, button, dev| {
                 paint_picture(
-                    layer, text, card, config, look, urgencies, button, icons, shadow,
+                    layer, text, card, config, look, urgencies, button, icons, shadow, dev,
                 );
             });
         }
@@ -1219,6 +1301,7 @@ fn paint_picture(
     button: Option<usize>,
     icons: &HashMap<u32, IconBits>,
     shadow: Option<&Shadow>,
+    dev: Dev,
 ) {
     let Some(mut canvas) = layer.canvas() else {
         return;
@@ -1234,6 +1317,7 @@ fn paint_picture(
         button,
         icons,
         shadow,
+        dev,
     );
 }
 
@@ -1242,21 +1326,19 @@ fn paint_picture(
 /// through the tray's icon discipline (regular files only, capped), a
 /// theme name draws the letter tile (`None`). Never fails loudly: a
 /// refused image is a tile, not an error.
-fn decode_icon(note: &Notification) -> Option<IconBits> {
+fn decode_icon(note: &Notification, side: u32) -> Option<IconBits> {
     match &note.icon {
         crate::model::store::Icon::None => None,
         crate::model::store::Icon::Name(_) => None,
         crate::model::store::Icon::Path(path) => {
             let image = scootui::icon::image::load(std::path::Path::new(path)).ok()?;
-            let mut pixels = vec![0u8; ICON_SIDE as usize * ICON_SIDE as usize * 4];
-            image.scale_into(ICON_SIDE, &mut pixels);
-            Some(IconBits {
-                side: ICON_SIDE,
-                pixels,
-            })
+            let mut pixels = vec![0u8; side as usize * side as usize * 4];
+            image.scale_into(side, &mut pixels);
+            Some(IconBits { side, pixels })
         }
         crate::model::store::Icon::Data(image) => {
-            let side = ICON_SIDE as usize;
+            let side_px = side;
+            let side = side as usize;
             let src_w = image.width as usize;
             let src_h = image.height as usize;
             if src_w == 0 || src_h == 0 || src_w > 4096 || src_h > 4096 {
@@ -1281,9 +1363,9 @@ fn decode_icon(note: &Notification) -> Option<IconBits> {
                 dst[3] = a.min(255) as u8;
             }
             let mut pixels = vec![0u8; side * side * 4];
-            scootui::icon::sample::scale_into(&rgba, src_w, src_h, ICON_SIDE, &mut pixels);
+            scootui::icon::sample::scale_into(&rgba, src_w, src_h, side_px, &mut pixels);
             Some(IconBits {
-                side: ICON_SIDE,
+                side: side_px,
                 pixels,
             })
         }
@@ -1309,12 +1391,12 @@ macro_rules! empty_dispatch {
 }
 
 empty_dispatch!(wl_compositor::WlCompositor);
-empty_dispatch!(wl_surface::WlSurface);
 empty_dispatch!(wl_region::WlRegion);
 empty_dispatch!(wl_shm::WlShm);
 empty_dispatch!(wl_shm_pool::WlShmPool);
 empty_dispatch!(WpViewport);
-empty_dispatch!(WpFractionalScaleV1);
+empty_dispatch!(WpViewporter);
+empty_dispatch!(WpFractionalScaleManagerV1);
 empty_dispatch!(ZwlrLayerShellV1);
 empty_dispatch!(XdgActivationV1);
 empty_dispatch!(ExtIdleNotifierV1);
@@ -1357,6 +1439,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                 }
                 "wl_output" => {
                     let output: wl_output::WlOutput = registry.bind(name, 4.min(version), qh, ());
+                    app.scales.bound(output.clone());
                     app.outputs.push((name, output, String::new()));
                     app.refresh_due = true;
                 }
@@ -1369,9 +1452,12 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                 "xdg_activation_v1" => {
                     app.activation = Some(registry.bind(name, 1.min(version), qh, ()));
                 }
-                // The fractional globals stay unbound in v1 (scale-1
-                // rendering, said in `draw_frame`).
-                "wp_viewporter" | "wp_fractional_scale_manager_v1" => {}
+                "wp_viewporter" => {
+                    app.viewporter = Some(registry.bind(name, 1.min(version), qh, ()));
+                }
+                "wp_fractional_scale_manager_v1" => {
+                    app.fractional = Some(registry.bind(name, 1.min(version), qh, ()));
+                }
                 "ext_idle_notifier_v1" => {
                     if version >= 2 {
                         app.idle_notifier = Some(registry.bind(name, 2, qh, ()));
@@ -1388,7 +1474,17 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                 // An output going away: the stack moves (a null output
                 // follows the compositor; a named one falls back), and
                 // with zero outputs the cards wait.
+                let gone: Vec<wl_output::WlOutput> = app
+                    .outputs
+                    .iter()
+                    .filter(|(global, _, _)| *global == name)
+                    .map(|(_, output, _)| output.clone())
+                    .collect();
                 app.outputs.retain(|(global, _, _)| *global != name);
+                for output in &gone {
+                    app.scales.remove(output);
+                }
+                app.rescale_to_outputs();
                 app.refresh_due = true;
                 if app.outputs.is_empty() && app.live.is_some() {
                     app.destroy_live();
@@ -1408,11 +1504,19 @@ impl Dispatch<wl_output::WlOutput, ()> for App {
         _: &Connection,
         _: &QueueHandle<App>,
     ) {
-        // The v4 name: what `output = "NAME"` pins.
-        if let wl_output::Event::Name { name } = event
-            && let Some(slot) = app.outputs.iter_mut().find(|(_, proxy, _)| proxy == output)
-        {
-            slot.2 = name;
+        match event {
+            // The v4 name: what `output = "NAME"` pins.
+            wl_output::Event::Name { name } => {
+                if let Some(slot) = app.outputs.iter_mut().find(|(_, proxy, _)| proxy == output) {
+                    slot.2 = name;
+                }
+            }
+            // The integer scale: the fallback under the surface's own.
+            wl_output::Event::Scale { factor } => {
+                app.scales.set_scale(output, factor);
+                app.rescale_to_outputs();
+            }
+            _ => {}
         }
     }
 }
@@ -1680,6 +1784,7 @@ impl Dispatch<ExtIdleNotificationV1, ()> for App {
 }
 
 mod region;
+mod scale;
 
 #[cfg(test)]
 mod tests;

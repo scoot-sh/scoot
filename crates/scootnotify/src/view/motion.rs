@@ -47,16 +47,28 @@
 //! [`push_input_rects`](Motion::push_input_rects) and [`unproject`](Motion::unproject).
 //! Landing frees the pool once, on the frame after the last card stops.
 //!
+//! # Scale
+//!
+//! Everything above is in logical pixels, at every scale: the poses, the
+//! travel, the held height, the input region and the pointer's mapping back
+//! through a pose. Only a card's layer is in device pixels (a card painted
+//! once at the scale it is composited at, so a moving card is as sharp as a
+//! resting one), and [`compose`](Motion::compose) maps the poses to device
+//! pixels as it blits. A change of scale ([`set_scale`](Motion::set_scale))
+//! repaints every layer; nothing else moves.
+//!
 //! Nothing is read from a clock: every query takes `now`. The popup passes
 //! the frame it is drawing, so a late frame jumps forward and a frame past
 //! the deadline lands.
 
 use std::time::Instant;
 
+use scootui::density::Scale;
 use scootui::motion::{Settle, Timing};
 use scootui::paint::{Canvas, Layer};
 use scootui::region;
 
+use super::dev::Dev;
 use super::layout::{Card, Stack};
 use crate::config::Anchor;
 use crate::look::{CardMotion, MotionTokens};
@@ -154,11 +166,29 @@ struct Picture {
     local: Card,
     /// The layer's corner in the stack's coordinates.
     origin: (u32, u32),
+    /// The layer's size in logical pixels: the card and its shadow's room.
+    /// The layer itself is this size at the scale it is drawn at.
+    size: (u32, u32),
     layer: Layer,
     /// The button the layer was painted with hovered, if any.
     painted_hover: Option<usize>,
     /// Whether the layer must be painted again before it is composited.
     stale: bool,
+}
+
+/// A layer's size in device pixels for a `size` in logical ones. A card is
+/// placed by the position and the length each mapped on their own (see
+/// [`dev`](super::dev)), so its far edge can lie a pixel past the mapped
+/// size: the layer keeps one more, which a shadow's faint tail clears.
+fn layer_dims(dev: Dev, (width, height): (u32, u32)) -> (u32, u32) {
+    if dev.is_unit() {
+        (width, height)
+    } else {
+        (
+            dev.len(width).saturating_add(1),
+            dev.len(height).saturating_add(1),
+        )
+    }
 }
 
 impl Picture {
@@ -168,7 +198,7 @@ impl Picture {
     /// first moves and again when a new layout changes its place or its
     /// size (a replace can add a line). False when the card is too large
     /// to move.
-    fn refit(&mut self, card: &Card, stack: &Stack) -> bool {
+    fn refit(&mut self, card: &Card, stack: &Stack, scale: Scale) -> bool {
         let pad = stack.pad;
         let (Some(width), Some(height)) = (
             card.rect
@@ -182,7 +212,9 @@ impl Picture {
         ) else {
             return false;
         };
-        if !self.layer.begin(width, height) {
+        self.size = (width, height);
+        let (device_w, device_h) = layer_dims(Dev::new(scale), self.size);
+        if !self.layer.begin(device_w, device_h) {
             return false;
         }
         self.origin = (
@@ -215,6 +247,8 @@ pub struct Motion {
     /// popup says ([`fit`](Self::fit)): a card settling stops at the
     /// surface's edge instead of springing past it.
     surface: u32,
+    /// The scale the layers are drawn and composited at.
+    scale: Scale,
 }
 
 impl Motion {
@@ -233,7 +267,36 @@ impl Motion {
             pool: Vec::new(),
             hold: 0,
             surface: 0,
+            scale: Scale::Integer(1),
         }
+    }
+
+    /// The scale cards are drawn at, as a mapper from logical pixels.
+    pub fn dev(&self) -> Dev {
+        Dev::new(self.scale)
+    }
+
+    /// Draws at `scale` from now on. A different scale repaints every
+    /// moving card's layer at its new size on the next
+    /// [`paint_layers`](Self::paint_layers); the same scale changes
+    /// nothing. A leaving card is not repainted (the notification it
+    /// pictured is gone, and so is what it was painted with): it vanishes,
+    /// as does a card whose layer is too large at the new scale, which
+    /// snaps to its place instead of moving.
+    pub fn set_scale(&mut self, scale: Scale) {
+        if self.scale == scale {
+            return;
+        }
+        self.scale = scale;
+        self.ghosts.clear();
+        let dev = self.dev();
+        let fits = |picture: &mut Picture| {
+            let (width, height) = layer_dims(dev, picture.size);
+            picture.painted_hover = None;
+            picture.stale = true;
+            picture.layer.begin(width, height)
+        };
+        self.tracks.retain_mut(|track| fits(&mut track.picture));
     }
 
     /// Tells the motion how tall the surface it draws on is. A spring
@@ -294,11 +357,12 @@ impl Motion {
         let mut picture = Picture {
             local: card.clone(),
             origin: (0, 0),
+            size: (0, 0),
             layer,
             painted_hover: None,
             stale: true,
         };
-        picture.refit(card, stack).then_some(picture)
+        picture.refit(card, stack, self.scale).then_some(picture)
     }
 
     /// Takes the layer back into the pool, capped so a burst does not
@@ -332,7 +396,7 @@ impl Motion {
                     let seen = track.e as f32 + track.off.value(&self.timing, now);
                     track.e = e;
                     track.off = Settle::new(seen - e as f32, now);
-                    if track.picture.refit(card, new) {
+                    if track.picture.refit(card, new, self.scale) {
                         Some(track)
                     } else {
                         // Grew too large to move: it snaps.
@@ -521,13 +585,15 @@ impl Motion {
 
     /// Paints every layer that is stale or was painted with a different
     /// hover through `paint`, which receives the card (at the layer's
-    /// origin), the layer to clear and paint into, and the hovered button
-    /// of this card. Allocates nothing itself.
+    /// origin), the layer to clear and paint into, the hovered button of
+    /// this card, and the mapper from the layer's logical pixels to its
+    /// device ones. Allocates nothing itself.
     pub fn paint_layers(
         &mut self,
         hover: Option<(u32, Option<usize>)>,
-        mut paint: impl FnMut(&Card, &mut Layer, Option<usize>),
+        mut paint: impl FnMut(&Card, &mut Layer, Option<usize>, Dev),
     ) {
+        let scale = self.scale;
         let hovered = |id: u32| match hover {
             Some((hovered, button)) if hovered == id => button,
             _ => None,
@@ -545,19 +611,21 @@ impl Motion {
             if !picture.stale && picture.painted_hover == button {
                 continue;
             }
-            let (width, height) = (picture.layer.width(), picture.layer.height());
+            let (width, height) = layer_dims(Dev::new(scale), picture.size);
             if !picture.layer.begin(width, height) {
                 continue;
             }
-            paint(&picture.local, &mut picture.layer, button);
+            let dev = Dev::new(scale).from_origin(picture.origin.0, picture.origin.1);
+            paint(&picture.local, &mut picture.layer, button, dev);
             picture.painted_hover = button;
             picture.stale = false;
         }
     }
 
     /// Composites the leaving cards, then the moving ones, onto `canvas`
-    /// at `now`. The static cards were painted before this.
-    pub fn compose(&self, canvas: &mut Canvas<'_>, now: Instant) {
+    /// at `now`; `stack_height` is the layout's height in logical pixels.
+    /// The static cards were painted before this.
+    pub fn compose(&self, canvas: &mut Canvas<'_>, stack_height: u32, now: Instant) {
         let surface = canvas.height();
         for ghost in &self.ghosts {
             let leaving = if self.exit_timing.settled(ghost.start, now) {
@@ -568,9 +636,10 @@ impl Motion {
             let pose = Pose::of(ghost.style, leaving, self.right);
             blit(
                 canvas,
+                self.dev(),
                 &ghost.picture,
                 &pose,
-                self.layer_top(ghost.e, &ghost.picture, surface),
+                self.layer_top(ghost.e, &ghost.picture, surface, stack_height),
             );
         }
         for track in &self.tracks {
@@ -579,23 +648,35 @@ impl Motion {
             };
             blit(
                 canvas,
+                self.dev(),
                 &track.picture,
                 &pose,
-                self.layer_top(track.e, &track.picture, surface),
+                self.layer_top(track.e, &track.picture, surface, stack_height),
             );
         }
     }
 
-    /// Where a picture's layer top lies on a surface `surface` pixels
-    /// tall, for a card whose top is `e` from the anchored edge: the
-    /// card's own top less the shadow room above it.
-    fn layer_top(&self, e: i32, picture: &Picture, surface: u32) -> i32 {
+    /// Where a picture's layer top lies, in device pixels, on a surface
+    /// `surface` device pixels tall, for a card whose top is `e` logical
+    /// pixels from the anchored edge: the card's own top less the shadow
+    /// room above it.
+    ///
+    /// A bottom-anchored stack is drawn as the stack of `stack_height` that
+    /// it is, in whole device rows from the surface's bottom edge: the
+    /// held height above it (which comes and goes as cards move) moves
+    /// nothing inside it, so a card lands on the pixels it was moving
+    /// through to the pixel.
+    fn layer_top(&self, e: i32, picture: &Picture, surface: u32, stack_height: u32) -> i32 {
+        let scale = self.scale;
+        let room = i64::from(picture.local.rect.y);
         let top = if self.bottom {
-            i32::try_from(surface).unwrap_or(i32::MAX).saturating_add(e)
+            let stack = i64::from(stack_height);
+            i64::from(surface) - scale.to_device(stack)
+                + scale.to_device(stack + i64::from(e) - room)
         } else {
-            e
+            scale.to_device(i64::from(e) - room)
         };
-        top.saturating_sub(i32::try_from(picture.local.rect.y).unwrap_or(0))
+        i32::try_from(top.clamp(i64::from(i32::MIN), i64::from(i32::MAX))).unwrap_or(0)
     }
 
     /// How far a static card lies below its layout coordinates on a
@@ -688,14 +769,24 @@ impl Motion {
     }
 }
 
-/// Composites `picture` at its pose, its layer's top at `top` (before the
-/// pose's own vertical offset).
-fn blit(canvas: &mut Canvas<'_>, picture: &Picture, pose: &Pose, top: i32) {
-    let left = i32::try_from(picture.origin.0).unwrap_or(0);
+/// Composites `picture` at its pose, its layer's top at `top` (device
+/// pixels, before the pose's own vertical offset). The pose's offsets are
+/// logical pixels and are mapped here; the layer is already in device
+/// pixels.
+fn blit(canvas: &mut Canvas<'_>, dev: Dev, picture: &Picture, pose: &Pose, top: i32) {
+    let device = |logical: i64| {
+        i32::try_from(
+            dev.scale()
+                .to_device(logical)
+                .clamp(i64::from(i32::MIN), i64::from(i32::MAX)),
+        )
+        .unwrap_or(0)
+    };
+    let left = device(i64::from(picture.origin.0));
     picture.layer.composite(
         canvas,
-        left.saturating_add(pose.dx),
-        top.saturating_add(pose.dy),
+        left.saturating_add(device(i64::from(pose.dx))),
+        top.saturating_add(device(i64::from(pose.dy))),
         pose.scale,
         pose.alpha,
     );
