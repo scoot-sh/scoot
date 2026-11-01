@@ -14,7 +14,7 @@ symbol = " "
 style = "#7E9BB0"
 format = "[$symbol]($style)"
 [cmd_duration]
-style = "#9C8B95"
+style = "#aa9aa0"
 [character]
 success_symbol = "[❯](bold #FFD54A)"
 error_symbol = "[❯](bold #E87F6A)"

@@ -38,7 +38,7 @@ button, entry, dropdown > button, combobox > box > button {
 entry, dropdown > button, combobox > box > button, button.image-button {
   background: alpha(#5E4B5B, 0.75);
   color: #F6EEDC;
-  border: 1px solid alpha(#9C8B95, 0.8);
+  border: 1px solid alpha(#aa9aa0, 0.8);
 }
 button.suggested-action {
   background: #FFA45C;

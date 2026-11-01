@@ -99,10 +99,7 @@ fn dim_on_surface_is_measured_against_the_surface_and_reports() {
     assert_eq!(dim.background, "#FFFFFF");
     assert_eq!(dim.threshold, 4.5);
     assert!(!dim.refuses);
-    assert_eq!(
-        dim.ratio,
-        (ratio("#9C8B95", "#FFFFFF") * 10.0).round() / 10.0
-    );
+    assert_eq!(dim.ratio, ratio("#9C8B95", "#FFFFFF"));
     assert!(report.warnings().iter().any(|p| p.name == "dim/surface"));
     assert!(report.refusals().is_empty());
 }
@@ -152,6 +149,30 @@ fn the_inactive_ring_is_held_to_three_to_one_and_only_reports() {
     assert_eq!(ring.threshold, 3.0);
     assert!(ring.ratio < 3.0 && !ring.refuses);
     assert!(report.refusals().is_empty());
+}
+
+#[test]
+fn the_inactive_ring_names_the_border_color_as_its_foreground() {
+    // The surviving mutation from the dark-ring review: swapping which
+    // color the `border/background` pair reports as its foreground passed
+    // every test. The warning names the ring color, so pin it: the pair's
+    // foreground is the look's `border`, its background the `background`.
+    // (The minimal fixture defaults `border` to `dim`, which would not
+    // catch the swap, so this sets a distinctive ring color first.)
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[palette]",
+        "[palette]\nborder = \"#2C3749\"",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::Shipped))]);
+    let look = resolve(&map, "x").expect("resolves");
+    assert_ne!(look.palette.border, look.palette.dim);
+    let report = check(&look, Origin::Shipped);
+    let ring = pair(&report, "border/background");
+    assert_eq!(ring.foreground, "#2C3749");
+    assert_eq!(ring.foreground, look.palette.border);
+    assert_eq!(ring.background, look.palette.background);
 }
 
 #[test]

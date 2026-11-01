@@ -35,7 +35,7 @@ background = "#2B3648"
 foreground = "#F6EEDC"
 accent = "#FFA45C"
 hover = "#FFD54A"
-dim = "#9C8B95"
+dim = "#aa9aa0"
 urgent = "#E87F6A"
 
 [workspaces]

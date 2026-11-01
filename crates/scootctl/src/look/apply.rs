@@ -255,13 +255,17 @@ pub fn validate_entry(
     for refusal in report.refusals() {
         validation.errors.push(format!(
             "{} is {} (needs {})",
-            refusal.name, refusal.ratio, refusal.threshold
+            refusal.name,
+            scoot_look::format_ratio(refusal.ratio),
+            refusal.threshold
         ));
     }
     for warning in report.warnings() {
         validation.warnings.push(format!(
             "{} is {} (needs {})",
-            warning.name, warning.ratio, warning.threshold
+            warning.name,
+            scoot_look::format_ratio(warning.ratio),
+            warning.threshold
         ));
     }
     // Effectful refusals land in `errors`, not in `Err`, so `--json`
@@ -373,13 +377,17 @@ pub fn validate_dir(
     for refusal in report.refusals() {
         validation.errors.push(format!(
             "{} is {} (needs {})",
-            refusal.name, refusal.ratio, refusal.threshold
+            refusal.name,
+            scoot_look::format_ratio(refusal.ratio),
+            refusal.threshold
         ));
     }
     for warning in report.warnings() {
         validation.warnings.push(format!(
             "{} is {} (needs {})",
-            warning.name, warning.ratio, warning.threshold
+            warning.name,
+            scoot_look::format_ratio(warning.ratio),
+            warning.threshold
         ));
     }
     if let Ok(inputs) = check_inputs(&chain, &merged, checks, &mut validation) {
@@ -3077,7 +3085,9 @@ pub fn apply_with_live(
     for refusal in contrast.refusals() {
         contrast_errors.push(format!(
             "{} is {} (needs {})",
-            refusal.name, refusal.ratio, refusal.threshold
+            refusal.name,
+            scoot_look::format_ratio(refusal.ratio),
+            refusal.threshold
         ));
     }
     if !contrast_errors.is_empty() {
@@ -3089,7 +3099,9 @@ pub fn apply_with_live(
     for warning in contrast.warnings() {
         report.notes.push(format!(
             "contrast: {} is {} (needs {})",
-            warning.name, warning.ratio, warning.threshold
+            warning.name,
+            scoot_look::format_ratio(warning.ratio),
+            warning.threshold
         ));
     }
     let mut validation = Validation::default();

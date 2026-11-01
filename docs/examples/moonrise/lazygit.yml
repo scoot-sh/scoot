@@ -8,7 +8,7 @@ gui:
   border: rounded
   theme:
     activeBorderColor: ["#FFA45C", bold]
-    inactiveBorderColor: ["#9C8B95"]
+    inactiveBorderColor: ["#aa9aa0"]
     selectedLineBgColor: ["#4E3B40"]
     optionsTextColor: ["#FFA45C"]
     unstagedChangesColor: ["#E87F6A"]

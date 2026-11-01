@@ -78,7 +78,7 @@ the other knobs.
 ## The palette
 
 The wallpaper's colors: paper `#FCFBFB`, ink `#1A2032`, headphone blue `#3D579A`
-(accent and focused ring), hover `#5D7AB0`, inactive ring `#D5D7DD`, dim `#C9CBD0`,
+(accent and focused ring), hover `#5D7AB0`, inactive ring `#8E919C`, dim `#70747F`,
 guitar red (`#E0574A`, bright `#EE6F5E`), amp green (`#5F7D3F`, bright `#7A9A55`),
 cassette purple (`#8A73C4`), record yellow (`#C9962A`, bright `#E6B440`), teal
 `#3F8A9A`. The focused window's ring is blue and the others' pale grey; the bar,

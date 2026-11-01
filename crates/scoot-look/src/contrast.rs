@@ -38,9 +38,22 @@ pub fn luminance(hex: &str) -> f64 {
 }
 
 /// WCAG contrast ratio of two `#rrggbb` colors.
+///
+/// The stored value is always the full-precision measurement: bars are
+/// compared on this unrounded value, so a real 4.46 is still a warning
+/// against a 4.5 bar. Human output prints [`format_ratio`] (two decimals);
+/// machine output (`scoot look show --json`) carries the full value.
 pub fn ratio(a: &str, b: &str) -> f64 {
     let (x, y) = (luminance(a), luminance(b));
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// The ratio as human output shows it: two decimals. The bar comparison
+/// itself runs on the unrounded [`ratio`], so a warning line always means
+/// below the bar; printing hundredths (not tenths) shrinks the window in
+/// which a failing pair can print as its bar from ±0.05 to ±0.005.
+pub fn format_ratio(ratio: f64) -> String {
+    format!("{ratio:.2}")
 }
 
 /// The card fill's two stops over `surface` for `effects.fill = "gradient"`,
@@ -141,7 +154,7 @@ fn dim_on_surface(look: &ResolvedLook) -> ContrastPair {
 pub fn check(look: &ResolvedLook, origin: Origin) -> ContrastReport {
     let refuses = origin.contrast_refuses();
     let p = &look.palette;
-    let mut pairs = vec![
+    let pairs = vec![
         ContrastPair {
             name: "foreground/background",
             foreground: p.foreground.clone(),
@@ -210,10 +223,8 @@ pub fn check(look: &ResolvedLook, origin: Origin) -> ContrastReport {
             refuses: false,
         },
     ];
-    for pair in &mut pairs {
-        // Round to one decimal, the precision the design's own table claims.
-        pair.ratio = (pair.ratio * 10.0).round() / 10.0;
-    }
+    // The stored ratio stays full-precision: `refusals` and `warnings`
+    // compare on the unrounded value, and callers print `format_ratio`.
     ContrastReport { pairs }
 }
 

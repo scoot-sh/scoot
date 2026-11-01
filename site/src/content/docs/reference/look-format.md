@@ -207,7 +207,9 @@ Four pairs refuse below their bar: foreground on background at
 3.0, focus on background at 3.0. Four more pairs report only: `dim`
 on background at 3.0, `urgent` on background at 3.0, `dim` on
 `surface` at 4.5, and `border` on background at 3.0. A warning
-names the pair and the ratio.
+names the pair and the ratio to two decimals; bars compare on the
+unrounded value, so a warning always means below the bar (a real 4.46
+prints as 4.46, never as a passing-looking 4.5).
 
 `dim` on `surface` is the text bar for the notification card's
 app-name line and the launcher's secondary text, both of which
