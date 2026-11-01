@@ -32,6 +32,7 @@ use crate::paint::{Canvas, Corners, Span};
 use crate::text::Text;
 use crate::theme::Theme;
 use scootui::effects::{FillStyle, ShadowStyle};
+use scootui::motion::Timing;
 use scootui::paint::{Pad, Shadow, ShadowSpec};
 
 #[cfg(test)]
@@ -41,7 +42,7 @@ mod tests;
 const NEVER: u64 = u64::MAX;
 
 /// How the bar draws modules: colors, text size and gaps, all logical.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Style {
     pub theme: Theme,
     /// The em, in logical pixels.
@@ -66,6 +67,9 @@ pub struct Style {
     /// How the bar and popup fills are laid down (`bar.fill`): solid or a
     /// vertical gradient with the light at the top.
     pub fill: FillStyle,
+    /// The popup entrance timing (`bar.motion` + duration + bounce):
+    /// [`Timing::NONE`] (the default) opens instantly, exactly as before.
+    pub timing: Timing,
 }
 
 impl Style {

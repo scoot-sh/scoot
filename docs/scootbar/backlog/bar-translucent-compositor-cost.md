@@ -69,5 +69,5 @@ option.
 
 Changing any look's bar opacity (that decision lives with the looks), and
 the shadow and entrance work, which are
-[scootbar-depth-tokens](scootbar-depth-tokens.md) and
-[scootbar-popup-entrance](scootbar-popup-entrance.md).
+[scootbar-depth-tokens](resolved/scootbar-depth-tokens-done.md) and
+[scootbar-popup-entrance](resolved/scootbar-popup-entrance-done.md).

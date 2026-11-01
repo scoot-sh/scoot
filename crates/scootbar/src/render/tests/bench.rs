@@ -137,6 +137,7 @@ impl Rig {
                 opacity: alpha,
                 shadow: scootui::effects::ShadowStyle::None,
                 fill: scootui::effects::FillStyle::Solid,
+                timing: scootui::motion::Timing::NONE,
             },
             scale,
             frame: Frame {
@@ -467,6 +468,7 @@ fn cells_device(scale: Scale, label: &str) -> (u32, u32) {
         opacity: 255,
         shadow,
         fill: FillStyle::Solid,
+        timing: scootui::motion::Timing::NONE,
     };
     let surf_h = style.surface_height(HEIGHT, crate::bar::Edge::Top);
     scale

@@ -108,6 +108,7 @@ impl Bar {
                 opacity: u8::MAX,
                 shadow: scootui::effects::ShadowStyle::None,
                 fill: scootui::effects::FillStyle::Solid,
+                timing: scootui::motion::Timing::NONE,
             },
         }
     }
@@ -486,6 +487,7 @@ fn the_style_says_when_it_needs_alpha_and_what_is_opaque() {
         opacity: u8::MAX,
         shadow: scootui::effects::ShadowStyle::None,
         fill: scootui::effects::FillStyle::Solid,
+        timing: scootui::motion::Timing::NONE,
         ..Bar::new(&[]).style
     };
     assert!(!opaque.translucent());
@@ -500,6 +502,7 @@ fn the_style_says_when_it_needs_alpha_and_what_is_opaque() {
         opacity: 254,
         shadow: scootui::effects::ShadowStyle::None,
         fill: scootui::effects::FillStyle::Solid,
+        timing: scootui::motion::Timing::NONE,
         ..opaque
     };
     assert!(faint.translucent());
@@ -509,6 +512,7 @@ fn the_style_says_when_it_needs_alpha_and_what_is_opaque() {
         opacity: 0,
         shadow: scootui::effects::ShadowStyle::None,
         fill: scootui::effects::FillStyle::Solid,
+        timing: scootui::motion::Timing::NONE,
         ..opaque
     };
     assert_eq!(both.opaque_inset(), None);
@@ -540,6 +544,7 @@ fn a_shadowed_bar_blends_and_keeps_its_zone() {
         let look = Style {
             shadow: style,
             fill: FillStyle::Solid,
+            timing: scootui::motion::Timing::NONE,
             ..Bar::new(&[]).style
         };
         // Top bars shadow below, bottom bars above: opposite sides.
@@ -575,6 +580,7 @@ fn a_shadowed_bar_blends_and_keeps_its_zone() {
     // the polarity, and the shadow still owns only its strip.
     let gradient = Style {
         fill: FillStyle::Gradient,
+        timing: scootui::motion::Timing::NONE,
         shadow: ShadowStyle::Soft,
         ..Bar::new(&[]).style
     };
@@ -605,6 +611,7 @@ fn a_soft_to_glow_switch_rebuilds_the_shadow_tables() {
         opacity: u8::MAX,
         shadow,
         fill: FillStyle::Solid,
+        timing: scootui::motion::Timing::NONE,
     };
     // Both styles pad a 20-pixel bar to a 36-pixel surface at 1x, so the
     // surface height (and the daemon's recreate check) cannot tell them

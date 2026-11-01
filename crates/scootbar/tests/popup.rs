@@ -35,8 +35,14 @@ const MODULE: (u32, u32) = (800, 20);
 const BINDING: &str = "on-click = \"popup\"\n";
 
 fn config(extra: &str) -> String {
+    config_bar("", extra)
+}
+
+/// With `bar_extra` as extra `[bar]` keys (motion) and `extra` as the
+/// `[volume]` body.
+fn config_bar(bar_extra: &str, extra: &str) -> String {
     format!(
-        "[bar]\nheight = {HEIGHT}\nfont-size = 20\ntooltip-delay = 0\n\
+        "[bar]\nheight = {HEIGHT}\nfont-size = 20\ntooltip-delay = 0\n{bar_extra}\
          [colors]\nbackground = \"{BAR}\"\nforeground = \"{FG}\"\naccent = \"{ACCENT}\"\n\
          dim = \"{DIM}\"\n[volume]\n{extra}"
     )
@@ -60,6 +66,17 @@ impl Rig {
         Self::start_placed(tag, extra, env, &["--center", "volume"])
     }
 
+    /// With `bar_extra` as extra `[bar]` keys (a motion entrance), `extra` as
+    /// the `[volume]` body.
+    fn start_with_bar(
+        tag: &str,
+        bar_extra: &str,
+        extra: &str,
+        env: &[(&str, &str)],
+    ) -> Option<Self> {
+        Self::start_placed_bar(tag, bar_extra, extra, env, &["--center", "volume"])
+    }
+
     /// With `placement` as the bar's own flags (where the module goes, which
     /// edge).
     fn start_placed(
@@ -68,10 +85,21 @@ impl Rig {
         env: &[(&str, &str)],
         placement: &[&str],
     ) -> Option<Self> {
+        Self::start_placed_bar(tag, "", extra, env, placement)
+    }
+
+    /// With `bar_extra` as extra `[bar]` keys, `extra` as the `[volume]` body.
+    fn start_placed_bar(
+        tag: &str,
+        bar_extra: &str,
+        extra: &str,
+        env: &[(&str, &str)],
+        placement: &[&str],
+    ) -> Option<Self> {
         let session = Session::scoot(&common::scootbar_bin(), tag, 1, "")?;
         let server = pulse::Server::start(&session.runtime_dir().join("pulse"));
         let file = session.runtime_dir().join("bar.toml");
-        fs::write(&file, config(extra)).unwrap();
+        fs::write(&file, config_bar(bar_extra, extra)).unwrap();
         let address = server.address();
         let mut vars = vec![("PULSE_SERVER", address.as_str())];
         vars.extend_from_slice(env);
@@ -939,4 +967,142 @@ fn on_sway_a_click_opens_it_with_a_grab_and_outside_closes_it() {
         session.bar_stderr()
     );
     drop(server);
+}
+
+/// A shadowless popup with a long spring entrance: the default `shadow =
+/// "none"` keeps the motion room above the popup (B1), so a mid-flight frame
+/// differs from rest and the input region follows every frame.
+mod shadowless_motion {
+    use super::*;
+
+    /// Extra `[bar]` keys: a 1000 ms spring (the default shadow, `none`).
+    const MOTION: &str = "motion = \"spring\"\nmotion-duration-ms = 1000\nmotion-bounce = 0.6\n";
+
+    /// The popup is up when its slider is drawn: with motion room the pixel
+    /// just under the bar (`HEIGHT + 2`) is transparent room, so the plain
+    /// `popup_shown` check reads false while it is open.
+    fn visible(rig: &Rig) -> bool {
+        Slider::find(&rig.shot()).is_some()
+    }
+
+    fn wait_visible(rig: &mut Rig, shown: bool, what: &str) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        loop {
+            if visible(rig) == shown {
+                return;
+            }
+            if std::time::Instant::now() > deadline {
+                rig.save("failure");
+                panic!("never {what}; scootbar said: {}", rig.session.bar_stderr());
+            }
+            rig.alive();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// `set_input_region` requests in the protocol trace.
+    fn input_regions(rig: &Rig) -> usize {
+        rig.session.bar_stderr().matches("set_input_region").count()
+    }
+
+    #[test]
+    fn a_shadowless_entrance_keeps_its_room_and_updates_per_frame() {
+        let Some(mut rig) = Rig::start_with_bar(
+            "popup-motion-shadowless",
+            MOTION,
+            BINDING,
+            &[("WAYLAND_DEBUG", "1")],
+        ) else {
+            return;
+        };
+        let before = input_regions(&rig);
+        rig.click(MODULE);
+        // The popup is up: its slider is drawn on the first frame.
+        rig.session
+            .wait_for(&mut rig.bar.0, "the slider drawn", |session| {
+                Slider::find(&session.scoot_screenshot(1)).map(|_| ())
+            });
+        // Past the entrance: settled at rest.
+        std::thread::sleep(Duration::from_millis(1500));
+        let rest = rig.shot();
+        rig.save("popup-motion-rest");
+        assert!(visible(&rig), "the popup is still up at rest");
+        // The rest origin keeps the motion room even without a shadow
+        // (B1): the rows right under the bar are the desktop showing
+        // through the transparent room, not the popup's frame. With the
+        // origin at (0, 0) the frame sat flush under the bar and every
+        // upward slide frame clamped to the surface edge, so the entrance
+        // never moved. The gap holds in every frame (at least the first
+        // frame's 4 rows of a 12 px slide in 16 px of room), so this needs
+        // no mid-flight timing; the trace below carries the per-frame
+        // proof (headless screenshots alias to the first presented frame
+        // here, so a mid-vs-rest pixel comparison cannot see the slide).
+        let desk = rest.at(100, 500);
+        assert_ne!(desk, rgb(BAR), "the desktop sample is the bar");
+        for y in HEIGHT..HEIGHT + 4 {
+            assert_eq!(
+                rest.at(800, y),
+                desk,
+                "no motion room above the shadowless popup at row {y}"
+            );
+        }
+        // The region followed every frame: the build's send plus frame
+        // updates (at rest the same origin sends nothing anew). Without
+        // the fix the origin never leaves (0, 0) and the delta is exactly
+        // the build's single send.
+        let after = input_regions(&rig);
+        assert!(
+            after - before >= 3,
+            "the region never followed the slide: {} sends",
+            after - before
+        );
+        rig.alive();
+        // Closing still works after a full entrance.
+        rig.click(MODULE);
+        wait_visible(&mut rig, false, "the popup closed by a second click");
+        rig.alive();
+        rig.clean();
+    }
+
+    #[test]
+    fn a_mid_entrance_dismissal_closes_at_once_with_nothing_stranded() {
+        let Some(mut rig) = Rig::start_with_bar("popup-motion-dismiss", MOTION, BINDING, &[])
+        else {
+            return;
+        };
+        // Escape mid-flight (the slider is drawn on the first frame, well
+        // inside the 1000 ms entrance).
+        rig.click(MODULE);
+        rig.session
+            .wait_for(&mut rig.bar.0, "the slider drawn", |session| {
+                Slider::find(&session.scoot_screenshot(1)).map(|_| ())
+            });
+        rig.key("Escape");
+        wait_visible(&mut rig, false, "the popup closed by mid-entrance Escape");
+        rig.alive();
+        // And a click outside mid-flight: open again, dismiss at once.
+        rig.click(MODULE);
+        rig.session
+            .wait_for(&mut rig.bar.0, "the slider drawn", |session| {
+                Slider::find(&session.scoot_screenshot(1)).map(|_| ())
+            });
+        rig.click((200, 600));
+        wait_visible(
+            &mut rig,
+            false,
+            "the popup closed by a mid-entrance click outside",
+        );
+        rig.alive();
+        // Nothing stranded: it opens and closes again, with no error.
+        rig.click(MODULE);
+        rig.session
+            .wait_for(&mut rig.bar.0, "the slider drawn", |session| {
+                Slider::find(&session.scoot_screenshot(1)).map(|_| ())
+            });
+        assert!(visible(&rig));
+        rig.click(MODULE);
+        wait_visible(&mut rig, false, "the popup closed by a second click");
+        rig.alive();
+        rig.clean();
+    }
 }

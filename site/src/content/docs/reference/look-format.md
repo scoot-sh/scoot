@@ -85,7 +85,7 @@ color = "#2B3648"
 | `fonts.nix` | Nixpkgs attribute paths: `ui`, `sans` or `mono` to one to eight `Name.segment` paths. Resolved only with `lib.attrByPath` against `pkgs`. Nix-only; a non-Nix box resolves families with `fc-match`. |
 | `opacity` | `bar`, `popups`, `terminal`: 0.0 to 1.0, each default 1.0. |
 | `shape` | `radius`: 0 to 64, default 0. `ring-width`: 0 to 64, required. `ring-inactive-width`: default = `ring-width`. No `gap` in v1: gap is layout, not presentation. |
-| `effects` | Depth and motion tokens, all optional and unset by default. `shadow`: `none`, `soft`, `deep` or `glow`. `fill`: `solid` or `gradient`. `motion`: `none`, `ease-out` or `spring`. `motion-duration-ms`: 0 to 1000. `motion-bounce`: 0.0 to 1.0. `scootnotify`, `scootlaunch` and `scootbar` read them (the bar reads `shadow` and `fill` today; motion reaches it with the entrance ticket); a look that sets none renders exactly the fragments it did before. See [notification depth](../scootnotify/configure.md#depth) and [motion](../scootnotify/configure.md#motion), the [launcher's](../scootlaunch/panel.md#depth-and-motion), and the [bar's](../scootbar/configure.md#shape-opacity-and-depth). To set them for every look without editing one, use the `[effects]`, `[card]` and `[title]` tables of `notify.toml` and `launch.toml` ([notifier](../scootnotify/configure.md#effects-over-any-look), [launcher](../scootlaunch/panel.md#effects-over-any-look)), and the `[effects]` table of `bar.toml` (the [bar's own](../scootbar/configure.md#effects-over-any-look)). |
+| `effects` | Depth and motion tokens, all optional and unset by default. `shadow`: `none`, `soft`, `deep` or `glow`. `fill`: `solid` or `gradient`. `motion`: `none`, `ease-out` or `spring`. `motion-duration-ms`: 0 to 1000. `motion-bounce`: 0.0 to 1.0. `scootnotify`, `scootlaunch` and `scootbar` read them; a look that sets none renders exactly the fragments it did before. See [notification depth](../scootnotify/configure.md#depth) and [motion](../scootnotify/configure.md#motion), the [launcher's](../scootlaunch/panel.md#depth-and-motion), and the [bar's](../scootbar/configure.md#shape-opacity-and-depth). To set them for every look without editing one, use the `[effects]`, `[card]` and `[title]` tables of `notify.toml` and `launch.toml` ([notifier](../scootnotify/configure.md#effects-over-any-look), [launcher](../scootlaunch/panel.md#effects-over-any-look)), and the `[effects]` table of `bar.toml` (the [bar's own](../scootbar/configure.md#effects-over-any-look)). |
 | `cursor` | `theme`: name, required. `size`: 4 to 256, default 24. `accent`: `#rrggbb` or `"none"`, default = `focus`. `body`: optional `#rrggbb`; a look leaves it alone unless set. |
 | `wallpaper` | One unit, never merged per key: `image` or `color`, never both. `image` is a path inside the look dir, or `https://` plus a required 64-hex `sha256`. `mode`: `fill`, `fit`, `stretch`, `center` or `tile` (image only; a color wallpaper carries no `mode` or `fill`). `fill`: default = `background`. `transition`: `none`, `fade`, `wipe` or `grow` (default `none`; the five shipped looks set `fade`, which animates at scootbg's defaults: 500 ms, `ease-out`). |
 | `icons` | `theme`: name. Default `Adwaita`. |
@@ -116,17 +116,17 @@ time, does. Per-output and per-workspace images belong in the
 user's own file.
 
 `scootbar` takes its six colors, bar style and per-module visual
-keys, plus `bar.shadow` and `bar.fill` (the `[effects]` shadow and fill,
-per app). The bar's `font` and `fallback-fonts` are not overrides: scootbar
+keys, plus `bar.shadow`, `bar.fill`, `bar.motion`, `bar.motion-duration-ms`
+and `bar.motion-bounce` (the `[effects]` tokens, per app). The bar's `font` and `fallback-fonts` are not overrides: scootbar
 reads file paths there, so only the tool's resolved `--ui-font-file`
 supplies them, and a fragment without one carries neither key.
 `scootnotify`, `scootlaunch` and `scootgreet` take the thirteen
 color roles plus face, size, opacity and radius. `scootnotify`,
 `scootlaunch` and `scootbar` also take `shadow` and `fill` (`scootbar` as
 `bar.shadow` and `bar.fill`; the `[effects]` values, per app).
-`scootnotify` and `scootlaunch` also take `motion`, `motion-duration-ms`
-and `motion-bounce` (the bar's motion reaches it with the entrance
-ticket). `scootnotify` alone
+`scootnotify`, `scootlaunch` and `scootbar` also take `motion`, `motion-duration-ms`
+and `motion-bounce` (`scootbar` as `bar.motion`, `bar.motion-duration-ms`
+and `bar.motion-bounce`). `scootnotify` alone
 takes `card.enter`, `card.exit`, `card.mark`, `card.shape`,
 `card.app-accent`, `title.weight` and `title.spacing`; the others refuse
 what they do not read, since they would report an unknown key on every
@@ -148,6 +148,9 @@ no key whose value gets only a length check.
 | `bar.opacity`, shell `opacity` | number, 0 to 1 |
 | `bar.shadow` | `none`, `soft`, `deep` or `glow` |
 | `bar.fill` | `solid` or `gradient` |
+| `bar.motion` | `none`, `ease-out` or `spring` |
+| `bar.motion-duration-ms` | whole number, 0 to 1000 |
+| `bar.motion-bounce` | number, 0 to 1 |
 | `bar.font-size`, shell `font-size` | whole number, 1 to 256 |
 | `bar.padding`, `bar.spacing`, `bar.separator` | whole number, 0 to 1024 |
 | `workspaces.item-gap` | whole number, 0 to 1024 |
@@ -156,9 +159,9 @@ no key whose value gets only a length check.
 | shell `radius` | whole number, 0 to 64 |
 | `scootnotify`, `scootlaunch` `shadow` | `none`, `soft`, `deep` or `glow` |
 | `scootnotify`, `scootlaunch` `fill` | `solid` or `gradient` |
-| `scootnotify`, `scootlaunch` `motion` | `none`, `ease-out` or `spring` |
-| `scootnotify`, `scootlaunch` `motion-duration-ms` | whole number, 0 to 1000 |
-| `scootnotify`, `scootlaunch` `motion-bounce` | number, 0 to 1 |
+| `scootnotify`, `scootlaunch`, `scootbar` `motion` | `none`, `ease-out` or `spring` |
+| `scootnotify`, `scootlaunch`, `scootbar` `motion-duration-ms` | whole number, 0 to 1000 |
+| `scootnotify`, `scootlaunch`, `scootbar` `motion-bounce` | number, 0 to 1 |
 | `scootnotify` `card.enter`, `card.exit` | `slide`, `fade`, `scale` or `drop` |
 | `scootnotify` `card.mark` | `none`, `stripe`, `dot` or `badge` |
 | `scootnotify` `card.shape` | `rounded` or `pill` |
@@ -242,7 +245,9 @@ warnings.
 corner radius and the wallpaper unit. `bar.toml` carries the six
 bar colors, radius (clamped to half the default bar height, 14),
 `popup-radius` (only when the target binary
-has the `popup` feature), opacity and font size. `font` appears
+has the `popup` feature), opacity, font size, and the depth and motion
+tokens the look sets (`shadow`, `fill`, `motion`, `motion-duration-ms`,
+`motion-bounce`). `font` appears
 only with `--ui-font-file`: scootbar reads a file path there, and
 without one the bar falls back to its well-known font paths.
 Per-app overrides merge into those tables: each section renders

@@ -298,6 +298,7 @@ pub fn render_bar(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, 
     for (key, value, options) in [
         ("shadow", &look.effects.shadow, SHADOW_STYLES),
         ("fill", &look.effects.fill, FILL_STYLES),
+        ("motion", &look.effects.motion, MOTION_CURVES),
     ] {
         if let Some(value) = value {
             if !options.contains(&value.as_str()) {
@@ -308,6 +309,24 @@ pub fn render_bar(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, 
             }
             bar.insert(key.to_string(), toml_str(value));
         }
+    }
+    if let Some(ms) = look.effects.motion_duration_ms {
+        if !(0..=MOTION_DURATION_MAX_MS).contains(&ms) {
+            return Err(GrammarError::new(
+                "effects.motion-duration-ms",
+                format!("must be a whole number from 0 to {MOTION_DURATION_MAX_MS}"),
+            ));
+        }
+        bar.insert("motion-duration-ms".to_string(), ms.to_string());
+    }
+    if let Some(bounce) = look.effects.motion_bounce {
+        if !(0.0..=1.0).contains(&bounce) {
+            return Err(GrammarError::new(
+                "effects.motion-bounce",
+                "must be a number from 0 to 1",
+            ));
+        }
+        bar.insert("motion-bounce".to_string(), format!("{bounce:?}"));
     }
     // scootbar's `font` is a file path, never the family name `fonts.ui`
     // holds (`crates/scootbar/src/config.rs:87-90`, `font.rs:1`): emit

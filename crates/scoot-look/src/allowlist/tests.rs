@@ -326,9 +326,15 @@ fn the_motion_keys_belong_to_the_notifier_and_the_launcher() {
         for app in ["scootnotify", "scootlaunch"] {
             assert!(allows(app, key), "{app} {key}");
         }
-        for other in ["scootgreet", "scootbar"] {
-            assert!(!allows(other, key), "{other} {key}");
-        }
+        // The bar reads the same motion under its own dotted keys
+        // (`bar.motion`), never the dotless ones.
+        assert!(!allows("scootgreet", key), "{key}");
+        assert!(!allows("scootbar", key), "{key}");
+    }
+    for key in ["bar.motion", "bar.motion-duration-ms", "bar.motion-bounce"] {
+        assert!(allows("scootbar", key), "{key}");
+        assert!(!allows("scootgreet", key), "{key}");
+        assert!(!allows("scoot", key), "{key}");
     }
     // The card transitions are the notifier's alone.
     for key in ["card.enter", "card.exit"] {
@@ -519,8 +525,9 @@ fn user_tables_map_to_the_dotted_look_keys() {
         let (table, key) = dotted.split_once('.').unwrap_or(("effects", dotted));
         assert_eq!(user_effect_key("scootnotify", table, key), Some(*dotted));
     }
-    // The bar's user `[effects]` shares the look's allowlist: `shadow` and
-    // `fill` map to the bar's dotted keys, never a copy.
+    // The bar's user `[effects]` shares the look's allowlist: `shadow`,
+    // `fill` and the three motion keys map to the bar's dotted keys,
+    // never a copy.
     assert_eq!(
         user_effect_key("scootbar", "effects", "shadow"),
         Some("bar.shadow")
@@ -529,6 +536,23 @@ fn user_tables_map_to_the_dotted_look_keys() {
         user_effect_key("scootbar", "effects", "fill"),
         Some("bar.fill")
     );
+    assert_eq!(
+        user_effect_key("scootbar", "effects", "motion"),
+        Some("bar.motion")
+    );
+    assert_eq!(
+        user_effect_key("scootbar", "effects", "motion-duration-ms"),
+        Some("bar.motion-duration-ms")
+    );
+    assert_eq!(
+        user_effect_key("scootbar", "effects", "motion-bounce"),
+        Some("bar.motion-bounce")
+    );
+    for dotted in BAR_DEPTH_KEYS {
+        // `bar.*` keys come from `[effects]` in the user file.
+        let key = dotted.strip_prefix("bar.").unwrap_or(dotted);
+        assert_eq!(user_effect_key("scootbar", "effects", key), Some(*dotted));
+    }
 }
 
 #[test]
@@ -551,21 +575,12 @@ fn user_tables_never_reach_the_looks_own_keys() {
         assert_eq!(user_effect_key("scootnotify", table, "theme"), None);
         assert_eq!(user_effect_key("scootnotify", table, "accent"), None);
     }
-    // The launcher has no cards or titles; the bar has no cards, titles or
-    // motion (its entrance lands later). Apps outside the shell trio read none.
+    // The launcher has no cards or titles; the bar has no cards or titles.
+    // Apps outside the shell trio read none.
     assert_eq!(user_effect_key("scootlaunch", "card", "mark"), None);
     assert_eq!(user_effect_key("scootlaunch", "title", "weight"), None);
     assert_eq!(user_effect_key("scootbar", "card", "mark"), None);
     assert_eq!(user_effect_key("scootbar", "title", "weight"), None);
-    assert_eq!(user_effect_key("scootbar", "effects", "motion"), None);
-    assert_eq!(
-        user_effect_key("scootbar", "effects", "motion-duration-ms"),
-        None
-    );
-    assert_eq!(
-        user_effect_key("scootbar", "effects", "motion-bounce"),
-        None
-    );
     assert_eq!(user_effect_key("scootbar", "bar", "shadow"), None);
     for app in ["scootgreet", "scoot", "nonesuch"] {
         assert_eq!(user_effect_key(app, "effects", "shadow"), None, "{app}");
