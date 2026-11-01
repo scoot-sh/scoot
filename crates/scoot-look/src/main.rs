@@ -36,8 +36,8 @@ use std::path::Path;
 
 use scoot_look::{
     ImportOptions, Origin, RenderInputs, STATIC_LEAVES, check_contrast, check_static_leaf,
-    import_base16, render_bar, render_foot, render_fuzzel, render_greet, render_gtk3_css,
-    render_gtk4_css, render_json, render_launch, render_leaf_files, render_notify,
+    format_ratio, import_base16, render_bar, render_foot, render_fuzzel, render_greet,
+    render_gtk3_css, render_gtk4_css, render_json, render_launch, render_leaf_files, render_notify,
     render_qt_scheme, render_scoot, render_swaylock, resolve, source_hash, validate_apps_allowlist,
     validate_for_origin,
 };
@@ -296,10 +296,20 @@ fn validate_dir(dir: &Path, origin: Origin, explicit_name: Option<&str>, trust: 
             Ok(look) => {
                 let report = check_contrast(&look, origin);
                 for w in report.warnings() {
-                    eprintln!("warning: {} is {} (bar {})", w.name, w.ratio, w.threshold);
+                    eprintln!(
+                        "warning: {} is {} (bar {})",
+                        w.name,
+                        format_ratio(w.ratio),
+                        w.threshold
+                    );
                 }
                 for r in report.refusals() {
-                    eprintln!("error: {} is {} (bar {})", r.name, r.ratio, r.threshold);
+                    eprintln!(
+                        "error: {} is {} (bar {})",
+                        r.name,
+                        format_ratio(r.ratio),
+                        r.threshold
+                    );
                     failed = true;
                 }
             }
@@ -577,7 +587,12 @@ fn build_dir(
     let report = check_contrast(&look, origin);
     if !report.refusals().is_empty() {
         for r in report.refusals() {
-            eprintln!("error: {} is {} (bar {})", r.name, r.ratio, r.threshold);
+            eprintln!(
+                "error: {} is {} (bar {})",
+                r.name,
+                format_ratio(r.ratio),
+                r.threshold
+            );
         }
         std::process::exit(1);
     }
@@ -773,10 +788,20 @@ fn import_scheme(
             Ok(look) => {
                 let report = check_contrast(&look, origin);
                 for w in report.warnings() {
-                    eprintln!("warning: {} is {} (bar {})", w.name, w.ratio, w.threshold);
+                    eprintln!(
+                        "warning: {} is {} (bar {})",
+                        w.name,
+                        format_ratio(w.ratio),
+                        w.threshold
+                    );
                 }
                 for r in report.refusals() {
-                    eprintln!("error: {} is {} (bar {})", r.name, r.ratio, r.threshold);
+                    eprintln!(
+                        "error: {} is {} (bar {})",
+                        r.name,
+                        format_ratio(r.ratio),
+                        r.threshold
+                    );
                     failed = true;
                 }
             }

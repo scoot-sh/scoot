@@ -84,7 +84,7 @@ pub use allowlist::{
     ValueKind, allows, check_app_value, is_wallpaper_override_key, validate_apps_allowlist,
     value_kind,
 };
-pub use contrast::{ContrastPair, ContrastReport, check as check_contrast};
+pub use contrast::{ContrastPair, ContrastReport, check as check_contrast, format_ratio};
 pub use grammar::GrammarError;
 pub use import::{ImportOptions, import_base16};
 pub use leaf_path::locate_leaf;

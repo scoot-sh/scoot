@@ -1389,7 +1389,9 @@ fn run_show(look: &Look, name: &str) -> Result<(), String> {
         .map(|warning| {
             format!(
                 "{} is {} (needs {})",
-                warning.name, warning.ratio, warning.threshold
+                warning.name,
+                scoot_look::format_ratio(warning.ratio),
+                warning.threshold
             )
         })
         .collect();
@@ -1399,7 +1401,9 @@ fn run_show(look: &Look, name: &str) -> Result<(), String> {
         .map(|refusal| {
             format!(
                 "{} is {} (needs {})",
-                refusal.name, refusal.ratio, refusal.threshold
+                refusal.name,
+                scoot_look::format_ratio(refusal.ratio),
+                refusal.threshold
             )
         })
         .collect();

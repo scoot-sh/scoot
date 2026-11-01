@@ -85,7 +85,7 @@ one-screen default and the other knobs.
 
 The image's colors: espresso `#270E0A`, cream `#F6E8CB`, sunset orange
 `#FE9949` (accent and focused ring), sun yellow `#FFD757`, peach `#FEC69A`,
-inactive-ring mauve `#7D4564`, taupe `#AA6D5F`, brick `#CE6B4B`,
+inactive-ring mauve `#7D4564`, taupe `#AC6F61`, brick `#CE6B4B`,
 olive (`#A5C643`, bright `#B8D26A`), dusk blue (`#6A7FBD`, bright `#95A4D0`),
 rose (`#B2676D`, bright `#C89397`), steel (`#878CB6`, bright `#ADB0CD`) and
 sand `#EAC985`. The focused window's ring is orange and the

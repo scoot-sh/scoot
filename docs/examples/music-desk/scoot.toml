@@ -19,7 +19,7 @@ corner_radius = 14                    # costs a little per frame: 0 is free
 focus_ring_width = 2                  # the color, not the weight, says which is focused
 focus_ring_inactive_width = 2
 focus_ring_active_color = "#3D579A"
-focus_ring_inactive_color = "#D5D7DD"
+focus_ring_inactive_color = "#8E919C"
 
 [wallpaper]
 # A relative path is resolved against this file's directory.

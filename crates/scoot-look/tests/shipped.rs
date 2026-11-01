@@ -108,7 +108,12 @@ fn every_shipped_look_validates_and_renders() {
             "{name}: contrast refusals: {}",
             refusals
                 .iter()
-                .map(|p| format!("{} is {} (bar {})", p.name, p.ratio, p.threshold))
+                .map(|p| format!(
+                    "{} is {} (bar {})",
+                    p.name,
+                    scoot_look::format_ratio(p.ratio),
+                    p.threshold
+                ))
                 .collect::<Vec<_>>()
                 .join("; ")
         );
@@ -350,28 +355,57 @@ fn shipped_contrast_warnings_are_the_known_pairs() {
     // clears `dim` on `background` and on `surface` (4.5, the text bar: the
     // notification card and the launcher panel draw their secondary text
     // there) and music-desk's inactive ring clears 3.0. What remains is
-    // locked: music-desk's urgent (2.9), and the dark looks' deliberately
-    // muted inactive rings (moonrise 1.5, vinyl-sunset 2.5, ginger-night
-    // 1.5; ratios round to one decimal). Locked here so a retune shows up
-    // as a test change; the maintainer call (retune or accept) rides in
-    // the PR, not in a refusal.
-    let mut below: Vec<(String, String, f64)> = Vec::new();
+    // locked: music-desk's urgent (2.88), and the dark looks' deliberately
+    // muted inactive rings (moonrise 1.53, vinyl-sunset 2.52, ginger-night
+    // 1.52; ratios print to two decimals and bars compare on the unrounded
+    // value, so a warning always means below the bar). Locked here so a
+    // retune shows up as a test change; the maintainer call (retune or
+    // accept) rides in the PR, not in a refusal.
+    let mut below: Vec<(String, String, String)> = Vec::new();
     for name in SHIPPED {
         let look = resolved(name);
         for pair in check_contrast(&look, Origin::Shipped).warnings() {
-            below.push((name.to_string(), pair.name.to_string(), pair.ratio));
+            below.push((
+                name.to_string(),
+                pair.name.to_string(),
+                scoot_look::format_ratio(pair.ratio),
+            ));
         }
     }
-    let known = |look: &str, pair: &str, ratio: f64| (look.to_string(), pair.to_string(), ratio);
+    let known = |look: &str, pair: &str, ratio: &str| {
+        (look.to_string(), pair.to_string(), ratio.to_string())
+    };
     assert_eq!(
         below,
         vec![
-            known("ginger-night", "border/background", 1.5),
-            known("moonrise", "border/background", 1.5),
-            known("music-desk", "urgent/background", 2.9),
-            known("vinyl-sunset", "border/background", 2.5),
+            known("ginger-night", "border/background", "1.52"),
+            known("moonrise", "border/background", "1.53"),
+            known("music-desk", "urgent/background", "2.88"),
+            known("vinyl-sunset", "border/background", "2.52"),
         ]
     );
+}
+
+#[test]
+fn shipped_border_warnings_name_the_border_color() {
+    // The ticket's surviving mutation: swapping which color the
+    // `border/background` pair reports as its foreground passed every
+    // test. Pin it per shipped look: the pair's foreground is the look's
+    // `border`, its background the `background`.
+    for name in SHIPPED {
+        let look = resolved(name);
+        let report = check_contrast(&look, Origin::Shipped);
+        if let Some(ring) = report.pairs.iter().find(|p| p.name == "border/background") {
+            assert_eq!(
+                ring.foreground, look.palette.border,
+                "{name}: border pair names its foreground"
+            );
+            assert_eq!(
+                ring.background, look.palette.background,
+                "{name}: border pair names its background"
+            );
+        }
+    }
 }
 
 #[test]

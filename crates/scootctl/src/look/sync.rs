@@ -614,7 +614,9 @@ pub fn sync_with(
     for refusal in contrast.refusals() {
         contrast_errors.push(format!(
             "{} is {} (needs {})",
-            refusal.name, refusal.ratio, refusal.threshold
+            refusal.name,
+            scoot_look::format_ratio(refusal.ratio),
+            refusal.threshold
         ));
     }
     if !contrast_errors.is_empty() {
@@ -626,7 +628,9 @@ pub fn sync_with(
     for warning in contrast.warnings() {
         report.notes.push(format!(
             "contrast: {} is {} (needs {})",
-            warning.name, warning.ratio, warning.threshold
+            warning.name,
+            scoot_look::format_ratio(warning.ratio),
+            warning.threshold
         ));
     }
     let mut validation = Validation::default();

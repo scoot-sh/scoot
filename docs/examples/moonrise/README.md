@@ -91,7 +91,7 @@ Role-named, so the coming look registry can absorb this look without rework:
 | `accent` | disc amber `#FFA45C` | focused ring (`#FF9A49`, the disc's own mid-tone), bar accent, prompt directory |
 | `glow` | disc yellow `#FFD54A` | hover, prompt success, btop highlights |
 | `hush` | mauve `#5E4B5B` | inactive ring, entry fields |
-| `mist` | pale mauve `#9C8B95` | dim text, separators, line numbers |
+| `mist` | pale mauve `#aa9aa0` | dim text, separators, line numbers |
 | `ember` | dusty rose `#E87F6A` | urgent, errors, deletions |
 | `dusk` | dusty mauve `#B595AD` | inactive workspace numbers, git branch |
 | `ridge` | slate blue `#7C8FB0` | ANSI blue/cyan family (the mountain) |
