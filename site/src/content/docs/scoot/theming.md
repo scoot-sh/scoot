@@ -85,7 +85,8 @@ records it beside the declared default, and `sync` leaves it alone.
 Visible change with this setup: the shipped looks now carry their
 shape — rounded windows, ring widths, bar padding and spacing — where
 the Nix path used to apply only colors, fonts and the wallpaper (the
-bar stays opaque: its opacity holds at 1.0). To keep square windows,
+bar is translucent: its opacity holds the example value the
+bar-opacity benchmark cleared). To keep square windows,
 set `settings.appearance.corner_radius = 0`: your file wins per key.
 
 `radial-burst` ships no shell, editor or monitor files, so those

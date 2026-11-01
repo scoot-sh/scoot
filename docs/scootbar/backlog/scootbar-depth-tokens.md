@@ -3,7 +3,7 @@ title: "Shadow and gradient fill tokens for the bar and its popups"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "bar-opacity-benchmark"
+blocked: null
 ---
 
 # Shadow and gradient fill tokens for the bar and its popups

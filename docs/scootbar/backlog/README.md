@@ -192,8 +192,8 @@ The bar's half of the [live-looks epic](../../backlog/core/live-looks.md) ([desi
 ### Shell UI motion and depth (filed 2026-10-31)
 The bar's slice of the [shell motion/depth epic](https://github.com/scoot-sh/scoot/issues/807)
 (section 4, "scootbar (optional, later)"; sections 1-3 shipped in #810, #811, #812, #814, #835, #836, #838, #839, #841):
-- [Bar opacity pixman benchmark: the gate for translucent bars](bar-opacity-benchmark.md) (medium): the five `[opacity] bar = 1.0` pins stay until the CPU-tier numbers exist
-- [Shadow and gradient fill tokens for the bar and its popups](scootbar-depth-tokens.md) (low): blocked on `bar-opacity-benchmark`
+- [Bar opacity pixman benchmark: the gate for translucent bars](resolved/bar-opacity-benchmark-done.md) (medium) — RESOLVED 2026-11-01: every budget passed, the five `[opacity] bar` pins rose to the examples' values
+- [Shadow and gradient fill tokens for the bar and its popups](scootbar-depth-tokens.md) (low): unblocked by the benchmark's pass
 - [Popups open with the notification-card entrance](scootbar-popup-entrance.md) (low): blocked on `scootbar-depth-tokens`
 
 ### Unscheduled (until someone asks)
