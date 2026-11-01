@@ -1034,6 +1034,42 @@ fn set_column_width_lands_through_the_whole_state_path() {
 }
 
 #[test]
+fn scroll_view_to_column_focuses_and_aligns_over_ipc() {
+    let mut fixture = Fixture::drive();
+    fixture.state.needs_render = false;
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(scoot_ipc::Action::ScrollViewToColumn {
+                index: 0,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the scroll-view-to-column action was not served"
+    );
+    assert!(
+        fixture.state.needs_render,
+        "a real scroll-view-to-column laid nothing out"
+    );
+    let arrangement = fixture.state.world.arrange();
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(scoot_ipc::Action::ScrollViewToColumn {
+                index: 99,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the out-of-range scroll-view-to-column was not served"
+    );
+    assert_eq!(
+        fixture.state.world.arrange(),
+        arrangement,
+        "an out-of-range scroll-view-to-column moved anything at all"
+    );
+}
+
+#[test]
 fn a_move_to_index_over_ipc_leaves_a_clicked_taskbars_keyboard_alone() {
     // The same boundary the layout-action test above pins, for the new
     // action: carrying a window changes arrangement, not where focus is

@@ -25,6 +25,17 @@ pub enum Action {
     FocusColumn {
         direction: Horizontal,
     },
+    /// Focus the column at `index` (0-based, strip order) and scroll the
+    /// view so its left edge sits at the usable edge, clamped to the strip
+    /// -- the wire half of `scoot_core::Action::ScrollViewToColumn`. The
+    /// aligned half of `FocusColumn`'s stepping: focusing a neighbour that
+    /// is already visible moves nothing, so a swipe that steps focus eases
+    /// back. Out of range does nothing, like `FocusWorkspaceIndex`.
+    /// Additive: a client that never sends this tag decodes exactly as
+    /// before, so no `PROTOCOL_VERSION` bump.
+    ScrollViewToColumn {
+        index: usize,
+    },
     FocusWindow {
         direction: Vertical,
     },

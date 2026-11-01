@@ -267,6 +267,8 @@ fn layout_actions_on_an_empty_workspace_do_nothing() {
     let mut world = world();
     let actions = [
         Action::FocusColumn(Horizontal::Left),
+        Action::ScrollViewToColumn(0),
+        Action::ScrollViewToColumn(3),
         Action::MoveColumn(Horizontal::Right),
         Action::FocusWindow(Vertical::Up),
         Action::MoveWindow(Vertical::Down),
@@ -308,4 +310,170 @@ fn arrange_is_pure() {
         open(&mut world, id);
     }
     assert_eq!(world.arrange(), world.arrange());
+}
+
+#[test]
+fn scroll_view_to_column_lines_the_left_edge_up_with_two_visible() {
+    // The ticket's shape: three half-width columns, 1000x600 with a 10px
+    // gap, so two are visible. Focusing the neighbour moves nothing
+    // (`scroll_into_view` is already satisfied); aligning scrolls it to
+    // the usable edge.
+    let mut world = world();
+    for id in 1..=3 {
+        open(&mut world, id);
+    }
+    // Focus 1, so column 2 is the already-visible neighbour.
+    world.handle_action(Action::FocusColumn(Horizontal::Left));
+    world.handle_action(Action::FocusColumn(Horizontal::Left));
+    assert_eq!(focused(&world), Some(1));
+    assert_eq!(placement(&world, 1).rect.x, 10);
+    assert_eq!(placement(&world, 2).rect.x, 505);
+    // Plain focus would not move the view here: check the premise.
+    world.handle_action(Action::FocusColumn(Horizontal::Right));
+    assert_eq!(focused(&world), Some(2));
+    assert_eq!(placement(&world, 2).rect.x, 505);
+    // Back to 1, then align to column 2 (index 1).
+    world.handle_action(Action::FocusColumn(Horizontal::Left));
+    world.handle_action(Action::ScrollViewToColumn(1));
+    assert_eq!(focused(&world), Some(2));
+    assert_eq!(placement(&world, 2).rect.x, 10);
+    assert_eq!(placement(&world, 3).rect.x, 505);
+}
+
+#[test]
+fn scroll_view_to_column_clamps_at_both_ends() {
+    let mut world = world();
+    for id in 1..=4 {
+        open(&mut world, id);
+    }
+    // First column aligns to the usable edge (already there).
+    world.handle_action(Action::ScrollViewToColumn(0));
+    assert_eq!(focused(&world), Some(1));
+    assert_eq!(placement(&world, 1).rect.x, 10);
+    // Last column cannot align its left edge: the strip ends, so it clamps
+    // to the strip's end like every other scroll.
+    world.handle_action(Action::ScrollViewToColumn(3));
+    assert_eq!(focused(&world), Some(4));
+    // Strip: 4 x 485 + 3 x 10 = 1970; view 980 wide; max scroll 990.
+    // Column 4 starts at 3*(485+10) = 1485 in strip coords, so view 990
+    // puts it at x 505, and column 1 at -980.
+    assert_eq!(placement(&world, 4).rect.x, 505);
+    assert_eq!(placement(&world, 1).rect.x, 10 - 990);
+}
+
+#[test]
+fn scroll_view_to_column_with_one_column_is_a_noop() {
+    let mut world = world();
+    open(&mut world, 1);
+    let before = placement(&world, 1);
+    world.handle_action(Action::ScrollViewToColumn(0));
+    assert_eq!(focused(&world), Some(1));
+    assert_eq!(placement(&world, 1), before);
+    assert_eq!(before.rect.x, 10);
+}
+
+#[test]
+fn scroll_view_to_column_out_of_range_changes_nothing() {
+    let mut world = world();
+    for id in 1..=2 {
+        open(&mut world, id);
+    }
+    let before = world.arrange();
+    for index in [2, 3, usize::MAX / 2, usize::MAX] {
+        assert!(
+            world
+                .handle_action(Action::ScrollViewToColumn(index))
+                .is_empty()
+        );
+        assert_eq!(world.arrange(), before, "index {index}");
+        assert_eq!(focused(&world), Some(2), "index {index}");
+    }
+}
+
+#[test]
+fn scroll_view_to_column_with_no_columns_or_outputs_does_nothing() {
+    let mut world = world();
+    world.handle_action(Action::ScrollViewToColumn(0));
+    world.handle_action(Action::ScrollViewToColumn(3));
+    assert_eq!(focused(&world), None);
+    assert!(world.arrange().placements.is_empty());
+    let mut bare = World::new(config());
+    bare.handle_action(Action::ScrollViewToColumn(0));
+    bare.handle_action(Action::ScrollViewToColumn(usize::MAX));
+    assert_eq!(bare.workspaces(OutputId(1)), None);
+}
+
+#[test]
+fn scroll_view_to_column_on_an_already_aligned_column_changes_nothing_visible() {
+    let mut world = world();
+    for id in 1..=3 {
+        open(&mut world, id);
+    }
+    world.handle_action(Action::ScrollViewToColumn(2));
+    let before = world.arrange();
+    world.handle_action(Action::ScrollViewToColumn(2));
+    assert_eq!(world.arrange(), before);
+    assert_eq!(focused(&world), Some(3));
+}
+
+#[test]
+fn scroll_view_to_column_with_different_widths_aligns_each_start() {
+    let mut world = world();
+    open(&mut world, 1);
+    world.handle_action(Action::SetColumnWidth(1));
+    open(&mut world, 2);
+    open(&mut world, 3);
+    // Column 1 is now full width (980); columns 2-3 half (485).
+    world.handle_action(Action::ScrollViewToColumn(0));
+    assert_eq!(placement(&world, 1).rect.x, 10);
+    assert_eq!(placement(&world, 1).rect.w, 980);
+    world.handle_action(Action::ScrollViewToColumn(1));
+    assert_eq!(focused(&world), Some(2));
+    assert_eq!(placement(&world, 2).rect.x, 10);
+}
+
+#[test]
+fn scroll_view_to_column_with_a_short_strip_stays_put() {
+    let mut world = world();
+    open(&mut world, 1);
+    let before = world.arrange();
+    world.handle_action(Action::ScrollViewToColumn(0));
+    assert_eq!(world.arrange(), before);
+}
+
+#[test]
+fn scroll_view_to_column_on_fullscreen_and_maximized_columns() {
+    let mut world = world();
+    for id in 1..=3 {
+        open(&mut world, id);
+    }
+    world.handle_action(Action::ToggleFullscreen);
+    assert_eq!(world.fullscreen_on(OutputId(1)), Some(WindowId(3)));
+    world.handle_action(Action::ScrollViewToColumn(2));
+    assert_eq!(focused(&world), Some(3));
+    assert_eq!(world.fullscreen_on(OutputId(1)), Some(WindowId(3)));
+    world.handle_action(Action::ToggleFullscreen);
+    assert_eq!(world.fullscreen_on(OutputId(1)), None);
+    world.handle_action(Action::ToggleMaximize);
+    assert_eq!(world.maximized_on(OutputId(1)), Some(WindowId(3)));
+    world.handle_action(Action::ScrollViewToColumn(0));
+    assert_eq!(focused(&world), Some(1));
+    assert_eq!(world.maximized_on(OutputId(1)), None);
+    world.handle_action(Action::ScrollViewToColumn(2));
+    assert_eq!(focused(&world), Some(3));
+    assert_eq!(world.maximized_on(OutputId(1)), Some(WindowId(3)));
+}
+
+#[test]
+fn scroll_view_to_column_leaves_the_floating_layer_for_the_strip() {
+    let mut world = world();
+    for id in 1..=2 {
+        open(&mut world, id);
+    }
+    world.handle_action(Action::ToggleFloating);
+    assert!(world.floating_has_focus());
+    world.handle_action(Action::ScrollViewToColumn(0));
+    assert!(!world.floating_has_focus());
+    assert_eq!(focused(&world), Some(1));
+    assert_eq!(placement(&world, 1).rect.x, 10);
 }

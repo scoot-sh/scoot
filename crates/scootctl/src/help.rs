@@ -309,6 +309,11 @@ pub const ACTIONS: &[ActionDoc] = &[
         description: "set the focused column's width preset by index",
     },
     ActionDoc {
+        name: "scroll-view-to-column",
+        args: "N",
+        description: "focus column N (0-based, strip order) and scroll it to the usable edge",
+    },
+    ActionDoc {
         name: "toggle-fullscreen",
         args: "(none)",
         description: "toggle fullscreen on the focused window",

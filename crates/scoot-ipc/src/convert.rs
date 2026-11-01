@@ -24,6 +24,7 @@ impl From<Action> for scoot_core::Action {
     fn from(action: Action) -> Self {
         match action {
             Action::FocusColumn { direction } => Self::FocusColumn(direction.into()),
+            Action::ScrollViewToColumn { index } => Self::ScrollViewToColumn(index),
             Action::FocusWindow { direction } => Self::FocusWindow(direction.into()),
             Action::FocusWindowId { id } => Self::FocusWindowId(scoot_core::WindowId(id)),
             Action::MoveColumn { direction } => Self::MoveColumn(direction.into()),
@@ -134,6 +135,10 @@ mod tests {
         assert_eq!(
             scoot_core::Action::from(Action::SetColumnWidth { index: 2 }),
             scoot_core::Action::SetColumnWidth(2)
+        );
+        assert_eq!(
+            scoot_core::Action::from(Action::ScrollViewToColumn { index: 2 }),
+            scoot_core::Action::ScrollViewToColumn(2)
         );
         assert_eq!(
             scoot_core::Action::from(Action::MoveFocusedWindowToOutput { output: 2 }),

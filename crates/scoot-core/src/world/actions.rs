@@ -43,6 +43,7 @@ impl World {
             Action::FocusColumn(dir) => {
                 self.reshape(|o| o.active_workspace_mut().focus_column(dir))
             }
+            Action::ScrollViewToColumn(index) => self.scroll_view_to_column(index),
             Action::MoveColumn(dir) => self.reshape(|o| o.active_workspace_mut().move_column(dir)),
             Action::FocusWindow(dir) => {
                 self.reshape(|o| o.active_workspace_mut().focus_window(dir))
