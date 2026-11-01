@@ -452,7 +452,9 @@ fn bar_hovered_at_1_5x() {
 
 /// A soft shadow under a square bar: the surface reserves the
 /// window-facing room (below a top bar), the exclusive zone stays the
-/// bar's height, and the input region covers the bar only.
+/// bar's height, and the input region covers the bar only. The alpha
+/// plane (not the color plane: a black shadow over transparency reads
+/// black whatever it does) pins the paint, not just the geometry.
 #[test]
 fn bar_shadow_soft_at_1x() {
     let look = Look {
@@ -460,15 +462,24 @@ fn bar_shadow_soft_at_1x() {
         ..Look::default()
     };
     let (pixels, w, h) = draw(160, 20, Scale::Integer(1), look);
+    let image = Image::from_alpha(&pixels, w, h);
+    // Rows past the 20-pixel bar hold the shadow's falloff: non-zero, and
+    // not the bar's own opaque rows (a shadowless bar has no such rows).
+    assert_eq!((w, h), (160, 36), "soft surface room");
+    let strip: u32 = image.samples[(20 * w) as usize..]
+        .iter()
+        .map(|&s| u32::from(s))
+        .sum();
+    assert!(strip > 0, "soft shadow paints nothing past the bar");
     check(
         "bar-shadow-soft-1x",
-        "a 160x20 bar at scale 1 with a soft shadow below it (16 device pixels of room)",
-        &Image::from_xrgb(&pixels, w, h, true),
+        "the alpha plane of a 160x20 bar at scale 1 with a soft shadow below it (16 device pixels of room)",
+        &image,
     );
 }
 
 /// A deep shadow: wider and heavier than soft, same room rule (below only,
-/// sides and anchored edge clip).
+/// sides and anchored edge clip). Alpha plane, as above.
 #[test]
 fn bar_shadow_deep_at_1x() {
     let look = Look {
@@ -476,10 +487,17 @@ fn bar_shadow_deep_at_1x() {
         ..Look::default()
     };
     let (pixels, w, h) = draw(160, 20, Scale::Integer(1), look);
+    let image = Image::from_alpha(&pixels, w, h);
+    assert_eq!((w, h), (160, 58), "deep surface room");
+    let strip: u32 = image.samples[(20 * 160) as usize..]
+        .iter()
+        .map(|&s| u32::from(s))
+        .sum();
+    assert!(strip > 0, "deep shadow paints nothing past the bar");
     check(
         "bar-shadow-deep-1x",
-        "a 160x20 bar at scale 1 with a deep shadow below it",
-        &Image::from_xrgb(&pixels, w, h, true),
+        "the alpha plane of a 160x20 bar at scale 1 with a deep shadow below it",
+        &image,
     );
 }
 

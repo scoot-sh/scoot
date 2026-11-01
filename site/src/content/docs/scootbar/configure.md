@@ -163,7 +163,7 @@ named, and a start never fails over it.
 
 - **What a look sets**: the six `[colors]` tokens; `[bar]` `radius`,
   `popup-radius`, `opacity`, `font-size`, `padding`, `spacing`,
-  `separator` (plus the renderer's own `bar.font` file path); the
+  `separator`, `shadow`, `fill` (plus the renderer's own `bar.font` file path); the
   workspaces pill keys and the per-module glyph icons. It never sets
   geometry or placement (`edge`, `height`, `margin`, `layer`,
   `exclusive`), module lists, `exec`/`button`/`push` tables, `on-*`
@@ -573,7 +573,8 @@ fill = "gradient"
   shadow, solid, opaque).
 - **Scales rebuild, then cache**: shadow tables are per device-pixel size
   (`Shadow::prepare` outside any repaint, `shadow = "none"` builds
-  nothing). They rebuild when the scale, radius, bar size or edge changes
+  nothing). They rebuild when the style, scale, radius, bar size or edge
+  changes
   and cache otherwise; warm frames allocate nothing. The bench covers 1x
   and 2x (see below).
 - **The radius is cut back to fit**: `--height` below twice the file's
@@ -594,6 +595,34 @@ fill = "gradient"
 - **Popups round separately**: `[bar] radius` never rounds a popup; that is
   `[bar] popup-radius` ([Popups](./modules.md#popups)), which follows this radius when
   unset.
+
+### Effects over any look
+
+`shadow` and `fill` can also be set in `bar.toml`, in an `[effects]`
+table. It wins per key over whatever look is active, and over the file's
+own `[bar]` keys, so one setting turns a shadow or a gradient on for
+every look without copying a look. A key the file does not set stays the
+look's, and a key the look does not set stays the built-in default
+(`none`, `solid`).
+
+```toml
+[effects]
+shadow = "soft"
+fill = "gradient"
+```
+
+| Table and key | Value | Same as the look's |
+|---|---|---|
+| `[effects]` `shadow` | `none`, `soft`, `deep` or `glow` | `bar.shadow` ([Shape, opacity and depth](#shape-opacity-and-depth)) |
+| `[effects]` `fill` | `solid` or `gradient` | `bar.fill` ([Shape, opacity and depth](#shape-opacity-and-depth)) |
+
+Precedence, highest first, per key: the file's `[effects]` table, the
+file's `[bar]` keys, the look layer, the built-in defaults. (Daemon flags
+sit above the file but set neither key.) A
+refused `[effects]` value refuses the file loudly, naming its dotted key;
+an unknown `[effects]` key is refused by name. The look layer, by
+contrast, reports a bad value and ignores it, so a look never breaks the
+bar.
 
 
 

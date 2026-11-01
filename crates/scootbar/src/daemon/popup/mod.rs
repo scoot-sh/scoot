@@ -688,25 +688,9 @@ impl State {
                     radius,
                 );
             }
-        } else if round.rounded() {
-            // Unreachable: the branch above already covers rounded. Kept
-            // for the shape of the original code; a square opaque
-            // unshadowed popup needs no regions at all.
-            let radius = crate::region::effective_radius(
-                style.popup_radius,
-                requested.width,
-                requested.height,
-            );
-            super::canvas::set_opaque_region(
-                &self.globals,
-                qh,
-                &surface,
-                (requested, Some(radius.saturating_add(1))),
-            );
-            if matches!(flavor, Flavor::Popup { .. }) {
-                super::canvas::set_input_region(&self.globals, qh, &surface, (requested, radius));
-            }
         }
+        // `round.rounded()` already takes the branch above, so no `else if`
+        // remains: a square opaque unshadowed popup needs no regions at all.
         positioner.destroy();
         // No buffer yet: the compositor answers with the configure.
         surface.commit();

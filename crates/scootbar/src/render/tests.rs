@@ -584,6 +584,61 @@ fn a_shadowed_bar_blends_and_keeps_its_zone() {
     assert_eq!(gradient.opaque_inset(), None);
 }
 
+/// A soft-to-glow switch at the same size and scale rebuilds the shadow
+/// tables: both pad to 16, so the surface is not recreated and only the
+/// cache key tells them apart (soft is offset 4 blur 12, glow offset 0
+/// blur 16). Without the style in the key the second update keeps the
+/// old tables while the tint follows the new style.
+#[test]
+fn a_soft_to_glow_switch_rebuilds_the_shadow_tables() {
+    use scootui::effects::{FillStyle, ShadowStyle};
+    let mut scene = Scene::with_members(&[]);
+    let output = OutputView { name: None };
+    let style = |shadow| Style {
+        theme: Theme::default(),
+        font_size: 14,
+        padding: 4,
+        spacing: 6,
+        separator: 0,
+        radius: 0,
+        popup_radius: 0,
+        opacity: u8::MAX,
+        shadow,
+        fill: FillStyle::Solid,
+    };
+    // Both styles pad a 20-pixel bar to a 36-pixel surface at 1x, so the
+    // surface height (and the daemon's recreate check) cannot tell them
+    // apart: only the cache key can.
+    let extent = Size {
+        width: 160,
+        height: 36,
+    };
+    scene.update(
+        &[],
+        &output,
+        None,
+        &style(ShadowStyle::Soft),
+        Scale::Integer(1),
+        extent,
+    );
+    let soft = scene.shadow.clone();
+    assert!(soft.is_some(), "soft builds tables");
+    scene.update(
+        &[],
+        &output,
+        None,
+        &style(ShadowStyle::Glow),
+        Scale::Integer(1),
+        extent,
+    );
+    let glow = scene.shadow.clone();
+    assert!(glow.is_some(), "glow builds tables");
+    assert_ne!(
+        soft, glow,
+        "soft then glow at the same size/scale rebuilds the tables"
+    );
+}
+
 /// An output shows the modules it lists, in its own sections: a module
 /// another output shows takes no space here, its changes do not make this
 /// scene stale, and the scenes of two outputs differ over the same started

@@ -1309,7 +1309,7 @@ impl File {
                 });
             };
             if let Some(err) = scoot_look::allowlist::check_app_value("scootbar", dotted, v) {
-                return Err(value(path, "bar.shadow", format_args!("{err}")));
+                return Err(value(path, dotted, format_args!("{err}")));
             }
             match dotted {
                 "bar.shadow" => {

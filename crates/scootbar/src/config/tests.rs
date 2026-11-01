@@ -413,9 +413,13 @@ fn a_bad_shadow_or_fill_is_refused_naming_its_key() {
         ("[effects]\nmotion = \"spring\"\n", "effects.motion"),
     ] {
         let error = read(text).unwrap_err().to_string();
+        // The outer key attribution, quoted (`'bar.fill': …`), not just the
+        // inner allowlist text (which names the key unquoted inside
+        // `apps.scootbar[…]`): a wrong outer key must fail here.
+        let outer = format!("'{key}'");
         assert!(
-            error.contains(key),
-            "{text} refused without naming {key}: {error}"
+            error.contains(&outer),
+            "{text} refused without the outer key {outer}: {error}"
         );
     }
 }

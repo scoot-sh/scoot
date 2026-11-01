@@ -463,37 +463,6 @@ pub(super) fn set_opaque_region(
     region.destroy();
 }
 
-/// `wl_surface.set_input_region` for a tooltip's surface of `size`
-/// (logical) whose corners are cut by `radius` ([`region::input_rects`]).
-/// Only tooltips use this now (the bar uses
-/// [`set_input_region_bar`]); tooltips have no shadow, so the whole
-/// surface is the popup.
-#[cfg(feature = "popup")]
-pub(super) fn set_input_region(
-    globals: &Globals,
-    qh: &QueueHandle<State>,
-    surface: &WlSurface,
-    (size, radius): (Size, u32),
-) {
-    if radius == 0 {
-        surface.set_input_region(None);
-        return;
-    }
-    let mut rects = Vec::with_capacity(2 * radius as usize + 1);
-    region::input_rects(size.width, size.height, radius, &mut rects);
-    let region = globals.compositor.create_region(qh, ());
-    for rect in rects {
-        region.add(
-            logical(rect.x),
-            logical(rect.y),
-            logical(rect.width),
-            logical(rect.height),
-        );
-    }
-    surface.set_input_region(Some(&region));
-    region.destroy();
-}
-
 /// `wl_surface.set_input_region` for the bar's own rect inside a shadowed
 /// surface: `(bar_width, bar_y, bar_height)` in surface-local logical
 /// pixels, corners cut by `radius`. The shadow never takes input: clicks in

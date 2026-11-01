@@ -135,13 +135,6 @@ translucency is affordable) and the popup entrance motion
 (`scootbar-popup-entrance` reuses the room this ticket reserves). No
 changes to which modules have popups.
 
-## Not in this ticket
-
-The opacity benchmark itself (`bar-opacity-benchmark` decides whether
-translucency is affordable) and the popup entrance motion
-(`scootbar-popup-entrance` reuses the room this ticket reserves). No
-changes to which modules have popups.
-
 ## Resolution (2026-11-01, verdict: PASS)
 
 Depth reaches the bar and all five popups from `[effects]` and
@@ -219,7 +212,7 @@ shadow style and the gradient.
   zone, input, opaque, restyle recreate on pad change); popup
   `paint_depth` with origin/shadow/fill/opacity and pool format gating.
 - Goldens: `bar-shadow-soft/deep/glow-1x.pgm`, `bar-gradient-1x.pgm`;
-  defaults unchanged (all 1086 bin tests pass, including the 21
+  defaults unchanged (all 1095 bin tests pass, 2 skipped, including the 21
   snapshots).
 - Docs: `site/.../reference/look-format.md` (bar reads depth, per-app
   table), `scootbar/configure.md` (Shape, opacity and depth: room,
@@ -245,8 +238,8 @@ after). `cargo fmt` on the Mac; no VM restarts.
 - `cargo test -p scoot-look` (Mac): 226 passed.
 - `cargo nextest run -p scoot-look` (VM): 250 passed.
 - `cargo clippy -p scootbar --all-targets -- -D warnings` (VM): clean.
-- `cargo nextest run -p scootbar --bin scootbar` (VM): 1086 passed,
-  1 skipped (including 4 new goldens + `no_snapshot_is_left_over`).
+- `cargo nextest run -p scootbar --bin scootbar` (VM): 1095 passed,
+  2 skipped (including 4 new goldens + `no_snapshot_is_left_over`).
 - `cargo test -p scootbar --bin scootbar warm_frames…` (VM): pass (0
   allocations on 10 warm full repaints per combo/scale).
 - `SCOOTBAR_BLESS=1 cargo test -p scootbar --bin scootbar -- snapshots::tests::bar_shadow… snapshots::tests::bar_gradient…`

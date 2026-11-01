@@ -276,6 +276,12 @@ pub fn members(layout: &layout::Layout, placed: &[Placed]) -> Vec<Member> {
     members
 }
 
+/// What a scene's [`Shadow`](scootui::paint::Shadow) tables were prepared
+/// for: the style, scale, bar size, corner radius and edge. The style is
+/// part of the key (`Soft` and `Glow` pad the same but paint different
+/// offset/blur), not just whether a spec exists.
+type ShadowCacheKey = (ShadowStyle, Scale, (u32, u32), u32, Edge);
+
 /// One output's modules as last measured and laid out. Everything here is
 /// indexed by member (its place on this output), not by started module.
 #[derive(Debug, Default)]
@@ -319,10 +325,10 @@ pub struct Scene {
     /// The bar's drop shadow tables (device pixels), if it has one. Built
     /// outside any repaint via [`Shadow::prepare`] and read every frame it
     /// is drawn; `None` for `shadow = "none"` (nothing built or painted).
-    /// Rebuilt when the scale, radius or bar size changes, cached otherwise.
+    /// Rebuilt when the style, scale, radius or bar size changes, cached otherwise.
     shadow: Option<Shadow>,
-    /// What `shadow` was prepared for: scale, bar size and corner radius.
-    shadow_for: Option<(Scale, (u32, u32), u32, Edge)>,
+    /// What `shadow` was prepared for: style, scale, bar size and corner radius.
+    shadow_for: Option<ShadowCacheKey>,
 }
 
 impl Scene {
@@ -458,12 +464,20 @@ impl Scene {
         if radius != self.corners.radius() {
             self.corners = Corners::new(radius);
         }
-        // The shadow tables, rebuilt when the scale, bar size, radius or
-        // edge changes and cached otherwise: no per-frame allocation once
-        // warm. `shadow = "none"` builds nothing.
-        let shadow_key = style
-            .shadow_spec(edge)
-            .map(|_| (scale, (bar_size.width, bar_size.height), radius, edge));
+        // The shadow tables, rebuilt when the style, scale, bar size,
+        // radius or edge changes and cached otherwise: no per-frame
+        // allocation once warm. `shadow = "none"` builds nothing. The key
+        // holds the style itself (`Soft` and `Glow` pad the same but paint
+        // different offset/blur), not just whether a spec exists.
+        let shadow_key = style.shadow_spec(edge).map(|_| {
+            (
+                style.shadow,
+                scale,
+                (bar_size.width, bar_size.height),
+                radius,
+                edge,
+            )
+        });
         if shadow_key != self.shadow_for {
             self.shadow_for = shadow_key;
             self.shadow = style.shadow_spec(edge).map(|logical| {
