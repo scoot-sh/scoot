@@ -1,6 +1,6 @@
 pkgbase = scootbar
 	pkgdesc = Status bar for the scoot compositor
-	pkgver = 0.6.26
+	pkgver = 0.6.27
 	pkgrel = 1
 	url = https://github.com/scoot-sh/scoot
 	install = scootbar.install
@@ -17,7 +17,7 @@ pkgbase = scootbar
 	optdepends = systemd: run the bar as a user unit (scootbar.service)
 	optdepends = ttf-dejavu: sans font the bar finds on its own
 	options = !debug
-	source = scootbar-0.6.26.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v0.6.26.tar.gz
+	source = scootbar-0.6.27.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v0.6.27.tar.gz
 	sha256sums = SKIP
 
 pkgname = scootbar

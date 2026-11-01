@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.27](https://github.com/scoot-sh/scoot/compare/v0.6.26...v0.6.27) - 2026-11-01
+
+### scootui
+
+- performance: blend scaled composites row-first through a pooled scratch row ([#853](https://github.com/scoot-sh/scoot/pull/853))
+
 ## [0.6.26](https://github.com/scoot-sh/scoot/compare/v0.6.25...v0.6.26) - 2026-11-01
 
 ### scoot-look,scootctl
