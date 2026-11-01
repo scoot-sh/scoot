@@ -244,7 +244,11 @@ fn a_new_file_rebuilds_the_text() {
     let first = dir.path().join("first.ttf");
     let second = dir.path().join("second.ttf");
     std::fs::write(&first, scootui::testfont::build()).unwrap();
-    std::fs::write(&second, scootui::testfont::build_symbols_advance(['3'], 1200)).unwrap();
+    std::fs::write(
+        &second,
+        scootui::testfont::build_symbols_advance(['3'], 1200),
+    )
+    .unwrap();
     let old = Look {
         font_family: String::from("Same"),
         font_file: Some(first),
