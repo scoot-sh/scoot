@@ -195,6 +195,7 @@ The bar's slice of the [shell motion/depth epic](https://github.com/scoot-sh/sco
 - [Bar opacity pixman benchmark: the gate for translucent bars](resolved/bar-opacity-benchmark-done.md) (medium) — RESOLVED 2026-11-01: every budget passed, the five `[opacity] bar` pins rose to the examples' values
 - [Shadow and gradient fill tokens for the bar and its popups](scootbar-depth-tokens.md) (low): unblocked by the benchmark's pass
 - [Popups open with the notification-card entrance](scootbar-popup-entrance.md) (low): blocked on `scootbar-depth-tokens`
+- [Translucent bar: measure the compositor-side recomposite cost under animation](bar-translucent-compositor-cost.md) (low): from the #850 review; the bar-opacity benchmark covered the bar's own paint cost, not the compositor recomposite with moving pixels behind it
 
 ### Unscheduled (until someone asks)
 - [Hung spawned children block every other exec binding until the bar restarts](resolved/hung-spawn-blocks-binds-done.md) (low) — RESOLVED 2026-10-28: a refused spawn names the running commands (program, pid, age, oldest first); queue and `msg` kill declined
