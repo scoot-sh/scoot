@@ -237,6 +237,41 @@ fn a_new_family_leaves_a_given_font_file_alone() {
 }
 
 #[test]
+fn a_new_file_rebuilds_the_text() {
+    // Without `--font` the look's `font-file` is what draws, so a reload
+    // that changes only the file (same family) must rebuild the text.
+    let dir = tempfile::tempdir().expect("scratch");
+    let first = dir.path().join("first.ttf");
+    let second = dir.path().join("second.ttf");
+    std::fs::write(&first, scootui::testfont::build()).unwrap();
+    std::fs::write(
+        &second,
+        scootui::testfont::build_symbols_advance(['3'], 1200),
+    )
+    .unwrap();
+    let old = Look {
+        font_family: String::from("Same"),
+        font_file: Some(first),
+        ..Look::default()
+    };
+    let new = Look {
+        font_family: String::from("Same"),
+        font_file: Some(second),
+        ..Look::default()
+    };
+    let mut app = App::new(Config::default(), old);
+    let text = build_text(None, &app.look).expect("the first file loads");
+    app.text = Some(text);
+    assert_eq!(app.text.as_ref().unwrap().measure(None, "3", 50.0), 30);
+    app.retheme(new);
+    assert_eq!(
+        app.text.as_ref().unwrap().measure(None, "3", 50.0),
+        60,
+        "a file-only change rebuilds the text"
+    );
+}
+
+#[test]
 fn the_default_look_has_no_shadow_and_the_configured_margins() {
     let app = App::new(Config::default(), Look::default());
     assert!(app.shadow.is_none());

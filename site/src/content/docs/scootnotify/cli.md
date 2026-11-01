@@ -14,7 +14,7 @@ placement, timeouts and the look layer are in
 scootnotify daemon                          # own the name and serve until killed
 scootnotify daemon --check                  # validate the config, exit 0 or 1
 scootnotify daemon --config PATH            # read PATH instead of the default
-scootnotify daemon --font PATH              # draw with PATH instead of the look's font or the first well-known one
+scootnotify daemon --font PATH              # draw with PATH instead of the look's font-file, its font, or the first well-known one
 scootnotify msg list [--json]               # live notifications: lines, or JSON
 scootnotify msg history [--json]            # the history ring: lines, or JSON
 scootnotify msg dnd [on|off|toggle|status]  # read or steer do-not-disturb
