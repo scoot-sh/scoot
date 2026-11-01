@@ -1039,6 +1039,9 @@ impl State {
         layout.height = tip.dims.1;
         tip.layout = layout;
         tip.round = round;
+        // The new style's background (a colors-only reload repaints the
+        // tooltip in it); tooltips stay solid and opaque, without a shadow.
+        tip.fill = (style.theme.background, style.theme.background);
         tip.dirty = true;
         if tip.round.rounded() {
             let radius = crate::region::effective_radius(
