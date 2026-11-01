@@ -173,6 +173,8 @@ fn a_warm_tick_allocates_nothing() {
         radius: 0,
         popup_radius: 0,
         opacity: u8::MAX,
+        shadow: scootui::effects::ShadowStyle::None,
+        fill: scootui::effects::FillStyle::Solid,
     };
     let scale = Scale::Integer(1);
     let frame = Frame {

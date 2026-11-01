@@ -34,6 +34,10 @@ const NAMES: &[&str] = &[
     "bar-separated-groups-1x",
     "bar-hover-1x",
     "bar-hover-1.5x",
+    "bar-shadow-soft-1x",
+    "bar-shadow-deep-1x",
+    "bar-shadow-glow-1x",
+    "bar-gradient-1x",
     "workspaces-pill-1x",
     "workspaces-circle-1x",
     "workspaces-circle-two-digits-1x",
@@ -141,6 +145,8 @@ struct Look {
     background: Color,
     radius: u32,
     opacity: u8,
+    shadow: scootui::effects::ShadowStyle,
+    fill: scootui::effects::FillStyle,
     /// The separator's width; with a nonzero one the scene has all three
     /// modules on the left, so there are gaps to draw it in.
     separator: u32,
@@ -160,6 +166,8 @@ impl Default for Look {
             background: gray(0),
             radius: 0,
             opacity: u8::MAX,
+            shadow: scootui::effects::ShadowStyle::None,
+            fill: scootui::effects::FillStyle::Solid,
             separator: 0,
             grouped: false,
             margin: 0,
@@ -211,12 +219,22 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
         radius: look.radius,
         popup_radius: 0,
         opacity: look.opacity,
+        shadow: look.shadow,
+        fill: look.fill,
+    };
+    // A shadowed bar's surface reserves the window-facing room: the bar
+    // plus its shadow, while the exclusive zone stays the bar's height.
+    // The snapshot draws the whole surface (bar and shadow), top edge.
+    let surf_h = style.surface_height(height, crate::bar::Edge::Top);
+    let surf_size = Size {
+        width,
+        height: surf_h,
     };
     let frame = Frame {
-        size: Size { width, height },
+        size: surf_size,
         scale,
     };
-    let (device_width, device_height) = scale.buffer(frame.size).unwrap();
+    let (device_width, device_height) = scale.buffer(surf_size).unwrap();
     let mut text = Text::new(FontArc::new(
         FontVec::try_from_vec(testfont::build()).unwrap(),
     ));
@@ -241,6 +259,7 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
         })
         .collect();
     let mut scene = Scene::with_members(&members);
+    scene.edge = crate::bar::Edge::Top;
     scene.update(
         &placed,
         &OutputView { name: None },
@@ -330,6 +349,8 @@ fn bar_rounded_translucent_at_1_5x() {
     let look = Look {
         radius: 6,
         opacity: 128,
+        shadow: scootui::effects::ShadowStyle::None,
+        fill: scootui::effects::FillStyle::Solid,
         ..Look::default()
     };
     let (pixels, w, h) = draw(160, 20, Scale::Fractional(180), look);
@@ -385,6 +406,8 @@ fn bar_translucent_at_1x() {
     let look = Look {
         background: gray(0x80),
         opacity: 128,
+        shadow: scootui::effects::ShadowStyle::None,
+        fill: scootui::effects::FillStyle::Solid,
         ..Look::default()
     };
     let (pixels, w, h) = draw(160, 20, Scale::Integer(1), look);
@@ -423,6 +446,71 @@ fn bar_hovered_at_1_5x() {
     check(
         "bar-hover-1.5x",
         "the hovered bar of bar-hover-1x at scale 1.5 (fractional, 240x30 device pixels)",
+        &Image::from_xrgb(&pixels, w, h, true),
+    );
+}
+
+/// A soft shadow under a square bar: the surface reserves the
+/// window-facing room (below a top bar), the exclusive zone stays the
+/// bar's height, and the input region covers the bar only.
+#[test]
+fn bar_shadow_soft_at_1x() {
+    let look = Look {
+        shadow: scootui::effects::ShadowStyle::Soft,
+        ..Look::default()
+    };
+    let (pixels, w, h) = draw(160, 20, Scale::Integer(1), look);
+    check(
+        "bar-shadow-soft-1x",
+        "a 160x20 bar at scale 1 with a soft shadow below it (16 device pixels of room)",
+        &Image::from_xrgb(&pixels, w, h, true),
+    );
+}
+
+/// A deep shadow: wider and heavier than soft, same room rule (below only,
+/// sides and anchored edge clip).
+#[test]
+fn bar_shadow_deep_at_1x() {
+    let look = Look {
+        shadow: scootui::effects::ShadowStyle::Deep,
+        ..Look::default()
+    };
+    let (pixels, w, h) = draw(160, 20, Scale::Integer(1), look);
+    check(
+        "bar-shadow-deep-1x",
+        "a 160x20 bar at scale 1 with a deep shadow below it",
+        &Image::from_xrgb(&pixels, w, h, true),
+    );
+}
+
+/// A glow: zero offset, tinted with the accent, same room on the
+/// window-facing side.
+#[test]
+fn bar_shadow_glow_at_1x() {
+    let look = Look {
+        shadow: scootui::effects::ShadowStyle::Glow,
+        ..Look::default()
+    };
+    let (pixels, w, h) = draw(160, 20, Scale::Integer(1), look);
+    check(
+        "bar-shadow-glow-1x",
+        "a 160x20 bar at scale 1 with an accent glow below it",
+        &Image::from_xrgb(&pixels, w, h, true),
+    );
+}
+
+/// A vertical gradient fill with the light at the top, solid when the
+/// stops are equal (which the other goldens pin).
+#[test]
+fn bar_gradient_at_1x() {
+    let look = Look {
+        fill: scootui::effects::FillStyle::Gradient,
+        ..Look::default()
+    };
+    let (pixels, w, h) = draw(160, 20, Scale::Integer(1), look);
+    check(
+        "bar-gradient-1x",
+        "a 160x20 bar at scale 1 with a vertical gradient fill, light at the top",
         &Image::from_xrgb(&pixels, w, h, true),
     );
 }

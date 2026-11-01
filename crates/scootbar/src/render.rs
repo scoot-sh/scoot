@@ -23,6 +23,7 @@
 //! records differ once there are two buffers: a buffer written two draws
 //! ago has missed one draw's changes, and gets them now.
 
+use crate::bar::Edge;
 use crate::density::{DENOMINATOR, Scale, scaled_length};
 use crate::layout::{self, Section};
 use crate::modules::{CustomDraw, Measure, OutputView, Placed, View};
@@ -30,6 +31,8 @@ use crate::outputs::{Frame, Size};
 use crate::paint::{Canvas, Corners, Span};
 use crate::text::Text;
 use crate::theme::Theme;
+use scootui::effects::{FillStyle, ShadowStyle};
+use scootui::paint::{Pad, Shadow, ShadowSpec};
 
 #[cfg(test)]
 mod tests;
@@ -57,35 +60,92 @@ pub struct Style {
     pub popup_radius: u32,
     /// The background's alpha, 255 (opaque) down to 0.
     pub opacity: u8,
+    /// The depth under the bar and its popups (`bar.shadow`): `none` is the
+    /// default and costs nothing (no tables built, nothing painted).
+    pub shadow: ShadowStyle,
+    /// How the bar and popup fills are laid down (`bar.fill`): solid or a
+    /// vertical gradient with the light at the top.
+    pub fill: FillStyle,
 }
 
 impl Style {
     /// Whether the buffer needs an alpha channel: a translucent
-    /// background, or corners with nothing behind them. Otherwise the bar
-    /// is `XRGB8888`, as it was before either option existed.
+    /// background, rounded corners, or a shadow (which bleeds past the
+    /// bar's own rect). Otherwise the bar is `XRGB8888`, as it was before
+    /// any of these existed.
     pub fn translucent(&self) -> bool {
-        self.opacity < u8::MAX || self.radius > 0
+        self.opacity < u8::MAX || self.radius > 0 || self.shadow != ShadowStyle::None
     }
 
     /// How far in from each edge the surface is opaque, in logical pixels,
     /// for the opaque region: `Some(0)` all of it, `Some(n)` all but the
     /// corner squares of side `n`, `None` none (a translucent background
-    /// is blended by the compositor). One more than the radius: the
-    /// corner's antialiased edge, at a fractional scale, can round half a
-    /// device pixel past it.
+    /// or a shadow is blended by the compositor). One more than the radius:
+    /// the corner's antialiased edge, at a fractional scale, can round half
+    /// a device pixel past it. A shadowed bar is never opaque: its shadow
+    /// reaches past the bar's own rect.
     pub fn opaque_inset(&self) -> Option<u32> {
-        (self.opacity == u8::MAX).then(|| match self.radius {
+        if self.shadow != ShadowStyle::None || self.opacity != u8::MAX {
+            return None;
+        }
+        Some(match self.radius {
             0 => 0,
             radius => radius.saturating_add(1),
         })
     }
 
-    /// The corner radius in device pixels at `scale`, for a bar `extent`
-    /// device pixels: cut back to what the bar can hold.
-    fn corners(&self, scale: Scale, extent: Size) -> u32 {
-        device(self.radius, scale)
-            .min(extent.width / 2)
-            .min(extent.height / 2)
+    /// The bar fill's top and bottom colors over the background: the light
+    /// at the top whatever the polarity, solid when `fill` is solid.
+    pub fn fill_stops(&self) -> (scootui::color::Color, scootui::color::Color) {
+        self.fill.stops(self.theme.background)
+    }
+
+    /// The shadow geometry for `edge`: `None` for `shadow = "none"`
+    /// (nothing built or painted). A bottom bar mirrors a top bar's offset
+    /// so its shadow falls upward onto the windows below the bar's
+    /// opposite side: `soft`'s `(0, 4)` down becomes `(0, -4)` up, `glow`
+    /// (zero offset) is the same either way.
+    pub fn shadow_spec(&self, edge: Edge) -> Option<ShadowSpec> {
+        let mut spec = self.shadow.spec()?;
+        if edge == Edge::Bottom {
+            spec.offset_y = -spec.offset_y;
+        }
+        Some(spec)
+    }
+
+    /// Room the bar's shadow needs around its rect, in logical pixels, for
+    /// `edge`. The surface reserves only the window-facing side (bottom for
+    /// a top bar, top for a bottom bar); the anchored edge and the sides
+    /// clip, so no shadow ever widens the surface sideways or pushes past
+    /// the screen edge. The exclusive zone stays the bar's height either
+    /// way, so windows never move for a shadow.
+    pub fn shadow_pad(&self, edge: Edge) -> Pad {
+        let Some(spec) = self.shadow_spec(edge) else {
+            return Pad::ZERO;
+        };
+        let full = Shadow::new(spec).pad();
+        match edge {
+            Edge::Top => Pad {
+                top: 0,
+                right: 0,
+                bottom: full.bottom,
+                left: 0,
+            },
+            Edge::Bottom => Pad {
+                top: full.top,
+                right: 0,
+                bottom: 0,
+                left: 0,
+            },
+        }
+    }
+
+    /// The surface height for a bar `height` logical pixels high on `edge`:
+    /// the bar plus the window-facing shadow room. Width is unchanged (side
+    /// shadows clip). The exclusive zone stays `height`.
+    pub fn surface_height(&self, height: u32, edge: Edge) -> u32 {
+        let pad = self.shadow_pad(edge);
+        height.saturating_add(pad.top).saturating_add(pad.bottom)
     }
 }
 
@@ -98,6 +158,60 @@ pub(crate) fn device(length: u32, scale: Scale) -> u32 {
     match scale {
         Scale::Integer(factor) => length.saturating_mul(factor.max(1)),
         Scale::Fractional(v120) => scaled_length(length, v120).unwrap_or(u32::MAX),
+    }
+}
+
+/// Room a shadow spec needs around its shape, without building tables:
+/// the same arithmetic [`Shadow::pad`] uses.
+fn pad_of(spec: ShadowSpec) -> Pad {
+    let (blur, ox, oy) = (
+        i64::from(spec.blur),
+        i64::from(spec.offset_x),
+        i64::from(spec.offset_y),
+    );
+    let side = |value: i64| value.max(0) as u32;
+    Pad {
+        top: side(blur - oy),
+        right: side(blur + ox),
+        bottom: side(blur + oy),
+        left: side(blur - ox),
+    }
+}
+
+/// A shadow's logical spec at `scale`: the blur and offsets scale, the
+/// strength does not. Mirrors `scootnotify`'s `Dev::shadow`.
+fn dev_shadow(spec: ShadowSpec, scale: Scale) -> ShadowSpec {
+    let offset =
+        |logical: i32| i32::try_from(scale.to_device(i64::from(logical))).unwrap_or(logical);
+    ShadowSpec {
+        offset_x: offset(spec.offset_x),
+        offset_y: offset(spec.offset_y),
+        blur: device(spec.blur, scale),
+        alpha: spec.alpha,
+    }
+}
+
+/// The shadow's device pad for `edge` at `scale`: the window-facing room
+/// only, as [`Style::shadow_pad`] clips the rest. Computed arithmetically,
+/// so no tables are built on a repaint path.
+fn dev_pad(style: &Style, scale: Scale, edge: Edge) -> Pad {
+    let Some(logical) = style.shadow_spec(edge) else {
+        return Pad::ZERO;
+    };
+    let full = pad_of(dev_shadow(logical, scale));
+    match edge {
+        Edge::Top => Pad {
+            top: 0,
+            right: 0,
+            bottom: full.bottom,
+            left: 0,
+        },
+        Edge::Bottom => Pad {
+            top: full.top,
+            right: 0,
+            bottom: 0,
+            left: 0,
+        },
     }
 }
 
@@ -198,6 +312,17 @@ pub struct Scene {
     measured: Option<(Scale, u32, u32)>,
     /// The corners' coverage, rebuilt only when their radius changes.
     corners: Corners,
+    /// The bar's anchored edge: the shadow falls window-ward from it
+    /// (below a top bar, above a bottom bar). Set when the output settles;
+    /// tests keep the default top.
+    pub edge: Edge,
+    /// The bar's drop shadow tables (device pixels), if it has one. Built
+    /// outside any repaint via [`Shadow::prepare`] and read every frame it
+    /// is drawn; `None` for `shadow = "none"` (nothing built or painted).
+    /// Rebuilt when the scale, radius or bar size changes, cached otherwise.
+    shadow: Option<Shadow>,
+    /// What `shadow` was prepared for: scale, bar size and corner radius.
+    shadow_for: Option<(Scale, (u32, u32), u32, Edge)>,
 }
 
 impl Scene {
@@ -259,6 +384,9 @@ impl Scene {
             layout: 0,
             measured: None,
             corners: Corners::NONE,
+            edge: Edge::Top,
+            shadow: None,
+            shadow_for: None,
         }
     }
 
@@ -297,7 +425,9 @@ impl Scene {
     }
 
     /// Brings the views, widths and spans up to date for a bar `extent`
-    /// device pixels big at `scale`.
+    /// device pixels big at `scale`. `extent` is the whole surface (the bar
+    /// plus its window-facing shadow room); the bar's own rect is derived
+    /// from it via [`Style::bar_rect`], using [`Scene::edge`].
     pub fn update(
         &mut self,
         placed: &[Placed],
@@ -307,11 +437,43 @@ impl Scene {
         scale: Scale,
         extent: Size,
     ) {
-        let width = extent.width;
-        let radius = style.corners(scale, extent);
+        let edge = self.edge;
+        // The bar's own size inside the surface: the shadow owns the
+        // window-facing strip, the bar the rest. Sides and the anchored
+        // edge clip (no room), so width is the surface's own.
+        let pad = dev_pad(style, scale, edge);
+        let bar_height = extent
+            .height
+            .saturating_sub(pad.top)
+            .saturating_sub(pad.bottom);
+        let bar_size = Size {
+            width: extent.width,
+            height: bar_height,
+        };
+        // Corners cut back to what the bar holds, not the whole surface:
+        // a shadowed bar's radius never reaches into its shadow.
+        let radius = device(style.radius, scale)
+            .min(bar_size.width / 2)
+            .min(bar_size.height / 2);
         if radius != self.corners.radius() {
             self.corners = Corners::new(radius);
         }
+        // The shadow tables, rebuilt when the scale, bar size, radius or
+        // edge changes and cached otherwise: no per-frame allocation once
+        // warm. `shadow = "none"` builds nothing.
+        let shadow_key = style
+            .shadow_spec(edge)
+            .map(|_| (scale, (bar_size.width, bar_size.height), radius, edge));
+        if shadow_key != self.shadow_for {
+            self.shadow_for = shadow_key;
+            self.shadow = style.shadow_spec(edge).map(|logical| {
+                let dev = dev_shadow(logical, scale);
+                let mut shadow = Shadow::new(dev);
+                shadow.prepare(radius, [(bar_size.width, bar_size.height)]);
+                shadow
+            });
+        }
+        let width = extent.width;
         let all = self.measured != Some((scale, width, style.font_size));
         self.measured = Some((scale, width, style.font_size));
         let em = em(style.font_size, scale);
@@ -351,7 +513,7 @@ impl Scene {
                         text,
                         em,
                         scale,
-                        height: extent.height,
+                        height: bar_size.height,
                     }))
                 }
                 // An icon-only module (the tray: its view holds no text,
@@ -366,7 +528,7 @@ impl Scene {
                         text,
                         em,
                         scale,
-                        height: extent.height,
+                        height: bar_size.height,
                     });
                     if extra == 0 {
                         0
@@ -387,7 +549,7 @@ impl Scene {
         // Clear the corners: the first module's padding starts at the
         // radius (its pill, which reaches half a padding out, stays past
         // it), so nothing is drawn in a corner square.
-        let edge = radius.saturating_sub(padding / 4);
+        let clear = radius.saturating_sub(padding / 4);
         for (device_margin, &margin) in self.margins_device.iter_mut().zip(&self.margins) {
             *device_margin = device(margin, scale);
         }
@@ -396,7 +558,7 @@ impl Scene {
             &self.widths,
             &self.margins_device,
             device(style.spacing, scale),
-            edge,
+            clear,
             width,
             &mut self.next,
         );
@@ -481,7 +643,10 @@ impl Record {
 }
 
 /// Paints `scene` at `frame` into `canvas`, whose pixels `record` says it
-/// shows, and updates `record`. Only what differs is painted.
+/// shows, and updates `record`. Only what differs is painted. The shadow
+/// falls window-ward from [`Scene::edge`] (below a top bar, above a bottom
+/// bar), the input region covers the bar's own rect and never the shadow,
+/// and the exclusive zone stays the bar's height either way.
 #[allow(clippy::too_many_arguments)]
 pub fn paint(
     canvas: &mut Canvas<'_>,
@@ -493,20 +658,61 @@ pub fn paint(
     frame: Frame,
     output: &OutputView<'_>,
 ) {
-    let whole = record.at != Some((frame, scene.layout));
+    let edge = scene.edge;
+    // A gradient bar repaints whole on any module change: a partial span's
+    // rounded slice would need outer-only corners, so the whole fill goes
+    // instead (still no allocation, just more pixels on clock ticks).
+    let any_differs = (0..scene.views.len()).any(|i| record.differs(scene, i));
+    let mut whole = record.at != Some((frame, scene.layout));
+    if style.fill != FillStyle::Solid && !whole && any_differs {
+        whole = true;
+    }
+    // The bar's own rect inside the surface (device pixels): the shadow
+    // owns the window-facing strip, the bar the rest.
+    let pad = dev_pad(style, frame.scale, edge);
+    let bar_y = match edge {
+        Edge::Top => 0,
+        Edge::Bottom => pad.top.min(canvas.height()),
+    };
+    let bar_h = canvas
+        .height()
+        .saturating_sub(pad.top)
+        .saturating_sub(pad.bottom)
+        .max(1);
+    let bar_rect = scootui::region::Rect {
+        x: 0,
+        y: bar_y,
+        width: canvas.width(),
+        height: bar_h,
+    };
+    let radius = device(style.radius, frame.scale)
+        .min(bar_rect.width / 2)
+        .min(bar_rect.height / 2);
+    let (top_fill, bottom_fill) = style.fill_stops();
     if whole {
-        canvas.fill_shaped(
-            Span {
-                x: 0,
-                width: canvas.width(),
-            },
-            style.theme.background,
-            style.opacity,
-            &scene.corners,
-        );
+        // A shadowed or rounded bar needs an alpha channel: clear to
+        // transparent first, so the corners and the shadow's falloff blend
+        // correctly. A square opaque bar overwrites every pixel below.
+        if style.shadow != ShadowStyle::None || style.translucent() {
+            canvas.clear();
+        }
+        if let Some(shadow) = scene.shadow.as_ref() {
+            let tint = match style.shadow {
+                ShadowStyle::Glow => style.theme.accent,
+                _ => scootui::color::Color { r: 0, g: 0, b: 0 },
+            };
+            shadow.paint(canvas, bar_rect, radius, tint);
+        }
+        // The bar's own fill over its rect: solid or gradient, opaque or
+        // translucent. `fill_rounded_gradient` with equal stops is the
+        // solid path and writes the bytes the plain fill always wrote.
+        canvas.fill_rounded_gradient(bar_rect, radius, top_fill, bottom_fill, style.opacity);
     }
     if whole {
-        separators(canvas, scene, style, frame.scale);
+        {
+            let mut bar_view = canvas.window(bar_y, bar_h);
+            separators(&mut bar_view, scene, style, frame.scale);
+        }
     }
     let Some(text) = text else {
         // No font: no module has any width, so nothing but the background.
@@ -515,18 +721,30 @@ pub fn paint(
     };
     let em = em(style.font_size, frame.scale);
     let padding = device(style.padding, frame.scale);
-    let baseline = text.metrics(em).baseline(canvas.height());
+    // Text centers in the bar, not the whole surface: a shadowed bar's
+    // shadow never moves its modules. `baseline()` returns the row within
+    // a `bar_h`-tall surface, so add the bar's offset for the full canvas;
+    // module draws go into the bar view (whose y=0 is the bar's top), so
+    // they use the bar-local baseline.
+    let baseline_full = text.metrics(em).baseline(bar_h) + bar_y as i64;
+    let baseline_bar = baseline_full - bar_y as i64;
     for (index, view) in scene.views.iter().enumerate() {
         let span = scene.spans[index];
         if !whole && !record.differs(scene, index) {
             continue;
         }
         if !whole {
-            canvas.fill_shaped(span, style.theme.background, style.opacity, &scene.corners);
+            // Solid-only partial: the module's own background slice of the
+            // bar, rounded like the whole bar, never touching the shadow.
+            // Gradient bars never reach here (they force `whole` above).
+            let mut bar_view = canvas.window(bar_y, bar_h);
+            bar_view.fill_shaped(span, style.theme.background, style.opacity, &scene.corners);
         }
         if span.width == 0 {
             continue;
         }
+        // Modules draw into the bar's own rect only, never the shadow.
+        let mut bar_view = canvas.window(bar_y, bar_h);
         // The modules with their own look draw themselves (the
         // workspaces pill, a window title longer than its span); the rest
         // draw as plain text.
@@ -535,11 +753,11 @@ pub fn paint(
             custom = placed.module.custom_draw(&mut CustomDraw {
                 output: *output,
                 view,
-                canvas: &mut *canvas,
+                canvas: &mut bar_view,
                 text: &mut *text,
                 span,
                 em,
-                baseline,
+                baseline: baseline_bar,
                 padding,
                 hovered: scene.hover == Some(index),
                 scale: frame.scale,
@@ -554,21 +772,22 @@ pub fn paint(
             };
             let mut x = i64::from(span.x) + i64::from(padding);
             if let Some(art) = view.art() {
-                text.draw_art(canvas, art, em, x, color, span);
+                text.draw_art(&mut bar_view, art, em, x, color, span);
                 x += i64::from(art_extent(text, view, em));
             }
             text.draw(
-                canvas,
+                &mut bar_view,
                 view.icon(),
                 view.text(),
                 em,
                 x,
-                baseline,
+                baseline_bar,
                 color,
                 span,
             );
         }
     }
+    let _ = baseline_full;
     record.set(scene, frame);
 }
 

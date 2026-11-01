@@ -519,13 +519,17 @@ section's list (marks included).
 
 
 
-## Shape and opacity
+## Shape, opacity and depth
 
 `[bar] radius` rounds the bar's four corners, in logical pixels: 0 (the
 default) is square, and the most is half the height (a pill), which the file
 enforces (`bar.radius` names the limit when it is refused). `[bar] opacity`
 is the background's alpha, 1 (the default) opaque down to 0 transparent;
-text stays fully opaque over it. There is no blur, gradient or shadow.
+text stays fully opaque over it. `[bar] shadow` (`none`, `soft`, `deep` or
+`glow`, default `none`) lifts the bar and its popups off the windows behind
+them, reusing the primitives the notification cards and the launcher panel
+proved. `[bar] fill` (`solid` or `gradient`, default `solid`) lays a
+vertical gradient with the light at the top over the background.
 
 ```toml
 [bar]
@@ -533,16 +537,45 @@ height = 28
 margin = "8,8"     # match scoot's [layout] gap: see Margins
 radius = 10
 opacity = 0.9
+shadow = "soft"
+fill = "gradient"
 ```
 
-- **A rounded or translucent bar is an `ARGB8888` buffer** (premultiplied);
-  a square, opaque bar stays `XRGB8888`. Only the surface is the bar, never a bigger transparent one: the margin
+- **A rounded, translucent or shadowed bar is an `ARGB8888` buffer** (premultiplied);
+  a square, opaque, shadowless bar stays `XRGB8888`. The surface is the bar
+  plus the window-facing shadow room (below a top bar, above a bottom bar);
+  the anchored edge and the sides clip, so width never grows. The margin
   is still the protocol's, and the corner pixels are the only transparent
-  ones.
-- **Opaque region**: an opaque bar tells the compositor which pixels are
+  ones without a shadow.
+- **Opaque region**: an opaque, shadowless bar tells the compositor which pixels are
   opaque, so it can skip blending under them (all of a square bar; all but
-  the four corner squares of a rounded one). A translucent bar declares
-  none: the compositor blends all of it, which is the cost of the option.
+  the four corner squares of a rounded one). A translucent or shadowed bar declares
+  none: the compositor blends all of it, which is the cost of the option (a
+  shadow reaches past the bar's own rect, so no pixel is opaque).
+- **The shadow never moves a client's window**: the surface reserves the
+  window-facing room (below a top bar, above a bottom bar), while the
+  exclusive zone stays the bar's own height. Windows start at height plus
+  margin, as before; the shadow overlaps them instead of pushing them.
+  A bottom bar mirrors a top bar's offset so its shadow falls upward.
+- **The input region is the bar's own rounded shape, never its shadow**:
+  the bar's rect at its offset (top at 0, bottom after the top pad),
+  cut by the radius, so clicks in the shadow or in a cut corner reach what
+  is behind the bar instead of an invisible bar. A square shadowless bar
+  keeps the default (the whole surface, which is the bar); a square
+  shadowed bar gets its own rect explicitly, so the shadow stays
+  click-through.
+- **Popups reserve room on every side**: a click popup's surface is its
+  layout plus the shadow's pad on all four sides, and the popup sits at the
+  pad offset. The positioner is told the whole surface, so the compositor
+  places it with its shadow; the input region is the popup's own rounded
+  rect at its offset, and a shadowed, rounded, translucent or gradient
+  popup blends (an `ARGB8888` buffer). Tooltips stay as they were (no
+  shadow, solid, opaque).
+- **Scales rebuild, then cache**: shadow tables are per device-pixel size
+  (`Shadow::prepare` outside any repaint, `shadow = "none"` builds
+  nothing). They rebuild when the scale, radius, bar size or edge changes
+  and cache otherwise; warm frames allocate nothing. The bench covers 1x
+  and 2x (see below).
 - **The radius is cut back to fit**: `--height` below twice the file's
   `radius` (the flag replaces the file's height), or a compositor giving
   the bar less height than asked, draws the corners as large as the bar

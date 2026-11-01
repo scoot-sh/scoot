@@ -357,6 +357,93 @@ fn a_radius_and_an_opacity_default_to_square_and_opaque() {
 }
 
 #[test]
+fn shadow_and_fill_default_to_none_and_solid() {
+    use scootui::effects::{FillStyle, ShadowStyle};
+    let config = read("").unwrap();
+    assert_eq!(config.shadow, ShadowStyle::None);
+    assert_eq!(config.fill, FillStyle::Solid);
+    let style = config.style();
+    assert_eq!(style.shadow, ShadowStyle::None);
+    assert_eq!(style.fill, FillStyle::Solid);
+    // `shadow = "none"` builds nothing: the style reports no translucency
+    // from depth alone, and the opaque region stays whole.
+    assert_eq!(style.opaque_inset(), Some(0));
+    let config = read("[bar]\nshadow = \"soft\"\nfill = \"gradient\"\n").unwrap();
+    assert_eq!(config.shadow, ShadowStyle::Soft);
+    assert_eq!(config.fill, FillStyle::Gradient);
+    let style = config.style();
+    assert_eq!(style.shadow, ShadowStyle::Soft);
+    assert_eq!(style.fill, FillStyle::Gradient);
+    assert!(style.translucent(), "a shadow needs an alpha channel");
+    assert_eq!(
+        style.opaque_inset(),
+        None,
+        "a shadowed bar blends everywhere"
+    );
+    for (text, shadow) in [
+        ("soft", ShadowStyle::Soft),
+        ("deep", ShadowStyle::Deep),
+        ("glow", ShadowStyle::Glow),
+        ("none", ShadowStyle::None),
+    ] {
+        let config = read(&format!("[bar]\nshadow = \"{text}\"\n")).unwrap();
+        assert_eq!(config.shadow, shadow, "{text}");
+        assert_eq!(config.fill, FillStyle::Solid, "{text}");
+    }
+    let config = read("[bar]\nfill = \"gradient\"\n").unwrap();
+    assert_eq!(config.fill, FillStyle::Gradient);
+    let config = read("[bar]\nfill = \"solid\"\n").unwrap();
+    assert_eq!(config.fill, FillStyle::Solid);
+}
+
+#[test]
+fn a_bad_shadow_or_fill_is_refused_naming_its_key() {
+    for (text, key) in [
+        ("[bar]\nshadow = \"huge\"\n", "bar.shadow"),
+        ("[bar]\nshadow = \"SOFT\"\n", "bar.shadow"),
+        ("[bar]\nshadow = 1\n", "bar.shadow"),
+        ("[bar]\nshadow = true\n", "bar.shadow"),
+        ("[bar]\nfill = \"rainbow\"\n", "bar.fill"),
+        ("[bar]\nfill = \"\"\n", "bar.fill"),
+        ("[bar]\nfill = 1\n", "bar.fill"),
+        ("[bar]\nfill = true\n", "bar.fill"),
+        ("[effects]\nshadow = \"huge\"\n", "bar.shadow"),
+        ("[effects]\nfill = \"rainbow\"\n", "bar.fill"),
+        ("[effects]\nshadow = 1\n", "bar.shadow"),
+        ("[effects]\nmotion = \"spring\"\n", "effects.motion"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(
+            error.contains(key),
+            "{text} refused without naming {key}: {error}"
+        );
+    }
+}
+
+#[test]
+fn effects_wins_over_bar_and_shares_the_allowlist() {
+    use scootui::effects::{FillStyle, ShadowStyle};
+    // The user's own `[effects]` table wins per key over `[bar]` above and
+    // over the look layer, through the look's own allowlist (never a copy):
+    // unknown `[effects]` keys refuse by name, and refused values name the
+    // dotted look key.
+    let config = read("[bar]\nshadow = \"soft\"\n[effects]\nshadow = \"deep\"\n").unwrap();
+    assert_eq!(config.shadow, ShadowStyle::Deep);
+    let config = read("[bar]\nfill = \"solid\"\n[effects]\nfill = \"gradient\"\n").unwrap();
+    assert_eq!(config.fill, FillStyle::Gradient);
+    // Unknown or refused tokens behave like today: reported and ignored?
+    // No — the file refuses loudly (the layer reports and ignores); both
+    // name the key.
+    for (text, key) in [
+        ("[effects]\nfont-size = 40\n", "effects.font-size"),
+        ("[effects]\n\"card.mark\" = \"dot\"\n", "effects.card.mark"),
+    ] {
+        let error = read(text).unwrap_err().to_string();
+        assert!(error.contains(key), "{text}: {error}");
+    }
+}
+
+#[test]
 fn a_radius_is_at_most_half_the_height() {
     // The default height is 28: 14 is a pill, 15 is refused.
     assert_eq!(read("[bar]\nradius = 14\n").unwrap().radius, 14);

@@ -359,15 +359,43 @@ impl Canvas {
             set_opaque_region(globals, qh, surface, opaque);
             layer.opaque = Some(opaque);
         }
-        // The input region is the rounded shape (logical pixels, so the
-        // scale is not part of its key): only when the size or the
-        // effective radius changes, and never for a square bar, which
-        // keeps the default (the whole surface).
-        let round = region::effective_radius(style.radius, frame.size.width, frame.size.height);
-        let input = (frame.size, round);
+        // The input region is the bar's own rounded shape (logical pixels,
+        // so the scale is not part of its key): the bar's rect inside the
+        // surface, never its shadow. Only when the size, offset or
+        // effective radius changes, and never for a square shadowless bar,
+        // which keeps the default (the whole surface, which is the bar).
+        let pad = style.shadow_pad(scene.edge);
+        let bar_y = match scene.edge {
+            crate::bar::Edge::Top => 0,
+            crate::bar::Edge::Bottom => pad.top.min(frame.size.height),
+        };
+        let bar_h = frame
+            .size
+            .height
+            .saturating_sub(pad.top)
+            .saturating_sub(pad.bottom)
+            .max(1);
+        let round = region::effective_radius(style.radius, frame.size.width, bar_h);
+        let has_shadow = style.shadow != scootui::effects::ShadowStyle::None;
+        let input = (frame.size, bar_y, bar_h, round);
         if layer.input != Some(input) {
-            if round > 0 || layer.input.is_some_and(|(_, was)| was > 0) {
-                set_input_region(globals, qh, surface, input);
+            let needs_region = round > 0 || has_shadow;
+            let was = layer
+                .input
+                .is_some_and(|(size, y, h, r)| r > 0 || size.height != h || y != 0);
+            // Send when the shape needs an explicit region, or when it
+            // stops needing one (back to the default whole surface).
+            if needs_region || was {
+                set_input_region_bar(
+                    globals,
+                    qh,
+                    surface,
+                    frame.size.width,
+                    bar_y,
+                    bar_h,
+                    round,
+                    has_shadow,
+                );
             }
             layer.input = Some(input);
         }
@@ -435,9 +463,12 @@ pub(super) fn set_opaque_region(
     region.destroy();
 }
 
-/// `wl_surface.set_input_region` for a surface of `size` (logical) whose
-/// corners are cut by `radius` ([`region::input_rects`]): the bar's rounded
-/// shape, or (`radius` 0) the default, the whole surface.
+/// `wl_surface.set_input_region` for a tooltip's surface of `size`
+/// (logical) whose corners are cut by `radius` ([`region::input_rects`]).
+/// Only tooltips use this now (the bar uses
+/// [`set_input_region_bar`]); tooltips have no shadow, so the whole
+/// surface is the popup.
+#[cfg(feature = "popup")]
 pub(super) fn set_input_region(
     globals: &Globals,
     qh: &QueueHandle<State>,
@@ -455,6 +486,55 @@ pub(super) fn set_input_region(
         region.add(
             logical(rect.x),
             logical(rect.y),
+            logical(rect.width),
+            logical(rect.height),
+        );
+    }
+    surface.set_input_region(Some(&region));
+    region.destroy();
+}
+
+/// `wl_surface.set_input_region` for the bar's own rect inside a shadowed
+/// surface: `(bar_width, bar_y, bar_height)` in surface-local logical
+/// pixels, corners cut by `radius`. The shadow never takes input: clicks in
+/// it fall through to the windows below, the way a tooltip's empty region
+/// falls through to the bar. A square shadowless bar keeps the default
+/// (the whole surface); a square shadowed bar gets its own rect explicitly,
+/// so the shadow stays click-through.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn set_input_region_bar(
+    globals: &Globals,
+    qh: &QueueHandle<State>,
+    surface: &WlSurface,
+    bar_width: u32,
+    bar_y: u32,
+    bar_height: u32,
+    radius: u32,
+    has_shadow: bool,
+) {
+    if radius == 0 && !has_shadow {
+        surface.set_input_region(None);
+        return;
+    }
+    if radius == 0 {
+        let region = globals.compositor.create_region(qh, ());
+        region.add(
+            logical(0),
+            logical(bar_y),
+            logical(bar_width),
+            logical(bar_height),
+        );
+        surface.set_input_region(Some(&region));
+        region.destroy();
+        return;
+    }
+    let mut rects = Vec::with_capacity(2 * radius as usize + 1);
+    region::input_rects(bar_width, bar_height, radius, &mut rects);
+    let region = globals.compositor.create_region(qh, ());
+    for rect in rects {
+        region.add(
+            logical(rect.x),
+            logical(rect.y.saturating_add(bar_y)),
             logical(rect.width),
             logical(rect.height),
         );

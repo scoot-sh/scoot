@@ -97,6 +97,8 @@ fn bar(width: u32, scale: Scale, modules: Vec<Iconic>) -> Image {
         radius: 0,
         popup_radius: 0,
         opacity: u8::MAX,
+        shadow: scootui::effects::ShadowStyle::None,
+        fill: scootui::effects::FillStyle::Solid,
     };
     let frame = Frame {
         size: Size { width, height: 20 },

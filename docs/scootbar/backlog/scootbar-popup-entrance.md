@@ -3,7 +3,7 @@ title: "Popups open with the notification-card entrance"
 status: "open"
 area: "scootbar"
 priority: "low"
-blocked: "scootbar-depth-tokens"
+blocked: null
 ---
 
 # Popups open with the notification-card entrance

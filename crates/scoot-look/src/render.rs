@@ -292,6 +292,23 @@ pub fn render_bar(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, 
         bar.insert("popup-radius".to_string(), look.shape.radius.to_string());
     }
     bar.insert("opacity".to_string(), format!("{:?}", look.opacity.bar));
+    // The depth tokens, only when the look sets them: a look that does not
+    // opt in renders the fragment it always did. A hand-built `ResolvedLook`
+    // skips the schema, so the values are checked here too.
+    for (key, value, options) in [
+        ("shadow", &look.effects.shadow, SHADOW_STYLES),
+        ("fill", &look.effects.fill, FILL_STYLES),
+    ] {
+        if let Some(value) = value {
+            if !options.contains(&value.as_str()) {
+                return Err(GrammarError::new(
+                    format!("effects.{key}"),
+                    format!("must be one of {}", options.join(", ")),
+                ));
+            }
+            bar.insert(key.to_string(), toml_str(value));
+        }
+    }
     // scootbar's `font` is a file path, never the family name `fonts.ui`
     // holds (`crates/scootbar/src/config.rs:87-90`, `font.rs:1`): emit
     // it only with a resolved path, so a default `build` never writes a

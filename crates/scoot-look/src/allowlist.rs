@@ -187,6 +187,13 @@ pub const LAUNCH_DEPTH_KEYS: &[&str] = &[
     "motion-bounce",
 ];
 
+/// The depth keys `scootbar` reads, as dotted look keys under `[bar]`:
+/// the shadow under the bar and its popups and how their fill is laid
+/// down. Only the two fill tokens today; motion reaches the bar with the
+/// entrance ticket. They are not in the shared list for the same reason
+/// as the notifier's: an app that never reads one reports it as unknown.
+pub const BAR_DEPTH_KEYS: &[&str] = &["bar.shadow", "bar.fill"];
+
 /// The keys of a look's `[effects]` table, and of the `[effects]` table in
 /// a shell app's own config file: the five depth and motion tokens. A
 /// subset of every dotless allowlist entry the apps read, so `[effects]`
@@ -204,10 +211,20 @@ pub const EFFECTS_TABLE_KEYS: &[&str] = &[
 /// when `app` does not read that key, or `table` is not one of the three
 /// (`[colors]` and `[icons]` belong to the look and are unreachable
 /// here). The user-file layer of `scootnotify` and `scootlaunch` asks this
-/// so its tables share the look's allowlist, never a copy of it.
+/// so its tables share the look's allowlist, never a copy of it. For
+/// `scootbar` `[effects] shadow` is `bar.shadow` (and `fill` likewise):
+/// the bar's user file keeps its `[bar]` shape while sharing the same
+/// allowlist the look layer is checked against.
 pub fn user_effect_key(app: &str, table: &str, key: &str) -> Option<&'static str> {
     if !reads_depth(app) || key.len() > 64 || !key.is_ascii() {
         return None;
+    }
+    if app == "scootbar" {
+        return match (table, key) {
+            ("effects", "shadow") => Some("bar.shadow"),
+            ("effects", "fill") => Some("bar.fill"),
+            _ => None,
+        };
     }
     let reads = |dotted: &str| match app {
         "scootnotify" => NOTIFY_DEPTH_KEYS.iter().copied().find(|k| *k == dotted),
@@ -225,11 +242,11 @@ pub fn user_effect_key(app: &str, table: &str, key: &str) -> Option<&'static str
 }
 
 /// Whether `app` reads the shared depth and motion keys
-/// ([`LAUNCH_DEPTH_KEYS`]): the apps that draw a surface of their own with
-/// a shadow and a fill. The renderer and the value kinds both ask this, so
-/// an app joins in one place.
+/// ([`LAUNCH_DEPTH_KEYS`], [`BAR_DEPTH_KEYS`] for the bar): the apps that
+/// draw a surface of their own with a shadow and a fill. The renderer and
+/// the value kinds both ask this, so an app joins in one place.
 pub fn reads_depth(app: &str) -> bool {
-    matches!(app, "scootnotify" | "scootlaunch")
+    matches!(app, "scootnotify" | "scootlaunch" | "scootbar")
 }
 
 /// Whether `key` (an `[apps.<app>]` dotted key) is allowlisted for `app`.
@@ -240,7 +257,7 @@ pub fn allows(app: &str, key: &str) -> bool {
     }
     match app {
         "scoot" => SCOOT_ALLOWLIST.contains(&key) || is_wallpaper_override_key(key),
-        "scootbar" => SCOOTBAR_ALLOWLIST.contains(&key),
+        "scootbar" => SCOOTBAR_ALLOWLIST.contains(&key) || BAR_DEPTH_KEYS.contains(&key),
         "scootnotify" => SHELL_APP_ALLOWLIST.contains(&key) || NOTIFY_DEPTH_KEYS.contains(&key),
         "scootlaunch" => SHELL_APP_ALLOWLIST.contains(&key) || LAUNCH_DEPTH_KEYS.contains(&key),
         "scootgreet" => SHELL_APP_ALLOWLIST.contains(&key),
@@ -410,6 +427,8 @@ pub fn value_kind(app: &str, key: &str) -> Option<ValueKind> {
             "bar.padding" | "bar.spacing" | "bar.separator" => {
                 Some(ValueKind::IntRange { min: 0, max: 1024 })
             }
+            "bar.shadow" => Some(ValueKind::Enum(SHADOW_STYLES)),
+            "bar.fill" => Some(ValueKind::Enum(FILL_STYLES)),
             "workspaces.active-color" | "workspaces.inactive-color" => Some(ValueKind::Color),
             "workspaces.item-gap" => Some(ValueKind::IntRange { min: 0, max: 1024 }),
             "workspaces.display" => Some(ValueKind::Enum(&["numbers", "dots"])),
