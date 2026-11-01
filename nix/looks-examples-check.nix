@@ -124,7 +124,8 @@ let
       # Against the examples: the style values. The corner radius is the
       # example's (D15, raised once look-layer-scoot's pixman benchmark
       # passed: +5-6% per frame at 1, 10 and 50 windows); the bar opacity
-      # stays at 1.0 until its blend cost is measured.
+      # is the example's too, raised once the bar-opacity pixman benchmark
+      # passed (no extra idle wakeups, per-repaint deltas inside +10%).
       (
         assert t.shape.radius == (exampleScoot name).corner_radius;
         true
@@ -138,7 +139,7 @@ let
         true
       )
       (
-        assert t.opacity.bar == 1.0;
+        assert t.opacity.bar == exBar.bar.opacity;
         true
       )
       (

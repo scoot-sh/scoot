@@ -136,10 +136,9 @@ fn every_shipped_look_validates_and_renders() {
         // pixman benchmark as the condition: ~+5-6% per frame (~6-12 us at
         // 1, 10 and 50 windows on pixman, release build), acceptable, so the
         // shipped looks carry the examples' radius, locked per look. Bar
-        // opacity stays at 1.0: blending a translucent bar over background
-        // and windows on pixman was never measured (no layer-surface
-        // translucency bench exists), so the examples' opacity stays a
-        // comment in each look.toml until that benchmark passes.
+        // opacity rose the same way once the bar-opacity pixman benchmark
+        // passed (no extra idle wakeups, per-repaint deltas inside +10% of
+        // opaque): each look carries its example's value, locked per look.
         let corners = match *name {
             "ginger-night" => 14,
             "moonrise" => 14,
@@ -158,10 +157,18 @@ fn every_shipped_look_validates_and_renders() {
             Some(corners.min(14)),
             "{name}: bar radius holds the example value (clamped to the bar limit)"
         );
+        let opacity = match *name {
+            "ginger-night" => 0.82,
+            "moonrise" => 0.82,
+            "music-desk" => 0.7,
+            "radial-burst" => 0.88,
+            "vinyl-sunset" => 0.78,
+            _ => panic!("unexpected shipped look {name}"),
+        };
         assert_eq!(
             bar["bar"]["opacity"].as_float(),
-            Some(1.0),
-            "{name}: bar opacity holds at 1.0 until the translucency benchmark passes"
+            Some(opacity),
+            "{name}: bar opacity holds the example value"
         );
         // Without `--ui-font-file` the bar fragment carries no `font` key
         // (scootbar's is a file path, not the family name), so the bar
