@@ -1,9 +1,10 @@
 ---
 title: "Layer::composite's scaled path costs 17 ns a pixel: a 2x launcher entrance frame is 9 ms"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-01"
 ---
 
 # Layer::composite's scaled path costs 17 ns a pixel: a 2x launcher entrance frame is 9 ms
@@ -68,3 +69,56 @@ room) is already done per pixel.
 ## Not in this ticket
 
 Changing the entrance's look (the 96% start scale) or the curve.
+
+## Resolution
+
+Landed 2026-11-01. `Layer::composite`'s scaled path now blends the two
+source rows vertically once per destination row into a pooled scratch row
+(`width * 4` `u16` samples in `0..=65280`, reserved by `Layer::begin` so
+the composite still allocates nothing), then blends horizontally out of
+it, so the inner loop runs over contiguous slices. The integer arithmetic
+is exactly the old column-first blend, reordered: the old per-pixel value
+`((a*(256-wx)+b*wx)*(256-wy)+(c*(256-wx)+e*wx)*wy+0x8000)>>16` equals the
+new `(v0*(256-wx)+v1*wx+0x8000)>>16` with `v0 = a*(256-wy)+c*wy` and
+`v1 = b*(256-wy)+e*wy` (addition and multiplication reorder exactly; the
+`wy == 0` fast path widens the single source row by 256, the same value).
+The two per-axis divisions are hoisted out of the row loop (one per axis
+per composite instead of two per row); per-column taps stay computed on
+the fly (one multiply each, no division, no table); wholly-clear rows and
+pixels are still skipped. `Layer` gains a `RefCell<Vec<u16>>` scratch pool;
+`composite` keeps its `&self` shape, the crate stays `#![deny(unsafe_code)]`
+(no `unsafe`), no nightly, no arch-specific intrinsics (builds for the
+no-SIMD baseline and aarch64 as before). Equivalence is pinned by
+`scaled_matches_the_old_column_first_blend_byte_for_byte`, which compares
+the new composite against the old column-first implementation kept as a
+`#[cfg(test)]` reference over 6 sizes x 8 scales x 5 alphas x 3 offsets,
+and `compositing_allocates_nothing...` still passes, extended by
+`scaled_composites_reuse_the_pooled_scratch` (50 scaled frames after warm-up
+allocate nothing). `bench_effects` now also covers 3x (the loop was
+`[1, 2]`, now `[1, 2, 3]`); no site page quotes frame costs (`grep` for
+`ns a pixel` / `entrance frame` in `site/src` finds only an unrelated
+pixman line), so no other docs change. Idle cost is unchanged: no new
+timers, no new threads, no per-frame allocation.
+
+Before/after on the dev VM (release, `taskset -c 3`, interleaved
+main/branch pairs, 3 runs each; `main` is `98a45bbcc` plus only the 3x
+bench-loop line, built to its own target dir; raw logs `/tmp/b-main-N.log`
+/ `/tmp/b-branch-N.log`, motion `/tmp/m-main-N.log` / `/tmp/m-branch-N.log`):
+
+```sh
+cargo test --release -p scootlaunch --bin scootlaunch bench_effects -- --ignored --nocapture
+cargo run --release -p scootnotify --example bench_motion -- --scale 360
+```
+
+| entrance frame (scaled + faded present) | main median | branch median | per-pair win |
+|---|---|---|---|
+| 1x (414x314) | 1967.9, 1957.1, 1918.5 us | 1391.9, 1402.8, 1508.7 us | -29%, -28%, -21% |
+| 2x (828x628) | 8480.1, 7742.1, 8944.7 us | 6164.0, 6025.0, 6726.9 us | -27%, -22%, -25% |
+| 3x (1242x942) | 19762.0, 19029.5, 21079.2 us | 13660.5, 11539.2, 15181.9 us | -31%, -39%, -28% |
+
+The 3x entrance is under the 16.6 ms budget with margin (worst branch run
+15.2 ms against a best main run of 19.0 ms). Notify `enter scale` at
+`--scale 360` (1152x1434): main 9968.4, 10111.5, 9898.4 us vs branch
+8516.0, 8548.6, 8953.6 us (-15%, -15%, -10%). All existing goldens and
+fingerprints pass untouched (`the_default_look_paints_the_bytes_it_always_did`,
+the notifier entrance goldens, the layer tests).
