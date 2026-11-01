@@ -1,6 +1,6 @@
 pkgbase = scoot-globalshortcuts-portal
 	pkgdesc = GlobalShortcuts portal backend for the scoot compositor
-	pkgver = 0.6.25
+	pkgver = 0.6.26
 	pkgrel = 1
 	url = https://github.com/scoot-sh/scoot
 	install = scoot-globalshortcuts-portal.install
@@ -15,7 +15,7 @@ pkgbase = scoot-globalshortcuts-portal
 	optdepends = systemd: run the backend as a user unit (scoot-globalshortcuts-portal.service)
 	optdepends = xdg-desktop-portal: the portal that routes GlobalShortcuts to this backend
 	options = !debug
-	source = scoot-globalshortcuts-portal-0.6.25.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v0.6.25.tar.gz
+	source = scoot-globalshortcuts-portal-0.6.26.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v0.6.26.tar.gz
 	sha256sums = SKIP
 
 pkgname = scoot-globalshortcuts-portal
