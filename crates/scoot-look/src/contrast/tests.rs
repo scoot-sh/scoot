@@ -189,3 +189,22 @@ fn malformed_colors_never_panic() {
     look.palette.foreground = "blue".to_string();
     let _ = check(&look, Origin::Shipped);
 }
+
+#[test]
+fn format_ratio_truncates_toward_zero_to_two_decimals() {
+    // Truncation (not rounding) so a failing pair can never print as its
+    // bar: 4.496 against a 4.5 bar prints "4.49", never "4.50". The `1e-9`
+    // absorbs binary float error so exact cent values still print exact.
+    for (input, want) in [
+        (4.4999, "4.49"),
+        (4.496, "4.49"),
+        (2.995, "2.99"),
+        (3.0, "3.00"),
+        (21.0, "21.00"),
+        (1.0, "1.00"),
+        (4.5, "4.50"),
+        (3.12, "3.12"),
+    ] {
+        assert_eq!(format_ratio(input), want, "format_ratio({input})");
+    }
+}

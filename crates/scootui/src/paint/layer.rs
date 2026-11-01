@@ -239,16 +239,18 @@ impl Layer {
                 // so the compiler vectorizes it.
                 let inv_y = 256 - wy;
                 let mut row_has_ink = false;
-                // Fast path when the row taps a single source row: the
-                // scratch is that row widened, with no arithmetic.
+                // Fast path when the row's lower weight is 0: the
+                // scratch is the upper row widened, with no arithmetic.
+                // `wy == 0` does not imply `ty0 == ty1` (`taps()` can
+                // return weight 0 with distinct taps within 1/256 of a
+                // pixel boundary); the fast path is still correct because
+                // the lower row's weight is 0.
                 if wy == 0 {
                     for (v, b) in scratch_row.iter_mut().zip(upper.iter()) {
                         let wide = u16::from(*b);
                         *v = wide * 256;
                         row_has_ink |= wide != 0;
                     }
-                    // `wy == 0` implies `ty0 == ty1`, but keep the general
-                    // shape: `lower` equals `upper` there.
                 } else {
                     for (v, pair) in scratch_row.iter_mut().zip(upper.iter().zip(lower.iter())) {
                         let (u, l) = (u32::from(*pair.0), u32::from(*pair.1));

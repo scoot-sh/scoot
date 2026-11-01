@@ -624,6 +624,11 @@ fn refused_socket_retries_bounded_then_parks() {
     // refuses. The race grace and the bounded timer retry past it —
     // a backlog-full bar under load recovers the same way — then the
     // spell parks owed on the watch. One line for the change.
+    // A refused Unix connect can surface as ECONNRESET ("Connection reset
+    // by peer") instead of ECONNREFUSED when the listener closed with a
+    // backlog or under load; `dial` maps both to the same refused path
+    // (`Dial::Stale`), and a post-connect reset also retries bounded then
+    // parks, so the test accepts both wordings as the same contract.
     let (_dir, socket) = scratch_socket("stalebar");
     let stale = UnixListener::bind(&socket).expect("the stale file binds");
     std::mem::drop(stale);
@@ -634,7 +639,11 @@ fn refused_socket_retries_bounded_then_parks() {
     assert!(feed.sync(&store).is_none(), "the start never blocks");
     let lines = drive(&mut feed, &store, Duration::from_secs(10));
     assert_eq!(lines.len(), 1, "one line per failed change: {lines:?}");
-    assert!(lines[0].contains("connection refused"), "{}", lines[0]);
+    assert!(
+        lines[0].contains("connection refused") || lines[0].contains("Connection reset by peer"),
+        "a refused socket retries (refused or reset): {}",
+        lines[0]
+    );
     assert!(feed.owed(), "the stale socket parks owed");
     assert!(
         feed.poll_fd().is_some(),

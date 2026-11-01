@@ -81,7 +81,9 @@ is exactly the old column-first blend, reordered: the old per-pixel value
 `((a*(256-wx)+b*wx)*(256-wy)+(c*(256-wx)+e*wx)*wy+0x8000)>>16` equals the
 new `(v0*(256-wx)+v1*wx+0x8000)>>16` with `v0 = a*(256-wy)+c*wy` and
 `v1 = b*(256-wy)+e*wy` (addition and multiplication reorder exactly; the
-`wy == 0` fast path widens the single source row by 256, the same value).
+`wy == 0` fast path widens `upper` by 256, which is correct because the
+lower row's weight is 0 — `taps()` can return weight 0 with distinct taps
+within 1/256 of a pixel boundary).
 The two per-axis divisions are hoisted out of the row loop (one per axis
 per composite instead of two per row); per-column taps stay computed on
 the fly (one multiply each, no division, no table); wholly-clear rows and
@@ -93,7 +95,7 @@ no-SIMD baseline and aarch64 as before). Equivalence is pinned by
 the new composite against the old column-first implementation kept as a
 `#[cfg(test)]` reference over 6 sizes x 8 scales x 5 alphas x 3 offsets,
 and `compositing_allocates_nothing...` still passes, extended by
-`scaled_composites_reuse_the_pooled_scratch` (50 scaled frames after warm-up
+`scaled_composites_reuse_the_pooled_scratch` (100 scaled frames after warm-up
 allocate nothing). `bench_effects` now also covers 3x (the loop was
 `[1, 2]`, now `[1, 2, 3]`); no site page quotes frame costs (`grep` for
 `ns a pixel` / `entrance frame` in `site/src` finds only an unrelated
