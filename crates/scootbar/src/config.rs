@@ -27,6 +27,7 @@ use crate::render::Style;
 use crate::text::MAX_FALLBACKS;
 use crate::theme::Theme;
 use scootui::effects::{FillStyle, ShadowStyle};
+use scootui::motion::{Curve, DEFAULT_BOUNCE, DEFAULT_DURATION_MS, Timing};
 
 #[cfg(test)]
 mod binding_tests;
@@ -80,7 +81,7 @@ pub const MAX_TOOLTIP_DELAY: u32 = 10_000;
 /// anything past this is not one. Bounds what a reload buffers.
 pub const MAX_FILE: u64 = 64 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub bar: Bar,
     pub theme: Theme,
@@ -108,6 +109,13 @@ pub struct Config {
     /// How the bar and popup fills are laid down (`bar.fill`): solid or a
     /// vertical gradient with the light at the top.
     pub fill: FillStyle,
+    /// The curve the popup entrance follows (`bar.motion`): `none` (the
+    /// default) opens instantly, exactly as before.
+    pub motion: Curve,
+    /// How long one popup entrance runs (`bar.motion-duration-ms`, 0 to 1000).
+    pub motion_ms: u32,
+    /// The spring's overshoot (`bar.motion-bounce`, 0 to 1).
+    pub motion_bounce: f32,
     /// `bar.tooltip-delay`: how long the pointer rests on a module with a
     /// tooltip before it shows, in milliseconds; 0 turns tooltips off. No
     /// flag: config file only.
@@ -131,6 +139,9 @@ impl Default for Config {
             opacity: u8::MAX,
             shadow: ShadowStyle::None,
             fill: FillStyle::Solid,
+            motion: Curve::None,
+            motion_ms: DEFAULT_DURATION_MS,
+            motion_bounce: DEFAULT_BOUNCE,
             #[cfg(feature = "popup")]
             popup_radius: 0,
             #[cfg(feature = "popup")]
@@ -157,6 +168,7 @@ impl Config {
             opacity: self.opacity,
             shadow: self.shadow,
             fill: self.fill,
+            timing: Timing::new(self.motion, self.motion_ms, self.motion_bounce),
         }
     }
 }
@@ -470,6 +482,15 @@ struct BarFile {
     /// How the bar and popup fills are laid down: `solid` (the default) or
     /// `gradient` (a vertical gradient with the light at the top).
     fill: Option<toml::Value>,
+    /// The popup entrance curve: `none` (the default), `ease-out` or
+    /// `spring`. `none` opens instantly, exactly as before.
+    motion: Option<toml::Value>,
+    /// How long one popup entrance runs, in milliseconds: 0 to 1000.
+    #[serde(rename = "motion-duration-ms")]
+    motion_duration_ms: Option<toml::Value>,
+    /// The spring's overshoot: 0 to 1.
+    #[serde(rename = "motion-bounce")]
+    motion_bounce: Option<toml::Value>,
     /// Without the `popup` feature there is no such key (and so no
     /// tooltip), and `deny_unknown_fields` refuses it loudly.
     #[cfg(feature = "popup")]
@@ -1295,6 +1316,84 @@ impl File {
                 }
             }
         };
+        // The popup entrance motion shares the look's allowlist too:
+        // `[bar] motion`/`motion-duration-ms`/`motion-bounce` go through
+        // `check_app_value` first, then the typed parse. `none` (the
+        // default) opens instantly and costs nothing.
+        let mut motion = match &bar.motion {
+            None => defaults.motion,
+            Some(v) => {
+                if let Some(err) =
+                    scoot_look::allowlist::check_app_value("scootbar", "bar.motion", v)
+                {
+                    return Err(value(path, "bar.motion", format_args!("{err}")));
+                }
+                match v {
+                    toml::Value::String(text) => Curve::parse(text).ok_or_else(|| {
+                        value(
+                            path,
+                            "bar.motion",
+                            format_args!("takes none, ease-out or spring, not `{text}`"),
+                        )
+                    })?,
+                    other => {
+                        return Err(value(
+                            path,
+                            "bar.motion",
+                            format_args!("takes none, ease-out or spring, not `{other}`"),
+                        ));
+                    }
+                }
+            }
+        };
+        let mut motion_ms = match &bar.motion_duration_ms {
+            None => defaults.motion_ms,
+            Some(v) => {
+                if let Some(err) =
+                    scoot_look::allowlist::check_app_value("scootbar", "bar.motion-duration-ms", v)
+                {
+                    return Err(value(path, "bar.motion-duration-ms", format_args!("{err}")));
+                }
+                match v {
+                    toml::Value::Integer(ms)
+                        if (0..=i64::from(scootui::motion::MAX_DURATION_MS)).contains(ms) =>
+                    {
+                        u32::try_from(*ms).unwrap_or(u32::MAX)
+                    }
+                    other => {
+                        return Err(value(
+                            path,
+                            "bar.motion-duration-ms",
+                            format_args!(
+                                "takes whole milliseconds from 0 to {}, not `{other}`",
+                                scootui::motion::MAX_DURATION_MS
+                            ),
+                        ));
+                    }
+                }
+            }
+        };
+        let mut motion_bounce = match &bar.motion_bounce {
+            None => defaults.motion_bounce,
+            Some(v) => {
+                if let Some(err) =
+                    scoot_look::allowlist::check_app_value("scootbar", "bar.motion-bounce", v)
+                {
+                    return Err(value(path, "bar.motion-bounce", format_args!("{err}")));
+                }
+                match v {
+                    toml::Value::Float(f) if f.is_finite() && (0.0..=1.0).contains(f) => *f as f32,
+                    toml::Value::Integer(i) if *i == 0 || *i == 1 => *i as f32,
+                    other => {
+                        return Err(value(
+                            path,
+                            "bar.motion-bounce",
+                            format_args!("takes a number from 0 to 1, not `{other}`"),
+                        ));
+                    }
+                }
+            }
+        };
         // The user's own `[effects]` table, winning per key over `[bar]`
         // above and over the look layer (merged earlier with the user
         // winning). Keys go through the look's allowlist via
@@ -1343,6 +1442,61 @@ impl File {
                             format_args!("takes solid or gradient, not `{text}`"),
                         )
                     })?;
+                }
+                "bar.motion" => {
+                    let Some(toml::Value::String(text)) = Some(v) else {
+                        return Err(value(
+                            path,
+                            "bar.motion",
+                            format_args!("takes none, ease-out or spring, not `{v}`"),
+                        ));
+                    };
+                    motion = Curve::parse(text).ok_or_else(|| {
+                        value(
+                            path,
+                            "bar.motion",
+                            format_args!("takes none, ease-out or spring, not `{text}`"),
+                        )
+                    })?;
+                }
+                "bar.motion-duration-ms" => {
+                    let Some(toml::Value::Integer(ms)) = Some(v) else {
+                        return Err(value(
+                            path,
+                            "bar.motion-duration-ms",
+                            format_args!(
+                                "takes whole milliseconds from 0 to {}, not `{v}`",
+                                scootui::motion::MAX_DURATION_MS
+                            ),
+                        ));
+                    };
+                    if !(0..=i64::from(scootui::motion::MAX_DURATION_MS)).contains(ms) {
+                        return Err(value(
+                            path,
+                            "bar.motion-duration-ms",
+                            format_args!(
+                                "takes whole milliseconds from 0 to {}, not `{v}`",
+                                scootui::motion::MAX_DURATION_MS
+                            ),
+                        ));
+                    }
+                    motion_ms = u32::try_from(*ms).unwrap_or(u32::MAX);
+                }
+                "bar.motion-bounce" => {
+                    let bounce = match v {
+                        toml::Value::Float(f) if f.is_finite() && (0.0..=1.0).contains(f) => {
+                            *f as f32
+                        }
+                        toml::Value::Integer(i) if *i == 0 || *i == 1 => *i as f32,
+                        _ => {
+                            return Err(value(
+                                path,
+                                "bar.motion-bounce",
+                                format_args!("takes a number from 0 to 1, not `{v}`"),
+                            ));
+                        }
+                    };
+                    motion_bounce = bounce;
                 }
                 _ => {
                     return Err(Error::Named {
@@ -1831,6 +1985,9 @@ impl File {
             opacity,
             shadow,
             fill,
+            motion,
+            motion_ms,
+            motion_bounce,
             #[cfg(feature = "popup")]
             popup_radius,
             #[cfg(feature = "popup")]

@@ -188,11 +188,17 @@ pub const LAUNCH_DEPTH_KEYS: &[&str] = &[
 ];
 
 /// The depth keys `scootbar` reads, as dotted look keys under `[bar]`:
-/// the shadow under the bar and its popups and how their fill is laid
-/// down. Only the two fill tokens today; motion reaches the bar with the
-/// entrance ticket. They are not in the shared list for the same reason
-/// as the notifier's: an app that never reads one reports it as unknown.
-pub const BAR_DEPTH_KEYS: &[&str] = &["bar.shadow", "bar.fill"];
+/// the shadow under the bar and its popups, how their fill is laid
+/// down, and the popup entrance motion. They are not in the shared list
+/// for the same reason as the notifier's: an app that never reads one
+/// reports it as unknown.
+pub const BAR_DEPTH_KEYS: &[&str] = &[
+    "bar.shadow",
+    "bar.fill",
+    "bar.motion",
+    "bar.motion-duration-ms",
+    "bar.motion-bounce",
+];
 
 /// The keys of a look's `[effects]` table, and of the `[effects]` table in
 /// a shell app's own config file: the five depth and motion tokens. A
@@ -223,6 +229,9 @@ pub fn user_effect_key(app: &str, table: &str, key: &str) -> Option<&'static str
         return match (table, key) {
             ("effects", "shadow") => Some("bar.shadow"),
             ("effects", "fill") => Some("bar.fill"),
+            ("effects", "motion") => Some("bar.motion"),
+            ("effects", "motion-duration-ms") => Some("bar.motion-duration-ms"),
+            ("effects", "motion-bounce") => Some("bar.motion-bounce"),
             _ => None,
         };
     }
@@ -429,6 +438,12 @@ pub fn value_kind(app: &str, key: &str) -> Option<ValueKind> {
             }
             "bar.shadow" => Some(ValueKind::Enum(SHADOW_STYLES)),
             "bar.fill" => Some(ValueKind::Enum(FILL_STYLES)),
+            "bar.motion" => Some(ValueKind::Enum(MOTION_CURVES)),
+            "bar.motion-duration-ms" => Some(ValueKind::IntRange {
+                min: 0,
+                max: MOTION_DURATION_MAX_MS,
+            }),
+            "bar.motion-bounce" => Some(ValueKind::Unit),
             "workspaces.active-color" | "workspaces.inactive-color" => Some(ValueKind::Color),
             "workspaces.item-gap" => Some(ValueKind::IntRange { min: 0, max: 1024 }),
             "workspaces.display" => Some(ValueKind::Enum(&["numbers", "dots"])),

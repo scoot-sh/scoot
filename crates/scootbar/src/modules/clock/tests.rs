@@ -175,6 +175,7 @@ fn a_warm_tick_allocates_nothing() {
         opacity: u8::MAX,
         shadow: scootui::effects::ShadowStyle::None,
         fill: scootui::effects::FillStyle::Solid,
+        timing: scootui::motion::Timing::NONE,
     };
     let scale = Scale::Integer(1);
     let frame = Frame {

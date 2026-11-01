@@ -162,19 +162,46 @@ struct Open {
     shadow: Option<scootui::paint::Shadow>,
     /// The shadow's tint (black, or the accent for a glow).
     shadow_tint: scootui::color::Color,
-    /// The popup's top-left in the surface (device pixels): the shadow's
-    /// left/top pad, `(0, 0)` without a shadow. The paint offsets all of
-    /// the frame and widgets by it, so clicks in the shadow fall through
-    /// to the windows below.
+    /// The popup's top-left at rest in the surface (device pixels): the
+    /// shadow's pad plus the entrance's room, `(0, 0)` without either. The
+    /// paint offsets all of the frame and widgets by it, so clicks in the
+    /// shadow fall through to the windows below. Mid-entrance the popup
+    /// draws above or below this (the slide), settling here.
     origin: (u32, u32),
+    /// Where the popup last drew (device pixels in the surface): at rest,
+    /// or a slide away mid-entrance. Pointer hits subtract this to reach
+    /// popup-local coordinates, so clicks during the entrance hit where
+    /// the popup is drawn, never where it was a frame ago.
+    drawn: (u32, u32),
     /// The popup fill's top and bottom colors and its alpha: the gradient
     /// stops over the background, solid when equal.
     fill: (scootui::color::Color, scootui::color::Color),
     opacity: u8,
-    /// The shadow's room on each side (device pixels): the surface is the
-    /// content plus this pad, the content sits at `(pad.left, pad.top)`.
-    /// Zero for tooltips and unshadowed popups.
+    /// The room on each side (device pixels): the shadow's pad plus the
+    /// entrance's room when motion moves. The surface is the content plus
+    /// this pad, the content rests at `(pad.left, pad.top)`. Zero for
+    /// tooltips and for still popups without a shadow.
     pad: scootui::paint::Pad,
+    /// The entrance timing (`bar.motion` + duration + bounce):
+    /// [`Timing::NONE`](scootui::motion::Timing::NONE) opens instantly,
+    /// exactly as before. Tooltips never move.
+    timing: scootui::motion::Timing,
+    /// When the entrance began (the first mapped draw), while it runs:
+    /// `None` before it starts and for `motion = "none"`. A look switch
+    /// that changes the timing restarts it (see `restyle_open`).
+    entered: Option<std::time::Instant>,
+    /// The bar's edge this popup hangs off: the slide runs away from it.
+    edge: Edge,
+    /// Whether a `wl_surface.frame` callback is outstanding: one at most,
+    /// none at rest and none for `motion = "none"`.
+    frame_pending: bool,
+    /// Pooled input-region rects: `scratch` is rebuilt every draw, `sent`
+    /// is what the compositor was last told. Comparing them sends a new
+    /// region only when it differs (at rest every draw but the first after
+    /// a change sends nothing; in motion every frame moves and sends).
+    /// No allocation once warm.
+    region_scratch: Vec<scootui::region::Rect>,
+    region_sent: Vec<scootui::region::Rect>,
     interaction: Interaction,
     /// The wheel movement of the frame being read, grouped into rows.
     wheel: Wheel,
@@ -384,6 +411,35 @@ fn int(value: u32) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }
 
+/// The popup's input rects at `origin`: its own rounded rect, never the
+/// shadow or the entrance room. Into `out` (cleared first, capacity kept):
+/// no allocation once warm.
+fn popup_rects(
+    width: u32,
+    height: u32,
+    radius: u32,
+    origin: (u32, u32),
+    out: &mut Vec<scootui::region::Rect>,
+) {
+    use crate::region;
+    let (ox, oy) = origin;
+    out.clear();
+    if radius == 0 {
+        out.push(scootui::region::Rect {
+            x: ox,
+            y: oy,
+            width,
+            height,
+        });
+        return;
+    }
+    region::input_rects(width, height, radius, out);
+    for rect in out.iter_mut() {
+        rect.x = rect.x.saturating_add(ox);
+        rect.y = rect.y.saturating_add(oy);
+    }
+}
+
 /// Sets the input region for a click popup's own rect at `origin` (device
 /// pixels offset by the shadow's pad) of `width` by `height` with `radius`:
 /// the rounded shape, never the shadow, so clicks in the shadow fall
@@ -401,25 +457,11 @@ fn set_popup_input_region(
     height: u32,
     radius: u32,
 ) {
-    use crate::region;
-    let (ox, oy) = origin;
-    if radius == 0 {
-        let region = globals.compositor.create_region(qh, ());
-        region.add(int(ox), int(oy), int(width), int(height));
-        surface.set_input_region(Some(&region));
-        region.destroy();
-        return;
-    }
     let mut rects = Vec::with_capacity(2 * radius as usize + 1);
-    region::input_rects(width, height, radius, &mut rects);
+    popup_rects(width, height, radius, origin, &mut rects);
     let region = globals.compositor.create_region(qh, ());
     for rect in rects {
-        region.add(
-            int(rect.x.saturating_add(ox)),
-            int(rect.y.saturating_add(oy)),
-            int(rect.width),
-            int(rect.height),
-        );
+        region.add(int(rect.x), int(rect.y), int(rect.width), int(rect.height));
     }
     surface.set_input_region(Some(&region));
     region.destroy();
@@ -519,36 +561,60 @@ impl State {
             }
         }
         let is_popup = matches!(flavor, Flavor::Popup { .. });
+        let edge = entry.objects.bar.edge;
+        let timing = if is_popup {
+            style.timing
+        } else {
+            scootui::motion::Timing::NONE
+        };
         // The popup's shadow (click popups only; tooltips stay as they
         // were): the surface reserves the shadow's room on every side, and
         // the popup sits at the pad offset. The positioner is told the
         // whole surface, so the compositor places it with its shadow.
+        // The entrance keeps its own room on top when it moves (a slide
+        // away from the bar needs somewhere to start): `motion = "none"`
+        // keeps the surface it always had.
         let (pad_left, pad_top, pad_right, pad_bottom, shadow_tables, shadow_tint) = if is_popup {
-            if let Some(logical) = style.shadow_spec(entry.objects.bar.edge) {
-                let dev_spec = scootui::paint::ShadowSpec {
-                    offset_x: i32::try_from(scale.to_device(i64::from(logical.offset_x)))
-                        .unwrap_or(logical.offset_x),
-                    offset_y: i32::try_from(scale.to_device(i64::from(logical.offset_y)))
-                        .unwrap_or(logical.offset_y),
-                    blur: render::device(logical.blur, scale),
-                    alpha: logical.alpha,
+            let (shadow_left, shadow_top, shadow_right, shadow_bottom, tables, tint) =
+                if let Some(logical) = style.shadow_spec(edge) {
+                    let dev_spec = scootui::paint::ShadowSpec {
+                        offset_x: i32::try_from(scale.to_device(i64::from(logical.offset_x)))
+                            .unwrap_or(logical.offset_x),
+                        offset_y: i32::try_from(scale.to_device(i64::from(logical.offset_y)))
+                            .unwrap_or(logical.offset_y),
+                        blur: render::device(logical.blur, scale),
+                        alpha: logical.alpha,
+                    };
+                    let pad = scootui::paint::Shadow::new(dev_spec).pad();
+                    let tint = match style.shadow {
+                        scootui::effects::ShadowStyle::Glow => style.theme.accent,
+                        _ => scootui::color::Color { r: 0, g: 0, b: 0 },
+                    };
+                    (
+                        pad.left,
+                        pad.top,
+                        pad.right,
+                        pad.bottom,
+                        Some((dev_spec, tint)),
+                        tint,
+                    )
+                } else {
+                    (0, 0, 0, 0, None, scootui::color::Color { r: 0, g: 0, b: 0 })
                 };
-                let pad = scootui::paint::Shadow::new(dev_spec).pad();
-                let tint = match style.shadow {
-                    scootui::effects::ShadowStyle::Glow => style.theme.accent,
-                    _ => scootui::color::Color { r: 0, g: 0, b: 0 },
-                };
-                (
-                    pad.left,
-                    pad.top,
-                    pad.right,
-                    pad.bottom,
-                    Some((dev_spec, tint)),
-                    tint,
-                )
-            } else {
-                (0, 0, 0, 0, None, scootui::color::Color { r: 0, g: 0, b: 0 })
-            }
+            let (motion_left, motion_top, motion_right, motion_bottom) =
+                crate::popup_motion::motion_pad(&timing);
+            let motion_left = render::device(motion_left, scale);
+            let motion_top = render::device(motion_top, scale);
+            let motion_right = render::device(motion_right, scale);
+            let motion_bottom = render::device(motion_bottom, scale);
+            (
+                shadow_left.saturating_add(motion_left),
+                shadow_top.saturating_add(motion_top),
+                shadow_right.saturating_add(motion_right),
+                shadow_bottom.saturating_add(motion_bottom),
+                tables,
+                tint,
+            )
         } else {
             (0, 0, 0, 0, None, scootui::color::Color { r: 0, g: 0, b: 0 })
         };
@@ -659,12 +725,12 @@ impl State {
                 region.destroy();
             }
         }
-        if round.rounded() || shadow.is_some() || popup_opacity < 255 {
+        if round.rounded() || shadow.is_some() || popup_opacity < 255 || timing.active() {
             // The corners are transparent, the shadow falls outside the
-            // popup, or the fill itself is translucent: the compositor
-            // blends the whole surface (the default whole-opaque would show
-            // cleared pixels as black). A square opaque unshadowed popup
-            // keeps the default.
+            // popup, the fill itself is translucent, or the entrance keeps
+            // room around the popup: the compositor blends the whole surface
+            // (the default whole-opaque would show cleared pixels as black).
+            // A square opaque still popup keeps the default.
             super::canvas::set_opaque_region(&self.globals, qh, &surface, (requested, None));
             // A click popup's input shape is the popup's own rounded rect
             // at its offset, never its shadow, so a click in the shadow or
@@ -688,6 +754,24 @@ impl State {
                     radius,
                 );
             }
+        }
+        // The pooled input-region lists start warm: `sent` holds what the
+        // open just told the compositor (or nothing when it told nothing),
+        // so the first draw sends only when the entrance moved it. `none`
+        // keeps the single send it always did.
+        let mut region_sent = Vec::new();
+        if matches!(flavor, Flavor::Popup { .. })
+            && (round.rounded() || shadow.is_some() || popup_opacity < 255 || timing.active())
+        {
+            let radius =
+                crate::region::effective_radius(style.popup_radius, layout.width, layout.height);
+            popup_rects(
+                layout.width,
+                layout.height,
+                radius,
+                origin,
+                &mut region_sent,
+            );
         }
         // `round.rounded()` already takes the branch above, so no `else if`
         // remains: a square opaque unshadowed popup needs no regions at all.
@@ -728,6 +812,7 @@ impl State {
             shadow,
             shadow_tint,
             origin,
+            drawn: origin,
             fill: (fill_top, fill_bottom),
             opacity: popup_opacity,
             pad: scootui::paint::Pad {
@@ -736,6 +821,12 @@ impl State {
                 bottom: pad_bottom,
                 left: pad_left,
             },
+            timing,
+            entered: None,
+            edge,
+            frame_pending: false,
+            region_scratch: Vec::new(),
+            region_sent,
             interaction: Interaction::default(),
             wheel: Wheel::default(),
             framed,
@@ -805,16 +896,16 @@ impl State {
             return;
         };
         open.layout.compute(&open.content, text, em, pad, frame);
-        // A shadow change resizes the surface: remake it, as at the open.
-        // The bar's edge decides the shadow's mirror (top bars shadow
-        // below, bottom bars above).
+        // A shadow or motion-room change resizes the surface: remake it, as
+        // at the open. The bar's edge decides the shadow's mirror (top bars
+        // shadow below, bottom bars above) and the entrance's direction.
         let bar_edge = self
             .outputs
             .iter()
             .find(|entry| entry.output.id() == open.output)
             .map(|entry| entry.objects.bar.edge)
             .unwrap_or(crate::bar::Edge::Top);
-        let new_pad = if let Some(logical) = style.shadow_spec(bar_edge) {
+        let shadow_pad = if let Some(logical) = style.shadow_spec(bar_edge) {
             let dev_spec = scootui::paint::ShadowSpec {
                 offset_x: i32::try_from(open.scale.to_device(i64::from(logical.offset_x)))
                     .unwrap_or(logical.offset_x),
@@ -826,6 +917,22 @@ impl State {
             scootui::paint::Shadow::new(dev_spec).pad()
         } else {
             scootui::paint::Pad::ZERO
+        };
+        let (motion_left, motion_top, motion_right, motion_bottom) =
+            crate::popup_motion::motion_pad(&style.timing);
+        let new_pad = scootui::paint::Pad {
+            left: shadow_pad
+                .left
+                .saturating_add(render::device(motion_left, open.scale)),
+            top: shadow_pad
+                .top
+                .saturating_add(render::device(motion_top, open.scale)),
+            right: shadow_pad
+                .right
+                .saturating_add(render::device(motion_right, open.scale)),
+            bottom: shadow_pad
+                .bottom
+                .saturating_add(render::device(motion_bottom, open.scale)),
         };
         if new_pad != open.pad {
             let (output, module, serial) = (open.output, open.module, open.serial);
@@ -914,15 +1021,27 @@ impl State {
         open.fill = style.fill_stops();
         open.opacity = style.opacity;
         open.origin = (open.pad.left, open.pad.top);
+        // The entrance timing is part of the cache key: a runtime look
+        // switch that changes it restarts the entrance (a colors-only reload
+        // keeps the settled state, so it never re-animates). A switch that
+        // flips active/inactive already remade the surface above (the total
+        // pad changed), so this only runs when the room is the same.
+        if style.timing != open.timing {
+            open.timing = style.timing;
+            open.entered = None;
+            open.frame_pending = false;
+        }
+        open.edge = bar_edge;
         open.interaction.retain(&open.content, &open.layout);
         open.dirty = true;
         // The new style on the same surface: the regions are re-sent, as at
-        // the open. A shadowed, rounded or translucent popup blends;
-        // otherwise the defaults stand.
+        // the open. A shadowed, rounded, translucent, gradient or moving
+        // popup blends; otherwise the defaults stand.
         let needs_alpha = open.round.rounded()
             || open.shadow.is_some()
             || open.opacity < 255
-            || open.fill.0 != open.fill.1;
+            || open.fill.0 != open.fill.1
+            || open.timing.active();
         if needs_alpha {
             super::canvas::set_opaque_region(
                 &self.globals,
@@ -1198,6 +1317,13 @@ impl State {
 /// Draws `open` into a free buffer and commits it, if a redraw is owed and
 /// it is mapped. `false` when it cannot be drawn at all (no buffer to be had,
 /// a canvas that cannot be made): the caller closes it.
+///
+/// A popup with motion moves only on frame callbacks: the first mapped draw
+/// starts its entrance, each frame draws where the timeline says it is and
+/// asks for the next callback while it still moves, and the input region
+/// moves with it every frame (sent only when it differs, so at rest every
+/// draw but the first after a change sends nothing). `motion = "none"`
+/// never starts, never asks, and paints exactly what it always did.
 fn draw_open(
     open: &mut Open,
     globals: &super::wayland::Globals,
@@ -1208,13 +1334,37 @@ fn draw_open(
     if !open.dirty || !open.mapped {
         return true;
     }
-    // A shadowed, rounded, translucent or gradient popup needs an alpha
-    // channel; otherwise the buffer stays opaque, as before. No per-frame
-    // allocation either way: the shadow tables were prepared on open.
+    let now = std::time::Instant::now();
+    // The entrance starts on the first mapped draw, once.
+    if open.timing.active() && open.entered.is_none() {
+        open.entered = Some(now);
+    }
+    let settled = match open.entered {
+        Some(start) => crate::popup_motion::settled(&open.timing, start, now),
+        None => true,
+    };
+    // Where the popup draws this frame: at rest, or a slide away mid-entrance.
+    let dy_device: i32 = match open.entered {
+        Some(start) if !settled => {
+            let dy_logical = crate::popup_motion::entrance_dy(&open.timing, start, now, open.edge);
+            (f64::from(dy_logical) * open.scale.factor()).round() as i32
+        }
+        _ => 0,
+    };
+    let (rest_ox, rest_oy) = open.origin;
+    let cur_oy =
+        (i64::from(rest_oy) + i64::from(dy_device)).clamp(0, i64::from(open.dims.1)) as u32;
+    let cur_origin = (rest_ox, cur_oy);
+    // Where this frame draws, for the hit test: clicks hit where the popup
+    // is drawn, never where it was a frame ago.
+    open.drawn = cur_origin;
+    // A moving popup keeps transparent room around it, so it blends even
+    // when it otherwise would not. `none` keeps the buffer it always had.
     let needs_alpha = open.round.rounded()
         || open.shadow.is_some()
         || open.opacity < 255
-        || open.fill.0 != open.fill.1;
+        || open.fill.0 != open.fill.1
+        || open.timing.active();
     let slot = match open.pool.take(globals, qh, open.id, open.dims, needs_alpha) {
         // Every buffer is held: the release wakes the loop.
         Ok(None) => return true,
@@ -1234,12 +1384,14 @@ fn draw_open(
     // Tooltips (no shadow, solid, opaque, at the origin) paint exactly as
     // before, so their goldens hold. Everything else goes through the
     // depth-aware path (shadow, gradient, translucency, offset), which is
-    // identical for the defaults.
+    // identical for the defaults. A moving popup never takes the default
+    // path: its origin carries the entrance room.
     let is_default = open.shadow.is_none()
         && open.fill.0 == open.fill.1
         && open.fill.0 == theme.background
         && open.opacity == 255
-        && open.origin == (0, 0);
+        && open.origin == (0, 0)
+        && !open.timing.active();
     if is_default {
         popup::paint(
             &mut canvas,
@@ -1265,7 +1417,7 @@ fn draw_open(
             &open.interaction,
             open.em,
             &open.round,
-            open.origin,
+            cur_origin,
             shadow,
             open.fill,
             open.opacity,
@@ -1294,8 +1446,74 @@ fn draw_open(
         }
     }
     surface.damage_buffer(0, 0, int(open.dims.0), int(open.dims.1));
+    // The input region follows the popup every frame in motion (where it
+    // is drawn, not where it rests), and is sent only when it differs from
+    // what the compositor was last told: at rest every draw but the first
+    // after a change sends nothing, in motion every frame sends its own.
+    // No allocation once the pooled lists are warm. A square opaque still
+    // popup keeps the default (no region), as before.
+    if needs_alpha {
+        // Disjoint field borrows: `slot` holds `open.pool`, the region
+        // lists are separate.
+        let (scratch, sent) = (&mut open.region_scratch, &mut open.region_sent);
+        update_popup_input_region(
+            scratch,
+            sent,
+            &open.layout,
+            &open.round,
+            &open.surface,
+            globals,
+            qh,
+            cur_origin,
+        );
+    }
+    // While something moves, ask for the next frame callback (one at most):
+    // the callback marks the next redraw. At rest and for `none`, ask for
+    // none, so an idle popup costs nothing.
+    if open.timing.active() && !settled && !open.frame_pending {
+        open.surface.frame(qh, open.id);
+        open.frame_pending = true;
+    }
+    if settled {
+        open.frame_pending = false;
+    }
     surface.commit();
     slot.held = true;
     open.dirty = false;
     true
+}
+
+/// Rebuilds the popup's input region at `origin` (where it draws this
+/// frame) into the pooled scratch list, sending it only when it differs
+/// from what was last sent. A square popup gets its own rect explicitly
+/// (to exclude the shadow and the entrance room); a rounded one gets its
+/// outline rows. No allocation once warm.
+#[allow(clippy::too_many_arguments)]
+fn update_popup_input_region(
+    scratch: &mut Vec<scootui::region::Rect>,
+    sent: &mut Vec<scootui::region::Rect>,
+    layout: &Layout,
+    round: &Round,
+    surface: &WlSurface,
+    globals: &super::wayland::Globals,
+    qh: &QueueHandle<State>,
+    origin: (u32, u32),
+) {
+    popup_rects(
+        layout.width,
+        layout.height,
+        round.outer().radius(),
+        origin,
+        scratch,
+    );
+    if scratch == sent {
+        return;
+    }
+    let region = globals.compositor.create_region(qh, ());
+    for rect in scratch.iter() {
+        region.add(int(rect.x), int(rect.y), int(rect.width), int(rect.height));
+    }
+    surface.set_input_region(Some(&region));
+    region.destroy();
+    std::mem::swap(scratch, sent);
 }

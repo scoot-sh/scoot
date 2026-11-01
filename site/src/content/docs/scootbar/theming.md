@@ -11,15 +11,17 @@ merged per key, with the file winning every key it sets. A value set in
 
 The layer carries the six `[colors]` tokens, the `[bar]` style keys
 (`radius`, `popup-radius`, `opacity`, `font-size`, `padding`, `spacing`,
-`separator`, `shadow`, `fill`), the workspaces pill keys and the per-module glyph icons.
+`separator`, `shadow`, `fill`, `motion`, `motion-duration-ms`, `motion-bounce`), the workspaces pill keys and the per-module glyph icons.
 It never carries geometry, placement, module lists, commands or
 actions. `hover` follows a custom `accent` when unset: a file that sets
 only `accent` derives its hover from it; a file that sets only `hover`
 keeps the look's `accent`. `shadow` (`none`, `soft`, `deep` or `glow`)
 and `fill` (`solid` or `gradient`) lift the bar and its popups off the
-windows behind them; a look that sets neither renders the fragment it
+windows behind them; `motion` (`none`, `ease-out` or `spring`), `motion-duration-ms`
+(0 to 1000) and `motion-bounce` (0 to 1) slide popups open; a look that sets none
+renders the fragment it
 always did. Ginger-night (the default) takes a soft shadow; radial-burst
-takes a glow.
+takes a glow and a spring entrance.
 
 A bar without scoot has no state link. It pins a rendered fragment
 instead:

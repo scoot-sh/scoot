@@ -193,8 +193,10 @@ impl State {
         let Some(open) = self.popup.open.as_mut() else {
             return;
         };
-        let x = device(open.pointer.0, open.scale);
-        let y = device(open.pointer.1, open.scale);
+        // Surface-local to popup-local: the popup draws at `drawn` (at rest,
+        // or a slide away mid-entrance), so clicks hit where it is drawn.
+        let x = device(open.pointer.0, open.scale).saturating_sub(i64::from(open.drawn.0));
+        let y = device(open.pointer.1, open.scale).saturating_sub(i64::from(open.drawn.1));
         let outcome = open.interaction.motion(&open.content, &open.layout, x, y);
         open.dirty |= outcome.redraw;
         if let Some(activate) = outcome.activate {
@@ -206,8 +208,8 @@ impl State {
         let Some(open) = self.popup.open.as_mut() else {
             return;
         };
-        let x = device(open.pointer.0, open.scale);
-        let y = device(open.pointer.1, open.scale);
+        let x = device(open.pointer.0, open.scale).saturating_sub(i64::from(open.drawn.0));
+        let y = device(open.pointer.1, open.scale).saturating_sub(i64::from(open.drawn.1));
         let outcome = if pressed {
             open.interaction.press(&open.content, &open.layout, x, y)
         } else {
@@ -369,6 +371,45 @@ impl Dispatch<WlSurface, PopupId> for State {
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
+    }
+}
+
+/// A frame callback while the entrance moves: the next animated frame is
+/// owed. At rest no callback is outstanding, so nothing here fires at idle.
+/// A callback for a popup already closed (a `popup_done` or Escape won the
+/// race mid-entrance) names nobody and is dropped: a dismiss mid-entrance
+/// closes at once and never strands input.
+impl Dispatch<wayland_client::protocol::wl_callback::WlCallback, PopupId> for State {
+    fn event(
+        state: &mut Self,
+        _: &wayland_client::protocol::wl_callback::WlCallback,
+        event: wayland_client::protocol::wl_callback::Event,
+        id: &PopupId,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if !matches!(
+            event,
+            wayland_client::protocol::wl_callback::Event::Done { .. }
+        ) {
+            return;
+        }
+        let Some(open) = state.popup.open.as_mut() else {
+            return;
+        };
+        if open.id != *id {
+            return;
+        }
+        open.frame_pending = false;
+        // While something still moves, the next frame is owed; once settled,
+        // no callback is asked for again.
+        if open.timing.active()
+            && open.entered.is_some_and(|start| {
+                !crate::popup_motion::settled(&open.timing, start, std::time::Instant::now())
+            })
+        {
+            open.dirty = true;
+        }
     }
 }
 

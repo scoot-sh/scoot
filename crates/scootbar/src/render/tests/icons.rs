@@ -64,6 +64,7 @@ fn style() -> Style {
         opacity: u8::MAX,
         shadow: scootui::effects::ShadowStyle::None,
         fill: scootui::effects::FillStyle::Solid,
+        timing: scootui::motion::Timing::NONE,
     }
 }
 

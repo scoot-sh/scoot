@@ -410,7 +410,18 @@ fn a_bad_shadow_or_fill_is_refused_naming_its_key() {
         ("[effects]\nshadow = \"huge\"\n", "bar.shadow"),
         ("[effects]\nfill = \"rainbow\"\n", "bar.fill"),
         ("[effects]\nshadow = 1\n", "bar.shadow"),
-        ("[effects]\nmotion = \"spring\"\n", "effects.motion"),
+        ("[bar]\nmotion = \"bouncy\"\n", "bar.motion"),
+        ("[bar]\nmotion = 1\n", "bar.motion"),
+        ("[effects]\nmotion = \"bouncy\"\n", "bar.motion"),
+        (
+            "[effects]\nmotion-duration-ms = -1\n",
+            "bar.motion-duration-ms",
+        ),
+        (
+            "[effects]\nmotion-duration-ms = 1001\n",
+            "bar.motion-duration-ms",
+        ),
+        ("[effects]\nmotion-bounce = 2\n", "bar.motion-bounce"),
     ] {
         let error = read(text).unwrap_err().to_string();
         // The outer key attribution, quoted (`'bar.fill': …`), not just the
@@ -435,6 +446,24 @@ fn effects_wins_over_bar_and_shares_the_allowlist() {
     assert_eq!(config.shadow, ShadowStyle::Deep);
     let config = read("[bar]\nfill = \"solid\"\n[effects]\nfill = \"gradient\"\n").unwrap();
     assert_eq!(config.fill, FillStyle::Gradient);
+    // The motion tokens ride the same path: `[bar]` sets them, `[effects]`
+    // wins per key, and the timing follows.
+    let config = read("[bar]\nmotion = \"spring\"\n").unwrap();
+    assert_eq!(config.motion, scootui::motion::Curve::Spring);
+    assert!(config.style().timing.active());
+    let config = read("[bar]\nmotion = \"spring\"\n[effects]\nmotion = \"ease-out\"\n").unwrap();
+    assert_eq!(config.motion, scootui::motion::Curve::EaseOut);
+    let config =
+        read("[bar]\nmotion = \"spring\"\nmotion-duration-ms = 380\nmotion-bounce = 0.5\n")
+            .unwrap();
+    assert_eq!(config.motion_ms, 380);
+    assert_eq!(config.motion_bounce, 0.5);
+    assert!(config.style().timing.active());
+    // `none` (the default) opens instantly and costs nothing.
+    let config = read("").unwrap();
+    assert_eq!(config.motion, scootui::motion::Curve::None);
+    assert_eq!(config.style().timing, scootui::motion::Timing::NONE);
+    assert!(!config.style().timing.active());
     // Unknown or refused tokens behave like today: reported and ignored?
     // No — the file refuses loudly (the layer reports and ignores); both
     // name the key.

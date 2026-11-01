@@ -529,7 +529,11 @@ text stays fully opaque over it. `[bar] shadow` (`none`, `soft`, `deep` or
 `glow`, default `none`) lifts the bar and its popups off the windows behind
 them, reusing the primitives the notification cards and the launcher panel
 proved. `[bar] fill` (`solid` or `gradient`, default `solid`) lays a
-vertical gradient with the light at the top over the background.
+vertical gradient with the light at the top over the background. `[bar] motion`
+(`none`, `ease-out` or `spring`, default `none`) slides popups open away from
+the bar's edge through the shared timeline helper; `motion-duration-ms`
+(0 to 1000, default 250) and `motion-bounce` (0 to 1, default 1.0) tune it.
+`none` opens instantly, exactly as before, and costs nothing.
 
 ```toml
 [bar]
@@ -539,6 +543,9 @@ radius = 10
 opacity = 0.9
 shadow = "soft"
 fill = "gradient"
+motion = "spring"
+motion-duration-ms = 250
+motion-bounce = 0.6
 ```
 
 - **A rounded, translucent or shadowed bar is an `ARGB8888` buffer** (premultiplied);
@@ -565,16 +572,26 @@ fill = "gradient"
   shadowed bar gets its own rect explicitly, so the shadow stays
   click-through.
 - **Popups reserve room on every side**: a click popup's surface is its
-  layout plus the shadow's pad on all four sides, and the popup sits at the
+  layout plus the shadow's pad plus the entrance's room (16 px per side when
+  motion moves, none for `none`) on all four sides, and the popup sits at the
   pad offset. The positioner is told the whole surface, so the compositor
   places it with its shadow; the input region is the popup's own rounded
-  rect at its offset, and a shadowed, rounded, translucent or gradient
+  rect at its offset, and a shadowed, rounded, translucent, gradient or moving
   popup blends (an `ARGB8888` buffer). Tooltips stay as they were (no
   shadow, solid, opaque).
+- **Popups open with a slide**: a top bar's popup starts 12 px above rest
+  (toward the bar) and drops to it; a bottom bar's mirrors upward. A spring
+  overshoots past rest briefly, the way notification cards do. The entrance
+  runs only on frame callbacks while something moves; at rest and for `none`
+  no callback is asked, so idle costs nothing. There is no exit animation:
+  a pick, a click outside or Escape closes at once (the dmenu precedent),
+  so a script waiting on a pick never waits on motion and a half-open popup
+  never strands input. The grab is taken on the press (first frame), not on
+  settle.
 - **Scales rebuild, then cache**: shadow tables are per device-pixel size
   (`Shadow::prepare` outside any repaint, `shadow = "none"` builds
-  nothing). They rebuild when the style, scale, radius, bar size or edge
-  changes
+  nothing) and the entrance room scales with them. They rebuild when the style, scale, radius, bar size, edge or
+  timing changes
   and cache otherwise; warm frames allocate nothing. The bench covers 1x
   and 2x (see below).
 - **The radius is cut back to fit**: `--height` below twice the file's
@@ -598,23 +615,29 @@ fill = "gradient"
 
 ### Effects over any look
 
-`shadow` and `fill` can also be set in `bar.toml`, in an `[effects]`
+`shadow`, `fill`, `motion`, `motion-duration-ms` and `motion-bounce` can also be set in `bar.toml`, in an `[effects]`
 table. It wins per key over whatever look is active, and over the file's
-own `[bar]` keys, so one setting turns a shadow or a gradient on for
+own `[bar]` keys, so one setting turns a shadow, a gradient or an entrance on for
 every look without copying a look. A key the file does not set stays the
 look's, and a key the look does not set stays the built-in default
-(`none`, `solid`).
+(`none`, `solid`, `none`, 250, 1.0).
 
 ```toml
 [effects]
 shadow = "soft"
 fill = "gradient"
+motion = "spring"
+motion-duration-ms = 250
+motion-bounce = 0.6
 ```
 
 | Table and key | Value | Same as the look's |
 |---|---|---|
 | `[effects]` `shadow` | `none`, `soft`, `deep` or `glow` | `bar.shadow` ([Shape, opacity and depth](#shape-opacity-and-depth)) |
 | `[effects]` `fill` | `solid` or `gradient` | `bar.fill` ([Shape, opacity and depth](#shape-opacity-and-depth)) |
+| `[effects]` `motion` | `none`, `ease-out` or `spring` | `bar.motion` ([Shape, opacity and depth](#shape-opacity-and-depth)) |
+| `[effects]` `motion-duration-ms` | whole number, 0 to 1000 | `bar.motion-duration-ms` ([Shape, opacity and depth](#shape-opacity-and-depth)) |
+| `[effects]` `motion-bounce` | number, 0 to 1 | `bar.motion-bounce` ([Shape, opacity and depth](#shape-opacity-and-depth)) |
 
 Precedence, highest first, per key: the file's `[effects]` table, the
 file's `[bar]` keys, the look layer, the built-in defaults. (Daemon flags

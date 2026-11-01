@@ -162,6 +162,42 @@ fn popup_radius_gated_on_feature() {
 }
 
 #[test]
+fn bar_motion_renders_and_overrides() {
+    // A look that sets `[effects] motion` renders `bar.motion` and friends;
+    // one that sets nothing renders none of them, so defaults stay instant
+    // and existing goldens hold.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[effects]\nmotion = \"spring\"\nmotion-duration-ms = 380\nmotion-bounce = 0.6\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let frag = render_bar(&look, &inputs()).expect("renders");
+    let parsed: toml::Table = toml::from_str(&frag).expect("reparses");
+    assert_eq!(parsed["bar"]["motion"].as_str(), Some("spring"));
+    assert_eq!(parsed["bar"]["motion-duration-ms"].as_integer(), Some(380));
+    assert_eq!(parsed["bar"]["motion-bounce"].as_float(), Some(0.6));
+    // Per-app overrides win per key over `[effects]`.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[effects]\nmotion = \"spring\"\n[apps.scootbar]\n\"bar.motion\" = \"ease-out\"\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let frag = render_bar(&look, &inputs()).expect("renders");
+    let parsed: toml::Table = toml::from_str(&frag).expect("reparses");
+    assert_eq!(parsed["bar"]["motion"].as_str(), Some("ease-out"));
+    // Moonrise sets no motion: no motion key, so defaults stay instant.
+    let frag = render_bar(&moonrise(), &inputs()).expect("renders");
+    assert!(!frag.contains("motion"), "unset motion renders:\n{frag}");
+    let _: toml::Value = toml::from_str(&frag).expect("fragment is TOML");
+}
+
+#[test]
 fn cursor_none_omits_color() {
     let text = crate::schema::tests::minimal_toml().replacen(
         "accent = \"#FF9A49\"",

@@ -924,7 +924,7 @@ pub enum Msg {
 
 /// What `scootbar daemon` runs with: the flags' values, the config file to
 /// read them with, and what the flags alone (without a file) would run.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DaemonCommand {
     pub given: Given,
     /// `--config`'s path; `None` reads the default file.
@@ -935,7 +935,7 @@ pub struct DaemonCommand {
     pub check: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Help(Topic),
     Version,
@@ -1768,6 +1768,9 @@ impl Given {
             opacity: defaults.opacity,
             shadow: defaults.shadow,
             fill: defaults.fill,
+            motion: defaults.motion,
+            motion_ms: defaults.motion_ms,
+            motion_bounce: defaults.motion_bounce,
             #[cfg(feature = "popup")]
             popup_radius: defaults.popup_radius,
             #[cfg(feature = "popup")]

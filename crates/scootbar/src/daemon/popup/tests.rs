@@ -1,7 +1,7 @@
 //! The popup glue's pure parts: what is arithmetic, not protocol.
 
 use super::events::device;
-use super::{fits, resized};
+use super::{fits, popup_rects, resized};
 use crate::density::Scale;
 use crate::popup::Layout;
 use scootui::paint::Pad;
@@ -134,4 +134,57 @@ fn a_restyled_popup_is_remade_only_when_it_no_longer_fits() {
         no_pad(),
         (102, 51)
     ));
+}
+
+/// The input region follows the popup every frame in motion (where it is
+/// drawn, not where it rests): different origins give different rects, so
+/// clicks during the entrance hit where the popup is, and the same origin
+/// gives the same rects, so at rest every draw but the first after a change
+/// sends nothing. The rects key on everything that changes them (origin,
+/// size, radius): a runtime look switch that changes any of them rebuilds.
+#[test]
+fn the_input_region_follows_the_popup_and_keys_on_everything() {
+    let mut rest = Vec::new();
+    let mut moved = Vec::new();
+    let mut same = Vec::new();
+    // Square: one rect at the origin.
+    popup_rects(100, 50, 0, (28, 24), &mut rest);
+    popup_rects(100, 50, 0, (28, 18), &mut moved);
+    assert_ne!(rest, moved, "a slide moves the region");
+    popup_rects(100, 50, 0, (28, 24), &mut same);
+    assert_eq!(rest, same, "the same origin sends nothing anew");
+    // Size and radius change the rects too: the cache key is the content.
+    let mut resized = Vec::new();
+    popup_rects(120, 50, 0, (28, 24), &mut resized);
+    assert_ne!(rest, resized, "a new size rebuilds the region");
+    let mut rounded = Vec::new();
+    let mut square = Vec::new();
+    popup_rects(100, 50, 6, (28, 24), &mut rounded);
+    popup_rects(100, 50, 0, (28, 24), &mut square);
+    assert_ne!(rounded, square, "a new radius rebuilds the region");
+}
+
+/// Warm animated frames allocate nothing: rebuilding the pooled region
+/// rects at a new origin every frame (a slide) builds nothing on the heap
+/// once the lists are warm. Shadow tables are prepared once on open (the
+/// bar's `warm_frames` test pins the table cache); `none` builds nothing.
+#[test]
+fn warm_entrance_frames_allocate_nothing_once_pooled() {
+    use scootbg_mem::count_allocations;
+    let mut scratch = Vec::new();
+    let mut sent = Vec::new();
+    // Warm up: size both pooled lists once, as the open does (one send,
+    // one scratch).
+    popup_rects(120, 60, 6, (28, 24), &mut sent);
+    popup_rects(120, 60, 6, (28, 24), &mut scratch);
+    // Ten animated frames (rest and 6 px above, alternating, as a slide
+    // would) allocate nothing.
+    let ((), allocations) = count_allocations(|| {
+        for i in 0..10 {
+            let oy = if i % 2 == 0 { 24 } else { 18 };
+            popup_rects(120, 60, 6, (28, oy), &mut scratch);
+            std::mem::swap(&mut scratch, &mut sent);
+        }
+    });
+    assert_eq!(allocations, 0, "warm entrance frames allocated");
 }

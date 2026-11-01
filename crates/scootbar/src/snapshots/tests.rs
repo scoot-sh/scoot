@@ -38,6 +38,8 @@ const NAMES: &[&str] = &[
     "bar-shadow-deep-1x",
     "bar-shadow-glow-1x",
     "bar-gradient-1x",
+    "popup-entrance-rest-1x-alpha",
+    "popup-entrance-mid-1x-alpha",
     "workspaces-pill-1x",
     "workspaces-circle-1x",
     "workspaces-circle-two-digits-1x",
@@ -221,6 +223,7 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
         opacity: look.opacity,
         shadow: look.shadow,
         fill: look.fill,
+        timing: scootui::motion::Timing::NONE,
     };
     // A shadowed bar's surface reserves the window-facing room: the bar
     // plus its shadow, while the exclusive zone stays the bar's height.
@@ -530,6 +533,134 @@ fn bar_gradient_at_1x() {
         "bar-gradient-1x",
         "a 160x20 bar at scale 1 with a vertical gradient fill, light at the top",
         &Image::from_xrgb(&pixels, w, h, true),
+    );
+}
+
+/// A popup's entrance at rest and mid-slide, through the same depth-aware
+/// paint the daemon uses: a soft shadow, a 6 px rounded frame, and 16 px of
+/// entrance room on every side. The theme background is non-black (0x80 gray),
+/// so the color plane would show the fill; the alpha plane (not the color
+/// plane: a black shadow over transparency reads black whatever it does)
+/// pins the paint, not just the geometry: the transparent entrance room, the
+/// shadow's falloff, and the opaque popup at two heights 6 px apart.
+fn popup_entrance(dy: i32) -> (Vec<u8>, u32, u32) {
+    use crate::popup::{Content, Interaction, Layout, Round};
+    use scootui::paint::{Canvas, Shadow, ShadowSpec};
+    let scale = Scale::Integer(1);
+    let mut text = Text::new(FontArc::new(
+        FontVec::try_from_vec(testfont::build()).unwrap(),
+    ));
+    let theme = Theme {
+        background: gray(0x80),
+        foreground: gray(0xff),
+        accent: gray(0xc0),
+        hover: gray(0xe0),
+        dim: gray(0x80),
+        urgent: gray(0xe0),
+    };
+    let mut content = Content::default();
+    content.text(format_args!("12:34"));
+    content.button(format_args!("12:35"), "nop", None, false, false);
+    let em = crate::render::em(14, scale);
+    let pad = crate::render::device(4, scale);
+    let frame = crate::render::device(1, scale).max(1);
+    let mut layout = Layout::default();
+    layout.compute(&content, &text, em, pad, frame);
+    let round = Round::new(
+        crate::render::device(6, scale),
+        frame,
+        layout.width,
+        layout.height,
+    );
+    // Soft shadow at 1x, top edge (below the bar).
+    let dev_spec = ShadowSpec {
+        offset_x: 0,
+        offset_y: 4,
+        blur: 12,
+        alpha: 92,
+    };
+    let shadow_pad = Shadow::new(dev_spec).pad();
+    let motion = crate::popup_motion::MOTION_ROOM;
+    let (pad_left, pad_top, pad_right, pad_bottom) = (
+        shadow_pad.left.saturating_add(motion),
+        shadow_pad.top.saturating_add(motion),
+        shadow_pad.right.saturating_add(motion),
+        shadow_pad.bottom.saturating_add(motion),
+    );
+    let surf_w = layout
+        .width
+        .saturating_add(pad_left)
+        .saturating_add(pad_right);
+    let surf_h = layout
+        .height
+        .saturating_add(pad_top)
+        .saturating_add(pad_bottom);
+    let mut tables = Shadow::new(dev_spec);
+    tables.prepare(round.outer().radius(), [(layout.width, layout.height)]);
+    let rest_ox = pad_left;
+    let rest_oy = pad_top;
+    let cur_oy = (i64::from(rest_oy) + i64::from(dy)).clamp(0, i64::from(surf_h)) as u32;
+    let origin = (rest_ox, cur_oy);
+    let mut pixels = vec![0u8; surf_w as usize * surf_h as usize * 4];
+    let mut canvas = Canvas::new(&mut pixels, surf_w, surf_h).unwrap();
+    crate::popup::paint_depth(
+        &mut canvas,
+        &mut text,
+        &theme,
+        &content,
+        &layout,
+        &Interaction::default(),
+        em,
+        &round,
+        origin,
+        Some((
+            &tables,
+            crate::color::Color { r: 0, g: 0, b: 0 },
+            round.outer().radius(),
+        )),
+        (theme.background, theme.background),
+        255,
+    );
+    (pixels, surf_w, surf_h)
+}
+
+#[test]
+fn popup_entrance_rest_at_1x() {
+    let (pixels, w, h) = popup_entrance(0);
+    let image = Image::from_alpha(&pixels, w, h);
+    // The top motion room is transparent, the popup below it opaque.
+    let top: u32 = image.samples[..(16 * w) as usize]
+        .iter()
+        .map(|&s| u32::from(s))
+        .sum();
+    assert_eq!(top, 0, "entrance room is transparent at rest");
+    let body: u32 = image.samples[(24 * w) as usize..]
+        .iter()
+        .map(|&s| u32::from(s))
+        .sum();
+    assert!(body > 0, "the popup paints nothing at rest");
+    check(
+        "popup-entrance-rest-1x-alpha",
+        "the alpha plane of a popup at scale 1 at rest: 16 px of transparent entrance room above a soft shadow and an opaque 0x80-gray popup",
+        &image,
+    );
+}
+
+#[test]
+fn popup_entrance_mid_at_1x() {
+    // Mid-entrance: 6 px above rest (toward a top bar), the slide half done.
+    let (pixels, w, h) = popup_entrance(-6);
+    let image = Image::from_alpha(&pixels, w, h);
+    let (rest_pixels, _, _) = popup_entrance(0);
+    let rest = Image::from_alpha(&rest_pixels, w, h);
+    assert_ne!(
+        image.samples, rest.samples,
+        "mid-entrance paints where rest does not"
+    );
+    check(
+        "popup-entrance-mid-1x-alpha",
+        "the alpha plane of the same popup 6 px above rest, mid-entrance",
+        &image,
     );
 }
 
