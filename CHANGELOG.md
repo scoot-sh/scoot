@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.23](https://github.com/scoot-sh/scoot/compare/v0.6.22...v0.6.23) - 2026-11-01
+
+### scoot-look,scootui,scootnotify,scootlaunch,scootctl,docs
+
+- added: resolve the look's UI font to a file at apply ([#842](https://github.com/scoot-sh/scoot/pull/842))
+
 ### nix
 
 - fixed: the packaged `scoot` can reach libgbm, so the GPU scanout tier is
