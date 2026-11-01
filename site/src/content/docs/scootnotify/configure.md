@@ -542,9 +542,10 @@ scootnotify has no fontconfig. It picks the card font in this order:
    `/usr/local/share/fonts` and NixOS's
    `/run/current-system/sw/share/X11/fonts` and `.../share/fonts`, up to
    six directories deep. `DroidSansM Nerd Font Propo` finds
-   `DroidSansMNerdFontPropo-Regular.otf`; case, spaces and hyphens do not
-   matter, and only `.ttf` and `.otf` files named exactly the family,
-   the family plus `Regular`, or the family plus `Bold` count.
+   `DroidSansMNerdFontPropo-Regular.otf`; case, spaces, hyphens and
+   underscores do not matter, and only `.ttf` and `.otf` files named
+   exactly the family, the family plus `Regular`, or the family plus
+   `Bold` count.
 4. The first well-known file (DejaVu Sans, then Noto Sans).
 
 Steps 3 and 4 are the fallbacks for a `notify.toml` with no `font-file`
