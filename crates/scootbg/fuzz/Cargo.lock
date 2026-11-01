@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "scootbg-mem"
-version = "0.6.29"
+version = "0.6.30"
 dependencies = [
  "rustix",
 ]
