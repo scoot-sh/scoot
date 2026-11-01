@@ -440,6 +440,20 @@ fn popup_rects(
     }
 }
 
+/// The popup's rest origin in the surface (device pixels): the shadow's pad
+/// plus the entrance's room when it moves. A shadowless moving popup still
+/// keeps the motion room above it: the slide starts away from rest and needs
+/// somewhere to start (`(0, 0)` pins every upward frame to the surface edge
+/// via the `clamp` in `draw_open`, so the entrance never moves). Tooltips
+/// keep `(0, 0)` (their pad is 0).
+fn rest_origin(is_popup: bool, pad_left: u32, pad_top: u32) -> (u32, u32) {
+    if is_popup {
+        (pad_left, pad_top)
+    } else {
+        (0, 0)
+    }
+}
+
 /// Sets the input region for a click popup's own rect at `origin` (device
 /// pixels offset by the shadow's pad) of `width` by `height` with `radius`:
 /// the rounded shape, never the shadow, so clicks in the shadow fall
@@ -655,12 +669,12 @@ impl State {
                 let mut tables = scootui::paint::Shadow::new(dev_spec);
                 tables.prepare(radius, [(layout.width, layout.height)]);
                 let _ = tint;
-                (Some(tables), (pad_left, pad_top))
+                (Some(tables), rest_origin(true, pad_left, pad_top))
             } else {
-                (None, (0, 0))
+                (None, rest_origin(true, pad_left, pad_top))
             }
         } else {
-            (None, (0, 0))
+            (None, rest_origin(false, pad_left, pad_top))
         };
         let shadow_tint = if is_popup {
             match style.shadow {
@@ -1020,7 +1034,7 @@ impl State {
         };
         open.fill = style.fill_stops();
         open.opacity = style.opacity;
-        open.origin = (open.pad.left, open.pad.top);
+        open.origin = rest_origin(true, open.pad.left, open.pad.top);
         // The entrance timing is part of the cache key: a runtime look
         // switch that changes it restarts the entrance (a colors-only reload
         // keeps the settled state, so it never re-animates). A switch that
@@ -1031,6 +1045,11 @@ impl State {
             open.entered = None;
             open.frame_pending = false;
         }
+        // The edge needs no restart here: it is bar geometry, and a geometry
+        // change takes the full reload (which closes the popup), never this
+        // style-only path (`respond::style_only`, pinned by
+        // `style_tests::bar_geometry_is_not_style_only`). At rest `dy = 0`
+        // either way; this assignment only keeps the invariant.
         open.edge = bar_edge;
         open.interaction.retain(&open.content, &open.layout);
         open.dirty = true;

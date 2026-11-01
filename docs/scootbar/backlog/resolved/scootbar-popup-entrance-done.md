@@ -306,3 +306,61 @@ Screenshots: `/tmp/entrance-shots/power-mid-1x.png`,
 `/tmp/entrance-shots/looks-rest-2x.png` on the Mac.
 
 Epic #807 is closed; referenced, not touched.
+
+## Follow-up fix for review finding B1 (2026-11-01, unmerged PR head `1ee3aea48`)
+
+The review found shadowless popups never move: `build_popup` gave a
+`shadow = "none"` popup the rest origin `(0, 0)` though the surface
+carries the entrance's 16 px motion room, so every upward slide frame
+clamped to the surface edge and the entrance was invisible (protocol
+proof: one `set_input_region` over a 1000 ms entrance; pixel proof:
+byte-identical screenshots). Fixed by giving `is_popup` the pad origin
+`(pad_left, pad_top)` regardless of shadow (`rest_origin` helper in
+`daemon/popup/mod.rs`, shared with `restyle_open` so both sites agree);
+tooltips keep `(0, 0)`.
+
+- N1 (edge change on restyle): no code change. The edge is bar geometry:
+  a change takes the full reload (which closes the popup), never the
+  style-only path (`respond::style_only`, pinned by
+  `style_tests::bar_geometry_is_not_style_only`), so `open.edge = bar_edge`
+  in `restyle_open` can only ever keep the invariant. At rest `dy = 0`
+  either way. Noted in a code comment.
+- N2 (mid-entrance dismissal): new live test
+  `shadowless_motion::a_mid_entrance_dismissal_closes_at_once_with_nothing_stranded`
+  (Escape and click-outside each mid-flight close at once; the popup
+  reopens after each, no stranded input, no protocol error).
+- Regression test for B1:
+  `daemon/popup/tests.rs::a_shadowless_moving_popup_rests_at_the_pad_not_the_origin`
+  (unit; fails with the origin at `(0, 0)`, passes with the pad) plus
+  `shadowless_motion::a_shadowless_entrance_keeps_its_room_and_updates_per_frame`
+  (headless: default `shadow = "none"`, `motion = "spring"` 1000 ms/0.6 —
+  asserts the 4 rows under the bar stay desktop through the entrance and
+  the region delta is the build plus frame updates, not the build alone;
+  both fail without the fix).
+
+Live re-verification on headless scoot (dev VM, 800x600, CPU tier,
+looks popup, `motion = "spring"` 1000 ms/0.6; worktree `/tmp/wt-fix863`,
+VM tree `/dev/shm/fix863/tree`, own `CARGO_TARGET_DIR`, `-j2`):
+
+- Shadowless (`shadow = "none"`): mid-flight content top 3 px above rest
+  (13 vs 16 rows of room), 3397 px differ (`cmp` byte 2974 line 5);
+  per-frame regions from `(16, 4)` through `(16, 16)` then silence at rest
+  (15 sends: the bar's startup send plus the popup build plus 13
+  per-frame updates); idle 60 s with the popup open
+  at rest 116→116 voluntary, 0→0 nonvoluntary (0 wakes).
+- Soft (`shadow = "soft"`, same timing): mid 3 px above rest, 7903 px
+  differ (`cmp` byte 3624 line 9); regions climb 12 integer positions to
+  the rest origin `(28, 24)` (shadow pad plus motion room), same 15-send
+  shape.
+- Shots: `/tmp/entrance-shots/shadowless-mid-1x.png`,
+  `shadowless-rest-1x.png`, `soft-mid-1x.png`, `soft-rest-1x.png`.
+- Note: at 1600x1000 on a loaded VM the headless screenshots alias to the
+  first presented frame (all identical), so the pixel proof here is
+  800x600 and the per-frame proof is the protocol trace, which is
+  timing-proof either way. The new headless tests assert only
+  timing-proof properties (gap geometry, region-send counts).
+- Gates (VM): `clippy -p scootbar --all-targets` clean,
+  `--no-default-features` clean; `nextest -p scootbar` 1270 passed,
+  10 skipped; `cargo test -p scootbar --bin scootbar` 1108 passed;
+  `cargo test -p scootbar --test popup` 21 passed (19 existing + 2 new);
+  `fmt --check` (Mac) clean; `backlog check` 0 problems.

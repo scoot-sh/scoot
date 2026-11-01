@@ -1,7 +1,7 @@
 //! The popup glue's pure parts: what is arithmetic, not protocol.
 
 use super::events::device;
-use super::{fits, popup_rects, resized};
+use super::{fits, popup_rects, resized, rest_origin};
 use crate::density::Scale;
 use crate::popup::Layout;
 use scootui::paint::Pad;
@@ -162,6 +162,24 @@ fn the_input_region_follows_the_popup_and_keys_on_everything() {
     popup_rects(100, 50, 6, (28, 24), &mut rounded);
     popup_rects(100, 50, 0, (28, 24), &mut square);
     assert_ne!(rounded, square, "a new radius rebuilds the region");
+}
+
+/// The rest origin keeps the motion room without a shadow (B1): a
+/// shadowless moving popup rests at `(pad.left, pad.top)`, not `(0, 0)` —
+/// `(0, 0)` pins every upward slide frame to the surface edge via the clamp
+/// in `draw_open`, so the entrance never moves. Tooltips keep `(0, 0)`.
+#[test]
+fn a_shadowless_moving_popup_rests_at_the_pad_not_the_origin() {
+    // Shadowless with motion room (the default shadow, an active timing):
+    // the 16 px room sits above the popup.
+    assert_eq!(rest_origin(true, 16, 16), (16, 16));
+    // Shadowed: the shadow's pad plus the same room.
+    assert_eq!(rest_origin(true, 28, 24), (28, 24));
+    // Still popups without a shadow keep the surface they always had.
+    assert_eq!(rest_origin(true, 0, 0), (0, 0));
+    // Tooltips never move: the origin whatever the pad.
+    assert_eq!(rest_origin(false, 0, 0), (0, 0));
+    assert_eq!(rest_origin(false, 16, 16), (0, 0));
 }
 
 /// Warm animated frames allocate nothing: rebuilding the pooled region
