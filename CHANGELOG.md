@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.29](https://github.com/scoot-sh/scoot/compare/v0.6.28...v0.6.29) - 2026-11-01
+
+### scoot-look,scootbar,scootui
+
+- added: shadow and gradient depth tokens for the bar and its popups ([#861](https://github.com/scoot-sh/scoot/pull/861))
+
 ## [0.6.28](https://github.com/scoot-sh/scoot/compare/v0.6.27...v0.6.28) - 2026-11-01
 
 ### scoot-core,scoot,scoot-ipc,scootctl
