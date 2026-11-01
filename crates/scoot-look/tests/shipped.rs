@@ -355,10 +355,11 @@ fn shipped_contrast_warnings_are_the_known_pairs() {
     // clears `dim` on `background` and on `surface` (4.5, the text bar: the
     // notification card and the launcher panel draw their secondary text
     // there) and music-desk's inactive ring clears 3.0. What remains is
-    // locked: music-desk's urgent (2.88), and the dark looks' deliberately
-    // muted inactive rings (moonrise 1.53, vinyl-sunset 2.52, ginger-night
-    // 1.52; ratios print to two decimals and bars compare on the unrounded
-    // value, so a warning always means below the bar). Locked here so a
+    // locked: music-desk's urgent (2.87), and the dark looks' deliberately
+    // muted inactive rings (moonrise 1.52, vinyl-sunset 2.52, ginger-night
+    // 1.51; ratios print truncated to two decimals and bars compare on the
+    // unrounded value, so a warning always means below the bar and a failing
+    // pair never prints as its bar). Locked here so a
     // retune shows up as a test change; the maintainer call (retune or
     // accept) rides in the PR, not in a refusal.
     let mut below: Vec<(String, String, String)> = Vec::new();
@@ -378,9 +379,9 @@ fn shipped_contrast_warnings_are_the_known_pairs() {
     assert_eq!(
         below,
         vec![
-            known("ginger-night", "border/background", "1.52"),
-            known("moonrise", "border/background", "1.53"),
-            known("music-desk", "urgent/background", "2.88"),
+            known("ginger-night", "border/background", "1.51"),
+            known("moonrise", "border/background", "1.52"),
+            known("music-desk", "urgent/background", "2.87"),
             known("vinyl-sunset", "border/background", "2.52"),
         ]
     );

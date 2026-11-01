@@ -48,12 +48,27 @@ pub fn ratio(a: &str, b: &str) -> f64 {
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
-/// The ratio as human output shows it: two decimals. The bar comparison
-/// itself runs on the unrounded [`ratio`], so a warning line always means
-/// below the bar; printing hundredths (not tenths) shrinks the window in
-/// which a failing pair can print as its bar from ±0.05 to ±0.005.
+/// The ratio as human output shows it: two decimals, truncated toward zero.
+/// The bar comparison itself runs on the unrounded [`ratio`], and
+/// truncation (not rounding) means a failing pair can never print as its
+/// bar: a real 4.496 prints as "4.49", never "4.50".
 pub fn format_ratio(ratio: f64) -> String {
-    format!("{ratio:.2}")
+    if !ratio.is_finite() {
+        return format!("{ratio:.2}");
+    }
+    // Truncate toward zero: `trunc(x*100)/100`. The `1e-9` absorbs binary
+    // float representation error so an exact cent value (4.5, 3.12) never
+    // prints one cent low (4.49, 3.11) when `ratio * 100.0` lands a hair
+    // under the integer. It is far below half a cent (5e-3), so a true
+    // 4.4999 cannot cross up to 4.50, and far above the ulp-scale error
+    // (~1e-13) at these magnitudes. Sign-aware so a negative keeps
+    // toward-zero truncation (unreachable for real ratios, possible for
+    // a hand-built caller).
+    let eps = 1e-9 * ratio.signum();
+    let truncated = ((ratio * 100.0 + eps).trunc()) / 100.0;
+    // Avoid "-0.00" from truncating a tiny negative.
+    let truncated = if truncated == 0.0 { 0.0 } else { truncated };
+    format!("{truncated:.2}")
 }
 
 /// The card fill's two stops over `surface` for `effects.fill = "gradient"`,
