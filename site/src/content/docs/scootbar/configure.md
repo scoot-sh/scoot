@@ -559,6 +559,17 @@ motion-bounce = 0.6
   the four corner squares of a rounded one). A translucent or shadowed bar declares
   none: the compositor blends all of it, which is the cost of the option (a
   shadow reaches past the bar's own rect, so no pixel is opaque).
+- **What translucency costs when something moves behind the bar**: the
+  default bar pays nothing per frame — its exclusive zone keeps every tiled
+  window out of its rectangle, and with a static wallpaper the compositor
+  recomposites from the cached bar buffer. When moving pixels do sit behind
+  a translucent bar (a floating window dragged under it, an overlay-style
+  bar with `exclusive = false`, an animated wallpaper), every redrawn frame
+  blends the bar's strip instead of skipping it. Measured on the CPU
+  (pixman) tier, a 1920x40 strip costs about 2.3 to 4.4 times its opaque
+  blit per redraw (roughly +30 to +55 us at 1x, +110 to +170 us at 2x for
+  the strip alone), plus the window pixels under the bar that occlusion
+  culling would otherwise skip entirely.
 - **The shadow never moves a client's window**: the surface reserves the
   window-facing room (below a top bar, above a bottom bar), while the
   exclusive zone stays the bar's own height. Windows start at height plus
