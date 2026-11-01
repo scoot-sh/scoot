@@ -93,6 +93,30 @@ and updating the docs that describe the pin. If it fails, the pins stay
 and this ticket records the measured trade-off with the same standing
 the radius numbers got in `look-layer-scoot-done.md:99-107`.
 
+## Budgets (stated 2026-11-01, before measuring)
+
+Stated before any number below was taken, relative to the opaque
+(`bar = 1.0`) measurement in the same scenario, on the same build, on
+the same machine. The +10% follows D15's precedent (which accepted
+~+5-6% per frame for rounded corners): the bar's own fill is
+alpha-independent by construction (`fill_shaped` runs the same loop for
+any alpha, only the premultiplied pixel value changes), so +10% is
+generous headroom for VM noise; the compositor-side blend cost is the
+unknown this gate exists to measure.
+
+1. **Idle**: no extra wakeups. Translucent wakeups/min must equal opaque
+   exactly (the standing bar: a settled bar wakes only on its
+   minute-aligned clock).
+2. **Damage-limited span redraw**: per-repaint cost within +10% of opaque.
+3. **Bar-with-popup**: per show/hide cycle within +10% of opaque.
+4. **Tick full cost**: within +10% of opaque.
+5. **Full-bar repaint at 1x and 2x**: bar-side within +10% of opaque;
+   compositor frame (screenshot-forced) within +10% of opaque.
+
+Verdict rule: every scenario inside budget lifts the five pins to the
+comments' values in the same PR; any scenario outside keeps all pins at
+1.0 and this ticket records the trade-off instead.
+
 ## Acceptance
 
 - The five scenarios above have before (opaque) / after (translucent)
