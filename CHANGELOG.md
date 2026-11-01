@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.26](https://github.com/scoot-sh/scoot/compare/v0.6.25...v0.6.26) - 2026-11-01
+
+### scoot-look,scootctl
+
+- fixed: compare and print contrast at full precision ([#852](https://github.com/scoot-sh/scoot/pull/852))
+
 ## [0.6.25](https://github.com/scoot-sh/scoot/compare/v0.6.24...v0.6.25) - 2026-11-01
 
 ### scootbar,looks
