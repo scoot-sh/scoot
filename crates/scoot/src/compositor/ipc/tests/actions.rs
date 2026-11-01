@@ -465,6 +465,10 @@ fn focusing_over_ipc_takes_the_keyboard_back_from_a_clicked_taskbar() {
         scoot_ipc::Action::FocusOutputDirection {
             direction: scoot_ipc::Horizontal::Left,
         },
+        // The aligned half of `FocusColumn`'s stepping: focusing column 0
+        // (a real move on this two-column fixture) spends the click like
+        // every other focus move, and the keyboard follows it.
+        scoot_ipc::Action::ScrollViewToColumn { index: 0 },
     ];
     for (n, action) in covered.into_iter().enumerate() {
         fixture.click_taskbar();

@@ -180,11 +180,14 @@ pub enum Action {
     /// [`Action::FocusWorkspaceIndex`] counts within the focused output's
     /// list. Out of range does nothing -- not even focus, and the view is
     /// left alone -- like that index action. With no output, or no columns,
-    /// there is nothing to focus, so it likewise does nothing. A fullscreen
-    /// or maximized column is `area.w` / usable wide, never narrower than
-    /// the view, so aligning to its start is exactly what `fix_view` would
-    /// do for it anyway; a column narrower than the view at the strip's end
-    /// clamps to the strip's end, like every other scroll.
+    /// there is nothing to focus, so it likewise does nothing. With a
+    /// floating window focused, this leaves the floating layer for the strip
+    /// like [`Action::FocusWindowId`], focusing column `index` and clearing
+    /// floating focus. A fullscreen or maximized column is `area.w` / usable
+    /// wide, never narrower than the view, so aligning to its start is
+    /// exactly what `fix_view` would do for it anyway; a column narrower
+    /// than the view at the strip's end clamps to the strip's end, like
+    /// every other scroll.
     ScrollViewToColumn(usize),
     FocusWindow(Vertical),
     FocusWindowId(WindowId),
@@ -472,7 +475,8 @@ pub enum Action {
     ///   floating window. [`Action::ToggleFloatingFocus`] switches between
     ///   them. With a floating window focused, [`Action::FocusColumn`] leaves
     ///   the floating layer for the strip's focused column (without stepping),
-    ///   and [`Action::FocusWindow`] cycles the floating stack -- down raises
+    ///   and [`Action::ScrollViewToColumn`] leaves it for the named column,
+    ///   while [`Action::FocusWindow`] cycles the floating stack -- down raises
     ///   the bottom-most window, up sends the top one to the bottom. The
     ///   strip-only actions ([`Action::MoveColumn`], [`Action::MoveWindow`],
     ///   [`Action::ConsumeOrExpel`], [`Action::CycleColumnWidth`],

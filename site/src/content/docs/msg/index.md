@@ -52,8 +52,8 @@ that had given a *click-focused* (`on_demand`) layer surface the
 keyboard, so afterwards keystrokes go to the window `windows` reports as
 focused:
 
-- `focus-column`, `focus-window`, `focus-window-id`, `focus-workspace`,
-  `focus-workspace-index` — with or without `--output ID`;
+- `focus-column`, `scroll-view-to-column`, `focus-window`, `focus-window-id`,
+  `focus-workspace`, `focus-workspace-index` — with or without `--output ID`;
 - `focus-output`, `focus-output-index`, `focus-output-left`,
   `focus-output-right`;
 - `toggle-floating-focus`.

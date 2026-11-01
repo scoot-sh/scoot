@@ -30,7 +30,8 @@ pub enum Action {
     /// -- the wire half of `scoot_core::Action::ScrollViewToColumn`. The
     /// aligned half of `FocusColumn`'s stepping: focusing a neighbour that
     /// is already visible moves nothing, so a swipe that steps focus eases
-    /// back. Out of range does nothing, like `FocusWorkspaceIndex`.
+    /// back. With a floating window focused it leaves the floating layer
+    /// like `FocusWindowId`. Out of range does nothing, like `FocusWorkspaceIndex`.
     /// Additive: a client that never sends this tag decodes exactly as
     /// before, so no `PROTOCOL_VERSION` bump.
     ScrollViewToColumn {

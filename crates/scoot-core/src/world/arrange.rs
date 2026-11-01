@@ -394,15 +394,12 @@ impl World {
             return;
         };
         let available = output.usable.inset(self.config.gap).w;
-        if ws.columns.is_empty() {
-            self.outputs[o].workspaces[active].view_x = 0;
-            return;
-        }
         let spans = self.column_spans(ws, available, output.area.w);
         let (starts, strip) = layout::starts(spans.iter().map(|span| span.width), self.config.gap);
-        let Some(&start) = starts.get(index) else {
-            return;
-        };
+        // `index < columns.len()` returned above, and `starts` holds exactly
+        // one start per column (see `layout::starts`), so this index is
+        // always in range -- no empty-strip or missed-lookup arm to keep.
+        let start = starts[index];
         let view = start.clamp(0, (strip - available).max(0));
         self.outputs[o].workspaces[active].view_x = view;
     }

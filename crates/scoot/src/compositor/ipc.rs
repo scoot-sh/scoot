@@ -548,6 +548,7 @@ impl State {
                     | scoot_ipc::Action::FocusOutput { .. }
                     | scoot_ipc::Action::FocusOutputIndex { .. }
                     | scoot_ipc::Action::FocusOutputDirection { .. }
+                    | scoot_ipc::Action::ScrollViewToColumn { .. }
                     | scoot_ipc::Action::ToggleFloatingFocus => true,
                     _ => false,
                 };
