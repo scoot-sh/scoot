@@ -1,6 +1,6 @@
 pkgbase = scootnotify-git
 	pkgdesc = Notification daemon for the scoot compositor (git)
-	pkgver = 0.6.27.r0.g0000000
+	pkgver = 0.6.28.r0.g0000000
 	pkgrel = 1
 	url = https://github.com/scoot-sh/scoot
 	install = scootnotify.install

@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.28](https://github.com/scoot-sh/scoot/compare/v0.6.27...v0.6.28) - 2026-11-01
+
+### scoot-core,scoot,scoot-ipc,scootctl
+
+- added: scroll the view to a column so a swipe settles on it ([#859](https://github.com/scoot-sh/scoot/pull/859))
+
+### scoot-look,scootui,scootnotify
+
+- fixed: truncate contrast ratios, correct layer comment, harden refused-socket test ([#858](https://github.com/scoot-sh/scoot/pull/858))
+
 ## [0.6.27](https://github.com/scoot-sh/scoot/compare/v0.6.26...v0.6.27) - 2026-11-01
 
 ### scootui
