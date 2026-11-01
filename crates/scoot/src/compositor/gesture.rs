@@ -43,10 +43,10 @@
 //! Past the ends of the strip the shift is rubber-banded.
 //!
 //! On release the nearest column to the view -- or, past [`FLICK_VELOCITY`],
-//! the next one in the direction of the flick -- takes the focus, by the same
-//! `focus-column` actions a key would run. The core scrolls the view into the
-//! new column itself, so the offset is then re-based onto the new targets and
-//! eased to zero with the `[animation]` curve (snapped when animation is off).
+//! the next one in the direction of the flick -- takes the focus, aligned to
+//! the usable edge by the `scroll-view-to-column` core action. The offset is
+//! then re-based onto the new targets and eased to zero with the
+//! `[animation]` curve (snapped when animation is off).
 //! Vertical does not track: past [`VERTICAL_DISTANCE`] it fires one
 //! `focus-workspace` or `focus-window` on release.
 //!
@@ -58,7 +58,7 @@
 
 use std::time::Instant;
 
-use scoot_core::{Action, Arrangement, Horizontal, OutputId, Placement, Vertical, WindowId};
+use scoot_core::{Action, Arrangement, OutputId, Placement, Vertical, WindowId};
 use smithay::backend::input::InputTime;
 use smithay::input::pointer::{GestureSwipeBeginEvent, GestureSwipeEndEvent};
 use smithay::utils::SERIAL_COUNTER;
@@ -756,19 +756,19 @@ impl State {
         }
     }
 
-    /// Focuses the column the release landed on and starts easing the offset
-    /// out against the layout's new targets.
+    /// Focuses the column the release landed on, aligned to the usable edge,
+    /// and starts easing the offset out against the layout's new targets.
     fn release_horizontal(&mut self, claim: &Claim, velocity: f64) {
         // The layout may have moved under the swipe (a window opened or
-        // closed): read the columns and the focus again, so the steps below
-        // are counted against what is there now.
+        // closed): read the columns and the focus again, so the target below
+        // is counted against what is there now.
         let Some(now) = self.gesture_snapshot() else {
             self.finish_gesture();
             return;
         };
         if now.output != claim.output {
             // The focus moved to another output under the swipe: the strip
-            // that was dragged is not the one the focus actions would step.
+            // that was dragged is not the one the focus action would step.
             self.finish_gesture();
             return;
         }
@@ -776,16 +776,8 @@ impl State {
         let before = self.world.arrange();
         let reference = before.focused;
         let x_before = reference.and_then(|id| before.get(id)).map(|p| p.rect.x);
-        if let Some(focused) = now.focused {
-            let steps = target.abs_diff(focused);
-            let dir = if target > focused {
-                Horizontal::Right
-            } else {
-                Horizontal::Left
-            };
-            for _ in 0..steps {
-                self.act_bind(Action::FocusColumn(dir), false);
-            }
+        if now.focused.is_some() {
+            self.act_bind(Action::ScrollViewToColumn(target), false);
         }
         let x_after = reference
             .and_then(|id| self.world.arrange().get(id).map(|p| p.rect.x))

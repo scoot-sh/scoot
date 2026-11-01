@@ -1,9 +1,10 @@
 ---
 title: "A core action that scrolls the view to a column, so a swipe settles on it"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-01"
 ---
 
 # A core action that scrolls the view to a column
@@ -43,3 +44,7 @@ column, fullscreen and maximized columns, a view already aligned).
 ## Not in this ticket
 
 Centering columns, or any change to what plain `focus-column` does.
+
+## Resolved 2026-11-01
+
+Landed `Action::ScrollViewToColumn(usize)` (`scroll-view-to-column N`, wire `scroll_view_to_column`): focuses column N (0-based, strip order) and lines the view up with its left edge, clamped to `[0, strip-view]`. Out of range / no output / no columns does nothing. The gesture release fires it once instead of stepping `focus-column`; the settle re-bases onto the aligned targets as before. No protocol bump (additive tag, following `SetColumnWidth`); no default bind. Tests: 10 new `scoot-core` column tests, fuzz alphabet extended in `invariants.rs`, IPC round-trip + `scoot msg action` + bind parse/emit pins, compositor gesture test asserting the settled column sits at the usable edge. Hardware: real `--tty` synthetic pad, 3 foot windows, ~0.75-column swipe 1->2 on both `--renderer cpu` and `gpu`: `windows-before` (1 at x12 focused, 2 at x806) -> `windows-after1` (1 at x-782, 2 at x12 focused) — the view moved a full column instead of easing back. Screenshots rest/mid/after1/settled for both renderers.

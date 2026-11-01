@@ -362,6 +362,47 @@ impl World {
             self.fix_view(o);
         }
     }
+
+    /// Focuses the column at `index` on the focused output's active
+    /// workspace and scrolls it so its left edge sits at the usable edge,
+    /// clamped to the strip.
+    ///
+    /// The aligned half of `fix_view`'s minimal scroll: `fix_view` moves
+    /// only as far as needed to show the focused column, so a neighbour
+    /// that is already fully visible moves nothing. This lines the view up
+    /// with the column's start instead, clamped to `[0, strip - view]` like
+    /// every other scroll. Out of range (or no output, or no columns) does
+    /// nothing at all -- not even focus.
+    pub(super) fn scroll_view_to_column(&mut self, index: usize) {
+        let o = self.focused_output;
+        let Some(output) = self.outputs.get(o) else {
+            return;
+        };
+        let active = output.active;
+        let Some(ws) = output.workspaces.get(active) else {
+            return;
+        };
+        if index >= ws.columns.len() {
+            return;
+        }
+        self.outputs[o].workspaces[active].focused = index;
+        self.outputs[o].workspaces[active].floating_focused = false;
+        let Some(output) = self.outputs.get(o) else {
+            return;
+        };
+        let Some(ws) = output.workspaces.get(active) else {
+            return;
+        };
+        let available = output.usable.inset(self.config.gap).w;
+        let spans = self.column_spans(ws, available, output.area.w);
+        let (starts, strip) = layout::starts(spans.iter().map(|span| span.width), self.config.gap);
+        // `index < columns.len()` returned above, and `starts` holds exactly
+        // one start per column (see `layout::starts`), so this index is
+        // always in range -- no empty-strip or missed-lookup arm to keep.
+        let start = starts[index];
+        let view = start.clamp(0, (strip - available).max(0));
+        self.outputs[o].workspaces[active].view_x = view;
+    }
 }
 
 /// Where a fullscreen column sits, as `place_workspace` measured it.

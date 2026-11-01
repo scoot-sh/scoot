@@ -121,8 +121,13 @@ fn random_action(
             random_window(rng, windows)
         }
     };
-    match rng.below(30) {
+    match rng.below(31) {
         0 => Action::FocusColumn(horizontal),
+        30 => Action::ScrollViewToColumn(match rng.below(8) {
+            0 => usize::MAX,
+            1 => usize::MAX / 2,
+            other => other,
+        }),
         1 => Action::FocusWindow(vertical),
         2 => Action::MoveColumn(horizontal),
         3 => Action::MoveWindow(vertical),

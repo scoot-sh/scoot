@@ -128,6 +128,7 @@ fn group_of(action: &str) -> &'static str {
         | "focus-output-index"
         | "focus-output-left"
         | "focus-output-right"
+        | "scroll-view-to-column"
         | "toggle-floating-focus" => "Move around",
         "move-column"
         | "move-window"

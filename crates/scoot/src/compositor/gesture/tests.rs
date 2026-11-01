@@ -381,6 +381,33 @@ fn releasing_past_half_a_column_focuses_the_next_one() {
 }
 
 #[test]
+fn releasing_onto_a_column_aligns_the_view_to_its_left_edge() {
+    let mut fixture = fixture(4);
+    let step = x_of(&fixture, 2) - x_of(&fixture, 1);
+    let drag = -(f64::from(step) * 0.7);
+    swipe(&mut fixture, 3, &[(drag / 10.0, 0.0); 10], 120);
+    assert_eq!(focused(&fixture), Some(WindowId(2)));
+    // The ticket's gap: plain focus would leave a fully visible neighbour
+    // where it is. The aligned action lines it up with the usable edge
+    // instead: the same x a direct `scroll-view-to-column` lands on.
+    let usable_x = fixture
+        .state
+        .world
+        .usable_area(OutputId(1))
+        .expect("an output")
+        .inset(fixture.state.world.config().gap)
+        .x;
+    assert_eq!(x_of(&fixture, 2), usable_x);
+    let mut direct = self::fixture(4);
+    direct
+        .state
+        .world
+        .handle_action(Action::ScrollViewToColumn(1));
+    assert_eq!(x_of(&direct, 2), usable_x);
+    assert_eq!(x_of(&fixture, 2), x_of(&direct, 2));
+}
+
+#[test]
 fn releasing_under_half_a_column_stays_put() {
     let mut fixture = fixture(4);
     let step = x_of(&fixture, 2) - x_of(&fixture, 1);

@@ -2171,6 +2171,7 @@ pub(crate) fn action_string(action: &Action) -> String {
         },
         Action::CycleColumnWidth => "cycle-column-width".to_owned(),
         Action::SetColumnWidth(index) => format!("set-column-width {index}"),
+        Action::ScrollViewToColumn(index) => format!("scroll-view-to-column {index}"),
         Action::ToggleFullscreen => "toggle-fullscreen".to_owned(),
         Action::SetFullscreen { id, fullscreen } => format!(
             "set-fullscreen {} {}",
@@ -3320,6 +3321,27 @@ mod tests {
         // `--print-default-config` emission containing one would reload.
         let spelling = "set-column-width 3";
         let action = Action::SetColumnWidth(3);
+        let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
+        let (loaded, _) = load_from(&path, true).expect("valid config");
+        assert_eq!(
+            matched(
+                &loaded.keybindings,
+                keysym_named("F1").unwrap(),
+                Modifiers {
+                    super_: true,
+                    ..Modifiers::default()
+                }
+            ),
+            Some(Bound::Action(action.clone())),
+            "{spelling} did not parse through a bind"
+        );
+        assert_eq!(action_string(&action), spelling);
+    }
+
+    #[test]
+    fn scroll_view_to_column_parses_through_a_bind_and_emits_back() {
+        let spelling = "scroll-view-to-column 2";
+        let action = Action::ScrollViewToColumn(2);
         let (_dir, path) = write_temp(&format!("[binds]\n\"super+F1\" = \"{spelling}\"\n"));
         let (loaded, _) = load_from(&path, true).expect("valid config");
         assert_eq!(

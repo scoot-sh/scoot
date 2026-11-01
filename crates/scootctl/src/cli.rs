@@ -87,7 +87,8 @@ pub const ACTIONS_HELP: &str = "\
     move-window-to-output ID | focus-output-index N
     move-window-to-output-index N | focus-output-left | focus-output-right
     move-window-to-output-left | move-window-to-output-right
-    cycle-column-width | set-column-width N | toggle-fullscreen
+    cycle-column-width | set-column-width N | scroll-view-to-column N
+    toggle-fullscreen
     set-fullscreen ID on|off | toggle-maximize | set-maximized ID on|off
     close | spawn COMMAND... | show-keymap | quit
     toggle-floating | set-floating ID on|off | toggle-floating-focus
@@ -652,6 +653,9 @@ pub fn action(args: &mut impl Iterator<Item = String>) -> Result<Action, Error> 
         "cycle-column-width" => Action::CycleColumnWidth,
         "set-column-width" => Action::SetColumnWidth {
             index: number("a column width index", args.next())?,
+        },
+        "scroll-view-to-column" => Action::ScrollViewToColumn {
+            index: number("a column index", args.next())?,
         },
         "toggle-fullscreen" => Action::ToggleFullscreen,
         "set-fullscreen" => Action::SetFullscreen {
@@ -1465,6 +1469,20 @@ mod tests {
         // against a bare cycle.
         assert!(parse_msg_args(&["action", "set-column-width", "down"]).is_err());
         assert!(parse_msg_args(&["action", "set-column-width"]).is_err());
+    }
+
+    #[test]
+    fn scroll_view_to_column_takes_a_number() {
+        assert_eq!(
+            parse_msg_args(&["action", "scroll-view-to-column", "2"]),
+            Ok(Msg {
+                request: Request::Action(Action::ScrollViewToColumn { index: 2 }),
+                out: None,
+                json: false,
+            })
+        );
+        assert!(parse_msg_args(&["action", "scroll-view-to-column", "left"]).is_err());
+        assert!(parse_msg_args(&["action", "scroll-view-to-column"]).is_err());
     }
 
     #[test]

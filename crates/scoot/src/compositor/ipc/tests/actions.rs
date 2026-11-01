@@ -465,6 +465,10 @@ fn focusing_over_ipc_takes_the_keyboard_back_from_a_clicked_taskbar() {
         scoot_ipc::Action::FocusOutputDirection {
             direction: scoot_ipc::Horizontal::Left,
         },
+        // The aligned half of `FocusColumn`'s stepping: focusing column 0
+        // (a real move on this two-column fixture) spends the click like
+        // every other focus move, and the keyboard follows it.
+        scoot_ipc::Action::ScrollViewToColumn { index: 0 },
     ];
     for (n, action) in covered.into_iter().enumerate() {
         fixture.click_taskbar();
@@ -1030,6 +1034,42 @@ fn set_column_width_lands_through_the_whole_state_path() {
         fixture.state.focus,
         Some(focused),
         "an out-of-range set-column-width lost the focused window"
+    );
+}
+
+#[test]
+fn scroll_view_to_column_focuses_and_aligns_over_ipc() {
+    let mut fixture = Fixture::drive();
+    fixture.state.needs_render = false;
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(scoot_ipc::Action::ScrollViewToColumn {
+                index: 0,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the scroll-view-to-column action was not served"
+    );
+    assert!(
+        fixture.state.needs_render,
+        "a real scroll-view-to-column laid nothing out"
+    );
+    let arrangement = fixture.state.world.arrange();
+    let response =
+        fixture
+            .state
+            .handle_request(Request::Action(scoot_ipc::Action::ScrollViewToColumn {
+                index: 99,
+            }));
+    assert!(
+        matches!(response, Response::Ok { locked: false }),
+        "the out-of-range scroll-view-to-column was not served"
+    );
+    assert_eq!(
+        fixture.state.world.arrange(),
+        arrangement,
+        "an out-of-range scroll-view-to-column moved anything at all"
     );
 }
 

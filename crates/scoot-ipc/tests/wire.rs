@@ -126,6 +126,19 @@ fn set_column_width_travels_as_snake_case_with_an_index() {
 }
 
 #[test]
+fn scroll_view_to_column_travels_as_snake_case_with_an_index() {
+    let request = Request::Action(Action::ScrollViewToColumn { index: 2 });
+    assert_eq!(
+        json_of(&request),
+        json!({ "type": "action", "action": "scroll_view_to_column", "index": 2 })
+    );
+    assert_eq!(
+        decode::<Request>(&encode(&request).unwrap()).unwrap(),
+        request
+    );
+}
+
+#[test]
 fn toggle_fullscreen_travels_as_a_bare_snake_case_tag() {
     let request = Request::Action(Action::ToggleFullscreen);
     assert_eq!(

@@ -320,8 +320,9 @@ protocol), so those do nothing.
 
 - **Sideways.** The strip follows your fingers one to one, with the columns
   that were off screen sliding in. Lift and the nearest column takes the
-  focus. A quick flick goes one column further in its direction, however
-  short. The view then eases into place with your
+  focus, aligned so its left edge sits at the usable edge (clamped to the
+  strip, like every other scroll). A quick flick goes one column further in
+  its direction, however short. The view then eases into place with your
   [`[animation]`](./configure.md#animation) curve (spring included); with
   animation off it snaps. Past the first or last column the strip stretches
   and springs back.
@@ -347,10 +348,9 @@ protocol), so those do nothing.
 - **What is drawn is not where the windows are.** While you swipe, and
   while the view settles, the windows are drawn shifted. Clicks, `scoot msg
   windows` and focus go by where the windows will be once it settles.
-- **After a settle the view may not move.** Focus follows the column you
-  stopped on, and scoot scrolls the view only as far as it needs to show that
-  column. If it was already fully visible, the strip eases back to where it
-  was and only the focus ring moves.
+- **The settle lands on the column.** The release fires `scroll-view-to-column`:
+  the settled column takes the focus and the view lines up with its left edge,
+  clamped to the strip's end like every other scroll.
 
 > **Symptom:** nothing happens on a swipe in a VM or over remote desktop.
 > The host keeps multi-finger swipes, so the guest never receives them (a
