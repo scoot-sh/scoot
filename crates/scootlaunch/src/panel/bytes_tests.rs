@@ -76,12 +76,15 @@ pub(super) fn fingerprint(scales: &[scootui::density::Scale], dmenu: bool) -> u6
         for scale in scales.iter().copied() {
             for count in [0usize, 1, 5, 40] {
                 let ui = Ui::open(entries(count), Frecency::empty(), 0, 10);
-                let logical = Layout::new(look.font_size_px, look.radius, 1.0);
+                let logical = Layout::new(
+                    look.font_size_px,
+                    look.radius,
+                    scootui::density::Scale::Integer(1),
+                );
                 let width = (30.0 * look.font_size_px) as u32;
                 let height = logical.height(10);
-                let factor = scale.factor();
-                let width_d = (f64::from(width) * factor).round() as u32;
-                let height_d = (f64::from(height) * factor).round() as u32;
+                let width_d = crate::layout::scale_len(width, scale);
+                let height_d = crate::layout::scale_len(height, scale);
                 for error in [None, Some("scootlaunch: could not start it")] {
                     let mut pixels = vec![0u8; width_d as usize * height_d as usize * 4];
                     let view = super::PanelView {
@@ -151,9 +154,14 @@ fn the_default_look_paints_the_bytes_it_always_did() {
     assert_eq!(hash, ONE_X, "recorded on 4e8293664");
 }
 
-/// The scaled draws, with the rows held to the scaled height: recorded
-/// when the launcher began drawing at the compositor's scale, which is the
-/// first time a scaled draw reached a screen.
+/// The scaled draws, with the rows held to the scaled height: re-recorded
+/// when the fit remainder joined the top and bottom padding (instead of
+/// dead space under the last row) and the panel's device size rounded the
+/// integer way the buffer does. The 1x pin below is unchanged; the integer
+/// scale inside this pin draws the bytes it always did (exact multiply,
+/// no remainder), so the move is the fractional half alone: rows shifted
+/// down by the top remainder and 1 px width/height moves where the old
+/// `f64` round disagreed with the integer rule.
 #[test]
 fn the_scaled_panel_paints_the_bytes_recorded_with_the_fit() {
     let hash = fingerprint(
@@ -167,4 +175,4 @@ fn the_scaled_panel_paints_the_bytes_recorded_with_the_fit() {
 }
 
 const ONE_X: u64 = 0x6226_31d1_2e84_8874;
-const SCALED: u64 = 0xa352_c849_814f_5f69;
+const SCALED: u64 = 0x219f_0ed0_9338_2d41;

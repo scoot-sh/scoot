@@ -30,11 +30,17 @@ output's scale, so the 2x case is no longer hypothetical: `bench_effects`
 
 A 3x output (about 1240x940) extrapolates to roughly 20 ms an entrance
 frame at the same 17 ns, over the 60 Hz budget; unmeasured, filed from the
-#839 review as [launch-fit-remainder-and-scale-len](launch-fit-remainder-and-scale-len.md).
+#839 review as [launch-fit-remainder-and-scale-len](resolved/launch-fit-remainder-and-scale-len-done.md).
 
-A 3x output (about 1240x940) extrapolates to roughly 20 ms an entrance
-frame at the same 17 ns, over the 60 Hz budget; unmeasured, filed from the
-#839 review as [launch-fit-remainder-and-scale-len](launch-fit-remainder-and-scale-len.md).
+Measured 2026-11-01 on the dev VM (`bench_effects`, release, `taskset -c 3`,
+three runs, 2,700 frames each): the entrance frame at 3x (1242x942
+surface) costs 19.3 to 19.5 ms median (p5 3.9 to 4.0 ms; one unpinned run:
+19.9 ms median, p5 4.1 ms) — over the 16.6 ms frame budget, as
+extrapolated. The p5 tail is the run's end frames, where the scale is
+within a 256th of one and the copy is exact. No bigger optimization is
+attempted here: the cheapest fix stays the one filed below (blend rows
+vertically into a pooled scratch row, then horizontally, so the inner
+loop vectorizes, with no output change).
 
 The notification cards pay the same
 ([notify-ignores-preferred-scale](resolved/notify-ignores-preferred-scale-done.md)):
