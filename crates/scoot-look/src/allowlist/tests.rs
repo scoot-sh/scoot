@@ -536,3 +536,26 @@ fn user_tables_never_reach_the_looks_own_keys() {
     assert_eq!(user_effect_key("scootnotify", "card", "x.mark"), None);
     assert_eq!(user_effect_key("scootnotify", "effects", "card.mark"), None);
 }
+
+#[test]
+fn font_file_is_the_tools_key_never_an_author_override() {
+    for app in ["scootnotify", "scootlaunch", "scootgreet", "scootbar"] {
+        assert!(!allows(app, FONT_FILE_KEY), "{app}");
+        assert!(
+            check_app_value(app, FONT_FILE_KEY, &toml::Value::String("/x.ttf".into())).is_some()
+        );
+    }
+}
+
+#[test]
+fn a_font_file_value_is_an_absolute_path_string() {
+    let text = |s: &str| toml::Value::String(s.to_owned());
+    assert!(check_font_file(&text("/nix/store/x/DejaVuSans.ttf")).is_none());
+    assert!(check_font_file(&text("/a b/C d.otf")).is_none());
+    for bad in ["", "relative.ttf", "./x.ttf", "~/x.ttf", "/x\0y.ttf"] {
+        assert!(check_font_file(&text(bad)).is_some(), "{bad:?}");
+    }
+    assert!(check_font_file(&text(&format!("/{}", "a".repeat(FONT_FILE_MAX)))).is_some());
+    assert!(check_font_file(&toml::Value::Integer(1)).is_some());
+    assert!(check_font_file(&toml::Value::Array(Vec::new())).is_some());
+}

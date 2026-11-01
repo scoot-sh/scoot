@@ -28,8 +28,10 @@ Three small findings, none a crash and none a blur.
 2. **Two rounding rules for one length.** `scale_len`
    (`crates/scootlaunch/src/panel.rs`, `f64::round`) and
    `scootui::density::scaled_length` (integer arithmetic on the v120 scale)
-   differ by 1 px for about 39 non-dyadic v120 values: 122, 123, 130, 131,
-   138, 145, 146, 153, 161, 183, 191, 206, 244 to 247 and 260 to 262. The
+   differ by 1 px for 25 v120 values up to 300 (the 19 below 263: 122, 123,
+   130, 131, 138, 145, 146, 153, 161, 183, 191, 206, 244 to 247 and 260 to
+   262; plus 275 to 277 and 290 to 292), and for about 180 values up to 16x
+   at lengths up to 1500. The
    buffer itself is sized by `scaled_length` (through `Demand::buffer_dims`)
    while the panel's device size inside it comes from `scale_len`, clamped
    to the buffer with `.min(buffer_w)`: one rule would do.

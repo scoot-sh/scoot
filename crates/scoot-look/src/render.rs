@@ -13,7 +13,8 @@
 use std::collections::BTreeMap;
 
 use crate::allowlist::{
-    FILL_STYLES, MOTION_CURVES, MOTION_DURATION_MAX_MS, SHADOW_STYLES, check_app_value,
+    FILL_STYLES, FONT_FILE_KEY, MOTION_CURVES, MOTION_DURATION_MAX_MS, SHADOW_STYLES,
+    check_app_value,
 };
 use crate::grammar::{GrammarError, is_hex_color};
 use crate::resolved::{ResolvedLook, pt_to_px};
@@ -419,8 +420,14 @@ pub fn render_greet(look: &ResolvedLook) -> Result<String, GrammarError> {
 /// base tables: an `[apps.scootnotify]` `colors.*` key replaces the
 /// derived role, and a dotless key (`font`, `font-size`, `opacity`,
 /// `radius`) replaces the top-level value, so each is emitted once.
-pub fn render_notify(look: &ResolvedLook) -> Result<String, GrammarError> {
-    render_shell_fragment(look, "scootnotify")
+///
+/// With `inputs.ui_font_file` the fragment also carries `font-file`, the
+/// file the tool resolved the `fonts.ui` family to (fontconfig, or the
+/// look's own `[fonts.files]` entry). It is left out when the look's
+/// `[apps.<app>]` overrides `font`: that names another family, which the
+/// resolved file is not.
+pub fn render_notify(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, GrammarError> {
+    render_shell_fragment(look, "scootnotify", inputs)
 }
 
 /// Render the launcher fragment (`launch.toml`): the thirteen color
@@ -431,8 +438,12 @@ pub fn render_notify(look: &ResolvedLook) -> Result<String, GrammarError> {
 /// an `[apps.scootlaunch]` `colors.*` key replaces the derived role, and
 /// a dotless key (`font`, `font-size`, `opacity`, `radius`) replaces the
 /// top-level value, so each is emitted once.
-pub fn render_launch(look: &ResolvedLook) -> Result<String, GrammarError> {
-    render_shell_fragment(look, "scootlaunch")
+///
+/// With `inputs.ui_font_file` (the file the tool resolved `fonts.ui` to) the
+/// fragment also carries `font-file`, so the app reads a path and walks no
+/// font directory; see [`render_notify`].
+pub fn render_launch(look: &ResolvedLook, inputs: &RenderInputs) -> Result<String, GrammarError> {
+    render_shell_fragment(look, "scootlaunch", inputs)
 }
 
 /// The shared shell-app fragment renderer behind [`render_notify`] and
@@ -440,7 +451,11 @@ pub fn render_launch(look: &ResolvedLook) -> Result<String, GrammarError> {
 /// the same `[icons] theme`, differing only in whose `[apps.<app>]`
 /// overrides merge in. One function so the two fragments cannot drift
 /// apart key by key.
-fn render_shell_fragment(look: &ResolvedLook, app: &str) -> Result<String, GrammarError> {
+fn render_shell_fragment(
+    look: &ResolvedLook,
+    app: &str,
+    inputs: &RenderInputs,
+) -> Result<String, GrammarError> {
     let p = &look.palette;
     // A hand-built `ResolvedLook` skips the name grammar, so the comment
     // quotes rather than interpolates: a newline in the name stays one line.
@@ -519,7 +534,11 @@ fn render_shell_fragment(look: &ResolvedLook, app: &str) -> Result<String, Gramm
     // `[apps.<app>] "icons.theme"`.
     let mut icons: BTreeMap<String, String> = BTreeMap::new();
     icons.insert("theme".to_string(), toml_str(&look.icons_theme));
-    for (section, keys) in override_sections(app, &look.apps)? {
+    let overrides = override_sections(app, &look.apps)?;
+    let font_overridden = overrides
+        .get("")
+        .is_some_and(|keys| keys.contains_key("font"));
+    for (section, keys) in overrides {
         if section.is_empty() {
             top.extend(keys);
         } else if section == "colors" {
@@ -532,6 +551,11 @@ fn render_shell_fragment(look: &ResolvedLook, app: &str) -> Result<String, Gramm
             // visible instead of silently lost.
             sections.entry(section).or_default().extend(keys);
         }
+    }
+    // The resolved file for the family above: only while the family is the
+    // look's, so an app that overrides `font` still names what it draws.
+    if let Some(file) = inputs.ui_font_file.as_deref().filter(|_| !font_overridden) {
+        top.insert(FONT_FILE_KEY.to_string(), toml_str(file));
     }
     // Top-level keys first: TOML reads keys before the first table as
     // the root table, so these must precede `[colors]`.

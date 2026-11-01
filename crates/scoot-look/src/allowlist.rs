@@ -597,6 +597,34 @@ pub fn check_app_value(app: &str, key: &str, value: &toml::Value) -> Option<Gram
     }
 }
 
+/// The dotless key the tool renders into `launch.toml` and `notify.toml`
+/// (not `greet.toml`, which draws the sans): the file `scoot look apply`
+/// resolved the look's `fonts.ui` to, or the fallback its note names when
+/// that family is not installed. It is the tool's, like the bar's `font`:
+/// not in any allowlist, so `[apps.<app>]` cannot set it. The apps that read it check
+/// the value with [`check_font_file`].
+pub const FONT_FILE_KEY: &str = "font-file";
+
+/// The longest `font-file` value, in bytes: Linux's `PATH_MAX`.
+pub const FONT_FILE_MAX: usize = 4096;
+
+/// Check a fragment's `font-file` value: an absolute path in a string, at
+/// most [`FONT_FILE_MAX`] bytes, no NUL. Whether the file exists and is a
+/// font is the reading app's to find out (it falls back with a note); only
+/// the shape is checked here.
+pub fn check_font_file(value: &toml::Value) -> Option<GrammarError> {
+    let reason = match value {
+        toml::Value::String(path) if path.is_empty() || path.len() > FONT_FILE_MAX => {
+            "must be 1 to 4096 bytes"
+        }
+        toml::Value::String(path) if !path.starts_with('/') => "must be an absolute path",
+        toml::Value::String(path) if path.contains('\0') => "must not contain NUL",
+        toml::Value::String(_) => return None,
+        _ => "must be a path string",
+    };
+    Some(GrammarError::new(FONT_FILE_KEY, reason))
+}
+
 /// Refuse every `[apps.<app>]` key no allowlist holds, by name. A
 /// name-only pass over already-parsed tables; [`parse_look_toml`](crate::schema::parse_look_toml)
 /// enforces the same rule (plus per-key values) itself, so there is no

@@ -2260,6 +2260,103 @@ fn a_missing_font_family_refuses_despite_a_fallback_file() {
     assert!(refusal.contains("not installed"), "{refusal}");
 }
 
+/// The `font` and `font-file` values of a rendered shell-app fragment.
+fn font_keys(fragment: &Path) -> (Option<String>, Option<String>) {
+    let text = std::fs::read_to_string(fragment).expect("a fragment");
+    let table: toml::Table = text.parse().expect("a TOML fragment");
+    let get = |key: &str| table.get(key).and_then(|v| v.as_str()).map(str::to_owned);
+    (get("font"), get("font-file"))
+}
+
+#[test]
+fn launch_and_notify_carry_the_file_the_bar_font_resolved_to() {
+    // A family only fontconfig knows (the fake answers any name with a
+    // file): the shell apps get the same file as the bar, and read a path
+    // instead of walking the font directories.
+    let fixture = fixture("font-file");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let out = fixture._root.join("out");
+    build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+        false,
+    )
+    .expect("buildable");
+    let bar: toml::Table = std::fs::read_to_string(out.join("bar.toml"))
+        .expect("a bar fragment")
+        .parse()
+        .expect("TOML");
+    let bar_font = bar["bar"]["font"].as_str().expect("a bar font").to_owned();
+    assert!(bar_font.ends_with("DejaVu Sans.otf"), "{bar_font}");
+    for file in ["launch.toml", "notify.toml"] {
+        let (family, resolved) = font_keys(&out.join(file));
+        assert_eq!(family.as_deref(), Some("DejaVu Sans"), "{file}");
+        assert_eq!(resolved.as_deref(), Some(bar_font.as_str()), "{file}");
+    }
+}
+
+#[test]
+fn a_font_the_look_carries_reaches_launch_and_notify() {
+    // `[fonts.files] ui` lives in the look directory, in no font
+    // directory: only the apply-time resolution can hand it to the apps.
+    let fixture = fixture("font-carried");
+    let fonts = fixture._root.join("fonts");
+    std::fs::create_dir_all(&fonts).expect("a fonts dir");
+    let checks = FakeChecks::with_fonts(&fonts);
+    let sources = fixture._root.join("carried-looks");
+    let dir = write_look(
+        &sources,
+        "look-carried",
+        "\n[fonts.files]\nui = \"fonts/Carried.ttf\"\n",
+    );
+    std::fs::create_dir_all(dir.join("fonts")).expect("a fonts dir");
+    std::fs::write(dir.join("fonts/Carried.ttf"), b"font").expect("a font");
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    let out = fixture._root.join("out-carried");
+    build_to_out(
+        &BuildTarget::Name("look-carried".to_owned()),
+        &out,
+        &catalog,
+        &checks,
+        false,
+    )
+    .expect("buildable");
+    for file in ["launch.toml", "notify.toml"] {
+        let (_, resolved) = font_keys(&out.join(file));
+        let resolved = resolved.expect("a resolved font file");
+        assert!(
+            resolved.ends_with("fonts/Carried.ttf"),
+            "{file}: {resolved}"
+        );
+    }
+}
+
+#[test]
+fn without_a_resolver_launch_and_notify_carry_no_font_file() {
+    // No `fc-match`: the look applies with a note and the apps keep
+    // walking the font directories, as before.
+    let fixture = fixture("font-none");
+    let checks = FakeChecks::default();
+    let out = fixture._root.join("out");
+    build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+        false,
+    )
+    .expect("buildable");
+    for file in ["launch.toml", "notify.toml"] {
+        let (family, resolved) = font_keys(&out.join(file));
+        assert_eq!(family.as_deref(), Some("DejaVu Sans"), "{file}");
+        assert_eq!(resolved, None, "{file}");
+    }
+}
+
 #[test]
 fn validate_and_build_cover_a_directory_and_a_name() {
     let fixture = fixture("validate");

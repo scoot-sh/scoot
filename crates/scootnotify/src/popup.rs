@@ -206,13 +206,15 @@ pub struct App {
     gone: bool,
 }
 
-/// The cards' text: `--font`, else the look's family, else the default
-/// font, with the family's bold face beside the regular one (the summary
-/// and `<b>` runs draw it). A note about the family goes to stderr.
-fn build_text(given: Option<&Path>, family: &str) -> Result<Text, scootui::font::Error> {
+/// The cards' text: `--font`, else the look's resolved file, else its
+/// family, else the default font, with the bold face beside the regular one
+/// (the summary and `<b>` runs draw it). A note about the look's font goes
+/// to stderr.
+fn build_text(given: Option<&Path>, look: &Look) -> Result<Text, scootui::font::Error> {
     let spec = scootui::font::Spec {
         given,
-        family,
+        file: look.font_file.as_deref(),
+        family: &look.font_family,
         fallbacks: &[],
         bold: true,
     };
@@ -835,11 +837,11 @@ impl App {
         self.refresh_due = true;
         // A new family loads its own files, now and not at the next draw;
         // a family that cannot be built keeps the running text.
-        if look.font_family != self.look.font_family
+        if (look.font_family != self.look.font_family || look.font_file != self.look.font_file)
             && self.font_path.is_none()
             && self.text.is_some()
         {
-            match build_text(None, &look.font_family) {
+            match build_text(None, &look) {
                 Ok(text) => self.text = Some(text),
                 Err(error) => warn(format_args!("scootnotify: keeping the font: {error}")),
             }
@@ -966,7 +968,7 @@ impl Popup {
             return Err(String::from("no layer surface to draw on: headless"));
         }
         app.font_path = font_path.cloned();
-        app.text = match build_text(font_path.map(|path| path.as_path()), &look.font_family) {
+        app.text = match build_text(font_path.map(|path| path.as_path()), look) {
             Ok(text) => Some(text),
             Err(error) => return Err(format!("no font ({error}): headless")),
         };

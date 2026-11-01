@@ -158,12 +158,12 @@ fn a_text_has_its_bold_face_beside_a_given_file() {
         ..Spec::default()
     };
     // No sibling yet: regular only.
-    assert!(!build(&spec, &[]).unwrap().0.has_bold());
+    assert!(!build(&spec, Vec::new).unwrap().0.has_bold());
     s.file(
         "Face-Bold.ttf",
         &testfont::build_symbols_advance(['x'], 900),
     );
-    let (text, note) = build(&spec, &[]).unwrap();
+    let (text, note) = build(&spec, Vec::new).unwrap();
     assert!(text.has_bold());
     assert_eq!(note, None);
     assert_eq!(
@@ -175,7 +175,7 @@ fn a_text_has_its_bold_face_beside_a_given_file() {
         bold: false,
         ..spec
     };
-    assert!(!build(&spec, &[]).unwrap().0.has_bold());
+    assert!(!build(&spec, Vec::new).unwrap().0.has_bold());
 }
 
 #[test]
@@ -192,7 +192,7 @@ fn a_family_picks_its_file_and_an_unknown_one_is_a_note() {
         bold: true,
         ..Spec::default()
     };
-    let (text, note) = build(&spec, &dirs).unwrap();
+    let (text, note) = build(&spec, || dirs.clone()).unwrap();
     assert!(text.has_bold());
     assert_eq!(note, None);
     assert_eq!(text.measure(None, "3", 50.0), 30);
@@ -202,7 +202,7 @@ fn a_family_picks_its_file_and_an_unknown_one_is_a_note() {
         family: "ZZ No Such Family",
         ..Spec::default()
     };
-    match build(&spec, &dirs) {
+    match build(&spec, || dirs.clone()) {
         Ok((_, note)) => assert!(note.unwrap().contains("ZZ No Such Family")),
         Err(error) => assert!(error.to_string().contains("no font")),
     }
@@ -212,7 +212,7 @@ fn a_family_picks_its_file_and_an_unknown_one_is_a_note() {
         family: "Broken",
         ..Spec::default()
     };
-    match build(&spec, &dirs) {
+    match build(&spec, || dirs.clone()) {
         Ok((_, note)) => assert!(note.unwrap().contains("Broken")),
         Err(error) => assert!(error.to_string().contains("no font")),
     }
@@ -228,6 +228,99 @@ fn a_given_file_beats_the_family() {
         family: "Brand",
         ..Spec::default()
     };
-    let (_, note) = build(&spec, &dirs(&s, &["."])).unwrap();
+    let (_, note) = build(&spec, || dirs(&s, &["."])).unwrap();
     assert_eq!(note, None);
+}
+
+#[test]
+fn a_resolved_file_is_read_without_walking_a_directory() {
+    let s = Scratch::new("file");
+    let file = s.font("store/Brand-Regular.ttf");
+    s.file(
+        "store/Brand-Bold.ttf",
+        &testfont::build_symbols_advance(['x'], 900),
+    );
+    let spec = Spec {
+        file: Some(&file),
+        family: "Brand",
+        bold: true,
+        ..Spec::default()
+    };
+    // The directories are never asked for: a file that loads ends the
+    // search (the closure would fail the test).
+    let (text, note) = build(&spec, || panic!("walked the font directories")).unwrap();
+    assert_eq!(note, None);
+    assert!(text.has_bold());
+    assert_eq!(text.measure(None, "3", 50.0), 30);
+}
+
+#[test]
+fn a_resolved_file_serves_a_family_no_directory_has() {
+    // A look-carried font: in no font directory, so only the file finds it.
+    let s = Scratch::new("carried");
+    let file = s.font("look/Carried.ttf");
+    let spec = Spec {
+        file: Some(&file),
+        family: "Carried Sans",
+        ..Spec::default()
+    };
+    let (text, note) = build(&spec, || dirs(&s, &["empty"])).unwrap();
+    assert_eq!(note, None);
+    assert_eq!(text.measure(None, "3", 50.0), 30);
+}
+
+#[test]
+fn a_given_font_beats_the_resolved_file() {
+    let s = Scratch::new("given-file");
+    let given = s.font("Given.ttf");
+    let resolved = s.file("Resolved.ttf", b"not a font");
+    let spec = Spec {
+        given: Some(&given),
+        file: Some(&resolved),
+        ..Spec::default()
+    };
+    let (_, note) = build(&spec, || panic!("walked")).unwrap();
+    assert_eq!(note, None);
+}
+
+#[test]
+fn a_resolved_file_that_fails_falls_back_to_the_family_walk_with_a_note() {
+    let s = Scratch::new("bad-file");
+    let broken = s.file("gone/Brand.ttf", b"not a font");
+    s.font("fonts/Brand-Regular.ttf");
+    let spec = Spec {
+        file: Some(&broken),
+        family: "Brand",
+        ..Spec::default()
+    };
+    let (text, note) = build(&spec, || dirs(&s, &["fonts"])).unwrap();
+    // The directory copy was used, and the broken file is named.
+    assert_eq!(text.measure(None, "3", 50.0), 30);
+    let note = note.expect("a note");
+    assert!(note.contains("Brand.ttf"), "{note}");
+    assert!(note.contains("looking for `Brand` instead"), "{note}");
+    // The family was found, so the default font is not claimed.
+    assert!(!note.contains("default font"), "{note}");
+    // A missing file too, with no family to fall back on: the default font
+    // (or, where this machine has none, the error naming the file).
+    let missing = s.0.join("missing.ttf");
+    let spec = Spec {
+        file: Some(&missing),
+        ..Spec::default()
+    };
+    match build(&spec, || panic!("walked")) {
+        Ok((_, note)) => assert!(note.unwrap().contains("missing.ttf")),
+        Err(error) => assert!(error.to_string().contains("missing.ttf"), "{error}"),
+    }
+}
+
+#[test]
+fn a_missing_family_with_no_default_font_names_the_family() {
+    let message = crate::font::Error::NoneFound {
+        named: vec!["the look's font `ZZ Family` has no .ttf or .otf file".to_owned()],
+        tried: Vec::new(),
+    }
+    .to_string();
+    assert!(message.contains("`ZZ Family`"), "{message}");
+    assert!(message.contains("--font PATH"), "{message}");
 }

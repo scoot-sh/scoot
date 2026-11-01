@@ -299,7 +299,7 @@ fn every_shipped_look_validates_and_renders() {
         // thirteen shell-app roles, the UI font at its popup size, the
         // popups opacity, with the look's radius. scootlaunch reads it
         // at every open.
-        let launch = render_launch(&look)
+        let launch = render_launch(&look, &RenderInputs::default())
             .unwrap_or_else(|e| panic!("{name}: launch.toml does not render: {e}"));
         let launch: toml::Value =
             toml::from_str(&launch).unwrap_or_else(|e| panic!("{name}: launch.toml reparse: {e}"));
@@ -320,7 +320,7 @@ fn every_shipped_look_validates_and_renders() {
         // The notification fragment renders for every shipped look too:
         // the same thirteen roles, font, opacity and radius. scootnotify
         // reads it at start and on re-theme.
-        let notify = render_notify(&look)
+        let notify = render_notify(&look, &RenderInputs::default())
             .unwrap_or_else(|e| panic!("{name}: notify.toml does not render: {e}"));
         let notify: toml::Value =
             toml::from_str(&notify).unwrap_or_else(|e| panic!("{name}: notify.toml reparse: {e}"));
@@ -637,7 +637,8 @@ const SHELL_EFFECT_KEYS: &[&str] = &[
 fn only_ginger_night_and_radial_burst_opt_in_and_only_radial_burst_moves() {
     for name in SHIPPED {
         let look = resolved(name);
-        let notify = render_notify(&look).unwrap_or_else(|e| panic!("{name}: notify.toml: {e}"));
+        let notify = render_notify(&look, &RenderInputs::default())
+            .unwrap_or_else(|e| panic!("{name}: notify.toml: {e}"));
         let notify: toml::Table = toml::from_str(&notify).expect("notify.toml reparses");
         match *name {
             "ginger-night" => {
@@ -683,7 +684,8 @@ fn only_ginger_night_and_radial_burst_opt_in_and_only_radial_burst_moves() {
         // The launcher carries the shared depth and motion keys and none of
         // the notifier's card and title tables; a look that does not opt in
         // renders the launcher fragment it always did.
-        let launch = render_launch(&look).unwrap_or_else(|e| panic!("{name}: launch.toml: {e}"));
+        let launch = render_launch(&look, &RenderInputs::default())
+            .unwrap_or_else(|e| panic!("{name}: launch.toml: {e}"));
         let launch: toml::Table = toml::from_str(&launch).expect("launch.toml reparses");
         for key in ["card", "title"] {
             assert!(!launch.contains_key(key), "{name}: launch.toml has `{key}`");

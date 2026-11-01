@@ -1051,7 +1051,7 @@ fn launch_fragment_carries_the_shell_contract() {
     // at its popup size, translucent at the popups opacity, with the
     // look's radius. Moonrise sets no popups opacity, so it renders the
     // 1.0 default; its popup size defaults to its 10 pt size (13 px).
-    let frag = render_launch(&moonrise()).expect("renders");
+    let frag = render_launch(&moonrise(), &RenderInputs::default()).expect("renders");
     for line in [
         "background = \"#2B3648\"",
         "foreground = \"#F6EEDC\"",
@@ -1101,7 +1101,7 @@ fn launch_fragment_follows_popups_opacity() {
     let raw = parse_look_toml(text.as_bytes()).expect("parses");
     let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
     let look = resolve(&map, "x").expect("resolves");
-    let frag = render_launch(&look).expect("renders");
+    let frag = render_launch(&look, &RenderInputs::default()).expect("renders");
     assert!(
         frag.contains("opacity = 0.5"),
         "launcher follows popups opacity:\n{frag}"
@@ -1120,7 +1120,7 @@ fn launch_overrides_merge() {
     let raw = parse_look_toml(text.as_bytes()).expect("parses");
     let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
     let look = resolve(&map, "x").expect("resolves");
-    let frag = render_launch(&look).expect("renders");
+    let frag = render_launch(&look, &RenderInputs::default()).expect("renders");
     assert_eq!(
         frag.matches("[colors]").count(),
         1,
@@ -1135,7 +1135,7 @@ fn launch_overrides_merge() {
         "scootlaunch".to_string(),
         BTreeMap::from([("binds.foo".to_string(), toml::Value::String("x".into()))]),
     )]);
-    assert!(render_launch(&look).is_err());
+    assert!(render_launch(&look, &RenderInputs::default()).is_err());
 }
 
 #[test]
@@ -1144,8 +1144,8 @@ fn notify_fragment_carries_the_shell_contract() {
     // the UI font at its popup size, translucent at the popups opacity,
     // with the look's radius: whatever the launcher draws, the stack
     // draws, key for key.
-    let launch = render_launch(&moonrise()).expect("renders");
-    let frag = render_notify(&moonrise()).expect("renders");
+    let launch = render_launch(&moonrise(), &RenderInputs::default()).expect("renders");
+    let frag = render_notify(&moonrise(), &RenderInputs::default()).expect("renders");
     for line in launch.lines() {
         assert!(
             frag.contains(line),
@@ -1169,7 +1169,7 @@ fn notify_overrides_merge_under_its_own_app() {
     let raw = parse_look_toml(text.as_bytes()).expect("parses");
     let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
     let look = resolve(&map, "x").expect("resolves");
-    let frag = render_notify(&look).expect("renders");
+    let frag = render_notify(&look, &RenderInputs::default()).expect("renders");
     let parsed: toml::Table = toml::from_str(&frag).expect("notify fragment reparses");
     assert_eq!(parsed["colors"]["accent"].as_str(), Some("#000000"));
     assert_eq!(parsed["radius"].as_integer(), Some(3));
@@ -1179,7 +1179,7 @@ fn notify_overrides_merge_under_its_own_app() {
         "scootnotify".to_string(),
         BTreeMap::from([("binds.foo".to_string(), toml::Value::String("x".into()))]),
     )]);
-    assert!(render_notify(&look).is_err());
+    assert!(render_notify(&look, &RenderInputs::default()).is_err());
 }
 
 fn with_effects(extra: &str) -> ResolvedLook {
@@ -1194,7 +1194,7 @@ fn with_effects(extra: &str) -> ResolvedLook {
 fn a_look_without_effects_renders_the_fragments_it_always_did() {
     // No `[effects]`: no depth key anywhere, so every fragment is
     // byte-identical to what the renderer wrote before the tokens existed.
-    let frag = render_notify(&moonrise()).expect("renders");
+    let frag = render_notify(&moonrise(), &RenderInputs::default()).expect("renders");
     assert!(!frag.contains("shadow") && !frag.contains("fill"), "{frag}");
 }
 
@@ -1202,11 +1202,12 @@ fn a_look_without_effects_renders_the_fragments_it_always_did() {
 fn effects_reach_the_notifier_and_launcher_fragments_and_no_other() {
     let look = with_effects("[effects]\nshadow = \"soft\"\nfill = \"gradient\"\n");
     let notify: toml::Table =
-        toml::from_str(&render_notify(&look).expect("renders")).expect("TOML");
+        toml::from_str(&render_notify(&look, &RenderInputs::default()).expect("renders"))
+            .expect("TOML");
     assert_eq!(notify["shadow"].as_str(), Some("soft"));
     assert_eq!(notify["fill"].as_str(), Some("gradient"));
     // The keys are top-level, before any table, like `radius`.
-    let text = render_notify(&look).expect("renders");
+    let text = render_notify(&look, &RenderInputs::default()).expect("renders");
     assert!(
         text.find("shadow").unwrap() < text.find("[colors]").unwrap(),
         "{text}"
@@ -1214,7 +1215,8 @@ fn effects_reach_the_notifier_and_launcher_fragments_and_no_other() {
     // The launcher reads both; the greeter reads neither yet and would
     // report them as unknown on every load.
     let launch: toml::Table =
-        toml::from_str(&render_launch(&look).expect("renders")).expect("TOML");
+        toml::from_str(&render_launch(&look, &RenderInputs::default()).expect("renders"))
+            .expect("TOML");
     assert_eq!(launch["shadow"].as_str(), Some("soft"));
     assert_eq!(launch["fill"].as_str(), Some("gradient"));
     let greet = render_greet(&look).expect("renders");
@@ -1232,19 +1234,21 @@ fn a_launcher_override_beats_the_shared_effects_and_the_notifiers_does_not_leak(
          [apps.scootnotify]\n\"shadow\" = \"deep\"\n",
     );
     let launch: toml::Table =
-        toml::from_str(&render_launch(&look).expect("renders")).expect("each key once");
+        toml::from_str(&render_launch(&look, &RenderInputs::default()).expect("renders"))
+            .expect("each key once");
     assert_eq!(launch["shadow"].as_str(), Some("glow"));
     assert_eq!(launch["motion"].as_str(), Some("spring"));
     assert_eq!(launch["motion-duration-ms"].as_integer(), Some(160));
     let notify: toml::Table =
-        toml::from_str(&render_notify(&look).expect("renders")).expect("each key once");
+        toml::from_str(&render_notify(&look, &RenderInputs::default()).expect("renders"))
+            .expect("each key once");
     assert_eq!(notify["shadow"].as_str(), Some("deep"));
     assert_eq!(notify["motion-duration-ms"].as_integer(), Some(380));
 }
 
 #[test]
 fn a_look_without_effects_renders_the_launcher_fragment_it_always_did() {
-    let frag = render_launch(&moonrise()).expect("renders");
+    let frag = render_launch(&moonrise(), &RenderInputs::default()).expect("renders");
     for key in ["shadow", "fill", "motion"] {
         assert!(!frag.contains(key), "{key}: {frag}");
     }
@@ -1267,7 +1271,7 @@ fn a_notifier_override_beats_the_shared_effects() {
     let look = with_effects(
         "[effects]\nshadow = \"soft\"\n[apps.scootnotify]\n\"shadow\" = \"glow\"\n\"fill\" = \"gradient\"\n",
     );
-    let text = render_notify(&look).expect("renders");
+    let text = render_notify(&look, &RenderInputs::default()).expect("renders");
     let parsed: toml::Table = toml::from_str(&text).expect("each key is emitted once");
     assert_eq!(parsed["shadow"].as_str(), Some("glow"));
     assert_eq!(parsed["fill"].as_str(), Some("gradient"));
@@ -1277,19 +1281,19 @@ fn a_notifier_override_beats_the_shared_effects() {
 fn a_hand_built_look_with_a_bad_effect_value_is_refused_not_rendered() {
     let mut look = moonrise();
     look.effects.shadow = Some("soft\"\n[autostart]".to_string());
-    assert!(render_notify(&look).is_err());
+    assert!(render_notify(&look, &RenderInputs::default()).is_err());
     look.effects.shadow = None;
     look.effects.fill = Some("rainbow".to_string());
-    assert!(render_notify(&look).is_err());
+    assert!(render_notify(&look, &RenderInputs::default()).is_err());
     // The launcher reads the keys, so it refuses the same bad values.
-    assert!(render_launch(&look).is_err());
+    assert!(render_launch(&look, &RenderInputs::default()).is_err());
     // An app that never reads the keys does not look at them.
     assert!(render_greet(&look).is_ok());
 }
 
 #[test]
 fn a_look_without_motion_renders_no_motion_key() {
-    let frag = render_notify(&moonrise()).expect("renders");
+    let frag = render_notify(&moonrise(), &RenderInputs::default()).expect("renders");
     for key in ["motion", "card"] {
         assert!(!frag.contains(key), "{key}: {frag}");
     }
@@ -1300,7 +1304,7 @@ fn motion_reaches_the_notifier_and_launcher_fragments_and_no_other() {
     let look = with_effects(
         "[effects]\nmotion = \"spring\"\nmotion-duration-ms = 380\nmotion-bounce = 0.12\n",
     );
-    let text = render_notify(&look).expect("renders");
+    let text = render_notify(&look, &RenderInputs::default()).expect("renders");
     let notify: toml::Table = toml::from_str(&text).expect("TOML");
     assert_eq!(notify["motion"].as_str(), Some("spring"));
     assert_eq!(notify["motion-duration-ms"].as_integer(), Some(380));
@@ -1311,7 +1315,8 @@ fn motion_reaches_the_notifier_and_launcher_fragments_and_no_other() {
         "{text}"
     );
     let launch: toml::Table =
-        toml::from_str(&render_launch(&look).expect("renders")).expect("TOML");
+        toml::from_str(&render_launch(&look, &RenderInputs::default()).expect("renders"))
+            .expect("TOML");
     assert_eq!(launch["motion"].as_str(), Some("spring"));
     assert_eq!(launch["motion-duration-ms"].as_integer(), Some(380));
     assert_eq!(launch["motion-bounce"].as_float(), Some(0.12));
@@ -1325,7 +1330,7 @@ fn card_overrides_render_as_a_card_table_and_beat_the_shared_motion() {
     let look = with_effects(
         "[effects]\nmotion = \"ease-out\"\n[apps.scootnotify]\n\"motion\" = \"spring\"\n\"card.enter\" = \"drop\"\n\"card.exit\" = \"fade\"\n",
     );
-    let text = render_notify(&look).expect("renders");
+    let text = render_notify(&look, &RenderInputs::default()).expect("renders");
     let parsed: toml::Table = toml::from_str(&text).expect("each key is emitted once");
     assert_eq!(parsed["motion"].as_str(), Some("spring"));
     assert_eq!(parsed["card"]["enter"].as_str(), Some("drop"));
@@ -1336,18 +1341,18 @@ fn card_overrides_render_as_a_card_table_and_beat_the_shared_motion() {
 fn a_hand_built_look_with_a_bad_motion_value_is_refused_not_rendered() {
     let mut look = moonrise();
     look.effects.motion = Some("spring\"\n[autostart]".to_string());
-    assert!(render_notify(&look).is_err());
+    assert!(render_notify(&look, &RenderInputs::default()).is_err());
     look.effects.motion = None;
     look.effects.motion_duration_ms = Some(60_000);
-    assert!(render_notify(&look).is_err());
+    assert!(render_notify(&look, &RenderInputs::default()).is_err());
     look.effects.motion_duration_ms = None;
     look.effects.motion_bounce = Some(f64::NAN);
-    assert!(render_notify(&look).is_err());
+    assert!(render_notify(&look, &RenderInputs::default()).is_err());
     look.effects.motion_bounce = Some(7.0);
-    assert!(render_notify(&look).is_err());
+    assert!(render_notify(&look, &RenderInputs::default()).is_err());
     // The launcher reads the same keys and refuses the same values; an app
     // that never reads them does not look at them.
-    assert!(render_launch(&look).is_err());
+    assert!(render_launch(&look, &RenderInputs::default()).is_err());
     assert!(render_greet(&look).is_ok());
 }
 
@@ -1356,7 +1361,7 @@ fn card_style_and_title_overrides_render_into_their_tables_once() {
     let look = with_effects(
         "[apps.scootnotify]\n\"card.mark\" = \"badge\"\n\"card.shape\" = \"pill\"\n\"card.app-accent\" = true\n\"card.enter\" = \"fade\"\n\"title.weight\" = 600\n\"title.spacing\" = -1\n",
     );
-    let text = render_notify(&look).expect("renders");
+    let text = render_notify(&look, &RenderInputs::default()).expect("renders");
     let parsed: toml::Table = toml::from_str(&text).expect("each key is emitted once");
     assert_eq!(parsed["card"]["mark"].as_str(), Some("badge"));
     assert_eq!(parsed["card"]["shape"].as_str(), Some("pill"));
@@ -1368,7 +1373,7 @@ fn card_style_and_title_overrides_render_into_their_tables_once() {
 
 #[test]
 fn a_look_without_card_style_or_title_keys_renders_neither_table() {
-    let frag = render_notify(&moonrise()).expect("renders");
+    let frag = render_notify(&moonrise(), &RenderInputs::default()).expect("renders");
     for key in [
         "[card]",
         "[title]",
@@ -1385,11 +1390,99 @@ fn a_look_without_card_style_or_title_keys_renders_neither_table() {
 fn card_style_keys_reach_the_notifier_fragment_and_no_other() {
     let look =
         with_effects("[apps.scootnotify]\n\"card.mark\" = \"stripe\"\n\"title.weight\" = 500\n");
-    for other in [render_launch(&look), render_greet(&look)] {
+    for other in [
+        render_launch(&look, &RenderInputs::default()),
+        render_greet(&look),
+    ] {
         let other = other.expect("renders");
         assert!(
             !other.contains("stripe") && !other.contains("[title]"),
             "{other}"
         );
     }
+}
+
+fn with_font_file(path: &str) -> RenderInputs {
+    RenderInputs {
+        ui_font_file: Some(path.to_owned()),
+        ..RenderInputs::default()
+    }
+}
+
+#[test]
+fn the_resolved_ui_font_rides_launch_and_notify_as_font_file() {
+    let inputs = with_font_file("/nix/store/abc-dejavu/share/fonts/DejaVu Sans.ttf");
+    for text in [
+        render_launch(&moonrise(), &inputs).expect("renders"),
+        render_notify(&moonrise(), &inputs).expect("renders"),
+    ] {
+        let table: toml::Table = toml::from_str(&text).expect("TOML");
+        assert_eq!(
+            table["font-file"].as_str(),
+            Some("/nix/store/abc-dejavu/share/fonts/DejaVu Sans.ttf")
+        );
+        // The family stays: it names the font for the notes and for a
+        // directory walk when the file is gone.
+        assert_eq!(table["font"].as_str(), Some("DroidSansM Nerd Font Propo"));
+        // A top-level key, before the first table.
+        assert!(text.find("font-file").unwrap() < text.find("[colors]").unwrap());
+    }
+    // The greeter reads the sans, not the UI font: no such key.
+    assert!(
+        !render_greet(&moonrise())
+            .expect("renders")
+            .contains("font-file")
+    );
+}
+
+#[test]
+fn no_resolved_font_renders_no_font_file() {
+    for text in [
+        render_launch(&moonrise(), &RenderInputs::default()).expect("renders"),
+        render_notify(&moonrise(), &RenderInputs::default()).expect("renders"),
+    ] {
+        assert!(!text.contains("font-file"), "{text}");
+    }
+}
+
+#[test]
+fn a_font_file_with_quotes_and_backslashes_is_escaped() {
+    let inputs = with_font_file("/odd/\"quoted\"\\path\n/f.ttf");
+    let table: toml::Table =
+        toml::from_str(&render_launch(&moonrise(), &inputs).expect("renders")).expect("TOML");
+    assert_eq!(
+        table["font-file"].as_str(),
+        Some("/odd/\"quoted\"\\path\n/f.ttf")
+    );
+}
+
+#[test]
+fn an_app_font_override_drops_the_file_resolved_for_the_looks_family() {
+    let mut look = moonrise();
+    look.apps = BTreeMap::from([(
+        "scootlaunch".to_string(),
+        BTreeMap::from([("font".to_string(), toml::Value::String("Other Font".into()))]),
+    )]);
+    let inputs = with_font_file("/fonts/Look.ttf");
+    let launch: toml::Table =
+        toml::from_str(&render_launch(&look, &inputs).expect("renders")).expect("each key once");
+    assert_eq!(launch["font"].as_str(), Some("Other Font"));
+    assert!(!launch.contains_key("font-file"), "{launch:?}");
+    // The notifier has no override: it keeps the look's file.
+    let notify: toml::Table =
+        toml::from_str(&render_notify(&look, &inputs).expect("renders")).expect("TOML");
+    assert_eq!(notify["font-file"].as_str(), Some("/fonts/Look.ttf"));
+}
+
+#[test]
+fn an_author_cannot_set_font_file_through_apps() {
+    let mut look = moonrise();
+    look.apps = BTreeMap::from([(
+        "scootnotify".to_string(),
+        BTreeMap::from([(
+            "font-file".to_string(),
+            toml::Value::String("/etc/x".into()),
+        )]),
+    )]);
+    assert!(render_notify(&look, &RenderInputs::default()).is_err());
 }

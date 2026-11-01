@@ -5,13 +5,17 @@
 //! none the bar refuses to start, saying how to give it one. A font is
 //! needed only when a module is placed: a bar with no modules draws no text.
 //!
-//! An app with a look can also name a family ([`Spec::family`]): between
-//! the flag and the well-known list, [`family`] looks for its files in the
-//! usual font directories, and a bold face beside the regular one (the
-//! same for a `--font` file or a well-known one) when the app draws bold.
-//! A family that is not installed is a note and the well-known font, never
-//! a refusal. All of it happens when the text is built, at start or on a
-//! reload, never when a frame is drawn.
+//! An app with a look can also name a family ([`Spec::family`]) and the
+//! file the look tool resolved it to ([`Spec::file`], from fontconfig or the
+//! look's own font files, found once at `scoot look apply`). Between the
+//! flag and the well-known list the file is tried first and reads nothing
+//! else; with no file (a hand-edited config, a look applied by an older
+//! tool) [`family`] looks for the family's files in the usual font
+//! directories instead. A bold face beside the regular one (the same for a
+//! `--font` file or a well-known one) is loaded when the app draws bold.
+//! A family or file that cannot be used is a note and the next choice,
+//! never a refusal. All of it happens when the text is built, at start or
+//! on a reload, never when a frame is drawn.
 //!
 //! ## Mapped or read: the decision
 //!
@@ -106,8 +110,12 @@ impl fmt::Debug for Font {
 #[derive(Debug)]
 pub enum Error {
     /// `--font` was not given and no well-known file is usable; `tried`
-    /// says what was wrong with each that exists.
-    NoneFound { tried: Vec<(PathBuf, FileError)> },
+    /// says what was wrong with each that exists. `named` says why the
+    /// look's own file or family, if it had one, was not used either.
+    NoneFound {
+        named: Vec<String>,
+        tried: Vec<(PathBuf, FileError)>,
+    },
     /// The `--font` file cannot be used.
     Given { path: PathBuf, error: FileError },
     /// A `bar.fallback-fonts` file cannot be used.
@@ -152,10 +160,14 @@ impl fmt::Display for Error {
                     path.display()
                 )
             }
-            Self::NoneFound { tried } => {
+            Self::NoneFound { named, tried } => {
+                write!(f, "no font: ")?;
+                if !named.is_empty() {
+                    write!(f, "{}, and ", named.join("; "))?;
+                }
                 write!(
                     f,
-                    "no font: none of the usual font files is usable; give one with \
+                    "none of the usual font files is usable; give one with \
                      `--font PATH` (a .ttf or .otf file, such as DejaVuSans.ttf)"
                 )?;
                 for (path, error) in tried {
@@ -199,7 +211,12 @@ fn text_of(primary: Font, fallbacks: &[PathBuf]) -> Result<Text, Error> {
 pub struct Spec<'a> {
     /// The font file the user named (`--font`, a config's `font`): it wins.
     pub given: Option<&'a Path>,
-    /// The look's family, looked for when no file is given. Empty: none.
+    /// The font file the look tool resolved the family to (the fragment's
+    /// `font-file`), tried before any directory is read. Ignored when
+    /// `given` is set.
+    pub file: Option<&'a Path>,
+    /// The look's family, looked for in the font directories when no file
+    /// is given or the file cannot be used. Empty: none.
     pub family: &'a str,
     /// Fallback files, as for [`text`].
     pub fallbacks: &'a [PathBuf],
@@ -208,54 +225,79 @@ pub struct Spec<'a> {
 }
 
 /// [`text`] for an app with a look: the font `spec.given` names, else the
-/// look's `spec.family`, else the first well-known one, with the bold face
-/// beside it when `spec.bold`. The note says why a named family was not
-/// used (not installed, or its file cannot be read), for the caller to
-/// log; the text is the well-known font then. A bold file that cannot be
-/// used is dropped without a note (the app strikes regular glyphs twice,
-/// as it did before there was a bold face).
+/// look's resolved `spec.file`, else its `spec.family` found by name, else
+/// the first well-known one, with the bold face beside it when
+/// `spec.bold`. The note says why a named file or family was not used (not
+/// installed, or its file cannot be read), for the caller to log; the
+/// text is the next choice then. A bold file that cannot be used is
+/// dropped without a note (the app strikes regular glyphs twice, as it did
+/// before there was a bold face).
 pub fn text_with(spec: &Spec<'_>) -> Result<(Text, Option<String>), Error> {
-    let dirs = if spec.given.is_none() && !spec.family.is_empty() {
-        family::font_dirs()
-    } else {
-        Vec::new()
-    };
-    build(spec, &dirs)
+    build(spec, family::font_dirs)
 }
 
-/// [`text_with`] looking for the family in `dirs`.
-fn build(spec: &Spec<'_>, dirs: &[PathBuf]) -> Result<(Text, Option<String>), Error> {
-    let mut note = None;
+/// [`text_with`] looking for the family in the directories `dirs` lists,
+/// asked only if the walk is needed.
+fn build(
+    spec: &Spec<'_>,
+    dirs: impl FnOnce() -> Vec<PathBuf>,
+) -> Result<(Text, Option<String>), Error> {
+    let looked_up = spec.given.is_none();
+    let mut notes: Vec<String> = Vec::new();
     let mut primary = None;
     let mut bold_path = None;
-    if spec.given.is_none() && !spec.family.is_empty() {
-        match family::find_family(spec.family, dirs, spec.bold) {
+    if looked_up && let Some(file) = spec.file {
+        match load(file) {
+            Ok(font) => {
+                bold_path = spec
+                    .bold
+                    .then(|| family::bold_sibling(&font.path))
+                    .flatten();
+                primary = Some(font);
+            }
+            Err(error) => notes.push(format!(
+                "the look's font file {}: {error}{}",
+                file.display(),
+                if spec.family.is_empty() {
+                    String::new()
+                } else {
+                    format!("; looking for `{}` instead", spec.family)
+                }
+            )),
+        }
+    }
+    if primary.is_none() && looked_up && !spec.family.is_empty() {
+        match family::find_family(spec.family, &dirs(), spec.bold) {
             Some(found) => match load(&found.regular) {
                 Ok(font) => {
                     primary = Some(font);
                     bold_path = found.bold;
                 }
-                Err(error) => {
-                    note = Some(format!(
-                        "the look's font `{}`: {}: {error}; using the default font",
-                        spec.family,
-                        found.regular.display()
-                    ));
-                }
+                Err(error) => notes.push(format!(
+                    "the look's font `{}`: {}: {error}",
+                    spec.family,
+                    found.regular.display()
+                )),
             },
-            None => {
-                note = Some(format!(
-                    "the look's font `{}` has no .ttf or .otf file in the font directories; \
-                     using the default font",
-                    spec.family
-                ));
-            }
+            None => notes.push(format!(
+                "the look's font `{}` has no .ttf or .otf file in the font directories",
+                spec.family
+            )),
         }
     }
+    // The note ends with the fallback only when the default font was the
+    // outcome: a file that failed but whose family was found says no more.
+    let default_used = primary.is_none();
     let primary = match primary {
         Some(primary) => primary,
         None => {
-            let font = find(spec.given)?;
+            let font = find(spec.given).map_err(|error| match error {
+                Error::NoneFound { tried, .. } => Error::NoneFound {
+                    named: std::mem::take(&mut notes),
+                    tried,
+                },
+                other => other,
+            })?;
             bold_path = spec
                 .bold
                 .then(|| family::bold_sibling(&font.path))
@@ -267,6 +309,14 @@ fn build(spec: &Spec<'_>, dirs: &[PathBuf]) -> Result<(Text, Option<String>), Er
     if let Some(bold) = bold_path.as_deref().and_then(|path| load(path).ok()) {
         text = text.with_bold(bold.face);
     }
+    let note = (!notes.is_empty()).then(|| {
+        let tail = if default_used {
+            "; using the default font"
+        } else {
+            ""
+        };
+        format!("{}{tail}", notes.join("; "))
+    });
     Ok((text, note))
 }
 
@@ -288,7 +338,10 @@ pub fn find(given: Option<&Path>) -> Result<Font, Error> {
             Err(error) => tried.push((path.to_owned(), error)),
         }
     }
-    Err(Error::NoneFound { tried })
+    Err(Error::NoneFound {
+        named: Vec::new(),
+        tried,
+    })
 }
 
 /// Loads the font at `path`, mapped or read (see the module docs).
