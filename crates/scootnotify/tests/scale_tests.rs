@@ -333,6 +333,48 @@ fn show_configured(
     Some((bus, session, server, log, client))
 }
 
+/// Subscribes `client` to the server's signals, barriered so the rule
+/// is installed before the test triggers anything: a bare `AddMatch`
+/// only leaves the outbox on the wait loop's first pump — after the
+/// clicks — so a fast invoke's signals can reach the bus before the
+/// rule exists, and a rule-less broadcast is dropped, which reads as
+/// "no action invoked" (a ~2% CI flake). The barrier below closes it:
+/// the bus installs one connection's calls in order, so the reply
+/// proves the rule is live before the first click.
+fn watch_signals(client: &mut Conn) {
+    let mut rule = Writer::new();
+    rule.str("type='signal',interface='org.freedesktop.Notifications'");
+    client
+        .call(
+            conn::BUS_NAME,
+            conn::BUS_PATH,
+            conn::BUS_INTERFACE,
+            "AddMatch",
+            "s",
+            &rule.take_body().unwrap(),
+            scoot_dbus::proto::flag::NO_REPLY_EXPECTED,
+            0,
+        )
+        .unwrap();
+    // The barrier: the bus installs one connection's calls in order, so
+    // the reply below proves the rule is live.
+    client
+        .call(
+            BUS_NAME,
+            OBJECT,
+            INTERFACE,
+            "GetServerInformation",
+            "",
+            &[],
+            0,
+            8901,
+        )
+        .unwrap();
+    let _ = until(client, |event| {
+        matches!(event, Event::Reply { token: 8901, .. })
+    });
+}
+
 /// The buffer is the surface's logical size times the scale, to the pixel,
 /// from the first draw on, at the scales laptops ship with; the card is as
 /// many pixels wide on screen as its logical width times the scale; and the
@@ -394,20 +436,7 @@ fn a_click_lands_on_the_card_at_a_fractional_scale() {
         return;
     };
     // Subscribe to the server's signals.
-    let mut rule = Writer::new();
-    rule.str("type='signal',interface='org.freedesktop.Notifications'");
-    client
-        .call(
-            conn::BUS_NAME,
-            conn::BUS_PATH,
-            conn::BUS_INTERFACE,
-            "AddMatch",
-            "s",
-            &rule.take_body().unwrap(),
-            scoot_dbus::proto::flag::NO_REPLY_EXPECTED,
-            0,
-        )
-        .unwrap();
+    watch_signals(&mut client);
     let (x0, y0, _, y1) = ring_box(&session).expect("the card");
     // The screenshot is in device pixels, the click in logical ones.
     let logical = |device: u32| (f64::from(device) / 1.5) as u32;
