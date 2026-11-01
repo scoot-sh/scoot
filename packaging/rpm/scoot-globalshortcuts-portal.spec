@@ -15,7 +15,7 @@
 # here unchanged (the same release tarball, under the same name).
 
 Name:           scoot-globalshortcuts-portal
-Version:        0.6.27
+Version:        0.6.28
 Release:        1%{?dist}
 # No -debuginfo/-debugsource subpackages: see scoot.spec.
 %global         debug_package %{nil}
@@ -80,6 +80,9 @@ cd source
 %license source/LICENSE source/NOTICE source/THIRD-PARTY-LICENSES
 
 %changelog
+* Sun Nov 01 2026 scoot-sh <packages@scoot.sh> - 0.6.28-1
+- Built from the v0.6.28 release tag.
+
 * Sun Nov 01 2026 scoot-sh <packages@scoot.sh> - 0.6.27-1
 - Built from the v0.6.27 release tag.
 
