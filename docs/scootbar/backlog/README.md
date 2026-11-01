@@ -189,6 +189,13 @@ The bar's half of the [live-looks epic](../../backlog/core/live-looks.md) ([desi
 - [A style-only reload keeps every module running and repaints](resolved/scootbar-style-reload-done.md) (medium) — RESOLVED 2026-10-15 in #609: a reload differing only in style keeps every module running, restyles an open popup or tooltip in place (remade or closed where it cannot be), and repaints every output
 - [A looks picker: a bar popup module and a launcher list](resolved/look-picker-done.md) (medium) — RESOLVED 2026-10-15 in #637
 
+### Shell UI motion and depth (filed 2026-10-31)
+The bar's slice of the [shell motion/depth epic](https://github.com/scoot-sh/scoot/issues/807)
+(section 4, "scootbar (optional, later)"; sections 1-3 shipped in #810, #811, #812, #814, #835, #836, #838, #839, #841):
+- [Bar opacity pixman benchmark: the gate for translucent bars](bar-opacity-benchmark.md) (medium): the five `[opacity] bar = 1.0` pins stay until the CPU-tier numbers exist
+- [Shadow and gradient fill tokens for the bar and its popups](scootbar-depth-tokens.md) (low): blocked on `bar-opacity-benchmark`
+- [Popups open with the notification-card entrance](scootbar-popup-entrance.md) (low): blocked on `scootbar-depth-tokens`
+
 ### Unscheduled (until someone asks)
 - [Hung spawned children block every other exec binding until the bar restarts](resolved/hung-spawn-blocks-binds-done.md) (low) — RESOLVED 2026-10-28: a refused spawn names the running commands (program, pid, age, oldest first); queue and `msg` kill declined
 - [Gate integration tests on module features, tidy the unit-test script](resolved/scootbar-test-gating-and-script-hygiene-done.md) (low) — RESOLVED 2026-10-08 in #527
