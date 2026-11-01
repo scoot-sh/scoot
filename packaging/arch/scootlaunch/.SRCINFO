@@ -1,6 +1,6 @@
 pkgbase = scootlaunch
 	pkgdesc = Keyboard-first application launcher for the scoot compositor
-	pkgver = 0.6.24
+	pkgver = 0.6.25
 	pkgrel = 1
 	url = https://github.com/scoot-sh/scoot
 	arch = x86_64
@@ -16,7 +16,7 @@ pkgbase = scootlaunch
 	depends = libxkbcommon
 	optdepends = ttf-dejavu: sans font the panel finds on its own
 	options = !debug
-	source = scootlaunch-0.6.24.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v0.6.24.tar.gz
+	source = scootlaunch-0.6.25.tar.gz::https://github.com/scoot-sh/scoot/archive/refs/tags/v0.6.25.tar.gz
 	sha256sums = SKIP
 
 pkgname = scootlaunch

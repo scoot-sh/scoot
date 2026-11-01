@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.25](https://github.com/scoot-sh/scoot/compare/v0.6.24...v0.6.25) - 2026-11-01
+
+### scootbar,looks
+
+- added: pass the bar-opacity benchmark, lift the five pins ([#850](https://github.com/scoot-sh/scoot/pull/850))
+
+### scootlaunch
+
+- fixed: hold the fit remainder in the padding and round lengths one way ([#849](https://github.com/scoot-sh/scoot/pull/849))
+
 ## [0.6.23](https://github.com/scoot-sh/scoot/compare/v0.6.22...v0.6.23) - 2026-11-01
 
 ### scoot-look,scootui,scootnotify,scootlaunch,scootctl,docs
