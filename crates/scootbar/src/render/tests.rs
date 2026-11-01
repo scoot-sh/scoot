@@ -19,6 +19,7 @@ use crate::testfont;
 use crate::text::Text;
 use crate::theme::Theme;
 
+mod bench;
 mod hover;
 mod icons;
 mod spacing;
