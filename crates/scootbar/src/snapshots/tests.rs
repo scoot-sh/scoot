@@ -543,6 +543,7 @@ fn bar_gradient_at_1x() {
 /// plane: a black shadow over transparency reads black whatever it does)
 /// pins the paint, not just the geometry: the transparent entrance room, the
 /// shadow's falloff, and the opaque popup at two heights 6 px apart.
+#[cfg(feature = "popup")]
 fn popup_entrance(dy: i32) -> (Vec<u8>, u32, u32) {
     use crate::popup::{Content, Interaction, Layout, Round};
     use scootui::paint::{Canvas, Shadow, ShadowSpec};
@@ -625,6 +626,7 @@ fn popup_entrance(dy: i32) -> (Vec<u8>, u32, u32) {
 }
 
 #[test]
+#[cfg(feature = "popup")]
 fn popup_entrance_rest_at_1x() {
     let (pixels, w, h) = popup_entrance(0);
     let image = Image::from_alpha(&pixels, w, h);
@@ -647,6 +649,7 @@ fn popup_entrance_rest_at_1x() {
 }
 
 #[test]
+#[cfg(feature = "popup")]
 fn popup_entrance_mid_at_1x() {
     // Mid-entrance: 6 px above rest (toward a top bar), the slide half done.
     let (pixels, w, h) = popup_entrance(-6);
