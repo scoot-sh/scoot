@@ -72,8 +72,9 @@ rounds each measurement on its own, so it stood up to 11 px over the scaled
 logical height (a tall list at 1.25x). Growing the buffer to hold it would
 make the viewport resample the whole panel (3% at worst), which is the blur
 this fixes, so the layout is held to the scaled height instead
-(`Layout::fitted`): the rows give up at most 2 px, never below the text's
-own height, and nothing changes at 1x or at the integer scales. Clicks use
+(`Layout::fitted`): the rows give up a few px (3 px measured at font 8
+with no rows), never below the text's own height, and nothing changes
+at 1x or at the integer scales. Clicks use
 the drawn layout at the real scale factor (`row_at`), taking the pointer at
 the middle of its logical pixel.
 

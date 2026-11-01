@@ -376,9 +376,9 @@ the surface maps, and does not move it afterwards.
 > **Symptom:** the panel refuses to start over a font.
 
 Give it a file with `--font PATH` (a `.ttf` or `.otf`, such as
-DejaVuSans.ttf). Without one it looks for the look's font family, then
-tries a short list of well-known paths, and refuses, naming what it
-tried.
+DejaVuSans.ttf). Without one it tries the configured `font`, then the
+look's `font-file`, its family, then well-known paths, refusing with
+what it tried.
 
 > **Symptom:** the panel ignores the look.
 

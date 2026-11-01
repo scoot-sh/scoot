@@ -11,8 +11,9 @@ use scootui::color::Color;
 use scootui::density::Scale;
 use scootui::output::Size;
 
-use super::{PanelView, paint_panel, scale_len};
+use super::{PanelView, paint_panel};
 use crate::icons;
+use crate::layout::scale_len;
 use crate::motion::{Slide, slide};
 use crate::stage::{Effects, Scene, fit_room};
 use scootui::text::Text;
@@ -118,7 +119,7 @@ pub(super) fn stage_frame(
     // The shadow's room, as the compositor left it: the panel stays where
     // it was and the shadow gives way.
     let room = fit_room(fx.room, (frame_size.width, frame_size.height), shape.size);
-    let len = |logical| scale_len(logical, factor);
+    let len = |logical| scale_len(logical, shape.scale);
     let panel = (
         len(shape.size.0).min(dims.0).max(1),
         len(shape.size.1).min(dims.1).max(1),

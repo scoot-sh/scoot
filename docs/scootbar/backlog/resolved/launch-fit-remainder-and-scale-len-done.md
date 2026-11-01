@@ -1,9 +1,10 @@
 ---
 title: "scootlaunch fit: the remainder is dead space at the bottom, scale_len and scaled_length disagree, and a 3x entrance frame outruns 16.6 ms"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-31"
 ---
 
 # scootlaunch fit: the remainder is dead space at the bottom, scale_len and scaled_length disagree, and a 3x entrance frame outruns 16.6 ms
@@ -55,3 +56,37 @@ Three small findings, none a crash and none a blur.
 ## Not in this ticket
 
 Changing the panel's geometry at 1x or at the integer scales.
+
+## Resolution
+
+Landed 2026-11-01.
+
+1. `Layout` carries the fit remainder as `extra`, split top/bottom
+   (`top_extra`/`bottom_extra`, within 1 px), so the panel height lands on
+   the scaled height: apps 1.25x (10 rows) went from 8 px of dead space to
+   top 4 / bottom 4; dmenu 1.75x (12 rows) from 9 px to top 4 / bottom 5.
+   Rows stay uniform, so `row_at` stays a division (the click-coverage test
+   is unchanged and green). Layouts that already fit keep `extra` 0, so 1x
+   and the integer scales draw what they drew. The "at most 2 px" wording
+   is corrected to what the code does (3 px measured at font 8 with no
+   rows) in the `fitted` doc, the scale test, and the #839 resolution note.
+2. `scale_len` now takes the `Scale` and rounds the integer way the buffer
+   does (`scaled_length`; exact multiply at integer scales), so the panel
+   inside matches the buffer and the compositor's mapping. The sweep test
+   (`scale_len_matches_scaled_length_at_every_v120_and_length`: v120
+   120..1920 by lengths 1..1500) passes; the old `f64` rule is pinned to
+   fail it (`the_old_f64_scale_len_disagrees_with_scaled_length`: the 25
+   v120 values up to 300 each have a 1 px witness). The 1x byte pin is
+   unchanged (`0x6226_31d1_2e84_8874`); the scaled pin moves
+   (`0xa352_c849_814f_5f69` to `0x219f_0ed0_9338_2d41`) for the fractional
+   half alone — the integer-2x half draws the same bytes (exact multiply,
+   `extra` 0 at the pinned looks), the rows shift by the top remainder and
+   1 px widths/heights move where the old round disagreed.
+3. 3x entrance frame measured with `bench_effects` (release, `taskset -c 3`,
+   three runs): median 19.3 to 19.5 ms (p5 3.9 to 4.0 ms) at 1242x942 —
+   over the 16.6 ms budget, as extrapolated. Recorded on
+   `launcher-scaled-composite-cost`; the cheapest fix stays the filed
+   row-blend (no output change), not implemented here.
+4. `site/.../scootlaunch/panel.md` font symptom now states the real order
+   (given `font`, then `font-file`, family, well-known), matching
+   `troubleshooting.md`.

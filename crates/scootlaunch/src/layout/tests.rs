@@ -5,19 +5,20 @@
 use super::*;
 
 const EMS: [f32; 4] = [11.0, 13.0, 16.0, 20.0];
-const FACTORS: [f64; 3] = [1.0, 1.5, 2.0];
+const SCALES: [Scale; 3] = [Scale::Integer(1), Scale::Fractional(180), Scale::Integer(2)];
 const RADII: [u32; 5] = [0, 4, 14, 28, 64];
 
-fn each(mut check: impl FnMut(Layout, f64, u32, u32)) {
+fn each(mut check: impl FnMut(Layout, Scale, u32, u32)) {
     for em in EMS {
-        for factor in FACTORS {
+        for scale in SCALES {
             for radius in RADII {
+                let factor = scale.factor();
                 let em_d = em * factor as f32;
                 let radius_d = (f64::from(radius) * factor).round() as u32;
-                let layout = Layout::new(em_d, radius_d, factor);
+                let layout = Layout::new(em_d, radius_d, scale);
                 // The default 30-em panel, in device pixels.
                 let width = (30.0 * em_d) as u32;
-                check(layout, factor, radius_d, width);
+                check(layout, scale, radius_d, width);
             }
         }
     }
@@ -48,7 +49,7 @@ fn rows_tile_without_overlap_and_the_panel_height_is_exact() {
             if rows > 0 {
                 let last = layout.row(width, rows - 1);
                 assert_eq!(
-                    last.bottom() + layout.inner(),
+                    last.bottom() + layout.inner() + layout.bottom_extra(),
                     layout.height(rows),
                     "{layout:?} rows {rows}"
                 );
@@ -65,7 +66,7 @@ fn rows_tile_without_overlap_and_the_panel_height_is_exact() {
             layout.row(width, 0).y
         );
         assert_eq!(
-            layout.inner_box(width, 3).bottom() + layout.inner(),
+            layout.inner_box(width, 3).bottom() + layout.inner() + layout.bottom_extra(),
             layout.height(3)
         );
     });
@@ -163,7 +164,7 @@ fn text_never_leaves_its_row() {
 #[test]
 fn a_panel_too_narrow_for_its_padding_draws_nothing_and_does_not_panic() {
     for width in [0u32, 1, 10, 37] {
-        let layout = Layout::new(13.0, 14, 1.0);
+        let layout = Layout::new(13.0, 14, Scale::Integer(1));
         let row = layout.row(width, 0);
         assert!(row.width == 0 || row.right() <= width);
         let geo = layout.list_geometry(width);
@@ -174,11 +175,11 @@ fn a_panel_too_narrow_for_its_padding_draws_nothing_and_does_not_panic() {
 
 #[test]
 fn hostile_inputs_clamp() {
-    let layout = Layout::new(f32::NAN, u32::MAX, f64::NAN);
+    let layout = Layout::new(f32::NAN, u32::MAX, Scale::Integer(1));
     assert!(layout.row_h >= 1 && layout.side >= 1);
-    let layout = Layout::new(f32::INFINITY, u32::MAX, f64::INFINITY);
+    let layout = Layout::new(f32::INFINITY, u32::MAX, Scale::Fractional(1920));
     assert!(layout.row_h <= 4096);
-    let layout = Layout::new(1.0, 0, 0.0);
+    let layout = Layout::new(1.0, 0, Scale::Fractional(1));
     assert!(layout.side >= 1 && layout.side < layout.row_h);
     assert_eq!(layout.height(u32::MAX), u32::MAX);
 }
@@ -186,7 +187,7 @@ fn hostile_inputs_clamp() {
 #[test]
 fn the_default_panel_at_13_is_roomier_than_before() {
     // Before: row = ceil(13) + 8 = 21, pad 8, icon 13 against the field.
-    let layout = Layout::new(13.0, 14, 1.0);
+    let layout = Layout::new(13.0, 14, Scale::Integer(1));
     assert_eq!(layout.row_h, 23);
     assert_eq!(layout.side, 16);
     assert_eq!(layout.inner(), layout.border + layout.pad);
@@ -205,18 +206,23 @@ fn the_dmenu_layout_keeps_the_old_numbers() {
 fn the_dmenu_layout_scales_its_fixed_spacing_with_the_output() {
     // 13 px text at 2x is 26 device pixels: the border, padding, gap and
     // row slack double with it.
-    let layout = Layout::dmenu_scaled(26.0, 2.0);
+    let layout = Layout::dmenu_scaled(26.0, Scale::Integer(2));
     assert_eq!((layout.border, layout.pad, layout.gap), (4, 16, 8));
     assert_eq!(layout.row_h, 26 + 16);
-    // At 1.5 the rounding is the apps panel's: round, never zero border.
-    let layout = Layout::dmenu_scaled(19.5, 1.5);
+    // At 1.5 the rounding is the integer rule: half up, never zero border.
+    let layout = Layout::dmenu_scaled(19.5, Scale::Fractional(180));
     assert_eq!((layout.border, layout.pad, layout.gap), (3, 12, 6));
     assert_eq!(layout.row_h, 20 + 12);
     // Hostile values stay finite and nonzero.
-    for (em, factor) in [(f32::NAN, 1.0), (1.0, f64::NAN), (0.0, 0.0), (1e9, 1e9)] {
-        let layout = Layout::dmenu_scaled(em, factor);
-        assert!(layout.border >= 1 && layout.row_h >= 1, "{em} {factor}");
-        assert!(layout.height(64) < u32::MAX, "{em} {factor}");
+    for (em, scale) in [
+        (f32::NAN, Scale::Integer(1)),
+        (1.0, Scale::Fractional(0)),
+        (0.0, Scale::Fractional(1)),
+        (1e9, Scale::Fractional(1920)),
+    ] {
+        let layout = Layout::dmenu_scaled(em, scale);
+        assert!(layout.border >= 1 && layout.row_h >= 1, "{em} {scale}");
+        assert!(layout.height(64) < u32::MAX, "{em} {scale}");
     }
 }
 
@@ -225,29 +231,35 @@ fn rows_held_to_a_height_give_up_only_what_rounding_added() {
     // 1.25x of the 13 px dmenu over four rows: each measurement rounds on
     // its own, and the unfitted layout stands 3 px past the scaled height.
     let logical = Layout::dmenu(13.0);
-    let target = (f64::from(logical.height(4)) * 1.25).round() as u32;
-    let natural = Layout::dmenu_scaled(16.25, 1.25);
+    let scale = Scale::Fractional(150);
+    let target = scale_len(logical.height(4), scale);
+    let natural = Layout::dmenu_scaled(16.25, scale);
     assert!(
         natural.height(4) > target,
         "the premise: it stands too tall"
     );
     let fitted = Layout::dmenu_fitted(
         16.25,
-        1.25,
+        scale,
         Some(Fit {
             height: target,
             rows: 4,
         }),
     );
-    assert!(
-        fitted.height(4) <= target,
-        "{} over {target}",
-        fitted.height(4)
+    assert_eq!(
+        fitted.height(4),
+        target,
+        "the remainder joins the top and bottom padding"
     );
     assert!(natural.row_h - fitted.row_h <= 1, "a row gives up a pixel");
     assert_eq!(
         (fitted.pad, fitted.gap, fitted.border),
         (natural.pad, natural.gap, natural.border)
+    );
+    // The top and bottom padding match to within a pixel.
+    assert!(
+        fitted.top_extra().abs_diff(fitted.bottom_extra()) <= 1,
+        "{fitted:?}"
     );
 
     // A height it already fits changes nothing; no height changes nothing.
@@ -255,10 +267,10 @@ fn rows_held_to_a_height_give_up_only_what_rounding_added() {
         height: natural.height(4) + 50,
         rows: 4,
     };
-    assert_eq!(Layout::dmenu_fitted(16.25, 1.25, Some(roomy)), natural);
-    assert_eq!(Layout::dmenu_fitted(16.25, 1.25, None), natural);
-    let apps = Layout::new(16.25, 15, 1.25);
-    assert_eq!(Layout::fitted(16.25, 15, 1.25, None), apps);
+    assert_eq!(Layout::dmenu_fitted(16.25, scale, Some(roomy)), natural);
+    assert_eq!(Layout::dmenu_fitted(16.25, scale, None), natural);
+    let apps = Layout::new(16.25, 15, scale);
+    assert_eq!(Layout::fitted(16.25, 15, scale, None), apps);
 }
 
 #[test]
@@ -266,13 +278,13 @@ fn a_height_too_small_for_the_text_never_squeezes_the_rows_below_it() {
     for rows in [0, 1, 10, u32::MAX] {
         for height in [0, 1, 40] {
             let fit = Some(Fit { height, rows });
-            let dmenu = Layout::dmenu_fitted(20.0, 2.0, fit);
+            let dmenu = Layout::dmenu_fitted(20.0, Scale::Integer(2), fit);
             assert!(
                 dmenu.row_h >= 20,
                 "rows {rows} height {height}: {}",
                 dmenu.row_h
             );
-            let apps = Layout::fitted(20.0, 12, 2.0, fit);
+            let apps = Layout::fitted(20.0, 12, Scale::Integer(2), fit);
             assert!(
                 apps.row_h >= 20,
                 "rows {rows} height {height}: {}",

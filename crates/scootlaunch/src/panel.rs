@@ -85,7 +85,7 @@ use crate::cli::ColorOverrides;
 use crate::dmenu::{DmenuUi, Outcome as DmenuOutcome, Print as DmenuPrint};
 use crate::highlight::fill_round_rect;
 use crate::index::{Action, Entry};
-use crate::layout::{Fit, Layout, Rect};
+use crate::layout::{Fit, Layout, Rect, scale_len};
 use crate::look::Look;
 use crate::motion::Slide;
 use crate::spawn::{self, Token};
@@ -311,7 +311,7 @@ pub fn open(opts: Options) -> i32 {
     let layout = if dmenu.is_some() {
         Layout::dmenu(em)
     } else {
-        Layout::new(em, look.radius, 1.0)
+        Layout::new(em, look.radius, scootui::density::Scale::Integer(1))
     };
     let width = (config.width_em as f32 * em) as u32;
     // A prompt-only dmenu panel shows the entry alone: no gap, no list
@@ -1185,19 +1185,6 @@ struct PanelView<'a> {
     icon_bases: &'a [PathBuf],
 }
 
-/// `logical` pixels at output scale `factor`, at least one for a nonzero
-/// length.
-fn scale_len(logical: u32, factor: f64) -> u32 {
-    if logical == 0 {
-        0
-    } else {
-        ((f64::from(logical) * factor)
-            .round()
-            .max(1.0)
-            .min(f64::from(u32::MAX))) as u32
-    }
-}
-
 /// The list row at `pointer_y` logical pixels down the panel, of `shown`
 /// rows drawn from `layout` (device pixels) at `factor` device pixels per
 /// logical one down the panel. The pointer is a whole logical pixel, so it
@@ -1248,11 +1235,10 @@ fn paint_panel(
         icon_bases,
     } = *view;
     let (buffer_w, buffer_h) = dims;
-    let factor = scale.factor().max(MIN_FACTOR);
-    let width_d = scale_len(width, factor).min(buffer_w).max(1);
-    let height_d = scale_len(height, factor).min(buffer_h).max(1);
+    let width_d = scale_len(width, scale).min(buffer_w).max(1);
+    let height_d = scale_len(height, scale).min(buffer_h).max(1);
     let layout = device_layout(look, scale, height, rows);
-    let (em, radius_d) = (layout.em, scale_len(look.radius, factor));
+    let (em, radius_d) = (layout.em, scale_len(look.radius, scale));
     chrome_scaled(
         pixels,
         buffer_w,
@@ -1432,14 +1418,12 @@ const MIN_FACTOR: f64 = 0.25;
 fn device_layout(look: &Look, scale: scootui::density::Scale, height: u32, rows: u32) -> Layout {
     let factor = scale.factor().max(MIN_FACTOR);
     let em = ((f64::from(look.font_size_px) * factor) as f32).clamp(1.0, 512.0);
-    let radius = (f64::from(look.radius) * factor)
-        .round()
-        .clamp(0.0, f64::from(u32::MAX)) as u32;
+    let radius = scale_len(look.radius, scale);
     let fit = Fit {
-        height: scale_len(height, factor),
+        height: scale_len(height, scale),
         rows,
     };
-    Layout::fitted(em, radius, factor, Some(fit))
+    Layout::fitted(em, radius, scale, Some(fit))
 }
 
 /// The dmenu panel's geometry in device pixels at `scale`: the one place
@@ -1448,10 +1432,10 @@ fn dmenu_layout(look: &Look, scale: scootui::density::Scale, height: u32, rows: 
     let factor = scale.factor().max(MIN_FACTOR);
     let em = f64::from(look.font_size_px.clamp(1.0, 256.0)) * factor;
     let fit = Fit {
-        height: scale_len(height, factor),
+        height: scale_len(height, scale),
         rows,
     };
-    Layout::dmenu_fitted(em as f32, factor, Some(fit))
+    Layout::dmenu_fitted(em as f32, scale, Some(fit))
 }
 
 /// Draws one row's icon into `rect` (a square, `rect.width` device pixels
@@ -1562,10 +1546,9 @@ fn paint_dmenu(
     spec: &DmenuSpec,
 ) {
     let (buffer_w, buffer_h) = dims;
-    let factor = scale.factor().max(MIN_FACTOR);
     let layout = dmenu_layout(look, scale, height, rows);
-    let width = scale_len(width, factor).min(buffer_w);
-    let height = scale_len(height, factor).min(buffer_h);
+    let width = scale_len(width, scale).min(buffer_w);
+    let height = scale_len(height, scale).min(buffer_h);
     let row_h = layout.row_h;
     if width == 0 || height == 0 || row_h == 0 {
         return;
@@ -1576,7 +1559,7 @@ fn paint_dmenu(
         width,
         height,
         layout.border,
-        scale_len(look.radius, factor),
+        scale_len(look.radius, scale),
         look,
         look.fill_stops(),
     );
@@ -1585,15 +1568,16 @@ fn paint_dmenu(
     };
     let em = layout.em;
     let inner = layout.inner();
+    let top = inner.saturating_add(layout.top_extra());
     let entry_geo = Geometry {
         x: inner,
-        y: inner,
+        y: top,
         width: width.saturating_sub(inner.saturating_mul(2)),
         row_height: row_h,
         em,
     };
     let metrics = text.metrics(em);
-    let baseline = i64::from(inner) + metrics.baseline(row_h);
+    let baseline = i64::from(top) + metrics.baseline(row_h);
     // The prompt first, at the text start; the entry shifts right by
     // its measured width, so prompt and query never overlap.
     let prompt_w = if spec.prompt.is_empty() {
@@ -1636,7 +1620,7 @@ fn paint_dmenu(
     }
     let list_geo = Geometry {
         x: inner,
-        y: inner.saturating_add(row_h).saturating_add(layout.gap),
+        y: layout.list_y(),
         width: width.saturating_sub(inner.saturating_mul(2)),
         row_height: row_h,
         em,
@@ -2659,10 +2643,14 @@ mod tests {
         let scale = scootui::density::Scale::Fractional(180);
         assert_eq!(scale.factor(), 1.5);
         let width = 400u32;
-        let logical = Layout::new(look.font_size_px, look.radius, 1.0);
+        let logical = Layout::new(
+            look.font_size_px,
+            look.radius,
+            scootui::density::Scale::Integer(1),
+        );
         let height = logical.height(10);
-        let width_d = (f64::from(width) * 1.5).round() as u32;
-        let height_d = (f64::from(height) * 1.5).round() as u32;
+        let width_d = scale_len(width, scale);
+        let height_d = scale_len(height, scale);
         let mut pixels = vec![0u8; width_d as usize * height_d as usize * 4];
         let mut icons = crate::icons::Cache::default();
         let bases = [dir.path().join("icons")];
@@ -2749,12 +2737,12 @@ mod tests {
                         font_size_px: font,
                         ..Look::default()
                     };
-                    let logical = Layout::new(font, look.radius, 1.0);
+                    let logical =
+                        Layout::new(font, look.radius, scootui::density::Scale::Integer(1));
                     let width = (30.0 * font) as u32;
                     let height = logical.height(10);
-                    let factor = scale.factor();
-                    let width_d = (f64::from(width) * factor).round() as u32;
-                    let height_d = (f64::from(height) * factor).round() as u32;
+                    let width_d = scale_len(width, scale);
+                    let height_d = scale_len(height, scale);
                     let mut pixels = vec![0u8; width_d as usize * height_d as usize * 4];
                     let view = PanelView {
                         ui: &ui,
@@ -2789,21 +2777,21 @@ mod tests {
                     let mid = row.y + row.height / 2;
                     // The first row is selected: highlight edge to edge,
                     // and the icon column's left margin is still fill.
-                    assert_eq!(at(row.x, mid), accent, "font {font} scale {factor}");
+                    assert_eq!(at(row.x, mid), accent, "font {font} scale {scale}");
                     assert_eq!(
                         at(row.right() - 1, mid),
                         accent,
-                        "font {font} scale {factor}"
+                        "font {font} scale {scale}"
                     );
                     assert_eq!(
                         at(row.x + device.lead - 1, mid),
                         accent,
-                        "font {font} scale {factor}"
+                        "font {font} scale {scale}"
                     );
                     // Nothing paints outside the inner box's rows: the
                     // padding between the border and the highlight is
                     // not accent.
-                    assert_ne!(at(row.x - 1, mid), accent, "font {font} scale {factor}");
+                    assert_ne!(at(row.x - 1, mid), accent, "font {font} scale {scale}");
                 }
             }
         }

@@ -15,6 +15,7 @@ use scootui::output::Size;
 use scootui::text::Text;
 
 use super::*;
+use crate::layout::scale_len;
 use crate::rank::frecency::Frecency;
 
 fn at(base: Instant, ms: u64) -> Instant {
@@ -46,7 +47,7 @@ impl Rig {
         let dir = tempfile::tempdir().expect("tmp");
         let text = super::bytes_tests::test_text(dir.path());
         let ui = Ui::open(entries(6), Frecency::empty(), 0, 10);
-        let layout = Layout::new(look.font_size_px, look.radius, 1.0);
+        let layout = Layout::new(look.font_size_px, look.radius, Scale::Integer(1));
         let width = (30.0 * look.font_size_px) as u32;
         let height = layout.height(10);
         let fx = Effects::from_look(&look);
@@ -69,10 +70,9 @@ impl Rig {
             width: self.width + 2 * self.fx.room.0,
             height: self.height + 2 * self.fx.room.1,
         };
-        let factor = self.scale.factor();
         let dims = (
-            (f64::from(size.width) * factor).round() as u32,
-            (f64::from(size.height) * factor).round() as u32,
+            crate::layout::scale_len(size.width, self.scale),
+            crate::layout::scale_len(size.height, self.scale),
         );
         (size, dims)
     }
@@ -384,7 +384,7 @@ fn selected_slot_pixel(
     slot: u32,
 ) -> [u8; 4] {
     let layout = device_layout(&rig.look, rig.scale, rig.height, ROWS);
-    let row = layout.row(scale_len(rig.width, rig.scale.factor()), slot);
+    let row = layout.row(scale_len(rig.width, rig.scale), slot);
     // Left of the icon column, inside the highlight: nothing but fill.
     pixel_at(
         frame,
@@ -488,15 +488,9 @@ fn every_scale_and_a_tiny_surface_draw_without_a_panic() {
         let mut rig = Rig::new(moving(), scale);
         let (_, dims, origin) = rig.frame(true, base);
         // The panel never leaves the surface, whatever the rounding.
-        let panel = (
-            scale_len(rig.width, scale.factor()),
-            scale_len(rig.height, scale.factor()),
-        );
+        let panel = (scale_len(rig.width, scale), scale_len(rig.height, scale));
         assert!(origin.0 * 2 <= dims.0 && origin.1 * 2 <= dims.1);
-        let device = (
-            scale_len(origin.0, scale.factor()),
-            scale_len(origin.1, scale.factor()),
-        );
+        let device = (scale_len(origin.0, scale), scale_len(origin.1, scale));
         assert!(device.0 + panel.0 <= dims.0, "{scale:?}");
         assert!(device.1 + panel.1 <= dims.1, "{scale:?}");
         for ms in [10, 90, 400] {
@@ -568,7 +562,7 @@ fn a_scale_change_in_the_middle_of_a_motion_repaints_at_the_new_scale() {
     settled.frame(true, base);
     let (rest, dims, _) = settled.frame(false, at(base, 5000));
     // `origin` is logical: the panel's device top is twice the room.
-    let below = 2 * settled.fx.room.1 + scale_len(settled.height, 2.0) + 20;
+    let below = 2 * settled.fx.room.1 + scale_len(settled.height, Scale::Integer(2)) + 20;
     assert!(alpha_at(&rest, dims.0, dims.0 / 2, below) > 0);
 }
 

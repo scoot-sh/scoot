@@ -19,6 +19,7 @@ use scootui::text::Text;
 use super::staged::{Shape, stage_frame};
 use super::*;
 use crate::dmenu::DmenuUi;
+use crate::layout::scale_len;
 use crate::stage::Effects;
 
 fn at(base: Instant, ms: u64) -> Instant {
@@ -91,10 +92,9 @@ impl Rig {
             width: self.width + 2 * self.fx.room.0,
             height: self.height + 2 * self.fx.room.1,
         };
-        let factor = self.scale.factor();
         let dims = (
-            (f64::from(size.width) * factor).round() as u32,
-            (f64::from(size.height) * factor).round() as u32,
+            crate::layout::scale_len(size.width, self.scale),
+            crate::layout::scale_len(size.height, self.scale),
         );
         (size, dims)
     }
@@ -460,14 +460,8 @@ fn the_dmenu_draws_at_a_device_scale_with_the_border_scaled() {
             frame.iter().all(|byte| *byte == 0),
             "{scale:?}: first frame"
         );
-        let panel = (
-            scale_len(rig.width, scale.factor()),
-            scale_len(rig.height, scale.factor()),
-        );
-        let device = (
-            scale_len(origin.0, scale.factor()),
-            scale_len(origin.1, scale.factor()),
-        );
+        let panel = (scale_len(rig.width, scale), scale_len(rig.height, scale));
+        let device = (scale_len(origin.0, scale), scale_len(origin.1, scale));
         assert!(device.0 + panel.0 <= dims.0 && device.1 + panel.1 <= dims.1);
         // The panel's own edge is opaque, the shadow beside it is not.
         let mid = device.1 + panel.1 / 2;

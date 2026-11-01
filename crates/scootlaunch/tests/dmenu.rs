@@ -713,9 +713,9 @@ fn a_dmenu_enters_with_the_look_and_never_fades_out() {
 /// The same on HiDPI outputs, 1.25x to 2x: the buffer is the surface (the
 /// shadow's room included) times the scale to the pixel, a press on the
 /// shadow still dismisses, and a click on the third row still picks it.
-/// The device layout rounds each measurement on its own (3 px taller than
-/// the scaled logical height at 1.5x unfitted), so the click lands where the
-/// rows are drawn, not where the 1x layout would put them.
+/// The rows are held to the scaled height (the leftover joins the top and
+/// bottom padding), so the click lands where the rows are drawn, not
+/// where the 1x layout would put them.
 #[test]
 fn a_scaled_dmenu_under_a_shadow_fills_its_buffer_and_still_picks() {
     for (scale, v120) in [("1.25", 150u32), ("1.5", 180), ("1.75", 210), ("2", 240)] {
