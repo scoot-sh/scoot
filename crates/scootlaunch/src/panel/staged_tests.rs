@@ -639,7 +639,7 @@ fn bench_effects() {
         motion_ms: 200,
         ..Look::default()
     };
-    for scale in [Scale::Integer(1), Scale::Integer(2)] {
+    for scale in [Scale::Integer(1), Scale::Integer(2), Scale::Integer(3)] {
         println!("-- scale {}", scale.factor());
         // The default path: no shadow, no motion, straight into the buffer.
         let mut rig = Rig::new(Look::default(), scale);

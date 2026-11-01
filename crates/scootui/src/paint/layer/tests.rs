@@ -212,6 +212,201 @@ fn compositing_allocates_nothing_and_a_pooled_layer_reuses_its_buffer() {
 }
 
 #[test]
+fn scaled_composites_reuse_the_pooled_scratch() {
+    // The scaled path blends through the layer's pooled scratch row: warm
+    // it once, then steady state allocates nothing even with clear rows
+    // (a shadow's room) and fractional scales on every frame.
+    let mut layer = Layer::new();
+    assert!(layer.begin(40, 30));
+    for (i, chunk) in layer
+        .pixels_mut()
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .enumerate()
+    {
+        if i % 7 == 0 {
+            chunk.copy_from_slice(&[0, 0, 0, 0]);
+        } else {
+            chunk.copy_from_slice(&[
+                (i % 251) as u8,
+                (i * 3 % 251) as u8,
+                (i * 7 % 251) as u8,
+                200,
+            ]);
+        }
+    }
+    let mut buf = Vec::new();
+    let mut dst = canvas_of(&mut buf, 96, 96, [5, 5, 5, 255]);
+    layer.composite(&mut dst, 3, 3, 1.7, 255);
+    let ((), allocations) = scootbg_mem::count_allocations(|| {
+        for step in 0..50 {
+            layer.composite(&mut dst, 3, 3, 0.8 + step as f32 / 500.0, 255);
+            layer.composite(&mut dst, step - 10, step / 2, 2.0, 180);
+        }
+    });
+    assert_eq!(allocations, 0);
+}
+
+/// The pre-optimization column-first blend, kept as the byte-for-byte
+/// reference for the row-first pooled path: identical integer arithmetic.
+#[cfg(test)]
+fn old_scaled_pixel(
+    upper: &[u8],
+    lower: &[u8],
+    w: i64,
+    tx0: i64,
+    tx1: i64,
+    wx: u32,
+    wy: u32,
+) -> [u8; 4] {
+    let (at0, at1) = (tx0 as usize * 4, tx1 as usize * 4);
+    let (a, b, c, e) = (
+        &upper[at0..at0 + 4],
+        &upper[at1..at1 + 4],
+        &lower[at0..at0 + 4],
+        &lower[at1..at1 + 4],
+    );
+    let _ = w;
+    let mut mixed = [0u8; 4];
+    for channel in 0..4 {
+        let top = u32::from(a[channel]) * (256 - wx) + u32::from(b[channel]) * wx;
+        let bottom = u32::from(c[channel]) * (256 - wx) + u32::from(e[channel]) * wx;
+        mixed[channel] = ((top * (256 - wy) + bottom * wy + 0x8000) >> 16) as u8;
+    }
+    mixed
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)] // a test reference mirroring `composite`'s own shape.
+fn old_composite(
+    src: &[u8],
+    sw: u32,
+    sh: u32,
+    dst: &mut [u8],
+    dw_canvas: u32,
+    dh_canvas: u32,
+    x: i32,
+    y: i32,
+    scale: f32,
+    alpha: u8,
+) {
+    let (w, h) = (i64::from(sw), i64::from(sh));
+    let unscaled = (scale - 1.0).abs() < 1.0 / 256.0;
+    let (dw, dh) = if unscaled {
+        (w, h)
+    } else {
+        (
+            ((w as f64 * f64::from(scale)).round() as i64).clamp(1, 8192),
+            ((h as f64 * f64::from(scale)).round() as i64).clamp(1, 8192),
+        )
+    };
+    let left = i64::from(x) + (w - dw).div_euclid(2);
+    let top = i64::from(y) + (h - dh).div_euclid(2);
+    let (cw, ch) = (i64::from(dw_canvas), i64::from(dh_canvas));
+    let (x0, x1) = (left.max(0), (left + dw).min(cw));
+    let (y0, y1) = (top.max(0), (top + dh).min(ch));
+    if x0 >= x1 || y0 >= y1 {
+        return;
+    }
+    let g = u32::from(alpha);
+    let src_stride = sw as usize * 4;
+    let dst_stride = dw_canvas as usize * 4;
+    assert!(dst.len() >= dw_canvas as usize * dh_canvas as usize * 4);
+    for row in y0..y1 {
+        let out_start = row as usize * dst_stride + x0 as usize * 4;
+        let out_len = (x1 - x0) as usize * 4;
+        if unscaled {
+            let sy = (row - top) as usize;
+            let from = sy * src_stride + (x0 - left) as usize * 4;
+            let src_slice = &src[from..from + out_len];
+            let out = &mut dst[out_start..out_start + out_len];
+            for (d, s) in out
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(src_slice.as_chunks::<4>().0)
+            {
+                super::over(d, *s, g);
+            }
+        } else {
+            let step_x = (w << 16) / dw;
+            let step_y = (h << 16) / dh;
+            let fy = (row - top) * step_y + step_y / 2 - 0x8000;
+            let (ty0, ty1, wy) = super::taps(fy, h);
+            let upper = &src[ty0 as usize * src_stride..ty0 as usize * src_stride + src_stride];
+            let lower = &src[ty1 as usize * src_stride..ty1 as usize * src_stride + src_stride];
+            let out = &mut dst[out_start..out_start + out_len];
+            for (offset, d) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                let ox = x0 - left + offset as i64;
+                let fx = ox * step_x + step_x / 2 - 0x8000;
+                let (tx0, tx1, wx) = super::taps(fx, w);
+                let at0 = tx0 as usize * 4;
+                let at1 = tx1 as usize * 4;
+                let all_clear = upper[at0..at0 + 4] == [0, 0, 0, 0]
+                    && upper[at1..at1 + 4] == [0, 0, 0, 0]
+                    && lower[at0..at0 + 4] == [0, 0, 0, 0]
+                    && lower[at1..at1 + 4] == [0, 0, 0, 0];
+                if all_clear {
+                    continue;
+                }
+                let mixed = old_scaled_pixel(upper, lower, w, tx0, tx1, wx, wy);
+                super::over(d, mixed, g);
+            }
+        }
+    }
+}
+
+#[test]
+fn scaled_matches_the_old_column_first_blend_byte_for_byte() {
+    // Patterned content with clear runs (a shadow's room), opaque runs
+    // and translucent pixels, over several sizes, scales, alphas and
+    // offsets: every destination byte must equal the old blend.
+    for (sw, sh) in [(1, 1), (2, 3), (5, 4), (9, 7), (16, 11), (40, 30)] {
+        let mut layer = Layer::new();
+        assert!(layer.begin(sw, sh));
+        for (i, chunk) in layer
+            .pixels_mut()
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .enumerate()
+        {
+            let (px, py) = ((i as u32) % sw, (i as u32) / sw);
+            if (px + py) % 5 == 0 {
+                chunk.copy_from_slice(&[0, 0, 0, 0]);
+            } else {
+                chunk.copy_from_slice(&[
+                    ((px * 37 + py * 91) % 251) as u8,
+                    ((px * 53 + py * 29 + 7) % 251) as u8,
+                    ((px * 11 + py * 67 + 13) % 251) as u8,
+                    [0, 64, 128, 200, 255][(px as usize + py as usize) % 5],
+                ]);
+            }
+        }
+        let src_snapshot = layer.pixels().to_vec();
+        for scale in [0.5, 0.8, 0.96, 1.5, 1.7, 2.0, 2.96, 3.0] {
+            for alpha in [1u8, 64, 128, 200, 255] {
+                for (x, y) in [(0, 0), (-3, -2), (2, 1)] {
+                    let (cw, ch) = (sw * 3 + 8, sh * 3 + 8);
+                    let mut a = vec![0x5au8; cw as usize * ch as usize * 4];
+                    let mut b = a.clone();
+                    {
+                        let mut ca = Canvas::new(&mut a, cw, ch).expect("sized");
+                        layer.composite(&mut ca, x, y, scale, alpha);
+                    }
+                    old_composite(&src_snapshot, sw, sh, &mut b, cw, ch, x, y, scale, alpha);
+                    assert_eq!(
+                        a, b,
+                        "mismatch at {sw}x{sh} scale {scale} alpha {alpha} offset ({x},{y})"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn a_layer_with_a_larger_limit_holds_what_the_default_refuses() {
     let side = 2048u32;
     let mut default = Layer::new();

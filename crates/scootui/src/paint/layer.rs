@@ -13,6 +13,7 @@
 //! nothing and clips to the canvas.
 
 use super::Canvas;
+use std::cell::RefCell;
 
 /// The most pixels a layer holds (8 MiB of `ARGB8888`): a card larger than
 /// this is not worth moving and is drawn in place instead. The shell's
@@ -26,6 +27,12 @@ pub struct Layer {
     width: u32,
     height: u32,
     limit: usize,
+    /// The vertically-blended source row the scaled path reuses: `width *
+    /// 4` `u16` samples in `0..=65280` (`width` is fixed by [`Layer::begin`],
+    /// so [`Layer::composite`] never grows it and allocates nothing).
+    /// `RefCell` keeps [`Layer::composite`]'s `&self` shape at its call
+    /// sites; the layer is only composited on one thread.
+    scratch: RefCell<Vec<u16>>,
 }
 
 impl Default for Layer {
@@ -50,6 +57,7 @@ impl Layer {
             width: 0,
             height: 0,
             limit: max_pixels,
+            scratch: RefCell::new(Vec::new()),
         }
     }
 
@@ -67,6 +75,12 @@ impl Layer {
         }
         self.pixels.clear();
         self.pixels.resize(pixels * 4, 0);
+        // Pool the scaled path's scratch row for this width: `resize`
+        // within capacity allocates nothing, so shrinking and regrowing to
+        // a width the layer held before stays free.
+        let mut scratch = self.scratch.borrow_mut();
+        scratch.clear();
+        scratch.resize(width as usize * 4, 0);
         self.width = width;
         self.height = height;
         true
@@ -143,6 +157,29 @@ impl Layer {
         let g = u32::from(alpha);
         let src_stride = self.width as usize * 4;
         let dst_stride = dst.width as usize * 4;
+        // The scaled path's per-row state, hoisted out of the row loop: one
+        // division per axis for the whole composite (the old code divided
+        // per row), and one pooled scratch row for the vertical blend.
+        let (step_x, step_y) = if unscaled {
+            (0, 0)
+        } else {
+            ((w << 16) / dw, (h << 16) / dh)
+        };
+        // Borrow the scratch row once for the whole scaled run: the
+        // vertical blend writes it, the horizontal blend reads it.
+        // `begin` sized it to `width * 4`, so this resizes nothing in
+        // steady state and the composite allocates nothing.
+        let mut scratch_guard = self.scratch.borrow_mut();
+        let scratch_row: &mut [u16] = if unscaled {
+            &mut []
+        } else {
+            let need = self.width as usize * 4;
+            if scratch_guard.len() != need {
+                scratch_guard.clear();
+                scratch_guard.resize(need, 0);
+            }
+            &mut scratch_guard[..need]
+        };
         for row in y0..y1 {
             let Some(out) = dst
                 .pixels
@@ -171,11 +208,22 @@ impl Layer {
                 }
             } else {
                 // Bilinear in 16.16 fixed point: the source position of a
-                // destination pixel center, minus half a source pixel. The
-                // two source rows this destination row blends are sliced
-                // once, so a pixel reads four slices of four bytes.
-                let step_x = (w << 16) / dw;
-                let step_y = (h << 16) / dh;
+                // destination pixel center, minus half a source pixel.
+                // Two passes with exactly the old integer arithmetic,
+                // reordered: the two source rows blend vertically once per
+                // destination row into the pooled scratch row (the weights
+                // are the same for every pixel of the row), then each
+                // destination pixel blends horizontally out of the scratch.
+                // The old per-pixel value was
+                //   ((a*(256-wx)+b*wx)*(256-wy)+(c*(256-wx)+e*wx)*wy+0x8000)>>16
+                // per channel; the scratch holds
+                //   v0 = a*(256-wy)+c*wy, v1 = b*(256-wy)+e*wy
+                // and the horizontal pass computes
+                //   (v0*(256-wx)+v1*wx+0x8000)>>16,
+                // the same integer (addition and multiplication reorder
+                // exactly). Both passes run over contiguous slices, which
+                // is what vectorizes; the per-column taps stay computed
+                // on the fly (one multiply each, no division, no table).
                 let fy = (row - top) * step_y + step_y / 2 - 0x8000;
                 let (ty0, ty1, wy) = taps(fy, h);
                 let source_row = |ty: i64| {
@@ -186,31 +234,55 @@ impl Layer {
                 let (Some(upper), Some(lower)) = (source_row(ty0), source_row(ty1)) else {
                     continue;
                 };
+                // Vertical pass: one blended row of `w` pixels in `u16`
+                // (`0..=65280`, since the weights sum to 256). Contiguous,
+                // so the compiler vectorizes it.
+                let inv_y = 256 - wy;
+                let mut row_has_ink = false;
+                // Fast path when the row taps a single source row: the
+                // scratch is that row widened, with no arithmetic.
+                if wy == 0 {
+                    for (v, b) in scratch_row.iter_mut().zip(upper.iter()) {
+                        let wide = u16::from(*b);
+                        *v = wide * 256;
+                        row_has_ink |= wide != 0;
+                    }
+                    // `wy == 0` implies `ty0 == ty1`, but keep the general
+                    // shape: `lower` equals `upper` there.
+                } else {
+                    for (v, pair) in scratch_row.iter_mut().zip(upper.iter().zip(lower.iter())) {
+                        let (u, l) = (u32::from(*pair.0), u32::from(*pair.1));
+                        let blended = u * inv_y + l * wy;
+                        *v = blended as u16;
+                        row_has_ink |= blended != 0;
+                    }
+                }
+                if !row_has_ink {
+                    // Both source rows are clear: every destination pixel
+                    // would blend to clear, which `over` skips.
+                    continue;
+                }
                 for (offset, d) in out.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                     let ox = x0 - left + offset as i64;
                     let fx = ox * step_x + step_x / 2 - 0x8000;
                     let (tx0, tx1, wx) = taps(fx, w);
                     let (at0, at1) = (tx0 as usize * 4, tx1 as usize * 4);
-                    let (Some(a), Some(b), Some(c), Some(e)) = (
-                        upper.get(at0..at0 + 4),
-                        upper.get(at1..at1 + 4),
-                        lower.get(at0..at0 + 4),
-                        lower.get(at1..at1 + 4),
-                    ) else {
+                    let (Some(v0), Some(v1)) =
+                        (scratch_row.get(at0..at0 + 4), scratch_row.get(at1..at1 + 4))
+                    else {
                         continue;
                     };
                     // Four clear source pixels blend to a clear one, which
                     // `over` leaves the destination alone for: skip the
                     // arithmetic (a shadow's room is mostly this).
-                    if a.iter().chain(b).chain(c).chain(e).all(|byte| *byte == 0) {
+                    if v0.iter().chain(v1.iter()).all(|s| *s == 0) {
                         continue;
                     }
                     let mut mixed = [0u8; 4];
+                    let inv_x = 256 - wx;
                     for channel in 0..4 {
-                        let top = u32::from(a[channel]) * (256 - wx) + u32::from(b[channel]) * wx;
-                        let bottom =
-                            u32::from(c[channel]) * (256 - wx) + u32::from(e[channel]) * wx;
-                        mixed[channel] = ((top * (256 - wy) + bottom * wy + 0x8000) >> 16) as u8;
+                        let blended = u32::from(v0[channel]) * inv_x + u32::from(v1[channel]) * wx;
+                        mixed[channel] = ((blended + 0x8000) >> 16) as u8;
                     }
                     over(d, mixed, g);
                 }
