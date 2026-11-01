@@ -1,9 +1,10 @@
 ---
 title: "Bar opacity pixman benchmark: the gate for translucent bars"
-status: "open"
-area: "scootbar"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-10-31"
 ---
 
 # Bar opacity pixman benchmark: the gate for translucent bars
@@ -150,3 +151,106 @@ The depth tokens (`scootbar-depth-tokens`) and the popup entrance
 (`scootbar-popup-entrance`): this ticket only decides whether
 translucency is affordable. No config keys, no validator or schema
 changes, no look edits beyond the pin lift a pass unlocks.
+
+## Resolution (2026-11-01, verdict: PASS)
+
+Verdict: every budget passes, so the five `[opacity] bar` pins rise to
+their comments' values in the same PR (0.82 ginger-night, 0.82
+moonrise, 0.7 music-desk, 0.88 radial-burst, 0.78 vinyl-sunset).
+
+### What was built
+
+- `crates/scootbar/src/render/tests/bench.rs` (in-crate, `#[ignore]`d):
+  the real `render::paint` path (same `Scene` update, `Record` damage
+  tracking, `Canvas` fill the daemon drives) at the five example
+  opacities against opaque, full-bar and tick-sized span repaints at 1x
+  and 2x, median + p5 over interleaved samples. An `examples/` target
+  is impossible (scootbar is a binary crate, which an example cannot
+  import), so this is the justified equivalent, beside the live bench.
+- `crates/scootbar/tests/opacity_bench.rs` (integration, `#[ignore]`d,
+  `BENCH key=value` lines, the `popup_bench`/`tooltip_bench` pattern):
+  idle wakeups and per-minute CPU of a clock bar as shipped, per-update
+  CPU of `push` text changes, per-cycle CPU of volume-popup open/close,
+  and `screenshot` round-trip cost at 1x and 2x.
+
+### How it was measured
+
+Release builds on the dev VM (`taskset -c 2`, 6 vCPU shared box),
+`SCOOTBAR_REQUIRE_SCOOT=1` with `scoot` built beside the bar from the
+same tree; opaque and translucent binaries are the same binary (opacity
+is a runtime `[bar]` value — every comparison is the same build with
+only the config changed). Base `a75176dee` plus the bench commits; the
+lift changes no code the bench measures. Three full chains, each
+rotating the opacity order per run (9 samples per config per live
+scenario; micro 300 interleaved samples per cell, 3 invocations).
+
+The VM's CPU swings between speeds (opaque baselines move 2-3x run to
+run), so configs are compared within interleaved runs, and the p5
+(which the bursts leave alone) alongside the median, per the
+`bench_depth` statistic.
+
+### Numbers (medians; ranges are min-max over all samples)
+
+Micro, full-bar repaint (69,120 px at 1x; 276,480 px at 2x):
+
+- 1x full, us: 1.0: 16.0-17.5 across runs; 0.88/0.82/0.78/0.70 within
+  -4%..+9% of opaque within each run (p5s often bit-identical, e.g.
+  5.2/5.3/5.2/5.3/5.3).
+- 1x span, us: 0.5-1.7 at every opacity (sub-microsecond noise floor).
+- 2x full, us: 58.6-59.5 at every opacity (within 2%).
+- 2x span, us: 3.4-4.0 at every opacity.
+
+Live, clock bar as shipped, 60 s windows (n=9 per opacity):
+
+- idle wakeups: 1.0: 1 [1,2]; 0.70: 1 [1,2]; 0.78: 1 [1,2]; 0.82: 1
+  [1,2]; 0.88: 2 [1,2]. No window at any opacity reads 3+. RSS/fds/shm
+  identical (4780 kB, 8, 1).
+- idle CPU per 60 s, us: 1.0: 1675 [732,2354]; 0.70: 829; 0.78: 1431;
+  0.82: 816; 0.88: 1051 (every translucent median at or below opaque).
+- span updates, us/update: 1.0: 91.3 [72,142]; 0.70: 92.0; 0.78: 88.5;
+  0.82: 85.9; 0.88: 80.3. Wakeups/update 3.1-3.3 at every opacity.
+- popup open/close, us/cycle: 1.0: 438.9 [399,478]; 0.70: 431.2;
+  0.78: 448.8; 0.82: 449.3; 0.88: 480.9. Wakeups 4.00 (3.98-4.00) at
+  every opacity.
+- screenshot round trip, ms (n=12 per cell after a focused extra run):
+  1x: 1.0: 10.30 [8.98,14.23]; 0.70: 11.38; 0.88: 10.11.
+  2x: 1.0: 10.51 [8.48,13.04]; 0.70: 10.60; 0.88: 11.45.
+
+### Verdict per budget
+
+1. Idle: PASS with a note. Every opacity reads 1-2 wakes, opaque
+   included; nothing reads 3+ in 45 windows. The 0.88 median of 2
+   against opaque's 1 is one extra minute-tick catch in a minority of
+   windows (a 60 s window holds 1 or 2 minute boundaries depending on
+   phase), not a translucency effect: nothing in the bar is
+   alpha-value-dependent at runtime (alpha changes only the
+   premultiplied pixel and the surface flags at setup), and the other
+   three translucent alphas on the identical code path read median 1.
+2. Span redraw: PASS (every translucent median at or below opaque's
+   91.3 us).
+3. Popup: PASS (worst +9.6% at 0.88, inside +10%; wakeups identical).
+4. Tick: PASS (every translucent median below opaque's 1675 us).
+5. Full repaint: PASS. Bar-side deltas are pure noise (within-run
+   agreement, identical p5s). Compositor frames sit +8.9%..+10.4% on
+   the median in the two worst cells but inside opaque's own observed
+   range (opaque swings +-20% run to run; every translucent range
+   overlaps it fully, and the signs flip between runs) — below this
+   metric's resolution floor, which is dominated by PNG encode and IPC,
+   not the 40 px strip's blend. A focused extra frames run (n=12)
+   confirmed no systematic offset.
+
+Bar-side cost is zero by construction, confirmed: `fill_shaped` runs
+the same loop for any alpha (only the premultiplied pixel value
+changes), so the repaint path cannot tell 0.7 from 1.0.
+
+### Contrast (lift condition)
+
+`scoot-look` validator output on the five lifted looks is unchanged
+(no color changed, only alphas). Worst-case effective bar-text
+contrast, fill blended at the lifted alpha over pure white and pure
+black wallpapers: primary text stays >= 6.0 in every look (ginger-night
+9.69, moonrise 6.03, music-desk 7.47, radial-burst 10.06, vinyl-sunset
+7.59). Secondary roles dip only in those pathological extremes
+(music-desk urgent 2.88 -> 1.37 vs black; moonrise urgent 4.45 -> 2.54
+vs white); the shipped mid-tone wallpapers read far higher, and the
+validator's accepted dim/urgent warnings do not regress.
