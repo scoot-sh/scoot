@@ -36,6 +36,7 @@ pub use scootui::outputs;
 pub use scootui::paint;
 mod pointer;
 mod policy;
+#[cfg(feature = "popup")]
 mod popup_motion;
 pub use scoot_rt::print;
 #[cfg(feature = "popup")]
