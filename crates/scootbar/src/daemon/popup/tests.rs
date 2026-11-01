@@ -4,6 +4,16 @@ use super::events::device;
 use super::{fits, resized};
 use crate::density::Scale;
 use crate::popup::Layout;
+use scootui::paint::Pad;
+
+fn no_pad() -> Pad {
+    Pad {
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+    }
+}
 
 #[test]
 fn a_pointer_coordinate_is_device_pixels_at_the_scale_and_may_be_negative() {
@@ -37,17 +47,17 @@ fn a_refill_at_another_size_reopens_and_at_the_same_size_does_not() {
     // What the open earned: the reopen reuses this surface's size as
     // the "still the same" baseline, so the decision is purely the
     // computed size against it.
-    assert!(!resized(&sized(300, 200), dims));
+    assert!(!resized(&sized(300, 200), no_pad(), dims));
     // Either axis moving reopens: a menu grows from its `...` line,
     // and a scan that drops rows shrinks the list.
     for changed in [sized(300, 260), sized(240, 200), sized(0, 0)] {
-        assert!(resized(&changed, dims));
+        assert!(resized(&changed, no_pad(), dims));
     }
     // Once reopened at the new size, the same content does not reopen
     // again: one reopen per size change, never a loop.
     let grown = sized(300, 260);
-    assert!(resized(&grown, dims));
-    assert!(!resized(&grown, (grown.width, grown.height)));
+    assert!(resized(&grown, no_pad(), dims));
+    assert!(!resized(&grown, no_pad(), (grown.width, grown.height)));
 }
 
 #[test]
@@ -60,18 +70,68 @@ fn a_restyled_popup_is_remade_only_when_it_no_longer_fits() {
     }
     // Scale 1: the buffer is the size itself. Smaller keeps the surface
     // (no flicker); bigger is made again.
-    assert!(fits(Scale::Integer(1), &sized(300, 200), (300, 200)));
-    assert!(fits(Scale::Integer(1), &sized(240, 200), (300, 200)));
-    assert!(!fits(Scale::Integer(1), &sized(300, 201), (300, 200)));
-    assert!(!fits(Scale::Integer(1), &sized(301, 200), (300, 200)));
+    assert!(fits(
+        Scale::Integer(1),
+        &sized(300, 200),
+        no_pad(),
+        (300, 200)
+    ));
+    assert!(fits(
+        Scale::Integer(1),
+        &sized(240, 200),
+        no_pad(),
+        (300, 200)
+    ));
+    assert!(!fits(
+        Scale::Integer(1),
+        &sized(300, 201),
+        no_pad(),
+        (300, 200)
+    ));
+    assert!(!fits(
+        Scale::Integer(1),
+        &sized(301, 200),
+        no_pad(),
+        (300, 200)
+    ));
     // Scale 2 with an odd device width: the buffer rounds up (101 device
     // is 51 logical, 102 buffered), and the same content still fits it.
     // The old device-size comparison remade here, at every reload.
-    assert!(fits(Scale::Integer(2), &sized(101, 50), (102, 100)));
-    assert!(fits(Scale::Integer(2), &sized(100, 50), (102, 100)));
-    assert!(!fits(Scale::Integer(2), &sized(103, 50), (102, 100)));
-    assert!(!fits(Scale::Integer(2), &sized(101, 101), (102, 100)));
+    assert!(fits(
+        Scale::Integer(2),
+        &sized(101, 50),
+        no_pad(),
+        (102, 100)
+    ));
+    assert!(fits(
+        Scale::Integer(2),
+        &sized(100, 50),
+        no_pad(),
+        (102, 100)
+    ));
+    assert!(!fits(
+        Scale::Integer(2),
+        &sized(103, 50),
+        no_pad(),
+        (102, 100)
+    ));
+    assert!(!fits(
+        Scale::Integer(2),
+        &sized(101, 101),
+        no_pad(),
+        (102, 100)
+    ));
     // Fractional 1.5: 101 device is 68 logical, 102 buffered.
-    assert!(fits(Scale::Fractional(180), &sized(101, 50), (102, 51)));
-    assert!(!fits(Scale::Fractional(180), &sized(103, 50), (102, 51)));
+    assert!(fits(
+        Scale::Fractional(180),
+        &sized(101, 50),
+        no_pad(),
+        (102, 51)
+    ));
+    assert!(!fits(
+        Scale::Fractional(180),
+        &sized(103, 50),
+        no_pad(),
+        (102, 51)
+    ));
 }

@@ -1283,6 +1283,12 @@ jobs:
           export LD_LIBRARY_PATH="$CI_EGL_LIBRARY_PATH"
           export __EGL_VENDOR_LIBRARY_DIRS="$CI_EGL_VENDOR_DIRS"
           cargo clippy -p scoot --all-targets --no-default-features -- -D warnings
+          # No bar in this job: the look-golden scenes skip without one, as
+          # documented (`look_golden_screenshots.rs`). A stale cache-restored
+          # `target/debug/scootbar` would run them instead of skipping --
+          # green before depth tokens added `bar.shadow`/`bar.fill` keys an
+          # old binary refuses, red after. Remove it so the scenes skip.
+          rm -f target/debug/scootbar target/debug/scootbar.d
           cargo nextest run -p scoot --no-default-features --no-fail-fast
           cargo test -p scoot --no-default-features
 

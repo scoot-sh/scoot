@@ -148,6 +148,27 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// The rows `y .. y + height` as a canvas: the bar's own rect inside a
+    /// taller shadowed surface, so module paints written for a bar land in
+    /// the bar and never in its shadow. Clipped to what the canvas holds;
+    /// empty when `y` reaches the bottom. Allocates nothing.
+    pub fn window(&mut self, y: u32, height: u32) -> Canvas<'_> {
+        let y = y.min(self.height);
+        let height = height.min(self.height.saturating_sub(y));
+        let skipped = y as usize * self.width as usize * 4;
+        let kept = height as usize * self.width as usize * 4;
+        let pixels = self
+            .pixels
+            .get_mut(skipped..)
+            .and_then(|pixels| pixels.get_mut(..kept))
+            .unwrap_or_default();
+        Canvas {
+            pixels,
+            width: self.width,
+            height,
+        }
+    }
+
     /// Fills the full-height `span`, clipped to the canvas, with `color`.
     #[allow(dead_code)] // Only the workspaces module reads it; the bar fills through `fill_shaped`.
     pub fn fill_span(&mut self, span: Span, color: Color) {

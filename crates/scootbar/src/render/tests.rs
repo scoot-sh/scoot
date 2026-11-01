@@ -106,6 +106,8 @@ impl Bar {
                 radius: 0,
                 popup_radius: 0,
                 opacity: u8::MAX,
+                shadow: scootui::effects::ShadowStyle::None,
+                fill: scootui::effects::FillStyle::Solid,
             },
         }
     }
@@ -482,6 +484,8 @@ fn the_style_says_when_it_needs_alpha_and_what_is_opaque() {
     let opaque = Style {
         radius: 0,
         opacity: u8::MAX,
+        shadow: scootui::effects::ShadowStyle::None,
+        fill: scootui::effects::FillStyle::Solid,
         ..Bar::new(&[]).style
     };
     assert!(!opaque.translucent());
@@ -494,6 +498,8 @@ fn the_style_says_when_it_needs_alpha_and_what_is_opaque() {
     assert_eq!(round.opaque_inset(), Some(9), "all but the corner squares");
     let faint = Style {
         opacity: 254,
+        shadow: scootui::effects::ShadowStyle::None,
+        fill: scootui::effects::FillStyle::Solid,
         ..opaque
     };
     assert!(faint.translucent());
@@ -501,9 +507,136 @@ fn the_style_says_when_it_needs_alpha_and_what_is_opaque() {
     let both = Style {
         radius: 8,
         opacity: 0,
+        shadow: scootui::effects::ShadowStyle::None,
+        fill: scootui::effects::FillStyle::Solid,
         ..opaque
     };
     assert_eq!(both.opaque_inset(), None);
+}
+
+/// A shadowed bar needs an alpha channel and blends everywhere: its shadow
+/// reaches past its own rect, so no pixel is opaque. The exclusive zone
+/// stays the bar's height (windows never move for a shadow); only the
+/// surface grows, window-ward.
+#[test]
+fn a_shadowed_bar_blends_and_keeps_its_zone() {
+    use scootui::effects::{FillStyle, ShadowStyle};
+    let geom = crate::bar::Bar {
+        height: 28,
+        ..crate::bar::Bar::default()
+    };
+    // The zone sizes clients' windows: the bar's height, never the shadow.
+    assert_eq!(geom.exclusive_zone(), 28);
+    for (style, edge, pad_bottom, pad_top) in [
+        (ShadowStyle::None, crate::bar::Edge::Top, 0, 0),
+        (ShadowStyle::Soft, crate::bar::Edge::Top, 16, 0),
+        (ShadowStyle::Deep, crate::bar::Edge::Top, 38, 0),
+        (ShadowStyle::Glow, crate::bar::Edge::Top, 16, 0),
+        (ShadowStyle::None, crate::bar::Edge::Bottom, 0, 0),
+        (ShadowStyle::Soft, crate::bar::Edge::Bottom, 0, 16),
+        (ShadowStyle::Deep, crate::bar::Edge::Bottom, 0, 38),
+        (ShadowStyle::Glow, crate::bar::Edge::Bottom, 0, 16),
+    ] {
+        let look = Style {
+            shadow: style,
+            fill: FillStyle::Solid,
+            ..Bar::new(&[]).style
+        };
+        // Top bars shadow below, bottom bars above: opposite sides.
+        let pad = look.shadow_pad(edge);
+        assert_eq!(
+            (pad.bottom, pad.top),
+            (pad_bottom, pad_top),
+            "{style:?} {edge:?}"
+        );
+        // Sides and the anchored edge clip, so width never grows.
+        assert_eq!(
+            (pad.left, pad.right, pad.top.min(pad_top)),
+            (0, 0, pad.top.min(pad_top))
+        );
+        // The surface grows window-ward; the zone does not.
+        assert_eq!(
+            look.surface_height(geom.height, edge),
+            geom.height + pad_bottom + pad_top,
+            "{style:?} {edge:?}"
+        );
+        if style == ShadowStyle::None {
+            assert!(!look.translucent() || look.radius > 0 || look.opacity < 255);
+        } else {
+            assert!(look.translucent(), "{style:?} needs an alpha channel");
+            assert_eq!(
+                look.opaque_inset(),
+                None,
+                "a shadowed bar blends everywhere"
+            );
+        }
+    }
+    // Gradient and shadow compose: the fill's light stays on top whatever
+    // the polarity, and the shadow still owns only its strip.
+    let gradient = Style {
+        fill: FillStyle::Gradient,
+        shadow: ShadowStyle::Soft,
+        ..Bar::new(&[]).style
+    };
+    let (top, bottom) = gradient.fill_stops();
+    assert_ne!(top, bottom, "gradient has two stops");
+    assert_eq!(gradient.surface_height(28, crate::bar::Edge::Top), 28 + 16);
+    assert_eq!(gradient.opaque_inset(), None);
+}
+
+/// A soft-to-glow switch at the same size and scale rebuilds the shadow
+/// tables: both pad to 16, so the surface is not recreated and only the
+/// cache key tells them apart (soft is offset 4 blur 12, glow offset 0
+/// blur 16). Without the style in the key the second update keeps the
+/// old tables while the tint follows the new style.
+#[test]
+fn a_soft_to_glow_switch_rebuilds_the_shadow_tables() {
+    use scootui::effects::{FillStyle, ShadowStyle};
+    let mut scene = Scene::with_members(&[]);
+    let output = OutputView { name: None };
+    let style = |shadow| Style {
+        theme: Theme::default(),
+        font_size: 14,
+        padding: 4,
+        spacing: 6,
+        separator: 0,
+        radius: 0,
+        popup_radius: 0,
+        opacity: u8::MAX,
+        shadow,
+        fill: FillStyle::Solid,
+    };
+    // Both styles pad a 20-pixel bar to a 36-pixel surface at 1x, so the
+    // surface height (and the daemon's recreate check) cannot tell them
+    // apart: only the cache key can.
+    let extent = Size {
+        width: 160,
+        height: 36,
+    };
+    scene.update(
+        &[],
+        &output,
+        None,
+        &style(ShadowStyle::Soft),
+        Scale::Integer(1),
+        extent,
+    );
+    let soft = scene.shadow.clone();
+    assert!(soft.is_some(), "soft builds tables");
+    scene.update(
+        &[],
+        &output,
+        None,
+        &style(ShadowStyle::Glow),
+        Scale::Integer(1),
+        extent,
+    );
+    let glow = scene.shadow.clone();
+    assert!(glow.is_some(), "glow builds tables");
+    assert_ne!(
+        soft, glow,
+        "soft then glow at the same size/scale rebuilds the tables"
+    );
 }
 
 /// An output shows the modules it lists, in its own sections: a module

@@ -26,6 +26,7 @@ use crate::policy::Policy;
 use crate::render::Style;
 use crate::text::MAX_FALLBACKS;
 use crate::theme::Theme;
+use scootui::effects::{FillStyle, ShadowStyle};
 
 #[cfg(test)]
 mod binding_tests;
@@ -101,6 +102,12 @@ pub struct Config {
     pub popup_radius: u32,
     /// The background's alpha: 255 opaque, 0 transparent.
     pub opacity: u8,
+    /// The depth under the bar and its popups (`bar.shadow`): `none`
+    /// (the default) draws no shadow and builds nothing.
+    pub shadow: ShadowStyle,
+    /// How the bar and popup fills are laid down (`bar.fill`): solid or a
+    /// vertical gradient with the light at the top.
+    pub fill: FillStyle,
     /// `bar.tooltip-delay`: how long the pointer rests on a module with a
     /// tooltip before it shows, in milliseconds; 0 turns tooltips off. No
     /// flag: config file only.
@@ -122,6 +129,8 @@ impl Default for Config {
             font_size: DEFAULT_FONT_SIZE,
             radius: 0,
             opacity: u8::MAX,
+            shadow: ShadowStyle::None,
+            fill: FillStyle::Solid,
             #[cfg(feature = "popup")]
             popup_radius: 0,
             #[cfg(feature = "popup")]
@@ -146,6 +155,8 @@ impl Config {
             #[cfg(not(feature = "popup"))]
             popup_radius: 0,
             opacity: self.opacity,
+            shadow: self.shadow,
+            fill: self.fill,
         }
     }
 }
@@ -417,6 +428,14 @@ struct File {
     outputs: Option<toml::Value>,
     /// `[output."NAME"]`: what differs on one output.
     output: std::collections::BTreeMap<String, outputs::OutputFile>,
+    /// The `[effects]` table: the user's own shadow and fill, winning per
+    /// key over the look layer (and over `[bar]` shadow/fill below). Kept
+    /// as the raw table so the values go through the look's own allowlist
+    /// (`scoot_look::allowlist::user_effect_key`), never a copy of it;
+    /// only the key names are checked here, and a bad value is refused
+    /// with its dotted key, never silently ignored.
+    #[serde(default)]
+    effects: toml::Table,
     /// `[look]`: the fixed look layer for a bar without scoot (see
     /// `crate::look`). Read with the file, never from the layer.
     look: LookFile,
@@ -445,6 +464,12 @@ struct BarFile {
     padding: Option<u32>,
     spacing: Option<u32>,
     separator: Option<u32>,
+    /// The depth under the bar and its popups: `none`, `soft`, `deep` or
+    /// `glow`. `none` (the default) builds and paints nothing.
+    shadow: Option<toml::Value>,
+    /// How the bar and popup fills are laid down: `solid` (the default) or
+    /// `gradient` (a vertical gradient with the light at the top).
+    fill: Option<toml::Value>,
     /// Without the `popup` feature there is no such key (and so no
     /// tooltip), and `deny_unknown_fields` refuses it loudly.
     #[cfg(feature = "popup")]
@@ -1212,6 +1237,122 @@ impl File {
         let padding = gap(path, "bar.padding", bar.padding, defaults.layout.padding)?;
         let spacing = gap(path, "bar.spacing", bar.spacing, defaults.layout.spacing)?;
         let separator = gap(path, "bar.separator", bar.separator, 0)?;
+        // The bar's depth tokens share the look's allowlist, never a copy:
+        // `[bar] shadow`/`fill` go through `check_app_value` first (the
+        // same check the look layer passes), then the typed parse. Unknown
+        // or refused tokens behave like today: reported and ignored? No —
+        // the file refuses loudly (deny_unknown_fields for tables, and
+        // here for values), while the look layer reports and ignores
+        // (#807 Constraints: the file is the user's own, the layer is not).
+        let mut shadow = match &bar.shadow {
+            None => defaults.shadow,
+            Some(v) => {
+                if let Some(err) =
+                    scoot_look::allowlist::check_app_value("scootbar", "bar.shadow", v)
+                {
+                    return Err(value(path, "bar.shadow", format_args!("{err}")));
+                }
+                match v {
+                    toml::Value::String(text) => ShadowStyle::parse(text).ok_or_else(|| {
+                        value(
+                            path,
+                            "bar.shadow",
+                            format_args!("takes none, soft, deep or glow, not `{text}`"),
+                        )
+                    })?,
+                    other => {
+                        return Err(value(
+                            path,
+                            "bar.shadow",
+                            format_args!("takes none, soft, deep or glow, not `{other}`"),
+                        ));
+                    }
+                }
+            }
+        };
+        let mut fill = match &bar.fill {
+            None => defaults.fill,
+            Some(v) => {
+                if let Some(err) = scoot_look::allowlist::check_app_value("scootbar", "bar.fill", v)
+                {
+                    return Err(value(path, "bar.fill", format_args!("{err}")));
+                }
+                match v {
+                    toml::Value::String(text) => FillStyle::parse(text).ok_or_else(|| {
+                        value(
+                            path,
+                            "bar.fill",
+                            format_args!("takes solid or gradient, not `{text}`"),
+                        )
+                    })?,
+                    other => {
+                        return Err(value(
+                            path,
+                            "bar.fill",
+                            format_args!("takes solid or gradient, not `{other}`"),
+                        ));
+                    }
+                }
+            }
+        };
+        // The user's own `[effects]` table, winning per key over `[bar]`
+        // above and over the look layer (merged earlier with the user
+        // winning). Keys go through the look's allowlist via
+        // `user_effect_key`, so the file shares it, never a copy.
+        for (key, v) in &self.effects {
+            let Some(dotted) = scoot_look::allowlist::user_effect_key("scootbar", "effects", key)
+            else {
+                return Err(Error::Named {
+                    path: path.to_owned(),
+                    key: format!("effects.{key}"),
+                    message: format!("has no key `{key}`"),
+                });
+            };
+            if let Some(err) = scoot_look::allowlist::check_app_value("scootbar", dotted, v) {
+                return Err(value(path, dotted, format_args!("{err}")));
+            }
+            match dotted {
+                "bar.shadow" => {
+                    let Some(toml::Value::String(text)) = Some(v) else {
+                        return Err(value(
+                            path,
+                            "bar.shadow",
+                            format_args!("takes none, soft, deep or glow, not `{v}`"),
+                        ));
+                    };
+                    shadow = ShadowStyle::parse(text).ok_or_else(|| {
+                        value(
+                            path,
+                            "bar.shadow",
+                            format_args!("takes none, soft, deep or glow, not `{text}`"),
+                        )
+                    })?;
+                }
+                "bar.fill" => {
+                    let Some(toml::Value::String(text)) = Some(v) else {
+                        return Err(value(
+                            path,
+                            "bar.fill",
+                            format_args!("takes solid or gradient, not `{v}`"),
+                        ));
+                    };
+                    fill = FillStyle::parse(text).ok_or_else(|| {
+                        value(
+                            path,
+                            "bar.fill",
+                            format_args!("takes solid or gradient, not `{text}`"),
+                        )
+                    })?;
+                }
+                _ => {
+                    return Err(Error::Named {
+                        path: path.to_owned(),
+                        key: format!("effects.{key}"),
+                        message: format!("has no key `{key}`"),
+                    });
+                }
+            }
+        }
         if separator > spacing {
             return Err(value(
                 path,
@@ -1688,6 +1829,8 @@ impl File {
             font_size,
             radius,
             opacity,
+            shadow,
+            fill,
             #[cfg(feature = "popup")]
             popup_radius,
             #[cfg(feature = "popup")]

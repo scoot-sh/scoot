@@ -154,6 +154,27 @@ struct Open {
     /// The frame's shape at this size and scale, built once: the paint
     /// reads its corner tables every frame and allocates nothing.
     round: Round,
+    /// The popup's drop shadow tables (device pixels), if it has one.
+    /// Built once on open via [`Shadow::prepare`] and read every redraw;
+    /// `None` for `shadow = "none"` (nothing built or painted). Rebuilt
+    /// only when the popup reopens at a new size or scale, never per
+    /// frame.
+    shadow: Option<scootui::paint::Shadow>,
+    /// The shadow's tint (black, or the accent for a glow).
+    shadow_tint: scootui::color::Color,
+    /// The popup's top-left in the surface (device pixels): the shadow's
+    /// left/top pad, `(0, 0)` without a shadow. The paint offsets all of
+    /// the frame and widgets by it, so clicks in the shadow fall through
+    /// to the windows below.
+    origin: (u32, u32),
+    /// The popup fill's top and bottom colors and its alpha: the gradient
+    /// stops over the background, solid when equal.
+    fill: (scootui::color::Color, scootui::color::Color),
+    opacity: u8,
+    /// The shadow's room on each side (device pixels): the surface is the
+    /// content plus this pad, the content sits at `(pad.left, pad.top)`.
+    /// Zero for tooltips and unshadowed popups.
+    pad: scootui::paint::Pad,
     interaction: Interaction,
     /// The wheel movement of the frame being read, grouped into rows.
     wheel: Wheel,
@@ -316,9 +337,20 @@ fn anchor_span(scale: Scale, span: crate::paint::Span, bar_width: u32) -> (u32, 
 /// `xdg_popup` cannot change size after configure). A same-size refill
 /// keeps the surface it has. The caller reopens with the stored grab
 /// serial, and the reopened popup reads the same content and revision,
-/// so this fires once per size change, never in a loop.
-fn resized(layout: &Layout, dims: (u32, u32)) -> bool {
-    (layout.width, layout.height) != dims
+/// so this fires once per size change, never in a loop. The surface is
+/// the content plus the shadow's pad on every side.
+fn resized(layout: &Layout, pad: scootui::paint::Pad, dims: (u32, u32)) -> bool {
+    let surf = (
+        layout
+            .width
+            .saturating_add(pad.left)
+            .saturating_add(pad.right),
+        layout
+            .height
+            .saturating_add(pad.top)
+            .saturating_add(pad.bottom),
+    );
+    surf != dims
 }
 
 /// Whether a restyled popup or tooltip still fits the surface it opened
@@ -330,11 +362,19 @@ fn resized(layout: &Layout, dims: (u32, u32)) -> bool {
 /// reload on scales where the buffer rounds up (scale 2 with an odd width,
 /// any fractional scale), reusing the old grab serial each time — which a
 /// compositor may refuse, closing the popup.
-fn fits(scale: Scale, layout: &Layout, dims: (u32, u32)) -> bool {
+fn fits(scale: Scale, layout: &Layout, pad: scootui::paint::Pad, dims: (u32, u32)) -> bool {
+    let surf_w = layout
+        .width
+        .saturating_add(pad.left)
+        .saturating_add(pad.right);
+    let surf_h = layout
+        .height
+        .saturating_add(pad.top)
+        .saturating_add(pad.bottom);
     scale
         .buffer(Size {
-            width: scale.logical_ceil(layout.width),
-            height: scale.logical_ceil(layout.height),
+            width: scale.logical_ceil(surf_w),
+            height: scale.logical_ceil(surf_h),
         })
         .is_some_and(|(width, height)| width <= dims.0 && height <= dims.1)
 }
@@ -342,6 +382,47 @@ fn fits(scale: Scale, layout: &Layout, dims: (u32, u32)) -> bool {
 /// A protocol `int` for a size or a coordinate: saturated.
 fn int(value: u32) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
+}
+
+/// Sets the input region for a click popup's own rect at `origin` (device
+/// pixels offset by the shadow's pad) of `width` by `height` with `radius`:
+/// the rounded shape, never the shadow, so clicks in the shadow fall
+/// through to the windows below. A square popup gets its own rect
+/// explicitly (to exclude the shadow); without a shadow a square popup
+/// would keep the default whole surface, but every caller here has a
+/// shadow or a radius (the `needs_alpha` branch), so an explicit region is
+/// always right.
+fn set_popup_input_region(
+    globals: &super::wayland::Globals,
+    qh: &QueueHandle<State>,
+    surface: &WlSurface,
+    origin: (u32, u32),
+    width: u32,
+    height: u32,
+    radius: u32,
+) {
+    use crate::region;
+    let (ox, oy) = origin;
+    if radius == 0 {
+        let region = globals.compositor.create_region(qh, ());
+        region.add(int(ox), int(oy), int(width), int(height));
+        surface.set_input_region(Some(&region));
+        region.destroy();
+        return;
+    }
+    let mut rects = Vec::with_capacity(2 * radius as usize + 1);
+    region::input_rects(width, height, radius, &mut rects);
+    let region = globals.compositor.create_region(qh, ());
+    for rect in rects {
+        region.add(
+            int(rect.x.saturating_add(ox)),
+            int(rect.y.saturating_add(oy)),
+            int(rect.width),
+            int(rect.height),
+        );
+    }
+    surface.set_input_region(Some(&region));
+    region.destroy();
 }
 
 impl State {
@@ -437,26 +518,98 @@ impl State {
                 layout.compute_tooltip(&content, text, em, pad, frame);
             }
         }
+        let is_popup = matches!(flavor, Flavor::Popup { .. });
+        // The popup's shadow (click popups only; tooltips stay as they
+        // were): the surface reserves the shadow's room on every side, and
+        // the popup sits at the pad offset. The positioner is told the
+        // whole surface, so the compositor places it with its shadow.
+        let (pad_left, pad_top, pad_right, pad_bottom, shadow_tables, shadow_tint) = if is_popup {
+            if let Some(logical) = style.shadow_spec(entry.objects.bar.edge) {
+                let dev_spec = scootui::paint::ShadowSpec {
+                    offset_x: i32::try_from(scale.to_device(i64::from(logical.offset_x)))
+                        .unwrap_or(logical.offset_x),
+                    offset_y: i32::try_from(scale.to_device(i64::from(logical.offset_y)))
+                        .unwrap_or(logical.offset_y),
+                    blur: render::device(logical.blur, scale),
+                    alpha: logical.alpha,
+                };
+                let pad = scootui::paint::Shadow::new(dev_spec).pad();
+                let tint = match style.shadow {
+                    scootui::effects::ShadowStyle::Glow => style.theme.accent,
+                    _ => scootui::color::Color { r: 0, g: 0, b: 0 },
+                };
+                (
+                    pad.left,
+                    pad.top,
+                    pad.right,
+                    pad.bottom,
+                    Some((dev_spec, tint)),
+                    tint,
+                )
+            } else {
+                (0, 0, 0, 0, None, scootui::color::Color { r: 0, g: 0, b: 0 })
+            }
+        } else {
+            (0, 0, 0, 0, None, scootui::color::Color { r: 0, g: 0, b: 0 })
+        };
+        let _ = shadow_tint;
+        let content_w = layout.width;
+        let content_h = layout.height;
+        let surf_w = content_w.saturating_add(pad_left).saturating_add(pad_right);
+        let surf_h = content_h.saturating_add(pad_top).saturating_add(pad_bottom);
         let requested = Size {
-            width: scale.logical_ceil(layout.width).clamp(1, MAX_SIDE),
-            height: scale.logical_ceil(layout.height).clamp(1, MAX_SIDE),
+            width: scale.logical_ceil(surf_w).clamp(1, MAX_SIDE),
+            height: scale.logical_ceil(surf_h).clamp(1, MAX_SIDE),
         };
         let dims = scale
             .buffer(requested)
             .ok_or("the popup is too large for a buffer")?;
-        // The buffer is the logical size at the scale, which rounds up from
-        // what the layout needed: the frame is drawn at the buffer's edge.
-        layout.width = dims.0;
-        layout.height = dims.1;
+        // The buffer rounds up from what was asked: the content grows to
+        // fill it less the shadow's pad, and the frame is drawn at the
+        // content's edge (the shadow owns the rest).
+        let new_content_w = dims.0.saturating_sub(pad_left).saturating_sub(pad_right);
+        let new_content_h = dims.1.saturating_sub(pad_top).saturating_sub(pad_bottom);
+        layout.width = new_content_w.max(1);
+        layout.height = new_content_h.max(1);
         // The frame's shape at this size and scale: the radius cut back to
-        // what the buffer holds, the corner tables built once and read
+        // what the content holds, the corner tables built once and read
         // every frame it is drawn.
         let round = Round::new(
             render::device(style.popup_radius, scale),
             frame,
-            dims.0,
-            dims.1,
+            layout.width,
+            layout.height,
         );
+        // The shadow tables for the content size, built once on open and
+        // read every redraw: no per-frame allocation once warm.
+        // `shadow = "none"` builds nothing.
+        let (shadow, origin) = if is_popup {
+            if let Some((dev_spec, tint)) = shadow_tables {
+                let radius = round.outer().radius();
+                let mut tables = scootui::paint::Shadow::new(dev_spec);
+                tables.prepare(radius, [(layout.width, layout.height)]);
+                let _ = tint;
+                (Some(tables), (pad_left, pad_top))
+            } else {
+                (None, (0, 0))
+            }
+        } else {
+            (None, (0, 0))
+        };
+        let shadow_tint = if is_popup {
+            match style.shadow {
+                scootui::effects::ShadowStyle::Glow => style.theme.accent,
+                _ => scootui::color::Color { r: 0, g: 0, b: 0 },
+            }
+        } else {
+            scootui::color::Color { r: 0, g: 0, b: 0 }
+        };
+        let (fill_top, fill_bottom) = if is_popup {
+            style.fill_stops()
+        } else {
+            (style.theme.background, style.theme.background)
+        };
+        let popup_opacity = if is_popup { style.opacity } else { 255 };
 
         self.popup.next = self.popup.next.wrapping_add(1);
         let id = PopupId(self.popup.next);
@@ -506,31 +659,38 @@ impl State {
                 region.destroy();
             }
         }
-        if round.rounded() {
-            // The corners are transparent: the compositor blends only
-            // them and skips blending under the rest (all but the corner
-            // squares), in logical pixels like the bar's own region. The
-            // default (the whole surface opaque) would show the cleared
-            // corners as black, so a rounded tooltip needs this too.
-            let radius = crate::region::effective_radius(
-                style.popup_radius,
-                requested.width,
-                requested.height,
-            );
-            super::canvas::set_opaque_region(
-                &self.globals,
-                qh,
-                &surface,
-                (requested, Some(radius.saturating_add(1))),
-            );
-            // A click popup's input shape is the rounded one, as the bar's
-            // own is, so a click in a cut corner does not land on the
-            // popup. A tooltip keeps its empty input region instead (it
-            // never takes a click).
+        if round.rounded() || shadow.is_some() || popup_opacity < 255 {
+            // The corners are transparent, the shadow falls outside the
+            // popup, or the fill itself is translucent: the compositor
+            // blends the whole surface (the default whole-opaque would show
+            // cleared pixels as black). A square opaque unshadowed popup
+            // keeps the default.
+            super::canvas::set_opaque_region(&self.globals, qh, &surface, (requested, None));
+            // A click popup's input shape is the popup's own rounded rect
+            // at its offset, never its shadow, so a click in the shadow or
+            // in a cut corner does not land on the popup. A tooltip keeps
+            // its empty input region instead (it never takes a click).
             if matches!(flavor, Flavor::Popup { .. }) {
-                super::canvas::set_input_region(&self.globals, qh, &surface, (requested, radius));
+                // Rounded or square: the popup's own rect at its origin,
+                // excluding the shadow on every side.
+                let radius = crate::region::effective_radius(
+                    style.popup_radius,
+                    layout.width,
+                    layout.height,
+                );
+                set_popup_input_region(
+                    &self.globals,
+                    qh,
+                    &surface,
+                    origin,
+                    layout.width,
+                    layout.height,
+                    radius,
+                );
             }
         }
+        // `round.rounded()` already takes the branch above, so no `else if`
+        // remains: a square opaque unshadowed popup needs no regions at all.
         positioner.destroy();
         // No buffer yet: the compositor answers with the configure.
         surface.commit();
@@ -565,6 +725,17 @@ impl State {
             content,
             layout,
             round,
+            shadow,
+            shadow_tint,
+            origin,
+            fill: (fill_top, fill_bottom),
+            opacity: popup_opacity,
+            pad: scootui::paint::Pad {
+                top: pad_top,
+                right: pad_right,
+                bottom: pad_bottom,
+                left: pad_left,
+            },
             interaction: Interaction::default(),
             wheel: Wheel::default(),
             framed,
@@ -634,13 +805,52 @@ impl State {
             return;
         };
         open.layout.compute(&open.content, text, em, pad, frame);
+        // A shadow change resizes the surface: remake it, as at the open.
+        // The bar's edge decides the shadow's mirror (top bars shadow
+        // below, bottom bars above).
+        let bar_edge = self
+            .outputs
+            .iter()
+            .find(|entry| entry.output.id() == open.output)
+            .map(|entry| entry.objects.bar.edge)
+            .unwrap_or(crate::bar::Edge::Top);
+        let new_pad = if let Some(logical) = style.shadow_spec(bar_edge) {
+            let dev_spec = scootui::paint::ShadowSpec {
+                offset_x: i32::try_from(open.scale.to_device(i64::from(logical.offset_x)))
+                    .unwrap_or(logical.offset_x),
+                offset_y: i32::try_from(open.scale.to_device(i64::from(logical.offset_y)))
+                    .unwrap_or(logical.offset_y),
+                blur: render::device(logical.blur, open.scale),
+                alpha: logical.alpha,
+            };
+            scootui::paint::Shadow::new(dev_spec).pad()
+        } else {
+            scootui::paint::Pad::ZERO
+        };
+        if new_pad != open.pad {
+            let (output, module, serial) = (open.output, open.module, open.serial);
+            open.destroy();
+            let member = self
+                .outputs
+                .iter()
+                .find(|entry| entry.output.id() == output)
+                .and_then(|entry| Popups::member_of(&entry.objects.scene, module));
+            if let Some(member) = member
+                && let Ok(fresh) = self.build_popup(qh, output, member, Flavor::Popup { serial })
+            {
+                self.popup.open = Some(fresh);
+            }
+            return;
+        }
         let round = Round::new(
             render::device(style.popup_radius, open.scale),
             frame,
-            open.dims.0,
-            open.dims.1,
+            open.layout.width,
+            open.layout.height,
         );
-        if !fits(open.scale, &open.layout, open.dims) || round.rounded() != open.round.rounded() {
+        if !fits(open.scale, &open.layout, open.pad, open.dims)
+            || round.rounded() != open.round.rounded()
+        {
             let (output, module, serial) = (open.output, open.module, open.serial);
             open.destroy();
             let member = self
@@ -656,31 +866,83 @@ impl State {
             return;
         }
         open.em = em;
-        // The popup keeps the size it opened at.
-        open.layout.width = open.dims.0;
-        open.layout.height = open.dims.1;
-        open.round = round;
+        // The popup keeps the surface it opened at: the content grows to
+        // fill it less the shadow's pad (no flicker on a smaller refill).
+        open.layout.width = open
+            .dims
+            .0
+            .saturating_sub(open.pad.left)
+            .saturating_sub(open.pad.right)
+            .max(1);
+        open.layout.height = open
+            .dims
+            .1
+            .saturating_sub(open.pad.top)
+            .saturating_sub(open.pad.bottom)
+            .max(1);
+        // The frame's new shape at the kept size, and the shadow's new
+        // tables for it (same size, new style): no per-frame allocation
+        // once warm.
+        open.round = Round::new(
+            render::device(style.popup_radius, open.scale),
+            frame,
+            open.layout.width,
+            open.layout.height,
+        );
+        if let Some(logical) = style.shadow_spec(bar_edge) {
+            let dev_spec = scootui::paint::ShadowSpec {
+                offset_x: i32::try_from(open.scale.to_device(i64::from(logical.offset_x)))
+                    .unwrap_or(logical.offset_x),
+                offset_y: i32::try_from(open.scale.to_device(i64::from(logical.offset_y)))
+                    .unwrap_or(logical.offset_y),
+                blur: render::device(logical.blur, open.scale),
+                alpha: logical.alpha,
+            };
+            let mut tables = scootui::paint::Shadow::new(dev_spec);
+            tables.prepare(
+                open.round.outer().radius(),
+                [(open.layout.width, open.layout.height)],
+            );
+            open.shadow = Some(tables);
+        } else {
+            open.shadow = None;
+        }
+        open.shadow_tint = match style.shadow {
+            scootui::effects::ShadowStyle::Glow => style.theme.accent,
+            _ => scootui::color::Color { r: 0, g: 0, b: 0 },
+        };
+        open.fill = style.fill_stops();
+        open.opacity = style.opacity;
+        open.origin = (open.pad.left, open.pad.top);
         open.interaction.retain(&open.content, &open.layout);
         open.dirty = true;
-        if open.round.rounded() {
-            // The new radius, on the same surface: the regions are
-            // re-sent, as at the open.
-            let radius = crate::region::effective_radius(
-                style.popup_radius,
-                open.requested.width,
-                open.requested.height,
-            );
+        // The new style on the same surface: the regions are re-sent, as at
+        // the open. A shadowed, rounded or translucent popup blends;
+        // otherwise the defaults stand.
+        let needs_alpha = open.round.rounded()
+            || open.shadow.is_some()
+            || open.opacity < 255
+            || open.fill.0 != open.fill.1;
+        if needs_alpha {
             super::canvas::set_opaque_region(
                 &self.globals,
                 qh,
                 &open.surface,
-                (open.requested, Some(radius.saturating_add(1))),
+                (open.requested, None),
             );
-            super::canvas::set_input_region(
+            let radius = crate::region::effective_radius(
+                style.popup_radius,
+                open.layout.width,
+                open.layout.height,
+            );
+            set_popup_input_region(
                 &self.globals,
                 qh,
                 &open.surface,
-                (open.requested, radius),
+                open.origin,
+                open.layout.width,
+                open.layout.height,
+                radius,
             );
         }
         self.popup.open = Some(open);
@@ -745,7 +1007,7 @@ impl State {
             tip.dims.0,
             tip.dims.1,
         );
-        if !fits(tip.scale, &layout, tip.dims) || round.rounded() != tip.round.rounded() {
+        if !fits(tip.scale, &layout, tip.pad, tip.dims) || round.rounded() != tip.round.rounded() {
             let (output, module) = (tip.output, tip.module);
             tip.destroy();
             let key = Key { output, module };
@@ -761,6 +1023,9 @@ impl State {
         layout.height = tip.dims.1;
         tip.layout = layout;
         tip.round = round;
+        // The new style's background (a colors-only reload repaints the
+        // tooltip in it); tooltips stay solid and opaque, without a shadow.
+        tip.fill = (style.theme.background, style.theme.background);
         tip.dirty = true;
         if tip.round.rounded() {
             let radius = crate::region::effective_radius(
@@ -888,8 +1153,9 @@ impl State {
                 // do not survive: the rows moved anyway). Same size
                 // keeps the surface it has; a reopened popup reads the
                 // same content and revision, so this fires once per size
-                // change, never in a loop.
-                if resized(&open.layout, open.dims) {
+                // change, never in a loop. The surface is the content
+                // plus the shadow's pad.
+                if resized(&open.layout, open.pad, open.dims) {
                     let (output, module, serial) = match self.popup.open.as_ref() {
                         Some(open) => (open.output, open.module, open.serial),
                         None => return,
@@ -905,9 +1171,20 @@ impl State {
                     }
                     return;
                 }
-                // The popup keeps the size it opened at.
-                open.layout.width = open.dims.0;
-                open.layout.height = open.dims.1;
+                // The popup keeps the surface it opened at: the content
+                // grows to fill it less the shadow's pad.
+                open.layout.width = open
+                    .dims
+                    .0
+                    .saturating_sub(open.pad.left)
+                    .saturating_sub(open.pad.right)
+                    .max(1);
+                open.layout.height = open
+                    .dims
+                    .1
+                    .saturating_sub(open.pad.top)
+                    .saturating_sub(open.pad.bottom)
+                    .max(1);
                 open.interaction.retain(&open.content, &open.layout);
                 open.dirty = true;
             }
@@ -931,8 +1208,14 @@ fn draw_open(
     if !open.dirty || !open.mapped {
         return true;
     }
-    let rounded = open.round.rounded();
-    let slot = match open.pool.take(globals, qh, open.id, open.dims, rounded) {
+    // A shadowed, rounded, translucent or gradient popup needs an alpha
+    // channel; otherwise the buffer stays opaque, as before. No per-frame
+    // allocation either way: the shadow tables were prepared on open.
+    let needs_alpha = open.round.rounded()
+        || open.shadow.is_some()
+        || open.opacity < 255
+        || open.fill.0 != open.fill.1;
+    let slot = match open.pool.take(globals, qh, open.id, open.dims, needs_alpha) {
         // Every buffer is held: the release wakes the loop.
         Ok(None) => return true,
         Ok(Some(slot)) => slot,
@@ -948,16 +1231,46 @@ fn draw_open(
     else {
         return false;
     };
-    popup::paint(
-        &mut canvas,
-        text,
-        theme,
-        &open.content,
-        &open.layout,
-        &open.interaction,
-        open.em,
-        &open.round,
-    );
+    // Tooltips (no shadow, solid, opaque, at the origin) paint exactly as
+    // before, so their goldens hold. Everything else goes through the
+    // depth-aware path (shadow, gradient, translucency, offset), which is
+    // identical for the defaults.
+    let is_default = open.shadow.is_none()
+        && open.fill.0 == open.fill.1
+        && open.fill.0 == theme.background
+        && open.opacity == 255
+        && open.origin == (0, 0);
+    if is_default {
+        popup::paint(
+            &mut canvas,
+            text,
+            theme,
+            &open.content,
+            &open.layout,
+            &open.interaction,
+            open.em,
+            &open.round,
+        );
+    } else {
+        let shadow = open
+            .shadow
+            .as_ref()
+            .map(|tables| (tables, open.shadow_tint, open.round.outer().radius()));
+        popup::paint_depth(
+            &mut canvas,
+            text,
+            theme,
+            &open.content,
+            &open.layout,
+            &open.interaction,
+            open.em,
+            &open.round,
+            open.origin,
+            shadow,
+            open.fill,
+            open.opacity,
+        );
+    }
     let surface = &open.surface;
     surface.attach(Some(&slot.buffer), 0, 0);
     match &open.viewport {

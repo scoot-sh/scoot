@@ -1766,6 +1766,8 @@ impl Given {
             font_size: self.font_size.unwrap_or(defaults.font_size),
             radius: defaults.radius,
             opacity: defaults.opacity,
+            shadow: defaults.shadow,
+            fill: defaults.fill,
             #[cfg(feature = "popup")]
             popup_radius: defaults.popup_radius,
             #[cfg(feature = "popup")]

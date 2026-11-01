@@ -95,7 +95,57 @@ fn bar_fragment() {
     ] {
         assert!(frag.contains(line), "missing {line}:\n{frag}");
     }
+    // Moonrise sets no depth tokens: defaults stay shadowless and solid,
+    // so existing goldens hold.
+    assert!(!frag.contains("shadow"), "unset shadow renders:\n{frag}");
+    assert!(!frag.contains("fill"), "unset fill renders:\n{frag}");
     let _: toml::Value = toml::from_str(&frag).expect("fragment is TOML");
+}
+
+#[test]
+fn bar_depth_renders_and_overrides() {
+    // A look that sets `[effects] shadow` renders `bar.shadow`; one that
+    // sets nothing renders neither key, so defaults stay shadowless and
+    // solid and existing goldens hold. Ginger-night (soft) and
+    // radial-burst (glow) opt in through exactly this path (pinned by the
+    // shipped suite).
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[effects]\nshadow = \"soft\"\nfill = \"gradient\"\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let frag = render_bar(&look, &inputs()).expect("renders");
+    assert!(
+        frag.contains("shadow = \"soft\""),
+        "depth shadow missing:\n{frag}"
+    );
+    assert!(
+        frag.contains("fill = \"gradient\""),
+        "depth fill missing:\n{frag}"
+    );
+    // Per-app overrides win per key over `[effects]`, the way notify's do.
+    let text = crate::schema::tests::minimal_toml().replacen(
+        "[cursor]",
+        "[effects]\nshadow = \"soft\"\n[apps.scootbar]\n\"bar.shadow\" = \"deep\"\n[cursor]",
+        1,
+    );
+    let raw = parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("x".to_string(), (raw, Origin::User))]);
+    let look = resolve(&map, "x").expect("resolves");
+    let frag = render_bar(&look, &inputs()).expect("renders");
+    assert!(
+        frag.contains("shadow = \"deep\""),
+        "override shadow missing:\n{frag}"
+    );
+    let _: toml::Value = toml::from_str(&frag).expect("fragment is TOML");
+    // Unknown depth values never render: the schema refuses them first,
+    // and a hand-built look still hits the renderer's own check.
+    let mut bad = look.clone();
+    bad.effects.shadow = Some("huge".to_string());
+    assert!(render_bar(&bad, &inputs()).is_err());
 }
 
 #[test]

@@ -115,17 +115,22 @@ pub struct LayerObjects {
     pub(super) buffer_scale: u32,
     pub(super) destination: Option<Size>,
     pub(super) opaque: Option<(Size, Option<u32>)>,
-    /// The input region (logical size and effective corner radius, see
-    /// `crate::region`; `None` while never set).
-    pub(super) input: Option<(Size, u32)>,
+    /// The input region (surface size, bar offset and height, and effective
+    /// corner radius): the bar's own rounded shape, never its shadow (see
+    /// `crate::region`); `None` while never set.
+    pub(super) input: Option<(Size, u32, u32, u32)>,
 }
 
 impl LayerObjects {
     /// Creates the bar for `output` and commits it with no buffer, so the
     /// compositor reserves its zone and answers with a `configure`.
+    /// The surface reserves the window-facing shadow room (below a top bar,
+    /// above a bottom bar) while the exclusive zone stays the bar's own
+    /// height, so windows never move for a shadow.
     fn create(
         globals: &Globals,
         bar: &Bar,
+        style: &crate::render::Style,
         output: &WlOutput,
         qh: &QueueHandle<State>,
         id: OutputId,
@@ -168,10 +173,17 @@ impl LayerObjects {
             }
         }
         layer.set_anchor(anchor);
-        let (width, height) = bar.requested_size();
-        layer.set_size(width, height);
+        // Reserve the window-facing shadow room in the surface, never in the
+        // exclusive zone: a shadowed bar is taller than the zone that sizes
+        // clients' windows, so the shadow overlaps windows instead of moving
+        // them. The anchored edge and the sides clip (no room).
+        let (_width, height) = bar.requested_size();
+        let height = style.surface_height(height, bar.edge);
+        layer.set_size(0, height);
         let [top, right, bottom, left] = bar.margins();
         layer.set_margin(top, right, bottom, left);
+        // The zone stays the bar's own height: the shadow must never move a
+        // client's window (pinned by `bar.rs`'s zone test).
         layer.set_exclusive_zone(bar.exclusive_zone());
         layer.set_keyboard_interactivity(KeyboardInteractivity::None);
         surface.commit();
@@ -237,6 +249,10 @@ impl State {
         objects.bar = resolved.bar;
         objects.font_size = resolved.font_size;
         objects.scene = Scene::with_members(&members);
+        // The shadow falls window-ward from the bar's own edge: top bars
+        // shadow below, bottom bars above. The scene paints and measures
+        // from it, so a per-output edge override reaches the shadow.
+        objects.scene.edge = resolved.bar.edge;
         objects.canvas.resize(members.len());
         entry.output.invalidate();
         entry.output.set_selected(resolved.selected)
@@ -280,6 +296,7 @@ impl State {
             if effect != Effect::None || entry.objects.bar == before {
                 Self::apply(
                     &self.globals,
+                    &self.content.style,
                     &mut self.input,
                     #[cfg(feature = "popup")]
                     &mut self.popup,
@@ -304,6 +321,7 @@ impl State {
             entry.objects.layer = Some(LayerObjects::create(
                 &self.globals,
                 &entry.objects.bar,
+                &self.content.style,
                 &output,
                 qh,
                 id,
@@ -328,8 +346,43 @@ impl State {
         self.placement = placement;
         for entry in self.outputs.iter_mut() {
             let effect = Self::place(&self.placement, &self.content.modules, entry);
+            // A shadow change resizes the surface (the window-facing room),
+            // even though the bar's own geometry did not move: recreate it
+            // here, the way a `Bar` change does in `replace_placement`,
+            // rather than drawing the new shadow into the old size.
+            // The exclusive zone stays the bar's height either way, so no
+            // window moves.
+            let desired_h = self
+                .content
+                .style
+                .surface_height(entry.objects.bar.height, entry.objects.bar.edge);
+            let current_h = entry
+                .output
+                .surface_size(&entry.objects.bar)
+                .map(|size| size.height);
+            if current_h.is_some_and(|h| h != desired_h) {
+                if let Some(layer) = entry.objects.layer.take() {
+                    layer.destroy();
+                }
+                self.input.forget(entry.output.id());
+                #[cfg(feature = "popup")]
+                self.popup.close_for(entry.output.id());
+                entry.output.recreate();
+                let id = entry.output.id();
+                let output = entry.objects.wl_output().clone();
+                entry.objects.layer = Some(LayerObjects::create(
+                    &self.globals,
+                    &entry.objects.bar,
+                    &self.content.style,
+                    &output,
+                    qh,
+                    id,
+                ));
+                continue;
+            }
             Self::apply(
                 &self.globals,
+                &self.content.style,
                 &mut self.input,
                 #[cfg(feature = "popup")]
                 &mut self.popup,
@@ -385,6 +438,7 @@ impl State {
             let effect = entry.output.set_hidden(self.hidden);
             Self::apply(
                 &self.globals,
+                &self.content.style,
                 &mut self.input,
                 #[cfg(feature = "popup")]
                 &mut self.popup,
@@ -464,8 +518,10 @@ impl State {
     }
 
     /// Carries out `effect` for `entry`.
+    #[allow(clippy::too_many_arguments)]
     fn apply(
         globals: &Globals,
+        style: &crate::render::Style,
         input: &mut Pointer,
         #[cfg(feature = "popup")] popup: &mut super::popup::Popups,
         entry: &mut Entry<Objects>,
@@ -485,7 +541,14 @@ impl State {
                 if let Some(old) = objects.layer.take() {
                     old.destroy();
                 }
-                objects.layer = Some(LayerObjects::create(globals, bar, &objects.output, qh, id));
+                objects.layer = Some(LayerObjects::create(
+                    globals,
+                    bar,
+                    style,
+                    &objects.output,
+                    qh,
+                    id,
+                ));
             }
             Effect::Ack(serial) => {
                 if let Some(layer) = &objects.layer {
@@ -617,6 +680,7 @@ impl Dispatch<ZwlrLayerSurfaceV1, OutputId> for State {
         };
         Self::apply(
             &state.globals,
+            &state.content.style,
             &mut state.input,
             #[cfg(feature = "popup")]
             &mut state.popup,
@@ -693,6 +757,7 @@ impl Dispatch<WlCallback, RoundTrip> for State {
         };
         Self::apply(
             &state.globals,
+            &state.content.style,
             &mut state.input,
             #[cfg(feature = "popup")]
             &mut state.popup,

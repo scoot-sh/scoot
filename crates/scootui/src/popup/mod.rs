@@ -66,7 +66,7 @@ mod tip_tests;
 pub use hover::{Hover, Key, Step};
 pub use interact::{Interaction, Wheel};
 pub use layout::{Layout, TIP_MAX_EM};
-pub use paint::paint;
+pub use paint::{paint, paint_depth};
 
 /// The most widgets a popup holds: past it a module's extras are dropped,
 /// so a hostile or buggy module cannot grow the popup without bound.

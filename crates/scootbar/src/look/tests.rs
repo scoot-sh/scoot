@@ -93,6 +93,30 @@ fn per_key_precedence() {
 }
 
 #[test]
+fn user_file_wins_over_the_look_for_depth() {
+    use scootui::effects::{FillStyle, ShadowStyle};
+    // The user's file wins per key over the look layer for the depth
+    // tokens together, and the look fills the keys the file leaves alone.
+    let user = value("[bar]\nshadow = \"soft\"\n");
+    let layer = value("[bar]\nshadow = \"deep\"\nfill = \"gradient\"\n");
+    let (merged, _, notes) = merge(&user, &layer, &FULL, &origin()).expect("merges");
+    assert!(notes.is_empty(), "notes: {notes:?}");
+    assert_eq!(merged["bar"]["shadow"].as_str(), Some("soft"));
+    assert_eq!(merged["bar"]["fill"].as_str(), Some("gradient"));
+    let config = config::config_from_value(merged, Path::new("bar.toml")).expect("merged parses");
+    assert_eq!(config.shadow, ShadowStyle::Soft);
+    assert_eq!(config.fill, FillStyle::Gradient);
+    // The other way: the look's shadow stands where the file is silent,
+    // while the file's fill still wins its own key.
+    let user = value("[bar]\nfill = \"gradient\"\n");
+    let layer = value("[bar]\nshadow = \"glow\"\nfill = \"solid\"\n");
+    let (merged, _, _) = merge(&user, &layer, &FULL, &origin()).expect("merges");
+    let config = config::config_from_value(merged, Path::new("bar.toml")).expect("merged parses");
+    assert_eq!(config.shadow, ShadowStyle::Glow);
+    assert_eq!(config.fill, FillStyle::Gradient);
+}
+
+#[test]
 fn user_accent_alone_drives_hover() {
     // The user's `accent` if set, without their `hover`: the look's
     // `hover` is dropped so the bar derives hover from the user's accent.

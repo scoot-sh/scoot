@@ -263,10 +263,18 @@ fn the_depth_keys_belong_to_the_notifier_and_the_launcher() {
     for key in ["shadow", "fill"] {
         assert!(allows("scootnotify", key));
         assert!(allows("scootlaunch", key), "{key}");
-        // The greeter and the bar read neither yet: a key they would
+        // The greeter reads neither yet, and the bar reads its own dotted
+        // keys (`bar.shadow`), never the dotless ones: a key they would
         // report as unknown is refused at the look, not at every load.
         assert!(!allows("scootgreet", key), "{key}");
         assert!(!allows("scootbar", key), "{key}");
+    }
+    // The bar's depth keys live under `[bar]`, sharing the look's
+    // allowlist (never a copy): `bar.shadow` and `bar.fill`.
+    for key in BAR_DEPTH_KEYS {
+        assert!(allows("scootbar", key), "{key}");
+        assert!(!allows("scootgreet", key), "{key}");
+        assert!(!allows("scoot", key), "{key}");
     }
     let text = |s: &str| toml::Value::String(s.to_string());
     for style in SHADOW_STYLES {
@@ -298,6 +306,18 @@ fn the_depth_keys_belong_to_the_notifier_and_the_launcher() {
     assert!(check_app_value("scootlaunch", "fill", &text("rainbow")).is_some());
     assert!(check_app_value("scootlaunch", "shadow", &toml::Value::Integer(1)).is_some());
     assert!(check_app_value("scootgreet", "shadow", &text("soft")).is_some());
+    // The bar takes the same values under its own dotted keys, and refuses
+    // the same bad ones. Unknown or refused tokens stay reported, never fatal.
+    for style in SHADOW_STYLES {
+        assert!(check_app_value("scootbar", "bar.shadow", &text(style)).is_none());
+    }
+    for style in FILL_STYLES {
+        assert!(check_app_value("scootbar", "bar.fill", &text(style)).is_none());
+    }
+    assert!(check_app_value("scootbar", "bar.shadow", &text("huge")).is_some());
+    assert!(check_app_value("scootbar", "bar.fill", &text("rainbow")).is_some());
+    assert!(check_app_value("scootbar", "bar.shadow", &toml::Value::Integer(1)).is_some());
+    assert!(check_app_value("scootbar", "shadow", &text("soft")).is_some());
 }
 
 #[test]
@@ -499,6 +519,16 @@ fn user_tables_map_to_the_dotted_look_keys() {
         let (table, key) = dotted.split_once('.').unwrap_or(("effects", dotted));
         assert_eq!(user_effect_key("scootnotify", table, key), Some(*dotted));
     }
+    // The bar's user `[effects]` shares the look's allowlist: `shadow` and
+    // `fill` map to the bar's dotted keys, never a copy.
+    assert_eq!(
+        user_effect_key("scootbar", "effects", "shadow"),
+        Some("bar.shadow")
+    );
+    assert_eq!(
+        user_effect_key("scootbar", "effects", "fill"),
+        Some("bar.fill")
+    );
 }
 
 #[test]
@@ -521,11 +551,28 @@ fn user_tables_never_reach_the_looks_own_keys() {
         assert_eq!(user_effect_key("scootnotify", table, "theme"), None);
         assert_eq!(user_effect_key("scootnotify", table, "accent"), None);
     }
-    // The launcher has no cards or titles; apps outside the shell pair read none.
+    // The launcher has no cards or titles; the bar has no cards, titles or
+    // motion (its entrance lands later). Apps outside the shell trio read none.
     assert_eq!(user_effect_key("scootlaunch", "card", "mark"), None);
     assert_eq!(user_effect_key("scootlaunch", "title", "weight"), None);
-    for app in ["scootbar", "scootgreet", "scoot", "nonesuch"] {
+    assert_eq!(user_effect_key("scootbar", "card", "mark"), None);
+    assert_eq!(user_effect_key("scootbar", "title", "weight"), None);
+    assert_eq!(user_effect_key("scootbar", "effects", "motion"), None);
+    assert_eq!(
+        user_effect_key("scootbar", "effects", "motion-duration-ms"),
+        None
+    );
+    assert_eq!(
+        user_effect_key("scootbar", "effects", "motion-bounce"),
+        None
+    );
+    assert_eq!(user_effect_key("scootbar", "bar", "shadow"), None);
+    for app in ["scootgreet", "scoot", "nonesuch"] {
         assert_eq!(user_effect_key(app, "effects", "shadow"), None, "{app}");
+    }
+    // The bar's own depth keys map; nothing else does.
+    for key in ["font", "font-size", "opacity", "radius", "card.mark"] {
+        assert_eq!(user_effect_key("scootbar", "effects", key), None, "{key}");
     }
     // Hostile keys: long, non-ASCII, dotted.
     assert_eq!(

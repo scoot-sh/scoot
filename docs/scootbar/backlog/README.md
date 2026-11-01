@@ -193,8 +193,8 @@ The bar's half of the [live-looks epic](../../backlog/core/live-looks.md) ([desi
 The bar's slice of the [shell motion/depth epic](https://github.com/scoot-sh/scoot/issues/807)
 (section 4, "scootbar (optional, later)"; sections 1-3 shipped in #810, #811, #812, #814, #835, #836, #838, #839, #841):
 - [Bar opacity pixman benchmark: the gate for translucent bars](resolved/bar-opacity-benchmark-done.md) (medium) — RESOLVED 2026-11-01: every budget passed, the five `[opacity] bar` pins rose to the examples' values
-- [Shadow and gradient fill tokens for the bar and its popups](scootbar-depth-tokens.md) (low): unblocked by the benchmark's pass
-- [Popups open with the notification-card entrance](scootbar-popup-entrance.md) (low): blocked on `scootbar-depth-tokens`
+- [Shadow and gradient fill tokens for the bar and its popups](resolved/scootbar-depth-tokens-done.md) (low) — RESOLVED 2026-11-01: shadow and gradient reach the bar and all five popups, room vs clip pinned, goldens for each style
+- [Popups open with the notification-card entrance](scootbar-popup-entrance.md) (low): unblocked (its `scootbar-depth-tokens` shadow room landed)
 - [Translucent bar: measure the compositor-side recomposite cost under animation](bar-translucent-compositor-cost.md) (low): from the #850 review; the bar-opacity benchmark covered the bar's own paint cost, not the compositor recomposite with moving pixels behind it
 
 ### Unscheduled (until someone asks)

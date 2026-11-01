@@ -5,7 +5,9 @@
 use super::interact::Interaction;
 use super::layout::{Layout, Row};
 use super::{Content, Kind, MAX_TEXT, Round};
+use crate::paint::Shadow;
 use crate::paint::{Canvas, Span};
+use crate::region::Rect;
 use crate::text::Text;
 use crate::theme::Theme;
 
@@ -143,6 +145,185 @@ pub fn paint(
             round.frame(),
             theme.dim,
             theme.background,
+            round.outer(),
+            round.inner(),
+        );
+    }
+}
+
+/// Draws `content` as `layout` places it, offset by `origin` (the popup's
+/// top-left in the surface), with a drop shadow and a gradient fill.
+///
+/// `origin` is `(0, 0)` for an unshadowed popup (the surface is exactly the
+/// popup); a shadowed popup's surface is larger by the shadow's pad on
+/// every side (see [`Shadow::pad`]), and the popup sits at
+/// `(pad.left, pad.top)`. `shadow` is the prepared tables, the tint
+/// (black, or the accent for a glow) and the popup's corner radius;
+/// `None` draws no shadow. `fill` is the top and bottom stops (equal for a
+/// solid fill) and `opacity` the background's alpha.
+///
+/// The whole popup is drawn each time, into the pooled buffer, with no
+/// allocation once the shadow tables are prepared. A square opaque solid
+/// unshadowed popup at the origin paints exactly what [`paint`] does.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_depth(
+    canvas: &mut Canvas<'_>,
+    text: &mut Text,
+    theme: &Theme,
+    content: &Content,
+    layout: &Layout,
+    interaction: &Interaction,
+    em: f32,
+    round: &Round,
+    origin: (u32, u32),
+    shadow: Option<(&Shadow, crate::color::Color, u32)>,
+    fill: (crate::color::Color, crate::color::Color),
+    opacity: u8,
+) {
+    let (ox, oy) = origin;
+    let (width, height) = (layout.width, layout.height);
+    let outer_rect = Rect {
+        x: ox,
+        y: oy,
+        width,
+        height,
+    };
+    let outer_radius = round.outer().radius();
+    // Transparent corners, a shadow's falloff or a translucent fill need an
+    // alpha channel: clear to transparent first. A square opaque fill
+    // overwrites every pixel below.
+    let need_alpha = shadow.is_some() || round.rounded() || opacity < 255 || fill.0 != fill.1;
+    if need_alpha {
+        canvas.clear();
+    }
+    if let Some((tables, tint, radius)) = shadow {
+        tables.paint(canvas, outer_rect, radius, tint);
+    }
+    let frame = layout.frame;
+    let (top_fill, bottom_fill) = fill;
+    // The frame (the `dim` token) and the inside (the gradient stops) at
+    // `opacity`. Equal stops are the solid path.
+    canvas.fill_rounded_gradient(outer_rect, outer_radius, theme.dim, theme.dim, opacity);
+    let inner_rect = Rect {
+        x: ox.saturating_add(frame),
+        y: oy.saturating_add(frame),
+        width: width.saturating_sub(frame.saturating_mul(2)),
+        height: height.saturating_sub(frame.saturating_mul(2)),
+    };
+    let inner_radius = round.inner().radius();
+    if inner_rect.width > 0 && inner_rect.height > 0 {
+        canvas.fill_rounded_gradient(inner_rect, inner_radius, top_fill, bottom_fill, opacity);
+    }
+    let inside = Span {
+        x: ox.saturating_add(frame),
+        width: width.saturating_sub(frame.saturating_mul(2)),
+    };
+    let clip = Span {
+        x: ox.saturating_add(frame).saturating_add(layout.pad),
+        width: width
+            .saturating_sub(frame.saturating_mul(2))
+            .saturating_sub(layout.pad.saturating_mul(2)),
+    };
+    let metrics = text.metrics(em);
+    let scroll = interaction.scroll() as i64;
+    let mut kept = [0u8; MAX_TEXT];
+    for (index, (widget, row)) in content.widgets().iter().zip(layout.rows()).enumerate() {
+        let label = content.label(widget);
+        // Rows above or below the drawn part are skipped: the canvas clips
+        // what is left either way, but a list taller than the output has
+        // rows wholly off it. Rows are popup-local; the surface offset
+        // follows.
+        let y0 = i64::from(row.y0) - scroll + i64::from(oy);
+        let y1 = i64::from(row.y1) - scroll + i64::from(oy);
+        if y1 <= i64::from(oy) || y0 >= i64::from(oy) + i64::from(layout.height) {
+            continue;
+        }
+        let baseline = y0 + metrics.baseline(row.y1.saturating_sub(row.y0));
+        match widget.kind {
+            Kind::Text => {
+                let shown = cut(text, label, em, clip.width, &mut kept);
+                text.draw(
+                    canvas,
+                    None,
+                    shown,
+                    em,
+                    i64::from(clip.x),
+                    baseline,
+                    theme.foreground,
+                    clip,
+                );
+            }
+            Kind::Button { selected, .. } => {
+                if interaction.hover() == Some(index) {
+                    canvas.fill_rect(
+                        Span {
+                            x: inside.x,
+                            width: inside.width,
+                        },
+                        y0.max(i64::from(oy)) as u32,
+                        y1.max(i64::from(oy)) as u32,
+                        theme.dim,
+                    );
+                }
+                let color = if selected {
+                    theme.accent
+                } else {
+                    theme.foreground
+                };
+                let shown = cut(text, label, em, clip.width, &mut kept);
+                text.draw(
+                    canvas,
+                    None,
+                    shown,
+                    em,
+                    i64::from(clip.x),
+                    baseline,
+                    color,
+                    clip,
+                );
+            }
+            Kind::Slider { value, max, .. } => {
+                let shown = match interaction.dragging() {
+                    Some((dragged, value)) if dragged == index => value,
+                    _ => value,
+                };
+                // Tracks and knobs are popup-local; shift them into the
+                // surface by the origin. Rows carry the origin; `dy` stays
+                // the scroll, so `y0 = (row + oy) - scroll` lands in the
+                // surface.
+                let track = layout.track(index);
+                let track = Span {
+                    x: track.x.saturating_add(ox),
+                    width: track.width,
+                };
+                let row_shifted = Row {
+                    y0: row.y0.saturating_add(oy),
+                    y1: row.y1.saturating_add(oy),
+                };
+                slider(
+                    canvas,
+                    theme,
+                    track,
+                    row_shifted,
+                    layout.knob_x(index, shown, max).saturating_add(ox),
+                    scroll,
+                );
+            }
+        }
+    }
+    if round.rounded() {
+        // What the rows painted past the inner arc returns to the frame's
+        // own edge. For a gradient fill the inner edge is approximated
+        // with the bottom stop; gradient goldens stay square, so no golden
+        // pins the difference.
+        canvas.restore_frame_edge(
+            ox,
+            oy,
+            ox.saturating_add(width),
+            oy.saturating_add(height),
+            round.frame(),
+            theme.dim,
+            fill.1,
             round.outer(),
             round.inner(),
         );
