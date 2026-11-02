@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.34](https://github.com/scoot-sh/scoot/compare/v0.6.33...v0.6.34) - 2026-11-02
+
+### scoot-look,scootctl
+
+- fixed: bound reload runs; ASCII-only outputs; join-site guard ([#874](https://github.com/scoot-sh/scoot/pull/874))
+
 ## [0.6.33](https://github.com/scoot-sh/scoot/compare/v0.6.32...v0.6.33) - 2026-11-02
 
 ### scoot-look,scootctl
