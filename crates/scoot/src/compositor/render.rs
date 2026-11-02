@@ -452,6 +452,40 @@ impl Backend {
         self.size = (width, height);
     }
 
+    /// Forgets this backend's damage history, so the next frame repaints the
+    /// whole output.
+    ///
+    /// What a `corner_radius` reload uses: toggling the radius wraps or
+    /// unwraps every window's element (or changes its cut) while the inner
+    /// element's commit counter -- the only thing the damage tracker keys a
+    /// wrapper change on -- does not move, so without this the margin and
+    /// corner pixels the newly wrapped or unwrapped draw no longer paints
+    /// stay on screen until the client next commits (see `rounded.rs`).
+    /// A reload is a cold path, so rebuilding the tracker here costs
+    /// nothing per frame; the wrapper itself stays allocation-free on the
+    /// hot path. Harmless on the scanout tier, which never reads this
+    /// tracker (`DrmCompositor` owns its own).
+    pub(super) fn reset_damage(&mut self, output: &Output) {
+        self.damage = OutputDamageTracker::from_output(output);
+    }
+
+    /// Drives this backend's damage tracker over `elements` at buffer `age`
+    /// and reports the damage it would repaint, without rendering. Test-only:
+    /// production always renders through [`draw_frame_with`], which owns
+    /// the age and the elements.
+    #[cfg(test)]
+    pub(crate) fn damage_output_for_test<E>(
+        &mut self,
+        age: usize,
+        elements: &[E],
+    ) -> Result<Option<Vec<Rectangle<i32, Physical>>>, smithay::output::OutputNoMode>
+    where
+        E: smithay::backend::renderer::element::Element,
+    {
+        let (damage, _) = self.damage.damage_output(age, elements)?;
+        Ok(damage.cloned())
+    }
+
     /// Hands a rebuilt GPU-tier renderer to the backend an output already
     /// has: the seat reconnect's fresh device builds its presenters and
     /// renderers together (`try_scanout`), and this is where the renderer

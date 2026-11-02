@@ -3585,3 +3585,115 @@ fn a_scoped_reload_with_no_layer_refuses_and_keeps_the_session() {
         "nothing applied, so no identity was recorded"
     );
 }
+
+// -- corner_radius damage reset -------------------------------------------------
+
+use smithay::backend::renderer::element::{Element, Id};
+use smithay::backend::renderer::utils::{CommitCounter, OpaqueRegions};
+use smithay::utils::{Buffer as BufferSpace, Physical, Rectangle, Scale};
+
+/// A steady window element: same id, same commit, same geometry, no damage
+/// -- what the damage tracker sees across a radius-only reload, when no
+/// client commits alongside it.
+struct SteadyWindow {
+    id: Id,
+    geom: Rectangle<i32, Physical>,
+}
+
+impl Element for SteadyWindow {
+    fn id(&self) -> &Id {
+        &self.id
+    }
+
+    fn current_commit(&self) -> CommitCounter {
+        CommitCounter::default()
+    }
+
+    fn src(&self) -> Rectangle<f64, BufferSpace> {
+        Rectangle::from_size((f64::from(self.geom.size.w), f64::from(self.geom.size.h)).into())
+    }
+
+    fn geometry(&self, _scale: Scale<f64>) -> Rectangle<i32, Physical> {
+        self.geom
+    }
+
+    fn opaque_regions(&self, _scale: Scale<f64>) -> OpaqueRegions<i32, Physical> {
+        OpaqueRegions::from_slice(&[Rectangle::new((0, 0).into(), self.geom.size)])
+    }
+}
+
+/// A runtime `corner_radius` toggle must repaint the margin and corner
+/// pixels on a damage-tracked backend, not just ask for a render.
+///
+/// `Rounded` forwards the inner element's commit counter, so a radius
+/// change alone gives the damage tracker nothing new: same id, same
+/// commit, same geometry, empty damage since. `finish_reload` therefore
+/// forgets every backend's damage history on a radius change, and the next
+/// frame repaints the whole output. This drives one backend's tracker at
+/// buffer age 1 -- the `--tty` dumb tier's real age, where the stale
+/// pixels lived (`--headless` and `--nested` pass age 0 and always repaint
+/// fully) -- through the same elements before and after the reload:
+/// steady `None`, then full-output damage after. Neuter check: without the
+/// reset in `finish_reload` the last `damage_output` reports `None`.
+#[test]
+fn a_corner_radius_reload_forces_full_damage_on_a_tracked_backend() {
+    let mut fixture = Fixture::with_config("[appearance]\ncorner_radius = 0\n");
+    let output = fixture
+        .state
+        .outputs
+        .primary_id()
+        .expect("a headless harness has an output");
+    let window = SteadyWindow {
+        id: Id::new(),
+        geom: Rectangle::from_size((CANVAS, CANVAS).into()),
+    };
+    let elements = std::slice::from_ref(&window);
+    let damage_of = |fixture: &mut Fixture, age: usize| {
+        fixture
+            .state
+            .backends
+            .get_mut(&output)
+            .expect("a headless backend")
+            .damage_output_for_test(age, elements)
+            .expect("an output with a mode")
+    };
+    assert!(
+        damage_of(&mut fixture, 0).is_some(),
+        "age 0 always repaints fully"
+    );
+    assert_eq!(
+        damage_of(&mut fixture, 1),
+        None,
+        "a steady frame at buffer age 1 damages nothing"
+    );
+    fixture.rewrite("[appearance]\ncorner_radius = 12\n");
+    let response = fixture.reload();
+    assert!(
+        applied(&response).contains(&field::CORNER_RADIUS.to_owned()),
+        "the radius change must report: {response:?}"
+    );
+    let damage = damage_of(&mut fixture, 1);
+    let Some(damage) = damage else {
+        panic!("a radius-only reload must force full damage at age 1, got None");
+    };
+    let full = Rectangle::<i32, Physical>::from_size((CANVAS, CANVAS).into());
+    let covers = damage.iter().fold(
+        Rectangle::<i32, Physical>::new((CANVAS, CANVAS).into(), (0, 0).into()),
+        |mut acc, rect| {
+            let x0 = acc.loc.x.min(rect.loc.x);
+            let y0 = acc.loc.y.min(rect.loc.y);
+            let x1 = (acc.loc.x + acc.size.w).max(rect.loc.x + rect.size.w);
+            let y1 = (acc.loc.y + acc.size.h).max(rect.loc.y + rect.size.h);
+            acc.loc = (x0, y0).into();
+            acc.size = (x1 - x0, y1 - y0).into();
+            acc
+        },
+    );
+    assert!(
+        covers.loc.x <= full.loc.x
+            && covers.loc.y <= full.loc.y
+            && covers.loc.x + covers.size.w >= full.loc.x + full.size.w
+            && covers.loc.y + covers.size.h >= full.loc.y + full.size.h,
+        "the forced damage must cover the whole output, got {damage:?}"
+    );
+}

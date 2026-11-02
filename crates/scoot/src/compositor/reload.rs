@@ -628,6 +628,24 @@ impl State {
                 || name == field::CORNER_RADIUS
         }) {
             self.request_render();
+            if report
+                .applied
+                .iter()
+                .any(|name| name == field::CORNER_RADIUS)
+            {
+                // The radius wraps, unwraps or re-cuts every window's
+                // element while no client commits, so the damage tracker --
+                // which keys a wrapper change on the inner commit alone --
+                // reports nothing and the old margin and corner pixels stay
+                // (see `Backend::reset_damage`). Forgetting its history
+                // repaints the whole output on the next frame instead. A
+                // reload is a cold path; the per-frame wrapper is untouched.
+                for (id, output) in self.outputs.iter_with_ids() {
+                    if let Some(backend) = self.backends.get_mut(&id) {
+                        backend.reset_damage(output);
+                    }
+                }
+            }
         }
         // A rebuilt cursor is a cursor change like any other: a redraw where
         // frames draw it, and news for every capture that asked for the

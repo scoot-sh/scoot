@@ -45,6 +45,7 @@ use crate::compositor::test_support::{Harness, assert_pixel, find_color, pixel, 
 
 mod committed;
 mod csd;
+mod damage;
 mod inactive_width;
 mod margin;
 
