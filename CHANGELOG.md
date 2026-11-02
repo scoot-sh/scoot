@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.32](https://github.com/scoot-sh/scoot/compare/v0.6.31...v0.6.32) - 2026-11-02
+
+### scoot
+
+- fixed: repaint the whole output on a corner_radius reload ([#868](https://github.com/scoot-sh/scoot/pull/868))
+
 ## [0.6.30](https://github.com/scoot-sh/scoot/compare/v0.6.29...v0.6.30) - 2026-11-01
 
 ### scoot-look,scootbar
