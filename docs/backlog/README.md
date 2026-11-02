@@ -274,6 +274,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [Deferred: hyprland-global-shortcuts-v1 and xx-hotkey-v1](./protocols/global-shortcuts-deferred-wayland.md) — low, filed 2026-10-22 (W43): the two protocol paths not taken, and what would make either worthwhile; revisit once the portal backend exists
 - [Pointer cursor session follow-ups from the #774 review](./protocols/cursor-session-followups.md) — low, filed 2026-10-27: scale-change test, a real-GPU run, hotspot rounding at fractional scale, a session cap
 - [Verify the corner_radius reload repaint on a real GPU scanout output](./core/corner-radius-reload-scanout-hardware.md) — low, filed 2026-11-02: #868 arms a full repaint on the scanout tier from the pinned fork source; no GPU run has confirmed it
+- [Harden look-target reloads and paths: bounded pipes, NFC duplicates, write-site path check](./core/look-targets-hardening.md) — medium, filed 2026-11-02 from the #871 security review: a forking reload outlives its timeout, unbounded capture, NFC/NFD duplicate outputs
 - [Turn screens off when idle (`wlr-output-power-management`)](./resolved/output-power-management-done.md) — RESOLVED 2026-10-04 (daily-drive: idle Asahi laptop keeps both panels lit; agent IPC half included)
 - [Smaller/general protocol gaps (bundled)](./resolved/protocol-gaps-general-bundle-done.md) — every item resolved; archived 2026-10-12
 - [Niche protocol gaps (bundled)](./resolved/protocol-gaps-niche-bundle-done.md) — every item resolved or a recorded non-entry; archived 2026-10-12
