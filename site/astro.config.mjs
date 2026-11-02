@@ -248,6 +248,7 @@ export default defineConfig({
           items: [
             { label: 'Reference hub', slug: 'reference' },
             { label: 'Look format', slug: 'reference/look-format' },
+            { label: 'Look targets', slug: 'reference/look-targets' },
             { label: 'Builds and renderers', slug: 'reference/builds' },
             { label: 'Nix flake reference', slug: 'reference/nix' },
             { label: 'Versions and compatibility', slug: 'reference/versions' },

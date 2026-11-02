@@ -1,0 +1,7 @@
+name = "kitty-colors"
+output = "kitty/colors.conf"
+template = "colors.tmpl"
+
+[reload]
+argv = ["kitty", "@", "set-colors", "--all"]
+timeout_secs = 10

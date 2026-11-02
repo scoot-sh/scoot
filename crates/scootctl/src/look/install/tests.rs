@@ -1335,7 +1335,8 @@ fn url_wallpaper_resolves_from_cache_and_refuses_on_miss() {
                 .into_owned(),
         )),
     };
-    let validation = validate_entry(&catalog, "url-look", &hit, false).expect("validation runs");
+    let validation =
+        validate_entry(&catalog, "url-look", &hit, false, None).expect("validation runs");
     assert!(
         validation.errors.is_empty(),
         "a cached URL validates: {:?}",
@@ -1345,7 +1346,8 @@ fn url_wallpaper_resolves_from_cache_and_refuses_on_miss() {
     let miss = UrlChecks {
         answer: Err("wallpaper `https://example.com/wall.png` is not in the download cache: reinstall the look so its URL wallpaper is fetched and verified".to_owned()),
     };
-    let validation = validate_entry(&catalog, "url-look", &miss, false).expect("validation runs");
+    let validation =
+        validate_entry(&catalog, "url-look", &miss, false, None).expect("validation runs");
     assert!(
         validation
             .errors

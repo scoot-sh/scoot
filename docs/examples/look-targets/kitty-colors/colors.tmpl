@@ -1,0 +1,34 @@
+# Rendered from the active look by `scoot look apply`. Do not edit:
+# re-rendered on every swap from this template.
+#
+# Wiring (once): point kitty at the rendered file with an include in
+# `~/.config/kitty/kitty.conf` naming the state link, e.g.
+#   include ~/.local/state/scoot/look/targets/kitty/colors.conf
+# (the look state dir's `look` link plus `targets/kitty/colors.conf`).
+# Keys you set after the include win per key. Reload with
+# `kitty @ set-colors --all <that file>`, which is also what this
+# target's `[reload]` runs after every swap.
+
+background {{ palette.background }}
+foreground {{ palette.foreground }}
+selection_background {{ palette.selection }}
+selection_foreground {{ palette.selection-text }}
+cursor {{ palette.accent }}
+cursor_text_color {{ palette.background }}
+
+color0 {{ terminal.color0 }}
+color1 {{ terminal.color1 }}
+color2 {{ terminal.color2 }}
+color3 {{ terminal.color3 }}
+color4 {{ terminal.color4 }}
+color5 {{ terminal.color5 }}
+color6 {{ terminal.color6 }}
+color7 {{ terminal.color7 }}
+color8 {{ terminal.color8 }}
+color9 {{ terminal.color9 }}
+color10 {{ terminal.color10 }}
+color11 {{ terminal.color11 }}
+color12 {{ terminal.color12 }}
+color13 {{ terminal.color13 }}
+color14 {{ terminal.color14 }}
+color15 {{ terminal.color15 }}
