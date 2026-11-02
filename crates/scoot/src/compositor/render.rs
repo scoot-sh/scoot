@@ -463,8 +463,10 @@ impl Backend {
     /// stay on screen until the client next commits (see `rounded.rs`).
     /// A reload is a cold path, so rebuilding the tracker here costs
     /// nothing per frame; the wrapper itself stays allocation-free on the
-    /// hot path. Harmless on the scanout tier, which never reads this
-    /// tracker (`DrmCompositor` owns its own).
+    /// hot path. This does not reach the scanout tier, which never reads
+    /// this tracker (`DrmCompositor` owns its own): the same reload arms
+    /// and invalidates each output's scanout presenter alongside this (see
+    /// `reload::finish_reload`), forcing the same full repaint there.
     pub(super) fn reset_damage(&mut self, output: &Output) {
         self.damage = OutputDamageTracker::from_output(output);
     }

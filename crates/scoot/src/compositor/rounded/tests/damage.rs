@@ -210,9 +210,10 @@ fn window_and_below(
 /// What is below the cut repaints when it changes, on a damage-tracked
 /// path: the corner probe pins the corner-square cut, the margin probe
 /// pins the geometry-bounds cut. Neuter check: returning the inner opaque
-/// region uncut from [`Rounded::opaque_regions`] keeps the first frame's
-/// pixels (age 0 repaints fully) but leaves both probes stale green on the
-/// second frame, failing the yellow asserts below.
+/// region uncut (or skipping just the corner-square subtraction) fails the
+/// first frame's corner assert -- the cut corner reads clear instead of
+/// green; skipping just the geometry-bounds clip fails the first frame's
+/// margin assert instead.
 #[test]
 fn what_is_below_the_cut_repaints_when_it_changes() {
     let window_buffer = SolidColorBuffer::new((SIZE, SIZE), [0.0, 0.0, 1.0, 1.0]);

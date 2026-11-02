@@ -3697,3 +3697,62 @@ fn a_corner_radius_reload_forces_full_damage_on_a_tracked_backend() {
         "the forced damage must cover the whole output, got {damage:?}"
     );
 }
+
+/// A `CORNER_RADIUS` reload also visits every output's scanout presenter.
+///
+/// `Backend::reset_damage` cannot reach the scanout tier (`DrmCompositor`
+/// owns its own damage tracker), so the same reload arms one composite-only
+/// frame and drops the swapchain slots on each output's scanout presenter.
+/// There is no scanout presenter without hardware -- the headless harness
+/// has no `Tty` at all -- so this pins what can be pinned off hardware: the
+/// reload's scanout loop visits every output exactly once on a radius
+/// change, and never on any other appearance change. The arming itself
+/// (`arm_force_composite` buys exactly one composite frame) and the slot
+/// drop forcing a full redraw (no buffer age left to trust; age 0 repaints
+/// everything) are pinned in `tty::scanout`'s own tests and traced against
+/// the pinned fork in the fix. Neuter check: removing the scanout loop in
+/// `finish_reload` leaves `scanout_radius_arms_for_test` empty and fails
+/// below.
+#[test]
+fn a_corner_radius_reload_visits_every_outputs_scanout_presenter() {
+    let mut fixture = Fixture::with_config("[appearance]\ncorner_radius = 0\n");
+    let second = headless::add_output(&mut fixture.state, "headless-2", CANVAS, CANVAS)
+        .expect("a second headless output");
+    let first = fixture
+        .state
+        .outputs
+        .primary_id()
+        .expect("a headless harness has an output");
+    assert!(
+        fixture.state.scanout_radius_arms_for_test.is_empty(),
+        "no reload has run yet"
+    );
+    fixture.rewrite("[appearance]\ncorner_radius = 12\n");
+    let response = fixture.reload();
+    assert!(
+        applied(&response).contains(&field::CORNER_RADIUS.to_owned()),
+        "the radius change must report: {response:?}"
+    );
+    let mut arms = fixture.state.scanout_radius_arms_for_test.clone();
+    arms.sort_by_key(|id| id.0);
+    let mut expected = vec![first, second];
+    expected.sort_by_key(|id| id.0);
+    assert_eq!(
+        arms, expected,
+        "the radius reload must visit every output's scanout presenter once"
+    );
+    // A non-radius appearance change visits none: the scanout loop is gated
+    // on `CORNER_RADIUS` like the damage reset, not on the outer redraw.
+    fixture.state.scanout_radius_arms_for_test.clear();
+    fixture.rewrite("[appearance]\ncorner_radius = 12\nbackground_color = \"#ff0000\"\n");
+    let response = fixture.reload();
+    assert!(
+        !applied(&response).contains(&field::CORNER_RADIUS.to_owned()),
+        "only the background changed: {response:?}"
+    );
+    assert!(
+        fixture.state.scanout_radius_arms_for_test.is_empty(),
+        "only a radius change arms the scanout tier, got {:?}",
+        fixture.state.scanout_radius_arms_for_test
+    );
+}
