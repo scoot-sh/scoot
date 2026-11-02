@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.33](https://github.com/scoot-sh/scoot/compare/v0.6.32...v0.6.33) - 2026-11-02
+
+### scoot-look,scootctl
+
+- added: user-owned look targets (slice 1) ([#871](https://github.com/scoot-sh/scoot/pull/871))
+
 ## [0.6.32](https://github.com/scoot-sh/scoot/compare/v0.6.31...v0.6.32) - 2026-11-02
 
 ### scoot
