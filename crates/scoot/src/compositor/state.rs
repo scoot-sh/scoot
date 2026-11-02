@@ -658,6 +658,17 @@ pub struct State {
     /// arranges per capture) or any test's direct `world.arrange()`.
     #[cfg(test)]
     pub(crate) arrange_calls_for_test: Cell<usize>,
+    /// Test-only record of which outputs a `CORNER_RADIUS` reload asked the
+    /// scanout tier to repaint fully: one entry per output the reload's
+    /// scanout loop visited, whether or not this session has a scanout
+    /// presenter for it (headless/nested harnesses have none, so the real
+    /// arming there is a no-op lookup). The pin for the scanout half of the
+    /// radius fix -- `Backend::reset_damage` cannot reach `DrmCompositor`'s
+    /// own damage tracker, so the reload arms and invalidates each output's
+    /// scanout presenter alongside it. Neuter check: removing that loop
+    /// leaves this empty and the new reload test fails.
+    #[cfg(test)]
+    pub(crate) scanout_radius_arms_for_test: Vec<OutputId>,
     /// Test-only: the listening socket's and the display's loop
     /// registrations, so a test harness can remove both on teardown even
     /// when its event loop outlives it (see `test_support`'s
@@ -1611,6 +1622,8 @@ impl State {
             fail_next_draw_for_test: false,
             #[cfg(test)]
             arrange_calls_for_test: Cell::new(0),
+            #[cfg(test)]
+            scanout_radius_arms_for_test: Vec::new(),
             #[cfg(test)]
             listener_tokens: listener_tokens.to_vec(),
             #[cfg(test)]

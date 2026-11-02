@@ -53,8 +53,11 @@ frame, GTK with client-side shadows) can paint outside its
 `xdg_surface` window geometry: a 1px border, a drop shadow, resize handles.
 With `corner_radius` above `0`, scoot shows only what lies inside the
 window geometry, so those pixels never show in the gap or poke out past the
-rounded corners and the ring. This applies to every toplevel, tiled or
-floating, that is not fullscreen. Popups and menus are separate surfaces and
+rounded corners and the ring. This applies to every Wayland toplevel,
+tiled or floating, that is not fullscreen. XWayland windows are rounded at
+the corners but keep their margin: the geometry clip covers a toplevel's
+Wayland surface tree, and an X window has no `xdg_toplevel` geometry to
+clip to. Popups and menus are separate surfaces and
 extend past the geometry as they always did.
 
 With `corner_radius = 0` the window is drawn unclipped, so a client's frame

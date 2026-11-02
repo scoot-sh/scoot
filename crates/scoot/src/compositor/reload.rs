@@ -628,6 +628,51 @@ impl State {
                 || name == field::CORNER_RADIUS
         }) {
             self.request_render();
+            if report
+                .applied
+                .iter()
+                .any(|name| name == field::CORNER_RADIUS)
+            {
+                // The radius wraps, unwraps or re-cuts every window's
+                // element while no client commits, so the damage tracker --
+                // which keys a wrapper change on the inner commit alone --
+                // reports nothing and the old margin and corner pixels stay
+                // (see `Backend::reset_damage`). Forgetting its history
+                // repaints the whole output on the next frame instead. A
+                // reload is a cold path; the per-frame wrapper is untouched.
+                for (id, output) in self.outputs.iter_with_ids() {
+                    if let Some(backend) = self.backends.get_mut(&id) {
+                        backend.reset_damage(output);
+                    }
+                }
+                // The reset above cannot reach the scanout tier: `DrmCompositor`
+                // owns its own `OutputDamageTracker`, never read from the
+                // backend's, and an empty frame there keeps the old pixels on
+                // screen (`render_and_queue`: nothing queued, previous frame
+                // stays). So the same reload arms one composite-only frame on
+                // every output's scanout presenter and drops its swapchain
+                // slots (`reset_buffers` leaves no buffer age to trust, which
+                // is what forces the full redraw -- the pinned fork's
+                // `damage_output_internal` repaints everything at age 0). The
+                // lookup is a no-op where there is no scanout presenter: a
+                // headless/nested session, a dumb-tier `--tty` head, or a
+                // build without `gpu-scanout`. Same pattern as
+                // `force_scanout_composite` for stale captures, minus its
+                // immediate render: `request_render` above already queued the
+                // frame this arming will composite.
+                let ids: Vec<OutputId> = self.outputs.iter_with_ids().map(|(id, _)| id).collect();
+                for id in ids {
+                    #[cfg(test)]
+                    self.scanout_radius_arms_for_test.push(id);
+                    #[cfg(feature = "gpu-scanout")]
+                    if let Some(presenter) = self.tty.as_mut().and_then(|tty| tty.scanout_mut(id)) {
+                        presenter.arm_force_composite();
+                        presenter.invalidate_scanout();
+                    }
+                    #[cfg(all(not(test), not(feature = "gpu-scanout")))]
+                    let _ = id;
+                }
+            }
         }
         // A rebuilt cursor is a cursor change like any other: a redraw where
         // frames draw it, and news for every capture that asked for the
