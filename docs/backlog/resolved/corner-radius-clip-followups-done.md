@@ -1,9 +1,10 @@
 ---
 title: "corner_radius surface clip: runtime toggle, opaque-region coverage, X windows"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-02"
 ---
 
 # corner_radius surface clip: runtime toggle, opaque-region coverage, X windows
@@ -45,3 +46,11 @@ are a test and a docs sentence.
 ## Not in this ticket
 
 Clipping popups (deliberately never wrapped).
+
+## Resolution
+
+Landed in PR #868 (`fix(scoot): repaint the whole output on a corner_radius reload`).
+
+1. **Real bug, fixed.** Traced against the pinned Smithay fork (`b65cbc5`): an unchanged element contributes only `damage_since` at its stored commit, and `Rounded` forwards the inner commit, so a radius change alone damages nothing; only buffer age > 0 reads damage history, and only `--tty` passes a real age. `finish_reload` now resets every backend's `OutputDamageTracker` (`Backend::reset_damage`) on a `CORNER_RADIUS` change -- one full repaint on the next frame, cold path only. Live `--nested` repro (cage host, foot client, 0 to 12 + reload) repaints correctly with no stale pixels, as the age-0 full-redraw analysis predicts; the age-1 regression test (`a_corner_radius_reload_forces_full_damage_on_a_tracked_backend`) is the damage-tracked-path proof and fails without the reset.
+2. **Opaque cut covered on a damage-tracked path.** `what_is_below_the_cut_repaints_when_it_changes` renders through a real pixman damage tracker at age 1; the corner and margin probes fail when the cut is neutered.
+3. **X windows documented, not extended.** The `corner_radius` page states XWayland windows are rounded at the corners but keep their margin: no `xdg_toplevel` geometry to clip to, X geometry semantics unverified.
