@@ -213,6 +213,28 @@ fn start(tag: &str, shared: &Scratch) -> Option<Session> {
     Some(session)
 }
 
+/// The output side, in pixels, of
+/// [`apply_config_killed_mid_wait_changes_it_all_the_same`].
+///
+/// The test needs a decode slow enough to still be in flight when the
+/// client is killed: the state file naming the image is the signal that
+/// the daemon has started it, and the kill lands milliseconds after. A
+/// 4000x3000 noise PNG took about 13 s to generate and encode in a debug
+/// build and about 7 s to decode and draw on two default outputs; an
+/// 800x600 one generates in about 0.5 s and still decodes for about 0.2 s,
+/// so the kill still lands mid-decode. A 64x64 output draws in
+/// milliseconds (a default 1600x1000 one takes about a second a side in a
+/// debug build, mostly resampling), which changes nothing about the
+/// decode.
+const SMALL: u32 = 64;
+
+/// [`start`] on one small output (see [`SMALL`]).
+fn start_small(tag: &str, shared: &Scratch) -> Option<Session> {
+    let mut session = Session::start_sized(tag, SMALL, SMALL)?;
+    session.state_home = shared.0.clone();
+    Some(session)
+}
+
 fn section(hex: &str) -> String {
     format!(r#"{{"color":"{hex}"}}"#)
 }
@@ -1005,14 +1027,14 @@ fn a_daemon_killed_mid_apply() {
 #[test]
 fn apply_config_killed_mid_wait_changes_it_all_the_same() {
     let shared = Scratch::new("ac-front");
-    let Some(session) = start("ac-fro", &shared) else {
+    let Some(session) = start_small("ac-fro", &shared) else {
         return;
     };
     apply(&session, "scoot", &section(RED));
-    configured_names(&session, 2);
-    let big = session.scratch.0.join("big.png");
-    write_noise_png(&big, 4000, 3000);
-    let json = json!({"image": big.to_str().unwrap()}).to_string();
+    configured_names(&session, 1);
+    let noise = session.scratch.0.join("noise.png");
+    write_noise_png(&noise, 800, 600);
+    let json = json!({"image": noise.to_str().unwrap()}).to_string();
     let mut child = session
         .scootbg()
         .args(["apply-config", "--profile", "scoot", &json])
@@ -1020,13 +1042,13 @@ fn apply_config_killed_mid_wait_changes_it_all_the_same() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    wait_for_state(&shared.0, "scoot", "big.png");
+    wait_for_state(&shared.0, "scoot", "noise.png");
     child.kill().unwrap();
     child.wait().unwrap();
     session.query_until("the image shown", |outputs| {
         outputs
             .iter()
-            .all(|o| o["shows"]["image"] == big.to_str().unwrap())
+            .all(|o| o["shows"]["image"] == noise.to_str().unwrap())
     });
 }
 
