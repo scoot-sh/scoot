@@ -61,7 +61,7 @@ in-tree example (kitty, all sixteen terminal colors) lives in
 | `output` | string, required. Relative to the config home (`kitty/colors.conf`). ASCII only (a Unicode name refuses); no `..`, no absolute path, no hidden segments; must stay under the config home through symlinks. | Rendered to `targets/<output>` in the active look on every apply. Two targets naming the same output refuse (compared case-insensitively). |
 | `template` | string, required. The template file inside the target directory. | Read on every apply (symlinks refuse); an unreadable template refuses the swap. |
 | `reload.argv` | array of 1 to 16 strings, optional. The program plus its arguments: a bare name on `PATH` or an absolute path. | Run directly after a successful swap, never through a shell (no splitting, no globs, no `$VAR`). |
-| `reload.timeout_secs` | whole number, default `30`, 1 to 300. | The hung child is killed after the wait; the swap stands either way. |
+| `reload.timeout_secs` | whole number, default `30`, 1 to 300. | The hung child and the processes it started are killed after the wait (a process that starts its own session is not reached); the swap stands either way. |
 
 Unknown keys refuse: `target.toml` takes only the keys above. A reload
 needs no entry to render; without `[reload]` the file still renders and

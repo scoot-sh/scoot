@@ -5003,11 +5003,14 @@ fn lurking_grandchild_is_killed_with_its_group() {
     // Finding 1, second half: a fix that merely stops waiting at the
     // deadline would return fast and orphan the grandchild. The wrapper
     // script's path is a unique marker, so a `ps` scan proves the whole
-    // process group died instead of lingering past the timeout.
+    // process group died instead of lingering past the timeout. The script
+    // does NOT `exec` into `sleep`: an exec would replace the process image
+    // and erase the marker from `ps` within milliseconds, making the scan
+    // pass whether or not anything was killed.
     let fixture = fixture("targets-group-kill");
     let marker = format!("scoot-reload-probe-{}-group.sh", std::process::id());
     let script = fixture._root.join(&marker);
-    std::fs::write(&script, "#!/bin/sh\nexec sleep 8\n").expect("a probe script");
+    std::fs::write(&script, "#!/bin/sh\nsleep 8\n").expect("a probe script");
     #[cfg(unix)]
     std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
         .expect("a runnable probe script");

@@ -10,7 +10,8 @@
 //! One helper fixes every caller (target reloads and `run_with_timeout`),
 //! so there is exactly one place that gets this right:
 //! - the child leads its own process group (`process_group(0)`), so the
-//!   deadline kill reaches forked grandchildren, not just the child;
+//!   deadline kill reaches forked grandchildren, not just the child (a
+//!   grandchild that calls `setsid` leaves the group and is not reached);
 //! - both pipes drain on nonblocking reads while the child runs, so a
 //!   full pipe never wedges a child that would otherwise exit;
 //! - each stream keeps at most [`MAX_OUTPUT_BYTES`], then the group is
