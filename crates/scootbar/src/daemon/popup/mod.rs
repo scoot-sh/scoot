@@ -702,10 +702,21 @@ impl State {
             .map(|viewporter| viewporter.get_viewport(&surface, qh, ()));
         // Anchored to the module's rect on the bar (logical, in the layer
         // surface's own coordinates), opening away from the bar's edge.
+        // Spans are in surface coordinates (offset by the bar's origin where
+        // the shadow grew side room into the margin), so `start`/`end` land
+        // on the module; the anchor rect's y is the bar's own row, never the
+        // grown surface's.
         let (start, end) = anchor_span(scale, span, bar_size.width);
+        let bar_room = style.shadow_room(entry.objects.bar.edge, entry.objects.bar.margin);
+        let bar_y = bar_room.top.min(bar_size.height);
+        let bar_h = bar_size
+            .height
+            .saturating_sub(bar_room.top)
+            .saturating_sub(bar_room.bottom)
+            .max(1);
         let positioner = wm.create_positioner(qh, ());
         positioner.set_size(int(requested.width), int(requested.height));
-        positioner.set_anchor_rect(int(start), 0, int(end - start), int(bar_size.height.max(1)));
+        positioner.set_anchor_rect(int(start), int(bar_y), int(end - start), int(bar_h));
         let (anchor, gravity) = match entry.objects.bar.edge {
             Edge::Top => (Anchor::Bottom, Gravity::Bottom),
             Edge::Bottom => (Anchor::Top, Gravity::Top),

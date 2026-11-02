@@ -364,37 +364,34 @@ impl Canvas {
         // surface, never its shadow. Only when the size, offset or
         // effective radius changes, and never for a square shadowless bar,
         // which keeps the default (the whole surface, which is the bar).
-        let pad = style.shadow_pad(scene.edge);
-        let bar_y = match scene.edge {
-            crate::bar::Edge::Top => 0,
-            crate::bar::Edge::Bottom => pad.top.min(frame.size.height),
-        };
+        let room = style.shadow_room(scene.edge, scene.margin);
+        let bar_x = room.left.min(frame.size.width);
+        let bar_y = room.top.min(frame.size.height);
+        let bar_w = frame
+            .size
+            .width
+            .saturating_sub(room.left)
+            .saturating_sub(room.right)
+            .max(1);
         let bar_h = frame
             .size
             .height
-            .saturating_sub(pad.top)
-            .saturating_sub(pad.bottom)
+            .saturating_sub(room.top)
+            .saturating_sub(room.bottom)
             .max(1);
-        let round = region::effective_radius(style.radius, frame.size.width, bar_h);
+        let round = region::effective_radius(style.radius, bar_w, bar_h);
         let has_shadow = style.shadow != scootui::effects::ShadowStyle::None;
-        let input = (frame.size, bar_y, bar_h, round);
+        let input = (frame.size, bar_x, bar_y, bar_w, bar_h, round);
         if layer.input != Some(input) {
             let needs_region = round > 0 || has_shadow;
-            let was = layer
-                .input
-                .is_some_and(|(size, y, h, r)| r > 0 || size.height != h || y != 0);
+            let was = layer.input.is_some_and(|(size, x, y, w, h, r)| {
+                r > 0 || size.height != h || size.width != w || y != 0 || x != 0
+            });
             // Send when the shape needs an explicit region, or when it
             // stops needing one (back to the default whole surface).
             if needs_region || was {
                 set_input_region_bar(
-                    globals,
-                    qh,
-                    surface,
-                    frame.size.width,
-                    bar_y,
-                    bar_h,
-                    round,
-                    has_shadow,
+                    globals, qh, surface, bar_x, bar_y, bar_w, bar_h, round, has_shadow,
                 );
             }
             layer.input = Some(input);
@@ -464,19 +461,20 @@ pub(super) fn set_opaque_region(
 }
 
 /// `wl_surface.set_input_region` for the bar's own rect inside a shadowed
-/// surface: `(bar_width, bar_y, bar_height)` in surface-local logical
+/// surface: `(bar_x, bar_y, bar_width, bar_height)` in surface-local logical
 /// pixels, corners cut by `radius`. The shadow never takes input: clicks in
 /// it fall through to the windows below, the way a tooltip's empty region
 /// falls through to the bar. A square shadowless bar keeps the default
-/// (the whole surface); a square shadowed bar gets its own rect explicitly,
-/// so the shadow stays click-through.
+/// (the whole surface, which is the bar); a square shadowed bar gets its
+/// own rect explicitly, so the shadow stays click-through.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn set_input_region_bar(
     globals: &Globals,
     qh: &QueueHandle<State>,
     surface: &WlSurface,
-    bar_width: u32,
+    bar_x: u32,
     bar_y: u32,
+    bar_width: u32,
     bar_height: u32,
     radius: u32,
     has_shadow: bool,
@@ -488,7 +486,7 @@ pub(super) fn set_input_region_bar(
     if radius == 0 {
         let region = globals.compositor.create_region(qh, ());
         region.add(
-            logical(0),
+            logical(bar_x),
             logical(bar_y),
             logical(bar_width),
             logical(bar_height),
@@ -502,7 +500,7 @@ pub(super) fn set_input_region_bar(
     let region = globals.compositor.create_region(qh, ());
     for rect in rects {
         region.add(
-            logical(rect.x),
+            logical(rect.x.saturating_add(bar_x)),
             logical(rect.y.saturating_add(bar_y)),
             logical(rect.width),
             logical(rect.height),

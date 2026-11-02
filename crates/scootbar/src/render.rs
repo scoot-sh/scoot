@@ -23,7 +23,7 @@
 //! records differ once there are two buffers: a buffer written two draws
 //! ago has missed one draw's changes, and gets them now.
 
-use crate::bar::Edge;
+use crate::bar::{Edge, Margin};
 use crate::density::{DENOMINATOR, Scale, scaled_length};
 use crate::layout::{self, Section};
 use crate::modules::{CustomDraw, Measure, OutputView, Placed, View};
@@ -117,39 +117,97 @@ impl Style {
         Some(spec)
     }
 
-    /// Room the bar's shadow needs around its rect, in logical pixels, for
-    /// `edge`. The surface reserves only the window-facing side (bottom for
-    /// a top bar, top for a bottom bar); the anchored edge and the sides
-    /// clip, so no shadow ever widens the surface sideways or pushes past
-    /// the screen edge. The exclusive zone stays the bar's height either
-    /// way, so windows never move for a shadow.
-    pub fn shadow_pad(&self, edge: Edge) -> Pad {
+    /// The shadow's full room around its shape, in logical pixels, for
+    /// `edge`: what it reaches on every side before anything clips it (see
+    /// [`Shadow::pad`]). With no margin the surface keeps only the
+    /// window-facing side of this (see [`Style::shadow_room`]).
+    pub fn shadow_full_pad(&self, edge: Edge) -> Pad {
         let Some(spec) = self.shadow_spec(edge) else {
             return Pad::ZERO;
         };
-        let full = Shadow::new(spec).pad();
+        Shadow::new(spec).pad()
+    }
+
+    /// Room the surface grows for the shadow where `margin` holds it, in
+    /// logical pixels, for `edge`: the window-facing side always (that room
+    /// overlaps windows, never the margin), and on each other side at most
+    /// what the margin holds (`min(shadow side room, margin on that side)`).
+    /// A bar with no margin keeps only the window-facing side; a floating
+    /// bar grows into its margins so the soft shadow falls off naturally
+    /// instead of clipping at the surface edge. The margin on the edge
+    /// opposite the bar's does nothing (the protocol says so) and contributes
+    /// no room. The exclusive zone stays the bar's height either way.
+    pub fn shadow_room(&self, edge: Edge, margin: Margin) -> Pad {
+        let full = self.shadow_full_pad(edge);
+        if full.is_zero() {
+            return Pad::ZERO;
+        }
         match edge {
             Edge::Top => Pad {
-                top: 0,
-                right: 0,
+                top: full.top.min(margin.top),
+                right: full.right.min(margin.right),
                 bottom: full.bottom,
-                left: 0,
+                left: full.left.min(margin.left),
             },
             Edge::Bottom => Pad {
                 top: full.top,
-                right: 0,
-                bottom: 0,
-                left: 0,
+                right: full.right.min(margin.right),
+                bottom: full.bottom.min(margin.bottom),
+                left: full.left.min(margin.left),
             },
         }
     }
 
-    /// The surface height for a bar `height` logical pixels high on `edge`:
-    /// the bar plus the window-facing shadow room. Width is unchanged (side
-    /// shadows clip). The exclusive zone stays `height`.
-    pub fn surface_height(&self, height: u32, edge: Edge) -> u32 {
-        let pad = self.shadow_pad(edge);
-        height.saturating_add(pad.top).saturating_add(pad.bottom)
+    /// The surface height for a bar `height` logical pixels high on `edge`
+    /// where it holds `margin`: the bar plus the room the shadow grows into
+    /// it (see [`Style::shadow_room`]). With no margin the surface keeps
+    /// only the window-facing shadow room and the width never grows; the
+    /// exclusive zone stays `height` either way.
+    pub fn surface_height_in(&self, height: u32, edge: Edge, margin: Margin) -> u32 {
+        let room = self.shadow_room(edge, margin);
+        height.saturating_add(room.top).saturating_add(room.bottom)
+    }
+
+    /// The layer-shell margins to send for a bar holding `margin` on `edge`:
+    /// each side (and the anchored edge) reduced by the shadow room grown
+    /// into it, so the bar's own rect stays at exactly the same screen
+    /// position. The window-facing room is new surface in the windows' area,
+    /// never from the margin, so that side is untouched. With no margin the
+    /// margins go over unchanged.
+    pub fn surface_margins(&self, margin: Margin, edge: Edge) -> Margin {
+        let room = self.shadow_room(edge, margin);
+        match edge {
+            Edge::Top => Margin {
+                top: margin.top.saturating_sub(room.top),
+                right: margin.right.saturating_sub(room.right),
+                bottom: margin.bottom,
+                left: margin.left.saturating_sub(room.left),
+            },
+            Edge::Bottom => Margin {
+                top: margin.top,
+                right: margin.right.saturating_sub(room.right),
+                bottom: margin.bottom.saturating_sub(room.bottom),
+                left: margin.left.saturating_sub(room.left),
+            },
+        }
+    }
+
+    /// The exclusive zone to send for `bar` on its edge: the bar's height
+    /// plus the anchored-edge shadow room grown into the margin, so the
+    /// reserved strip (the zone plus the sent anchored margin, which the
+    /// compositor adds itself) is exactly height plus margin — windows start
+    /// at the same place with and without a shadow. `-1` for a floating bar
+    /// (`exclusive = false`), as before.
+    pub fn exclusive_zone(&self, bar: &crate::bar::Bar) -> i32 {
+        if !bar.exclusive {
+            return -1;
+        }
+        let room = self.shadow_room(bar.edge, bar.margin);
+        let anchored = match bar.edge {
+            Edge::Top => room.top,
+            Edge::Bottom => room.bottom,
+        };
+        i32::try_from(bar.height.saturating_add(anchored)).unwrap_or(i32::MAX)
     }
 }
 
@@ -195,26 +253,39 @@ fn dev_shadow(spec: ShadowSpec, scale: Scale) -> ShadowSpec {
     }
 }
 
-/// The shadow's device pad for `edge` at `scale`: the window-facing room
-/// only, as [`Style::shadow_pad`] clips the rest. Computed arithmetically,
-/// so no tables are built on a repaint path.
-fn dev_pad(style: &Style, scale: Scale, edge: Edge) -> Pad {
+/// The shadow's device room for `edge` at `scale` where the bar holds
+/// `margin`: the window-facing room always, the sides and the anchored edge
+/// cut to what the margin holds (see [`Style::shadow_room`]). Computed
+/// arithmetically, so no tables are built on a repaint path. With no margin
+/// it is exactly [`dev_pad`].
+fn dev_room(style: &Style, scale: Scale, edge: Edge, margin: Margin) -> Pad {
     let Some(logical) = style.shadow_spec(edge) else {
         return Pad::ZERO;
     };
     let full = pad_of(dev_shadow(logical, scale));
+    if full.is_zero() {
+        return Pad::ZERO;
+    }
+    // The margin in device pixels: the room is compared in the pixels it is
+    // drawn in. 0 stays 0, as [`device`] keeps it.
+    let margin = Margin {
+        top: device(margin.top, scale),
+        right: device(margin.right, scale),
+        bottom: device(margin.bottom, scale),
+        left: device(margin.left, scale),
+    };
     match edge {
         Edge::Top => Pad {
-            top: 0,
-            right: 0,
+            top: full.top.min(margin.top),
+            right: full.right.min(margin.right),
             bottom: full.bottom,
-            left: 0,
+            left: full.left.min(margin.left),
         },
         Edge::Bottom => Pad {
             top: full.top,
-            right: 0,
-            bottom: 0,
-            left: 0,
+            right: full.right.min(margin.right),
+            bottom: full.bottom.min(margin.bottom),
+            left: full.left.min(margin.left),
         },
     }
 }
@@ -284,7 +355,7 @@ pub fn members(layout: &layout::Layout, placed: &[Placed]) -> Vec<Member> {
 /// for: the style, scale, bar size, corner radius and edge. The style is
 /// part of the key (`Soft` and `Glow` pad the same but paint different
 /// offset/blur), not just whether a spec exists.
-type ShadowCacheKey = (ShadowStyle, Scale, (u32, u32), u32, Edge);
+type ShadowCacheKey = (ShadowStyle, Scale, (u32, u32), u32, Edge, Pad);
 
 /// One output's modules as last measured and laid out. Everything here is
 /// indexed by member (its place on this output), not by started module.
@@ -322,10 +393,18 @@ pub struct Scene {
     measured: Option<(Scale, u32, u32)>,
     /// The corners' coverage, rebuilt only when their radius changes.
     corners: Corners,
+    /// The device shadow room the spans were last arranged with: a margin
+    /// reload that changes the room re-arranges even when no width moved.
+    room: Pad,
     /// The bar's anchored edge: the shadow falls window-ward from it
     /// (below a top bar, above a bottom bar). Set when the output settles;
     /// tests keep the default top.
     pub edge: Edge,
+    /// The bar's layer-shell margins, in logical pixels: where the shadow
+    /// grows its side and anchored-edge room. Set when the output settles
+    /// (with [`Scene::edge`]); tests keep the default none, which paints
+    /// exactly as before.
+    pub margin: Margin,
     /// The bar's drop shadow tables (device pixels), if it has one. Built
     /// outside any repaint via [`Shadow::prepare`] and read every frame it
     /// is drawn; `None` for `shadow = "none"` (nothing built or painted).
@@ -394,7 +473,9 @@ impl Scene {
             layout: 0,
             measured: None,
             corners: Corners::NONE,
+            room: Pad::ZERO,
             edge: Edge::Top,
+            margin: Margin::default(),
             shadow: None,
             shadow_for: None,
         }
@@ -436,8 +517,11 @@ impl Scene {
 
     /// Brings the views, widths and spans up to date for a bar `extent`
     /// device pixels big at `scale`. `extent` is the whole surface (the bar
-    /// plus its window-facing shadow room); the bar's own rect is derived
-    /// from it via [`Style::bar_rect`], using [`Scene::edge`].
+    /// plus the shadow's room where the margin holds it); the bar's own rect
+    /// is the surface less that room on every side, using [`Scene::edge`]
+    /// and [`Scene::margin`]. Spans are in surface coordinates (offset by the
+    /// bar's origin), so paint, damage and hit-testing all read them as
+    /// before.
     pub fn update(
         &mut self,
         placed: &[Placed],
@@ -448,16 +532,24 @@ impl Scene {
         extent: Size,
     ) {
         let edge = self.edge;
-        // The bar's own size inside the surface: the shadow owns the
-        // window-facing strip, the bar the rest. Sides and the anchored
-        // edge clip (no room), so width is the surface's own.
-        let pad = dev_pad(style, scale, edge);
+        // The bar's own size inside the surface: the shadow owns the room
+        // where the margin holds it (the window-facing strip always, the
+        // sides and the anchored edge where there is a margin), the bar the
+        // rest. With no margin this is exactly the old window-facing-only
+        // pad, so the geometry is byte-identical.
+        let room = dev_room(style, scale, edge, self.margin);
+        let bar_width = extent
+            .width
+            .saturating_sub(room.left)
+            .saturating_sub(room.right)
+            .max(1);
         let bar_height = extent
             .height
-            .saturating_sub(pad.top)
-            .saturating_sub(pad.bottom);
+            .saturating_sub(room.top)
+            .saturating_sub(room.bottom)
+            .max(1);
         let bar_size = Size {
-            width: extent.width,
+            width: bar_width,
             height: bar_height,
         };
         // Corners cut back to what the bar holds, not the whole surface:
@@ -469,10 +561,12 @@ impl Scene {
             self.corners = Corners::new(radius);
         }
         // The shadow tables, rebuilt when the style, scale, bar size,
-        // radius or edge changes and cached otherwise: no per-frame
-        // allocation once warm. `shadow = "none"` builds nothing. The key
-        // holds the style itself (`Soft` and `Glow` pad the same but paint
-        // different offset/blur), not just whether a spec exists.
+        // radius, edge or grown room changes and cached otherwise: no
+        // per-frame allocation once warm. `shadow = "none"` builds nothing.
+        // The key holds the style itself (`Soft` and `Glow` pad the same but
+        // paint different offset/blur), not just whether a spec exists, and
+        // the grown room (a margin reload that changes the side pads must
+        // not keep tables keyed without them).
         let shadow_key = style.shadow_spec(edge).map(|_| {
             (
                 style.shadow,
@@ -480,6 +574,7 @@ impl Scene {
                 (bar_size.width, bar_size.height),
                 radius,
                 edge,
+                room,
             )
         });
         if shadow_key != self.shadow_for {
@@ -491,7 +586,7 @@ impl Scene {
                 shadow
             });
         }
-        let width = extent.width;
+        let width = bar_size.width;
         let all = self.measured != Some((scale, width, style.font_size));
         self.measured = Some((scale, width, style.font_size));
         let em = em(style.font_size, scale);
@@ -560,8 +655,10 @@ impl Scene {
             resized |= width != *measured;
             *measured = width;
         }
-        // The layout is recomputed only when a width (or the bar) changed.
-        if !resized {
+        // The layout is recomputed only when a width, the bar, or the grown
+        // room changed (a margin reload moves the bar's origin inside a new
+        // surface even when every module measures the same).
+        if !resized && room == self.room && !self.spans.is_empty() {
             return;
         }
         // Clear the corners: the first module's padding starts at the
@@ -580,6 +677,15 @@ impl Scene {
             width,
             &mut self.next,
         );
+        // Spans are arranged bar-local; the surface reads them offset by the
+        // bar's origin, so paint, damage and hit-testing all stay in surface
+        // coordinates. With no margin the origin is 0 and this is a no-op.
+        if room.left > 0 {
+            for span in &mut self.next {
+                span.x = span.x.saturating_add(room.left);
+            }
+        }
+        self.room = room;
         if self.next != self.spans {
             std::mem::swap(&mut self.next, &mut self.spans);
             self.layout = self.layout.wrapping_add(1);
@@ -686,21 +792,23 @@ pub fn paint(
         whole = true;
     }
     // The bar's own rect inside the surface (device pixels): the shadow
-    // owns the window-facing strip, the bar the rest.
-    let pad = dev_pad(style, frame.scale, edge);
-    let bar_y = match edge {
-        Edge::Top => 0,
-        Edge::Bottom => pad.top.min(canvas.height()),
-    };
+    // owns the room where the margin holds it (the window-facing strip
+    // always, the sides and the anchored edge where there is a margin), the
+    // bar the rest. With no margin this is exactly the old rect.
+    let room = dev_room(style, frame.scale, edge, scene.margin);
+    let bar_y = room.top.min(canvas.height());
     let bar_h = canvas
         .height()
-        .saturating_sub(pad.top)
-        .saturating_sub(pad.bottom)
+        .saturating_sub(room.top)
+        .saturating_sub(room.bottom)
         .max(1);
     let bar_rect = scootui::region::Rect {
-        x: 0,
+        x: room.left.min(canvas.width()),
         y: bar_y,
-        width: canvas.width(),
+        width: canvas
+            .width()
+            .saturating_sub(room.left)
+            .saturating_sub(room.right),
         height: bar_h,
     };
     let radius = device(style.radius, frame.scale)

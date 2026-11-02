@@ -547,8 +547,9 @@ fn a_shadowed_bar_blends_and_keeps_its_zone() {
             timing: scootui::motion::Timing::NONE,
             ..Bar::new(&[]).style
         };
-        // Top bars shadow below, bottom bars above: opposite sides.
-        let pad = look.shadow_pad(edge);
+        // Top bars shadow below, bottom bars above: opposite sides. With no
+        // margin the room is exactly the old window-facing-only pad.
+        let pad = look.shadow_room(edge, crate::bar::Margin::default());
         assert_eq!(
             (pad.bottom, pad.top),
             (pad_bottom, pad_top),
@@ -561,7 +562,7 @@ fn a_shadowed_bar_blends_and_keeps_its_zone() {
         );
         // The surface grows window-ward; the zone does not.
         assert_eq!(
-            look.surface_height(geom.height, edge),
+            look.surface_height_in(geom.height, edge, crate::bar::Margin::default()),
             geom.height + pad_bottom + pad_top,
             "{style:?} {edge:?}"
         );
@@ -586,8 +587,237 @@ fn a_shadowed_bar_blends_and_keeps_its_zone() {
     };
     let (top, bottom) = gradient.fill_stops();
     assert_ne!(top, bottom, "gradient has two stops");
-    assert_eq!(gradient.surface_height(28, crate::bar::Edge::Top), 28 + 16);
+    assert_eq!(
+        gradient.surface_height_in(28, crate::bar::Edge::Top, crate::bar::Margin::default()),
+        28 + 16
+    );
     assert_eq!(gradient.opaque_inset(), None);
+}
+
+/// The shadow's room grows into the margin side by side: `min(shadow side
+/// room, margin on that side)` on the sides and the anchored edge, the
+/// window-facing side always. Soft is offset 4 blur 12 (top 8, sides 12,
+/// bottom 16); deep is offset 10 blur 28 (top 18, sides 28, bottom 38);
+/// glow is offset 0 blur 16 (16 everywhere).
+#[test]
+fn shadow_room_grows_into_the_margin() {
+    use crate::bar::{Edge, Margin};
+    use scootui::effects::{FillStyle, ShadowStyle};
+    let style = |shadow| Style {
+        shadow,
+        fill: FillStyle::Solid,
+        timing: scootui::motion::Timing::NONE,
+        ..Bar::new(&[]).style
+    };
+    let room = |shadow, edge, margin| style(shadow).shadow_room(edge, margin);
+    let all = |v| Margin {
+        top: v,
+        right: v,
+        bottom: v,
+        left: v,
+    };
+    // No margin: exactly the old window-facing-only room.
+    assert_eq!(
+        room(ShadowStyle::Soft, Edge::Top, Margin::default()),
+        scootui::paint::Pad {
+            top: 0,
+            right: 0,
+            bottom: 16,
+            left: 0,
+        }
+    );
+    assert_eq!(
+        room(ShadowStyle::Soft, Edge::Bottom, Margin::default()),
+        scootui::paint::Pad {
+            top: 16,
+            right: 0,
+            bottom: 0,
+            left: 0,
+        }
+    );
+    assert_eq!(
+        room(ShadowStyle::None, Edge::Top, all(12)),
+        scootui::paint::Pad::ZERO,
+        "no shadow builds no room, whatever the margin"
+    );
+    // Margin larger than every side: the full room (top 8, sides 12).
+    assert_eq!(
+        room(ShadowStyle::Soft, Edge::Top, all(100)),
+        scootui::paint::Pad {
+            top: 8,
+            right: 12,
+            bottom: 16,
+            left: 12,
+        }
+    );
+    assert_eq!(
+        room(ShadowStyle::Deep, Edge::Bottom, all(100)),
+        scootui::paint::Pad {
+            top: 38,
+            right: 28,
+            bottom: 18,
+            left: 28,
+        }
+    );
+    assert_eq!(
+        room(ShadowStyle::Glow, Edge::Top, all(100)),
+        scootui::paint::Pad {
+            top: 16,
+            right: 16,
+            bottom: 16,
+            left: 16,
+        }
+    );
+    // Margin smaller than the room: cut to it (partial), per side.
+    assert_eq!(
+        room(ShadowStyle::Soft, Edge::Top, all(4)),
+        scootui::paint::Pad {
+            top: 4,
+            right: 4,
+            bottom: 16,
+            left: 4,
+        }
+    );
+    assert_eq!(
+        room(
+            ShadowStyle::Soft,
+            Edge::Top,
+            Margin {
+                top: 3,
+                right: 20,
+                bottom: 50,
+                left: 0
+            }
+        ),
+        scootui::paint::Pad {
+            top: 3,
+            right: 12,
+            bottom: 16,
+            left: 0,
+        }
+    );
+    // The margin on the edge opposite the bar's does nothing, whatever it
+    // holds (the protocol says so): a top bar's bottom margin buys no room.
+    assert_eq!(
+        room(
+            ShadowStyle::Soft,
+            Edge::Top,
+            Margin {
+                top: 0,
+                right: 0,
+                bottom: 50,
+                left: 0
+            }
+        ),
+        scootui::paint::Pad {
+            top: 0,
+            right: 0,
+            bottom: 16,
+            left: 0,
+        }
+    );
+}
+
+/// The bar's own rect stays at exactly the same screen position with and
+/// without a shadow: the sent margins shrink by the grown room, and the
+/// sent zone grows by the anchored pad, so the reserved strip (zone plus
+/// sent anchored margin) is height plus margin either way.
+#[test]
+fn the_bar_keeps_its_place_and_the_zone_keeps_its_strip() {
+    use crate::bar::{Edge, Margin};
+    use scootui::effects::{FillStyle, ShadowStyle};
+    let style = Style {
+        shadow: ShadowStyle::Soft,
+        fill: FillStyle::Solid,
+        timing: scootui::motion::Timing::NONE,
+        ..Bar::new(&[]).style
+    };
+    for edge in [Edge::Top, Edge::Bottom] {
+        for margin in [
+            Margin::default(),
+            Margin {
+                top: 4,
+                right: 4,
+                bottom: 4,
+                left: 4,
+            },
+            Margin {
+                top: 12,
+                right: 12,
+                bottom: 12,
+                left: 12,
+            },
+            Margin {
+                top: 100,
+                right: 100,
+                bottom: 100,
+                left: 100,
+            },
+        ] {
+            let bar = crate::bar::Bar {
+                edge,
+                height: 28,
+                margin,
+                ..crate::bar::Bar::default()
+            };
+            let room = style.shadow_room(edge, margin);
+            let sent = style.surface_margins(margin, edge);
+            // Sides and the anchored edge: what was sent plus what was
+            // grown is what was configured.
+            assert_eq!(sent.left + room.left, margin.left, "{edge:?} {margin:?}");
+            assert_eq!(sent.right + room.right, margin.right, "{edge:?} {margin:?}");
+            // The bar's origin inside the surface is the grown room; the
+            // surface's origin is the sent margin; their sum is the
+            // configured margin either way.
+            let (anchor_sent, anchor_room, anchor_margin) = match edge {
+                Edge::Top => (sent.top, room.top, margin.top),
+                Edge::Bottom => (sent.bottom, room.bottom, margin.bottom),
+            };
+            assert_eq!(
+                anchor_sent + anchor_room,
+                anchor_margin,
+                "{edge:?} {margin:?}"
+            );
+            // The reserved strip never moves for a shadow.
+            let zone = style.exclusive_zone(&bar);
+            assert_eq!(
+                zone + anchor_sent as i32,
+                28 + anchor_margin as i32,
+                "{edge:?} {margin:?}"
+            );
+            // The surface holds the bar plus the room, nothing else.
+            assert_eq!(
+                style.surface_height_in(28, edge, margin),
+                28 + room.top + room.bottom,
+                "{edge:?} {margin:?}"
+            );
+        }
+    }
+    // No margin, no shadow: the zone is the bar's height, as before.
+    let plain = crate::bar::Bar {
+        height: 28,
+        ..crate::bar::Bar::default()
+    };
+    assert_eq!(
+        Style {
+            ..Bar::new(&[]).style
+        }
+        .exclusive_zone(&plain),
+        28
+    );
+    // A floating bar reserves nothing, whatever its shadow and margin.
+    let floating = crate::bar::Bar {
+        height: 28,
+        margin: Margin {
+            top: 12,
+            right: 12,
+            bottom: 12,
+            left: 12,
+        },
+        exclusive: false,
+        ..crate::bar::Bar::default()
+    };
+    assert_eq!(style.exclusive_zone(&floating), -1);
 }
 
 /// A soft-to-glow switch at the same size and scale rebuilds the shadow

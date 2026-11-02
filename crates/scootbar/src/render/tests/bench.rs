@@ -199,7 +199,11 @@ impl Rig {
         rig.style.fill = fill;
         // The surface grows window-ward with the shadow: resize the
         // rig's frame and buffers to it, as the daemon does.
-        let surf_h = rig.style.surface_height(HEIGHT, crate::bar::Edge::Top);
+        let surf_h = rig.style.surface_height_in(
+            HEIGHT,
+            crate::bar::Edge::Top,
+            crate::bar::Margin::default(),
+        );
         let surf_size = Size {
             width: WIDTH,
             height: surf_h,
@@ -470,7 +474,8 @@ fn cells_device(scale: Scale, label: &str) -> (u32, u32) {
         fill: FillStyle::Solid,
         timing: scootui::motion::Timing::NONE,
     };
-    let surf_h = style.surface_height(HEIGHT, crate::bar::Edge::Top);
+    let surf_h =
+        style.surface_height_in(HEIGHT, crate::bar::Edge::Top, crate::bar::Margin::default());
     scale
         .buffer(Size {
             width: WIDTH,
@@ -498,7 +503,11 @@ fn warm_frames_allocate_nothing_once_tables_are_cached() {
             let mut rig = Rig::new(scale, 255);
             rig.style.shadow = shadow;
             rig.style.fill = fill;
-            let surf_h = rig.style.surface_height(HEIGHT, crate::bar::Edge::Top);
+            let surf_h = rig.style.surface_height_in(
+                HEIGHT,
+                crate::bar::Edge::Top,
+                crate::bar::Margin::default(),
+            );
             let surf_size = Size {
                 width: WIDTH,
                 height: surf_h,

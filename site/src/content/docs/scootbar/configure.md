@@ -362,10 +362,12 @@ font-size = 20                  # 1 to 256, as [bar] font-size; absent is the sh
   geometry changed is made again. Modules are restarted as at any reload,
   except an `exec` whose table is unchanged, which keeps its child (above)
   — unless the reload changed only style (`[colors]`; `[bar]` `radius`,
-  `popup-radius`, `opacity`, `font`, `fallback-fonts`, `font-size`; the
+  `popup-radius`, `opacity`, `shadow`, `fill`, `motion`, `font`,
+  `fallback-fonts`, `font-size`; the
   layout's `padding`, `spacing`, `separator` and per-module `margins`;
   `tooltip-delay`), in which case every module keeps running with its
-  state and the bar only repaints; an open popup or tooltip is restyled
+  state and the bar only repaints (remaking its surface where the shadow's
+  room changed); an open popup or tooltip is restyled
   to the new style where it fits its surface, remade where it does not,
   and closed only where neither is possible. A module's own colors (like
   `workspaces` `active-color`) and its icon art are not style: they take
@@ -550,9 +552,12 @@ motion-bounce = 0.6
 
 - **A rounded, translucent or shadowed bar is an `ARGB8888` buffer** (premultiplied);
   a square, opaque, shadowless bar stays `XRGB8888`. The surface is the bar
-  plus the window-facing shadow room (below a top bar, above a bottom bar);
-  the anchored edge and the sides clip, so width never grows. The margin
-  is still the protocol's, and the corner pixels are the only transparent
+  plus the window-facing shadow room (below a top bar, above a bottom bar),
+  plus, where the bar holds a margin, the side and anchored-edge shadow room
+  grown into it. A bar with no margin still clips its sides and anchored
+  edge, so its width never grows: there is no empty screen beside or behind
+  it for a shadow to fall onto, and the surface is exactly the bar. The
+  margin is still the protocol's, and the corner pixels are the only transparent
   ones without a shadow.
 - **Opaque region**: an opaque, shadowless bar tells the compositor which pixels are
   opaque, so it can skip blending under them (all of a square bar; all but
@@ -571,17 +576,20 @@ motion-bounce = 0.6
   the strip alone), plus the window pixels under the bar that occlusion
   culling would otherwise skip entirely.
 - **The shadow never moves a client's window**: the surface reserves the
-  window-facing room (below a top bar, above a bottom bar), while the
-  exclusive zone stays the bar's own height. Windows start at height plus
-  margin, as before; the shadow overlaps them instead of pushing them.
+  window-facing room (below a top bar, above a bottom bar) plus, where the
+  bar holds a margin, the side and anchored-edge room grown into it, while
+  the exclusive zone is the bar's height plus the anchored-edge room. The
+  reserved strip (zone plus the sent anchored margin, which the compositor
+  adds itself) is height plus margin either way, so windows start at height
+  plus margin, as before; the shadow overlaps them instead of pushing them.
   A bottom bar mirrors a top bar's offset so its shadow falls upward.
 - **The input region is the bar's own rounded shape, never its shadow**:
-  the bar's rect at its offset (top at 0, bottom after the top pad),
-  cut by the radius, so clicks in the shadow or in a cut corner reach what
-  is behind the bar instead of an invisible bar. A square shadowless bar
-  keeps the default (the whole surface, which is the bar); a square
-  shadowed bar gets its own rect explicitly, so the shadow stays
-  click-through.
+  the bar's rect at its offset (beside and below the grown room for a top
+  bar; beside and above it for a bottom bar), cut by the radius, so clicks
+  in the shadow or in a cut corner reach what is behind the bar instead of
+  an invisible bar. A square shadowless bar keeps the default (the whole
+  surface, which is the bar); a square shadowed bar gets its own rect
+  explicitly, so the shadow stays click-through.
 - **Popups reserve room on every side**: a click popup's surface is its
   layout plus the shadow's pad plus the entrance's room (16 px per side when
   motion moves, none for `none`) on all four sides, and the popup sits at the
@@ -601,7 +609,8 @@ motion-bounce = 0.6
   settle.
 - **Scales rebuild, then cache**: shadow tables are per device-pixel size
   (`Shadow::prepare` outside any repaint, `shadow = "none"` builds
-  nothing) and the entrance room scales with them. They rebuild when the style, scale, radius, bar size, edge or
+  nothing) and the entrance room scales with them. They rebuild when the style, scale, radius, bar size, edge, grown
+  side room or
   timing changes
   and cache otherwise; warm frames allocate nothing. The bench covers 1x
   and 2x (see below).

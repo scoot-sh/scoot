@@ -53,7 +53,7 @@ fn every_theme_token_alone_is_style_only() {
 
 #[test]
 fn bar_style_keys_and_the_font_are_style_only() {
-    let changes: [fn(&mut Config); 9] = [
+    let changes: [fn(&mut Config); 14] = [
         |new: &mut Config| new.radius += 1,
         |new: &mut Config| new.opacity = new.opacity.saturating_sub(1),
         |new: &mut Config| {
@@ -67,6 +67,11 @@ fn bar_style_keys_and_the_font_are_style_only() {
         |new: &mut Config| new.layout.spacing += 1,
         |new: &mut Config| new.layout.separator += 1,
         |new: &mut Config| new.layout.margins.push(("clock", 2)),
+        |new: &mut Config| new.shadow = scootui::effects::ShadowStyle::Soft,
+        |new: &mut Config| new.fill = scootui::effects::FillStyle::Gradient,
+        |new: &mut Config| new.motion = scootui::motion::Curve::Spring,
+        |new: &mut Config| new.motion_ms += 1,
+        |new: &mut Config| new.motion_bounce = 0.5,
     ];
     for change in changes {
         let (old, new) = changed(change);
@@ -169,6 +174,13 @@ fn every_style_field_at_once_is_style_only() {
         new.layout.spacing += 1;
         new.layout.separator = 1;
         new.layout.margins.push(("clock", 2));
+        // Depth and motion are style too (see `style_only`): a shadow, fill
+        // or entrance change keeps every module running.
+        new.shadow = scootui::effects::ShadowStyle::Soft;
+        new.fill = scootui::effects::FillStyle::Gradient;
+        new.motion = scootui::motion::Curve::Spring;
+        new.motion_ms += 1;
+        new.motion_bounce = 0.5;
     });
     assert_ne!(old.theme, new.theme, "the theme under test differs");
     assert!(style_only(&old, &new));
