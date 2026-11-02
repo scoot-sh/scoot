@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.35](https://github.com/scoot-sh/scoot/compare/v0.6.34...v0.6.35) - 2026-11-02
+
+### nix,scootctl,docs
+
+- added: Nix-declared look targets plus six-app starter pack ([#876](https://github.com/scoot-sh/scoot/pull/876))
+
 ## [0.6.34](https://github.com/scoot-sh/scoot/compare/v0.6.33...v0.6.34) - 2026-11-02
 
 ### scoot-look,scootctl
