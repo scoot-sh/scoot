@@ -5539,3 +5539,86 @@ fn symlinked_target_dir_renders_like_a_plain_one() {
         "the stowed target renders"
     );
 }
+
+#[test]
+fn nix_dir_symlink_shape_succeeds_but_per_file_symlinks_refuse() {
+    // The Nix module exposes one directory symlink per target
+    // (`scoot/look-targets/<name>` -> a store dir of regular files
+    // `target.toml` + `template`): that shape validates and applies.
+    // The old per-file shape (each file a symlink into the store, what
+    // `xdg.configFile` per-file entries produce) still refuses via
+    // `O_NOFOLLOW`.
+    let ok = fixture("targets-nix-dir");
+    let store = ok._root.join("store/kitty-colors");
+    std::fs::create_dir_all(&store).expect("a store dir");
+    std::fs::write(
+        store.join("target.toml"),
+        "name = \"kitty-colors\"\noutput = \"kitty/colors.conf\"\ntemplate = \"template\"\n",
+    )
+    .expect("a target.toml");
+    std::fs::write(store.join("template"), KITTY_TEMPLATE).expect("a template");
+    assert!(
+        !std::fs::symlink_metadata(store.join("target.toml"))
+            .expect("a manifest meta")
+            .file_type()
+            .is_symlink(),
+        "the store manifest is a regular file"
+    );
+    assert!(
+        !std::fs::symlink_metadata(store.join("template"))
+            .expect("a template meta")
+            .file_type()
+            .is_symlink(),
+        "the store template is a regular file"
+    );
+    let root = ok.config.join("scoot/look-targets");
+    std::fs::create_dir_all(&root).expect("a targets root");
+    std::os::unix::fs::symlink(&store, root.join("kitty-colors")).expect("a dir link");
+    let validation = validate_entry(
+        &ok.catalog,
+        "look-a",
+        &FakeChecks::default(),
+        false,
+        Some(&ok.config),
+    )
+    .expect("validate runs");
+    assert!(validation.errors.is_empty(), "{:?}", validation.errors);
+    let report = offline_apply(&ok, "look-a", &options(), &ScriptedLeaves::ok());
+    assert!(
+        PathBuf::from(&report.rendered)
+            .join("targets/kitty/colors.conf")
+            .is_file(),
+        "the directory-symlinked target renders"
+    );
+
+    // Per-file symlinks (the pre-fix Nix emission) refuse: the manifest
+    // symlink refuses before the template is even read.
+    let bad = fixture("targets-nix-per-file");
+    let dir = bad.config.join("scoot/look-targets/kitty-colors");
+    std::fs::create_dir_all(&dir).expect("a target dir");
+    let bad_store = bad._root.join("store/kitty-colors");
+    std::fs::create_dir_all(&bad_store).expect("a store dir");
+    std::fs::write(
+        bad_store.join("target.toml"),
+        "name = \"kitty-colors\"\noutput = \"kitty/colors.conf\"\ntemplate = \"template\"\n",
+    )
+    .expect("a target.toml");
+    std::fs::write(bad_store.join("template"), KITTY_TEMPLATE).expect("a template");
+    std::os::unix::fs::symlink(bad_store.join("target.toml"), dir.join("target.toml"))
+        .expect("a manifest link");
+    std::os::unix::fs::symlink(bad_store.join("template"), dir.join("template"))
+        .expect("a template link");
+    let validation = validate_entry(
+        &bad.catalog,
+        "look-a",
+        &FakeChecks::default(),
+        false,
+        Some(&bad.config),
+    )
+    .expect("validate runs");
+    assert!(
+        validation.errors.iter().any(|e| e.contains("is a symlink")),
+        "per-file symlinks refuse: {:?}",
+        validation.errors
+    );
+}

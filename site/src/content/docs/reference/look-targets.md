@@ -157,7 +157,9 @@ Six maintained targets ship in-tree in `docs/examples/look-targets/<name>/`
 example cannot rot). Copy the directory you want into
 `~/.config/scoot/look-targets/<name>/` and add the wiring line to the app's
 own config, once, by hand. Keys you set in your own config after the
-include win per key. None of the six declares a `[reload]`: the middle
+include win per key. All six need a look with a `[terminal]` table;
+against a look without one `validate` names the missing token. None of
+the six declares a `[reload]`: the middle
 column says how each app picks up the re-render.
 
 | Target | What it themes | Picks up a swap |

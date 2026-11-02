@@ -209,13 +209,12 @@ let
     if d == "." || d == "" then "session.sh" else "${d}/session.sh";
 
   # Whether a Nix-declared look target output is structurally sound:
-  # relative, normalized, no `..`, no leading `/`, no backslash, no
-  # hidden segments, 1 to 512 bytes, each segment 1 to 64 bytes. The
-  # rest of the grammar (ASCII-only, no control characters, staying
-  # under the config home through symlinks) stays runtime-checked by
-  # `scoot look validate` (see `check_target_path` in
-  # `crates/scoot-look/src/targets.rs`); this only fails the evaluation
-  # on the shapes that are cheap to name here.
+  # relative, normalized, ASCII-only (printable, no control characters),
+  # no `..`, no leading `/`, no backslash, no hidden segments, 1 to 512
+  # bytes, each segment 1 to 64 bytes. Only staying under the config home
+  # through symlinks stays runtime-checked by `scoot look validate` (see
+  # `check_target_path` in `crates/scoot-look/src/targets.rs`); this fails
+  # the evaluation on everything else, matching the tool's grammar.
   targetOutputValid =
     output:
     let
@@ -230,11 +229,44 @@ let
     in
     output != ""
     && builtins.stringLength output <= 512
+    && builtins.match "^[ -~]*$" output != null
     && !(lib.hasInfix "\\" output)
     && !(lib.hasPrefix "/" output)
     && !(lib.hasInfix "//" output)
     && !(lib.hasSuffix "/" output)
     && lib.all segmentOk segments;
+
+  # One Nix-declared look target as a store directory of regular files:
+  # `target.toml` plus the template file named `template` (what the
+  # manifest's `template = "template"` names). Built with `runCommandLocal`
+  # copying bytes into real files, never symlinks: Home Manager turns every
+  # `xdg.configFile` entry into a store symlink, and the tool refuses
+  # symlinked manifests/templates (`O_NOFOLLOW`), so per-file entries would
+  # make every Nix-declared target refuse. A directory `source` instead
+  # links the target directory itself (`scoot/look-targets/<name>` ->
+  # store dir), the shape slice 1 supports (`discover_in` canonicalizes a
+  # symlinked dir): the files inside stay regular and validate/apply pass.
+  # One directory symlink per target (not one for the whole tree) so a
+  # hand-written sibling in the same parent keeps working beside the
+  # managed ones. `recursive` stays unset (false): Home Manager then links
+  # the directory itself, not per-file.
+  lookTargetDir =
+    name: target:
+    let
+      tomlFile = builtins.toFile "${name}-target.toml" (targetTomlText name target);
+      templateFile =
+        if builtins.isPath target.template then
+          target.template
+        else if lib.isStorePath target.template then
+          builtins.toFile "${name}-template" (builtins.readFile target.template)
+        else
+          builtins.toFile "${name}-template" target.template;
+    in
+    pkgs.runCommandLocal "scoot-look-target-${name}" { } ''
+      mkdir -p $out
+      cp -- "${tomlFile}" "$out/target.toml"
+      cp -- "${templateFile}" "$out/template"
+    '';
 
   # One Nix-declared look target as its `target.toml` bytes: the same
   # grammar slice 1 reads (name, relative output, the template file
@@ -381,7 +413,7 @@ in
           options = {
             template = lib.mkOption {
               type = lib.types.either lib.types.path lib.types.lines;
-              example = ./alacritty-colors.tmpl;
+              example = ../../docs/examples/look-targets/alacritty/colors.tmpl;
               description = ''
                 The template the target renders: a path to a template file,
                 or the template text itself. Renders with the active look's
@@ -396,8 +428,10 @@ in
               description = ''
                 Where the rendered file lands, relative to the config home
                 (`kitty/colors.conf`), mirrored under `targets/` in the
-                render. Relative and normalized: no `..`, no absolute path,
-                no hidden segments. Anything else fails the evaluation.
+                render. Relative and normalized: ASCII only, no `..`, no
+                absolute path, no hidden segments, no control characters.
+                Anything else fails the evaluation; staying under the config
+                home through symlinks stays checked by `scoot look validate`.
               '';
             };
 
@@ -416,7 +450,9 @@ in
                       description = ''
                         The program plus its arguments, run directly (never
                         through a shell) after a successful swap. A bare name
-                        on `PATH` or an absolute path.
+                        on `PATH` or an absolute path. The program shape and
+                        control characters stay checked by `scoot look
+                        validate`, not at evaluation.
                       '';
                     };
 
@@ -464,10 +500,11 @@ in
         }
       '';
       description = ''
-        User-owned look targets, Nix-declared: each entry lands as
-        `scoot/look-targets/<name>/{target.toml,template}` in the config
-        home, exactly like a hand-written target. Needs only
-        `programs.scoot.enable` (no catalog, no profile).
+        User-owned look targets, Nix-declared: each entry links as a
+        directory symlink `scoot/look-targets/<name>` to a store directory
+        of regular files (`target.toml` plus the template file named
+        `template`), which reads exactly like a hand-written target. Needs
+        only `programs.scoot.enable` (no catalog, no profile).
       '';
     };
 
@@ -1016,13 +1053,15 @@ in
       };
     })
 
-    # User-owned look targets, Nix-declared: the same on-disk
-    # `scoot/look-targets/<name>/{target.toml,template}` a hand-written
-    # target is, so `scoot look apply` reads them with no other change
-    # (see the `lookTargets` option). Gated on `enable` alone: targets work
+    # User-owned look targets, Nix-declared: one directory symlink per
+    # target (`scoot/look-targets/<name>` -> a store directory of regular
+    # files `target.toml` + `template`), which reads like a hand-written
+    # target, so `scoot look apply` reads them with no other change (see
+    # the `lookTargets` option). Gated on `enable` alone: targets work
     # with no catalog and no profile, like hand-written ones. A bad name
-    # or output fails the evaluation naming the entry (the full grammar
-    # stays runtime-checked by `scoot look validate`).
+    # or output fails the evaluation naming the entry; staying under the
+    # config home through symlinks stays runtime-checked by
+    # `scoot look validate`.
     #
     # Sync note: a sync with any target configured (Nix-declared or
     # hand-written) renders fresh instead of pointing at the catalog
@@ -1032,7 +1071,7 @@ in
     # templates render per-user at apply time against the active look.
     (lib.mkIf (cfg.enable && cfg.lookTargets != { }) {
       xdg.configFile = lib.listToAttrs (
-        lib.concatMap (
+        map (
           name:
           let
             target = cfg.lookTargets.${name};
@@ -1040,38 +1079,14 @@ in
           if builtins.match "[a-z0-9-]{1,32}" name == null then
             throw "programs.scoot.lookTargets `${name}`: names must match [a-z0-9-]{1,32} (the target directory name)"
           else if !targetOutputValid target.output then
-            throw "programs.scoot.lookTargets.${name}: output `${target.output}` must be a relative path under the config home (no `..`, no absolute path, no hidden segments)"
+            throw "programs.scoot.lookTargets.${name}: output `${target.output}` must be a relative ASCII path under the config home (no `..`, no absolute path, no hidden segments, no control characters)"
           else
-            [
-              {
-                name = "scoot/look-targets/${name}/target.toml";
-                value = {
-                  text = targetTomlText name target;
-                };
-              }
-              {
-                name = "scoot/look-targets/${name}/template";
-                value =
-                  # A path value lands as a file; anything else is the
-                  # template text itself. An interpolated store path (a
-                  # string, e.g. `builtins.toFile`) reads back as its
-                  # content, so it behaves like the file it names; a
-                  # relative string stays text, so pass files as paths
-                  # (`./colors.tmpl`), not strings.
-                  if builtins.isPath target.template then
-                    {
-                      source = target.template;
-                    }
-                  else if lib.isStorePath target.template then
-                    {
-                      text = builtins.readFile target.template;
-                    }
-                  else
-                    {
-                      text = target.template;
-                    };
-              }
-            ]
+            {
+              name = "scoot/look-targets/${name}";
+              value = {
+                source = lookTargetDir name target;
+              };
+            }
         ) (builtins.attrNames cfg.lookTargets)
       );
     })
