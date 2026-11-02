@@ -195,7 +195,7 @@ The bar's slice of the [shell motion/depth epic](https://github.com/scoot-sh/sco
 - [Bar opacity pixman benchmark: the gate for translucent bars](resolved/bar-opacity-benchmark-done.md) (medium) — RESOLVED 2026-11-01: every budget passed, the five `[opacity] bar` pins rose to the examples' values
 - [Shadow and gradient fill tokens for the bar and its popups](resolved/scootbar-depth-tokens-done.md) (low) — RESOLVED 2026-11-01: shadow and gradient reach the bar and all five popups, room vs clip pinned, goldens for each style
 - [Popups open with the notification-card entrance](resolved/scootbar-popup-entrance-done.md) (low) — RESOLVED 2026-11-01: slide entrance via shared Timing, instant exit (dmenu precedent), grab on first frame, input follows every frame, goldens + live 1x/2x mid/rest + 0 wakes idle
-- [Translucent bar: measure the compositor-side recomposite cost under animation](bar-translucent-compositor-cost.md) (low): from the #850 review; the bar-opacity benchmark covered the bar's own paint cost, not the compositor recomposite with moving pixels behind it
+- [Translucent bar: measure the compositor-side recomposite cost under animation](resolved/bar-translucent-compositor-cost-done.md) (low) — RESOLVED 2026-11-01: the translucent strip costs ~2.3-4.4x its opaque blit per redraw (micro-bench FAIL vs +10%), documented next to `[opacity]`; looks unchanged
 
 ### Unscheduled (until someone asks)
 - [Hung spawned children block every other exec binding until the bar restarts](resolved/hung-spawn-blocks-binds-done.md) (low) — RESOLVED 2026-10-28: a refused spawn names the running commands (program, pid, age, oldest first); queue and `msg` kill declined

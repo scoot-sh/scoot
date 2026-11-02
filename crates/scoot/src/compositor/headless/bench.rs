@@ -796,3 +796,198 @@ fn look_rounded_corners_cost_windows() {
         );
     }
 }
+
+/// The translucent-bar compositor-cost micro-bench: what the pixman tier
+/// pays to composite the bar's own strip, opaque vs translucent, at 1x and
+/// 2x. A measurement, not a check (`#[ignore]`): it asserts nothing about
+/// speed, it prints `strip` timing lines. Run it against the build that
+/// is being measured, release (a debug build says nothing about a blend):
+///
+/// ```sh
+/// taskset -c 2 cargo test -p scoot --release --bin scoot -- --ignored --nocapture translucent_strip
+/// ```
+///
+/// Under `cargo test`, not nextest: blend timing wants one process left
+/// alone, the way the headless frame benches above run under `cargo test`
+/// for the same reason.
+///
+/// What path this benches, verified against the pinned Smithay source
+/// (fork rev `b65cbc5`, `src/backend/renderer/pixman/mod.rs`
+/// `render_texture_from_to`): the pixman backend picks `OVER` vs `SRC`
+/// solely from the source image's format (`has_alpha`: `Argb8888` blends,
+/// `Xrgb8888` blits) and ignores the `_opaque_regions` parameter. The
+/// opaque region still matters one layer up: the damage tracker
+/// (`src/backend/renderer/damage/mod.rs`) skips elements fully occluded by
+/// opaque regions above them, so an opaque bar lets the compositor skip
+/// what is behind it while a translucent one blends over it. This bench
+/// drives the real `render_texture_from_to` entry with the real formats
+/// scootbar commits (`daemon/canvas.rs`: `Argb8888` when
+/// `Style::translucent()`, else `Xrgb8888`) and the real opaque regions
+/// scootbar sets (`daemon/canvas.rs` `set_opaque_region`: the whole strip
+/// when opaque, `None` when translucent), over a 1920x40 strip at 1x and
+/// 2x. The damage-occlusion half is covered by the headless live run in
+/// `crates/scootbar/tests/translucent_cost_bench.rs`, where a floating
+/// window moves under the bar: no in-process timer can see culling.
+#[test]
+#[ignore = "a measurement: run it with --ignored only"]
+fn translucent_strip_blend_cost() {
+    use smithay::backend::allocator::Fourcc;
+    use smithay::backend::renderer::pixman::PixmanRenderer;
+    use smithay::backend::renderer::{Bind, Frame, ImportMem, Offscreen, Renderer};
+    use smithay::utils::{Buffer, Physical, Rectangle, Transform};
+
+    fn median_and_p5(samples: &mut [Duration]) -> (Duration, Duration) {
+        samples.sort_unstable();
+        (samples[samples.len() / 2], samples[samples.len() / 20])
+    }
+
+    // The bar's committed color (#102030) as little-endian bytes:
+    // XRGB8888 for the opaque bar, premultiplied ARGB8888 at alpha 179
+    // (0.70, the lowest shipped look opacity) for the translucent one.
+    const BAR_R: u8 = 0x10;
+    const BAR_G: u8 = 0x20;
+    const BAR_B: u8 = 0x30;
+    const ALPHA: u16 = 179;
+    let premul = |c: u8| ((u16::from(c) * ALPHA + 127) / 255) as u8;
+    let (pr, pg, pb) = (premul(BAR_R), premul(BAR_G), premul(BAR_B));
+    // BGRA byte order (little-endian Argb8888/Xrgb8888).
+    let opaque_px = [BAR_B, BAR_G, BAR_R, 0xFF];
+    let transl_px = [pb, pg, pr, ALPHA as u8];
+
+    let iters = 300usize;
+    let per_round = 20usize;
+    let rounds = iters / per_round;
+    let passes = 2u32;
+    println!(
+        "scenario scale format surface-px median-us(best of {passes} passes) p5-us(best of {passes} passes)"
+    );
+    for (tag, w, h) in [("1x", 1920, 40), ("2x", 3840, 80)] {
+        let pixels = w as u64 * h as u64;
+        let output_size: smithay::utils::Size<i32, Physical> = (w, h).into();
+        let mut opaque_best: Option<(Duration, Duration)> = None;
+        let mut transl_best: Option<(Duration, Duration)> = None;
+        for _ in 0..passes {
+            let mut renderer = PixmanRenderer::new().expect("a pixman renderer");
+            let mut image = renderer
+                .create_buffer(Fourcc::Argb8888, (w, h).into())
+                .expect("a target image");
+            let mut target = renderer.bind(&mut image).expect("a framebuffer");
+            let opaque_data = opaque_px.repeat((w * h) as usize);
+            let transl_data = transl_px.repeat((w * h) as usize);
+            let opaque_tex = renderer
+                .import_memory(&opaque_data, Fourcc::Xrgb8888, (w, h).into(), false)
+                .expect("an opaque strip texture");
+            let transl_tex = renderer
+                .import_memory(&transl_data, Fourcc::Argb8888, (w, h).into(), false)
+                .expect("a translucent strip texture");
+            let src = Rectangle::<f64, Buffer>::from_size((w as f64, h as f64).into());
+            let dst = Rectangle::<i32, Physical>::from_size((w, h).into());
+            let damage = [dst];
+            // What scootbar actually sets: the whole strip opaque when the
+            // bar is opaque, none of it when translucent.
+            let opaque_regions = [dst];
+            let no_regions: [Rectangle<i32, Physical>; 0] = [];
+            // Warm both paths before timing (fault pages, fill caches).
+            for _ in 0..10 {
+                {
+                    let mut frame = renderer
+                        .render(&mut target, output_size, Transform::Normal)
+                        .expect("a frame");
+                    frame
+                        .render_texture_from_to(
+                            &opaque_tex,
+                            src,
+                            dst,
+                            &damage,
+                            &opaque_regions,
+                            Transform::Normal,
+                            1.0,
+                        )
+                        .expect("an opaque blit");
+                }
+                {
+                    let mut frame = renderer
+                        .render(&mut target, output_size, Transform::Normal)
+                        .expect("a frame");
+                    frame
+                        .render_texture_from_to(
+                            &transl_tex,
+                            src,
+                            dst,
+                            &damage,
+                            &no_regions,
+                            Transform::Normal,
+                            1.0,
+                        )
+                        .expect("a translucent blend");
+                }
+            }
+            let mut opaque_samples = Vec::with_capacity(iters);
+            let mut transl_samples = Vec::with_capacity(iters);
+            for round in 0..rounds {
+                // Rotate who goes first each round so a frequency swing
+                // lands on both configs instead of biasing one.
+                for slot in 0..2 {
+                    let slot = (slot + round) % 2;
+                    for _ in 0..per_round {
+                        let start = Instant::now();
+                        {
+                            let mut frame = renderer
+                                .render(&mut target, output_size, Transform::Normal)
+                                .expect("a frame");
+                            if slot == 0 {
+                                frame
+                                    .render_texture_from_to(
+                                        &opaque_tex,
+                                        src,
+                                        dst,
+                                        &damage,
+                                        &opaque_regions,
+                                        Transform::Normal,
+                                        1.0,
+                                    )
+                                    .expect("an opaque blit");
+                            } else {
+                                frame
+                                    .render_texture_from_to(
+                                        &transl_tex,
+                                        src,
+                                        dst,
+                                        &damage,
+                                        &no_regions,
+                                        Transform::Normal,
+                                        1.0,
+                                    )
+                                    .expect("a translucent blend");
+                            }
+                        }
+                        let elapsed = start.elapsed();
+                        if slot == 0 {
+                            opaque_samples.push(elapsed);
+                        } else {
+                            transl_samples.push(elapsed);
+                        }
+                    }
+                }
+            }
+            let opaque = median_and_p5(&mut opaque_samples);
+            let transl = median_and_p5(&mut transl_samples);
+            opaque_best =
+                Some(opaque_best.map_or(opaque, |(m, p)| (m.min(opaque.0), p.min(opaque.1))));
+            transl_best =
+                Some(transl_best.map_or(transl, |(m, p)| (m.min(transl.0), p.min(transl.1))));
+        }
+        let (om, op) = opaque_best.expect("measured");
+        let (tm, tp) = transl_best.expect("measured");
+        println!(
+            "strip {tag} opaque(XRGB8888/SRC) {pixels} {:.1} {:.1}",
+            om.as_secs_f64() * 1e6,
+            op.as_secs_f64() * 1e6,
+        );
+        println!(
+            "strip {tag} translucent(ARGB8888/OVER) {pixels} {:.1} {:.1}",
+            tm.as_secs_f64() * 1e6,
+            tp.as_secs_f64() * 1e6,
+        );
+    }
+}
