@@ -289,3 +289,69 @@ background = "#000000"
         "{errors:?}"
     );
 }
+
+#[test]
+fn nfc_output_refuses_as_non_ascii() {
+    // Security review of PR #871, finding 3: `caf\u{e9}/x.conf` (NFC)
+    // and `cafe\u{301}/x.conf` (NFD) are one file on APFS but two byte
+    // strings here, so the second would stage silently past a byte
+    // compare. No normalization crate sits in the workspace lock tree
+    // (`unicode-normalization` is absent from `Cargo.lock`), so
+    // non-ASCII outputs refuse at parse instead of reaching the
+    // duplicate check at all.
+    let mut errors = Vec::new();
+    validate_target_shape(
+        &RawTarget {
+            name: "kitty-colors".to_owned(),
+            output: "caf\u{e9}/x.conf".to_owned(),
+            template: "colors.tmpl".to_owned(),
+            reload: None,
+        },
+        &mut errors,
+    );
+    assert!(
+        errors.iter().any(|e| e.field == "output"),
+        "NFC output must refuse: {errors:?}"
+    );
+}
+
+#[test]
+fn nfd_output_refuses_as_non_ascii() {
+    // The NFD half of the same pair: `e` plus a combining acute. Refuses
+    // like its NFC twin, so neither spelling can stage, let alone both.
+    let mut errors = Vec::new();
+    validate_target_shape(
+        &RawTarget {
+            name: "kitty-colors".to_owned(),
+            output: "cafe\u{301}/x.conf".to_owned(),
+            template: "colors.tmpl".to_owned(),
+            reload: None,
+        },
+        &mut errors,
+    );
+    assert!(
+        errors.iter().any(|e| e.field == "output"),
+        "NFD output must refuse: {errors:?}"
+    );
+}
+
+#[test]
+fn unicode_template_stays_allowed() {
+    // The ASCII rule is outputs only: a template is a file inside the
+    // target's own directory, read `O_NOFOLLOW`, with no duplicate
+    // comparison run over it, so a Unicode template name keeps working.
+    let mut errors = Vec::new();
+    validate_target_shape(
+        &RawTarget {
+            name: "kitty-colors".to_owned(),
+            output: "kitty/colors.conf".to_owned(),
+            template: "caf\u{e9}.tmpl".to_owned(),
+            reload: None,
+        },
+        &mut errors,
+    );
+    assert!(
+        errors.is_empty(),
+        "a Unicode template must pass: {errors:?}"
+    );
+}

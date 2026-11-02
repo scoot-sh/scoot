@@ -10,14 +10,15 @@ use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use scoot_look::state::{LINK_NAME, RecordRead, read_record};
 
 use super::{
-    ApplyOptions, ApplyReport, Availability, BuildTarget, Checks, apply_with, apply_with_live,
-    build_to_out, foot_needs_legacy, is_foot_check_missing, is_foot_version_refusal,
-    parse_foot_version, shadowed_from_files_in, validate_dir, validate_entry,
+    ApplyOptions, ApplyReport, Availability, BuildTarget, Checks, RenderedFragments, apply_with,
+    apply_with_live, build_to_out, cached_complete, collect_chain, foot_needs_legacy,
+    is_foot_check_missing, is_foot_version_refusal, joinable_output, parse_foot_version,
+    shadowed_from_files_in, validate_dir, validate_entry, write_render_dir,
 };
 use scoot_look::Origin;
 
@@ -4928,6 +4929,266 @@ fn duplicate_outputs_refuse() {
         validation.errors.iter().any(|e| e.contains("same output")),
         "{:?}",
         validation.errors
+    );
+}
+
+#[test]
+fn duplicate_outputs_refuse_case_insensitively() {
+    // The duplicate check compares case-insensitively (`Kitty/x` and
+    // `kitty/x` are one file on a case-insensitive filesystem): pin it
+    // with a case-only difference, not just byte-identical outputs.
+    let fixture = fixture("targets-duplicate-case");
+    write_target(
+        &fixture.config,
+        "kitty-a",
+        "Kitty/colors.conf",
+        KITTY_TEMPLATE,
+        None,
+    );
+    write_target(
+        &fixture.config,
+        "kitty-b",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        None,
+    );
+    let validation = validate_entry(
+        &fixture.catalog,
+        "look-a",
+        &FakeChecks::default(),
+        false,
+        Some(&fixture.config),
+    )
+    .expect("validate runs");
+    assert!(
+        validation.errors.iter().any(|e| e.contains("same output")),
+        "{:?}",
+        validation.errors
+    );
+}
+
+#[test]
+fn forking_reload_is_bounded_by_its_timeout() {
+    // Security review of PR #871, finding 1: the exact breaking input.
+    // `sleep 8 & exec sleep 0` forks a grandchild holding the pipes, and
+    // the old `try_wait` + `wait_with_output` runner waited for pipe EOF
+    // past the 2 s deadline, blocking `run_reloads` for 8 s.
+    let fixture = fixture("targets-fork-timeout");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        Some(
+            "[reload]\nargv = [\"/bin/sh\", \"-c\", \"sleep 8 & exec sleep 0\"]\ntimeout_secs = 2\n",
+        ),
+    );
+    let start = Instant::now();
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    let elapsed = start.elapsed();
+    assert!(
+        report.notes.iter().any(|n| n.contains("timed out")),
+        "the forked reload is killed and noted: {:?}",
+        report.notes
+    );
+    assert_eq!(report.name, "look-a", "the swap stands");
+    assert!(
+        elapsed < Duration::from_secs(6),
+        "the 2 s timeout bounds the call: took {elapsed:?}, not 8 s",
+    );
+}
+
+#[test]
+fn lurking_grandchild_is_killed_with_its_group() {
+    // Finding 1, second half: a fix that merely stops waiting at the
+    // deadline would return fast and orphan the grandchild. The wrapper
+    // script's path is a unique marker, so a `ps` scan proves the whole
+    // process group died instead of lingering past the timeout. The script
+    // does NOT `exec` into `sleep`: an exec would replace the process image
+    // and erase the marker from `ps` within milliseconds, making the scan
+    // pass whether or not anything was killed.
+    let fixture = fixture("targets-group-kill");
+    let marker = format!("scoot-reload-probe-{}-group.sh", std::process::id());
+    let script = fixture._root.join(&marker);
+    std::fs::write(&script, "#!/bin/sh\nsleep 8\n").expect("a probe script");
+    #[cfg(unix)]
+    std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .expect("a runnable probe script");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        Some(&format!(
+            "[reload]\nargv = [\"/bin/sh\", \"-c\", \"\\\"{}\\\" & exec sleep 0\"]\ntimeout_secs = 2\n",
+            script.display()
+        )),
+    );
+    let start = Instant::now();
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    let elapsed = start.elapsed();
+    assert!(
+        report.notes.iter().any(|n| n.contains("timed out")),
+        "the reload is killed and noted: {:?}",
+        report.notes
+    );
+    assert!(
+        elapsed < Duration::from_secs(6),
+        "the 2 s timeout bounds the call: took {elapsed:?}, not 8 s",
+    );
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let ps = std::process::Command::new("ps")
+            .args(["-e", "-o", "command="])
+            .output()
+            .expect("`ps` runs");
+        let table = String::from_utf8_lossy(&ps.stdout);
+        let lurking = table.lines().any(|line| line.contains(&marker));
+        if !lurking {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the grandchild survived its process group being killed: {table}",
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn chatty_reload_output_is_capped_and_noted() {
+    // Finding 2: a `yes`-style reload captured stdout without a bound
+    // (only the displayed excerpt was truncated). The run keeps at most
+    // one cap of bytes per stream, then kills the child and says the
+    // output was truncated.
+    let fixture = fixture("targets-chatty");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        Some("[reload]\nargv = [\"/bin/sh\", \"-c\", \"yes | head -c 1000000\"]\n"),
+    );
+    let start = Instant::now();
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    let elapsed = start.elapsed();
+    assert!(
+        report.notes.iter().any(|n| n.contains("truncated")),
+        "the flooding reload says its output was truncated: {:?}",
+        report.notes
+    );
+    assert!(
+        report.notes.iter().any(|n| n.contains("the swap stands")),
+        "the swap stands: {:?}",
+        report.notes
+    );
+    assert!(
+        !report.reloaded.iter().any(|r| r == "target kitty-colors"),
+        "a truncated reload never counts as reloaded: {:?}",
+        report.reloaded
+    );
+    assert!(
+        elapsed < Duration::from_secs(20),
+        "the cap kills fast instead of draining 1 MB: took {elapsed:?}",
+    );
+}
+
+#[test]
+fn helper_output_past_the_cap_is_killed_and_reported() {
+    // Finding 1/2 through the pre-existing `run_with_timeout` shape: it
+    // runs on the same bounded runner, so a helper flooding stdout is
+    // killed at the cap instead of buffered without bound.
+    let error = super::run_with_timeout(Path::new("/bin/sh"), &["-c", "yes | head -c 1000000"])
+        .expect_err("a flooding helper refuses");
+    assert!(
+        error.contains("65536"),
+        "the refusal names the byte cap: {error}"
+    );
+}
+
+/// Bare fragments for the write-site tests: every built-in fragment
+/// empty, only the hand-built targets carried.
+fn empty_fragments(targets: Vec<crate::look::targets::TargetFile>) -> RenderedFragments {
+    RenderedFragments {
+        scoot: String::new(),
+        bar: String::new(),
+        gtk3: String::new(),
+        gtk4: String::new(),
+        qt: String::new(),
+        foot: None,
+        fuzzel: String::new(),
+        swaylock: String::new(),
+        greet: String::new(),
+        launch: String::new(),
+        notify: String::new(),
+        rendered_json: String::new(),
+        leaves: Vec::new(),
+        static_files: Vec::new(),
+        targets,
+    }
+}
+
+#[test]
+fn joinable_output_rejects_absolute_and_dotdot() {
+    assert!(joinable_output("kitty/colors.conf"));
+    assert!(!joinable_output("/etc/kitty.conf"));
+    assert!(!joinable_output("../escape.conf"));
+    assert!(!joinable_output("a/../../b.conf"));
+}
+
+#[test]
+fn write_render_dir_refuses_escaping_outputs() {
+    // Finding 4: a hand-built target bypasses `discover` validation, so
+    // the join itself refuses absolute and `..` outputs (defense in
+    // depth). The absolute path sits inside scratch: a vulnerable join
+    // writes it (failing this test) instead of erroring on permissions.
+    let scratch = scratch("targets-join-guard");
+    let tmp = scratch.path().join("render");
+    std::fs::create_dir_all(&tmp).expect("a tmp dir");
+    let absolute = tmp.join("abs-x.conf").to_string_lossy().into_owned();
+    let fragments = empty_fragments(vec![crate::look::targets::TargetFile {
+        output: absolute,
+        bytes: b"x".to_vec(),
+    }]);
+    write_render_dir(&tmp, &fragments).expect_err("absolute output refuses at the join");
+    let fragments = empty_fragments(vec![crate::look::targets::TargetFile {
+        output: "../escape.conf".to_owned(),
+        bytes: b"x".to_vec(),
+    }]);
+    write_render_dir(&tmp, &fragments).expect_err("`..` output refuses at the join");
+    assert!(
+        !tmp.join("escape.conf").exists(),
+        "nothing escapes `targets/`",
+    );
+}
+
+#[test]
+fn cached_complete_distrusts_escaping_outputs() {
+    // Finding 4 at the cache check: an absolute output naming a file
+    // that really is in the render still never counts as complete.
+    let fixture = fixture("targets-join-cache");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        None,
+    );
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    let rendered = PathBuf::from(&report.rendered);
+    let chain = collect_chain(&fixture.catalog, "look-a").expect("a chain");
+    let merged = scoot_look::resolve(&fixture.catalog.sources(), "look-a").expect("resolves");
+    let real = rendered
+        .join("targets/kitty/colors.conf")
+        .to_string_lossy()
+        .into_owned();
+    let hostile = vec![crate::look::targets::TargetFile {
+        output: real,
+        bytes: b"stale".to_vec(),
+    }];
+    assert!(
+        !cached_complete(&rendered, "look-a", &chain, &merged, false, &hostile),
+        "an absolute output never counts as complete",
     );
 }
 

@@ -18,6 +18,7 @@
 //! the link fresh.
 
 pub mod apply;
+pub mod bounded;
 pub mod build_dir;
 pub mod cycle;
 pub mod foot;

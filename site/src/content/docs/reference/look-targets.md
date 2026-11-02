@@ -58,10 +58,10 @@ in-tree example (kitty, all sixteen terminal colors) lives in
 | Option | Type / default | Reload |
 |---|---|---|
 | `name` | string, required. Matches the directory name (`[a-z0-9-]{1,32}`). | Validated on every apply; a mismatch refuses. |
-| `output` | string, required. Relative to the config home (`kitty/colors.conf`). No `..`, no absolute path, no hidden segments; must stay under the config home through symlinks. | Rendered to `targets/<output>` in the active look on every apply. Two targets naming the same output refuse. |
+| `output` | string, required. Relative to the config home (`kitty/colors.conf`). ASCII only (a Unicode name refuses); no `..`, no absolute path, no hidden segments; must stay under the config home through symlinks. | Rendered to `targets/<output>` in the active look on every apply. Two targets naming the same output refuse (compared case-insensitively). |
 | `template` | string, required. The template file inside the target directory. | Read on every apply (symlinks refuse); an unreadable template refuses the swap. |
 | `reload.argv` | array of 1 to 16 strings, optional. The program plus its arguments: a bare name on `PATH` or an absolute path. | Run directly after a successful swap, never through a shell (no splitting, no globs, no `$VAR`). |
-| `reload.timeout_secs` | whole number, default `30`, 1 to 300. | The hung child is killed after the wait; the swap stands either way. |
+| `reload.timeout_secs` | whole number, default `30`, 1 to 300. | The hung child and the processes it started are killed after the wait (a process that starts its own session is not reached); the swap stands either way. |
 
 Unknown keys refuse: `target.toml` takes only the keys above. A reload
 needs no entry to render; without `[reload]` the file still renders and
@@ -113,7 +113,9 @@ anything but a color refuses, as does an unknown filter or token.
 
 The reload runs after the swap stands: a zero exit counts as reloaded,
 anything else (missing binary, timeout, non-zero exit) is a note naming
-what happened. A failing reload never undoes the swap. A failing render
+what happened. A reload that writes past 64 KiB on stdout or stderr is
+killed instead, and the note says its output was truncated. A failing
+reload never undoes the swap. A failing render
 does the opposite: unknown token, unreadable template, duplicate or
 escaping output — the swap refuses before anything is recorded, the way
 a refused reload does.
@@ -137,7 +139,8 @@ allowlist, so only these user-owned directories are ever read.
 
 > **Symptom:** `validate` says two targets write the same output.
 >
-> Both `target.toml` files name the same `output`. Rename one: the
+> Both `target.toml` files name the same `output` (the compare is
+> case-insensitive, so `Kitty/x` and `kitty/x` collide). Rename one: the
 > second write would silently win, and no wiring could name both.
 
 > **Symptom:** `validate` says an output escapes the config home or a symlink.
