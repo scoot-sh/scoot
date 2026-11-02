@@ -1,0 +1,48 @@
+-- Rendered from the active look by `scoot look apply`. Do not edit:
+-- re-rendered on every swap from this template.
+--
+-- Wiring (once): load the rendered file from `~/.config/wezterm/wezterm.lua`, e.g.
+--   local scoot_colors = dofile(os.getenv("HOME") .. "/.local/state/scoot/look/targets/wezterm/colors.lua")
+--   scoot_colors.apply_to_config(config)
+-- (the look state dir's `look` link plus `targets/wezterm/colors.lua`).
+-- WezTerm reloads on file change (`automatically_reload_config`, on by
+-- default), so this target declares no `[reload]`.
+local wezterm = require("wezterm")
+
+local module = {}
+
+function module.apply_to_config(config)
+  config.colors = {
+    foreground = "{{ palette.foreground }}",
+    background = "{{ palette.background }}",
+    cursor_bg = "{{ palette.accent }}",
+    cursor_fg = "{{ palette.background }}",
+    cursor_border = "{{ palette.accent }}",
+    selection_fg = "{{ palette.selection-text }}",
+    selection_bg = "{{ palette.selection }}",
+    ansi = {
+      "{{ terminal.color0 }}",
+      "{{ terminal.color1 }}",
+      "{{ terminal.color2 }}",
+      "{{ terminal.color3 }}",
+      "{{ terminal.color4 }}",
+      "{{ terminal.color5 }}",
+      "{{ terminal.color6 }}",
+      "{{ terminal.color7 }}",
+    },
+    brights = {
+      "{{ terminal.color8 }}",
+      "{{ terminal.color9 }}",
+      "{{ terminal.color10 }}",
+      "{{ terminal.color11 }}",
+      "{{ terminal.color12 }}",
+      "{{ terminal.color13 }}",
+      "{{ terminal.color14 }}",
+      "{{ terminal.color15 }}",
+    },
+  }
+  config.font = wezterm.font("{{ fonts.mono }}")
+  config.font_size = {{ fonts.terminal-size }}
+end
+
+return module

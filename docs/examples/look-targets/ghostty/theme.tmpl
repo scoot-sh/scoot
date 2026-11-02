@@ -1,0 +1,34 @@
+# Rendered from the active look by `scoot look apply`. Do not edit:
+# re-rendered on every swap from this template.
+#
+# Wiring (once): include the rendered file from your Ghostty config
+# (`~/.config/ghostty/config.ghostty` or `config`), e.g.
+#   config-file = "~/.local/state/scoot/look/targets/ghostty/theme"
+# (the look state dir's `look` link plus `targets/ghostty/theme`; `~/`
+# expands, and a `?` prefix would ignore a missing file). The font size
+# stays yours. Reload with the `reload_config` keybind (`ctrl+shift+,`
+# by default): Ghostty has no external reload command, so this target
+# declares no `[reload]`.
+background = {{ palette.background }}
+foreground = {{ palette.foreground }}
+selection-background = {{ palette.selection }}
+selection-foreground = {{ palette.selection-text }}
+cursor-color = {{ palette.accent }}
+cursor-text = {{ palette.background }}
+palette = 0={{ terminal.color0 }}
+palette = 1={{ terminal.color1 }}
+palette = 2={{ terminal.color2 }}
+palette = 3={{ terminal.color3 }}
+palette = 4={{ terminal.color4 }}
+palette = 5={{ terminal.color5 }}
+palette = 6={{ terminal.color6 }}
+palette = 7={{ terminal.color7 }}
+palette = 8={{ terminal.color8 }}
+palette = 9={{ terminal.color9 }}
+palette = 10={{ terminal.color10 }}
+palette = 11={{ terminal.color11 }}
+palette = 12={{ terminal.color12 }}
+palette = 13={{ terminal.color13 }}
+palette = 14={{ terminal.color14 }}
+palette = 15={{ terminal.color15 }}
+font-family = {{ fonts.mono }}

@@ -5373,6 +5373,149 @@ fn the_in_tree_kitty_example_renders_against_a_terminal_look() {
 }
 
 #[test]
+fn the_in_tree_starter_targets_render_against_a_terminal_look() {
+    // Dogfood: every starter-pack target must render against any look
+    // carrying a `[terminal]` table, or the docs example rots. Reads the
+    // real files under `docs/examples/look-targets/<name>`: the
+    // `target.toml` (name, output, template file, and the deliberate lack
+    // of a `[reload]`) plus a format check over the rendered bytes where
+    // a real parser exists in the workspace.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let starters = [
+        ("alacritty", "colors.tmpl", "alacritty/colors.toml"),
+        ("wezterm", "colors.tmpl", "wezterm/colors.lua"),
+        ("ghostty", "theme.tmpl", "ghostty/theme"),
+        ("tmux", "theme.tmpl", "tmux/theme.conf"),
+        ("zathura", "theme.tmpl", "zathura/theme"),
+        ("rofi", "colors.tmpl", "rofi/colors.rasi"),
+    ];
+    let scratch = scratch("targets-starters");
+    write_look(scratch.path(), "look", TERMINAL_EXTRA);
+    let catalog =
+        scoot_look::catalog::discover_ordered(&[(scratch.path().to_owned(), Origin::User)]);
+    let merged = scoot_look::resolve(&catalog.sources(), "look").expect("resolves");
+    let tokens = scoot_look::target_tokens(&merged);
+    for (name, template_file, output) in starters {
+        let example = root.join("docs/examples/look-targets").join(name);
+        let toml = std::fs::read(example.join("target.toml")).expect("the example target.toml");
+        let raw = scoot_look::parse_target_toml(&toml).expect("the example parses");
+        assert_eq!(raw.name, name, "the target.toml name matches its directory");
+        assert_eq!(raw.output, output, "the pinned output for {name}");
+        assert_eq!(
+            raw.template, template_file,
+            "the pinned template file for {name}"
+        );
+        assert!(
+            raw.reload.is_none(),
+            "{name} declares no reload (see the docs for why)"
+        );
+        let template =
+            std::fs::read_to_string(example.join(template_file)).expect("the example template");
+        let rendered =
+            scoot_look::render_template(&template, &tokens).expect("the example renders");
+        assert!(
+            !rendered.contains("{{"),
+            "{name}: no unresolved tokens:\n{rendered}"
+        );
+        match name {
+            "alacritty" => {
+                let table: toml::Table = rendered.parse().expect("TOML renders");
+                let colors = &table["colors"];
+                for section in ["primary", "normal", "bright"] {
+                    assert!(
+                        colors.get(section).is_some(),
+                        "{name}: [{section}] renders:\n{rendered}"
+                    );
+                }
+                for key in [
+                    "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+                ] {
+                    for section in ["normal", "bright"] {
+                        let value = colors[section][key].as_str().expect("a #rrggbb string");
+                        assert!(
+                            value.starts_with('#'),
+                            "{name}: [{section}] {key} is a color, not {value}"
+                        );
+                    }
+                }
+            }
+            "wezterm" => {
+                // No Lua parser in the workspace: brace balance plus the
+                // tables WezTerm reads (`colors`, `ansi`, `brights`).
+                assert_eq!(
+                    rendered.chars().filter(|c| *c == '{').count(),
+                    rendered.chars().filter(|c| *c == '}').count(),
+                    "{name}: balanced braces:\n{rendered}"
+                );
+                for key in [
+                    "config.colors",
+                    "ansi = {",
+                    "brights = {",
+                    "apply_to_config",
+                ] {
+                    assert!(rendered.contains(key), "{name}: {key} renders:\n{rendered}");
+                }
+            }
+            "ghostty" => {
+                // `key = value` lines, one palette entry per index.
+                for line in rendered.lines() {
+                    let line = line.trim();
+                    assert!(
+                        line.is_empty() || line.starts_with('#') || line.contains('='),
+                        "{name}: every line is a comment or a `key = value` pair:\n{rendered}"
+                    );
+                }
+                for i in 0..16 {
+                    assert!(
+                        rendered.contains(&format!("palette = {i}=#")),
+                        "{name}: palette {i} renders:\n{rendered}"
+                    );
+                }
+            }
+            "tmux" => {
+                for line in rendered.lines() {
+                    let line = line.trim();
+                    assert!(
+                        line.is_empty() || line.starts_with('#') || line.starts_with("set -g "),
+                        "{name}: every line is a comment or a `set -g` option:\n{rendered}"
+                    );
+                }
+                assert!(
+                    rendered.contains("status-style"),
+                    "{name}: the status line themes:\n{rendered}"
+                );
+            }
+            "zathura" => {
+                for line in rendered.lines() {
+                    let line = line.trim();
+                    assert!(
+                        line.is_empty() || line.starts_with('#') || line.starts_with("set "),
+                        "{name}: every line is a comment or a `set` option:\n{rendered}"
+                    );
+                }
+                assert!(
+                    rendered.contains("set default-bg \"#"),
+                    "{name}: the page themes:\n{rendered}"
+                );
+            }
+            "rofi" => {
+                // No rasi parser in the workspace: brace balance plus the
+                // widgets rofi reads (`window`, `listview`, `element`).
+                assert_eq!(
+                    rendered.chars().filter(|c| *c == '{').count(),
+                    rendered.chars().filter(|c| *c == '}').count(),
+                    "{name}: balanced braces:\n{rendered}"
+                );
+                for key in ["* {", "window {", "listview {", "element-text {"] {
+                    assert!(rendered.contains(key), "{name}: {key} renders:\n{rendered}");
+                }
+            }
+            _ => unreachable!("the starter list above"),
+        }
+    }
+}
+
+#[test]
 fn symlinked_target_dir_renders_like_a_plain_one() {
     // Stow-style: the target entry links into another tree, but keeps
     // its own name; the template inside must still be a regular file.

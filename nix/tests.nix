@@ -2163,6 +2163,72 @@ let
     desktop.theme.targets.cursor.enable = false;
     desktop.theme.targets.fonts.enable = false;
   };
+  # ...with Nix-declared user targets: one from a template file, one
+  # from inline text with a reload (an argv carrying a space and a
+  # quote, proving the TOML encoding, not a shell, carries it). Needs
+  # no catalog and no profile: targets work with `enable` alone.
+  hmUserTargets = evalHome {
+    enable = true;
+    package = fakePkg;
+    lookTargets = {
+      kitty-colors = {
+        template = ../docs/examples/look-targets/kitty-colors/colors.tmpl;
+        output = "kitty/colors.conf";
+        reload.argv = [
+          "kitty"
+          "@"
+          "set-colors"
+          "--all"
+        ];
+        reload.timeout_secs = 10;
+      };
+      ghostty-theme = {
+        template = "background {{ palette.background }}\nforeground {{ palette.foreground }}\n";
+        output = "ghostty/theme";
+      };
+      quoting = {
+        template = "x {{ palette.background }}\n";
+        output = "quoting/out.conf";
+        reload.argv = [
+          "my reload"
+          "--name=\"quoted\""
+        ];
+      };
+      # A store path as a string (not a path value) reads back as its
+      # content, so it behaves like the file it names.
+      tofile-theme = {
+        template = builtins.toFile "colors.tmpl" "background {{ palette.background }}\n";
+        output = "tofile/colors.conf";
+      };
+    };
+  };
+  # ...with a target writing outside the grammar: the evaluation fails
+  # naming the entry (an absolute path here; `..`, hidden segments and
+  # backslashes fail the same way).
+  hmUserTargetsBadOutput = evalHome {
+    enable = true;
+    package = fakePkg;
+    lookTargets.bad = {
+      template = "x\n";
+      output = "/etc/kitty/colors.conf";
+    };
+  };
+  hmUserTargetsBadOutputRefused = builtins.tryEval (
+    hmUserTargetsBadOutput.config.xdg.configFile."scoot/look-targets/bad/target.toml".text
+  );
+  # ...with a target name outside the grammar: the evaluation fails
+  # naming it.
+  hmUserTargetsBadName = evalHome {
+    enable = true;
+    package = fakePkg;
+    lookTargets."Bad_Name" = {
+      template = "x\n";
+      output = "bad/out.conf";
+    };
+  };
+  hmUserTargetsBadNameRefused = builtins.tryEval (
+    hmUserTargetsBadName.config.xdg.configFile."scoot/look-targets/Bad_Name/target.toml".text
+  );
   # The NixOS-module-only catalog: the same entries as a system
   # package, the declared default in `/etc/scoot/look-default`.
   osLookCatalog = evalNixos {
@@ -7686,6 +7752,14 @@ let
   themeFontsConf = hmTheme.config.xdg.configFile."fontconfig/conf.d/10-scoot-look.conf".source;
   themeFootConf = hmTheme.config.xdg.configFile."foot/foot.ini".source;
   themeStarshipConf = hmTheme.config.xdg.configFile."starship.toml".source;
+  # Nix-declared user targets as files: the generated `target.toml`
+  # bytes, parsed by the content checks below.
+  userTargetKittyToml =
+    pkgs.writeText "target-kitty.toml"
+      hmUserTargets.config.xdg.configFile."scoot/look-targets/kitty-colors/target.toml".text;
+  userTargetQuotingToml =
+    pkgs.writeText "target-quoting.toml"
+      hmUserTargets.config.xdg.configFile."scoot/look-targets/quoting/target.toml".text;
   themeHelixConf = hmTheme.config.xdg.configFile."helix/config.toml".source;
   themeHelixTheme = hmTheme.config.xdg.configFile."helix/themes/scoot-light.toml".source;
   themeBtopConf = hmTheme.config.xdg.configFile."btop/btop.conf".source;
@@ -14536,6 +14610,64 @@ let
       assert hmLookDefault.config.xdg.configFile."scoot/look-nix-targets".text == "";
       true
     )
+    # ...Nix-declared user targets land as the on-disk
+    # `look-targets/<name>/{target.toml,template}` slice 1 reads (no
+    # catalog, no profile, no sync step involved)...
+    (
+      assert allAssertionsHold hmUserTargets.config;
+      true
+    )
+    (
+      assert
+        hmUserTargets.config.xdg.configFile."scoot/look-targets/kitty-colors/target.toml".text
+        == "name = \"kitty-colors\"\noutput = \"kitty/colors.conf\"\ntemplate = \"template\"\n[reload]\nargv = [\"kitty\",\"@\",\"set-colors\",\"--all\"]\ntimeout_secs = 10\n";
+      true
+    )
+    (
+      assert
+        hmUserTargets.config.xdg.configFile."scoot/look-targets/ghostty-theme/target.toml".text
+        == "name = \"ghostty-theme\"\noutput = \"ghostty/theme\"\ntemplate = \"template\"\n";
+      true
+    )
+    # ...a path template lands as a store source, inline text as text,
+    # and a store path as a string reads back as its content...
+    (
+      assert lib.hasSuffix "colors.tmpl" (
+        toString hmUserTargets.config.xdg.configFile."scoot/look-targets/kitty-colors/template".source
+      );
+      true
+    )
+    (
+      assert
+        hmUserTargets.config.xdg.configFile."scoot/look-targets/ghostty-theme/template".text
+        == "background {{ palette.background }}\nforeground {{ palette.foreground }}\n";
+      true
+    )
+    (
+      assert
+        hmUserTargets.config.xdg.configFile."scoot/look-targets/tofile-theme/template".text
+        == "background {{ palette.background }}\n";
+      true
+    )
+    # ...an argv carrying a space and a quote encodes through TOML (no
+    # shell ever splits it: the tool runs the argv directly)...
+    (
+      assert
+        hmUserTargets.config.xdg.configFile."scoot/look-targets/quoting/target.toml".text
+        == "name = \"quoting\"\noutput = \"quoting/out.conf\"\ntemplate = \"template\"\n[reload]\nargv = [\"my reload\",\"--name=\\\"quoted\\\"\"]\n";
+      true
+    )
+    # ...and a bad output or name fails the evaluation (the throw
+    # names the entry; `tryEval` keeps only success here, so the
+    # message is reviewed beside the option, not pinned).
+    (
+      assert !hmUserTargetsBadOutputRefused.success;
+      true
+    )
+    (
+      assert !hmUserTargetsBadNameRefused.success;
+      true
+    )
     (
       assert !(hmLookNoPackage.config.xdg.configFile ? "scoot/look-nix-targets");
       true
@@ -17876,6 +18008,23 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -q '^font = "' ${osRealLookCatalog}/share/scoot/rendered/moonrise/bar.toml
     echo "ok: the system look catalog builds with sources and renders under share/scoot"
   ''}
+
+  # 10g. Nix-declared user targets: the generated `target.toml` files
+  # parse, carry the pinned fields, and the quoting-needing argv
+  # round-trips through TOML exactly (the tool runs the argv directly,
+  # never through a shell).
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got == {"name": "kitty-colors", "output": "kitty/colors.conf", "template": "template", "reload": {"argv": ["kitty", "@", "set-colors", "--all"], "timeout_secs": 10}}, got
+  ' ${userTargetKittyToml}
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got["reload"]["argv"] == ["my reload", "--name=\"quoted\""], got
+  assert "timeout_secs" not in got["reload"], got
+  ' ${userTargetQuotingToml}
+  echo "ok: Nix-declared user targets render parseable target.toml files with exact argv"
 
   # 11-12c. Idle policy and locker content (Linux only: every line
   # below names a Linux-only tool's store path, and the files

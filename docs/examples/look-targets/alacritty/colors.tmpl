@@ -1,0 +1,45 @@
+# Rendered from the active look by `scoot look apply`. Do not edit:
+# re-rendered on every swap from this template.
+#
+# Wiring (once): import the rendered file from `~/.config/alacritty/alacritty.toml`, e.g.
+#   import = ["~/.local/state/scoot/look/targets/alacritty/colors.toml"]
+# (the look state dir's `look` link plus `targets/alacritty/colors.toml`).
+# Keys you set after the import win per key; the font size stays yours.
+# Alacritty reloads on file change (`live_config_reload`, on by default,
+# including imports), so this target declares no `[reload]`.
+
+[colors.primary]
+background = "{{ palette.background }}"
+foreground = "{{ palette.foreground }}"
+dim_foreground = "{{ palette.dim }}"
+
+[colors.cursor]
+text = "{{ palette.background }}"
+cursor = "{{ palette.accent }}"
+
+[colors.selection]
+text = "{{ palette.selection-text }}"
+background = "{{ palette.selection }}"
+
+[colors.normal]
+black = "{{ terminal.color0 }}"
+red = "{{ terminal.color1 }}"
+green = "{{ terminal.color2 }}"
+yellow = "{{ terminal.color3 }}"
+blue = "{{ terminal.color4 }}"
+magenta = "{{ terminal.color5 }}"
+cyan = "{{ terminal.color6 }}"
+white = "{{ terminal.color7 }}"
+
+[colors.bright]
+black = "{{ terminal.color8 }}"
+red = "{{ terminal.color9 }}"
+green = "{{ terminal.color10 }}"
+yellow = "{{ terminal.color11 }}"
+blue = "{{ terminal.color12 }}"
+magenta = "{{ terminal.color13 }}"
+cyan = "{{ terminal.color14 }}"
+white = "{{ terminal.color15 }}"
+
+[font]
+normal = { family = "{{ fonts.mono }}" }

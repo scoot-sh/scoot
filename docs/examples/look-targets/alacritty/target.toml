@@ -1,0 +1,3 @@
+name = "alacritty"
+output = "alacritty/colors.toml"
+template = "colors.tmpl"

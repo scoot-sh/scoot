@@ -46,7 +46,7 @@ the app. Shape to settle in the ticket:
    per-app overrides for targets the user has enabled, never templates,
    output paths or reload commands. Templates from a pack the user adds are
    the user's choice, shown first at add time, like `--trust`.
-5. **Nix.** `programs.scoot.look.targets.<name>` takes a template, output
+5. **Nix.** `programs.scoot.lookTargets.<name>` takes a template, output
    and reload, parallel to Stylix targets; the declared look still wins.
 6. **A starter pack**, maintained in-tree: kitty, Ghostty, Alacritty,
    WezTerm, tmux, zathura, rofi, plus Chrome/Chromium (the
@@ -137,10 +137,31 @@ the docs example cannot rot. Docs: `site/.../reference/look-targets.md`
 plus a pointer in `look-format.md`.
 
 Later slices (still open): trust for packs (show a pack's templates at
-add time, like `--trust`); `programs.scoot.look.targets` (Nix shape,
-declared look still wins); the starter pack (Ghostty, Alacritty,
-WezTerm, tmux, zathura, rofi, Chrome/Chromium policy, Firefox
-`userChrome.css` behind an opt-in — browsers stay the hard part, per
-the ticket); look-supplied token data and per-app overrides for
+add time, like `--trust`); look-supplied token data and per-app overrides for
 user-enabled targets; keeping look sources and template sources in
 separate imports. None of these run a look-supplied command, ever.
+
+## Resolution in progress — slice 2 (Nix targets + starter pack)
+
+`programs.scoot.lookTargets.<name>` (home-manager): `{ template
+(path or text), output, reload = { argv, timeout_secs } }` generating
+the same on-disk `look-targets/<name>/{target.toml,template}` slice 1
+reads (via `xdg.configFile`). Named `lookTargets`, not the ticket's
+`look.targets`: `programs.scoot.look` is the declared-default string
+and one option cannot be both that value and a parent (verified against
+`lib.evalModules` — the declarations collide), so the targets live
+beside it with zero churn to every `look` reader. A bad name or output
+fails the evaluation naming the entry; the full grammar stays
+runtime-checked. A sync with any target configured (declared or
+hand-written) renders fresh instead of pointing at the catalog render:
+the catalog build (`scoot-look build`, one look's fragments) cannot
+absorb per-user templates, so sync stays a pure repoint only in the
+no-targets case.
+
+Starter pack (non-browser), next to the kitty example
+(`docs/examples/look-targets/<name>/`): Alacritty, WezTerm, Ghostty,
+tmux, zathura and rofi — each from the real tokens, each with the right
+output path, no `[reload]` anywhere (live reload, keybind, manual or
+next-launch per app), each rendering in a test. Browsers stay a later
+slice (no live reload for Firefox without an extension, Chrome policy
+needs a managed path).

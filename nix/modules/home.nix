@@ -207,6 +207,61 @@ let
       d = builtins.dirOf cfg.configFile;
     in
     if d == "." || d == "" then "session.sh" else "${d}/session.sh";
+
+  # Whether a Nix-declared look target output is structurally sound:
+  # relative, normalized, no `..`, no leading `/`, no backslash, no
+  # hidden segments, 1 to 512 bytes, each segment 1 to 64 bytes. The
+  # rest of the grammar (ASCII-only, no control characters, staying
+  # under the config home through symlinks) stays runtime-checked by
+  # `scoot look validate` (see `check_target_path` in
+  # `crates/scoot-look/src/targets.rs`); this only fails the evaluation
+  # on the shapes that are cheap to name here.
+  targetOutputValid =
+    output:
+    let
+      segments = lib.splitString "/" output;
+      segmentOk =
+        segment:
+        segment != ""
+        && segment != "."
+        && segment != ".."
+        && !(lib.hasPrefix "." segment)
+        && builtins.stringLength segment <= 64;
+    in
+    output != ""
+    && builtins.stringLength output <= 512
+    && !(lib.hasInfix "\\" output)
+    && !(lib.hasPrefix "/" output)
+    && !(lib.hasInfix "//" output)
+    && !(lib.hasSuffix "/" output)
+    && lib.all segmentOk segments;
+
+  # One Nix-declared look target as its `target.toml` bytes: the same
+  # grammar slice 1 reads (name, relative output, the template file
+  # beside it, the user's own reload). Strings render through
+  # `builtins.toJSON`, whose `"..."` spelling is also a valid TOML
+  # basic string (same `\"`/`\\`/control escapes, raw UTF-8 otherwise),
+  # so an argv entry carrying spaces or quotes encodes exactly once and
+  # the tool still runs it directly, never through a shell.
+  targetTomlText =
+    name: target:
+    builtins.concatStringsSep "\n" (
+      [
+        "name = ${builtins.toJSON name}"
+        "output = ${builtins.toJSON target.output}"
+        ''template = "template"''
+      ]
+      ++ lib.optionals (target.reload != null) (
+        [
+          "[reload]"
+          "argv = ${builtins.toJSON target.reload.argv}"
+        ]
+        ++ lib.optionals (target.reload.timeout_secs != null) [
+          "timeout_secs = ${toString target.reload.timeout_secs}"
+        ]
+      )
+    )
+    + "\n";
 in
 {
   # The idle policy's user half (swayidle unit, inhibitor, locker
@@ -306,6 +361,113 @@ in
         nothing. Each value is a default a value you set in `settings`
         beats per key; the live choice in `<state>/look.json` beats this
         until it changes (see `scoot look sync`).
+      '';
+    };
+
+    # User-owned look targets, Nix-declared (`scoot/look-targets/<name>/`
+    # without the hand-writing): each entry renders the same on-disk
+    # `target.toml` plus template that `scoot look apply` reads, parallel
+    # to Stylix targets. Named `lookTargets` (not `look.targets`):
+    # `programs.scoot.look` is the declared-default string (null or one
+    # name from `looks`), and an option cannot be both that value and a
+    # parent — so the targets live beside it. The declared look still
+    # wins: targets only add rendered files, never look tokens. A sync
+    # with any target configured (Nix-declared or hand-written) renders
+    # fresh instead of pointing at the catalog render, which was built
+    # without the templates (see `scoot look sync`).
+    lookTargets = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            template = lib.mkOption {
+              type = lib.types.either lib.types.path lib.types.lines;
+              example = ./alacritty-colors.tmpl;
+              description = ''
+                The template the target renders: a path to a template file,
+                or the template text itself. Renders with the active look's
+                tokens on every apply (see
+                site/src/content/docs/reference/look-targets.md).
+              '';
+            };
+
+            output = lib.mkOption {
+              type = lib.types.str;
+              example = "kitty/colors.conf";
+              description = ''
+                Where the rendered file lands, relative to the config home
+                (`kitty/colors.conf`), mirrored under `targets/` in the
+                render. Relative and normalized: no `..`, no absolute path,
+                no hidden segments. Anything else fails the evaluation.
+              '';
+            };
+
+            reload = lib.mkOption {
+              type = lib.types.nullOr (
+                lib.types.submodule {
+                  options = {
+                    argv = lib.mkOption {
+                      type = lib.types.listOf lib.types.str;
+                      example = [
+                        "kitty"
+                        "@"
+                        "set-colors"
+                        "--all"
+                      ];
+                      description = ''
+                        The program plus its arguments, run directly (never
+                        through a shell) after a successful swap. A bare name
+                        on `PATH` or an absolute path.
+                      '';
+                    };
+
+                    timeout_secs = lib.mkOption {
+                      type = lib.types.nullOr (lib.types.ints.between 1 300);
+                      default = null;
+                      example = 10;
+                      description = ''
+                        How long to wait, in seconds (1 to 300). Null is the
+                        tool's 30 s default.
+                      '';
+                    };
+                  };
+                }
+              );
+              default = null;
+              example = {
+                argv = [
+                  "kitty"
+                  "@"
+                  "set-colors"
+                  "--all"
+                ];
+                timeout_secs = 10;
+              };
+              description = ''
+                The app's live-reload command, run after a successful swap
+                with a bounded wait. A reload failure is a note, never a
+                rollback. Null renders the file and runs nothing (most
+                apps: they reload on file change, on next launch, or by
+                hand — see the starter pack docs).
+              '';
+            };
+          };
+        }
+      );
+      default = { };
+      example = lib.literalExpression ''
+        {
+          kitty-colors = {
+            template = ./kitty-colors.tmpl;
+            output = "kitty/colors.conf";
+            reload.argv = [ "kitty" "@" "set-colors" "--all" ];
+          };
+        }
+      '';
+      description = ''
+        User-owned look targets, Nix-declared: each entry lands as
+        `scoot/look-targets/<name>/{target.toml,template}` in the config
+        home, exactly like a hand-written target. Needs only
+        `programs.scoot.enable` (no catalog, no profile).
       '';
     };
 
@@ -852,6 +1014,66 @@ in
               fi
             '';
       };
+    })
+
+    # User-owned look targets, Nix-declared: the same on-disk
+    # `scoot/look-targets/<name>/{target.toml,template}` a hand-written
+    # target is, so `scoot look apply` reads them with no other change
+    # (see the `lookTargets` option). Gated on `enable` alone: targets work
+    # with no catalog and no profile, like hand-written ones. A bad name
+    # or output fails the evaluation naming the entry (the full grammar
+    # stays runtime-checked by `scoot look validate`).
+    #
+    # Sync note: a sync with any target configured (Nix-declared or
+    # hand-written) renders fresh instead of pointing at the catalog
+    # render, which was built without the templates — so these stay a
+    # repoint only in the no-targets case. The catalog build cannot
+    # absorb them: `scoot-look build` renders one look's fragments, and
+    # templates render per-user at apply time against the active look.
+    (lib.mkIf (cfg.enable && cfg.lookTargets != { }) {
+      xdg.configFile = lib.listToAttrs (
+        lib.concatMap (
+          name:
+          let
+            target = cfg.lookTargets.${name};
+          in
+          if builtins.match "[a-z0-9-]{1,32}" name == null then
+            throw "programs.scoot.lookTargets `${name}`: names must match [a-z0-9-]{1,32} (the target directory name)"
+          else if !targetOutputValid target.output then
+            throw "programs.scoot.lookTargets.${name}: output `${target.output}` must be a relative path under the config home (no `..`, no absolute path, no hidden segments)"
+          else
+            [
+              {
+                name = "scoot/look-targets/${name}/target.toml";
+                value = {
+                  text = targetTomlText name target;
+                };
+              }
+              {
+                name = "scoot/look-targets/${name}/template";
+                value =
+                  # A path value lands as a file; anything else is the
+                  # template text itself. An interpolated store path (a
+                  # string, e.g. `builtins.toFile`) reads back as its
+                  # content, so it behaves like the file it names; a
+                  # relative string stays text, so pass files as paths
+                  # (`./colors.tmpl`), not strings.
+                  if builtins.isPath target.template then
+                    {
+                      source = target.template;
+                    }
+                  else if lib.isStorePath target.template then
+                    {
+                      text = builtins.readFile target.template;
+                    }
+                  else
+                    {
+                      text = target.template;
+                    };
+              }
+            ]
+        ) (builtins.attrNames cfg.lookTargets)
+      );
     })
 
     # No app module reads Stylix: the compositor's `[appearance]`,

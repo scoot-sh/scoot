@@ -1,0 +1,3 @@
+name = "wezterm"
+output = "wezterm/colors.lua"
+template = "colors.tmpl"

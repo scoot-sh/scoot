@@ -1,0 +1,18 @@
+# Rendered from the active look by `scoot look apply`. Do not edit:
+# re-rendered on every swap from this template.
+#
+# Wiring (once): source the rendered file from the tmux.conf your server
+# reads (`~/.tmux.conf`, or `$XDG_CONFIG_HOME/tmux/tmux.conf` on tmux 3.2+), e.g.
+#   source-file ~/.local/state/scoot/look/targets/tmux/theme.conf
+# (the look state dir's `look` link plus `targets/tmux/theme.conf`; tmux
+# expands `~`). Then reload the running server by hand
+# (`tmux source-file <that file>`, or restart it): the path is
+# machine-specific, so this target declares no `[reload]`.
+# Only colors land here: your status content, binds and options stay yours.
+set -g status-style "fg={{ palette.foreground }},bg={{ palette.background }}"
+set -g window-status-style "fg={{ palette.dim }},bg={{ palette.background }}"
+set -g window-status-current-style "fg={{ palette.background }},bg={{ palette.accent }},bold"
+set -g pane-border-style "fg={{ palette.border }}"
+set -g pane-active-border-style "fg={{ palette.focus }}"
+set -g message-style "fg={{ palette.foreground }},bg={{ palette.surface }}"
+set -g mode-style "fg={{ palette.selection-text }},bg={{ palette.selection }}"
