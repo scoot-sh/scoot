@@ -1,0 +1,68 @@
+/* Rendered from the active look by `scoot look apply`. Do not edit:
+ * re-rendered on every swap from this template.
+ *
+ * Wiring (once): import the rendered file at the end of
+ * `~/.config/rofi/config.rasi`, e.g.
+ *   @import "~/.local/state/scoot/look/targets/rofi/colors.rasi"
+ * (the look state dir's `look` link plus `targets/rofi/colors.rasi`;
+ * rofi expands `~` in absolute import paths). rofi reads its theme on
+ * every launch, so this target declares no `[reload]`. */
+* {
+  background: {{ palette.background }};
+  foreground: {{ palette.foreground }};
+  accent: {{ palette.accent }};
+  accent-fg: {{ palette.accent-fg }};
+  surface: {{ palette.surface }};
+  selection: {{ palette.selection }};
+  urgent: {{ palette.urgent }};
+  font: "{{ fonts.mono }} 10";
+}
+
+window {
+  background-color: @background;
+  border-color: @accent;
+}
+
+mainbox {
+  background-color: @background;
+}
+
+inputbar {
+  background-color: @surface;
+  text-color: @foreground;
+}
+
+entry {
+  background-color: @surface;
+  text-color: @foreground;
+  placeholder-color: @foreground;
+}
+
+listview {
+  background-color: @background;
+}
+
+element {
+  background-color: @background;
+  text-color: @foreground;
+}
+
+element selected.normal {
+  background-color: @selection;
+  text-color: @foreground;
+}
+
+element selected.urgent {
+  background-color: @urgent;
+  text-color: @background;
+}
+
+element-text {
+  background-color: inherit;
+  text-color: inherit;
+}
+
+message {
+  background-color: @surface;
+  text-color: @foreground;
+}

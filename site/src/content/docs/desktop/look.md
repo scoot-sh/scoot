@@ -60,6 +60,42 @@ yours keeps your whole section), or drop to `look = null`.
 Every look is previewed in [Theming](../scoot/theming.md) — including
 how to make your own.
 
+## Look targets (any app)
+
+`programs.scoot.lookTargets.<name>` themes an app scoot never
+hard-codes, from a template you give: each entry links as a directory
+symlink `scoot/look-targets/<name>` to a store directory of regular
+files (`target.toml` plus the template), which reads exactly like a
+hand-written target (see [Look
+targets](../reference/look-targets.md)), and needs no catalog and no
+profile. The declared look still wins: targets only add rendered
+files, never look tokens.
+
+| Option | Type / default | Target reloads |
+|---|---|---|
+| `lookTargets.<name>.template` | path or text, required | the template, rendered with the active look's tokens on every apply |
+| `lookTargets.<name>.output` | string, required | where the rendered file lands, relative to the config home (`kitty/colors.conf`); ASCII only, no `..`, no absolute path, no hidden segments, no control characters — anything else fails the evaluation; staying under the config home through symlinks stays checked by `scoot look validate` |
+| `lookTargets.<name>.reload.argv` | list of string, default `null` (no reload) | the program plus its arguments, run directly after a successful swap, never through a shell; a bare name on `PATH` or an absolute path (checked by `scoot look validate`, not at evaluation) |
+| `lookTargets.<name>.reload.timeout_secs` | 1 to 300, default `null` (the tool's 30 s) | how long to wait before the hung child is killed; a failing reload is a note, never a rollback |
+
+```nix title="home.nix"
+programs.scoot.lookTargets.kitty-colors = {
+  template = ./kitty-colors.tmpl;
+  output = "kitty/colors.conf";
+  reload.argv = [ "kitty" "@" "set-colors" "--all" ];
+  reload.timeout_secs = 10;
+};
+```
+
+A name outside `[a-z0-9-]{1,32}` or an output outside the grammar fails
+the evaluation naming the entry; staying under the config home through
+symlinks (and the reload program shape) stays checked by
+`scoot look validate`. A sync with any target configured (declared or
+hand-written) renders fresh instead of pointing at the catalog render,
+which was built without the templates — the catalog build cannot
+absorb them (a catalog entry is one look's fragments; templates render
+per user at apply time).
+
 ## App theme
 
 One look themes every app together: picking `music-desk` sets the

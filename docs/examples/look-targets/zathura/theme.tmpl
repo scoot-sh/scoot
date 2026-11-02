@@ -1,0 +1,27 @@
+# Rendered from the active look by `scoot look apply`. Do not edit:
+# re-rendered on every swap from this template.
+#
+# Wiring (once): zathura's `include` resolves relative to the file doing
+# the including, so link the rendered file next to your zathurarc and
+# include the link, e.g.
+#   ln -s ~/.local/state/scoot/look/targets/zathura/theme ~/.config/zathura/scoot-theme
+# and a line in `~/.config/zathura/zathurarc` reading
+#   include scoot-theme
+# Restart zathura to pick up a swap (`R` reloads the document, not the
+# config), so this target declares no `[reload]`.
+set default-bg "{{ palette.background }}"
+set default-fg "{{ palette.foreground }}"
+set statusbar-bg "{{ palette.background }}"
+set statusbar-fg "{{ palette.foreground }}"
+set inputbar-bg "{{ palette.surface }}"
+set inputbar-fg "{{ palette.foreground }}"
+set completion-bg "{{ palette.surface }}"
+set completion-fg "{{ palette.foreground }}"
+set completion-highlight-bg "{{ palette.accent }}"
+set completion-highlight-fg "{{ palette.accent-fg }}"
+set index-bg "{{ palette.surface }}"
+set index-fg "{{ palette.foreground }}"
+set index-active-bg "{{ palette.accent }}"
+set index-active-fg "{{ palette.accent-fg }}"
+set highlight-color "rgba({{ palette.accent | rgb }},0.5)"
+set font "{{ fonts.mono }} 10"

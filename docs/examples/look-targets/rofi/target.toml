@@ -1,0 +1,3 @@
+name = "rofi"
+output = "rofi/colors.rasi"
+template = "colors.tmpl"

@@ -48,10 +48,11 @@ scoot look apply moonrise
 The swap is atomic: every target renders before anything is recorded,
 under the same swap, cache key and rollback as the built-in fragments.
 `look validate` and `look build` cover targets the same way. A sync
-with targets configured renders fresh instead of pointing at the Nix
-catalog render (built without the user's templates) and says so. An
-in-tree example (kitty, all sixteen terminal colors) lives in
-`docs/examples/look-targets/kitty-colors/`.
+with targets configured (hand-written or Nix-declared) renders fresh
+instead of pointing at the Nix catalog render (built without the
+templates) and says so. An in-tree example (kitty, all sixteen
+terminal colors) lives in `docs/examples/look-targets/kitty-colors/`,
+beside the six-app starter pack below.
 
 ## target.toml
 
@@ -149,11 +150,76 @@ allowlist, so only these user-owned directories are ever read.
 > symlink out of the config home. Point it inside the home; through a
 > symlinked directory refuses even when the spelling looks relative.
 
+## Starter pack
+
+Six maintained targets ship in-tree in `docs/examples/look-targets/<name>/`
+(each with its `target.toml` and template, each rendering in a test so the
+example cannot rot). Copy the directory you want into
+`~/.config/scoot/look-targets/<name>/` and add the wiring line to the app's
+own config, once, by hand. Keys you set in your own config after the
+include win per key. All six need a look with a `[terminal]` table;
+against a look without one `validate` names the missing token. None of
+the six declares a `[reload]`: the middle
+column says how each app picks up the re-render.
+
+| Target | What it themes | Picks up a swap |
+|---|---|---|
+| `alacritty` | palette, all 16 terminal colors, mono font | live: Alacritty reloads on file change (`live_config_reload`, on by default), imports included |
+| `wezterm` | palette, all 16 terminal colors, mono font and size | live: WezTerm reloads on file change (`automatically_reload_config`, on by default) |
+| `ghostty` | palette, all 16 terminal colors, mono font | by keybind: the `reload_config` action (`ctrl+shift+,` by default); Ghostty has no external reload command |
+| `tmux` | status line, window list, pane borders, messages | by hand: run `tmux source-file <the rendered file>` (or restart the server); the path is machine-specific |
+| `zathura` | page, status bar, input bar, completion, index, search highlight, font | restart: `R` reloads the document, not the config |
+| `rofi` | window, input bar, list, selected and urgent rows, messages, font | next launch: rofi reads its theme on every start |
+
+Wire each one at its rendered path (the look state dir's `look` link plus
+`targets/<output>`):
+
+```text title="~/.config/alacritty/alacritty.toml"
+import = ["~/.local/state/scoot/look/targets/alacritty/colors.toml"]
+```
+
+```text title="~/.config/wezterm/wezterm.lua"
+local scoot_colors = dofile(os.getenv("HOME") .. "/.local/state/scoot/look/targets/wezterm/colors.lua")
+scoot_colors.apply_to_config(config)
+```
+
+```text title="~/.config/ghostty/config.ghostty"
+config-file = "~/.local/state/scoot/look/targets/ghostty/theme"
+```
+
+```text title="~/.tmux.conf"
+source-file ~/.local/state/scoot/look/targets/tmux/theme.conf
+```
+
+```sh
+ln -s ~/.local/state/scoot/look/targets/zathura/theme ~/.config/zathura/scoot-theme
+```
+
+```text title="~/.config/zathura/zathurarc"
+include scoot-theme
+```
+
+```text title="~/.config/rofi/config.rasi"
+@import "~/.local/state/scoot/look/targets/rofi/colors.rasi"
+```
+
+zathura's `include` resolves relative to the file doing the including,
+so the link above keeps the wiring portable; an absolute `include` of
+the state path works too. tmux reads `~/.tmux.conf` when its server
+starts (`$XDG_CONFIG_HOME/tmux/tmux.conf` on tmux 3.2+); `:source-file`
+applies a re-render to the running server.
+
+Nix users declare the same targets with
+[`programs.scoot.lookTargets`](../desktop/look.md): each entry lands
+as `scoot/look-targets/<name>/{target.toml,template}` in the config
+home. A sync with any target configured (declared or hand-written)
+renders fresh instead of pointing at the catalog render, which was
+built without the templates.
+
 ## Not here yet
 
-Trust for packs (`--trust` showing a pack's templates at add time), the
-Nix shape (`programs.scoot.look.targets`), a starter pack beyond the
-kitty example, browsers (no live reload for Firefox without an
-extension, and Chrome's policy needs a managed path), and keeping look
-sources and template sources in separate imports. Each is a later
-slice; the ticket lists them.
+Trust for packs (`--trust` showing a pack's templates at add time),
+browsers (no live reload for Firefox without an extension, and the
+Chrome policy needs a root or managed path), and keeping look sources
+and template sources in separate imports. Each is a later slice; the
+ticket lists them.

@@ -1,0 +1,3 @@
+name = "ghostty"
+output = "ghostty/theme"
+template = "theme.tmpl"

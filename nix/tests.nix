@@ -2163,6 +2163,84 @@ let
     desktop.theme.targets.cursor.enable = false;
     desktop.theme.targets.fonts.enable = false;
   };
+  # ...with Nix-declared user targets: one from a template file, one
+  # from inline text with a reload (an argv carrying a space and a
+  # quote, proving the TOML encoding, not a shell, carries it). Needs
+  # no catalog and no profile: targets work with `enable` alone.
+  hmUserTargets = evalHome {
+    enable = true;
+    package = fakePkg;
+    lookTargets = {
+      kitty-colors = {
+        template = ../docs/examples/look-targets/kitty-colors/colors.tmpl;
+        output = "kitty/colors.conf";
+        reload.argv = [
+          "kitty"
+          "@"
+          "set-colors"
+          "--all"
+        ];
+        reload.timeout_secs = 10;
+      };
+      ghostty-theme = {
+        template = "background {{ palette.background }}\nforeground {{ palette.foreground }}\n";
+        output = "ghostty/theme";
+      };
+      quoting = {
+        template = "x {{ palette.background }}\n";
+        output = "quoting/out.conf";
+        reload.argv = [
+          "my reload"
+          "--name=\"quoted\""
+        ];
+      };
+      # A store path as a string (not a path value) reads back as its
+      # content, so it behaves like the file it names.
+      tofile-theme = {
+        template = builtins.toFile "colors.tmpl" "background {{ palette.background }}\n";
+        output = "tofile/colors.conf";
+      };
+    };
+  };
+  # ...with a target writing outside the grammar: the evaluation fails
+  # naming the entry (an absolute path here; `..`, hidden segments,
+  # backslashes, non-ASCII and control characters fail the same way).
+  hmUserTargetsBadOutput = evalHome {
+    enable = true;
+    package = fakePkg;
+    lookTargets.bad = {
+      template = "x\n";
+      output = "/etc/kitty/colors.conf";
+    };
+  };
+  hmUserTargetsBadOutputRefused = builtins.tryEval (
+    hmUserTargetsBadOutput.config.xdg.configFile."scoot/look-targets/bad".source
+  );
+  # ...with a non-ASCII output: the evaluation fails naming the entry.
+  hmUserTargetsBadUnicode = evalHome {
+    enable = true;
+    package = fakePkg;
+    lookTargets.bad = {
+      template = "x\n";
+      output = "café/colors.conf";
+    };
+  };
+  hmUserTargetsBadUnicodeRefused = builtins.tryEval (
+    hmUserTargetsBadUnicode.config.xdg.configFile."scoot/look-targets/bad".source
+  );
+  # ...with a target name outside the grammar: the evaluation fails
+  # naming it.
+  hmUserTargetsBadName = evalHome {
+    enable = true;
+    package = fakePkg;
+    lookTargets."Bad_Name" = {
+      template = "x\n";
+      output = "bad/out.conf";
+    };
+  };
+  hmUserTargetsBadNameRefused = builtins.tryEval (
+    hmUserTargetsBadName.config.xdg.configFile."scoot/look-targets/Bad_Name".source
+  );
   # The NixOS-module-only catalog: the same entries as a system
   # package, the declared default in `/etc/scoot/look-default`.
   osLookCatalog = evalNixos {
@@ -7686,6 +7764,14 @@ let
   themeFontsConf = hmTheme.config.xdg.configFile."fontconfig/conf.d/10-scoot-look.conf".source;
   themeFootConf = hmTheme.config.xdg.configFile."foot/foot.ini".source;
   themeStarshipConf = hmTheme.config.xdg.configFile."starship.toml".source;
+  # Nix-declared user targets as directory symlinks: one store directory
+  # per target (`target.toml` + `template` as regular files), linked as
+  # `scoot/look-targets/<name>`. No per-file entries under the target.
+  userTargetKittyDir = hmUserTargets.config.xdg.configFile."scoot/look-targets/kitty-colors".source;
+  userTargetQuotingDir = hmUserTargets.config.xdg.configFile."scoot/look-targets/quoting".source;
+  userTargetGhosttyDir =
+    hmUserTargets.config.xdg.configFile."scoot/look-targets/ghostty-theme".source;
+  userTargetTofileDir = hmUserTargets.config.xdg.configFile."scoot/look-targets/tofile-theme".source;
   themeHelixConf = hmTheme.config.xdg.configFile."helix/config.toml".source;
   themeHelixTheme = hmTheme.config.xdg.configFile."helix/themes/scoot-light.toml".source;
   themeBtopConf = hmTheme.config.xdg.configFile."btop/btop.conf".source;
@@ -14536,6 +14622,69 @@ let
       assert hmLookDefault.config.xdg.configFile."scoot/look-nix-targets".text == "";
       true
     )
+    # ...Nix-declared user targets link as one directory symlink per
+    # target (`scoot/look-targets/<name>` -> a store dir of regular files,
+    # no catalog, no profile, no sync step involved)...
+    (
+      assert allAssertionsHold hmUserTargets.config;
+      true
+    )
+    (
+      # ...each target is a directory source, not per-file entries.
+      assert hmUserTargets.config.xdg.configFile ? "scoot/look-targets/kitty-colors";
+      true
+    )
+    (
+      assert hmUserTargets.config.xdg.configFile."scoot/look-targets/kitty-colors".source != null;
+      true
+    )
+    (
+      assert !(hmUserTargets.config.xdg.configFile ? "scoot/look-targets/kitty-colors/target.toml");
+      true
+    )
+    (
+      assert !(hmUserTargets.config.xdg.configFile ? "scoot/look-targets/kitty-colors/template");
+      true
+    )
+    (
+      assert hmUserTargets.config.xdg.configFile ? "scoot/look-targets/ghostty-theme";
+      true
+    )
+    (
+      assert !(hmUserTargets.config.xdg.configFile ? "scoot/look-targets/ghostty-theme/target.toml");
+      true
+    )
+    (
+      assert !(hmUserTargets.config.xdg.configFile ? "scoot/look-targets/ghostty-theme/template");
+      true
+    )
+    (
+      assert hmUserTargets.config.xdg.configFile ? "scoot/look-targets/quoting";
+      true
+    )
+    (
+      assert !(hmUserTargets.config.xdg.configFile ? "scoot/look-targets/quoting/target.toml");
+      true
+    )
+    (
+      assert hmUserTargets.config.xdg.configFile ? "scoot/look-targets/tofile-theme";
+      true
+    )
+    # ...and a bad output, a non-ASCII output, or a bad name fails the
+    # evaluation (the throw names the entry; `tryEval` keeps only success
+    # here, so the message is reviewed beside the option, not pinned).
+    (
+      assert !hmUserTargetsBadOutputRefused.success;
+      true
+    )
+    (
+      assert !hmUserTargetsBadUnicodeRefused.success;
+      true
+    )
+    (
+      assert !hmUserTargetsBadNameRefused.success;
+      true
+    )
     (
       assert !(hmLookNoPackage.config.xdg.configFile ? "scoot/look-nix-targets");
       true
@@ -17876,6 +18025,38 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     grep -q '^font = "' ${osRealLookCatalog}/share/scoot/rendered/moonrise/bar.toml
     echo "ok: the system look catalog builds with sources and renders under share/scoot"
   ''}
+
+  # 10g. Nix-declared user targets: each directory holds regular files
+  # `target.toml` + `template` (never symlinks, which the tool refuses),
+  # the generated `target.toml` files parse, carry the pinned fields, and
+  # the quoting-needing argv round-trips through TOML exactly (the tool
+  # runs the argv directly, never through a shell).
+  test ! -L ${userTargetKittyDir}/target.toml
+  test ! -L ${userTargetKittyDir}/template
+  test -f ${userTargetKittyDir}/target.toml
+  test -f ${userTargetKittyDir}/template
+  test ! -L ${userTargetQuotingDir}/target.toml
+  test ! -L ${userTargetGhosttyDir}/template
+  test ! -L ${userTargetTofileDir}/template
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got == {"name": "kitty-colors", "output": "kitty/colors.conf", "template": "template", "reload": {"argv": ["kitty", "@", "set-colors", "--all"], "timeout_secs": 10}}, got
+  ' ${userTargetKittyDir}/target.toml
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got["reload"]["argv"] == ["my reload", "--name=\"quoted\""], got
+  assert "timeout_secs" not in got["reload"], got
+  ' ${userTargetQuotingDir}/target.toml
+  python3 -c '
+  import sys,tomllib
+  got = tomllib.load(open(sys.argv[1],"rb"))
+  assert got == {"name": "ghostty-theme", "output": "ghostty/theme", "template": "template"}, got
+  ' ${userTargetGhosttyDir}/target.toml
+  grep -F "background {{ palette.background }}" ${userTargetGhosttyDir}/template
+  grep -F "background {{ palette.background }}" ${userTargetTofileDir}/template
+  echo "ok: Nix-declared user targets render parseable target.toml files with exact argv"
 
   # 11-12c. Idle policy and locker content (Linux only: every line
   # below names a Linux-only tool's store path, and the files
