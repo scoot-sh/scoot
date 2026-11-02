@@ -69,3 +69,78 @@ a refused reload does.
 
 Sharing target packs from git (see [`look-share`](look-share.md)); Windows
 or macOS app targets; anything that runs a look-supplied command.
+
+## Resolution in progress — slice 1 (user-owned targets only)
+
+Slice 1 ships the user-owned half: templates in
+`~/.config/scoot/look-targets/<name>/{target.toml,<template>}`
+(`$XDG_CONFIG_HOME` when set, else `~/.config`, via the shared
+`catalog::config_home` rule), rendered on every `scoot look apply`/swap
+into the look's state dir under `targets/<output>` next to the
+built-in fragments, under the same atomic swap, cache key
+(`RENDER_VERSION` 16) and rollback rules; `scoot look validate` and
+`look build` cover them (build stages `targets/` under `--out`).
+
+`target.toml` (`scoot-look/src/targets.rs`, strict `deny_unknown_fields`):
+
+```toml
+name = "kitty-colors"           # must match the directory name
+output = "kitty/colors.conf"    # relative to the config home (grammar:
+                                # no `..`, no absolute, no hidden segments)
+template = "colors.tmpl"        # file inside the target directory
+
+[reload]
+argv = ["kitty", "@", "set-colors", "--all"]  # bare PATH name or absolute
+timeout_secs = 10               # optional, 1 to 300, default 30
+```
+
+Tokens are the look's own spellings (`{{ palette.background }}`,
+`{{ terminal.color4 }}` (`color0`–`color15`, only when the look has a
+`[terminal]` table), `{{ fonts.mono }}`, plus `polarity`,
+`wallpaper.*`, `icons.theme`, `night.temperature` and the rest of the
+resolved tokens in `target_tokens`). Color filters re-spell `#rrggbb`:
+`| hex` (identity), `| nohash`, `| rgb` (`R,G,B`),
+`| rgba(<0 to 1>)`. Pure substitution with no logic, conditionals,
+loops, includes or execution; a template needing a literal `{{` has no
+escape in v1, and a stray `}}` stays literal (JSON nests `}}`).
+Unknown tokens, unknown filters, filters on non-colors and unclosed
+`{{` refuse at validate — so a typo never swaps a half-rendered file.
+
+Reload runs the user's own argv directly (never through a shell: no
+splitting, globs or `$VAR`), with the declared bounded wait. Tension
+with the ticket's "one failing target rolls the swap back like a
+refused reload" resolved explicitly: a *render* failure (unknown
+token, unreadable template, duplicate or escaping output) refuses
+*before* anything is recorded or repointed — the swap never started,
+exactly like a refused scoped reload. A *reload command* failure
+(missing binary, timeout, non-zero exit) is a note naming what happened
+and never undoes the swap, which already stands by then.
+
+Edge cases pinned by tests (`scootctl/src/look/apply/tests.rs`,
+`scoot-look/src/targets/tests.rs`): unknown token refuses at validate
+and records nothing; missing reload binary is a note; duplicate outputs
+refuse; absolute/`..`/hidden outputs refuse; a symlinked output prefix
+refuses; a symlinked template refuses (`O_NOFOLLOW` like every other
+look input); one failing target records and repoints nothing; a
+template edit re-renders instead of reusing the stale cache; validate,
+build and apply render the same bytes (the build test asserts the
+`--out` file equals the swapped one); a sync with targets configured
+renders fresh instead of pointing at the Nix catalog render (which was
+built without the user's templates). Installed looks can never supply
+templates, outputs or reloads: a `look.toml` with `[targets]` or a
+target-shaped `[apps.*]` table refuses at parse through the existing
+allowlist rules (pinned in `scoot-look` tests). One in-tree example
+target (kitty, all sixteen colors) lives under
+`docs/examples/look-targets/kitty-colors/` and renders in a test, so
+the docs example cannot rot. Docs: `site/.../reference/look-targets.md`
+(task-first, type/default/example/reload per option, `Symptom` boxes)
+plus a pointer in `look-format.md`.
+
+Later slices (still open): trust for packs (show a pack's templates at
+add time, like `--trust`); `programs.scoot.look.targets` (Nix shape,
+declared look still wins); the starter pack (Ghostty, Alacritty,
+WezTerm, tmux, zathura, rofi, Chrome/Chromium policy, Firefox
+`userChrome.css` behind an opt-in — browsers stay the hard part, per
+the ticket); look-supplied token data and per-app overrides for
+user-enabled targets; keeping look sources and template sources in
+separate imports. None of these run a look-supplied command, ever.

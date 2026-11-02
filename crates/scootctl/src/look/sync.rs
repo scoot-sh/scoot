@@ -683,8 +683,19 @@ pub fn sync_with(
     // An opted-out target always renders fresh: the catalog's
     // pre-rendered directory carries the cursor keys and the bar font
     // unconditionally, so pointing the link at it would theme exactly
-    // what the target leaves alone.
-    let (prerendered, fallback_note) = if target_skips.any() {
+    // what the target leaves alone. User-owned targets render fresh for
+    // the same reason: the pre-rendered directory was built without the
+    // user's templates, so pointing the link at it would drop every
+    // `targets/` file.
+    let has_user_targets = !super::targets::discover(config)
+        .map_err(|error| refuse(format!("cannot sync `{name}`: {error}")))?
+        .is_empty();
+    if has_user_targets {
+        report.notes.push(
+            "user targets configured: rendering fresh instead of the catalog render".to_owned(),
+        );
+    }
+    let (prerendered, fallback_note) = if target_skips.any() || has_user_targets {
         (None, None)
     } else {
         prerendered_for(&name, &hash, roots)
@@ -712,6 +723,7 @@ pub fn sync_with(
         checks,
         &mut report.notes,
         false,
+        config,
     )
     .map_err(refuse)?;
     // Already there: the same name, the same declared default, and the

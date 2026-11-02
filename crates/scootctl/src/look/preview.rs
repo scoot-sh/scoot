@@ -156,6 +156,7 @@ pub fn capture(
         catalog,
         checks,
         false,
+        None,
     );
     if let Err(error) = build {
         std::fs::remove_dir_all(&root).ok();

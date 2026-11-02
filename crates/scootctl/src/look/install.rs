@@ -621,7 +621,7 @@ fn finish_install(
             }
         }
     }
-    let staged = apply::validate_dir(&staging, Origin::Installed, catalog, checks, trust)?;
+    let staged = apply::validate_dir(&staging, Origin::Installed, catalog, checks, trust, None)?;
     if !staged.errors.is_empty() {
         return Err(format!("refused: {}", staged.errors.join("; ")));
     }
@@ -1065,7 +1065,7 @@ pub fn save_into(
             dir.join("look.toml").display()
         ));
     }
-    let validation = apply::validate_dir(&dir, Origin::User, catalog, checks, false)?;
+    let validation = apply::validate_dir(&dir, Origin::User, catalog, checks, false, None)?;
     if !validation.errors.is_empty() {
         return Err(format!(
             "invalid: {name} (the directory stays: fix it and re-run): {}",

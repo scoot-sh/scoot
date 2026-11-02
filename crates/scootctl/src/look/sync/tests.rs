@@ -1332,3 +1332,72 @@ fn cursor_skip_leaves_the_cursor_dconf_keys_and_ini_lines_alone() {
         report.notes
     );
 }
+
+#[test]
+fn user_targets_render_fresh_instead_of_the_catalog_render() {
+    // A catalog render the derivation built carries no user targets, so
+    // a sync with targets configured renders fresh instead of pointing
+    // the link at it (the pre-rendered path would drop every
+    // `targets/` file).
+    let fixture = fixture("targets-sync-fresh");
+    let empty_config = fixture._root.join("empty-config");
+    std::fs::create_dir_all(&empty_config).expect("an empty config home");
+    let checks = FakeChecks::default();
+    super::super::apply::build_to_out(
+        &super::super::apply::BuildTarget::Name("look-b".to_owned()),
+        &fixture.roots.join("look-b"),
+        &fixture.catalog,
+        &checks,
+        false,
+        Some(&empty_config),
+    )
+    .expect("the catalog render builds");
+    assert!(
+        !fixture.roots.join("look-b/targets").exists(),
+        "the catalog render carries no targets"
+    );
+    let dir = fixture.config.join("scoot/look-targets/kitty-colors");
+    std::fs::create_dir_all(&dir).expect("a target dir");
+    std::fs::write(
+        dir.join("target.toml"),
+        "name = \"kitty-colors\"\noutput = \"kitty/colors.conf\"\ntemplate = \"colors.tmpl\"\n",
+    )
+    .expect("a target.toml");
+    std::fs::write(
+        dir.join("colors.tmpl"),
+        "background {{ palette.background }}\n",
+    )
+    .expect("a template");
+    let mut compositor = FakeCompositor::not_running();
+    let report = run_sync(
+        Some(Some("look-b".to_owned())),
+        Vec::new(),
+        &fixture,
+        std::slice::from_ref(&fixture.roots),
+        &mut compositor,
+        &[],
+        &checks,
+        &FakeDconf::absent(),
+        &ScriptedLeaves::failing(),
+        &[],
+    )
+    .expect("sync with targets succeeds");
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|note| note.contains("rendering fresh instead of the catalog render")),
+        "names the fallback: {:?}",
+        report.notes
+    );
+    assert!(
+        !PathBuf::from(&report.rendered).starts_with(&fixture.roots),
+        "the link points at a fresh render, not the catalog one"
+    );
+    assert!(
+        PathBuf::from(&report.rendered)
+            .join("targets/kitty/colors.conf")
+            .is_file(),
+        "the fresh render carries the targets"
+    );
+}

@@ -29,6 +29,7 @@ pub mod pick;
 pub mod preview;
 pub mod reload;
 pub mod sync;
+pub mod targets;
 pub mod terminals;
 pub mod toolkit;
 pub mod watch;
@@ -1573,12 +1574,12 @@ fn run_validate(look: &Look, target: &str, origin: Origin, trust: bool) -> Resul
     let path = PathBuf::from(target);
     let validation = if is_path {
         if path.is_dir() {
-            validate_dir(&path, origin, &catalog, &checks, trust)?
+            validate_dir(&path, origin, &catalog, &checks, trust, None)?
         } else {
             return Err(not_a_dir(target, "validate"));
         }
     } else {
-        let mut validation = validate_entry(&catalog, target, &checks, trust)?;
+        let mut validation = validate_entry(&catalog, target, &checks, trust, None)?;
         if origin != Origin::User {
             validation.notes.push(
                 "`--origin` ignored for catalog names: the origin comes from the directory"
@@ -1648,7 +1649,7 @@ fn run_build(
         }
         BuildTarget::Name(target.to_owned())
     };
-    let report = build_to_out(&build_target, out, &catalog, &checks, trust)?;
+    let report = build_to_out(&build_target, out, &catalog, &checks, trust, None)?;
     let notes = dedup_notes(report.notes.clone());
     if look.json {
         output::print_line(
@@ -2470,7 +2471,7 @@ fn run_new(look: &Look, name: &str, base: &str) -> Result<(), String> {
     let catalog = discover();
     let dir = new::create_new(name, base, &catalog)?;
     let checks = apply::ProdChecks::new();
-    let validation = apply::validate_dir(&dir, Origin::User, &catalog, &checks, false)?;
+    let validation = apply::validate_dir(&dir, Origin::User, &catalog, &checks, false, None)?;
     if look.json {
         output::print_line(
             &serde_json::to_string_pretty(&serde_json::json!({

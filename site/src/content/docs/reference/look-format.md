@@ -326,7 +326,8 @@ text, well-formed TOML, btop theme lines, or a `colors_name`-setting
 Lua colorscheme), inherited through
 `extends` unless the child names its own. Installed looks (someone
 else's) drop them without `--trust`, which prints each kept leaf
-first; every other origin keeps them.
+first; every other origin keeps them. User-owned targets render
+beside them under `targets/` — see [Look targets](./look-targets.md).
 
 ## Validate and build
 

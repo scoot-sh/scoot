@@ -2044,6 +2044,7 @@ fn build_refuses_a_foreign_nonempty_out() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect_err("a foreign out refuses");
     assert!(error.contains("holds files"), "{error}");
@@ -2068,6 +2069,7 @@ fn build_refuses_a_symlinked_out_and_a_symlinked_fragment() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect_err("a symlinked out refuses");
     assert!(error.contains("symlink"), "{error}");
@@ -2082,6 +2084,7 @@ fn build_refuses_a_symlinked_out_and_a_symlinked_fragment() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect_err("a symlinked fragment refuses");
     assert!(error.contains("symlink"), "{error}");
@@ -2100,6 +2103,7 @@ fn build_into_an_out_holding_only_our_files_overwrites() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect("the first build succeeds");
     // A second build into the same dir (only our five files) succeeds.
@@ -2109,6 +2113,7 @@ fn build_into_an_out_holding_only_our_files_overwrites() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect("rebuilding over our own files succeeds");
 }
@@ -2131,6 +2136,7 @@ fn build_leaves_a_sibling_build_tmp_alone() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect("the build succeeds");
     assert!(sibling.join("keep.txt").is_file(), "the sibling survives");
@@ -2179,7 +2185,7 @@ fn validate_names_a_bad_wallpaper_instead_of_blank() {
         let dir = root.join("looks").join("badlook");
         // `validate_dir` reads look.toml first; the wallpaper failure must
         // appear in errors, never as an empty command error.
-        match validate_dir(&dir, Origin::User, &catalog, &checks, false) {
+        match validate_dir(&dir, Origin::User, &catalog, &checks, false, None) {
             Ok(validation) => {
                 assert!(
                     !validation.errors.is_empty(),
@@ -2284,6 +2290,7 @@ fn launch_and_notify_carry_the_file_the_bar_font_resolved_to() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect("buildable");
     let bar: toml::Table = std::fs::read_to_string(out.join("bar.toml"))
@@ -2323,6 +2330,7 @@ fn a_font_the_look_carries_reaches_launch_and_notify() {
         &catalog,
         &checks,
         false,
+        None,
     )
     .expect("buildable");
     for file in ["launch.toml", "notify.toml"] {
@@ -2348,6 +2356,7 @@ fn without_a_resolver_launch_and_notify_carry_no_font_file() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect("buildable");
     for file in ["launch.toml", "notify.toml"] {
@@ -2364,12 +2373,12 @@ fn validate_and_build_cover_a_directory_and_a_name() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let validation =
-        validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
+        validate_entry(&fixture.catalog, "look-a", &checks, false, None).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
-    assert!(validate_entry(&fixture.catalog, "nope", &checks, false).is_err());
+    assert!(validate_entry(&fixture.catalog, "nope", &checks, false, None).is_err());
     let dir = fixture._root.join("looks").join("look-a");
-    let validation =
-        validate_dir(&dir, Origin::User, &fixture.catalog, &checks, false).expect("validatable");
+    let validation = validate_dir(&dir, Origin::User, &fixture.catalog, &checks, false, None)
+        .expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
     let out = fixture._root.join("out");
     let report = build_to_out(
@@ -2378,6 +2387,7 @@ fn validate_and_build_cover_a_directory_and_a_name() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect("buildable");
     assert_eq!(report.name, "look-a");
@@ -2681,6 +2691,7 @@ fn a_directory_builds_itself_never_the_catalog_collision() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect("the copy builds");
     assert_eq!(report.name, "look-a");
@@ -2711,7 +2722,7 @@ fn effectful_refusals_are_structured_not_bare_errors() {
         foot_seen: RefCell::new(Vec::new()),
     };
     let validation =
-        validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
+        validate_entry(&fixture.catalog, "look-a", &checks, false, None).expect("validatable");
     assert_eq!(validation.errors.len(), 3, "{:?}", validation.errors);
     for error in &validation.errors {
         assert!(error.contains("no fallback font file exists"), "{error}");
@@ -2760,7 +2771,7 @@ fn validate_accepts_a_nameless_dir_path() {
     std::fs::create_dir_all(&fonts).expect("a fonts dir");
     let checks = FakeChecks::with_fonts(&fonts);
     let validation =
-        validate_dir(&probe, Origin::User, &catalog, &checks, false).expect("validatable");
+        validate_dir(&probe, Origin::User, &catalog, &checks, false, None).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
 }
 
@@ -2828,7 +2839,7 @@ fn validate_and_apply_agree_on_the_bar_fragment() {
         foot_seen: RefCell::new(Vec::new()),
     };
     let validation =
-        validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
+        validate_entry(&fixture.catalog, "look-a", &checks, false, None).expect("validatable");
     assert!(
         validation
             .errors
@@ -2885,7 +2896,7 @@ fn validate_retries_a_popup_refusal_without_popup_keys() {
         foot_seen: RefCell::new(Vec::new()),
     };
     let validation =
-        validate_entry(&fixture.catalog, "look-a", &checks, false).expect("validatable");
+        validate_entry(&fixture.catalog, "look-a", &checks, false, None).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
     let seen = checks.bar_seen.borrow();
     assert_eq!(
@@ -2952,7 +2963,8 @@ fn a_minimal_bar_drops_module_tokens_with_a_note() {
     };
     // Validate drops both and says so.
     let checks = new_checks();
-    let validation = validate_entry(&catalog, "look-ws", &checks, false).expect("validatable");
+    let validation =
+        validate_entry(&catalog, "look-ws", &checks, false, None).expect("validatable");
     assert!(validation.errors.is_empty(), "{:?}", validation.errors);
     let seen = checks.bar_seen.borrow();
     assert!(
@@ -3026,6 +3038,7 @@ fn a_minimal_bar_drops_module_tokens_with_a_note() {
         &catalog,
         &checks,
         false,
+        None,
     )
     .expect("a minimal bar builds a shipped-shaped look");
     let bar = std::fs::read_to_string(out.join("bar.toml")).expect("a bar fragment");
@@ -3183,6 +3196,7 @@ fn build_into_an_empty_out_writes_five_files_and_leaves_no_litter() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect("an empty out builds");
     assert_eq!(report.name, "look-a");
@@ -3209,6 +3223,7 @@ fn build_into_an_empty_out_writes_five_files_and_leaves_no_litter() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect_err("a foreign out refuses");
     assert_no_build_litter(&fixture._root);
@@ -3578,6 +3593,7 @@ fn build_writes_foot_ini_for_a_terminal_look() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect("a terminal look builds");
     let foot = std::fs::read_to_string(out.join("foot.ini")).expect("a foot.ini");
@@ -3605,6 +3621,7 @@ fn build_removes_a_stale_foot_ini_when_the_look_has_none() {
         &fixture.catalog,
         &checks,
         false,
+        None,
     )
     .expect("a terminal look builds");
     assert!(out.join("foot.ini").is_file(), "no foot.ini to go stale");
@@ -3619,6 +3636,7 @@ fn build_removes_a_stale_foot_ini_when_the_look_has_none() {
         &catalog,
         &checks,
         false,
+        None,
     )
     .expect("a plain look builds over the dir");
     assert!(
@@ -3698,7 +3716,7 @@ fn validate_reports_a_foot_refusal() {
     let mut checks = FakeChecks::with_fonts(&fonts);
     checks.foot_refuse = Some("foot says no".to_owned());
     let validation =
-        validate_entry(&fixture.catalog, "look-t", &checks, false).expect("a validation");
+        validate_entry(&fixture.catalog, "look-t", &checks, false, None).expect("a validation");
     assert!(
         validation.errors.iter().any(|e| e.contains("foot says no")),
         "errors: {:?}",
@@ -3857,7 +3875,7 @@ fn validate_downgrades_for_an_older_foot() {
     let mut checks = FakeChecks::with_fonts(&fonts);
     checks.old_foot = true;
     let validation =
-        validate_entry(&fixture.catalog, "look-t", &checks, false).expect("a validation");
+        validate_entry(&fixture.catalog, "look-t", &checks, false, None).expect("a validation");
     assert!(
         validation.errors.is_empty(),
         "errors: {:?}",
@@ -4419,6 +4437,7 @@ fn build_out_writes_static_leaves_and_clears_stale_ones() {
         &fixture.catalog,
         &FakeChecks::default(),
         false,
+        None,
     )
     .expect("a build succeeds");
     let _ = report;
@@ -4435,6 +4454,7 @@ fn build_out_writes_static_leaves_and_clears_stale_ones() {
         &fixture.catalog,
         &FakeChecks::default(),
         false,
+        None,
     )
     .expect("a rebuild succeeds");
     let _ = report;
@@ -4459,6 +4479,7 @@ fn build_dir_target_honors_origin_and_trust() {
         &fixture.catalog,
         &FakeChecks::default(),
         false,
+        None,
     )
     .expect("an untrusted build succeeds");
     assert!(
@@ -4477,6 +4498,7 @@ fn build_dir_target_honors_origin_and_trust() {
         &fixture.catalog,
         &FakeChecks::default(),
         true,
+        None,
     )
     .expect("a trusted build succeeds");
     assert!(
@@ -4591,8 +4613,14 @@ fn validate_reports_a_symlinked_static_leaf_like_apply() {
     let look = fixture._root.join("looks/look-a");
     std::fs::remove_file(look.join("apps/helix.toml")).expect("replace the leaf");
     plant_leaf_link(&look, &outside, LeafLink::ToFileInLook);
-    let report = validate_entry(&fixture.catalog, "look-a", &FakeChecks::default(), false)
-        .expect("validate runs");
+    let report = validate_entry(
+        &fixture.catalog,
+        "look-a",
+        &FakeChecks::default(),
+        false,
+        None,
+    )
+    .expect("validate runs");
     assert!(
         report.errors.iter().any(|e| e.contains("is a symlink")),
         "{report:?}"
@@ -4682,4 +4710,428 @@ fn a_symlinked_look_directory_still_applies_its_leaves() {
     let _ = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
     let rendered = PathBuf::from(&record_of(&fixture.state).rendered);
     assert!(rendered.join("apps/helix.toml").is_file());
+}
+
+/// Writes a user target into the fixture config home: `target.toml`
+/// naming `output` plus `colors.tmpl`, with an optional `[reload]` block.
+fn write_target(config: &Path, name: &str, output: &str, template: &str, reload: Option<&str>) {
+    let dir = config.join("scoot/look-targets").join(name);
+    std::fs::create_dir_all(&dir).expect("a target dir");
+    let mut toml =
+        format!("name = \"{name}\"\noutput = \"{output}\"\ntemplate = \"colors.tmpl\"\n");
+    if let Some(reload) = reload {
+        toml.push_str(reload);
+    }
+    std::fs::write(dir.join("target.toml"), toml).expect("a target.toml");
+    std::fs::write(dir.join("colors.tmpl"), template).expect("a template");
+}
+
+const KITTY_TEMPLATE: &str = "# kitty colors from the look\nbackground {{ palette.background }}\nforeground {{ palette.foreground }}\naccent {{ palette.accent | nohash }}\n";
+
+#[test]
+fn user_targets_render_into_the_swap_validate_and_build() {
+    let fixture = fixture("targets-render");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        None,
+    );
+    let checks = FakeChecks::default();
+    let validation = validate_entry(
+        &fixture.catalog,
+        "look-a",
+        &checks,
+        false,
+        Some(&fixture.config),
+    )
+    .expect("validatable");
+    assert!(validation.errors.is_empty(), "{:?}", validation.errors);
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    let rendered = PathBuf::from(&report.rendered);
+    let colors = rendered.join("targets/kitty/colors.conf");
+    assert!(colors.is_file(), "the target renders under targets/");
+    let text = std::fs::read_to_string(&colors).expect("target contents");
+    assert!(text.contains("background #2B3648"), "{text}");
+    assert!(text.contains("accent FFA45C"), "{text}");
+    // `build --out` covers them the same way: the same file lands under
+    // `targets/` there.
+    let out = fixture._root.join("out");
+    let report = build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+        false,
+        Some(&fixture.config),
+    )
+    .expect("buildable");
+    assert!(report.warnings.is_empty(), "{report:?}");
+    let built =
+        std::fs::read_to_string(out.join("targets/kitty/colors.conf")).expect("built target");
+    assert_eq!(built, text, "build renders what apply renders");
+    // No stray writes outside the render and `--out`: the user's own
+    // config home holds only the target sources.
+    assert!(
+        !fixture.config.join("kitty/colors.conf").exists(),
+        "apply never writes the output path itself"
+    );
+}
+
+#[test]
+fn unknown_token_refuses_validate_and_records_nothing() {
+    let fixture = fixture("targets-unknown");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        "background {{ palette.backround }}\n",
+        None,
+    );
+    let validation = validate_entry(
+        &fixture.catalog,
+        "look-a",
+        &FakeChecks::default(),
+        false,
+        Some(&fixture.config),
+    )
+    .expect("validate runs");
+    assert!(
+        validation
+            .errors
+            .iter()
+            .any(|e| e.contains("unknown token")),
+        "{:?}",
+        validation.errors
+    );
+    let mut compositor = FakeCompositor::not_running();
+    let failure = apply_with_live(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &FakeChecks::default(),
+        &FakeDconf::absent(),
+        &ScriptedLeaves::ok(),
+        &[],
+    )
+    .expect_err("one failing target refuses the swap");
+    assert!(failure.message.contains("unknown token"), "{failure}");
+    assert_eq!(compositor.calls.get(), 0, "no reload ran");
+    assert!(
+        !fixture.state.join("look.json").exists(),
+        "a failing target records nothing: the swap never started"
+    );
+    assert!(
+        fixture.state.join("look").symlink_metadata().is_err(),
+        "a failing target repoints nothing"
+    );
+}
+
+#[test]
+fn missing_reload_app_is_a_note_never_an_error() {
+    let fixture = fixture("targets-missing-app");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        Some("[reload]\nargv = [\"scoot-test-no-such-app-xyz\", \"--all\"]\n"),
+    );
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    assert!(
+        report
+            .notes
+            .iter()
+            .any(|n| n.contains("not run")
+                && (n.contains("not installed") || n.contains("not be run"))),
+        "a missing app is a note: {:?}",
+        report.notes
+    );
+    assert!(
+        !report.reloaded.iter().any(|r| r.contains("kitty-colors")),
+        "a missing reload never counts as reloaded: {:?}",
+        report.reloaded
+    );
+    assert_eq!(report.name, "look-a", "the swap stands");
+}
+
+#[test]
+fn failing_reload_command_does_not_roll_the_swap_back() {
+    let fixture = fixture("targets-false");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        Some("[reload]\nargv = [\"false\"]\n"),
+    );
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    assert!(
+        report.notes.iter().any(|n| n.contains("the swap stands")),
+        "a failing reload says the swap stands: {:?}",
+        report.notes
+    );
+    assert_eq!(report.name, "look-a");
+    assert_eq!(record_of(&fixture.state).name, "look-a");
+}
+
+#[test]
+fn successful_reload_command_counts_as_reloaded() {
+    let fixture = fixture("targets-true");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        Some("[reload]\nargv = [\"true\"]\n"),
+    );
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    assert!(
+        report.reloaded.iter().any(|r| r == "target kitty-colors"),
+        "{:?}",
+        report.reloaded
+    );
+}
+
+#[test]
+fn duplicate_outputs_refuse() {
+    let fixture = fixture("targets-duplicate");
+    write_target(
+        &fixture.config,
+        "kitty-a",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        None,
+    );
+    write_target(
+        &fixture.config,
+        "kitty-b",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        None,
+    );
+    let validation = validate_entry(
+        &fixture.catalog,
+        "look-a",
+        &FakeChecks::default(),
+        false,
+        Some(&fixture.config),
+    )
+    .expect("validate runs");
+    assert!(
+        validation.errors.iter().any(|e| e.contains("same output")),
+        "{:?}",
+        validation.errors
+    );
+}
+
+#[test]
+fn absolute_dotdot_and_hidden_outputs_refuse() {
+    for output in ["/etc/kitty.conf", "../escape.conf", ".hidden/colors.conf"] {
+        let fixture = fixture("targets-bad-output");
+        write_target(
+            &fixture.config,
+            "kitty-colors",
+            output,
+            KITTY_TEMPLATE,
+            None,
+        );
+        let validation = validate_entry(
+            &fixture.catalog,
+            "look-a",
+            &FakeChecks::default(),
+            false,
+            Some(&fixture.config),
+        )
+        .expect("validate runs");
+        assert!(
+            !validation.errors.is_empty(),
+            "output `{output}` must refuse: {:?}",
+            validation.errors
+        );
+    }
+}
+
+#[test]
+fn symlinked_output_prefix_refuses() {
+    // `kitty/` points outside the config home: the output would land
+    // through the link, so the target refuses instead of rendering
+    // through it.
+    let fixture = fixture("targets-symlink");
+    let outside = fixture._root.join("outside");
+    std::fs::create_dir_all(&outside).expect("an outside dir");
+    std::fs::create_dir_all(&fixture.config).expect("a config dir");
+    std::os::unix::fs::symlink(&outside, fixture.config.join("kitty")).expect("a link");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        None,
+    );
+    let validation = validate_entry(
+        &fixture.catalog,
+        "look-a",
+        &FakeChecks::default(),
+        false,
+        Some(&fixture.config),
+    )
+    .expect("validate runs");
+    assert!(
+        validation.errors.iter().any(|e| e.contains("symlink")),
+        "{:?}",
+        validation.errors
+    );
+    let mut compositor = FakeCompositor::not_running();
+    let failure = apply_with_live(
+        "look-a",
+        &options(),
+        &fixture.catalog,
+        &fixture.cache,
+        &fixture.state,
+        Some(&fixture.config),
+        &mut compositor,
+        &[],
+        &FakeChecks::default(),
+        &FakeDconf::absent(),
+        &ScriptedLeaves::ok(),
+        &[],
+    )
+    .expect_err("the symlinked output refuses the swap");
+    assert!(failure.message.contains("symlink"), "{failure}");
+}
+
+#[test]
+fn symlinked_template_refuses() {
+    // Templates are read `O_NOFOLLOW` like every other look input: a
+    // symlinked template refuses instead of rendering through it.
+    let fixture = fixture("targets-template-link");
+    let dir = fixture.config.join("scoot/look-targets/kitty-colors");
+    std::fs::create_dir_all(&dir).expect("a target dir");
+    std::fs::write(
+        dir.join("target.toml"),
+        "name = \"kitty-colors\"\noutput = \"kitty/colors.conf\"\ntemplate = \"colors.tmpl\"\n",
+    )
+    .expect("a target.toml");
+    std::os::unix::fs::symlink("/etc/hostname", dir.join("colors.tmpl")).expect("a link");
+    let validation = validate_entry(
+        &fixture.catalog,
+        "look-a",
+        &FakeChecks::default(),
+        false,
+        Some(&fixture.config),
+    )
+    .expect("validate runs");
+    assert!(!validation.errors.is_empty(), "{:?}", validation.errors);
+}
+
+#[test]
+fn edited_template_renders_fresh_instead_of_a_stale_cache() {
+    // The template bytes ride the render cache key: editing the template
+    // re-renders instead of reusing the stale directory.
+    let fixture = fixture("targets-cache");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        "background {{ palette.background }}\n",
+        None,
+    );
+    let first = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    let text = |rendered: &str| {
+        std::fs::read_to_string(PathBuf::from(rendered).join("targets/kitty/colors.conf"))
+            .expect("target contents")
+    };
+    assert!(text(&first.rendered).contains("#2B3648"));
+    std::fs::write(
+        fixture
+            .config
+            .join("scoot/look-targets/kitty-colors/colors.tmpl"),
+        "background {{ palette.foreground }}\n",
+    )
+    .expect("an edited template");
+    let second = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    assert_ne!(first.rendered, second.rendered, "the key moved");
+    assert!(
+        text(&second.rendered).contains("#F6EEDC"),
+        "the edited template renders"
+    );
+}
+
+#[test]
+fn target_reload_timeout_kills_and_notes() {
+    let fixture = fixture("targets-timeout");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        Some("[reload]\nargv = [\"sleep\", \"30\"]\ntimeout_secs = 1\n"),
+    );
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    assert!(
+        report.notes.iter().any(|n| n.contains("timed out")),
+        "the hung reload is killed and noted: {:?}",
+        report.notes
+    );
+    assert_eq!(report.name, "look-a", "the swap stands");
+}
+
+#[test]
+fn the_in_tree_kitty_example_renders_against_a_terminal_look() {
+    // Dogfood: the shipped example target must render against any look
+    // carrying a `[terminal]` table, or the docs example rots. Reads the
+    // real files under `docs/examples/look-targets/kitty-colors`.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let example = root.join("docs/examples/look-targets/kitty-colors");
+    let toml = std::fs::read(example.join("target.toml")).expect("the example target.toml");
+    let raw = scoot_look::parse_target_toml(&toml).expect("the example parses");
+    assert_eq!(raw.output, "kitty/colors.conf");
+    let template =
+        std::fs::read_to_string(example.join("colors.tmpl")).expect("the example template");
+    let scratch = scratch("targets-example");
+    write_look(scratch.path(), "look", TERMINAL_EXTRA);
+    let catalog =
+        scoot_look::catalog::discover_ordered(&[(scratch.path().to_owned(), Origin::User)]);
+    let merged = scoot_look::resolve(&catalog.sources(), "look").expect("resolves");
+    let tokens = scoot_look::target_tokens(&merged);
+    let rendered = scoot_look::render_template(&template, &tokens).expect("the example renders");
+    for i in 0..16 {
+        assert!(
+            rendered.contains(&format!("color{i} ")),
+            "color{i} missing:\n{rendered}"
+        );
+    }
+    assert!(rendered.contains("background #"), "{rendered}");
+}
+
+#[test]
+fn symlinked_target_dir_renders_like_a_plain_one() {
+    // Stow-style: the target entry links into another tree, but keeps
+    // its own name; the template inside must still be a regular file.
+    let fixture = fixture("targets-stow");
+    let store = fixture._root.join("store/kitty-colors");
+    std::fs::create_dir_all(&store).expect("a store dir");
+    std::fs::write(
+        store.join("target.toml"),
+        "name = \"kitty-colors\"\noutput = \"kitty/colors.conf\"\ntemplate = \"colors.tmpl\"\n",
+    )
+    .expect("a target.toml");
+    std::fs::write(store.join("colors.tmpl"), KITTY_TEMPLATE).expect("a template");
+    let root = fixture.config.join("scoot/look-targets");
+    std::fs::create_dir_all(&root).expect("a targets root");
+    std::os::unix::fs::symlink(&store, root.join("kitty-colors")).expect("a stow link");
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    assert!(
+        PathBuf::from(&report.rendered)
+            .join("targets/kitty/colors.conf")
+            .is_file(),
+        "the stowed target renders"
+    );
 }

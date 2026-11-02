@@ -49,6 +49,34 @@ const BUILD_DIRS: [(&str, &[&str]); 4] = [
     ("qt", &["scoot-look.conf"]),
 ];
 
+/// Whether `rel` (a `/`-separated path under `out`) is one our build may
+/// write: one of [`BUILD_FILES`], a file under a [`BUILD_DIRS`] entry, or
+/// anything under `targets/` (user targets mirror their declared outputs
+/// there: `targets/kitty/colors.conf`). Every segment is still a plain
+/// relative name — no `..`, no absolute, no hidden — and symlinks refuse
+/// below, so a hostile `targets/` entry cannot escape `--out`.
+fn is_build_output(rel: &str) -> bool {
+    if BUILD_FILES.contains(&rel) {
+        return true;
+    }
+    let mut parts = rel.split('/');
+    let Some(first) = parts.next() else {
+        return false;
+    };
+    if first == "targets" {
+        return rel
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..");
+    }
+    match BUILD_DIRS.iter().find(|(dir, _)| *dir == first) {
+        Some((_, allowed)) => {
+            let rest: Vec<&str> = parts.collect();
+            rest.len() == 1 && allowed.contains(&rest[0])
+        }
+        None => false,
+    }
+}
+
 /// Refuses a symlinked `out` (writing through it would land outside the
 /// named directory) and a non-empty foreign dir (only an absent dir, an
 /// empty dir, or one holding only our own files is written into). That
@@ -89,6 +117,46 @@ pub(crate) fn check_out_dir(out: &Path) -> Result<(), String> {
                 ));
             }
             if BUILD_FILES.contains(&entry_name.as_str()) {
+                continue;
+            }
+            if entry_name == "targets" {
+                // User targets mirror their declared outputs here: walk
+                // the subtree and refuse anything this build could not
+                // have written (foreign files, symlinks, `..` escapes —
+                // the last cannot arrive through the renderer, but the
+                // guard checks what is on disk, not how it got there).
+                if !fp.is_dir() {
+                    foreign.push(entry_name.clone());
+                    continue;
+                }
+                let mut stack = vec![fp.clone()];
+                while let Some(dir) = stack.pop() {
+                    let Ok(inner) = std::fs::read_dir(&dir) else {
+                        foreign.push(
+                            dir.strip_prefix(out)
+                                .map(|rel| rel.display().to_string())
+                                .unwrap_or_else(|_| dir.display().to_string()),
+                        );
+                        continue;
+                    };
+                    for child in inner.filter_map(|e| e.ok()) {
+                        let child_path = child.path();
+                        let rel = child_path
+                            .strip_prefix(out)
+                            .map(|rel| rel.display().to_string())
+                            .unwrap_or_else(|_| child_path.display().to_string());
+                        let child_symlink = std::fs::symlink_metadata(&child_path)
+                            .map(|meta| meta.file_type().is_symlink())
+                            .unwrap_or(false);
+                        if child_symlink || !is_build_output(&rel) {
+                            foreign.push(rel);
+                            continue;
+                        }
+                        if child_path.is_dir() {
+                            stack.push(child_path);
+                        }
+                    }
+                }
                 continue;
             }
             match BUILD_DIRS.iter().find(|(dir, _)| *dir == entry_name) {

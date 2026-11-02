@@ -44,6 +44,7 @@ use super::cycle::{Preview, PreviewRead, clear_preview, read_preview, write_prev
 use super::foot::foot_notes;
 use super::reload::{BarReload, CompositorReload, ReloadError};
 use super::sync::TargetSkips;
+use super::targets::{self, TargetFile};
 use super::toolkit::{Dconf, apply_toolkit_files, apply_toolkit_with_claims};
 use scoot_look::catalog::{Catalog, Entry, cache_home, config_home};
 
@@ -243,6 +244,7 @@ pub fn validate_entry(
     name: &str,
     checks: &dyn Checks,
     trust: bool,
+    config: Option<&Path>,
 ) -> Result<Validation, String> {
     let entry = catalog
         .find(name)
@@ -283,6 +285,9 @@ pub fn validate_entry(
         // The terminal static leaves, as `apply` renders them (or drops
         // them, for an installed look without `trust`).
         check_static_fragments(&chain, trust, &mut validation);
+        // The user-owned targets, as `apply` renders them into
+        // `targets/`: unknown tokens and bad outputs refuse here.
+        check_target_fragments(&merged, config, &mut validation);
     }
     Ok(validation)
 }
@@ -328,6 +333,7 @@ pub fn validate_dir(
     catalog: &Catalog,
     checks: &dyn Checks,
     trust: bool,
+    config: Option<&Path>,
 ) -> Result<Validation, String> {
     use scoot_look::{parse_look_toml, validate_apps_allowlist, validate_for_origin};
     let bytes = read_regular(&dir.join("look.toml"))?;
@@ -407,6 +413,7 @@ pub fn validate_dir(
         );
         check_leaf_fragments(&merged.name, &merged, &inputs.inputs, &mut validation);
         check_static_fragments(&chain, trust, &mut validation);
+        check_target_fragments(&merged, config, &mut validation);
         return Ok(validation);
     }
     Ok(validation)
@@ -1737,6 +1744,33 @@ fn check_static_fragments(chain: &[ChainEntry], trust: bool, validation: &mut Va
     }
 }
 
+/// Loads and renders the user-owned targets the way `apply` renders them
+/// into `targets/`, so `validate` and `apply` agree: discovery plus
+/// substitution, against this look. Refusals land in `errors`.
+fn check_target_fragments(
+    merged: &scoot_look::ResolvedLook,
+    config: Option<&Path>,
+    validation: &mut Validation,
+) {
+    match load_target_files(merged, config) {
+        Ok(_) => {}
+        Err(error) => validation.errors.push(error),
+    }
+}
+
+/// Loads the user's targets and renders them against the resolved look:
+/// the single choke point `validate`, `build` and every swap render
+/// through, so all three agree on what the targets say. Fails loudly on
+/// any broken target: one failing target refuses the render, and the
+/// caller turns that into a refusal before anything is recorded.
+pub(crate) fn load_target_files(
+    merged: &scoot_look::ResolvedLook,
+    config: Option<&Path>,
+) -> Result<Vec<TargetFile>, String> {
+    let defs = targets::discover(config)?;
+    targets::render_all(&defs, merged)
+}
+
 /// Resolves `rel` inside `dir`: the canonical target must stay inside the
 /// canonical directory and be a file. A planted symlink pointing outside
 /// refuses; a missing file refuses.
@@ -1850,19 +1884,23 @@ pub fn render_cache_dir() -> Result<PathBuf, String> {
 /// from installed looks without `--trust` like the other terminal
 /// leaves), so an unchanged look re-renders with it; 15 adds `font-file`
 /// (the resolved UI font) to `launch.toml` and `notify.toml`, so an
-/// unchanged look re-renders with it.
-pub const RENDER_VERSION: u32 = 15;
+/// unchanged look re-renders with it; 16 adds the user-owned targets
+/// (`targets/<output>` rendered from `look-targets/` templates), so an
+/// unchanged look re-renders with them.
+pub const RENDER_VERSION: u32 = 16;
 
-/// The cache key for a render: the chain's names and bytes plus the
-/// resolved inputs (wallpaper and font paths with mtimes, the bar's popup
-/// feature and dropped module sections), hashed like `source_hash`. A font
-/// package update or an edited source re-renders instead of reusing a stale
-/// directory.
+/// The cache key for a render: the chain's names and bytes, the user
+/// targets' outputs and rendered bytes, plus the resolved inputs
+/// (wallpaper and font paths with mtimes, the bar's popup feature and
+/// dropped module sections), hashed like `source_hash`. A font package
+/// update, an edited source or an edited target re-renders instead of
+/// reusing a stale directory.
 fn cache_key(
     chain: &[ChainEntry],
     inputs: &RenderInputs,
     trust: bool,
     static_files: &[(String, Vec<u8>)],
+    target_files: &[TargetFile],
 ) -> String {
     let mut buffer = Vec::new();
     buffer.extend_from_slice(&RENDER_VERSION.to_le_bytes());
@@ -1880,6 +1918,14 @@ fn cache_key(
         buffer.extend_from_slice(file.as_bytes());
         buffer.push(0);
         buffer.extend_from_slice(bytes);
+        buffer.push(0);
+    }
+    // The user targets ride the key the same way: an edited `target.toml`
+    // or template re-renders instead of reusing the stale directory.
+    for file in target_files {
+        buffer.extend_from_slice(file.output.as_bytes());
+        buffer.push(0);
+        buffer.extend_from_slice(&file.bytes);
         buffer.push(0);
     }
     for value in [
@@ -1949,6 +1995,7 @@ struct RenderedFragments {
     rendered_json: String,
     leaves: Vec<(String, String)>,
     static_files: Vec<(String, Vec<u8>)>,
+    targets: Vec<TargetFile>,
 }
 
 /// Renders every fragment for `name`, and proves the TOML ones parse (the
@@ -1958,12 +2005,16 @@ struct RenderedFragments {
 /// by unit tests instead. `static_files` are the already-checked terminal
 /// static leaves (verbatim bytes); the caller computed them with
 /// [`static_leaf_files`] so their notes ride the caller's notes.
+/// `target_files` are the already-rendered user targets (substituted
+/// bytes); the caller computed them with [`load_target_files`] so a
+/// failing target refuses before anything here is written.
 fn render_all_fragments(
     name: &str,
     chain: &[ChainEntry],
     merged: &scoot_look::ResolvedLook,
     inputs: &RenderInputs,
     static_files: Vec<(String, Vec<u8>)>,
+    target_files: &[TargetFile],
 ) -> Result<RenderedFragments, String> {
     let scoot =
         render_scoot(merged, inputs).map_err(|error| format!("cannot render {name}: {error}"))?;
@@ -2017,6 +2068,7 @@ fn render_all_fragments(
         rendered_json,
         leaves,
         static_files,
+        targets: target_files.to_vec(),
     })
 }
 
@@ -2066,6 +2118,17 @@ fn write_render_dir(tmp: &Path, fragments: &RenderedFragments) -> Result<(), std
         std::fs::write(&path, contents)?;
         std::fs::File::open(&path)?.sync_all()?;
     }
+    // The user targets under `targets/` (mirroring their declared
+    // outputs): substituted bytes, already rendered. Every output is a
+    // validated relative path, so the join stays inside the render dir.
+    for file in &fragments.targets {
+        let path = tmp.join("targets").join(&file.output);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, &file.bytes)?;
+        std::fs::File::open(&path)?.sync_all()?;
+    }
     Ok(())
 }
 
@@ -2097,6 +2160,7 @@ fn cached_complete(
     chain: &[ChainEntry],
     merged: &scoot_look::ResolvedLook,
     trust: bool,
+    target_files: &[TargetFile],
 ) -> bool {
     let leaves = match render_leaf_files(merged) {
         Ok(leaves) => leaves,
@@ -2128,6 +2192,13 @@ fn cached_complete(
         && static_files
             .iter()
             .all(|(file, _)| target.join(file).is_file())
+        && target_files.iter().all(|file| {
+            // Validated relative outputs stay inside `targets/`: the
+            // `..` case cannot arrive, and a hostile caller hand-building
+            // past the grammar still lands inside the render dir check
+            // below rather than outside it.
+            target.join("targets").join(&file.output).is_file()
+        })
 }
 
 /// Renders the look into the cache: `<cache>/<name>-<hash>/` with
@@ -2149,6 +2220,7 @@ fn cached_complete(
 /// racing the render sees the old or the new directory, never a half-written
 /// one. An existing directory with the same key is reused after its
 /// `render.json` names this look and every expected file is present.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_cached(
     name: &str,
     chain: &[ChainEntry],
@@ -2157,16 +2229,21 @@ pub(crate) fn render_cached(
     cache: &Path,
     notes: &mut Vec<String>,
     trust: bool,
+    config: Option<&Path>,
 ) -> Result<PathBuf, String> {
     let mut static_notes = Vec::new();
     let static_files = static_leaf_files(chain, trust, &mut static_notes)
         .map_err(|error| format!("cannot render {name}: {error}"))?;
+    // The user targets render before the key is computed: a failing
+    // target refuses the whole render here, before anything is written.
+    let target_files = load_target_files(merged, config)
+        .map_err(|error| format!("cannot render {name}: {error}"))?;
     let target = cache.join(format!(
         "{name}-{}",
-        cache_key(chain, inputs, trust, &static_files)
+        cache_key(chain, inputs, trust, &static_files, &target_files)
     ));
     if target.is_dir() {
-        if cached_complete(&target, name, chain, merged, trust) {
+        if cached_complete(&target, name, chain, merged, trust, &target_files) {
             notes.extend(static_notes);
             notes.push(format!("reusing cached render {}", target.display()));
             return Ok(target);
@@ -2175,7 +2252,7 @@ pub(crate) fn render_cached(
             .map_err(|error| format!("cannot clear {}: {error}", target.display()))?;
     }
     notes.extend(static_notes);
-    let fragments = render_all_fragments(name, chain, merged, inputs, static_files)?;
+    let fragments = render_all_fragments(name, chain, merged, inputs, static_files, &target_files)?;
     std::fs::create_dir_all(cache)
         .map_err(|error| format!("cannot create {}: {error}", cache.display()))?;
     let tmp = render_tmp_dir(cache, name);
@@ -2194,7 +2271,7 @@ pub(crate) fn render_cached(
         std::fs::remove_dir_all(&tmp).ok();
         // A concurrent apply won the rename: reuse its directory when it
         // is complete, else refuse.
-        if cached_complete(&target, name, chain, merged, trust) {
+        if cached_complete(&target, name, chain, merged, trust, &target_files) {
             notes.push(format!("reusing cached render {}", target.display()));
             return Ok(target);
         }
@@ -2221,6 +2298,7 @@ pub(crate) fn render_fixed_slot(
     slot: &str,
     notes: &mut Vec<String>,
     trust: bool,
+    config: Option<&Path>,
 ) -> Result<PathBuf, String> {
     if slot.is_empty() || slot.contains('/') || slot.starts_with('.') {
         return Err(format!("refusing a cache slot outside the cache: `{slot}`"));
@@ -2230,7 +2308,11 @@ pub(crate) fn render_fixed_slot(
     let static_files = static_leaf_files(chain, trust, &mut static_notes)
         .map_err(|error| format!("cannot render {name}: {error}"))?;
     notes.extend(static_notes);
-    let fragments = render_all_fragments(name, chain, merged, inputs, static_files)?;
+    // The user targets render like every other fragment: a failing
+    // target refuses the watched save, and the last good look stays.
+    let target_files = load_target_files(merged, config)
+        .map_err(|error| format!("cannot render {name}: {error}"))?;
+    let fragments = render_all_fragments(name, chain, merged, inputs, static_files, &target_files)?;
     std::fs::create_dir_all(cache)
         .map_err(|error| format!("cannot create {}: {error}", cache.display()))?;
     let tmp = render_tmp_dir(cache, name);
@@ -2780,6 +2862,14 @@ pub(crate) fn complete_swap(
                 report.reloaded.extend(terminal_report.reloaded);
                 report.notes.extend(terminal_report.notes);
             }
+            // The user-owned targets' own reloads are best-effort too:
+            // each declared argv runs after the swap stands, never
+            // through a shell. A missing app is a note, and a failing
+            // reload never undoes the swap (the render already refused
+            // before anything was recorded, like a refused reload does).
+            if merged.is_some() {
+                run_configured_target_reloads(config, report);
+            }
             // Shadowed keys: the compositor's reply when it reloaded; else
             // the files, read directly.
             if let Some(merged) = merged {
@@ -2877,13 +2967,16 @@ pub(crate) fn render_for_swap(
     checks: &dyn Checks,
     notes: &mut Vec<String>,
     trust: bool,
+    config: Option<&Path>,
 ) -> Result<(PathBuf, RenderInputs), String> {
     let mut target = match &source {
         RenderSource::PreRendered { path } => path.clone(),
-        RenderSource::Fresh => render_cached(name, chain, merged, &initial, cache, notes, trust)?,
-        RenderSource::FixedSlot { slot } => {
-            render_fixed_slot(name, chain, merged, &initial, cache, slot, notes, trust)?
+        RenderSource::Fresh => {
+            render_cached(name, chain, merged, &initial, cache, notes, trust, config)?
         }
+        RenderSource::FixedSlot { slot } => render_fixed_slot(
+            name, chain, merged, &initial, cache, slot, notes, trust, config,
+        )?,
     };
     let mut render_inputs = initial;
     // The bar's own parser over the rendered fragment, against the
@@ -2919,9 +3012,16 @@ pub(crate) fn render_for_swap(
                 drops.push(drop_);
                 target = match &source {
                     RenderSource::PreRendered { path } => path.clone(),
-                    RenderSource::Fresh => {
-                        render_cached(name, chain, merged, &render_inputs, cache, notes, trust)?
-                    }
+                    RenderSource::Fresh => render_cached(
+                        name,
+                        chain,
+                        merged,
+                        &render_inputs,
+                        cache,
+                        notes,
+                        trust,
+                        config,
+                    )?,
                     RenderSource::FixedSlot { slot } => render_fixed_slot(
                         name,
                         chain,
@@ -2931,6 +3031,7 @@ pub(crate) fn render_for_swap(
                         slot,
                         notes,
                         trust,
+                        config,
                     )?,
                 };
             }
@@ -2946,12 +3047,14 @@ pub(crate) fn render_for_swap(
             // The catalog render is build-time modern; skew needs a
             // fresh legacy render instead of that directory.
             RenderSource::PreRendered { .. } => {
-                render_cached(name, chain, merged, inputs, cache, notes, trust)
+                render_cached(name, chain, merged, inputs, cache, notes, trust, config)
             }
-            RenderSource::Fresh => render_cached(name, chain, merged, inputs, cache, notes, trust),
-            RenderSource::FixedSlot { slot } => {
-                render_fixed_slot(name, chain, merged, inputs, cache, slot, notes, trust)
+            RenderSource::Fresh => {
+                render_cached(name, chain, merged, inputs, cache, notes, trust, config)
             }
+            RenderSource::FixedSlot { slot } => render_fixed_slot(
+                name, chain, merged, inputs, cache, slot, notes, trust, config,
+            ),
         };
         check_foot_for_swap(
             &mut target,
@@ -3131,6 +3234,7 @@ pub fn apply_with_live(
         cache,
         &mut report.notes,
         options.trust,
+        config,
     )
     .map_err(refuse)?;
     // The bar's own parser over the rendered fragment, against the
@@ -3172,6 +3276,7 @@ pub fn apply_with_live(
                     cache,
                     &mut report.notes,
                     options.trust,
+                    config,
                 )
                 .map_err(refuse)?;
             }
@@ -3184,7 +3289,16 @@ pub fn apply_with_live(
     // recorded, like the bar's genuine errors.
     if merged.terminal.is_some() {
         let rerender = |inputs: &RenderInputs, notes: &mut Vec<String>| {
-            render_cached(name, &chain, &merged, inputs, cache, notes, options.trust)
+            render_cached(
+                name,
+                &chain,
+                &merged,
+                inputs,
+                cache,
+                notes,
+                options.trust,
+                config,
+            )
         };
         check_foot_for_swap(
             &mut target,
@@ -3446,6 +3560,12 @@ pub fn apply_with_live(
     );
     report.reloaded.extend(terminal_report.reloaded);
     report.notes.extend(terminal_report.notes);
+    // The user-owned targets' own reloads are best-effort too: each
+    // declared argv runs after the swap stands, never through a shell.
+    // A missing app is a note, and a failing reload never undoes the
+    // swap (the render already refused before anything was recorded,
+    // like a refused reload does).
+    run_configured_target_reloads(config, &mut report);
     // Shadowed keys: the compositor's reply when it reloaded; else the
     // files, read directly.
     report.notes.extend(foot_notes(&merged, state_dir, config));
@@ -3647,6 +3767,23 @@ fn holders_text(
     }
 }
 
+/// Runs the user's configured target reloads after a successful swap,
+/// best-effort: reloaded names and notes land on the report, and a
+/// discovery that fails this late (the user edited mid-swap) is a note,
+/// never a refusal — the swap already stands.
+fn run_configured_target_reloads(config: Option<&Path>, report: &mut ApplyReport) {
+    match targets::discover(config) {
+        Ok(defs) => {
+            let outcome = targets::run_reloads(&defs);
+            report.reloaded.extend(outcome.reloaded);
+            report.notes.extend(outcome.notes);
+        }
+        Err(error) => report.notes.push(format!(
+            "user targets unreadable after the swap, reloads skipped: {error}"
+        )),
+    }
+}
+
 /// The unknown-look refusal, naming what the catalog holds.
 pub(crate) fn unknown_look(name: &str, catalog: &Catalog) -> String {
     let mut names: Vec<&str> = catalog
@@ -3790,10 +3927,11 @@ pub fn build_to_out(
     catalog: &Catalog,
     checks: &dyn Checks,
     trust: bool,
+    config: Option<&Path>,
 ) -> Result<BuildReport, String> {
     let (chain, merged, name) = match target {
         BuildTarget::Dir { path, origin } => {
-            let validation = validate_dir(path, *origin, catalog, checks, trust)?;
+            let validation = validate_dir(path, *origin, catalog, checks, trust, config)?;
             if !validation.errors.is_empty() {
                 return Err(validation.errors.join("; "));
             }
@@ -3844,6 +3982,11 @@ pub fn build_to_out(
     let static_files = static_leaf_files(&chain, trust, &mut static_notes)
         .map_err(|error| format!("cannot build {name}: {error}"))?;
     validation.notes.extend(static_notes);
+    // The user targets render from the templates plus the resolved look:
+    // read once, outside the loop, like the static leaves. A failing
+    // target refuses the build before anything lands in `--out`.
+    let target_files = load_target_files(&merged, config)
+        .map_err(|error| format!("cannot build {name}: {error}"))?;
     /// One full render: the two first-party fragments, foot's `foot.ini`
     /// (only when the look has a `[terminal]` table), the launcher and
     /// locker leaves (`fuzzel.ini`, `swaylock`), the greeter fragment
@@ -3932,7 +4075,8 @@ pub fn build_to_out(
                     qt: &str,
                     json: &str,
                     leaves: &[(String, String)],
-                    static_files: &[(String, Vec<u8>)]| {
+                    static_files: &[(String, Vec<u8>)],
+                    target_files: &[TargetFile]| {
         let mut staged = vec![
             ("scoot.toml".to_owned(), scoot.to_owned()),
             ("bar.toml".to_owned(), bar.to_owned()),
@@ -3956,6 +4100,13 @@ pub fn build_to_out(
                 .iter()
                 .map(|(file, bytes)| (file.clone(), String::from_utf8_lossy(bytes).into_owned())),
         );
+        // Substituted UTF-8, mirrored under `targets/` like the cache.
+        staged.extend(target_files.iter().map(|file| {
+            (
+                format!("targets/{}", file.output),
+                String::from_utf8_lossy(&file.bytes).into_owned(),
+            )
+        }));
         staged
     };
     let (
@@ -4006,6 +4157,7 @@ pub fn build_to_out(
         &rendered_json,
         &leaf_files,
         &static_files,
+        &target_files,
     );
     for (file, contents) in &staged {
         let path = stage.join(file);
@@ -4077,6 +4229,7 @@ pub fn build_to_out(
                     &rendered_json,
                     &leaf_files,
                     &static_files,
+                    &target_files,
                 );
                 for (file, contents) in &staged {
                     let path = stage.join(file);
@@ -4133,6 +4286,7 @@ pub fn build_to_out(
                     &rendered_json,
                     &leaf_files,
                     &static_files,
+                    &target_files,
                 );
                 for (file, contents) in &staged {
                     let path = stage.join(file);
@@ -4212,6 +4366,10 @@ pub fn build_to_out(
             }
         }
     }
+    // Conditional targets leave no stale copies behind either: a rebuild
+    // after a target is removed clears its `targets/<output>`, so `--out`
+    // never carries a target the look no longer renders.
+    clear_stale_targets(out, &staged)?;
     Ok(BuildReport {
         name,
         out: path_to_string(out)?,
@@ -4220,6 +4378,74 @@ pub fn build_to_out(
     })
 }
 
+/// Removes rendered target files `--out` no longer carries: every file
+/// under `targets/` this render did not stage is deleted, then emptied
+/// directories are dropped bottom-up. Symlinks are never followed or
+/// removed (the output guard already refuses those); anything unlistable
+/// is left alone.
+fn clear_stale_targets(out: &Path, staged: &[(String, String)]) -> Result<(), String> {
+    let root = out.join("targets");
+    if !root.is_dir() {
+        return Ok(());
+    }
+    let mut dirs = vec![root.clone()];
+    let mut files = Vec::new();
+    while let Some(dir) = dirs.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            let meta = match std::fs::symlink_metadata(&path) {
+                Ok(meta) => meta,
+                Err(_) => continue,
+            };
+            if meta.file_type().is_symlink() {
+                continue;
+            }
+            if meta.is_dir() {
+                dirs.push(path);
+            } else if meta.is_file() {
+                files.push(path);
+            }
+        }
+    }
+    for path in files {
+        let rel = path
+            .strip_prefix(out)
+            .map(|rel| rel.display().to_string())
+            .unwrap_or_default();
+        if !staged.iter().any(|(file, _)| file == &rel) {
+            std::fs::remove_file(&path)
+                .map_err(|error| format!("cannot clear {}: {error}", path.display()))?;
+        }
+    }
+    // Deepest first, so an emptied parent drops with its child.
+    dirs.clear();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        dirs.push(dir.clone());
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.filter_map(|entry| entry.ok()) {
+                let path = entry.path();
+                if path.is_dir() && !path.is_symlink() {
+                    stack.push(path);
+                }
+            }
+        }
+    }
+    for dir in dirs.iter().rev() {
+        if *dir != root {
+            std::fs::remove_dir(dir).ok();
+        }
+    }
+    // The root itself drops when the render stages no targets at all.
+    if staged.iter().all(|(file, _)| !file.starts_with("targets/")) {
+        std::fs::remove_dir(&root).ok();
+    }
+    Ok(())
+}
 /// What `build` renders.
 pub enum BuildTarget {
     /// A source directory, with the origin to validate it under.

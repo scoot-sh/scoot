@@ -266,6 +266,7 @@ pub fn apply_watched_dir(
         checks,
         &mut report.notes,
         false,
+        config,
     )
     .map_err(refuse)?;
     let swap = SwapRequest {
