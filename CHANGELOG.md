@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.30](https://github.com/scoot-sh/scoot/compare/v0.6.29...v0.6.30) - 2026-11-01
+
+### scoot-look,scootbar
+
+- added: popups open with the notification-card entrance ([#863](https://github.com/scoot-sh/scoot/pull/863))
+
 ## [0.6.29](https://github.com/scoot-sh/scoot/compare/v0.6.28...v0.6.29) - 2026-11-01
 
 ### scoot-look,scootbar,scootui
