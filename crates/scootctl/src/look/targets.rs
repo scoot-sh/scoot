@@ -128,7 +128,10 @@ pub fn discover_in(config_home: &Path) -> Result<Vec<TargetDef>, String> {
     // Two targets writing the same output refuse: the second write
     // would silently win, and no wiring could name both. Compared
     // case-insensitively: `Kitty/x` and `kitty/x` are one file on a
-    // case-insensitive filesystem and confusing everywhere else.
+    // case-insensitive filesystem and confusing everywhere else. No
+    // Unicode normalization step is needed beside it: outputs are
+    // ASCII-only by grammar (`check_target_path` refuses the rest), so
+    // the NFC and NFD spellings of one file never reach this compare.
     let mut seen = std::collections::BTreeSet::new();
     for def in &defs {
         if !seen.insert(def.output.to_lowercase()) {
@@ -352,75 +355,65 @@ pub fn run_reloads(defs: &[TargetDef]) -> ReloadOutcome {
 /// Runs one argv directly: `argv[0]` is a bare name on `PATH` or an
 /// absolute path (relative paths with a `/` never parse, so only those
 /// two shapes arrive). `Ok(None)` is a clean zero exit; `Ok(Some)` is a
-/// zero exit worth naming; `Err` is everything else, as a note.
+/// zero exit worth naming; `Err` is everything else, as a note. Every
+/// run goes through the shared bounded runner, so a reload that forks
+/// and holds the pipes open is killed with its whole process group at
+/// the deadline, and a reload flooding stdout is killed at the byte cap
+/// with its truncation noted.
 fn run_one(argv: &[String], timeout: Duration) -> Result<Option<String>, String> {
-    use std::process::Stdio;
-    let mut child = std::process::Command::new(&argv[0])
-        .args(&argv[1..])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
+    use super::bounded::{BoundedError, MAX_OUTPUT_BYTES, run_bounded};
+    let program = Path::new(&argv[0]);
+    let args: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
+    let output = match run_bounded(program, &args, timeout) {
+        Ok(output) => output,
+        Err(BoundedError::Spawn(error)) => {
+            return Err(if error.kind() == std::io::ErrorKind::NotFound {
                 format!(
                     "reload `{}` not run: the app is not installed ({error}): left alone",
                     argv[0]
                 )
             } else {
                 format!("reload `{}` not run: {error}", argv[0])
-            }
-        })?;
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let output = child.wait_with_output().map_err(|error| {
-                    format!(
-                        "reload `{}` finished but its output is unreadable: {error}",
-                        argv[0]
-                    )
-                })?;
-                if status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    let stderr = stderr.trim().to_owned();
-                    if stderr.is_empty() {
-                        return Ok(None);
-                    }
-                    return Ok(Some(format!(
-                        "reload wrote to stderr: {}",
-                        truncate(&stderr, 256)
-                    )));
-                }
-                let mut detail = format!("reload exited with {status}");
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let stderr = stderr.trim().to_owned();
-                if !stderr.is_empty() {
-                    detail.push_str(": ");
-                    detail.push_str(&truncate(&stderr, 256));
-                }
-                return Err(format!("{detail}: the swap stands"));
-            }
-            Ok(None) => {
-                if std::time::Instant::now() >= deadline {
-                    child.kill().ok();
-                    child.wait().ok();
-                    return Err(format!(
-                        "reload `{}` timed out after {}s and was killed: the swap stands",
-                        argv[0],
-                        timeout.as_secs()
-                    ));
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(error) => {
-                return Err(format!(
-                    "reload `{}` could not be waited on: {error}",
-                    argv[0]
-                ));
-            }
+            });
         }
+        Err(BoundedError::Timeout { secs, .. }) => {
+            return Err(format!(
+                "reload `{}` timed out after {secs}s and was killed: the swap stands",
+                argv[0]
+            ));
+        }
+        Err(BoundedError::OutputCap { .. }) => {
+            return Err(format!(
+                "reload `{}` wrote past {MAX_OUTPUT_BYTES} bytes: output truncated and killed: the swap stands",
+                argv[0]
+            ));
+        }
+        Err(BoundedError::Wait(detail)) => {
+            return Err(format!(
+                "reload `{}` could not be waited on: {detail}",
+                argv[0]
+            ));
+        }
+    };
+    if output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim().to_owned();
+        if stderr.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(format!(
+            "reload wrote to stderr: {}",
+            truncate(&stderr, 256)
+        )));
     }
+    let mut detail = format!("reload exited with {}", output.status);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = stderr.trim().to_owned();
+    if !stderr.is_empty() {
+        detail.push_str(": ");
+        detail.push_str(&truncate(&stderr, 256));
+    }
+    Err(format!("{detail}: the swap stands"))
 }
 
 fn truncate(text: &str, max: usize) -> String {

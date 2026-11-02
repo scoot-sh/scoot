@@ -2072,6 +2072,21 @@ fn render_all_fragments(
     })
 }
 
+/// Whether a target `output` may be joined under a directory: relative
+/// with no `..`. The grammar refuses both long before this, so a refusal
+/// here means a hand-built [`TargetFile`] bypassed validation — defense
+/// in depth at the write site, so a future caller cannot escape the
+/// render dir through the join (`join` drops the prefix for an absolute
+/// path, and resolves `..` past it).
+fn joinable_output(output: &str) -> bool {
+    use std::path::Component;
+    let path = Path::new(output);
+    if path.is_absolute() {
+        return false;
+    }
+    !path.components().any(|c| matches!(c, Component::ParentDir))
+}
+
 /// Writes every fragment into `tmp` (an empty dir the caller owns) and syncs
 /// each file, so the renamed directory is complete on disk. Every path here
 /// is joined to the tool-owned temp dir, never attacker-controlled.
@@ -2119,9 +2134,19 @@ fn write_render_dir(tmp: &Path, fragments: &RenderedFragments) -> Result<(), std
         std::fs::File::open(&path)?.sync_all()?;
     }
     // The user targets under `targets/` (mirroring their declared
-    // outputs): substituted bytes, already rendered. Every output is a
-    // validated relative path, so the join stays inside the render dir.
+    // outputs): substituted bytes, already rendered. The join site
+    // re-checks what validation already promised: an absolute or `..`
+    // output in a hand-built file refuses here instead of escaping.
     for file in &fragments.targets {
+        if !joinable_output(&file.output) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "target output `{}` is absolute or escapes: refusing to write",
+                    file.output
+                ),
+            ));
+        }
         let path = tmp.join("targets").join(&file.output);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -2193,11 +2218,11 @@ fn cached_complete(
             .iter()
             .all(|(file, _)| target.join(file).is_file())
         && target_files.iter().all(|file| {
-            // Validated relative outputs stay inside `targets/`: the
-            // `..` case cannot arrive, and a hostile caller hand-building
-            // past the grammar still lands inside the render dir check
-            // below rather than outside it.
-            target.join("targets").join(&file.output).is_file()
+            // Defense in depth at the join: validated outputs are
+            // relative and `..`-free, but a hostile caller hand-building
+            // past the grammar must still land inside — an absolute
+            // output would discard the prefix, so it never counts.
+            joinable_output(&file.output) && target.join("targets").join(&file.output).is_file()
         })
 }
 
@@ -4475,46 +4500,32 @@ pub fn resolve_state_dir(explicit: Option<&Path>) -> Result<PathBuf, String> {
 /// wedge an apply with the lock held.
 pub const HELPER_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Runs a helper with a timeout, collecting its output. A child that
-/// outlives the timeout is killed and reported, never waited on forever.
+/// Runs a helper with a timeout, collecting its output. Every run goes
+/// through the shared bounded runner: the child leads its own process
+/// group so the deadline kill reaches forked grandchildren, both pipes
+/// drain while it runs (a full pipe never wedges it), and each stream
+/// keeps at most 64 KiB — a helper flooding stdout is killed at the cap
+/// and reported, never buffered without bound. A child that outlives the
+/// timeout is killed and reported, never waited on forever.
 /// The helpers here answer in lines (`fc-match` one path, `check-image`
-/// one verdict, `--check` one word), so collecting after exit cannot
-/// deadlock on a full pipe.
+/// one verdict, `--check` one word), so the cap never cuts a legitimate
+/// answer.
 pub(crate) fn run_with_timeout(
     program: &Path,
     args: &[&str],
 ) -> Result<std::process::Output, String> {
-    let mut child = std::process::Command::new(program)
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("cannot run `{}`: {error}", program.display()))?;
-    let deadline = std::time::Instant::now() + HELPER_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => {
-                return child
-                    .wait_with_output()
-                    .map_err(|error| format!("cannot run `{}`: {error}", program.display()));
+    match super::bounded::run_bounded(program, args, HELPER_TIMEOUT) {
+        Ok(out) => Ok(std::process::Output {
+            status: out.status,
+            stdout: out.stdout,
+            stderr: out.stderr,
+        }),
+        Err(error) => Err(match error {
+            super::bounded::BoundedError::Spawn(error) => {
+                format!("cannot run `{}`: {error}", program.display())
             }
-            Ok(None) => {
-                if std::time::Instant::now() >= deadline {
-                    child.kill().ok();
-                    child.wait().ok();
-                    return Err(format!(
-                        "`{}` timed out after {}s",
-                        program.display(),
-                        HELPER_TIMEOUT.as_secs()
-                    ));
-                }
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(error) => {
-                return Err(format!("cannot run `{}`: {error}", program.display()));
-            }
-        }
+            other => other.to_string(),
+        }),
     }
 }
 

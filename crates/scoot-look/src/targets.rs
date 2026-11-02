@@ -146,6 +146,12 @@ pub fn check_name_matches_dir(raw: &RawTarget, dir_name: &str) -> Option<Grammar
 /// One relative path inside a target (`output` under the config home,
 /// `template` inside the target directory): relative, normalized, no
 /// `..`, no leading `/`, no backslash, no hidden (dot-leading) segment.
+/// An `output` must also be ASCII: one file can have two Unicode
+/// spellings (NFC `caf\u{e9}` vs NFD `cafe\u{301}`), which would stage
+/// as silent duplicates past a byte compare — and no normalization crate
+/// sits in the workspace lock tree, so the refusal happens here instead.
+/// A template has no duplicate comparison run over it, so Unicode names
+/// stay allowed there.
 /// The containment itself (staying under the config home through
 /// symlinks) is the caller's, beside the filesystem.
 pub fn check_target_path(field: &str, value: &str) -> Option<GrammarError> {
@@ -156,6 +162,12 @@ pub fn check_target_path(field: &str, value: &str) -> Option<GrammarError> {
         return Some(GrammarError::new(
             field,
             "path must not contain control characters",
+        ));
+    }
+    if field == "output" && !value.is_ascii() {
+        return Some(GrammarError::new(
+            field,
+            "path must be ASCII: one file can have two Unicode spellings",
         ));
     }
     if value.starts_with('/') {
