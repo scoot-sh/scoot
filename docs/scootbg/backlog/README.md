@@ -154,4 +154,4 @@ full per-feature cycle.
 - [Share tests hard-code 4K page rounding](resolved/scootbg-share-tests-page-size-done.md) — RESOLVED 2026-09-30: the tests take the host's page size (verified on the Asahi's 16 KiB pages)
 - [restore two-sizes screenshot flake on sway](sway-restore-two-sizes-flake.md)
 - [animated_oom tight-limit test failed once in a full-suite run](animated-oom-tight-limit-flake.md)
-- [apply_config_killed_mid_wait test took 57 s under load](apply-config-killed-mid-wait-slow.md)
+- [apply_config_killed_mid_wait test took 57 s under load](resolved/apply-config-killed-mid-wait-slow-done.md) — RESOLVED 2026-11-02: one 64x64 output and an 800x600 noise PNG (was two default outputs and 4000x3000): ~1.3 s alone, ~1.7 s loaded, kill still lands mid-decode
