@@ -76,46 +76,32 @@
 //!   flushes every client; doing that from inside the dispatch of one client's
 //!   request is re-entrancy this compositor has no reason to take on.
 //!
-//! ## What this does *not* bound
+//! ## What bounds how many sessions a client holds
 //!
-//! One thing a client can still ask for without limit: **how many sessions it
-//! holds at once.** The per-tick work is one framebuffer read-back (shared by
-//! every session, which is why [`deliver`] does it once) plus one copy into
-//! each due client buffer, so N sessions with N parked frames cost N
-//! full-screen copies on the ticks the screen changes.
+//! The per-tick work is one framebuffer read-back (shared by every session,
+//! which is why [`deliver`] does it once) plus one copy into each due client
+//! buffer, and every live session is a list entry walked on each tick and by
+//! Smithay on each `capture`. Both are bounded per client:
 //!
-//! Deliberately not capped here, and the reasoning is worth recording rather
-//! than re-derived:
+//! - **Copies**: [`MAX_FRAMES_PER_CLIENT`] live frame objects, refused
+//!   pre-delegation with the protocol's own `duplicate_frame` error (see
+//!   `dispatch.rs`'s module doc for why a protocol error and not a silent
+//!   ignore). A `create_frame` loop with no `capture` -- which scoot's
+//!   [`Capture::pending`] throttle never sees, since it only runs on
+//!   `capture` -- therefore costs at most sixteen small objects per abusive
+//!   client, and each refusal kills only the client that overflowed.
+//! - **Sessions**: [`session_cap::MAX_SESSIONS_PER_CLIENT`] live capture and
+//!   cursor sessions, the next one created *stopped* rather than refused
+//!   with a disconnect, and a client past
+//!   [`session_cap::KILL_SESSIONS_PER_CLIENT`] disconnected. Counted at
+//!   `dispatch.rs`, the one place that sees the `Client` (the handler API
+//!   this module implements is handed a source, not a client), and freed
+//!   there too. The module doc in `session_cap.rs` has the reasoning.
 //!
-//! - That is the same shape of per-frame, per-object work a client can already
-//!   demand by mapping N surfaces, which this compositor accepts unbounded. A
-//!   cap on one and not the other would be inconsistent, not safer.
-//! - The only non-punitive form of a cap is per *client*, and the handler API
-//!   this is written against does not say which client a session belongs to
-//!   (`capture_constraints` is handed a source, not a `Client`).
-//!   `ImageCopyCaptureHandler::new_session` is handed a `Session` with no
-//!   protocol id or client accessor either, and Smithay's
-//!   `new_with_filter` counts manager *binds*, not sessions -- so per-client
-//!   session accounting has no hook at all today, and building a fifth
-//!   independent one here instead of folding sessions into the shared
-//!   mechanism the sibling entries will land would contradict the backlog's
-//!   own direction. A global cap would let one greedy client deny a
-//!   well-behaved one -- exactly the
-//!   concern already filed against the IPC connection cap.
-//!
-//! What *is* capped is the cheaper half of the same attack: **how many live
-//! frame objects one client holds**, at [`MAX_FRAMES_PER_CLIENT`], refused
-//! pre-delegation with the protocol's own `duplicate_frame` error (see
-//! `dispatch.rs`'s module doc for why a protocol error and not a silent
-//! ignore). A `create_frame` loop with no `capture` -- which scoot's
-//! [`Capture::pending`] throttle never sees, since it only runs on `capture`
-//! -- can therefore cost at most sixteen small objects per abusive client,
-//! and each refusal kills only the client that overflowed.
-//!
-//! Filed as
-//! [its own item](../../../../docs/backlog/resolved/screencopy-session-cap-done.md),
-//! the same way the `wl_shm` per-pool cap names the total it does not bound,
-//! rather than treated as covered by the throttling above.
+//! This reverses the earlier decision recorded in
+//! [its resolved entry](../../../../docs/backlog/resolved/screencopy-session-cap-done.md),
+//! which closed the sessions half as won't-fix on the premise that no hook
+//! could attribute a session to a client.
 //!
 //! ## The session-lock guarantee, and where it comes from
 //!
@@ -269,6 +255,7 @@ use super::State;
 use super::render::{Backend, CaptureStage, CursorPatch};
 
 mod cursor_session;
+pub(super) mod session_cap;
 #[cfg(test)]
 mod tests;
 
@@ -481,6 +468,9 @@ pub struct Screencopy {
     /// protocol) keeps counting until *it* dies, which is what keeps the
     /// bookkeeping exact across session teardown.
     frames_per_client: HashMap<ClientId, u32>,
+    /// How many sessions each client holds, and the refusal switch; see
+    /// [`session_cap`].
+    pub(super) session_cap: session_cap::SessionCap,
     /// The monotonic clock a frame's `presentation_time` is read from.
     ///
     /// Not [`State::start_time`](super::State), which measures time since this
@@ -674,6 +664,7 @@ impl Screencopy {
             sessions: Vec::new(),
             cursors: cursor_session::CursorSessions::default(),
             frames_per_client: HashMap::new(),
+            session_cap: session_cap::SessionCap::default(),
             clock: Clock::new(),
         }
     }
@@ -798,6 +789,11 @@ impl ImageCopyCaptureHandler for State {
     /// handing one output's size for another's pixels would mislabel a whole
     /// screen.
     fn capture_constraints(&mut self, source: &ImageCaptureSource) -> Option<BufferConstraints> {
+        if self.screencopy.session_cap.refusing() {
+            // Over the per-client cap: `None` is how the session comes out
+            // stopped (see `session_cap`).
+            return None;
+        }
         let weak = source.user_data().get::<WeakOutput>()?;
         let output = weak.upgrade()?;
         let id = self.outputs.id_of(&output)?;

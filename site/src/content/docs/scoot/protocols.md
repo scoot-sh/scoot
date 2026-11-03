@@ -1587,6 +1587,26 @@ What to know before pointing a client at it:
   protocol's own rule is stricter still (one frame object per *session*),
   which the pinned Smithay rev never enforces and exposes no hook to enforce
   per session.
+- **At most 32 live sessions per client, capture and pointer cursor
+  sessions together.** A cursor session and the capture session derived from
+  it count once. The 33rd session a client asks for while holding 32 is
+  created *stopped* (`stopped` on a capture session; on a cursor session its
+  capture session is stopped), and the client stays connected: destroy a
+  session and the next request is served again, at once. A stopped session
+  still counts until it is destroyed. A client that goes on to hold 64
+  sessions is disconnected with a protocol error (scoot logs `a client
+  reached 32 live capture sessions` the first time). The count is per
+  client, so one client at its limit never stops another's sessions. Real
+  clients are well below it: wayvnc holds one capture and one cursor session
+  per output, so 16 on eight outputs. The limits are not configurable.
+
+  > **Symptom:** a recorder or remote-desktop server works for a while,
+  > then every new session comes back `stopped` and the client reports the
+  > source as gone. It is holding 32 sessions and not destroying old ones
+  > (a leak when it reconnects); restart it.
+- **A cursor session accepts one `get_capture_session`.** A second request
+  is refused with the protocol's `duplicate_session` error, which
+  disconnects the client that sent it.
 - **While the session is locked, a capture sees the lock screen** — never the
   windows behind it, and never a half-drawn transition.
 - **On the GPU scanout tier a capture never sees a stale screen, including
