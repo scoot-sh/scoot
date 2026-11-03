@@ -103,6 +103,17 @@ enum Step {
     /// and [`Step::ShortWindow`] always negotiate (foot-shaped); only
     /// `SelfRounded { decorate: false }` stays unbound (GTK-shaped).
     SelfRounded { color: [u8; 4], decorate: bool },
+    /// A (by default unbound, GTK-shaped) self-rounded toplevel with its own corner
+    /// `radius` in logical pixels, drawn at most `max_size` logical pixels
+    /// (the configured size when `None`): a client rounder than the
+    /// compositor's `corner_radius`, or a window far smaller than its slot.
+    SelfRoundedCustom {
+        color: [u8; 4],
+        radius: i32,
+        max_size: Option<(i32, i32)>,
+        /// Negotiate server-side decorations first (an SSD client).
+        decorate: bool,
+    },
     /// Ask `ClientSide` on the mapped window's decoration object (needs a
     /// prior `SelfRounded { decorate: true }`): the `prefer_no_csd = false`
     /// half of the CSD rule.
@@ -444,6 +455,7 @@ fn rounded_buffer(
 /// [`rounded_buffer`]), through the same viewport path [`draw_short`] uses.
 /// The client's radius is logical, like the size: both scale into the
 /// buffer.
+#[allow(clippy::too_many_arguments)]
 fn draw_rounded(
     shm: &wl_shm::WlShm,
     qh: &QueueHandle<TestClient>,
@@ -451,6 +463,7 @@ fn draw_rounded(
     viewport: &wp_viewport::WpViewport,
     preferred: f64,
     size: (i32, i32),
+    client_radius: i32,
     color: [u8; 4],
 ) {
     viewport.set_destination(size.0, size.1);
@@ -458,7 +471,7 @@ fn draw_rounded(
         (f64::from(size.0) * preferred).round() as i32,
         (f64::from(size.1) * preferred).round() as i32,
     );
-    let radius = (f64::from(CLIENT_RADIUS) * preferred).round() as i32;
+    let radius = (f64::from(client_radius) * preferred).round() as i32;
     let buffer = rounded_buffer(shm, qh, bw, bh, radius, color);
     surface.attach(Some(&buffer), 0, 0);
     surface.damage_buffer(0, 0, bw, bh);
@@ -555,7 +568,8 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
             Step::Window { color }
             | Step::ShortWindow { color, .. }
             | Step::Framed { color, .. }
-            | Step::SelfRounded { color, .. } => {
+            | Step::SelfRounded { color, .. }
+            | Step::SelfRoundedCustom { color, .. } => {
                 let shrink = match step {
                     Step::ShortWindow { shrink, .. } => shrink,
                     _ => (0, 0),
@@ -568,9 +582,15 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     Step::SelfRounded {
                         decorate: false,
                         ..
+                    } | Step::SelfRoundedCustom {
+                        decorate: false,
+                        ..
                     } | Step::Framed { .. }
                 );
-                let self_rounded = matches!(step, Step::SelfRounded { .. });
+                let self_rounded = matches!(
+                    step,
+                    Step::SelfRounded { .. } | Step::SelfRoundedCustom { .. }
+                );
                 let index = client.window_serials.len();
                 client.window_serials.push(None);
                 client.window_sizes.push(None);
@@ -628,7 +648,25 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                         color,
                     );
                 } else if self_rounded {
-                    draw_rounded(&shm, &qh, &surface, &viewport, preferred, (w, h), color);
+                    let (client_radius, size) = match step {
+                        Step::SelfRoundedCustom {
+                            radius, max_size, ..
+                        } => match max_size {
+                            Some((mw, mh)) => (radius, (w.min(mw), h.min(mh))),
+                            None => (radius, (w, h)),
+                        },
+                        _ => (CLIENT_RADIUS, (w, h)),
+                    };
+                    draw_rounded(
+                        &shm,
+                        &qh,
+                        &surface,
+                        &viewport,
+                        preferred,
+                        size,
+                        client_radius,
+                        color,
+                    );
                 } else {
                     draw_short(
                         &shm,

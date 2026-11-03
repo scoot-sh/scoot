@@ -1054,7 +1054,7 @@ impl Decorations {
             entry.key = Some(key);
             build_strips(rect, appearance, thickness, color, scale, backdrop, entry);
         } else if entry.top_at.is_some()
-            && !refresh_strip_origins(rect, appearance, thickness, scale, entry)
+            && !refresh_strip_origins(rect, appearance, thickness, scale, backdrop, entry)
         {
             // A fractional-scale rounding boundary moved under a cached ring
             // and a strip canvas -- or an in-canvas paint offset -- no longer
@@ -1237,6 +1237,11 @@ struct StripPlan {
     /// what `paint_backdrop_corners` fills inside `outer`. Derived from the
     /// same clip/scale as the radii, so the plan stays pure.
     side: i32,
+    /// How many leading rows of the bottom strip lie inside the top strip's
+    /// rows (a window short enough that the strips overlap). The bottom
+    /// strip leaves them transparent: two translucent strips drawn over the
+    /// same pixels would blend the ring twice.
+    bottom_skip: i32,
 }
 
 /// Computes the strip plan for `rect`, or `None` when a canvas is degenerate
@@ -1244,11 +1249,15 @@ struct StripPlan {
 /// buffer: the ring of an invisible window is invisible either way, and
 /// `MemoryRenderBuffer::from_slice` on an empty slice would only assert
 /// downstream).
+///
+/// `backdrop` is whether the window paints the CSD backdrop: only then do the
+/// strips grow to hold its square, so SSD windows keep the minimal strips.
 fn plan_strips(
     rect: Rect,
     appearance: &Appearance,
     thickness: i32,
     scale: f64,
+    backdrop: bool,
 ) -> Option<StripPlan> {
     let (loc, logical, canvas) = ring_layout(rect, thickness, scale);
     if canvas.w <= 0 || canvas.h <= 0 {
@@ -1264,12 +1273,31 @@ fn plan_strips(
         clip.size,
     );
     let outer = Rectangle::new((0, 0).into(), (canvas.w, canvas.h).into());
+    // The backdrop square side the strips paint when the window is CSD: the
+    // same `max(radius, 24)` rule as the square path's `backdrop_corners`,
+    // in physical pixels and clamped to the clip, so tiny windows stay
+    // covered corner to corner. Stored in the plan so the paint stays pure.
+    let min_side = (f64::from(BACKDROP_CORNER_MIN) * scale).round() as i32;
+    let side = min_side
+        .max(radius_inner)
+        .min(clip.size.w)
+        .min(clip.size.h)
+        .max(0);
     // Strip height in physical pixels: the band rows plus the arc rows. The
     // logical height rounds UP, so the element's canvas always covers the
     // target: a strip one row short would leave a 1px gap in the ring at a
     // fractional scale, while a strip one row long only repaints side-band
-    // pixels the solid bars already cover (same opaque color -- idempotent).
-    let strip_target = thickness_phys + radius_outer;
+    // pixels the solid bars already cover (the bars are separate elements,
+    // so this is only invisible for an opaque ring color; the strips'
+    // own overlap is handled by `bottom_skip` below).
+    // A CSD window's strip must also hold the whole backdrop square below
+    // the band (`thickness + side` rows), or a client rounder than the ring shows the
+    // background where the square was cut off at the strip's last row.
+    let strip_target = if backdrop {
+        (thickness_phys + radius_outer).max(thickness_phys + side)
+    } else {
+        thickness_phys + radius_outer
+    };
     let strip_logical_h = ((strip_target as f64 / scale).ceil() as i32).max(1);
     let strip_logical = Size::<i32, Logical>::from((logical.w, strip_logical_h));
     // Top strip: full-canvas rows `0..canvas_h`, painted in place.
@@ -1281,9 +1309,12 @@ fn plan_strips(
     // canvas height comes from the same logical height at its own origin, so
     // it can differ from the top's by a pixel at fractional scales -- each
     // strip paints exactly its own canvas, so both stay correct. Seeded from
-    // the top height (exact at integer scales); a degenerate window whose
-    // full height is shorter than two strips just overlaps them, painting
-    // the same opaque color twice -- idempotent.
+    // the top height (exact at integer scales). A window whose full height
+    // is shorter than two strips overlaps them; the rows the top strip
+    // already paints are left transparent in the bottom strip (`bottom_skip`),
+    // because translucent ring pixels drawn twice would blend twice. The top
+    // strip paints all four backdrop squares clipped to its own rows, so
+    // nothing is lost.
     //
     // Recomputed rather than mirrored: the element rounding is
     // origin-sensitive, and the bottom origin differs.
@@ -1293,16 +1324,8 @@ fn plan_strips(
     if bottom_canvas.w <= 0 || bottom_canvas.h <= 0 {
         return None;
     }
-    // The backdrop square side the strips paint when the window is CSD: the
-    // same `max(radius, 24)` rule as the square path's `backdrop_corners`,
-    // in physical pixels and clamped to the clip, so tiny windows stay
-    // covered corner to corner. Stored in the plan so the paint stays pure.
-    let min_side = (f64::from(BACKDROP_CORNER_MIN) * scale).round() as i32;
-    let side = min_side
-        .max(radius_inner)
-        .min(clip.size.w)
-        .min(clip.size.h)
-        .max(0);
+    let bottom_first_row = canvas.h - bottom_canvas.h;
+    let bottom_skip = (top_canvas.h - bottom_first_row).clamp(0, bottom_canvas.h);
     Some(StripPlan {
         top: StripGeometry {
             loc,
@@ -1320,6 +1343,7 @@ fn plan_strips(
         radius_inner,
         radius_outer,
         side,
+        bottom_skip,
     })
 }
 
@@ -1341,9 +1365,10 @@ fn refresh_strip_origins(
     appearance: &Appearance,
     thickness: i32,
     scale: f64,
+    backdrop: bool,
     entry: &mut PaintedRing,
 ) -> bool {
-    let Some(plan) = plan_strips(rect, appearance, thickness, scale) else {
+    let Some(plan) = plan_strips(rect, appearance, thickness, scale, backdrop) else {
         return false;
     };
     let (Some(top_at), Some(bottom_at)) = (&mut entry.top_at, &mut entry.bottom_at) else {
@@ -1440,7 +1465,7 @@ fn build_strips(
     entry.bottom_at = None;
     entry.inner_at = None;
     entry.outer_at = None;
-    let Some(plan) = plan_strips(rect, appearance, thickness, scale) else {
+    let Some(plan) = plan_strips(rect, appearance, thickness, scale, backdrop) else {
         tracing::warn!("cannot paint a focus ring with no pixels; falling back to a square ring");
         return;
     };
@@ -1458,6 +1483,7 @@ fn build_strips(
         },
         argb,
         backdrop_side,
+        0,
     );
     entry.top = Some(MemoryRenderBuffer::from_slice(
         &entry.pixels,
@@ -1486,6 +1512,7 @@ fn build_strips(
         },
         argb,
         backdrop_side,
+        plan.bottom_skip,
     );
     entry.bottom = Some(MemoryRenderBuffer::from_slice(
         &entry.pixels,
@@ -1506,13 +1533,15 @@ fn build_strips(
 /// either strip passes, since `paint_ring` only fills rows its rects reach.
 /// When `backdrop_side` is set, also fills the CSD corner squares clipped to
 /// the outer arc (see `paint_backdrop_corners`) -- the same `side` for both
-/// strips, since the squares travel with the shifted `inner` rect.
+/// strips, since the squares travel with the shifted `inner` rect. The first
+/// `skip_rows` rows are cleared afterwards: rows the other strip owns.
 fn paint_strip(
     pixels: &mut Vec<u8>,
     canvas: Size<i32, Physical>,
     paint: RingPaint,
     color: [u8; 4],
     backdrop_side: Option<i32>,
+    skip_rows: i32,
 ) {
     let len = canvas.w as usize * canvas.h as usize * 4;
     if pixels.len() != len {
@@ -1523,6 +1552,10 @@ fn paint_strip(
     if let Some(side) = backdrop_side {
         paint_backdrop_corners(pixels, &paint, side, color);
     }
+    // Rows the other strip already paints stay transparent (see
+    // `StripPlan::bottom_skip`).
+    let skip = (skip_rows.max(0) as usize).min(canvas.h as usize) * canvas.w as usize * 4;
+    pixels[..skip].fill(0);
 }
 
 /// Updates one persistent segment buffer to `rect` (or to empty, if this
@@ -2082,6 +2115,32 @@ mod tests {
         assert_eq!(rects.right, Some(Rect::new(150, 100, 4, 150)));
     }
 
+    // -- plan_strips backdrop height ----------------------------------------
+
+    #[test]
+    fn only_a_backdrop_window_grows_its_strips_to_hold_the_square() {
+        let appearance = Appearance {
+            corner_radius: 8,
+            ..Appearance::default()
+        };
+        for scale in [1.0, 1.5, 2.0] {
+            let rect = Rect::new(10, 10, 400, 300);
+            let plain = plan_strips(rect, &appearance, 2, scale, false).expect("a plan");
+            let csd = plan_strips(rect, &appearance, 2, scale, true).expect("a plan");
+            let thickness = (2.0 * scale).round() as i32;
+            assert!(
+                csd.top.canvas.h >= thickness + csd.side,
+                "scale {scale}: the strip must hold the whole backdrop square"
+            );
+            assert!(csd.top.canvas.h > plain.top.canvas.h);
+            assert_eq!(plain.top.canvas.h, {
+                let ro = plain.radius_outer;
+                let target = thickness + ro;
+                ((f64::from(target) / scale).ceil() * scale).round() as i32
+            });
+        }
+    }
+
     // -- backdrop_corners --------------------------------------------------
 
     #[test]
@@ -2626,8 +2685,9 @@ mod tests {
                 for (dx, dy) in (0..4).flat_map(|dx| (0..4).map(move |dy| (dx, dy))) {
                     let rect = Rect::new(10 + dx, 20 + dy, 97, 83);
                     let what = format!("scale {scale} thickness {thickness} rect {rect:?}");
-                    let plan = plan_strips(rect, &appearance, appearance.focus_ring_width, scale)
-                        .expect("a plan");
+                    let plan =
+                        plan_strips(rect, &appearance, appearance.focus_ring_width, scale, false)
+                            .expect("a plan");
                     let [left, right] =
                         painted_side_bars(&plan.top, &plan.bottom, plan.inner, plan.outer);
                     let (left, right) = (left.expect("a left bar"), right.expect("a right bar"));
@@ -2718,6 +2778,7 @@ mod tests {
                     &appearance,
                     appearance.focus_ring_width,
                     scale,
+                    false,
                     &mut entry
                 ));
             }
@@ -2746,6 +2807,7 @@ mod tests {
                 &appearance,
                 appearance.focus_ring_width,
                 scale,
+                false,
             )
             .expect("a plan");
             assert_eq!(
@@ -2796,10 +2858,22 @@ mod tests {
         let scale = 1.25;
         let before_rect = Rect::new(1, 50, 100, 100);
         let after_rect = Rect::new(2, 50, 100, 100);
-        let before = plan_strips(before_rect, &appearance, appearance.focus_ring_width, scale)
-            .expect("a plan");
-        let after = plan_strips(after_rect, &appearance, appearance.focus_ring_width, scale)
-            .expect("a plan");
+        let before = plan_strips(
+            before_rect,
+            &appearance,
+            appearance.focus_ring_width,
+            scale,
+            false,
+        )
+        .expect("a plan");
+        let after = plan_strips(
+            after_rect,
+            &appearance,
+            appearance.focus_ring_width,
+            scale,
+            false,
+        )
+        .expect("a plan");
         assert_eq!(
             before.top.canvas, after.top.canvas,
             "the test only means something if the canvases match"
@@ -2819,6 +2893,7 @@ mod tests {
                 &appearance,
                 appearance.focus_ring_width,
                 scale,
+                false,
                 &mut entry
             ),
             "canvas-matching move at scale {scale} must repaint: the ring hole drifted"
@@ -2842,6 +2917,7 @@ mod tests {
                         &appearance,
                         appearance.focus_ring_width,
                         scale,
+                        false,
                         &mut entry
                     ),
                     "integer-scale move {x}→{} at scale {scale} must reuse the buffers",
@@ -2866,6 +2942,7 @@ mod tests {
             &appearance,
             appearance.focus_ring_width,
             scale,
+            false,
             &mut entry
         ));
         build_strips(
@@ -2883,6 +2960,7 @@ mod tests {
                 &appearance,
                 appearance.focus_ring_width,
                 scale,
+                false,
                 &mut entry
             ),
             "refreshing the position just repainted for must be a hit"
@@ -2925,12 +3003,22 @@ mod tests {
                     )
                     .collect();
                 for (before_rect, after_rect) in moves {
-                    let before =
-                        plan_strips(before_rect, &appearance, appearance.focus_ring_width, scale)
-                            .expect("a plan");
-                    let after =
-                        plan_strips(after_rect, &appearance, appearance.focus_ring_width, scale)
-                            .expect("a plan");
+                    let before = plan_strips(
+                        before_rect,
+                        &appearance,
+                        appearance.focus_ring_width,
+                        scale,
+                        false,
+                    )
+                    .expect("a plan");
+                    let after = plan_strips(
+                        after_rect,
+                        &appearance,
+                        appearance.focus_ring_width,
+                        scale,
+                        false,
+                    )
+                    .expect("a plan");
                     let plans_agree = before.top.canvas == after.top.canvas
                         && before.bottom.canvas == after.bottom.canvas
                         && before.inner == after.inner
@@ -2941,6 +3029,7 @@ mod tests {
                         &appearance,
                         appearance.focus_ring_width,
                         scale,
+                        false,
                         &mut entry,
                     );
                     assert_eq!(
@@ -2980,6 +3069,7 @@ mod tests {
                 &appearance,
                 appearance.focus_ring_width,
                 1.0,
+                false,
                 &mut entry
             ),
             "a poisoned entry must never report a hit"

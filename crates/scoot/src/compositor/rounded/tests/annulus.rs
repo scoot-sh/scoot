@@ -24,6 +24,7 @@
 //! reads as ring color, but nothing ring-colored leaves the outer arc.
 
 use super::*;
+use crate::compositor::decorations::Color;
 use crate::compositor::rounded::row_span;
 use smithay::utils::{Physical, Point, Rectangle};
 
@@ -49,6 +50,7 @@ fn pixel_at(pixels: &[u8], x: i32, y: i32) -> Option<[u8; 4]> {
 /// client's shape).
 fn assert_annulus_on_fixture(
     fixture: &mut Fixture,
+    drawn: Rect,
     configured: i32,
     thickness: i32,
     scale: f64,
@@ -56,7 +58,7 @@ fn assert_annulus_on_fixture(
 ) {
     fixture.state.appearance.corner_radius = configured;
     fixture.state.appearance.focus_ring_width = thickness;
-    let drawn = fixture.placement();
+    fixture.settle();
     let pixels = fixture.render();
 
     let clip = clip_rect(drawn, scale);
@@ -329,8 +331,10 @@ fn ring_corner_annulus() {
             }
             for configured in [8, 12, 16] {
                 for thickness in [1, 2, 4] {
+                    let drawn = fixture.placement();
                     assert_annulus_on_fixture(
                         &mut fixture,
+                        drawn,
                         configured,
                         thickness,
                         scale,
@@ -415,5 +419,366 @@ fn csd_crescent_without_wedge() {
             }
         }
         let _ = outer;
+    }
+}
+
+/// Half-transparent orange: over the dark background it blends to a color
+/// distinct from both, so a double-blended overlap would read as a different
+/// pixel from the band.
+const TRANSLUCENT_RING: Color = Color::new(1.0, 0.5, 0.0, 0.5);
+
+/// Which of the three things a pixel can be in the self-rounded corner
+/// model: outside the ring's outer arc, ring (the band plus the crescent
+/// the backdrop fills), or the client's own opaque content.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Zone {
+    Background,
+    Ring,
+    Window,
+}
+
+/// Pins a self-rounded (unbound) window's whole frame against the model:
+/// background outside the outer rounded rect, window color inside the
+/// client's own rounded rect, ring color everywhere between -- the compositor
+/// band and the crescent where the client rounds wider than the clip.
+///
+/// Every pixel is checked except those with a differently-classified
+/// neighbour: fractional scales shift each staircase by up to a pixel (the
+/// ring origin and the clip round separately), so a boundary pixel may land
+/// on either side. A wedge, a background sliver in the crescent, or a
+/// missing backdrop moves whole interior regions, which this still catches.
+/// `client_radius` is logical, scaled the way the client scales it. Returns
+/// how many steady ring pixels sit inside the clip rect (the crescent), so
+/// a caller can require the case to have bitten.
+fn assert_self_rounded_frame(
+    pixels: &[u8],
+    drawn: Rect,
+    scale: f64,
+    configured: i32,
+    thickness: i32,
+    client_radius: i32,
+    what: &str,
+) -> usize {
+    let clip = clip_rect(drawn, scale);
+    let radius_inner = physical_radius(configured, clip, scale);
+    let thickness_phys = (f64::from(thickness) * scale).round() as i32;
+    let radius_outer = radius_inner + thickness_phys;
+    let (ring_loc, _, canvas) = ring_layout(drawn, thickness, scale);
+    let origin: Point<i32, Physical> = ring_loc.to_i32_round();
+    let outer = Rectangle::new(origin, canvas);
+    let client_phys = (f64::from(client_radius) * scale).round() as i32;
+
+    let bg: [u8; 4] = pixels[0..4].try_into().expect("canvas corner");
+    let xx = clip.loc.x + clip.size.w / 2;
+    let ring = (outer.loc.y..clip.loc.y)
+        .rev()
+        .map(|yy| pixel(pixels, CANVAS, xx, yy))
+        .find(|px| *px != bg && *px != WINDOW_BGRA)
+        .unwrap_or_else(|| panic!("{what}: a ring pixel above the clip"));
+
+    let zone = |x: i32, y: i32| -> Zone {
+        let in_outer = row_span(radius_outer, y, outer)
+            .map(|(l, r)| x >= l && x < r)
+            .unwrap_or(false);
+        if !in_outer {
+            return Zone::Background;
+        }
+        let row = y - clip.loc.y;
+        if row < 0 || row >= clip.size.h {
+            return Zone::Ring;
+        }
+        let edge = row.min(clip.size.h - 1 - row);
+        let cut = if client_phys > 0 && edge < client_phys {
+            cut_width(client_phys, edge)
+        } else {
+            0
+        };
+        // Content shows where the client drew it and the compositor's own
+        // clip keeps it: the client's curve intersected with the clip's.
+        let kept = row_span(radius_inner, y, clip)
+            .map(|(l, r)| x >= l && x < r)
+            .unwrap_or(false);
+        if kept && x >= clip.loc.x + cut && x < clip.loc.x + clip.size.w - cut {
+            Zone::Window
+        } else {
+            Zone::Ring
+        }
+    };
+    let mut crescent_pixels = 0;
+    for y in 0..CANVAS {
+        for x in 0..CANVAS {
+            let here = zone(x, y);
+            let steady = (-1..=1)
+                .flat_map(|dy| (-1..=1).map(move |dx| (dx, dy)))
+                .all(|(dx, dy)| zone(x + dx, y + dy) == here);
+            if !steady {
+                continue;
+            }
+            let want = match here {
+                Zone::Background => bg,
+                Zone::Ring => ring,
+                Zone::Window => WINDOW_BGRA,
+            };
+            assert_pixel(
+                pixels,
+                CANVAS,
+                x,
+                y,
+                want,
+                &format!("{what}: ({x}, {y}) should read as {here:?}"),
+            );
+            // Ring inside the clip rect and past the compositor's own
+            // staircase: the crescent the backdrop is for.
+            if here == Zone::Ring
+                && x >= clip.loc.x
+                && x < clip.loc.x + clip.size.w
+                && y >= clip.loc.y
+                && y < clip.loc.y + clip.size.h
+            {
+                crescent_pixels += 1;
+            }
+        }
+    }
+    crescent_pixels
+}
+
+/// Maps an unbound self-rounded window (radius `client_radius`, drawn at
+/// most `max_size`) and returns the fixture with the rect it really drew.
+fn self_rounded_fixture(
+    scale: f64,
+    client_radius: i32,
+    max_size: Option<(i32, i32)>,
+) -> (Fixture, Rect) {
+    let mut fixture = Fixture::with_radius_at_scale(8, 1, scale);
+    fixture.run(Step::SelfRoundedCustom {
+        color: WINDOW_BGRA,
+        radius: client_radius,
+        max_size,
+        decorate: false,
+    });
+    let slot = fixture.placement();
+    let drawn = match max_size {
+        Some((mw, mh)) => Rect::new(slot.x, slot.y, slot.w.min(mw), slot.h.min(mh)),
+        None => slot,
+    };
+    (fixture, drawn)
+}
+
+/// A translucent ring color reads as one uniform band: the backdrop and the
+/// band overlap in the strips, and a double-blended overlap would show as a
+/// different pixel (and fail the "ring-colored" bins). Bound and unbound
+/// square clients, so the backdrop is both absent and present.
+#[test]
+fn a_translucent_ring_is_one_uniform_annulus() {
+    for scale in [1.0, 1.5, 2.0] {
+        for unbound in [false, true] {
+            let mut fixture = Fixture::with_radius_at_scale(8, 1, scale);
+            fixture.state.appearance.focus_ring_active_color = TRANSLUCENT_RING;
+            if unbound {
+                fixture.run(Step::Framed {
+                    color: WINDOW_BGRA,
+                    frame: [0x00, 0x00, 0x00, 0xFF],
+                    margin: 0,
+                    band: Band::Floor,
+                });
+            } else {
+                fixture.run(Step::Window { color: WINDOW_BGRA });
+            }
+            for configured in [8, 16] {
+                for thickness in [2, 4] {
+                    let drawn = fixture.placement();
+                    assert_annulus_on_fixture(
+                        &mut fixture,
+                        drawn,
+                        configured,
+                        thickness,
+                        scale,
+                        &format!(
+                            "translucent: radius {configured} thickness {thickness} scale {scale} {}",
+                            if unbound { "unbound" } else { "bound" }
+                        ),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The color the translucent tests rely on really is a blend: neither the
+/// background nor the opaque version of the same hue.
+#[test]
+fn the_translucent_ring_is_a_blend() {
+    let ring_above = |color: Color| {
+        let mut fixture = Fixture::with_radius_at_scale(8, 4, 1.0);
+        fixture.state.appearance.focus_ring_active_color = color;
+        fixture.run(Step::Window { color: WINDOW_BGRA });
+        let drawn = fixture.placement();
+        let pixels = fixture.render();
+        let bg: [u8; 4] = pixels[0..4].try_into().expect("canvas corner");
+        (
+            bg,
+            pixel(&pixels, CANVAS, drawn.x + drawn.w / 2, drawn.y - 2),
+        )
+    };
+    let (bg, blend) = ring_above(TRANSLUCENT_RING);
+    let (_, opaque) = ring_above(Color::new(1.0, 0.5, 0.0, 1.0));
+    assert_ne!(blend, bg, "the translucent ring must draw");
+    assert_ne!(blend, opaque, "the translucent ring must not be opaque");
+}
+
+/// A translucent ring behind a client that rounds wider than the clip: the
+/// crescent (backdrop over the background) must equal the band, not a
+/// darker overlap.
+#[test]
+fn a_translucent_ring_hugs_a_rounder_client_without_a_seam() {
+    for scale in [1.0, 1.5] {
+        let (mut fixture, drawn) = self_rounded_fixture(scale, 24, None);
+        fixture.state.appearance.focus_ring_active_color = TRANSLUCENT_RING;
+        // A thin ring on a wide radius: the backdrop square's corner sits
+        // well past the outer arc here (by `(sqrt(2) * radius - radius_outer)`
+        // along the diagonal), so an unclipped backdrop would show as a
+        // wedge. Client radius 24 stays rounder than the configured 16.
+        fixture.state.appearance.corner_radius = 16;
+        fixture.state.appearance.focus_ring_width = 2;
+        let pixels = fixture.render();
+        let crescent = assert_self_rounded_frame(
+            &pixels,
+            drawn,
+            scale,
+            16,
+            2,
+            24,
+            &format!("translucent crescent scale {scale}"),
+        );
+        assert!(crescent > 20, "scale {scale}: only {crescent} crescent px");
+    }
+}
+
+/// A window smaller than twice the radius: the clamped corners meet, the
+/// strip canvases are short and the backdrop side clamps to the window. The
+/// ring is still one concentric annulus with nothing outside the outer arc.
+#[test]
+fn a_window_smaller_than_twice_the_radius_keeps_the_annulus() {
+    for scale in [1.0, 1.5, 2.0] {
+        for size in [(30, 30), (44, 26)] {
+            let (mut fixture, drawn) = self_rounded_fixture(scale, 0, Some(size));
+            assert_eq!((drawn.w, drawn.h), size, "the window must draw small");
+            for configured in [16, 40] {
+                for thickness in [1, 2, 4] {
+                    assert_annulus_on_fixture(
+                        &mut fixture,
+                        drawn,
+                        configured,
+                        thickness,
+                        scale,
+                        &format!(
+                            "small {size:?}: radius {configured} thickness {thickness} scale {scale}"
+                        ),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// The same tiny window with a client rounder than the clamped clip: the
+/// backdrop's side clamp must still fill the crescent.
+#[test]
+fn a_tiny_rounder_client_still_gets_its_crescent() {
+    for scale in [1.0, 2.0] {
+        let (mut fixture, drawn) = self_rounded_fixture(scale, 24, Some((60, 60)));
+        for (configured, thickness) in [(8, 2), (40, 4)] {
+            fixture.state.appearance.corner_radius = configured;
+            fixture.state.appearance.focus_ring_width = thickness;
+            let pixels = fixture.render();
+            assert_self_rounded_frame(
+                &pixels,
+                drawn,
+                scale,
+                configured,
+                thickness,
+                24,
+                &format!("tiny radius {configured} thickness {thickness} scale {scale}"),
+            );
+        }
+    }
+}
+
+/// The backdrop's original job: a client rounder than the configured radius
+/// (24 against 8 and 12) leaves a crescent between its curve and the ring,
+/// which must stay ring-colored -- no background sliver inside the outer
+/// arc, nothing ring-colored outside it.
+#[test]
+fn a_rounder_client_keeps_a_ring_colored_crescent() {
+    for scale in [1.0, 1.25, 1.5, 2.0] {
+        let (mut fixture, drawn) = self_rounded_fixture(scale, 24, None);
+        for configured in [8, 12] {
+            for thickness in [2, 4] {
+                fixture.state.appearance.corner_radius = configured;
+                fixture.state.appearance.focus_ring_width = thickness;
+                let pixels = fixture.render();
+                let crescent = assert_self_rounded_frame(
+                    &pixels,
+                    drawn,
+                    scale,
+                    configured,
+                    thickness,
+                    24,
+                    &format!("radius {configured} thickness {thickness} scale {scale}"),
+                );
+                assert!(
+                    crescent > 20,
+                    "radius {configured} thickness {thickness} scale {scale}: only {crescent} crescent px"
+                );
+            }
+        }
+    }
+}
+
+/// Windows short enough that the ring's top and bottom strips overlap: with a
+/// translucent ring, every ring pixel of the rendered frame must read as the
+/// single-blend color (the top bar's), so no overlap row is drawn twice.
+/// Measured on the frame, not the buffers. CSD (radius 8: the backdrop-grown
+/// strips meet) and SSD (radius 40 clamps to half the window: the arc strips
+/// meet), at 30 logical pixels tall.
+#[test]
+fn overlapping_strips_do_not_double_blend_a_translucent_ring() {
+    for scale in [1.0, 1.5, 2.0] {
+        for (decorate, configured) in [(false, 8), (true, 40)] {
+            let mut fixture = Fixture::with_radius_at_scale(configured, 2, scale);
+            fixture.state.appearance.focus_ring_active_color = TRANSLUCENT_RING;
+            fixture.run(Step::SelfRoundedCustom {
+                color: WINDOW_BGRA,
+                radius: 0,
+                max_size: Some((60, 30)),
+                decorate,
+            });
+            let slot = fixture.placement();
+            let drawn = Rect::new(slot.x, slot.y, slot.w.min(60), slot.h.min(30));
+            assert_eq!(drawn.h, 30, "the window must draw short");
+            let pixels = fixture.render();
+            let clip = clip_rect(drawn, scale);
+            let bg: [u8; 4] = pixels[0..4].try_into().expect("canvas corner");
+            let ring = pixel(
+                &pixels,
+                CANVAS,
+                clip.loc.x + clip.size.w / 2,
+                clip.loc.y - 1,
+            );
+            assert_ne!(ring, bg, "the top bar must draw");
+            let what = format!("scale {scale} {}", if decorate { "ssd" } else { "csd" });
+            let mut ring_pixels = 0;
+            for y in 0..CANVAS {
+                for x in 0..CANVAS {
+                    let px = pixel(&pixels, CANVAS, x, y);
+                    if px == bg || px == WINDOW_BGRA {
+                        continue;
+                    }
+                    assert_eq!(px, ring, "{what}: ({x}, {y}) is not the single-blend ring");
+                    ring_pixels += 1;
+                }
+            }
+            assert!(ring_pixels > 100, "{what}: only {ring_pixels} ring pixels");
+        }
     }
 }

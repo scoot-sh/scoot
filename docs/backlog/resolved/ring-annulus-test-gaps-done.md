@@ -1,9 +1,10 @@
 ---
 title: "Ring annulus test gaps: translucent ring, tiny windows, client rounder than the config"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-03"
 ---
 
 # Ring annulus test gaps: translucent ring, tiny windows, client rounder than the config
@@ -30,6 +31,14 @@ kinds. It does not yet cover:
    ring-colored, with no background sliver and nothing outside the outer
    arc. The review of #882 argued this structurally (the new backdrop side
    equals the old extent) but did not run it.
+
+## Status (2026-11-03)
+
+Done in PR #885, in `rounded/tests/annulus.rs`, on pixman and the GPU tier.
+The crescent cases found a real bug, fixed in the same PR
+([`csd-backdrop-truncated-by-strip-done.md`](./csd-backdrop-truncated-by-strip-done.md)).
+The square-client cases (translucent ring, tiny window) catch an unclipped
+backdrop; the crescent cases also catch a removed or shrunk one.
 
 ## What to do
 
