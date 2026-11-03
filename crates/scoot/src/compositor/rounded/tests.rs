@@ -43,6 +43,7 @@ use crate::compositor::decorations::{Appearance, ring_rects};
 use crate::compositor::rounded::{clip_rect, cut_width, physical_radius, ring_layout};
 use crate::compositor::test_support::{Harness, assert_pixel, find_color, pixel, wait_for};
 
+mod annulus;
 mod committed;
 mod csd;
 mod damage;
