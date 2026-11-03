@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.38](https://github.com/scoot-sh/scoot/compare/v0.6.37...v0.6.38) - 2026-11-03
+
+### scoot
+
+- fixed: hold the whole CSD backdrop square in the ring strips, and pin the annulus gaps ([#885](https://github.com/scoot-sh/scoot/pull/885))
+
 ## [0.6.37](https://github.com/scoot-sh/scoot/compare/v0.6.36...v0.6.37) - 2026-11-03
 
 ### scoot
