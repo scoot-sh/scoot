@@ -629,7 +629,6 @@ fn the_translucent_ring_is_a_blend() {
 /// crescent (backdrop over the background) must equal the band, not a
 /// darker overlap.
 #[test]
-#[ignore = "real bug: the strips are shorter than the backdrop square (docs/backlog/core/csd-backdrop-truncated-by-strip.md)"]
 fn a_translucent_ring_hugs_a_rounder_client_without_a_seam() {
     for scale in [1.0, 1.5] {
         let (mut fixture, drawn) = self_rounded_fixture(scale, 24, None);
@@ -684,7 +683,6 @@ fn a_window_smaller_than_twice_the_radius_keeps_the_annulus() {
 /// The same tiny window with a client rounder than the clamped clip: the
 /// backdrop's side clamp must still fill the crescent.
 #[test]
-#[ignore = "real bug: the strips are shorter than the backdrop square (docs/backlog/core/csd-backdrop-truncated-by-strip.md)"]
 fn a_tiny_rounder_client_still_gets_its_crescent() {
     for scale in [1.0, 2.0] {
         let (mut fixture, drawn) = self_rounded_fixture(scale, 24, Some((60, 60)));
@@ -710,7 +708,6 @@ fn a_tiny_rounder_client_still_gets_its_crescent() {
 /// which must stay ring-colored -- no background sliver inside the outer
 /// arc, nothing ring-colored outside it.
 #[test]
-#[ignore = "real bug: the strips are shorter than the backdrop square (docs/backlog/core/csd-backdrop-truncated-by-strip.md)"]
 fn a_rounder_client_keeps_a_ring_colored_crescent() {
     for scale in [1.0, 1.25, 1.5, 2.0] {
         let (mut fixture, drawn) = self_rounded_fixture(scale, 24, None);

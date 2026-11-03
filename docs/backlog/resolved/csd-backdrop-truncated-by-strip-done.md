@@ -1,14 +1,15 @@
 ---
 title: "CSD backdrop is cut off at the ring strip's height: background sliver beside a client rounder than the ring"
-status: "open"
-area: "core"
-priority: "medium"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-03"
 ---
 
 # CSD backdrop is cut off at the ring strip's height: background sliver beside a client rounder than the ring
 
-Filed 2026-11-03 from writing `ring-annulus-test-gaps.md` case 3. Serves
+Filed 2026-11-03 from writing `ring-annulus-test-gaps-done.md` case 3. Serves
 **daily-drive**: a GTK/libadwaita window rounder than `corner_radius` shows a
 strip of desktop background in its corner, beside the ring.
 
@@ -35,21 +36,12 @@ whenever `thickness + radius_outer` is under `24 * scale`.
 Before #882 the backdrop was four separate solid squares, each the full
 `max(radius, 24)`, so this did not happen.
 
-## What to do
+## Resolution
 
-Make the strip at least as tall as the backdrop square plus the thickness.
-Verified one-line shape (all eight annulus tests green on both renderers
-with it; `strip_target` computed after `side`):
-
-```rust
-let strip_target = (thickness_phys + radius_outer)
-    .max(thickness_phys + side); // side = min_side.max(radius_inner).min(clip w/h)
-```
-
-Costs a taller strip canvas (at most 24 rows * scale more, repainted only
-on a key change). Un-ignore the three crescent tests in
-`compositor/rounded/tests/annulus.rs` (they carry an `#[ignore]` naming this
-entry) and resolve `ring-annulus-test-gaps.md` with it.
+`plan_strips` takes `backdrop`; for a CSD window the strip target is
+`max(thickness + radius_outer, thickness + side)`. SSD windows keep the
+minimal strips. Pinned by the crescent cases in
+`compositor/rounded/tests/annulus.rs` and `only_a_backdrop_window_grows_its_strips_to_hold_the_square`.
 
 ## Not in this ticket
 

@@ -1,9 +1,10 @@
 ---
 title: "Ring annulus test gaps: translucent ring, tiny windows, client rounder than the config"
-status: "open"
-area: "core"
-priority: "low"
-blocked: "csd-backdrop-truncated-by-strip"
+status: "resolved"
+area: "resolved"
+priority: null
+blocked: null
+resolved: "2026-11-03"
 ---
 
 # Ring annulus test gaps: translucent ring, tiny windows, client rounder than the config
@@ -33,18 +34,11 @@ kinds. It does not yet cover:
 
 ## Status (2026-11-03)
 
-All three cases are written in `rounded/tests/annulus.rs` and verified on
-pixman and the GPU tier. The square-client ones run: a translucent ring and
-a window smaller than twice the radius, bound and unbound, across scales.
-They catch an unclipped backdrop (the wedge) but not a removed or shrunk one,
-because an opaque client hides the backdrop. The three crescent ones (a
-translucent ring behind a rounder client, a tiny rounder client, and case 3
-itself at scales 1, 1.25, 1.5 and 2) catch removed, shrunk and unclipped
-backdrops, and they **found a real bug**: the backdrop is cut off at the ring
-strip's height, [`csd-backdrop-truncated-by-strip.md`](./csd-backdrop-truncated-by-strip.md).
-They are `#[ignore]`d until that lands; with its one-line fix applied all
-eight annulus tests pass on both renderers. Resolve this entry when they are
-un-ignored.
+Done in PR #885, in `rounded/tests/annulus.rs`, on pixman and the GPU tier.
+The crescent cases found a real bug, fixed in the same PR
+([`csd-backdrop-truncated-by-strip-done.md`](./csd-backdrop-truncated-by-strip-done.md)).
+The square-client cases (translucent ring, tiny window) catch an unclipped
+backdrop; the crescent cases also catch a removed or shrunk one.
 
 ## What to do
 
