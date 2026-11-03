@@ -198,3 +198,27 @@ succeeded first). No `--tty` seat was claimed (every live run here is
 writes fail (`cargo fmt -p` → `Permission denied`, same family as the
 `.git/index.lock` failure), so formatting ran Mac-side and was re-checked
 on the VM.
+
+## Reopened and closed the other way (session cap, `fix/session-cap`)
+
+The "Sessions per client: closed as won't-fix" section above rested on one
+premise, that nothing at the pinned rev says which client a session belongs
+to. That is true of the handler API (`new_session`, `capture_constraints`)
+and false at the dispatch seam: `dispatch.rs`'s `request()` is handed the
+`Client` for `ext_image_copy_capture_manager_v1.create_session` and
+`create_pointer_cursor_session`, and its destruction hook sees every dead
+session object, including the ones a disconnect destroys. Claim there, release
+there, and the count is exact without any Smithay hook. The frame cap
+already used the same seam.
+
+Sessions are now capped per client, capture and pointer cursor sessions
+together (the cursor-session follow-up asked for one decision): see
+`screencopy/session_cap.rs` for the derivation of 32 and the refusal. The
+residual this entry accepted (one client's session count adding latency to
+another's `capture`) is bounded by that cap.
+
+Found while doing it: `ext_image_copy_capture_cursor_session_v1
+.get_capture_session` sent twice made the pinned Smithay return without
+initialising the new object, which panics wayland-backend
+(`common_poll.rs:293`) -- one request from any client crashed the
+compositor. It is now refused with `duplicate_session`.

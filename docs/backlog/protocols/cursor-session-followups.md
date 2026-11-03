@@ -19,12 +19,11 @@ PR #774 served `create_pointer_cursor_session` on every backend. The independent
 - ~~**Client cursor hotspot at a fractional scale** can be 1 px off.~~ Done: a client cursor surface is placed at `round(pointer * scale) - round(hotspot * scale)` (`cursor::element_location`), so the image's hotspot is constant and matches the position the session reports; pinned at 1, 1.25 and 1.5.
 - **One pooled target is shared** by the cursor image and a `paint_cursors` region patch, so a shape change while both are live on one output rebuilds the target. Rare.
 - **A reload can serve one redundant frame** with the old image before the async cursor rebuild lands. Harmless.
-- **No per-client cap on cursor sessions**, the same as for capture sessions today.
+- ~~**No per-client cap on cursor sessions**, the same as for capture sessions today.~~ Done: capture and cursor sessions share one per-client cap of 32 live sessions (`screencopy/session_cap.rs`); the next is created stopped, and a client past 64 is disconnected.
 
 ## What to do
 
 - Run the cursor session on a real GPU scanout output and record the result.
-- Decide the session cap together with the capture-session cap, not separately.
 
 ## Not in this ticket
 

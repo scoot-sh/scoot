@@ -280,6 +280,10 @@ impl State {
         &mut self,
         source: &ImageCaptureSource,
     ) -> Option<BufferConstraints> {
+        if self.screencopy.session_cap.refusing() {
+            // Over the per-client cap; also skips rendering the image.
+            return None;
+        }
         let id = self.cursor_source_output(source)?;
         let at = self.cursor_hotspot_on(id);
         let key = self.cursor_image_key(id, at.is_some())?;

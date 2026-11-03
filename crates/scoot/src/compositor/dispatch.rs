@@ -3,12 +3,13 @@
 //! This is a hand-written copy of what `smithay::delegate_dispatch2!(State)`
 //! expands to -- the blanket `Dispatch`/`GlobalDispatch` impls that forward
 //! every request to whichever `Dispatch2` impl the object's user data
-//! carries -- plus eight guards on what a client may ask for
+//! carries -- plus nine guards on what a client may ask for
 //! ([`reject_invalid_shm_pool_resize`], [`reject_oversized_shm_pool_creation`],
 //! [`reject_excess_shm_pool`], [`reject_excess_buffer`],
 //! [`reject_unrepresentable_layer_size`],
 //! [`reject_frozen_toplevel_icon_request`],
-//! [`reject_excess_capture_frame`] and [`reject_too_deep_subsurface`], plus
+//! [`reject_excess_capture_frame`], [`reject_excess_capture_session`] and
+//! [`reject_too_deep_subsurface`], plus
 //! two that live with their protocols: explicit sync's retained-timeline
 //! cap in `drm_syncobj.rs`, and the pending dma-buf plane cap in
 //! `dmabuf/pending_planes.rs`, each with its release halves there too), one
@@ -432,7 +433,8 @@ use std::any::{Any, TypeId};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 
 use smithay::reexports::wayland_protocols::ext::image_copy_capture::v1::server::{
-    ext_image_copy_capture_frame_v1, ext_image_copy_capture_session_v1,
+    ext_image_copy_capture_cursor_session_v1, ext_image_copy_capture_frame_v1,
+    ext_image_copy_capture_manager_v1, ext_image_copy_capture_session_v1,
 };
 use smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_surface_v1;
 use smithay::reexports::wayland_protocols::wp::linux_dmabuf::zv1::server::zwp_linux_buffer_params_v1;
@@ -450,6 +452,8 @@ use smithay::reexports::wayland_server::{
 };
 use smithay::wayland::compositor::SubsurfaceUserData;
 use smithay::wayland::{Dispatch2, GlobalDispatch2};
+
+use smithay::wayland::image_copy_capture::SessionData;
 
 use super::State;
 use super::client_fds::Kind;
@@ -524,6 +528,7 @@ where
             || reject_unrepresentable_layer_size(resource, &request)
             || reject_frozen_toplevel_icon_request(state, resource, &request)
             || reject_excess_capture_frame(state, client, resource, &request)
+            || reject_excess_capture_session(state, client, resource, &request)
             || reject_too_deep_subsurface(resource, &request)
             || reject_second_subsurface(state, resource, &request)
             || super::drm_syncobj::reject_excess_timeline(state, client, resource, &request)
@@ -534,6 +539,7 @@ where
         super::dmabuf::pending_planes::note_consumed(state, client, resource, &request);
         prepare_post_destroy_lock_commit(state, resource, &request, dhandle);
         data.request(state, client, resource, request, dhandle, data_init);
+        end_capture_session_refusal::<I>(state);
     }
 
     fn destroyed(state: &mut Self, client: ClientId, resource: &I, data: &UserData) {
@@ -541,6 +547,7 @@ where
         // scoot's own per-client frame count, which Smithay's teardown
         // neither reads nor writes, and `data.destroyed` moves `client`.
         forget_destroyed_capture_frame::<I>(state, &client, resource);
+        forget_destroyed_capture_session::<I, UserData>(state, &client, resource);
         forget_destroyed_shm_pool::<I>(state, &client, resource);
         forget_destroyed_buffer::<I>(state, &client, resource);
         forget_destroyed_subsurface_role::<I, UserData>(state, resource, data);
@@ -1261,6 +1268,136 @@ where
         ),
     );
     true
+}
+
+/// Applies the per-client cap on capture and pointer cursor sessions to
+/// `request`, returning `true` only when it posted a protocol error and the
+/// request must not be delegated. See `screencopy/session_cap.rs` for the
+/// value and the semantics; this is the seam that sees the `Client`.
+///
+/// - A session-creating request on `ext_image_copy_capture_manager_v1`
+///   claims a unit. Past the soft cap it is still delegated, with the
+///   refusal armed: the constraints callbacks then answer `None`, which is
+///   how the fork creates a *stopped* session. The client stays connected.
+///   Past the hard cap it is a protocol error instead, and nothing is
+///   claimed. Not delegating is safe for the reason the frame guard gives:
+///   `post_error` kills synchronously, so the uninitialised `New` is never
+///   touched.
+/// - `ext_image_copy_capture_cursor_session_v1.get_capture_session` is
+///   refused with the protocol's `duplicate_session` when that cursor
+///   session already made one. The pinned Smithay returns from its handler
+///   without initialising the object in that case, which is the
+///   uninitialised-object panic the module doc describes for the other
+///   guards, reachable by one request from any client.
+///
+/// Folds away for every other interface, for the monomorphization reason of
+/// the guards above.
+fn reject_excess_capture_session<I>(
+    state: &mut State,
+    client: &Client,
+    resource: &I,
+    request: &I::Request,
+) -> bool
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() == TypeId::of::<ext_image_copy_capture_manager_v1::Request>() {
+        let creates = matches!(
+            (request as &dyn Any).downcast_ref::<ext_image_copy_capture_manager_v1::Request>(),
+            Some(
+                ext_image_copy_capture_manager_v1::Request::CreateSession { .. }
+                    | ext_image_copy_capture_manager_v1::Request::CreatePointerCursorSession { .. }
+            )
+        );
+        if !creates {
+            return false;
+        }
+        if state.screencopy.session_cap.admit(client)
+            != super::screencopy::session_cap::Admission::Kill
+        {
+            return false;
+        }
+        // No `Error` code names this (the interface has only
+        // `invalid_option`), so 0 with a message that says what happened.
+        resource.post_error(
+            0u32,
+            format!(
+                "session refused: this client already holds {} capture sessions",
+                super::screencopy::session_cap::KILL_SESSIONS_PER_CLIENT,
+            ),
+        );
+        return true;
+    }
+    if TypeId::of::<I::Request>()
+        == TypeId::of::<ext_image_copy_capture_cursor_session_v1::Request>()
+    {
+        let Some(ext_image_copy_capture_cursor_session_v1::Request::GetCaptureSession { .. }) =
+            (request as &dyn Any)
+                .downcast_ref::<ext_image_copy_capture_cursor_session_v1::Request>()
+        else {
+            return false;
+        };
+        if state
+            .screencopy
+            .session_cap
+            .note_capture_session(resource.id())
+        {
+            return false;
+        }
+        resource.post_error(
+            ext_image_copy_capture_cursor_session_v1::Error::DuplicateSession,
+            "get_capture_session sent twice (duplicate_session)".to_owned(),
+        );
+        return true;
+    }
+    false
+}
+
+/// Ends the stopped-session refusal [`reject_excess_capture_session`] may
+/// have armed, once the delegated handler has returned. Unconditional for
+/// manager requests, because the fork's invalid-source branch returns before
+/// it asks for constraints: a flag only the constraints callback cleared
+/// would stop the next client's session.
+fn end_capture_session_refusal<I>(state: &mut State)
+where
+    I: Resource,
+    I::Request: 'static,
+{
+    if TypeId::of::<I::Request>() != TypeId::of::<ext_image_copy_capture_manager_v1::Request>() {
+        return;
+    }
+    state.screencopy.session_cap.disarm();
+}
+
+/// Frees a session's unit when its protocol object dies, which is what
+/// keeps the cap exact: destroyed by the client, or by its disconnect.
+///
+/// A unit is one `ext_image_copy_capture_session_v1` made by the manager
+/// (told apart from a cursor session's derived one by its user data, which
+/// the claim side does not count) or one cursor session. Folds away for
+/// every other interface.
+fn forget_destroyed_capture_session<I, UserData>(state: &mut State, client: &ClientId, resource: &I)
+where
+    I: Resource,
+    I::Request: 'static,
+    UserData: 'static,
+{
+    if TypeId::of::<I::Request>() == TypeId::of::<ext_image_copy_capture_session_v1::Request>() {
+        if TypeId::of::<UserData>() == TypeId::of::<SessionData>() {
+            state.screencopy.session_cap.release(client);
+        }
+        return;
+    }
+    if TypeId::of::<I::Request>()
+        == TypeId::of::<ext_image_copy_capture_cursor_session_v1::Request>()
+    {
+        state.screencopy.session_cap.release(client);
+        state
+            .screencopy
+            .session_cap
+            .forget_cursor_session(&resource.id());
+    }
 }
 
 /// Posts `wl_subcompositor.bad_parent` and returns `true` when `request` is

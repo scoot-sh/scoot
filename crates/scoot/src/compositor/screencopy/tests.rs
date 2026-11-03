@@ -57,6 +57,7 @@ use super::xrgb_needs_forcing;
 
 mod cursor;
 mod cursor_session;
+mod session_cap;
 #[cfg(feature = "gpu-scanout")]
 mod streaming;
 
@@ -195,6 +196,20 @@ enum Step {
     ReadCursorEvents,
     /// [`Step::CaptureWithoutWaiting`] with a buffer of this size.
     CaptureSizedWithoutWaiting { width: i32, height: i32 },
+    /// Create `count` capture sessions on the one output and keep them all
+    /// without waiting for any constraint batch; answers
+    /// [`Ack::Count`] with how many of them were stopped. They do not
+    /// become *the* session.
+    HoldSessions { count: u32 },
+    /// The same for pointer cursor sessions, each with its capture session;
+    /// the count is of stopped capture sessions.
+    HoldCursorSessions { count: u32 },
+    /// Destroy the newest `count` sessions kept by the two steps above.
+    ReleaseHeld { count: usize },
+    /// Ask the current cursor session for a second capture session, the
+    /// protocol's `duplicate_session`. Never acknowledged: the compositor
+    /// answers with the error.
+    GetCaptureSessionTwice,
     /// Lock the session and give it a solid [`LOCK_BGRA`] lock surface.
     Lock,
     /// The same, but return once the surface commit is on the wire without
@@ -213,6 +228,8 @@ enum Ack {
     Frame(Outcome, Vec<u8>),
     /// The cursor-session events since the last read.
     CursorEvents(Vec<CursorEvent>),
+    /// A tally the step was asked for.
+    Count(u32),
 }
 
 /// One event of a pointer cursor session, as the client saw it.
@@ -236,6 +253,13 @@ impl Ack {
         match self {
             Ack::Frame(outcome, pixels) => (outcome, pixels),
             _ => panic!("expected a frame outcome"),
+        }
+    }
+
+    fn count(self) -> u32 {
+        match self {
+            Ack::Count(count) => count,
+            _ => panic!("expected a count"),
         }
     }
 
@@ -1807,6 +1831,9 @@ struct TestClient {
 
     /// The newest constraint batch, and whether a `done` has closed it yet.
     constraints: Constraints,
+    /// Every `stopped` any session has delivered, so a step creating several
+    /// can tell how many came back refused.
+    stopped_events: u32,
     /// Set only between `buffer_size`/`shm_format` and the `done` that closes
     /// the batch, so a test never reads half an update.
     incoming: Constraints,
@@ -1827,6 +1854,15 @@ struct TestClient {
     second_frame: Outcome,
     locked: bool,
     lock_configure: Option<(u32, u32, u32)>,
+}
+
+/// A session a client keeps across steps; see [`Step::HoldSessions`].
+enum KeptSession {
+    Capture(ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1),
+    Cursor(
+        ext_image_copy_capture_cursor_session_v1::ExtImageCopyCaptureCursorSessionV1,
+        ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1,
+    ),
 }
 
 /// Which of the two frame slots a `ext_image_copy_capture_frame_v1` reports
@@ -1889,6 +1925,9 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
     // `Step::CaptureAtOffset`. Held so the `wl_buffer` objects stay alive for
     // the whole run, i.e. so the pool really does have two live buffers in it.
     let mut neighbours: Vec<CaptureBuffer> = Vec::new();
+    // Sessions kept by [`Step::HoldSessions`] and [`Step::HoldCursorSessions`]
+    // until a [`Step::ReleaseHeld`], oldest first.
+    let mut kept: Vec<KeptSession> = Vec::new();
 
     while let Ok(step) = steps.recv() {
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
@@ -2144,6 +2183,63 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                 )?;
                 queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
                 Ack::Done
+            }
+            Step::HoldSessions { count } => {
+                let before = client.stopped_events;
+                for _ in 0..count {
+                    let source = sources.create_source(&output, &qh, ());
+                    let created = capture.create_session(
+                        &source,
+                        ext_image_copy_capture_manager_v1::Options::empty(),
+                        &qh,
+                        (),
+                    );
+                    source.destroy();
+                    kept.push(KeptSession::Capture(created));
+                }
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Count(client.stopped_events - before)
+            }
+            Step::HoldCursorSessions { count } => {
+                let seat = client.seat.clone().ok_or("no wl_seat")?;
+                let before = client.stopped_events;
+                for _ in 0..count {
+                    let source = sources.create_source(&output, &qh, ());
+                    let pointer = seat.get_pointer(&qh, ());
+                    let cursor = capture.create_pointer_cursor_session(&source, &pointer, &qh, ());
+                    source.destroy();
+                    pointer.release();
+                    let derived = cursor.get_capture_session(&qh, ());
+                    kept.push(KeptSession::Cursor(cursor, derived));
+                }
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Count(client.stopped_events - before)
+            }
+            Step::ReleaseHeld { count } => {
+                for _ in 0..count {
+                    match kept.pop() {
+                        Some(KeptSession::Capture(created)) => created.destroy(),
+                        Some(KeptSession::Cursor(cursor, derived)) => {
+                            derived.destroy();
+                            cursor.destroy();
+                        }
+                        None => return Err("nothing kept to release".into()),
+                    }
+                }
+                queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                Ack::Done
+            }
+            Step::GetCaptureSessionTwice => {
+                let cursor = cursor_session.as_ref().ok_or("no cursor session")?;
+                let _second = cursor.get_capture_session(&qh, ());
+                let deadline = Instant::now() + Duration::from_secs(5);
+                loop {
+                    queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
+                    if Instant::now() >= deadline {
+                        return Err("the compositor accepted a second capture session".into());
+                    }
+                    thread::sleep(Duration::from_millis(1));
+                }
             }
             Step::Lock => {
                 let manager = client
@@ -2445,6 +2541,7 @@ impl Dispatch<ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1, (
                 client.constraints.dones = dones;
             }
             ext_image_copy_capture_session_v1::Event::Stopped => {
+                client.stopped_events += 1;
                 client.constraints.stopped = true;
             }
             _ => {}
