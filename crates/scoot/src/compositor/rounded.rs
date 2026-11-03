@@ -323,9 +323,74 @@ pub fn paint_ring(pixels: &mut [u8], paint: &RingPaint, color: [u8; 4]) {
     }
 }
 
+/// Paints a CSD backdrop into the same strip buffer [`paint_ring`] fills: the
+/// four corner squares at the window's (`inner`) corners, each `side` physical
+/// pixels a side, clipped to the ring's outer rounded rect.
+///
+/// The squares live under the window (the strips draw behind it), so opaque
+/// window content covers them and only the client's own transparent crescent
+/// shows -- the backdrop the CSD rule exists for. Clipping to `outer` is what
+/// keeps the backdrop from becoming the corner wedge: a solid square would
+/// stick out past the outer arc by `(sqrt(2) - 1) * radius_outer` along the
+/// diagonal, while the intersection never leaves the ring's outer curve.
+///
+/// `paint` is the strip's own [`RingPaint`] (full-canvas `outer`/`inner` in
+/// the strip's coordinates -- shifted for the bottom strip exactly like the
+/// ring paint); `side` is already clamped to the window. Runs only on
+/// repaints, never per frame, and repaints the same opaque color the ring
+/// uses, so overlapping the band is idempotent.
+pub fn paint_backdrop_corners(pixels: &mut [u8], paint: &RingPaint, side: i32, color: [u8; 4]) {
+    let (canvas_w, canvas_h) = (paint.canvas.w, paint.canvas.h);
+    debug_assert_eq!(
+        pixels.len(),
+        canvas_w as usize * canvas_h as usize * 4,
+        "backdrop paint's buffer must be exactly the canvas"
+    );
+    let side = side.min(paint.inner.size.w).min(paint.inner.size.h).max(0);
+    if side <= 0 {
+        return;
+    }
+    let (ix, iy, iw, ih) = (
+        paint.inner.loc.x,
+        paint.inner.loc.y,
+        paint.inner.size.w,
+        paint.inner.size.h,
+    );
+    let squares = [
+        (ix, iy),
+        (ix + iw - side, iy),
+        (ix, iy + ih - side),
+        (ix + iw - side, iy + ih - side),
+    ];
+    let row_bytes = canvas_w as usize * 4;
+    for y in 0..canvas_h {
+        let Some((outer_left, outer_right)) = row_span(paint.radius_outer, y, paint.outer) else {
+            continue;
+        };
+        for (sx, sy) in squares {
+            if y < sy || y >= sy + side {
+                continue;
+            }
+            let (start, end) = ((sx).max(outer_left), (sx + side).min(outer_right));
+            let (start, end) = (start.max(0), end.min(canvas_w));
+            if start >= end {
+                continue;
+            }
+            let base = y as usize * row_bytes;
+            for pixel in pixels[base + start as usize * 4..base + end as usize * 4]
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+            {
+                pixel.copy_from_slice(&color);
+            }
+        }
+    }
+}
+
 /// One row's span inside a rounded rect, or `None` when the row misses the
 /// rect entirely (above/below it, or fully cut away at a corner).
-fn row_span(radius: i32, y: i32, rect: Rectangle<i32, Physical>) -> Option<(i32, i32)> {
+pub fn row_span(radius: i32, y: i32, rect: Rectangle<i32, Physical>) -> Option<(i32, i32)> {
     let yi = y - rect.loc.y;
     if yi < 0 || yi >= rect.size.h {
         return None;

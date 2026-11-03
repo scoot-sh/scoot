@@ -45,18 +45,23 @@
 //! Matching the client's radius would need per-commit alpha measurement
 //! (costly and fragile) or per-toolkit guessing (guessing), so this module
 //! does neither. Instead, every window the CSD rule in `render/elements.rs`
-//! calls self-decorated gets a solid backdrop in its own ring color, drawn
-//! directly under its four corners (see [`backdrop_corners`]): the client's
-//! own alpha shapes the visible part, so the corners read as the ring
-//! hugging the client's curve with no radius knowledge anywhere. Only the
-//! corners are backed -- a full-rect backdrop would tint translucent client
-//! content (a per-pixel-alpha window like Ghostty at `background-opacity <
-//! 1`) against the ring color instead of what is behind it. Square CSD
-//! content covers the corner squares completely except at its own curve, so
-//! the backdrop changes nothing there; server-side windows get none at all,
-//! nor do windows with a window-wide translucency (`wp_alpha_modifier_v1`
-//! -- an opaque backdrop would tint every pixel, not just the corners; see
-//! the rule in `render/elements.rs`).
+//! calls self-decorated gets a solid backdrop in its own ring color, painted
+//! into the rounded ring's own strip buffers under its four corners (see
+//! `paint_backdrop_corners`): the client's own alpha shapes the visible
+//! part, so the corners read as the ring hugging the client's curve with no
+//! radius knowledge anywhere. The fill is clipped to the ring's outer arc by
+//! construction -- a solid square would stick out past it as a filled wedge
+//! -- so it never leaves the ring. Only the corners are backed -- a
+//! full-rect backdrop would tint translucent client content (a
+//! per-pixel-alpha window like Ghostty at `background-opacity < 1`) against
+//! the ring color instead of what is behind it. Square CSD content covers
+//! the corner squares completely except at its own curve, so the backdrop
+//! changes nothing there; server-side windows get none at all, nor do
+//! windows with a window-wide translucency (`wp_alpha_modifier_v1` -- an
+//! opaque backdrop would tint every pixel, not just the corners; see the
+//! rule in `render/elements.rs`). The square fallback path (a strip import
+//! that failed) keeps the old separate corner squares: its square outer edge
+//! cannot wedge.
 //!
 //! # Persistent buffers, not fresh ones (the damage-tracking pitfall)
 //!
@@ -104,7 +109,8 @@ use smithay::utils::{Logical, Physical, Point, Rectangle, Size, Transform};
 
 use super::output_clip::to_output_local;
 use super::rounded::{
-    RingPaint, clip_rect, element_canvas, paint_ring, physical_radius, ring_layout,
+    RingPaint, clip_rect, element_canvas, paint_backdrop_corners, paint_ring, physical_radius,
+    ring_layout,
 };
 
 /// A straight (non-premultiplied) RGBA color in `0.0..=1.0`, the form a
@@ -600,6 +606,10 @@ pub enum RingElement<R: Renderer> {
 /// absolute position through rounding phases even for one key -- the refresh
 /// compares those separately and repaints exactly then, rather than widening
 /// this key.)
+/// `backdrop` is whether the CSD backdrop is painted into the strips'
+/// corner squares (see `paint_backdrop_corners`): a CSD window and an SSD
+/// window paint different pixels from the same geometry, so the flag is
+/// part of the key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PaintedKey {
     /// Logical window size (the paint's inputs, before scaling).
@@ -613,6 +623,8 @@ struct PaintedKey {
     color: [u8; 4],
     /// Output scale bits (`f64` has no `Eq`; the bits do).
     scale_bits: u64,
+    /// Whether the strips carry the CSD backdrop fill.
+    backdrop: bool,
 }
 
 /// One window's painted ring: the two strip buffers the elements borrow,
@@ -886,9 +898,10 @@ impl Decorations {
     /// same windows get no ring here as there: invisible ones, fullscreen
     /// ones and other outputs' ones -- and the same output-local
     /// coordinates, around the same `drawn` rect. Each window's CSD backdrop
-    /// corner squares (see `elements`'s `backdrop`) are pushed through their
-    /// persistent buffers first, as square fallback bars: they are plain
-    /// rects, which need no paint.
+    /// (see `elements`'s `backdrop`) is painted into the strips' corner
+    /// squares clipped to the outer arc (see `paint_backdrop_corners`), so it
+    /// can never stick out past the ring; the separate corner squares survive
+    /// only on the square fallback path, whose square outer edge cannot wedge.
     #[allow(clippy::too_many_arguments)]
     pub fn elements_rounded<R>(
         &mut self,
@@ -915,16 +928,8 @@ impl Decorations {
             let color = ring_color(arrangement, placement.id, appearance);
             // the window's ring width (`ring_width(..)`) > 0 mirrors the ring's own gate: a
             // backdrop with no ring would be colored corners around nothing.
-            if ring_width(arrangement, placement.id, appearance) > 0
-                && let Some(rect) = backdrop(placement)
-            {
-                let ring = self.rings.entry(placement.id).or_default();
-                let corners =
-                    backdrop_corners(to_output_local(rect, bounds), appearance.corner_radius);
-                for (buffer, corner) in ring.backdrop.iter_mut().zip(corners) {
-                    push_painted_rect(&mut elements, buffer, corner, color, scale);
-                }
-            }
+            let has_backdrop = ring_width(arrangement, placement.id, appearance) > 0
+                && backdrop(placement).is_some();
             self.push_painted(
                 &mut elements,
                 placement.id,
@@ -935,6 +940,7 @@ impl Decorations {
                 local_bounds,
                 scale,
                 renderer,
+                has_backdrop,
             );
         }
         elements
@@ -943,8 +949,8 @@ impl Decorations {
     /// [`Decorations::floating_elements`] for the rounded session: the
     /// floating windows' painted rings, top of the stack first, each
     /// window's element count appended to `spans`. Each window's CSD backdrop
-    /// corner squares (see `elements`'s `backdrop`) are pushed first and
-    /// counted in its span.
+    /// rides inside its strips (see `elements_rounded`), counted in its span
+    /// by the strips themselves.
     #[allow(clippy::too_many_arguments)]
     pub fn floating_elements_rounded<R>(
         &mut self,
@@ -972,16 +978,8 @@ impl Decorations {
             let before = elements.len();
             // the window's ring width (`ring_width(..)`) > 0 mirrors the ring's own gate: a
             // backdrop with no ring would be colored corners around nothing.
-            if ring_width(arrangement, placement.id, appearance) > 0
-                && let Some(rect) = backdrop(placement)
-            {
-                let ring = self.rings.entry(placement.id).or_default();
-                let corners =
-                    backdrop_corners(to_output_local(rect, bounds), appearance.corner_radius);
-                for (buffer, corner) in ring.backdrop.iter_mut().zip(corners) {
-                    push_painted_rect(&mut elements, buffer, corner, color, scale);
-                }
-            }
+            let has_backdrop = ring_width(arrangement, placement.id, appearance) > 0
+                && backdrop(placement).is_some();
             self.push_painted(
                 &mut elements,
                 placement.id,
@@ -992,6 +990,7 @@ impl Decorations {
                 local_bounds,
                 scale,
                 renderer,
+                has_backdrop,
             );
             spans.push((placement.id, elements.len() - before));
         }
@@ -1012,11 +1011,15 @@ impl Decorations {
     /// One window's painted rounded ring -- two strips plus the two solid
     /// side bars -- or the square fallback when the painted buffers cannot
     /// be built. Repaints only when the key changed (resize, radius, width,
-    /// color or scale); steady-state frames reuse the cached buffers with no
-    /// allocation and no renderer touch. A hit still re-derives the strips'
-    /// origins from the live rect -- moves and scrolls change no key input
-    /// -- repainting only when fractional-scale rounding changed a strip
-    /// canvas or an in-canvas paint offset out from under the cached buffers.
+    /// color, scale or the CSD backdrop flag); steady-state frames reuse the
+    /// cached buffers with no allocation and no renderer touch. A hit still
+    /// re-derives the strips' origins from the live rect -- moves and scrolls
+    /// change no key input -- repainting only when fractional-scale rounding
+    /// changed a strip canvas or an in-canvas paint offset out from under the
+    /// cached buffers. When `backdrop` is set the strips also carry the CSD
+    /// corner fill clipped to the outer arc (never a wedge past it); the
+    /// square fallback keeps the separate corner squares, whose square outer
+    /// edge cannot wedge.
     #[allow(clippy::too_many_arguments)]
     fn push_painted<R>(
         &mut self,
@@ -1029,6 +1032,7 @@ impl Decorations {
         bounds: Rect,
         scale: f64,
         renderer: &mut R,
+        backdrop: bool,
     ) where
         R: Renderer + ImportAll + ImportMem,
         R::TextureId: Texture + Send + Clone + 'static,
@@ -1043,11 +1047,12 @@ impl Decorations {
             radius: appearance.corner_radius,
             color: color.to_argb8888(),
             scale_bits: scale.to_bits(),
+            backdrop,
         };
         let entry = self.painted.entry(id).or_default();
         if entry.key != Some(key) {
             entry.key = Some(key);
-            build_strips(rect, appearance, thickness, color, scale, entry);
+            build_strips(rect, appearance, thickness, color, scale, backdrop, entry);
         } else if entry.top_at.is_some()
             && !refresh_strip_origins(rect, appearance, thickness, scale, entry)
         {
@@ -1060,15 +1065,19 @@ impl Decorations {
             // last build failed stays on the silent square fallback until
             // its key changes, rather than retrying (and warning) every
             // frame.
-            build_strips(rect, appearance, thickness, color, scale, entry);
+            build_strips(rect, appearance, thickness, color, scale, backdrop, entry);
         }
         let (Some(top), Some(bottom), Some(top_at), Some(bottom_at)) =
             (&entry.top, &entry.bottom, &entry.top_at, &entry.bottom_at)
         else {
             // The last build failed (already warned there): square fallback
             // through the persistent rect buffers, silently until the key
-            // changes and a rebuild is attempted.
-            self.push_fallback(elements, id, rect, thickness, color, bounds, scale);
+            // changes and a rebuild is attempted. A CSD window keeps its
+            // corner squares here -- the square outer edge cannot wedge, and
+            // the strips that now carry the backdrop never built.
+            self.push_fallback(
+                elements, id, rect, appearance, thickness, color, bounds, scale, backdrop,
+            );
             return;
         };
         let top = MemoryRenderBufferRenderElement::from_buffer(
@@ -1132,27 +1141,41 @@ impl Decorations {
                 entry.bottom_at = None;
                 entry.inner_at = None;
                 entry.outer_at = None;
-                self.push_fallback(elements, id, rect, thickness, color, bounds, scale);
+                self.push_fallback(
+                    elements, id, rect, appearance, thickness, color, bounds, scale, backdrop,
+                );
             }
         }
     }
 
     /// The square fallback for one window on the rounded path: the same four
     /// bars [`Decorations::elements`] builds, through the same persistent
-    /// buffers, so a window that cannot paint still gets a ring.
+    /// buffers, so a window that cannot paint still gets a ring. A CSD window
+    /// keeps its corner squares here (pushed first, like the square path):
+    /// the fallback's square outer edge cannot wedge, and the strips that
+    /// would otherwise carry the backdrop never built.
     #[allow(clippy::too_many_arguments)]
     fn push_fallback<R>(
         &mut self,
         elements: &mut Vec<RingElement<R>>,
         id: WindowId,
         rect: Rect,
+        appearance: &Appearance,
         thickness: i32,
         color: Color,
         bounds: Rect,
         scale: f64,
+        backdrop: bool,
     ) where
         R: Renderer,
     {
+        if backdrop {
+            let ring = self.rings.entry(id).or_default();
+            let corners = backdrop_corners(rect, appearance.corner_radius);
+            for (buffer, corner) in ring.backdrop.iter_mut().zip(corners) {
+                push_painted_rect(elements, buffer, corner, color, scale);
+            }
+        }
         let rects = ring_rects(rect, thickness, bounds);
         let ring = self.rings.entry(id).or_default();
         push_painted_rect(elements, &mut ring.top, rects.top, color, scale);
@@ -1210,6 +1233,10 @@ struct StripPlan {
     outer: Rectangle<i32, Physical>,
     radius_inner: i32,
     radius_outer: i32,
+    /// The CSD backdrop square side in physical pixels, clamped to the clip:
+    /// what `paint_backdrop_corners` fills inside `outer`. Derived from the
+    /// same clip/scale as the radii, so the plan stays pure.
+    side: i32,
 }
 
 /// Computes the strip plan for `rect`, or `None` when a canvas is degenerate
@@ -1266,6 +1293,16 @@ fn plan_strips(
     if bottom_canvas.w <= 0 || bottom_canvas.h <= 0 {
         return None;
     }
+    // The backdrop square side the strips paint when the window is CSD: the
+    // same `max(radius, 24)` rule as the square path's `backdrop_corners`,
+    // in physical pixels and clamped to the clip, so tiny windows stay
+    // covered corner to corner. Stored in the plan so the paint stays pure.
+    let min_side = (f64::from(BACKDROP_CORNER_MIN) * scale).round() as i32;
+    let side = min_side
+        .max(radius_inner)
+        .min(clip.size.w)
+        .min(clip.size.h)
+        .max(0);
     Some(StripPlan {
         top: StripGeometry {
             loc,
@@ -1282,6 +1319,7 @@ fn plan_strips(
         outer,
         radius_inner,
         radius_outer,
+        side,
     })
 }
 
@@ -1382,15 +1420,18 @@ fn painted_side_bars(
 /// Repaints `entry`'s two strips for `rect`: computes the full-canvas ring
 /// geometry once (the band both strips share -- see [`plan_strips`]), then
 /// paints the top rows and the bottom rows into the shared scratch,
-/// importing each into its buffer. On any failure warns once and leaves the
-/// entry empty (the caller falls back to the square ring until the key
-/// changes).
+/// importing each into its buffer. When `backdrop` is set the strips also
+/// carry the CSD corner fill (see `paint_backdrop_corners`), clipped to the
+/// outer arc so it can never become the corner wedge. On any failure warns
+/// once and leaves the entry empty (the caller falls back to the square ring
+/// until the key changes).
 fn build_strips(
     rect: Rect,
     appearance: &Appearance,
     thickness: i32,
     color: Color,
     scale: f64,
+    backdrop: bool,
     entry: &mut PaintedRing,
 ) {
     entry.top = None;
@@ -1404,6 +1445,7 @@ fn build_strips(
         return;
     };
     let argb = color.to_argb8888();
+    let backdrop_side = backdrop.then_some(plan.side);
     paint_strip(
         &mut entry.pixels,
         plan.top.canvas,
@@ -1415,6 +1457,7 @@ fn build_strips(
             radius_inner: plan.radius_inner,
         },
         argb,
+        backdrop_side,
     );
     entry.top = Some(MemoryRenderBuffer::from_slice(
         &entry.pixels,
@@ -1442,6 +1485,7 @@ fn build_strips(
             radius_inner: plan.radius_inner,
         },
         argb,
+        backdrop_side,
     );
     entry.bottom = Some(MemoryRenderBuffer::from_slice(
         &entry.pixels,
@@ -1460,11 +1504,15 @@ fn build_strips(
 /// Sizes `pixels` for a strip canvas, zeroes it, and paints the shared ring
 /// band into it: the same `outer`/`inner` rects (in full-canvas coordinates)
 /// either strip passes, since `paint_ring` only fills rows its rects reach.
+/// When `backdrop_side` is set, also fills the CSD corner squares clipped to
+/// the outer arc (see `paint_backdrop_corners`) -- the same `side` for both
+/// strips, since the squares travel with the shifted `inner` rect.
 fn paint_strip(
     pixels: &mut Vec<u8>,
     canvas: Size<i32, Physical>,
     paint: RingPaint,
     color: [u8; 4],
+    backdrop_side: Option<i32>,
 ) {
     let len = canvas.w as usize * canvas.h as usize * 4;
     if pixels.len() != len {
@@ -1472,6 +1520,9 @@ fn paint_strip(
     }
     pixels.fill(0);
     paint_ring(pixels, &paint, color);
+    if let Some(side) = backdrop_side {
+        paint_backdrop_corners(pixels, &paint, side, color);
+    }
 }
 
 /// Updates one persistent segment buffer to `rect` (or to empty, if this
@@ -2655,6 +2706,7 @@ mod tests {
                     appearance.focus_ring_width,
                     appearance.focus_ring_active_color,
                     scale,
+                    false,
                     &mut entry,
                 );
             }
@@ -2724,6 +2776,7 @@ mod tests {
             appearance.focus_ring_width,
             appearance.focus_ring_active_color,
             scale,
+            false,
             &mut entry,
         );
         assert!(
@@ -2821,6 +2874,7 @@ mod tests {
             appearance.focus_ring_width,
             appearance.focus_ring_active_color,
             scale,
+            false,
             &mut entry,
         );
         assert!(
