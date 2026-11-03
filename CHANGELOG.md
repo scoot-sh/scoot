@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.40](https://github.com/scoot-sh/scoot/compare/v0.6.39...v0.6.40) - 2026-11-03
+
+### scoot
+
+- fixed: cap capture and pointer cursor sessions per client ([#889](https://github.com/scoot-sh/scoot/pull/889))
+
 ## [0.6.39](https://github.com/scoot-sh/scoot/compare/v0.6.38...v0.6.39) - 2026-11-03
 
 ### scootctl
