@@ -148,8 +148,37 @@ artists (walks the list, keeps 16) and BlueZ managed objects (bounded by
 the 1 MiB message, held to 8 adapters and 64 devices). No new bound was
 invented on top of those decisions.
 
-Genuinely open: the suspend/resume DPMS test, the hotplug storm test, the
-multi-day soak, compositor-gone mid-frame, zero outputs with a compositor
-restart, the allocation-failure audit, and the restart-policy docs half
-above. This entry stays `open` (`ongoing`): it is the checklist, not a task
-to resolve.
+Genuinely open: the suspend/resume DPMS test, the multi-day soak, the
+allocation-failure audit, and the restart-policy docs half above. This entry
+stays `open` (`ongoing`): it is the checklist, not a task to resolve.
+
+## Lifecycle tests 2026-11-03
+
+Three of the "genuinely open" items turned out to be built and pinned
+already, or to need only a small addition; no bug was found.
+
+- **Hotplug storm**: already covered on a headless sway, the one compositor
+  here that adds and removes outputs at runtime (`tests/hotplug.rs`:
+  `a_hotplug_storm_leaves_one_bar_per_output_and_no_leak` and
+  `modules_still_update_after_a_hotplug_storm`, which checks the clock
+  still ticks on the survivors and the newcomer, with the fd count equal
+  and one buffer set per output after ten plug/unplug pairs). Run 2026-11-03
+  on the dev VM, all 10 tests in `hotplug.rs` pass.
+- **Zero outputs**: `zero_outputs_at_start_waits_without_waking` and
+  `a_bar_comes_and_goes_with_its_output` (down to none and back) cover the
+  wake count and recovery. New, `tests/compositor_gone.rs`:
+  `a_bar_with_no_outputs_exits_when_the_compositor_goes`.
+- **Compositor gone**: `bar.rs` had the plain case. New, in
+  `tests/compositor_gone.rs`: the compositor `SIGKILL`ed with ten outputs
+  just created and then all unplugged and an `exec` child running
+  (`the_compositor_going_mid_storm_ends_the_bar_and_its_command`). The bar
+  exits 1 (so `Restart=on-failure` restarts it) inside 5 s, says "lost the
+  connection to the compositor", and the child is gone. Both fail without
+  the behavior: `return Ok(())` for the exit gives status 0 and fails the
+  status assertion; `continue` in its place (a spin on the hang-up) fails
+  with "scootbar did not exit within 20s".
+- **Compositor restart**: a restart is the exit above plus a fresh start,
+  which every test already does against a new compositor; there is no
+  reconnect logic to test, by design. What is not covered: scoot's own
+  `--headless` has no runtime output add/remove, so these run on sway
+  (skipped without it; `SCOOTBAR_REQUIRE_SWAY` makes that a failure).
