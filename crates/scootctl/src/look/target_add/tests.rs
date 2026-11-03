@@ -181,7 +181,7 @@ fn an_output_collision_with_an_existing_target_refuses_case_insensitively() {
     let targets = read_pack(src.path(), home.path(), Some(&known())).unwrap();
     let before = tree_bytes(home.path());
     let error = add_into(&targets, home.path()).unwrap_err();
-    assert!(error.contains("already writes"), "{error}");
+    assert!(error.contains("already there"), "{error}");
     assert_eq!(tree_bytes(home.path()), before);
 }
 
@@ -400,4 +400,196 @@ fn the_in_tree_example_packs_add_as_one_pack() {
     let before = tree_bytes(home.path());
     assert!(add_into(&targets, home.path()).is_err());
     assert_eq!(tree_bytes(home.path()), before);
+}
+
+#[test]
+fn file_versus_directory_output_prefixes_refuse_in_the_pack() {
+    for (first, second) in [
+        ("x", "x/y"),
+        ("x/y", "x"),
+        ("K/colors.conf", "k/colors.conf/z"),
+    ] {
+        let src = scratch();
+        let home = scratch();
+        write_target(src.path(), "one", first, TEMPLATE, "");
+        write_target(src.path(), "two", second, TEMPLATE, "");
+        let error = read_pack(src.path(), home.path(), None).unwrap_err();
+        assert!(
+            error.contains("file where another target needs a directory"),
+            "{error}"
+        );
+    }
+    // A sibling sharing only a string prefix is fine.
+    let src = scratch();
+    let home = scratch();
+    write_target(src.path(), "one", "kitty/a", TEMPLATE, "");
+    write_target(src.path(), "two", "kitty/ab", TEMPLATE, "");
+    read_pack(src.path(), home.path(), None).expect("no segment prefix");
+}
+
+#[test]
+fn file_versus_directory_output_prefixes_refuse_against_existing_targets() {
+    for (existing, incoming) in [
+        ("kitty/colors.conf", "kitty/colors.conf/z"),
+        ("kitty/colors.conf/z", "kitty/colors.conf"),
+        ("Kitty", "kitty/x"),
+    ] {
+        let src = scratch();
+        let home = scratch();
+        write_target(&targets_root(home.path()), "mine", existing, "m\n", "");
+        write_target(src.path(), "theirs", incoming, TEMPLATE, "");
+        let before = tree_bytes(home.path());
+        let targets = read_pack(src.path(), home.path(), None).unwrap();
+        let error = add_into(&targets, home.path()).unwrap_err();
+        assert!(error.contains("already there"), "{error}");
+        assert_eq!(tree_bytes(home.path()), before);
+    }
+}
+
+#[test]
+fn hand_written_prefix_outputs_refuse_at_discovery_not_at_render() {
+    let home = scratch();
+    let root = targets_root(home.path());
+    write_target(&root, "aaa", "x", "a\n", "");
+    write_target(&root, "bbb", "x/y", "b\n", "");
+    let error = discover_in(home.path()).unwrap_err();
+    assert!(
+        error.contains("file where another target needs a directory"),
+        "{error}"
+    );
+}
+
+#[test]
+fn json_never_claims_an_add_that_failed() {
+    let src = scratch();
+    let home = scratch();
+    write_target(src.path(), "alpha", "alpha/x", TEMPLATE, "");
+    let targets = read_pack(src.path(), home.path(), None).unwrap();
+    // The name appears between review and add: the add fails.
+    write_target(&targets_root(home.path()), "alpha", "other/x", "m\n", "");
+    let mut lines = Vec::new();
+    let result = execute(&targets, home.path(), true, true, true, &mut |l| {
+        lines.push(l.to_owned());
+        Ok(())
+    });
+    assert!(result.is_err());
+    assert!(
+        lines.is_empty(),
+        "no document before a successful add: {lines:?}"
+    );
+    // Success prints added: true after the add; no --trust prints false.
+    let fresh = scratch();
+    let mut lines = Vec::new();
+    execute(&targets, fresh.path(), true, true, true, &mut |l| {
+        lines.push(l.to_owned());
+        Ok(())
+    })
+    .unwrap();
+    assert!(lines[0].contains("\"added\": true"), "{lines:?}");
+    assert!(targets_root(fresh.path()).join("alpha").is_dir());
+    let other = scratch();
+    let mut lines = Vec::new();
+    assert!(
+        execute(&targets, other.path(), false, true, true, &mut |l| {
+            lines.push(l.to_owned());
+            Ok(())
+        })
+        .is_err()
+    );
+    assert!(lines[0].contains("\"added\": false"), "{lines:?}");
+    assert!(tree_bytes(other.path()).is_empty());
+}
+
+#[test]
+fn escape_covers_every_non_graphic_class_and_keeps_real_text() {
+    for hidden in [
+        '\u{0}',
+        '\u{1b}',
+        '\r',
+        '\u{7f}',
+        '\u{9b}', // Cc
+        '\u{ad}',
+        '\u{61c}',
+        '\u{180e}',
+        '\u{200b}',
+        '\u{200e}',
+        '\u{202e}',
+        '\u{2060}',
+        '\u{2064}',
+        '\u{2066}',
+        '\u{feff}',
+        '\u{e0001}',
+        '\u{e0041}',
+        '\u{e007f}', // Cf
+        '\u{fe0f}',
+        '\u{fe00}', // variation selectors
+        '\u{e000}', // private use
+        '\u{2028}',
+        '\u{2029}',
+        '\u{a0}',
+        '\u{3000}', // separators
+        '\u{3164}',
+        '\u{115f}',
+        '\u{ffa0}', // invisible fillers
+        '\u{378}',
+        '\u{ffff}', // unassigned / noncharacter
+        '\u{301}',  // combining mark
+    ] {
+        let escaped = escape_for_terminal(&format!("a{hidden}b"));
+        assert!(
+            escaped.starts_with("a\\u{") && escaped.ends_with("}b"),
+            "{:x} must escape: {escaped:?}",
+            hidden as u32
+        );
+    }
+    for shown in "Ünïcödé 日本語 Привет — “quoted” … € → ░ 、 plain ~!{}|\\\"".chars()
+    {
+        assert_eq!(escape_for_terminal(&shown.to_string()), shown.to_string());
+    }
+}
+
+#[test]
+fn foreign_names_in_errors_are_escaped_and_one_line() {
+    let home = scratch();
+    let src = scratch();
+    write_target(src.path(), "t", "t/x", TEMPLATE, "");
+    std::fs::write(src.path().join("bad\x1b[2K\nREFUSED: fake"), "x").unwrap();
+    let error = read_pack(src.path(), home.path(), None).unwrap_err();
+    assert!(
+        !error.contains('\x1b') && !error.contains('\n'),
+        "{error:?}"
+    );
+    assert!(error.contains("\\u{1b}[2K\\u{a}REFUSED"), "{error}");
+    // And inside a target directory.
+    let src = scratch();
+    let dir = write_target(src.path(), "t", "t/x", TEMPLATE, "");
+    std::fs::write(dir.join("x\ry"), "x").unwrap();
+    let error = read_pack(src.path(), home.path(), None).unwrap_err();
+    assert!(!error.contains('\r'), "{error:?}");
+}
+
+#[test]
+fn reload_arguments_are_quoted_so_word_splits_differ() {
+    let make = |argv: &str| {
+        let src = scratch();
+        let home = scratch();
+        write_target(
+            src.path(),
+            "q",
+            "q/x",
+            TEMPLATE,
+            &format!("[reload]\nargv = {argv}\n"),
+        );
+        let targets = read_pack(src.path(), home.path(), None).unwrap();
+        review_text(&targets[0])
+    };
+    let joined = make("[\"echo\", \"a b\"]");
+    let split = make("[\"echo\", \"a\", \"b\"]");
+    assert!(joined.contains("RELOAD:   echo \"a b\" ("), "{joined}");
+    assert!(split.contains("RELOAD:   echo a b ("), "{split}");
+    let tricky = make("[\"sh\", \"-c\", \"say \\\"hi\\\"\\\\\"]");
+    assert!(
+        tricky.contains("sh -c \"say \\\"hi\\\"\\\\\" ("),
+        "{tricky}"
+    );
 }

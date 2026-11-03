@@ -59,7 +59,7 @@ beside the six-app starter pack below.
 | Option | Type / default | Reload |
 |---|---|---|
 | `name` | string, required. Matches the directory name (`[a-z0-9-]{1,32}`). | Validated on every apply; a mismatch refuses. |
-| `output` | string, required. Relative to the config home (`kitty/colors.conf`). ASCII only (a Unicode name refuses); no `..`, no absolute path, no hidden segments; must stay under the config home through symlinks. | Rendered to `targets/<output>` in the active look on every apply. Two targets naming the same output refuse (compared case-insensitively). |
+| `output` | string, required. Relative to the config home (`kitty/colors.conf`). ASCII only (a Unicode name refuses); no `..`, no absolute path, no hidden segments; must stay under the config home through symlinks. | Rendered to `targets/<output>` in the active look on every apply. Two targets naming the same output refuse, as do two where one output is a directory on the way to the other (`x` and `x/y`); both compared case-insensitively. |
 | `template` | string, required. The template file inside the target directory. | Read on every apply (symlinks refuse); an unreadable template refuses the swap. |
 | `reload.argv` | array of 1 to 16 strings, optional. The program plus its arguments: a bare name on `PATH` or an absolute path. | Run directly after a successful swap, never through a shell (no splitting, no globs, no `$VAR`). |
 | `reload.timeout_secs` | whole number, default `30`, 1 to 300. | The hung child and the processes it started are killed after the wait (a process that starts its own session is not reached); the swap stands either way. |
@@ -138,10 +138,11 @@ allowlist, so only these user-owned directories are ever read.
 > wrong). Install the app or fix the argv; the rendered file is already
 > in the active look, so a manual reload (or the next swap) picks it up.
 
-> **Symptom:** `validate` says two targets write the same output.
+> **Symptom:** `validate` says two targets write the same output, or a file where another needs a directory.
 >
 > Both `target.toml` files name the same `output` (the compare is
-> case-insensitive, so `Kitty/x` and `kitty/x` collide). Rename one: the
+> case-insensitive, so `Kitty/x` and `kitty/x` collide), or one names `x`
+> and the other `x/y`. Rename one: the
 > second write would silently win, and no wiring could name both.
 
 > **Symptom:** `validate` says an output escapes the config home or a symlink.
@@ -243,14 +244,20 @@ checked and copied, and the bytes you read are the bytes written.
 | Source shape | a symlink anywhere (the pack, a target directory, `target.toml` or a template), a hard link, a look directory (it has `look.toml`: use `look install`), a file beside the targets other than `README*`, `LICENSE*` or `COPYING*`, a file in a target beyond `target.toml` and its template, a `template` naming a subdirectory |
 | Limits | more than 32 targets, more than 4 MiB in total, a template over 64 KiB or not UTF-8 |
 | Each target | the same checks `look validate` runs: name matches its directory, `output` stays under the config home, reload shape, template syntax, and every token spelled by at least one look in your catalog (a token only some looks set refuses later, per look, as usual) |
-| Collisions | a target name that already exists in `look-targets/` (a Nix-declared one included: it is never written through), an `output` that an existing target or another target in the pack already writes (case-insensitive) |
+| Collisions | a target name that already exists in `look-targets/` (a Nix-declared one included: it is never written through), an `output` that an existing target or another target in the pack already writes, or that is a file where another needs a directory (`x` against `x/y`), compared case-insensitively |
 
-The add is all or nothing: every target is checked before the first one
-lands, and one that cannot land leaves `look-targets/` untouched. The
-review escapes control characters and invisible Unicode (as `\u{1b}`), so
-a template cannot rewrite the terminal or imitate the `RELOAD` line.
-`--json` prints the same review as a document (`added` is `false` without
-`--trust`; the template and reload arguments are raw there).
+On failure the add is all or nothing: every target is checked before the
+first one lands, and if one cannot land the ones already moved are
+removed again (a crash mid-add is not covered). The review shows letters,
+digits and ordinary punctuation as they are and escapes everything else
+(controls, zero-width and bidi characters, odd spaces, combining marks) as
+`\u{1b}`, so a template or file name cannot rewrite the terminal or
+imitate the `RELOAD` line. Each reload argument is quoted when it holds
+anything beyond plain path characters, so `echo "a b"` and `echo a b`
+read differently. `--json` prints the review as a document after the add
+succeeds (`added` is `true`), or with `added` set to `false` when you
+omitted `--trust`; a failed add prints only the error. The template and
+reload arguments are raw there.
 
 > **Symptom:** `target add` prints the review and exits 1 with "nothing added".
 >
@@ -265,10 +272,12 @@ a template cannot rewrite the terminal or imitate the `RELOAD` line.
 > added.
 
 > **Symptom:** `target add` says a target writes an output an existing
-> target already writes.
+> target already writes, or a file where another needs a directory.
 >
-> Two targets may not write the same file, because the second write would
-> silently win. Change one `output`, or remove the existing target.
+> Two targets may not write the same file (the second write would
+> silently win), and one may not write `x` while another writes `x/y`
+> (the render could not make `x` a directory). Change one `output`, or
+> remove the existing target.
 
 > **Symptom:** `target add` refuses a symlink, a hard link or an unexpected file.
 >

@@ -24,7 +24,7 @@
 //! first one lands, and targets stage in a sibling of `look-targets/`
 //! (a stray directory inside it would make every later apply refuse).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use scoot_look::{
@@ -33,7 +33,7 @@ use scoot_look::{
 };
 
 use super::apply;
-use super::targets::{check_output_inside_config, discover_in, targets_root};
+use super::targets::{check_output_inside_config, discover_in, output_conflict, targets_root};
 use crate::output;
 
 /// The most targets one pack may carry. The starter pack has seven.
@@ -68,6 +68,16 @@ pub struct PackTarget {
 /// refusing every later swap. `config_home` is where the targets will
 /// live, for the output containment check.
 pub fn read_pack(
+    src: &Path,
+    config_home: &Path,
+    known: Option<&BTreeMap<String, String>>,
+) -> Result<Vec<PackTarget>, String> {
+    // Foreign file names ride in the messages (and a TOML error quotes
+    // the foreign file): one line each, nothing that rewrites the terminal.
+    read_pack_inner(src, config_home, known).map_err(|error| escape_one_line(&error))
+}
+
+fn read_pack_inner(
     src: &Path,
     config_home: &Path,
     known: Option<&BTreeMap<String, String>>,
@@ -137,13 +147,18 @@ pub fn read_pack(
             src.display()
         ));
     }
-    let mut seen = BTreeSet::new();
-    for target in &targets {
-        if !seen.insert(target.output.to_lowercase()) {
-            return Err(format!(
-                "refused: target `{}` writes the same output as another target in the pack: `{}`",
-                target.name, target.output
-            ));
+    for (i, target) in targets.iter().enumerate() {
+        for other in &targets[..i] {
+            if let Some(conflict) = output_conflict(&other.output, &target.output) {
+                return Err(format!(
+                    "refused: target `{}` {} in the pack: `{}` against `{}` (target `{}`)",
+                    target.name,
+                    conflict.describe(),
+                    target.output,
+                    other.output,
+                    other.name
+                ));
+            }
         }
     }
     Ok(targets)
@@ -278,21 +293,85 @@ pub fn catalog_tokens() -> Option<BTreeMap<String, String>> {
     if union.is_empty() { None } else { Some(union) }
 }
 
-/// Escapes what could rewrite the terminal or spoof the review: every
-/// control character except newline and tab (ESC, CR, DEL, C1) and the
-/// invisible Unicode format characters (zero-width, bidi overrides,
-/// BOM), shown as `\u{..}`.
+/// Whether a character is shown as itself: ASCII printable, space, tab
+/// and newline; letters and digits of any script; and a short list of
+/// ordinary punctuation and symbol blocks (Latin-1 punctuation, general
+/// punctuation dashes and quotes, currency, arrows, technical and box
+/// symbols, CJK punctuation). Everything else, which is every control
+/// (Cc), format (Cf: zero-width, bidi, soft hyphen, word joiner, tags),
+/// surrogate/private/unassigned code point, variation selector, combining
+/// mark, odd space and invisible filler, shows as `\u{..}`. An allowlist,
+/// so a code point Unicode adds later is escaped until someone vouches
+/// for it.
+fn is_shown_plain(c: char) -> bool {
+    if c.is_ascii() {
+        return c == '\n' || c == '\t' || c == ' ' || c.is_ascii_graphic();
+    }
+    // Invisible fillers that count as letters.
+    if matches!(c as u32, 0x115F | 0x1160 | 0x3164 | 0xFFA0) {
+        return false;
+    }
+    c.is_alphanumeric()
+        || matches!(
+            c as u32,
+            0xA1..=0xAC
+                | 0xAE..=0xBF
+                | 0xD7
+                | 0xF7
+                | 0x2010..=0x2027
+                | 0x2030..=0x205E
+                | 0x20A0..=0x20BF
+                | 0x2190..=0x23FF
+                | 0x2500..=0x27BF
+                | 0x3001..=0x303F
+        )
+}
+
+/// Escapes everything [`is_shown_plain`] does not vouch for, as `\u{..}`.
 pub fn escape_for_terminal(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
-        let hidden = (c.is_control() && c != '\n' && c != '\t')
-            || matches!(c as u32, 0x200B..=0x200F | 0x2028..=0x202E | 0x2066..=0x2069 | 0xFEFF);
-        if hidden {
-            out.push_str(&format!("\\u{{{:x}}}", c as u32));
-        } else {
+        if is_shown_plain(c) {
             out.push(c);
+        } else {
+            out.push_str(&format!("\\u{{{:x}}}", c as u32));
         }
     }
+    out
+}
+
+/// Like [`escape_for_terminal`] but newline and tab escape too: for a
+/// foreign name or message that must stay on one line.
+fn escape_one_line(text: &str) -> String {
+    text.chars()
+        .map(|c| match c {
+            '\n' | '\t' => format!("\\u{{{:x}}}", c as u32),
+            c => escape_for_terminal(c.encode_utf8(&mut [0; 4])),
+        })
+        .collect()
+}
+
+/// One argv element for the review: bare when it is plainly safe,
+/// otherwise double-quoted with `\"` and `\\` backslashed and hidden
+/// characters escaped, so `["echo", "a b"]` and `["echo", "a", "b"]` read
+/// differently.
+fn quote_arg(arg: &str) -> String {
+    let bare = !arg.is_empty()
+        && arg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_./:=@%+,-".contains(c));
+    if bare {
+        return arg.to_owned();
+    }
+    let mut out = String::from("\"");
+    for c in arg.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c => out.push_str(&escape_one_line(c.encode_utf8(&mut [0; 4]))),
+        }
+    }
+    out.push('"');
     out
 }
 
@@ -306,7 +385,7 @@ pub fn review_text(target: &PackTarget) -> String {
     ));
     match &target.reload {
         Some(reload) => {
-            let argv: Vec<String> = reload.argv.iter().map(|a| escape_for_terminal(a)).collect();
+            let argv: Vec<String> = reload.argv.iter().map(|a| quote_arg(a)).collect();
             out.push_str(&format!(
                 "  RELOAD:   {} (runs after every swap, up to {}s)\n",
                 argv.join(" "),
@@ -338,7 +417,6 @@ pub fn check_collisions(targets: &[PackTarget], config_home: &Path) -> Result<()
         format!("the existing look-targets do not load, fix them first: {error}")
     })?;
     let root = targets_root(config_home);
-    let outputs: BTreeSet<String> = existing.iter().map(|d| d.output.to_lowercase()).collect();
     for target in targets {
         if std::fs::symlink_metadata(root.join(&target.name)).is_ok() {
             return Err(format!(
@@ -347,12 +425,18 @@ pub fn check_collisions(targets: &[PackTarget], config_home: &Path) -> Result<()
                 root.display()
             ));
         }
-        if outputs.contains(&target.output.to_lowercase()) {
-            return Err(format!(
-                "refused: target `{}` writes `{}`, which an existing target already writes: \
-                 nothing was added",
-                target.name, target.output
-            ));
+        for have in &existing {
+            if let Some(conflict) = output_conflict(&have.output, &target.output) {
+                return Err(format!(
+                    "refused: target `{}` {} already there: `{}` against `{}` (target `{}`): \
+                     nothing was added",
+                    target.name,
+                    conflict.describe(),
+                    target.output,
+                    have.output,
+                    have.name
+                ));
+            }
         }
     }
     Ok(())
@@ -420,6 +504,75 @@ pub fn add_into(targets: &[PackTarget], config_home: &Path) -> Result<(), String
     Ok(())
 }
 
+/// The `--json` document: `added` is true only once the targets landed.
+fn json_doc(targets: &[PackTarget], added: bool, notes: &[&str]) -> String {
+    let doc = serde_json::json!({
+        "added": added,
+        "targets": targets.iter().map(|t| serde_json::json!({
+            "name": t.name,
+            "output": t.output,
+            "reload": t.reload.as_ref().map(|r| serde_json::json!({
+                "argv": r.argv,
+                "timeout_secs": reload_timeout(r),
+            })),
+            "template_file": t.template_file,
+            "template": t.template_text,
+        })).collect::<Vec<_>>(),
+        "notes": notes,
+    });
+    serde_json::to_string_pretty(&doc).unwrap_or_default()
+}
+
+/// Reviews and, under `--trust`, adds. Every stdout line goes through
+/// `out`. The JSON document prints after the add succeeds (`added: true`),
+/// or, without `--trust`, with `added: false`; a failing add prints
+/// nothing but the error, so no document ever claims an add that did not
+/// happen.
+fn execute(
+    targets: &[PackTarget],
+    config_home: &Path,
+    trust: bool,
+    json: bool,
+    token_check: bool,
+    out: &mut dyn FnMut(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let notes: &[&str] = if token_check {
+        &[]
+    } else {
+        &["token names were not checked: no looks in the catalog"]
+    };
+    if json {
+        if trust {
+            add_into(targets, config_home)?;
+            return out(&json_doc(targets, true, notes));
+        }
+        out(&json_doc(targets, false, notes))?;
+    } else {
+        for target in targets {
+            for line in review_text(target).lines() {
+                out(line)?;
+            }
+        }
+        for note in notes {
+            output::warn(format_args!("note: {note}"));
+        }
+    }
+    if !trust {
+        return Err(
+            "nothing added: these templates render into your desktop's config and any reload \
+             runs on every swap; read the review above and rerun with --trust to add them"
+                .to_owned(),
+        );
+    }
+    add_into(targets, config_home)?;
+    let names: Vec<&str> = targets.iter().map(|t| t.name.as_str()).collect();
+    out(&format!(
+        "added: {} to {}",
+        names.join(", "),
+        targets_root(config_home).display()
+    ))
+}
+
 /// Runs `scoot look target add`: review, then add under `--trust`.
 pub fn run(look: &super::Look, path: &Path, trust: bool) -> Result<(), String> {
     let config_home = super::install::config_home_dir()?;
@@ -430,57 +583,14 @@ pub fn run(look: &super::Look, path: &Path, trust: bool) -> Result<(), String> {
     if config_home.exists() {
         check_collisions(&targets, &config_home)?;
     }
-    if look.json {
-        let doc = serde_json::json!({
-            "added": trust,
-            "targets": targets.iter().map(|t| serde_json::json!({
-                "name": t.name,
-                "output": t.output,
-                "reload": t.reload.as_ref().map(|r| serde_json::json!({
-                    "argv": r.argv,
-                    "timeout_secs": reload_timeout(r),
-                })),
-                "template_file": t.template_file,
-                "template": t.template_text,
-            })).collect::<Vec<_>>(),
-            "notes": if known.is_none() {
-                vec!["token names were not checked: no looks in the catalog"]
-            } else {
-                Vec::new()
-            },
-        });
-        output::print_line(&serde_json::to_string_pretty(&doc).unwrap_or_default())
-            .map_err(|error| error.to_string())?;
-    } else {
-        for target in &targets {
-            for line in review_text(target).lines() {
-                output::print_line(line).map_err(|error| error.to_string())?;
-            }
-        }
-        if known.is_none() {
-            output::warn(format_args!(
-                "note: token names were not checked: no looks in the catalog"
-            ));
-        }
-    }
-    if !trust {
-        return Err(
-            "nothing added: these templates render into your desktop's config and any reload \
-             runs on every swap; read the review above and rerun with --trust to add them"
-                .to_owned(),
-        );
-    }
-    add_into(&targets, &config_home)?;
-    if !look.json {
-        let names: Vec<&str> = targets.iter().map(|t| t.name.as_str()).collect();
-        output::print_line(&format!(
-            "added: {} to {}",
-            names.join(", "),
-            targets_root(&config_home).display()
-        ))
-        .map_err(|error| error.to_string())?;
-    }
-    Ok(())
+    execute(
+        &targets,
+        &config_home,
+        trust,
+        look.json,
+        known.is_some(),
+        &mut |line| output::print_line(line).map_err(|error| error.to_string()),
+    )
 }
 
 #[cfg(test)]
