@@ -38,6 +38,10 @@ const HEIGHT: u32 = 40;
 #[cfg(feature = "button")]
 const SCOOT: &str = "[[outputs]]\nname = \"headless-2\"\nscale = 1.5\n";
 
+/// Two outputs, the second at 2x, for the margined shadowed fidelity test.
+#[cfg(feature = "button")]
+const SCOOT_2X: &str = "[[outputs]]\nname = \"headless-2\"\nscale = 2\n";
+
 struct Rig {
     session: Session,
     bar: Reaper,
@@ -46,7 +50,17 @@ struct Rig {
 }
 
 impl Rig {
-    fn start(tag: &str, scoot: &str, outputs: u32, tables: &str, lists: &str) -> Option<Self> {
+    #[allow(clippy::too_many_arguments)]
+    fn start(
+        tag: &str,
+        scoot: &str,
+        outputs: u32,
+        tables: &str,
+        lists: &str,
+        edge: &str,
+        margin: &str,
+        shadow: &str,
+    ) -> Option<Self> {
         let session = Session::scoot(&common::scootbar_bin(), tag, outputs, scoot)?;
         let dir = session.runtime_dir().join("out");
         fs::create_dir_all(&dir).unwrap();
@@ -55,7 +69,7 @@ impl Rig {
         fs::write(
             &file,
             format!(
-                "{lists}\n[bar]\nheight = {HEIGHT}\n[colors]\nbackground = \"{BAR}\"\n{tables}"
+                "{lists}\n[bar]\nheight = {HEIGHT}\nedge = \"{edge}\"\nmargin = {margin}\nshadow = \"{shadow}\"\n[colors]\nbackground = \"{BAR}\"\n{tables}"
             ),
         )
         .unwrap();
@@ -66,9 +80,19 @@ impl Rig {
             #[cfg(feature = "button")]
             dir,
         };
+        // The bar's top-left logical pixel: (margin, margin) on a top bar,
+        // (margin, 1000-margin-HEIGHT) on a bottom one (headless outputs are
+        // 1600x1000 logical). With no margin on a top bar this is (0, 0), as
+        // before.
+        let margin_px: u32 = margin.parse().unwrap_or(0);
+        let (wait_x, wait_y) = if edge == "bottom" {
+            (margin_px, 1000 - margin_px - HEIGHT)
+        } else {
+            (margin_px, margin_px)
+        };
         rig.session
             .wait_for(&mut rig.bar.0, "the bar drawn", |session| {
-                (session.scoot_screenshot(1).at(0, 0) == rgb(BAR)).then_some(())
+                (session.scoot_screenshot(1).at(wait_x, wait_y) == rgb(BAR)).then_some(())
             });
         Some(rig)
     }
@@ -217,6 +241,9 @@ fn layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales() {
         2,
         &buttons(),
         "left = [\"alpha\"]\nright = [\"beta\"]\n",
+        "top",
+        "0",
+        "none",
     ) else {
         return;
     };
@@ -320,6 +347,249 @@ fn layout_rectangles_are_where_a_click_lands_on_two_outputs_at_two_scales() {
     }
 }
 
+/// What is wrong with a margined shadowed `output`'s `layout` against its
+/// screenshot: a module's rectangle with no ink in it, or bar ink outside
+/// every module rectangle. Unlike [`ink_problem`] (a marginless top bar at
+/// the origin), the bar sits at its margins and may be on either edge, so
+/// rows and columns come from the reported bar rect itself: logical to
+/// device is `(v - origin) * scale`, rounded outward, and only pixels
+/// inside the bar rect count (the shadow in the margins is not ink).
+#[cfg(feature = "button")]
+fn ink_problem_margined(shot: &common::Shot, output: &Value) -> Option<String> {
+    let scale = output["scale"].as_f64().unwrap();
+    let origin_x = output["origin"]["x"].as_i64().unwrap() as f64;
+    let origin_y = output["origin"]["y"].as_i64().unwrap() as f64;
+    let bar = &output["bar"];
+    let (bx, by) = (bar["x"].as_f64().unwrap(), bar["y"].as_f64().unwrap());
+    let (bw, bh) = (
+        bar["width"].as_f64().unwrap(),
+        bar["height"].as_f64().unwrap(),
+    );
+    let bx0 = (((bx - origin_x) * scale).floor().max(0.0)) as u32;
+    let bx1 = ((((bx + bw - origin_x) * scale).ceil().max(0.0)) as u32).min(shot.width);
+    let by0 = (((by - origin_y) * scale).floor().max(0.0)) as u32;
+    let by1 = ((((by + bh - origin_y) * scale).ceil().max(0.0)) as u32).min(shot.height);
+    let mut rects: Vec<(u32, u32, u32, u32)> = Vec::new();
+    for module in output["modules"].as_array().unwrap() {
+        let x = module["x"].as_f64().unwrap();
+        let y = module["y"].as_f64().unwrap();
+        let w = module["width"].as_f64().unwrap();
+        let h = module["height"].as_f64().unwrap();
+        let mx0 = (((x - origin_x) * scale).floor().max(0.0)) as u32;
+        let mx1 = ((((x + w - origin_x) * scale).ceil()) as u32).min(shot.width);
+        let my0 = (((y - origin_y) * scale).floor().max(0.0)) as u32;
+        let my1 = ((((y + h - origin_y) * scale).ceil()) as u32).min(shot.height);
+        rects.push((mx0, mx1, my0, my1));
+        let mut found = false;
+        for cx in mx0..mx1.min(shot.width) {
+            for cy in my0..my1.min(shot.height) {
+                if inked(shot, cx, cy) {
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                break;
+            }
+        }
+        if !found {
+            return Some(format!("no ink in {module}"));
+        }
+    }
+    for cx in bx0..bx1 {
+        for cy in by0..by1 {
+            if inked(shot, cx, cy)
+                && !rects
+                    .iter()
+                    .any(|&(mx0, mx1, my0, my1)| cx >= mx0 && cx < mx1 && cy >= my0 && cy < my1)
+            {
+                return Some(format!(
+                    "ink at device {cx},{cy}, outside every rect but inside the bar: {output}"
+                ));
+            }
+        }
+    }
+    None
+}
+
+#[cfg(feature = "button")]
+#[test]
+fn layout_rectangles_are_where_a_click_lands_with_a_margined_shadowed_bar() {
+    // A floating bar (margin 12, soft shadow) on both edges, at 1x and 2x:
+    // `layout` must report the bar's own rect (not the surface) and each
+    // module's span at the surface origin (not shifted by the side room),
+    // with the module's y/h on the bar's own row. The old surface-geometry
+    // code shifted every module by +room.left and, on a bottom bar, put y/h
+    // on the surface (the centre in the shadow, clicks falling through).
+    for edge in ["top", "bottom"] {
+        let tag = format!("agent-fidelity-margined-{edge}");
+        let Some(mut rig) = Rig::start(
+            &tag,
+            SCOOT_2X,
+            2,
+            &buttons(),
+            "left = [\"alpha\"]\nright = [\"beta\"]\n",
+            edge,
+            "12",
+            "soft",
+        ) else {
+            return;
+        };
+        // The second bar (2x) is up before asking where they are: its
+        // top-left is (24, 24) on a top bar, (24, 896) on a bottom one
+        // (its output is 1600x1000 device, 800x500 logical at 2x, HEIGHT
+        // 40, margin 12).
+        let (second_x, second_y) = if edge == "bottom" {
+            (24, (500 - 12 - HEIGHT) * 2)
+        } else {
+            (24, 24)
+        };
+        rig.session
+            .wait_for(&mut rig.bar.0, "both margined bars drawn", |session| {
+                (session.scoot_screenshot(2).at(second_x, second_y) == rgb(BAR)).then_some(())
+            });
+        let layout = rig.json(&["layout"]);
+        assert_eq!(layout["type"], "layout", "{edge}: {layout}");
+        let outputs = layout["outputs"].as_array().unwrap();
+        assert_eq!(outputs.len(), 2, "{edge}: {layout}");
+        let mut scales: Vec<f64> = outputs
+            .iter()
+            .map(|o| o["scale"].as_f64().unwrap())
+            .collect();
+        scales.sort_by(f64::total_cmp);
+        assert_eq!(scales, [1.0, 2.0], "{edge}: {layout}");
+        for output in outputs {
+            let name = output["output"].as_str().unwrap();
+            let id = rig
+                .session
+                .scoot_outputs()
+                .iter()
+                .find(|o| o["name"] == name)
+                .map(|o| o["id"].as_u64().unwrap())
+                .unwrap_or_else(|| panic!("scoot has no output `{name}`"));
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while let Some(problem) =
+                ink_problem_margined(&rig.session.scoot_screenshot(id), output)
+            {
+                assert!(
+                    Instant::now() < deadline,
+                    "{edge} {name}: layout disagrees with the screen: {problem}"
+                );
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+        let mut expected = 0;
+        for output in outputs {
+            let scale = output["scale"].as_f64().unwrap();
+            let bar = &output["bar"];
+            let (bx, by) = (bar["x"].as_i64().unwrap(), bar["y"].as_i64().unwrap());
+            let (bw, bh) = (
+                bar["width"].as_i64().unwrap(),
+                bar["height"].as_i64().unwrap(),
+            );
+            // The bar sits at its margins, not at the origin, and is only
+            // as tall as itself (not the shadowed surface). Headless
+            // outputs are 1600x1000 device: 1600x1000 logical at 1x,
+            // 800x500 at 2x.
+            let origin_x = output["origin"]["x"].as_i64().unwrap();
+            let origin_y = output["origin"]["y"].as_i64().unwrap();
+            let margin = 12;
+            let (out_w, out_h) = if scale == 2.0 {
+                (800, 500)
+            } else {
+                (1600, 1000)
+            };
+            let (want_x, want_y) = if edge == "bottom" {
+                (
+                    origin_x + margin,
+                    origin_y + out_h - margin - i64::from(HEIGHT),
+                )
+            } else {
+                (origin_x + margin, origin_y + margin)
+            };
+            assert_eq!(
+                (bx, by, bh),
+                (want_x, want_y, i64::from(HEIGHT)),
+                "{edge}: {output}"
+            );
+            assert_eq!(bw, out_w - 2 * margin, "{edge}: {output}");
+            let modules = output["modules"].as_array().unwrap();
+            assert_eq!(modules.len(), 2, "{edge} scale {scale}: {output}");
+            for module in modules {
+                let id = module["id"].as_str().unwrap();
+                let (x, w) = (
+                    module["x"].as_i64().unwrap(),
+                    module["width"].as_i64().unwrap(),
+                );
+                let (y, h) = (
+                    module["y"].as_i64().unwrap(),
+                    module["height"].as_i64().unwrap(),
+                );
+                assert!(w > 0, "{module}");
+                assert_eq!(
+                    (y, h),
+                    (by, bh),
+                    "{edge}: {module} not on the bar's row {bar}"
+                );
+                assert!(
+                    x >= bx && x + w <= bx + bw,
+                    "{edge}: {module} outside {bar}"
+                );
+                // The centre is inside the bar (not up in the shadow): a
+                // click there must hit the bar, not the window behind.
+                let (cx, cy) = (x + w / 2, by + bh / 2);
+                assert!(
+                    cx >= bx && cx < bx + bw && cy >= by && cy < by + bh,
+                    "{edge}: centre {cx},{cy} of {module} outside {bar}"
+                );
+                expected += 1;
+                rig.click(cx, cy);
+                let lines = rig.wait_lines("clicks", expected);
+                assert_eq!(
+                    lines.last().unwrap(),
+                    id,
+                    "{edge} scale {scale}: centre {cx} of {module}"
+                );
+                // Inside: the first and last logical pixel each click it at
+                // 1x (exact). At 2x a device-odd width rounds outward by a
+                // pixel of bare bar, so the second and second-last pixel
+                // click it there: a 12 px shift still lands outside and the
+                // ink check still pins the rect.
+                let inside: [i64; 2] = if scale == 1.0 {
+                    [x, x + w - 1]
+                } else {
+                    [x + 1, x + w - 2]
+                };
+                for inside in inside {
+                    expected += 1;
+                    rig.click(inside, cy);
+                    let lines = rig.wait_lines("clicks", expected);
+                    assert_eq!(
+                        lines.last().unwrap(),
+                        id,
+                        "{edge} scale {scale}: x {inside} of {module}"
+                    );
+                }
+                // Outside: one pixel either side is bare bar or the other module.
+                for outside in [x - 1, x + w] {
+                    rig.click(outside, cy);
+                    std::thread::sleep(Duration::from_millis(120));
+                    let lines = rig.lines("clicks");
+                    let landed = lines.len() > expected;
+                    if landed {
+                        assert_ne!(
+                            lines.last().unwrap(),
+                            id,
+                            "{edge} scale {scale}: x {outside} is outside {module} but clicked it"
+                        );
+                        expected += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(feature = "button")]
 #[test]
 fn a_hidden_bar_has_no_rectangles() {
@@ -329,6 +599,9 @@ fn a_hidden_bar_has_no_rectangles() {
         1,
         &buttons(),
         "left = [\"alpha\"]\nright = [\"beta\"]\n",
+        "top",
+        "0",
+        "none",
     ) else {
         return;
     };
@@ -355,6 +628,9 @@ fn query_names_one_module_and_refuses_one_that_is_not_placed() {
         1,
         &buttons(),
         "left = [\"alpha\"]\nright = [\"beta\"]\n",
+        "top",
+        "0",
+        "none",
     ) else {
         return;
     };
@@ -382,7 +658,16 @@ fn invoke_runs_the_binding_a_click_would() {
         append("up"),
         append("right"),
     );
-    let Some(mut rig) = Rig::start("agent-invoke", "", 1, &bindings, "right = [\"pad\"]\n") else {
+    let Some(mut rig) = Rig::start(
+        "agent-invoke",
+        "",
+        1,
+        &bindings,
+        "right = [\"pad\"]\n",
+        "top",
+        "0",
+        "none",
+    ) else {
         return;
     };
     rig.ok(&["invoke", "pad", "click"]);
@@ -424,7 +709,16 @@ fn invoke_runs_the_binding_a_click_would() {
 fn invoke_into_a_full_spawn_table_names_the_running_commands() {
     let bindings = "[button.pad]\ntext = \"P\"\n\
         on-click = { exec = [\"sh\", \"-c\", \"sleep 8 # secret-token\"] }\n";
-    let Some(rig) = Rig::start("agent-invoke-full", "", 1, bindings, "right = [\"pad\"]\n") else {
+    let Some(rig) = Rig::start(
+        "agent-invoke-full",
+        "",
+        1,
+        bindings,
+        "right = [\"pad\"]\n",
+        "top",
+        "0",
+        "none",
+    ) else {
         return;
     };
     for _ in 0..8 {
@@ -440,7 +734,16 @@ fn invoke_into_a_full_spawn_table_names_the_running_commands() {
 #[cfg(feature = "workspaces")]
 #[test]
 fn invoke_runs_a_module_action_with_its_number() {
-    let Some(rig) = Rig::start("agent-invoke-ws", "", 1, "", "right = [\"workspaces\"]\n") else {
+    let Some(rig) = Rig::start(
+        "agent-invoke-ws",
+        "",
+        1,
+        "",
+        "right = [\"workspaces\"]\n",
+        "top",
+        "0",
+        "none",
+    ) else {
         return;
     };
     // Workspaces need a compositor that has them: scoot headless does, and
@@ -511,7 +814,16 @@ fn a_stream_of_changes_is_told_at_the_frame_rate() {
     use std::io::Write;
     use std::os::unix::net::UnixStream;
     let tables = "[push.status]\nplaceholder = \"0\"\n";
-    let Some(rig) = Rig::start("agent-rate", "", 1, tables, "right = [\"status\"]\n") else {
+    let Some(rig) = Rig::start(
+        "agent-rate",
+        "",
+        1,
+        tables,
+        "right = [\"status\"]\n",
+        "top",
+        "0",
+        "none",
+    ) else {
         return;
     };
     let mut sub = Subscriber::start(&rig, &["module"]);
@@ -576,7 +888,16 @@ fn a_stream_of_changes_is_told_at_the_frame_rate() {
 #[test]
 fn a_subscriber_that_hangs_up_leaves_the_daemon_unharmed_and_idle() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
-    let Some(rig) = Rig::start("agent-hangup", "", 1, tables, "right = [\"status\"]\n") else {
+    let Some(rig) = Rig::start(
+        "agent-hangup",
+        "",
+        1,
+        tables,
+        "right = [\"status\"]\n",
+        "top",
+        "0",
+        "none",
+    ) else {
         return;
     };
     {
@@ -593,7 +914,16 @@ fn a_subscriber_that_hangs_up_leaves_the_daemon_unharmed_and_idle() {
 #[test]
 fn a_subscribed_connection_is_refused_further_requests() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
-    let Some(rig) = Rig::start("agent-refuse", "", 1, tables, "right = [\"status\"]\n") else {
+    let Some(rig) = Rig::start(
+        "agent-refuse",
+        "",
+        1,
+        tables,
+        "right = [\"status\"]\n",
+        "top",
+        "0",
+        "none",
+    ) else {
         return;
     };
     // Raw: subscribe, then ask `query` on the same connection.
@@ -628,7 +958,16 @@ fn a_subscribed_connection_is_refused_further_requests() {
 #[test]
 fn only_so_many_connections_may_subscribe_and_a_slot_comes_back() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
-    let Some(rig) = Rig::start("agent-cap", "", 1, tables, "right = [\"status\"]\n") else {
+    let Some(rig) = Rig::start(
+        "agent-cap",
+        "",
+        1,
+        tables,
+        "right = [\"status\"]\n",
+        "top",
+        "0",
+        "none",
+    ) else {
         return;
     };
     let mut held = Vec::new();
@@ -670,7 +1009,16 @@ fn a_subscription_outlives_a_flood_of_other_connections() {
     // aged out by them.
     use std::os::unix::net::UnixStream;
     let tables = "[push.status]\nplaceholder = \"0\"\n";
-    let Some(rig) = Rig::start("agent-flood", "", 1, tables, "right = [\"status\"]\n") else {
+    let Some(rig) = Rig::start(
+        "agent-flood",
+        "",
+        1,
+        tables,
+        "right = [\"status\"]\n",
+        "top",
+        "0",
+        "none",
+    ) else {
         return;
     };
     let mut subscriber = Subscriber::start(&rig, &["module"]);
@@ -690,7 +1038,16 @@ fn a_subscription_outlives_a_flood_of_other_connections() {
 #[test]
 fn an_idle_bar_with_subscribers_and_queries_wakes_for_nothing() {
     let tables = "[push.status]\nplaceholder = \"0\"\n";
-    let Some(rig) = Rig::start("agent-idle", "", 1, tables, "right = [\"status\"]\n") else {
+    let Some(rig) = Rig::start(
+        "agent-idle",
+        "",
+        1,
+        tables,
+        "right = [\"status\"]\n",
+        "top",
+        "0",
+        "none",
+    ) else {
         return;
     };
     let pid = rig.bar.0.id();

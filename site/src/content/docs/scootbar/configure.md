@@ -362,10 +362,10 @@ font-size = 20                  # 1 to 256, as [bar] font-size; absent is the sh
   geometry changed is made again. Modules are restarted as at any reload,
   except an `exec` whose table is unchanged, which keeps its child (above)
   — unless the reload changed only style (`[colors]`; `[bar]` `radius`,
-  `popup-radius`, `opacity`, `shadow`, `fill`, `motion`, `font`,
-  `fallback-fonts`, `font-size`; the
-  layout's `padding`, `spacing`, `separator` and per-module `margins`;
-  `tooltip-delay`), in which case every module keeps running with its
+  `popup-radius`, `opacity`, `shadow`, `fill`, `motion`,
+  `motion-duration-ms`, `motion-bounce`, `font`, `fallback-fonts`,
+  `font-size`; the layout's `padding`, `spacing`, `separator` and
+  per-module `margins`; `tooltip-delay`), in which case every module keeps running with its
   state and the bar only repaints (remaking its surface where the shadow's
   room changed); an open popup or tooltip is restyled
   to the new style where it fits its surface, remade where it does not,
@@ -609,9 +609,8 @@ motion-bounce = 0.6
   settle.
 - **Scales rebuild, then cache**: shadow tables are per device-pixel size
   (`Shadow::prepare` outside any repaint, `shadow = "none"` builds
-  nothing) and the entrance room scales with them. They rebuild when the style, scale, radius, bar size, edge, grown
-  side room or
-  timing changes
+  nothing) and the entrance room scales with them. They rebuild when the
+  style, scale, radius, bar size, edge, grown room or timing changes
   and cache otherwise; warm frames allocate nothing. The bench covers 1x
   and 2x (see below).
 - **The radius is cut back to fit**: `--height` below twice the file's

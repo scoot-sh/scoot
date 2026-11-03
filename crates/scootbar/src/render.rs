@@ -257,7 +257,7 @@ fn dev_shadow(spec: ShadowSpec, scale: Scale) -> ShadowSpec {
 /// `margin`: the window-facing room always, the sides and the anchored edge
 /// cut to what the margin holds (see [`Style::shadow_room`]). Computed
 /// arithmetically, so no tables are built on a repaint path. With no margin
-/// it is exactly [`dev_pad`].
+/// it is exactly [`dev_room`].
 fn dev_room(style: &Style, scale: Scale, edge: Edge, margin: Margin) -> Pad {
     let Some(logical) = style.shadow_spec(edge) else {
         return Pad::ZERO;
