@@ -310,3 +310,13 @@ use the ginger-night-like translucent+shadow+gradient interplay
 (`opacity 0.82`, `radius 14`, `soft`, `gradient`) to show it holds
 together. The sibling `scootbar-popup-entrance` is unblocked (its shadow
 room now exists).
+
+### Amendment (2026-11-02): margins extend the room
+
+The "the anchored edge and both sides clip" rule above held only for a bar
+with no margin to bleed into. Where the bar holds a margin, the surface now
+grows into it by `min(shadow side room, margin on that side)` on the sides
+and the anchored edge, the bar's own rect stays at exactly the same screen
+position (the sent margins shrink by the grown room), and the sent exclusive
+zone grows by the anchored pad so the reserved strip is unchanged. A bar
+with no margin paints byte-identical to this ticket's goldens.

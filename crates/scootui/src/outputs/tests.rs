@@ -166,6 +166,30 @@ fn a_zero_height_is_the_bars_and_a_zero_width_the_outputs_less_the_margins() {
 }
 
 #[test]
+fn a_zero_width_fallback_is_the_bar_without_its_side_room() {
+    // A width the compositor leaves as 0 resolves to the bar's own width
+    // (the output less the configured side margins), not the surface's
+    // (which is wider by the shadow's grown side room where the margin
+    // holds it). No compositor sends 0 for a surface anchored to both
+    // sides — the bar requests width 0 and the compositor configures the
+    // surface width explicitly — so this fallback never runs with side
+    // room on any checked compositor; it is pinned here so a future one
+    // that does send 0 shows up as too narrow rather than silently.
+    let (mut outputs, id) = configured(0, 28);
+    let bar = Bar {
+        margin: Margin {
+            top: 12,
+            right: 12,
+            bottom: 12,
+            left: 12,
+        },
+        ..Bar::default()
+    };
+    let output = output(&mut outputs, id);
+    assert_eq!(output.surface_size(&bar), Some(size(1896, 28)));
+}
+
+#[test]
 fn a_zero_width_with_no_mode_waits() {
     let mut outputs: Outputs<()> = Outputs::default();
     let id = outputs.add(1, |_| ());

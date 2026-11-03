@@ -527,6 +527,17 @@ impl Output {
     /// size, with an axis of 0 taken from the bar (its height) or the
     /// output (its width, less the side margins). `None` while not
     /// configured, or while a 0 width has no mode to resolve against.
+    ///
+    /// A width of 0 is resolved without the shadow's side room: the bar's
+    /// own width, not the surface's (which is wider by the grown side room
+    /// where the margin holds it). No compositor sends 0 for a surface
+    /// anchored to both sides — the bar requests width 0 and the compositor
+    /// configures the surface width explicitly (the output less the sent
+    /// side margins) — and sway and Smithay's `LayerMap::arrange` always
+    /// configure explicitly, so this fallback is dead on every checked
+    /// compositor. If one ever did send 0, the surface would be too narrow
+    /// by the side room, but the bar still draws (its width saturates to at
+    /// least 1 in the paint and layout paths).
     pub fn surface_size(&self, bar: &Bar) -> Option<Size> {
         let Surface::Configured { requested } = self.surface else {
             return None;

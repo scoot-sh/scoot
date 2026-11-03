@@ -115,18 +115,24 @@ pub struct LayerObjects {
     pub(super) buffer_scale: u32,
     pub(super) destination: Option<Size>,
     pub(super) opaque: Option<(Size, Option<u32>)>,
-    /// The input region (surface size, bar offset and height, and effective
-    /// corner radius): the bar's own rounded shape, never its shadow (see
+    /// The input region (surface size, bar offset and size, and effective
+    /// corner radius): the bar's own rounded rect, never its shadow (see
     /// `crate::region`); `None` while never set.
-    pub(super) input: Option<(Size, u32, u32, u32)>,
+    pub(super) input: Option<(Size, u32, u32, u32, u32, u32)>,
+    /// The geometry this surface was made with: the requested height, the
+    /// sent margins (the bar's margins less the grown shadow room) and the
+    /// sent zone, so a reload that changes any of them remakes it; `None`
+    /// while never set.
+    pub(super) geometry: Option<(u32, crate::bar::Margin, i32)>,
 }
 
 impl LayerObjects {
     /// Creates the bar for `output` and commits it with no buffer, so the
     /// compositor reserves its zone and answers with a `configure`.
     /// The surface reserves the window-facing shadow room (below a top bar,
-    /// above a bottom bar) while the exclusive zone stays the bar's own
-    /// height, so windows never move for a shadow.
+    /// above a bottom bar) plus, where the bar holds a margin, the side and
+    /// anchored-edge shadow room grown into it, while the exclusive zone
+    /// stays the bar's own height, so windows never move for a shadow.
     fn create(
         globals: &Globals,
         bar: &Bar,
@@ -173,18 +179,30 @@ impl LayerObjects {
             }
         }
         layer.set_anchor(anchor);
-        // Reserve the window-facing shadow room in the surface, never in the
-        // exclusive zone: a shadowed bar is taller than the zone that sizes
-        // clients' windows, so the shadow overlaps windows instead of moving
-        // them. The anchored edge and the sides clip (no room).
+        // Reserve the shadow's room in the surface, never in the exclusive
+        // zone: a shadowed bar is bigger than the zone that sizes clients'
+        // windows, so the shadow overlaps windows instead of moving them.
+        // The window-facing side always grows; the sides and the anchored
+        // edge grow where the margin holds them, and the bar's own rect
+        // stays at exactly the same screen position (the margins shrink by
+        // the grown room). With no margin this is exactly the old
+        // window-facing-only room.
         let (_width, height) = bar.requested_size();
-        let height = style.surface_height(height, bar.edge);
+        let height = style.surface_height_in(height, bar.edge, bar.margin);
         layer.set_size(0, height);
-        let [top, right, bottom, left] = bar.margins();
-        layer.set_margin(top, right, bottom, left);
-        // The zone stays the bar's own height: the shadow must never move a
-        // client's window (pinned by `bar.rs`'s zone test).
-        layer.set_exclusive_zone(bar.exclusive_zone());
+        let sent = style.surface_margins(bar.margin, bar.edge);
+        let margin_side = |value: u32| i32::try_from(value).unwrap_or(i32::MAX);
+        layer.set_margin(
+            margin_side(sent.top),
+            margin_side(sent.right),
+            margin_side(sent.bottom),
+            margin_side(sent.left),
+        );
+        // The zone is the bar's height plus the anchored-edge shadow room
+        // grown into the margin: the reserved strip (zone plus the sent
+        // anchored margin, which the compositor adds itself) is height plus
+        // margin either way, so no window moves for a shadow.
+        layer.set_exclusive_zone(style.exclusive_zone(bar));
         layer.set_keyboard_interactivity(KeyboardInteractivity::None);
         surface.commit();
         Self {
@@ -196,6 +214,10 @@ impl LayerObjects {
             destination: None,
             opaque: None,
             input: None,
+            // What geometry this surface was made with: the requested height,
+            // the sent margins and the sent zone, so a reload that changes
+            // the grown shadow room remakes it (see `restyle`).
+            geometry: Some((height, sent, style.exclusive_zone(bar))),
         }
     }
 
@@ -251,8 +273,11 @@ impl State {
         objects.scene = Scene::with_members(&members);
         // The shadow falls window-ward from the bar's own edge: top bars
         // shadow below, bottom bars above. The scene paints and measures
-        // from it, so a per-output edge override reaches the shadow.
+        // from it, so a per-output edge override reaches the shadow. The
+        // side and anchored-edge shadow room grows into the margin, so a
+        // per-output margin override reaches it the same way.
         objects.scene.edge = resolved.bar.edge;
+        objects.scene.margin = resolved.bar.margin;
         objects.canvas.resize(members.len());
         entry.output.invalidate();
         entry.output.set_selected(resolved.selected)
@@ -292,8 +317,26 @@ impl State {
             let effect = Self::place(&self.placement, &self.content.modules, entry);
             // A changed `font-size` alone resizes nothing: the surface
             // stays, and the next draw re-measures and repaints at the new
-            // em. Only a changed `Bar` is made again.
-            if effect != Effect::None || entry.objects.bar == before {
+            // em. A changed `Bar` is made again — and so is a surface whose
+            // shadow-driven geometry changed behind a full reload (e.g. a
+            // shadow change beside a left-out module, which skips the
+            // style-only path): drawing the new shadow into the old size
+            // would shrink the bar. Anything else repaints into the surface
+            // it has.
+            let bar = entry.objects.bar;
+            let wanted = Some((
+                self.content
+                    .style
+                    .surface_height_in(bar.height, bar.edge, bar.margin),
+                self.content.style.surface_margins(bar.margin, bar.edge),
+                self.content.style.exclusive_zone(&bar),
+            ));
+            let kept = entry
+                .objects
+                .layer
+                .as_ref()
+                .and_then(|layer| layer.geometry);
+            if effect != Effect::None || (entry.objects.bar == before && kept == wanted) {
                 Self::apply(
                     &self.globals,
                     &self.content.style,
@@ -346,21 +389,29 @@ impl State {
         self.placement = placement;
         for entry in self.outputs.iter_mut() {
             let effect = Self::place(&self.placement, &self.content.modules, entry);
-            // A shadow change resizes the surface (the window-facing room),
-            // even though the bar's own geometry did not move: recreate it
-            // here, the way a `Bar` change does in `replace_placement`,
-            // rather than drawing the new shadow into the old size.
-            // The exclusive zone stays the bar's height either way, so no
-            // window moves.
+            // A shadow change resizes the surface (the window-facing room, or
+            // the side and anchored-edge room grown into the margin), even
+            // though the bar's own geometry did not move: recreate it here,
+            // the way a `Bar` change does in `replace_placement`, rather
+            // than drawing the new shadow into the old size. The exclusive
+            // zone stays the bar's height either way, so no window moves.
+            let bar = entry.objects.bar;
             let desired_h = self
                 .content
                 .style
-                .surface_height(entry.objects.bar.height, entry.objects.bar.edge);
-            let current_h = entry
-                .output
-                .surface_size(&entry.objects.bar)
-                .map(|size| size.height);
-            if current_h.is_some_and(|h| h != desired_h) {
+                .surface_height_in(bar.height, bar.edge, bar.margin);
+            let desired_m = self.content.style.surface_margins(bar.margin, bar.edge);
+            let desired_z = self.content.style.exclusive_zone(&bar);
+            let desired = Some((desired_h, desired_m, desired_z));
+            let current = entry
+                .objects
+                .layer
+                .as_ref()
+                .and_then(|layer| layer.geometry);
+            // Only a live surface is remade here: an output with none (still
+            // waiting, hidden, or given up) keeps it, and `apply` below
+            // carries out whatever `place` said.
+            if entry.objects.layer.is_some() && current != desired {
                 if let Some(layer) = entry.objects.layer.take() {
                     layer.destroy();
                 }

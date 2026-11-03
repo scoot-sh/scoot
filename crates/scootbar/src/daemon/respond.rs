@@ -253,6 +253,14 @@ fn style_only(old: &Config, new: &Config) -> bool {
         probe.tooltip_delay = old.tooltip_delay;
     }
     probe.opacity = old.opacity;
+    // Depth and motion are style too: a shadow, fill or entrance change
+    // repaints (and remakes the surface where its room changed, in
+    // `restyle`) without restarting any module.
+    probe.shadow = old.shadow;
+    probe.fill = old.fill;
+    probe.motion = old.motion;
+    probe.motion_ms = old.motion_ms;
+    probe.motion_bounce = old.motion_bounce;
     probe.layout.padding = old.layout.padding;
     probe.layout.spacing = old.layout.spacing;
     probe.layout.separator = old.layout.separator;

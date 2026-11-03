@@ -40,6 +40,7 @@ use crate::control::protocol::{ModuleView, PlacedRect, Point, Rect, Reply, write
 use crate::density::Scale;
 use crate::modules::{ArgKind, OutputView, Placed, View};
 use crate::outputs::{Outputs, Size};
+use scootui::paint::Pad;
 
 /// The longest reply written, in bytes. A reply that would pass it is
 /// replaced by an error saying so: past it a client would be reading more
@@ -143,30 +144,64 @@ pub(super) fn write_query(
 /// `output`, for a surface of `surface` logical pixels: the layer-shell
 /// placement of a surface anchored to one edge and both sides, which is
 /// where the protocol says it goes (the margins in from the edges).
-pub(super) fn bar_rect(bar: &Bar, origin: (i32, i32), output: Size, surface: Size) -> Rect {
+/// `room` is the shadow's logical grown room
+/// ([`crate::render::Style::shadow_room`]): the surface is the bar plus
+/// that room, so the bar is the surface less the room, at the configured
+/// margins. With no room this is exactly the old surface-is-the-bar
+/// geometry.
+pub(super) fn bar_rect(
+    bar: &Bar,
+    origin: (i32, i32),
+    output: Size,
+    surface: Size,
+    room: Pad,
+) -> Rect {
     let [top, _, bottom, left] = bar.margins();
-    let height = i64::from(surface.height);
+    let width = surface
+        .width
+        .saturating_sub(room.left)
+        .saturating_sub(room.right)
+        .max(1);
+    let height = surface
+        .height
+        .saturating_sub(room.top)
+        .saturating_sub(room.bottom)
+        .max(1);
     let y = match bar.edge {
         Edge::Top => i64::from(origin.1) + i64::from(top),
-        Edge::Bottom => i64::from(origin.1) + i64::from(output.height) - i64::from(bottom) - height,
+        Edge::Bottom => {
+            i64::from(origin.1) + i64::from(output.height) - i64::from(bottom) - i64::from(height)
+        }
     };
     Rect {
         x: clamp_i32(i64::from(origin.0) + i64::from(left)),
         y: clamp_i32(y),
-        width: surface.width,
-        height: surface.height,
+        width,
+        height,
     }
 }
 
 /// A module's rectangle: its device-pixel span `x..x + width` on a bar at
 /// `bar`, at `scale`, rounded outward (the start down, the end up).
-pub(super) fn module_rect(x: u32, width: u32, scale: Scale, bar: Rect) -> Rect {
+/// `room_left` is the shadow's grown room on the bar's left
+/// ([`crate::render::Style::shadow_room`]): spans are in surface
+/// coordinates (offset by the bar's origin inside the surface), so the
+/// surface origin is `bar.x - room_left` and the span is clamped to the
+/// bar's own row (`bar.y`, `bar.height`) and its columns
+/// (`room_left..room_left + bar.width` in surface-local logical pixels).
+/// With no room this is exactly the old bar-origin span geometry.
+pub(super) fn module_rect(x: u32, width: u32, scale: Scale, bar: Rect, room_left: u32) -> Rect {
     let start = scale.logical_floor(x);
-    let end = scale.logical_ceil(x.saturating_add(width)).min(bar.width);
+    let end = scale.logical_ceil(x.saturating_add(width));
+    let lo = u64::from(room_left);
+    let hi = lo.saturating_add(u64::from(bar.width));
+    let start = u64::from(start).clamp(lo, hi);
+    let end = u64::from(end).clamp(lo, hi);
+    let surface_x = i64::from(bar.x) - i64::from(room_left);
     Rect {
-        x: clamp_i32(i64::from(bar.x) + i64::from(start)),
+        x: clamp_i32(surface_x + start as i64),
         y: bar.y,
-        width: end.saturating_sub(start),
+        width: end.saturating_sub(start) as u32,
         height: bar.height,
     }
 }
@@ -188,6 +223,10 @@ pub(super) fn write_layout(out: &mut Vec<u8>, state: &State) {
         }
         let info = entry.output.info();
         let scale = entry.output.scale();
+        let room = state
+            .content
+            .style
+            .shadow_room(entry.objects.bar.edge, entry.objects.bar.margin);
         let bar = entry
             .output
             .surface_size(&entry.objects.bar)
@@ -198,6 +237,7 @@ pub(super) fn write_layout(out: &mut Vec<u8>, state: &State) {
                     info.origin,
                     scale.logical(device),
                     surface,
+                    room,
                 )
             });
         let origin = Point {
@@ -230,7 +270,7 @@ pub(super) fn write_layout(out: &mut Vec<u8>, state: &State) {
                 let rect = PlacedRect {
                     id: module.id,
                     section: section.name(),
-                    rect: module_rect(span.x, span.width, scale, bar),
+                    rect: module_rect(span.x, span.width, scale, bar, room.left),
                 };
                 failed |= write_json(out, b"", &rect);
             }

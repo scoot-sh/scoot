@@ -37,6 +37,7 @@ const NAMES: &[&str] = &[
     "bar-shadow-soft-1x",
     "bar-shadow-deep-1x",
     "bar-shadow-glow-1x",
+    "bar-shadow-sides-1x",
     "bar-gradient-1x",
     "popup-entrance-rest-1x-alpha",
     "popup-entrance-mid-1x-alpha",
@@ -160,6 +161,11 @@ struct Look {
     /// The pointer over the right module: its text in the `hover` token,
     /// set apart from the `accent` one, instead of its class's.
     hover: bool,
+    /// The bar's layer-shell margins, in logical pixels: where the shadow
+    /// grows its side and anchored-edge room. Zero keeps every old golden
+    /// byte-identical (the surface is exactly the bar plus the
+    /// window-facing room).
+    bar_margin: crate::bar::Margin,
 }
 
 impl Default for Look {
@@ -174,6 +180,7 @@ impl Default for Look {
             grouped: false,
             margin: 0,
             hover: false,
+            bar_margin: crate::bar::Margin::default(),
         }
     }
 }
@@ -225,12 +232,13 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
         fill: look.fill,
         timing: scootui::motion::Timing::NONE,
     };
-    // A shadowed bar's surface reserves the window-facing room: the bar
-    // plus its shadow, while the exclusive zone stays the bar's height.
-    // The snapshot draws the whole surface (bar and shadow), top edge.
-    let surf_h = style.surface_height(height, crate::bar::Edge::Top);
+    // A shadowed bar's surface reserves the window-facing room plus, where
+    // the bar holds a margin, the side and anchored-edge room grown into it
+    // (top edge here). The snapshot draws the whole surface.
+    let room = style.shadow_room(crate::bar::Edge::Top, look.bar_margin);
+    let surf_h = style.surface_height_in(height, crate::bar::Edge::Top, look.bar_margin);
     let surf_size = Size {
-        width,
+        width: width + room.left + room.right,
         height: surf_h,
     };
     let frame = Frame {
@@ -263,6 +271,7 @@ fn draw(width: u32, height: u32, scale: Scale, look: Look) -> (Vec<u8>, u32, u32
         .collect();
     let mut scene = Scene::with_members(&members);
     scene.edge = crate::bar::Edge::Top;
+    scene.margin = look.bar_margin;
     scene.update(
         &placed,
         &OutputView { name: None },
@@ -517,6 +526,78 @@ fn bar_shadow_glow_at_1x() {
         "bar-shadow-glow-1x",
         "a 160x20 bar at scale 1 with an accent glow below it",
         &Image::from_xrgb(&pixels, w, h, true),
+    );
+}
+
+/// A soft shadow with side margins falls off smoothly past the rounded
+/// bar's ends instead of clipping at the surface edge: the surface grows
+/// into the margin on the sides (and the anchored top), the bar keeps its
+/// rect, and the strip of pixels beside the bar is non-zero and
+/// monotone-decreasing outward. The background is non-black (0x80 gray) so
+/// the fill reads apart from the shadow; the alpha plane (not the color
+/// plane: a black shadow over transparency reads black whatever it does)
+/// pins the falloff, not just the geometry.
+#[test]
+fn bar_shadow_sides_at_1x() {
+    let margin = 12;
+    let look = Look {
+        background: gray(0x80),
+        radius: 12,
+        shadow: scootui::effects::ShadowStyle::Soft,
+        bar_margin: crate::bar::Margin {
+            top: margin,
+            right: margin,
+            bottom: margin,
+            left: margin,
+        },
+        ..Look::default()
+    };
+    let (pixels, w, h) = draw(160, 28, Scale::Integer(1), look);
+    // Soft's room (offset 4, blur 12): top 8, sides 12, bottom 16.
+    assert_eq!((w, h), (160 + 2 * margin, 28 + 8 + 16));
+    let image = Image::from_alpha(&pixels, w, h);
+    // The bar's own middle row: the room above it plus half its height.
+    let mid = 8 + 14;
+    let at = |x: u32, y: u32| image.samples[(y * w + x) as usize];
+    let bar_left = margin;
+    let bar_right = margin + 160;
+    // Just inside the bar's rounded end: the opaque fill.
+    assert_eq!(at(bar_left, mid), 255);
+    assert_eq!(at(bar_right - 1, mid), 255);
+    // Just outside it: the shadow, neither the fill nor nothing.
+    let (outside_left, outside_right) = (at(bar_left - 1, mid), at(bar_right, mid));
+    assert!(
+        outside_left > 0 && outside_left < 255,
+        "shadow falls off past the left end, not cut: {outside_left}"
+    );
+    assert!(
+        outside_right > 0 && outside_right < 255,
+        "shadow falls off past the right end, not cut: {outside_right}"
+    );
+    // The whole side strips fade monotonically outward from the bar: a
+    // squared clip would read as a flat cut, not a falloff.
+    let mut left: Vec<u8> = (0..margin).map(|x| at(x, mid)).collect();
+    // Index 0 at the bar in both, rising toward it: the right strip reads
+    // outward, so it is collected in reverse.
+    let mut right: Vec<u8> = (bar_right..w).rev().map(|x| at(x, mid)).collect();
+    left.push(at(bar_left, mid));
+    right.push(at(bar_right - 1, mid));
+    for (side, strip) in [("left", &left), ("right", &right)] {
+        for (i, pair) in strip.windows(2).enumerate() {
+            assert!(
+                pair[0] <= pair[1],
+                "{side} strip rises toward the bar at {i}: {strip:?}"
+            );
+        }
+        assert!(
+            strip.windows(2).any(|pair| pair[0] < pair[1]),
+            "{side} strip falls off instead of a flat cut: {strip:?}"
+        );
+    }
+    check(
+        "bar-shadow-sides-1x",
+        "the alpha plane of a 160x28 bar at scale 1, radius 12, with a soft shadow grown 12 into its margins: the sides fall off smoothly",
+        &image,
     );
 }
 
