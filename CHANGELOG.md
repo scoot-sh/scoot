@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.39](https://github.com/scoot-sh/scoot/compare/v0.6.38...v0.6.39) - 2026-11-03
+
+### scootctl
+
+- added: look target add, a reviewed and trust-gated target pack (slice 3) ([#887](https://github.com/scoot-sh/scoot/pull/887))
+
 ## [0.6.38](https://github.com/scoot-sh/scoot/compare/v0.6.37...v0.6.38) - 2026-11-03
 
 ### scoot
