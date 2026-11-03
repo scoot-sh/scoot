@@ -30,6 +30,7 @@ pub mod pick;
 pub mod preview;
 pub mod reload;
 pub mod sync;
+pub mod target_add;
 pub mod targets;
 pub mod terminals;
 pub mod toolkit;
@@ -136,6 +137,9 @@ pub enum Command {
     /// Install someone else's look from a directory or a tarball into
     /// `installed-looks/`, behind the trust boundary.
     Install { path: PathBuf, trust: bool },
+    /// Add a pack of look targets (templates someone else wrote) to the
+    /// user's own `look-targets/`, reviewed first and gated on `--trust`.
+    TargetAdd { path: PathBuf, trust: bool },
     /// Export a source look as a tarball (plain ustar `.tar`).
     Export { name: String, out: Option<PathBuf> },
     /// Save the user's own appearance and color values as a source look
@@ -159,7 +163,7 @@ pub enum CycleStep {
 /// `_preview-revert` stays out: it is spawned, never typed.
 pub const COMMANDS: &[&str] = &[
     "list", "current", "show", "validate", "build", "apply", "next", "prev", "random", "pick",
-    "sync", "toolkit", "new", "watch", "preview", "install", "export", "save", "wiring",
+    "sync", "toolkit", "new", "watch", "preview", "install", "target", "export", "save", "wiring",
 ];
 
 /// The usage line, shared by `scoot look --help` and the top-level help.
@@ -178,6 +182,7 @@ pub const LOOK_USAGE: &str = "\
     look watch DIR [--no-toolkit] [--origin shipped|declared|user|installed] [--json]
     look preview [NAME] [--capture] [--out FILE] [--width N] [--height N] [--timeout SECS] [--origin shipped|declared|user|installed] [--json]
     look install PATH [--trust] [--json]
+    look target add PATH [--trust] [--json]
     look export NAME [--out FILE] [--json]
     look save NAME [--json]
     look wiring [--json]
@@ -303,6 +308,7 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
         "watch" => parse_watch(&positionals)?,
         "preview" => parse_preview(&positionals)?,
         "install" => parse_install(&positionals)?,
+        "target" => parse_target(&positionals)?,
         "export" => parse_export(&positionals)?,
         "save" => parse_save(&positionals)?,
         "wiring" => {
@@ -342,7 +348,7 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
                 &[
                     "list", "current", "show", "validate", "build", "apply", "next", "prev",
                     "random", "pick", "sync", "toolkit", "new", "watch", "preview", "install",
-                    "export", "save", "wiring",
+                    "target", "export", "save", "wiring",
                 ],
                 "scoot look --help",
             ));
@@ -442,6 +448,11 @@ COMMANDS:
                 look's name; `apps/` leaves drop unless `--trust` (which
                 prints them first); a URL wallpaper is fetched, verified
                 and cached now, so a later swap makes no network request
+    target add  add a pack of look targets (a target directory, or a
+                directory of them) to your `look-targets/`: prints each
+                target's output, its reload command and its whole template,
+                and adds nothing without `--trust`; a pack is never part
+                of a look, and installed looks still cannot carry targets
     export      write a source look as a tarball (plain ustar `.tar`,
                 `--out FILE`, else `<name>.tar` here) for handing over;
                 installs back unchanged
@@ -977,6 +988,43 @@ fn parse_install(positionals: &[String]) -> Result<Command, Error> {
     Ok(Command::Install { path, trust })
 }
 
+/// `target add PATH [--trust]`: the one target verb. The path is a
+/// target directory or a directory of them.
+fn parse_target(positionals: &[String]) -> Result<Command, Error> {
+    let mut rest = positionals.iter();
+    match rest.next().map(String::as_str) {
+        Some("add") => {}
+        Some(other) => {
+            return Err(hinted(
+                "target action",
+                other.to_owned(),
+                &["add"],
+                "scoot look --help",
+            ));
+        }
+        None => return Err(Error::Missing("a target action (add)")),
+    }
+    let mut path: Option<PathBuf> = None;
+    let mut trust = false;
+    for word in rest {
+        if word == "--trust" {
+            trust = true;
+        } else if path.is_none() {
+            refuse_flag_shaped(word)?;
+            path = Some(PathBuf::from(word));
+        } else {
+            return Err(hinted(
+                "flag",
+                word.clone(),
+                &["--trust", "--json", "--state", "--socket"],
+                "scoot look --help",
+            ));
+        }
+    }
+    let path = path.ok_or(Error::Missing("a target directory or pack directory"))?;
+    Ok(Command::TargetAdd { path, trust })
+}
+
 /// `export NAME [--out FILE]`: the name is positional, the tarball path
 /// rides `--out` (spelled `--out FILE` or `--out=FILE`), else
 /// `<name>.tar` in the working directory.
@@ -1187,6 +1235,7 @@ pub fn run(look: &Look) -> Result<(), String> {
             *origin,
         ),
         Command::Install { path, trust } => run_install(look, path, *trust),
+        Command::TargetAdd { path, trust } => target_add::run(look, path, *trust),
         Command::Export { name, out } => run_export(look, name, out.as_deref()),
         Command::Save { name } => run_save(look, name),
         Command::Wiring => run_wiring(look),

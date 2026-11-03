@@ -125,6 +125,11 @@ fn spec() -> Vec<SpecRow> {
             globals(vec![("--trust", None)]),
         ),
         (
+            "target",
+            vec!["target", "add", "./pack"],
+            globals(vec![("--trust", None)]),
+        ),
+        (
             "export",
             vec!["export", "moonrise"],
             globals(vec![("--out", Some("/tmp/moonrise.tar"))]),
@@ -558,6 +563,25 @@ fn child_main() {
     run_ok(&["install", tarball.to_str().expect("UTF-8")]);
     run_ok(&["show", "snippet-look"]);
     run_ok(&["apply", "snippet-look", "--trust"]);
+    // A target pack: the review prints and refuses without `--trust`,
+    // adds with it, and a second add refuses on the name.
+    let pack = root.join("snippet-pack");
+    let target_dir = pack.join("snippet-target");
+    std::fs::create_dir_all(&target_dir).expect("a pack");
+    std::fs::write(
+        target_dir.join("target.toml"),
+        "name = \"snippet-target\"\noutput = \"snippet/colors.conf\"\ntemplate = \"colors.tmpl\"\n",
+    )
+    .expect("a manifest");
+    std::fs::write(
+        target_dir.join("colors.tmpl"),
+        "background {{ palette.background }}\n",
+    )
+    .expect("a template");
+    let pack_arg = pack.to_str().expect("UTF-8");
+    run_err(&["target", "add", pack_arg]);
+    run_ok(&["target", "add", pack_arg, "--trust"]);
+    run_err(&["target", "add", pack_arg, "--trust"]);
     // Every refusal shape stays loud and actionable.
     run_err(&["show", "nosuchlook"]);
     run_err(&["apply", "LOUD"]);

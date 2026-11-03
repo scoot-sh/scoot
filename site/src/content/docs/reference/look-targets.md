@@ -152,11 +152,12 @@ allowlist, so only these user-owned directories are ever read.
 
 ## Starter pack
 
-Six maintained targets ship in-tree in `docs/examples/look-targets/<name>/`
-(each with its `target.toml` and template, each rendering in a test so the
-example cannot rot). Copy the directory you want into
-`~/.config/scoot/look-targets/<name>/` and add the wiring line to the app's
-own config, once, by hand. Keys you set in your own config after the
+Seven maintained targets ship in-tree in `docs/examples/look-targets/<name>/`:
+the kitty example above plus the six below (each with its `target.toml` and template, each rendering in a test so the
+example cannot rot). Add the ones you want with
+[`scoot look target add`](#add-a-pack) (or copy a directory into
+`~/.config/scoot/look-targets/<name>/` by hand), then add the wiring line
+to the app's own config, once, by hand. Keys you set in your own config after the
 include win per key. All six need a look with a `[terminal]` table;
 against a look without one `validate` names the missing token. None of
 the six declares a `[reload]`: the middle
@@ -216,10 +217,69 @@ home. A sync with any target configured (declared or hand-written)
 renders fresh instead of pointing at the catalog render, which was
 built without the templates.
 
+## Add a pack
+
+A pack is a directory of targets someone else wrote: a directory holding
+target directories (the starter pack above is one), or a single target
+directory. `target add` copies it into your own `look-targets/`. A pack
+is not part of a look and not part of `look install`: installed looks
+still cannot carry templates, outputs or reload commands.
+
+```sh
+scoot look target add ./pack            # print the review, add nothing
+scoot look target add ./pack --trust    # print the review, then add
+```
+
+Targets render files into your desktop's config and may run a command on
+every swap, so the add is gated like `look install --trust`. Without
+`--trust` it prints, for each target, what it writes, its `RELOAD` command
+on a line of its own (or `reload: none`), and the whole template, then
+exits 1 having written nothing. With `--trust` the same review prints
+first and the targets land. Nothing runs at add time; the files are read,
+checked and copied, and the bytes you read are the bytes written.
+
+| Check | What refuses |
+|---|---|
+| Source shape | a symlink anywhere (the pack, a target directory, `target.toml` or a template), a hard link, a look directory (it has `look.toml`: use `look install`), a file beside the targets other than `README*`, `LICENSE*` or `COPYING*`, a file in a target beyond `target.toml` and its template, a `template` naming a subdirectory |
+| Limits | more than 32 targets, more than 4 MiB in total, a template over 64 KiB or not UTF-8 |
+| Each target | the same checks `look validate` runs: name matches its directory, `output` stays under the config home, reload shape, template syntax, and every token spelled by at least one look in your catalog (a token only some looks set refuses later, per look, as usual) |
+| Collisions | a target name that already exists in `look-targets/` (a Nix-declared one included: it is never written through), an `output` that an existing target or another target in the pack already writes (case-insensitive) |
+
+The add is all or nothing: every target is checked before the first one
+lands, and one that cannot land leaves `look-targets/` untouched. The
+review escapes control characters and invisible Unicode (as `\u{1b}`), so
+a template cannot rewrite the terminal or imitate the `RELOAD` line.
+`--json` prints the same review as a document (`added` is `false` without
+`--trust`; the template and reload arguments are raw there).
+
+> **Symptom:** `target add` prints the review and exits 1 with "nothing added".
+>
+> That is the gate working: you ran it without `--trust`. Read the
+> templates and the `RELOAD` lines; if you trust the pack, rerun with
+> `--trust`.
+
+> **Symptom:** `target add` says a target named `<name>` already exists.
+>
+> `look-targets/<name>` is already there (yours, or declared in Nix).
+> Remove or rename it, or rename the target in the pack; nothing was
+> added.
+
+> **Symptom:** `target add` says a target writes an output an existing
+> target already writes.
+>
+> Two targets may not write the same file, because the second write would
+> silently win. Change one `output`, or remove the existing target.
+
+> **Symptom:** `target add` refuses a symlink, a hard link or an unexpected file.
+>
+> A pack is foreign input and is read as plain files only. Re-export it
+> with `cp -R` or `tar` (macOS `tar` adds `._*` files; set
+> `COPYFILE_DISABLE=1`), without links.
+
 ## Not here yet
 
-Trust for packs (`--trust` showing a pack's templates at add time),
-browsers (no live reload for Firefox without an extension, and the
-Chrome policy needs a root or managed path), and keeping look sources
+Browsers (no live reload for Firefox without an extension, and the
+Chrome policy needs a root or managed path), look-supplied token data and
+per-app overrides for the targets you enabled, and keeping look sources
 and template sources in separate imports. Each is a later slice; the
 ticket lists them.
