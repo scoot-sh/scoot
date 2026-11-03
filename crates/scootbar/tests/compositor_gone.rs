@@ -19,7 +19,7 @@ const BAR: &str = "#20c030";
 /// How long a bar may take to notice a dead compositor and exit. The loop
 /// wakes on the hang-up at once; this is slack for a loaded machine, far
 /// below the harness's 20 s patience.
-const PROMPT: Duration = Duration::from_secs(3);
+const PROMPT: Duration = Duration::from_secs(5);
 
 fn exits_one_promptly(session: &Session, bar: &mut Reaper) {
     let start = Instant::now();

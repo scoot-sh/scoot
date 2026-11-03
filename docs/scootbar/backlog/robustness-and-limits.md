@@ -172,7 +172,7 @@ already, or to need only a small addition; no bug was found.
   `tests/compositor_gone.rs`: the compositor `SIGKILL`ed with ten outputs
   just created and then all unplugged and an `exec` child running
   (`the_compositor_going_mid_storm_ends_the_bar_and_its_command`). The bar
-  exits 1 (so `Restart=on-failure` restarts it) inside 3 s, says "lost the
+  exits 1 (so `Restart=on-failure` restarts it) inside 5 s, says "lost the
   connection to the compositor", and the child is gone. Both fail without
   the behavior: `return Ok(())` for the exit gives status 0 and fails the
   status assertion; `continue` in its place (a spin on the hang-up) fails
