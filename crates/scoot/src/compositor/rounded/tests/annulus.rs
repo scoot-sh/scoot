@@ -554,6 +554,7 @@ fn self_rounded_fixture(
         color: WINDOW_BGRA,
         radius: client_radius,
         max_size,
+        decorate: false,
     });
     let slot = fixture.placement();
     let drawn = match max_size {
@@ -730,6 +731,54 @@ fn a_rounder_client_keeps_a_ring_colored_crescent() {
                     "radius {configured} thickness {thickness} scale {scale}: only {crescent} crescent px"
                 );
             }
+        }
+    }
+}
+
+/// Windows short enough that the ring's top and bottom strips overlap: with a
+/// translucent ring, every ring pixel of the rendered frame must read as the
+/// single-blend color (the top bar's), so no overlap row is drawn twice.
+/// Measured on the frame, not the buffers. CSD (radius 8: the backdrop-grown
+/// strips meet) and SSD (radius 40 clamps to half the window: the arc strips
+/// meet), at 30 logical pixels tall.
+#[test]
+fn overlapping_strips_do_not_double_blend_a_translucent_ring() {
+    for scale in [1.0, 1.5, 2.0] {
+        for (decorate, configured) in [(false, 8), (true, 40)] {
+            let mut fixture = Fixture::with_radius_at_scale(configured, 2, scale);
+            fixture.state.appearance.focus_ring_active_color = TRANSLUCENT_RING;
+            fixture.run(Step::SelfRoundedCustom {
+                color: WINDOW_BGRA,
+                radius: 0,
+                max_size: Some((60, 30)),
+                decorate,
+            });
+            let slot = fixture.placement();
+            let drawn = Rect::new(slot.x, slot.y, slot.w.min(60), slot.h.min(30));
+            assert_eq!(drawn.h, 30, "the window must draw short");
+            let pixels = fixture.render();
+            let clip = clip_rect(drawn, scale);
+            let bg: [u8; 4] = pixels[0..4].try_into().expect("canvas corner");
+            let ring = pixel(
+                &pixels,
+                CANVAS,
+                clip.loc.x + clip.size.w / 2,
+                clip.loc.y - 1,
+            );
+            assert_ne!(ring, bg, "the top bar must draw");
+            let what = format!("scale {scale} {}", if decorate { "ssd" } else { "csd" });
+            let mut ring_pixels = 0;
+            for y in 0..CANVAS {
+                for x in 0..CANVAS {
+                    let px = pixel(&pixels, CANVAS, x, y);
+                    if px == bg || px == WINDOW_BGRA {
+                        continue;
+                    }
+                    assert_eq!(px, ring, "{what}: ({x}, {y}) is not the single-blend ring");
+                    ring_pixels += 1;
+                }
+            }
+            assert!(ring_pixels > 100, "{what}: only {ring_pixels} ring pixels");
         }
     }
 }

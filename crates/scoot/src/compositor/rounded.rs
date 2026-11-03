@@ -337,8 +337,9 @@ pub fn paint_ring(pixels: &mut [u8], paint: &RingPaint, color: [u8; 4]) {
 /// `paint` is the strip's own [`RingPaint`] (full-canvas `outer`/`inner` in
 /// the strip's coordinates -- shifted for the bottom strip exactly like the
 /// ring paint); `side` is already clamped to the window. Runs only on
-/// repaints, never per frame, and repaints the same opaque color the ring
-/// uses, so overlapping the band is idempotent.
+/// repaints, never per frame, and overwrites (never blends) with the ring's
+/// color, so overlapping the band inside one buffer is idempotent for any
+/// color, translucent included.
 pub fn paint_backdrop_corners(pixels: &mut [u8], paint: &RingPaint, side: i32, color: [u8; 4]) {
     let (canvas_w, canvas_h) = (paint.canvas.w, paint.canvas.h);
     debug_assert_eq!(

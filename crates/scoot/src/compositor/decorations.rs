@@ -1237,6 +1237,11 @@ struct StripPlan {
     /// what `paint_backdrop_corners` fills inside `outer`. Derived from the
     /// same clip/scale as the radii, so the plan stays pure.
     side: i32,
+    /// How many leading rows of the bottom strip lie inside the top strip's
+    /// rows (a window short enough that the strips overlap). The bottom
+    /// strip leaves them transparent: two translucent strips drawn over the
+    /// same pixels would blend the ring twice.
+    bottom_skip: i32,
 }
 
 /// Computes the strip plan for `rect`, or `None` when a canvas is degenerate
@@ -1282,7 +1287,9 @@ fn plan_strips(
     // logical height rounds UP, so the element's canvas always covers the
     // target: a strip one row short would leave a 1px gap in the ring at a
     // fractional scale, while a strip one row long only repaints side-band
-    // pixels the solid bars already cover (same opaque color -- idempotent).
+    // pixels the solid bars already cover (the bars are separate elements,
+    // so this is only invisible for an opaque ring color; the strips'
+    // own overlap is handled by `bottom_skip` below).
     // A CSD window's strip must also hold the whole backdrop square below
     // the band (`thickness + side` rows), or a client rounder than the ring shows the
     // background where the square was cut off at the strip's last row.
@@ -1302,9 +1309,12 @@ fn plan_strips(
     // canvas height comes from the same logical height at its own origin, so
     // it can differ from the top's by a pixel at fractional scales -- each
     // strip paints exactly its own canvas, so both stay correct. Seeded from
-    // the top height (exact at integer scales); a degenerate window whose
-    // full height is shorter than two strips just overlaps them, painting
-    // the same opaque color twice -- idempotent.
+    // the top height (exact at integer scales). A window whose full height
+    // is shorter than two strips overlaps them; the rows the top strip
+    // already paints are left transparent in the bottom strip (`bottom_skip`),
+    // because translucent ring pixels drawn twice would blend twice. The top
+    // strip paints all four backdrop squares clipped to its own rows, so
+    // nothing is lost.
     //
     // Recomputed rather than mirrored: the element rounding is
     // origin-sensitive, and the bottom origin differs.
@@ -1314,6 +1324,8 @@ fn plan_strips(
     if bottom_canvas.w <= 0 || bottom_canvas.h <= 0 {
         return None;
     }
+    let bottom_first_row = canvas.h - bottom_canvas.h;
+    let bottom_skip = (top_canvas.h - bottom_first_row).clamp(0, bottom_canvas.h);
     Some(StripPlan {
         top: StripGeometry {
             loc,
@@ -1331,6 +1343,7 @@ fn plan_strips(
         radius_inner,
         radius_outer,
         side,
+        bottom_skip,
     })
 }
 
@@ -1470,6 +1483,7 @@ fn build_strips(
         },
         argb,
         backdrop_side,
+        0,
     );
     entry.top = Some(MemoryRenderBuffer::from_slice(
         &entry.pixels,
@@ -1498,6 +1512,7 @@ fn build_strips(
         },
         argb,
         backdrop_side,
+        plan.bottom_skip,
     );
     entry.bottom = Some(MemoryRenderBuffer::from_slice(
         &entry.pixels,
@@ -1518,13 +1533,15 @@ fn build_strips(
 /// either strip passes, since `paint_ring` only fills rows its rects reach.
 /// When `backdrop_side` is set, also fills the CSD corner squares clipped to
 /// the outer arc (see `paint_backdrop_corners`) -- the same `side` for both
-/// strips, since the squares travel with the shifted `inner` rect.
+/// strips, since the squares travel with the shifted `inner` rect. The first
+/// `skip_rows` rows are cleared afterwards: rows the other strip owns.
 fn paint_strip(
     pixels: &mut Vec<u8>,
     canvas: Size<i32, Physical>,
     paint: RingPaint,
     color: [u8; 4],
     backdrop_side: Option<i32>,
+    skip_rows: i32,
 ) {
     let len = canvas.w as usize * canvas.h as usize * 4;
     if pixels.len() != len {
@@ -1535,6 +1552,10 @@ fn paint_strip(
     if let Some(side) = backdrop_side {
         paint_backdrop_corners(pixels, &paint, side, color);
     }
+    // Rows the other strip already paints stay transparent (see
+    // `StripPlan::bottom_skip`).
+    let skip = (skip_rows.max(0) as usize).min(canvas.h as usize) * canvas.w as usize * 4;
+    pixels[..skip].fill(0);
 }
 
 /// Updates one persistent segment buffer to `rect` (or to empty, if this

@@ -103,7 +103,7 @@ enum Step {
     /// and [`Step::ShortWindow`] always negotiate (foot-shaped); only
     /// `SelfRounded { decorate: false }` stays unbound (GTK-shaped).
     SelfRounded { color: [u8; 4], decorate: bool },
-    /// An unbound (GTK-shaped) self-rounded toplevel with its own corner
+    /// A (by default unbound, GTK-shaped) self-rounded toplevel with its own corner
     /// `radius` in logical pixels, drawn at most `max_size` logical pixels
     /// (the configured size when `None`): a client rounder than the
     /// compositor's `corner_radius`, or a window far smaller than its slot.
@@ -111,6 +111,8 @@ enum Step {
         color: [u8; 4],
         radius: i32,
         max_size: Option<(i32, i32)>,
+        /// Negotiate server-side decorations first (an SSD client).
+        decorate: bool,
     },
     /// Ask `ClientSide` on the mapped window's decoration object (needs a
     /// prior `SelfRounded { decorate: true }`): the `prefer_no_csd = false`
@@ -580,8 +582,10 @@ fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> R
                     Step::SelfRounded {
                         decorate: false,
                         ..
-                    } | Step::SelfRoundedCustom { .. }
-                        | Step::Framed { .. }
+                    } | Step::SelfRoundedCustom {
+                        decorate: false,
+                        ..
+                    } | Step::Framed { .. }
                 );
                 let self_rounded = matches!(
                     step,
