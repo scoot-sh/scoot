@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.37](https://github.com/scoot-sh/scoot/compare/v0.6.36...v0.6.37) - 2026-11-03
+
+### scoot
+
+- fixed: paint CSD backdrop inside the ring strips, clipped to the outer arc ([#882](https://github.com/scoot-sh/scoot/pull/882))
+
 ## [0.6.36](https://github.com/scoot-sh/scoot/compare/v0.6.35...v0.6.36) - 2026-11-03
 
 ### scootbar
