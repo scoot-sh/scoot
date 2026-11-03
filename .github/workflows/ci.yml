@@ -123,7 +123,16 @@ jobs:
   #
   #   crates/scootbar/, scripts/scootbar-bench/, scripts/scootbar-appearance-hw-test.sh
   #                                        -> scootbar=true (scootbar job, which
-  #                                           also builds the Nix module check)
+  #                                           also builds the Nix module check).
+  #                           crates/scootbar/ also sets scoot=true: the
+  #                           look-golden suite (crates/scoot/tests/
+  #                           look_golden_screenshots.rs) runs a real
+  #                           scootbar beside its headless scoot in the
+  #                           Linux (compositor) jobs, so a bar change
+  #                           moves golden pixels without any scoot file
+  #                           changing. The bench and hw-test scripts do
+  #                           not affect bar pixels, so they stay
+  #                           scootbar-only.
   #   crates/scoot-dbus/                 -> scoot=true as well (the compositor's
   #                                           scootctl dev-deps on Linux),
   #                                           scootbar=true (the
@@ -402,11 +411,16 @@ jobs:
                   scootnotify=true
                   portal=true ;;
                 # Its manifest is read at eval time by flake.nix (the
-                # package description), as scootbg's.
+                # package description), as scootbg's. Any bar file fans
+                # out to the scoot jobs too: the look-golden suite runs
+                # the real bar beside its headless scoot there (see
+                # look_golden_screenshots.rs's module doc), so a bar
+                # change moves golden pixels.
                 crates/scootbar/Cargo.toml)
                   scoot=true
                   scootbar=true ;;
                 crates/scootbar/*)
+                  scoot=true
                   scootbar=true ;;
                 # The launcher index (crates/scootlaunch): its own job
                 # below, gated on this output. It depends on scoot-rt
@@ -439,12 +453,16 @@ jobs:
                 # and icons through it, and scootgreet joins as its
                 # ticket lands, per dev/design/shell-apps.md). Its
                 # manifest also runs the Linux job, as scootbar's does.
+                # Every scootui file does too: the bar draws through it,
+                # so a drawing change moves the look-golden pixels the
+                # scoot jobs compare.
                 crates/scootui/Cargo.toml)
                   scoot=true
                   scootbar=true
                   scootlaunch=true
                   scootnotify=true ;;
                 crates/scootui/*)
+                  scoot=true
                   scootbar=true
                   scootlaunch=true
                   scootnotify=true ;;

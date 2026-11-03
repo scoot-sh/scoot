@@ -68,16 +68,18 @@ CASES = {
     "crates/scoot-look/src/schema.rs": {"scoot", "macos", "scootbar", "scootlaunch", "scootnotify", "look"},
     "crates/scoot-rt/src/lib.rs": {"scoot", "macos", "scootbar", "scootlaunch", "scootnotify", "portal"},
     "crates/scoot-dbus/src/conn.rs": {"scoot", "scootbar", "scootlaunch", "scootnotify", "portal"},
-    "crates/scootui/src/canvas.rs": {"scootbar", "scootlaunch", "scootnotify"},
+    "crates/scootui/src/canvas.rs": {"scoot", "scootbar", "scootlaunch", "scootnotify"},
     "crates/scootbg-mem/src/lib.rs": {"scoot", "scootbg", "scootbar", "scootlaunch", "scootnotify", "portal"},
-    # leaf apps (plus the integration jobs that run on either side)
+    # leaf apps (plus the integration jobs that run on either side).
+    # scootbar fans out to scoot too: the look-golden suite runs the real
+    # bar beside its headless scoot in the scoot jobs.
     "crates/scootbg/src/main.rs": {"scootbg"},
-    "crates/scootbar/src/main.rs": {"scootbar"},
+    "crates/scootbar/src/main.rs": {"scoot", "scootbar"},
     "crates/scootlaunch/src/main.rs": {"scootlaunch"},
     "crates/scootnotify/src/main.rs": {"scootnotify"},
     "crates/scoot-globalshortcuts-portal/src/main.rs": {"portal"},
     "crates/scootbar/Cargo.toml": {"scoot", "scootbar"},
-    "crates/scootui/Cargo.toml": {"scootbar", "scootlaunch", "scootnotify"},
+    "crates/scootui/Cargo.toml": {"scoot", "scootbar", "scootlaunch", "scootnotify"},
     # shared roots and infra: fail open
     "Cargo.toml": {"scoot", "macos", "scootbg", "scootbar", "scootlaunch",
                    "scootnotify", "portal", "look"},
