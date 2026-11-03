@@ -136,10 +136,9 @@ the docs example cannot rot. Docs: `site/.../reference/look-targets.md`
 (task-first, type/default/example/reload per option, `Symptom` boxes)
 plus a pointer in `look-format.md`.
 
-Later slices (still open): trust for packs (show a pack's templates at
-add time, like `--trust`); look-supplied token data and per-app overrides for
+Later slices (still open): look-supplied token data and per-app overrides for
 user-enabled targets; keeping look sources and template sources in
-separate imports. None of these run a look-supplied command, ever.
+separate imports; browsers. None of these run a look-supplied command, ever.
 
 ## Resolution in progress — slice 2 (Nix targets + starter pack)
 
@@ -171,3 +170,38 @@ output path, no `[reload]` anywhere (live reload, keybind, manual or
 next-launch per app), each rendering in a test. Browsers stay a later
 slice (no live reload for Firefox without an extension, Chrome policy
 needs a managed path).
+
+## Resolution in progress — slice 3 (trust for packs)
+
+`scoot look target add PATH [--trust]` (`scootctl/src/look/target_add.rs`):
+adds a pack (a directory of target directories, or one target directory)
+to the user's own `look-targets/`. Chosen over the other two slices
+because it is the only one that adds no execution path and no new schema:
+a pack is a directory the user names on the command line, never something
+a look carries, so installed looks still cannot supply templates, outputs
+or reload commands (the parse refusals are untouched). The verb is
+`target add`, not `look add`/`install`, so it cannot be read as installing
+a look.
+
+Without `--trust` it prints, per target, what it writes, the `RELOAD`
+argv on its own line, and the whole template, then exits 1 having written
+nothing (unlike `install`, the templates are the whole payload, so there
+is nothing to keep without trust). With `--trust` the same review prints
+first and the targets land. Nothing runs at add time.
+
+Pinned by `target_add/tests.rs` and the docs snippet gate: a foreign-pack
+gate (symlinked pack, target directory, manifest or template; hard link;
+stray file in a target or beside targets, including macOS `._*`; a
+`look.toml` directory; nested template path; target-count and total-size
+caps), the same validation `look validate` runs plus every token checked
+against the union of the catalog's looks, the bytes reviewed equal the
+bytes written (each file read once through the `O_NOFOLLOW` reader),
+all-or-nothing add (staged in a sibling of `look-targets/`, since a stray
+directory inside it would make every later apply refuse), name collisions
+(a Nix-declared symlink is never written through), case-insensitive output
+collisions against existing targets and inside the pack, and a hostile
+review test (ESC, CR, clear-line, BEL and a bidi override in a template
+print escaped and cannot imitate the `RELOAD` line; a control byte in a
+reload argument refuses at read). The whole `docs/examples/look-targets`
+directory adds as one pack of seven. `RENDER_VERSION` is unchanged:
+rendering is unchanged.

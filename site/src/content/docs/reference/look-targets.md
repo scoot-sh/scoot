@@ -59,7 +59,7 @@ beside the six-app starter pack below.
 | Option | Type / default | Reload |
 |---|---|---|
 | `name` | string, required. Matches the directory name (`[a-z0-9-]{1,32}`). | Validated on every apply; a mismatch refuses. |
-| `output` | string, required. Relative to the config home (`kitty/colors.conf`). ASCII only (a Unicode name refuses); no `..`, no absolute path, no hidden segments; must stay under the config home through symlinks. | Rendered to `targets/<output>` in the active look on every apply. Two targets naming the same output refuse (compared case-insensitively). |
+| `output` | string, required. Relative to the config home (`kitty/colors.conf`). ASCII only (a Unicode name refuses); no `..`, no absolute path, no hidden segments; must stay under the config home through symlinks. | Rendered to `targets/<output>` in the active look on every apply. Two targets naming the same output refuse, as do two where one output is a directory on the way to the other (`x` and `x/y`); both compared case-insensitively. |
 | `template` | string, required. The template file inside the target directory. | Read on every apply (symlinks refuse); an unreadable template refuses the swap. |
 | `reload.argv` | array of 1 to 16 strings, optional. The program plus its arguments: a bare name on `PATH` or an absolute path. | Run directly after a successful swap, never through a shell (no splitting, no globs, no `$VAR`). |
 | `reload.timeout_secs` | whole number, default `30`, 1 to 300. | The hung child and the processes it started are killed after the wait (a process that starts its own session is not reached); the swap stands either way. |
@@ -138,10 +138,11 @@ allowlist, so only these user-owned directories are ever read.
 > wrong). Install the app or fix the argv; the rendered file is already
 > in the active look, so a manual reload (or the next swap) picks it up.
 
-> **Symptom:** `validate` says two targets write the same output.
+> **Symptom:** `validate` says two targets write the same output, or a file where another needs a directory.
 >
 > Both `target.toml` files name the same `output` (the compare is
-> case-insensitive, so `Kitty/x` and `kitty/x` collide). Rename one: the
+> case-insensitive, so `Kitty/x` and `kitty/x` collide), or one names `x`
+> and the other `x/y`. Rename one: the
 > second write would silently win, and no wiring could name both.
 
 > **Symptom:** `validate` says an output escapes the config home or a symlink.
@@ -152,11 +153,12 @@ allowlist, so only these user-owned directories are ever read.
 
 ## Starter pack
 
-Six maintained targets ship in-tree in `docs/examples/look-targets/<name>/`
-(each with its `target.toml` and template, each rendering in a test so the
-example cannot rot). Copy the directory you want into
-`~/.config/scoot/look-targets/<name>/` and add the wiring line to the app's
-own config, once, by hand. Keys you set in your own config after the
+Seven maintained targets ship in-tree in `docs/examples/look-targets/<name>/`:
+the kitty example above plus the six below (each with its `target.toml` and template, each rendering in a test so the
+example cannot rot). Add the ones you want with
+[`scoot look target add`](#add-a-pack) (or copy a directory into
+`~/.config/scoot/look-targets/<name>/` by hand), then add the wiring line
+to the app's own config, once, by hand. Keys you set in your own config after the
 include win per key. All six need a look with a `[terminal]` table;
 against a look without one `validate` names the missing token. None of
 the six declares a `[reload]`: the middle
@@ -216,10 +218,77 @@ home. A sync with any target configured (declared or hand-written)
 renders fresh instead of pointing at the catalog render, which was
 built without the templates.
 
+## Add a pack
+
+A pack is a directory of targets someone else wrote: a directory holding
+target directories (the starter pack above is one), or a single target
+directory. `target add` copies it into your own `look-targets/`. A pack
+is not part of a look and not part of `look install`: installed looks
+still cannot carry templates, outputs or reload commands.
+
+```sh
+scoot look target add ./pack            # print the review, add nothing
+scoot look target add ./pack --trust    # print the review, then add
+```
+
+Targets render files into your desktop's config and may run a command on
+every swap, so the add is gated like `look install --trust`. Without
+`--trust` it prints, for each target, what it writes, its `RELOAD` command
+on a line of its own (or `reload: none`), and the whole template, then
+exits 1 having written nothing. With `--trust` the same review prints
+first and the targets land. Nothing runs at add time; the files are read,
+checked and copied, and the bytes you read are the bytes written.
+
+| Check | What refuses |
+|---|---|
+| Source shape | a symlink anywhere (the pack, a target directory, `target.toml` or a template), a hard link, a look directory (it has `look.toml`: use `look install`), a file beside the targets other than `README*`, `LICENSE*` or `COPYING*`, a file in a target beyond `target.toml` and its template, a `template` naming a subdirectory |
+| Limits | more than 32 targets, more than 4 MiB in total, a template over 64 KiB or not UTF-8 |
+| Each target | the same checks `look validate` runs: name matches its directory, `output` stays under the config home, reload shape, template syntax, and every token spelled by at least one look in your catalog (a token only some looks set refuses later, per look, as usual) |
+| Collisions | a target name that already exists in `look-targets/` (a Nix-declared one included: it is never written through), an `output` that an existing target or another target in the pack already writes, or that is a file where another needs a directory (`x` against `x/y`), compared case-insensitively |
+
+On failure the add is all or nothing: every target is checked before the
+first one lands, and if one cannot land the ones already moved are
+removed again (a crash mid-add is not covered). The review shows letters,
+digits and ordinary punctuation as they are and escapes everything else
+(controls, zero-width and bidi characters, odd spaces, combining marks) as
+`\u{1b}`, so a template or file name cannot rewrite the terminal or
+imitate the `RELOAD` line. Each reload argument is quoted when it holds
+anything beyond plain path characters, so `echo "a b"` and `echo a b`
+read differently. `--json` prints the review as a document after the add
+succeeds (`added` is `true`), or with `added` set to `false` when you
+omitted `--trust`; a failed add prints only the error. The template and
+reload arguments are raw there.
+
+> **Symptom:** `target add` prints the review and exits 1 with "nothing added".
+>
+> That is the gate working: you ran it without `--trust`. Read the
+> templates and the `RELOAD` lines; if you trust the pack, rerun with
+> `--trust`.
+
+> **Symptom:** `target add` says a target named `<name>` already exists.
+>
+> `look-targets/<name>` is already there (yours, or declared in Nix).
+> Remove or rename it, or rename the target in the pack; nothing was
+> added.
+
+> **Symptom:** `target add` says a target writes an output an existing
+> target already writes, or a file where another needs a directory.
+>
+> Two targets may not write the same file (the second write would
+> silently win), and one may not write `x` while another writes `x/y`
+> (the render could not make `x` a directory). Change one `output`, or
+> remove the existing target.
+
+> **Symptom:** `target add` refuses a symlink, a hard link or an unexpected file.
+>
+> A pack is foreign input and is read as plain files only. Re-export it
+> with `cp -R` or `tar` (macOS `tar` adds `._*` files; set
+> `COPYFILE_DISABLE=1`), without links.
+
 ## Not here yet
 
-Trust for packs (`--trust` showing a pack's templates at add time),
-browsers (no live reload for Firefox without an extension, and the
-Chrome policy needs a root or managed path), and keeping look sources
+Browsers (no live reload for Firefox without an extension, and the
+Chrome policy needs a root or managed path), look-supplied token data and
+per-app overrides for the targets you enabled, and keeping look sources
 and template sources in separate imports. Each is a later slice; the
 ticket lists them.

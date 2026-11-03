@@ -612,6 +612,35 @@ fn preview_shows_or_captures() {
 }
 
 #[test]
+fn target_add_takes_a_path_and_trust() {
+    assert_eq!(
+        command(&["target", "add", "./pack"]),
+        Ok(Command::TargetAdd {
+            path: PathBuf::from("./pack"),
+            trust: false,
+        })
+    );
+    assert_eq!(
+        command(&["target", "add", "./pack", "--trust"]),
+        Ok(Command::TargetAdd {
+            path: PathBuf::from("./pack"),
+            trust: true,
+        })
+    );
+    assert_eq!(
+        command(&["target", "add"]),
+        Err(Error::Missing("a target directory or pack directory"))
+    );
+    assert_eq!(
+        command(&["target"]),
+        Err(Error::Missing("a target action (add)"))
+    );
+    assert!(command(&["target", "remove", "x"]).is_err());
+    assert!(command(&["target", "add", "--bogus"]).is_err());
+    assert!(command(&["target", "add", "a", "b"]).is_err());
+}
+
+#[test]
 fn install_takes_a_path_and_trust() {
     assert_eq!(
         command(&["install", "./handed-over"]),

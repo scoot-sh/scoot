@@ -530,6 +530,7 @@ step here needs Nix.
 ```sh
 scoot look export moonrise --out moonrise.tar   # a tarball of the source look
 scoot look install ./handed-over                # a directory or a tarball
+scoot look target add ./pack                    # review a pack of app targets
 scoot look save my-tweak                        # your own files as a user look
 ```
 
@@ -549,6 +550,12 @@ can be applied but never extended. Its `apps/` leaves drop unless
 `--trust` keeps them (printed first). A wallpaper given by URL is
 fetched, verified against its `sha256` and cached now — the install
 refuses if that fails — so a later swap makes no network request.
+
+`target add PATH` adds a pack of app targets (templates that theme apps
+scoot has no renderer for) to your own `look-targets/`. It is not part
+of `install`: an installed look still cannot carry templates, outputs or
+reload commands. See [Look targets](../reference/look-targets.md#add-a-pack)
+for the review it prints and the checks it runs.
 
 `save NAME` snapshots your own appearance and color values (the
 compositor's `[appearance]` and `[wallpaper]`, the bar's `[colors]`) as
@@ -586,6 +593,7 @@ stderr. The shapes:
 | `watch` | one document per save: `{"applied": ..., "generation": ..., "rendered": ..., "reloaded": [...], "skipped": [...], "shadowed": [...], "invalid": [...], "notes": [...]}` (a refused save prints `{"applied": null, "error": ...}`) |
 | `preview` | `{"name": ..., "preview": ..., "exists": ...}` (with `--capture`: `{"name", "preview", "width", "height", "bytes"}`) |
 | `install` | `{"installed": ..., "dir": ..., "dropped": [...], "kept": [...], "fetched": ... or null, "notes": [...]}` |
+| `target add` | `{"added": ..., "targets": [{`name`, `output`, `reload` ({`argv`, `timeout_secs`} or null), `template_file`, `template`}], "notes": [...]}` (`added` is false without `--trust`, which exits 1 after printing the review) |
 | `export` | `{"exported": ..., "tarball": ..., "files": [...], "notes": [...]}` |
 | `save` | `{"saved": ..., "dir": ..., "extends": ..., "tokens": [...], "notes": [...]}` |
 | `wiring` | `{"active": {`name`, `rendered`, `generation`}, "items": [{`app`, `status`, `detail`}], "notes": [...]}` (`status` is `wired`, `missing`, `manual` or `absent`) |

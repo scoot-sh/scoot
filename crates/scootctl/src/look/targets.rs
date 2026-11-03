@@ -132,16 +132,62 @@ pub fn discover_in(config_home: &Path) -> Result<Vec<TargetDef>, String> {
     // Unicode normalization step is needed beside it: outputs are
     // ASCII-only by grammar (`check_target_path` refuses the rest), so
     // the NFC and NFD spellings of one file never reach this compare.
-    let mut seen = std::collections::BTreeSet::new();
-    for def in &defs {
-        if !seen.insert(def.output.to_lowercase()) {
-            return Err(format!(
-                "target `{}` writes the same output as another target: `{}`",
-                def.name, def.output
-            ));
+    for (i, def) in defs.iter().enumerate() {
+        for other in &defs[..i] {
+            if let Some(conflict) = output_conflict(&other.output, &def.output) {
+                return Err(format!(
+                    "target `{}` {}: `{}` against `{}` (target `{}`)",
+                    def.name,
+                    conflict.describe(),
+                    def.output,
+                    other.output,
+                    other.name
+                ));
+            }
         }
     }
     Ok(defs)
+}
+
+/// How two target outputs collide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputConflict {
+    /// Both name one file (compared case-insensitively).
+    Same,
+    /// One output is a directory on the way to the other (`x` and
+    /// `x/y`): the render writes `x` as a file, then cannot make it a
+    /// directory, so every swap would fail.
+    Prefix,
+}
+
+impl OutputConflict {
+    /// The refusal wording, completing "target `n` ...".
+    pub fn describe(self) -> &'static str {
+        match self {
+            Self::Same => "writes the same output as another target",
+            Self::Prefix => {
+                "writes an output that is a file where another target needs a directory (or the reverse)"
+            }
+        }
+    }
+}
+
+/// Whether two outputs cannot both be rendered: the same file, or one a
+/// whole-segment prefix of the other. Case-insensitive, like the
+/// filesystems that fold `Kitty/x` and `kitty/x`. Outputs are ASCII by
+/// grammar, so the lowercase fold needs no Unicode care.
+pub fn output_conflict(a: &str, b: &str) -> Option<OutputConflict> {
+    let a = a.to_ascii_lowercase();
+    let b = b.to_ascii_lowercase();
+    if a == b {
+        Some(OutputConflict::Same)
+    } else if b.strip_prefix(&a).is_some_and(|rest| rest.starts_with('/'))
+        || a.strip_prefix(&b).is_some_and(|rest| rest.starts_with('/'))
+    {
+        Some(OutputConflict::Prefix)
+    } else {
+        None
+    }
 }
 
 /// Loads one target directory: the manifest, the name match, the
