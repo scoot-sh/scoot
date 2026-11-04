@@ -40,8 +40,7 @@ stderr and exits 0, as the panel ignores it. TEXT is the next
 argument after `--query`, whatever it holds. Anything else is a loud
 error: exit 2, naming the flag and the supported list, never silently
 ignored. The panel launches the picked entry (exit 0) or nothing on
-dismiss (exit 1): the codes are unchanged from the print-the-id days,
-but a launch prints nothing anymore.
+dismiss (exit 1): a launch prints nothing.
 
 ## Dmenu mode
 
@@ -112,7 +111,7 @@ scootlaunch --list-executables-in-path
 
 Seven `rrggbbaa` flags override the look's roles for one open,
 above the user's file and the look — the same seven the look passes
-the repo's pickers, so one menu reads as one wherever it opens.
+the repo's pickers.
 `--layer=overlay` rides along the same way (the launcher script
 passes it to the bare panel too).
 
@@ -208,8 +207,8 @@ are still launchable by id. The action must name one of the entry's
 
 Exit codes: 0 for a launch, 1 for a refused launch (the error object
 above), 2 for a usage error (`--action` without `--run-id`,
-`--run-id` combined with another command, a missing value). An agent
-loop an agent can paste:
+`--run-id` combined with another command, a missing value). Commands
+an agent can paste:
 
 ```sh
 scootlaunch --list --json | jq '.[] | {id, name}'
@@ -256,6 +255,5 @@ bad cache is never an error: any mismatch means a rescan.
 
 `scootlaunch --dmenu` speaks the flags in the table above and
 `--index` / `--placeholder` only. Any other fuzzel flag exits 2
-naming the flag: the call sites in this repo are enumerated, and an
-eval pin keeps them inside the supported set. A user's own script
-with another flag fails here instead of silently changing meaning.
+naming the flag, so a script with another flag fails instead of
+silently changing meaning.

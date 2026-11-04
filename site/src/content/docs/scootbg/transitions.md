@@ -40,12 +40,10 @@ changes the same way. Every key reloads live (re-applied on
 | `--angle` / `angle` | degrees as a number | `0` | `--angle 90` | yes |
 | `--position` / `position` | `X,Y` fractions, each `0`–`1` | `0.5,0.5` | `--position 0,0` | yes |
 
-A transition flag without `--transition` is refused (exit 2), so a stray
-`--duration-ms` teaches rather than being ignored; with an explicit
-`--transition none` the rest are ignored. Past `60000` ms is refused:
-a longer animation would hold its buffers past any reasonable change.
-`clear` takes no transition and lands at once — there is no wallpaper
-to blend from or to. In TOML the keys are strings:
+A transition flag without `--transition` is refused (exit 2); with an
+explicit `--transition none` the rest are ignored. Past `60000` ms is
+refused. `clear` takes no transition and lands at once: there is
+nothing to blend. In TOML the keys are strings:
 
 ```toml
 [wallpaper]
@@ -68,8 +66,8 @@ without the animation.
 
 ## The kinds
 
-**Fade** lerps every pixel from old to new — the simplest kind, and the
-most expensive per frame (about 5.4 ms at 1080p, 21.6 ms at 4K,
+**Fade** blends every pixel from old to new. It is the most expensive
+kind per frame (about 5.4 ms at 1080p, 21.6 ms at 4K,
 measured; at 4K it holds time with fewer steps, see
 [below](#how-it-works)):
 
@@ -95,15 +93,14 @@ scootbg set ~/Pictures/grid.png --transition grow --position 0,0
 ```
 
 At `t = 0` every pixel is old and at `t = 1` every pixel is new,
-exactly — no stray line of either side at either end.
+exactly, with no stray line of either side.
 
 ## How it works
 
 CPU only, into `wl_shm`, one frame at a time: each frame blends the two
-endpoint buffers (shared references to pixels that already exist, never
-copies) into a full-size frame buffer — the third buffer the ticket
-budgets, 33 MB at 4K, with a second where the compositor releases
-lazily — and commits it with damage limited to what changed (the
+endpoint buffers into a full-size frame buffer (the third buffer,
+33 MB at 4K, with a second where the compositor releases
+lazily) and commits it with damage limited to what changed (the
 whole buffer for a fade, the sweeping band for a wipe, the disc's box
 for a grow). Frames are paced by frame callbacks and, where the compositor offers
 `wp_presentation`, presentation feedback; a ~60 Hz timer covers a compositor that
@@ -112,12 +109,11 @@ frames rather than falling behind, and a frame past its 8 ms budget
 skips the next one. At 1080p every kind holds 60 fps outright (2.4–5.4
 ms a frame, measured); at 4K a fade blends in 21.6 ms, a wipe in
 12.1 ms, a grow in 10.0 ms, so 4K transitions keep time with fewer
-steps instead of lagging. A restart snapshots what is on screen with one
-memcpy and starts from there. When the last frame lands, the final
+steps instead of lagging. A restarted transition starts from a snapshot of what is on screen. When the last frame lands, the final
 wallpaper goes on through the normal draw and every extra buffer is
 freed: an idle daemon costs what a static wallpaper costs (zero
-wakeups, measured). Allocation failure ends the transition at once at
-the final wallpaper — never wedged.
+wakeups, measured). If allocation fails, the transition ends at once at
+the final wallpaper.
 
 > **Symptom:** *the change lands at once, no animation.*
 > No `--transition` on the request (the default is `none`), a zero

@@ -25,7 +25,7 @@ scootbg set https://example.com/hills.jpg --sha256 9f86d081884c7d659a2feaa0c55ad
 (`~/.cache/scootbg/` when `XDG_CACHE_HOME` is unset, empty or relative),
 one file per URL, named for the URL's SHA-256. A file already there is
 shown as is (re-checked against `sha256` when one is pinned); otherwise
-the worker thread — never the event loop — runs
+a worker thread runs
 `curl --fail --location` (redirects followed, five at most; `http` and
 `https` only), capped at 32 MiB and sixty seconds, verifies the pin when
 given, checks the bytes start as PNG, JPEG, GIF or WebP, and renames the

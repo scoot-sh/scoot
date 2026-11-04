@@ -12,8 +12,7 @@ description: "Wallpaper symptoms and their fixes — images, links, outputs, res
 - *`set` refuses an animation past the size cap.* An animated GIF, APNG
   or animated WebP holds at most 64 frames and 64 MiB of frames; past
   that the `set` is refused and every output keeps what it showed. Pass
-  `--no-animate` to show the first frame as a still instead (playing
-  frame by frame is a follow-up). That still is live-only: after a
+  `--no-animate` to show the first frame as a still instead. That still is live-only: after a
   restart the caps are checked again, so an over-cap animation is refused
   then and the output loses its wallpaper until the next `set`.
 - *A link won't show.* In order: no `curl` on `PATH`; host unresolvable
