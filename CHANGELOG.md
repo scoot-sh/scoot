@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.0](https://github.com/scoot-sh/scoot/compare/v0.6.43...v0.7.0) - 2026-11-04
+
+### scootlaunch
+
+- fixed: [**breaking**] password mode never filters on the secret; dmenu docs and color pin ([#911](https://github.com/scoot-sh/scoot/pull/911))
+
 ## [0.6.43](https://github.com/scoot-sh/scoot/compare/v0.6.42...v0.6.43) - 2026-11-04
 
 ### scootbar
