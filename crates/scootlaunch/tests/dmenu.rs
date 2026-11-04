@@ -492,6 +492,114 @@ fn password_prompt_draws_masked() {
     panel.clean();
 }
 
+/// A password prompt over a stdin list shows no list and never filters
+/// on the secret: typing a line's text draws the same frame as typing
+/// any other secret of that length, and Enter prints the secret, not the
+/// matching line.
+#[test]
+fn password_over_a_list_hides_the_list_and_prints_the_secret() {
+    let Some((session, data_home)) = dmenu_session("password-list") else {
+        return;
+    };
+    let mut panel = start_dmenu(
+        session,
+        data_home,
+        b"alpha\nbeta\ngamma\n",
+        &["--dmenu", "--password"],
+        &[],
+    );
+    panel.wait_shown(rgb("#f9e2af"));
+    std::thread::sleep(Duration::from_millis(300));
+    panel.type_text("beta");
+    std::thread::sleep(Duration::from_millis(300));
+    let matching = panel.shot();
+    for _ in 0..4 {
+        panel.key("BackSpace");
+    }
+    panel.type_text("zzzz");
+    std::thread::sleep(Duration::from_millis(300));
+    let other = panel.shot();
+    assert_same_frame(&matching, &other, "a matching secret draws like any other");
+    // The panel is the entry alone: shorter than the one with a list.
+    let (_, y0, _, y1) = panel.find_panel(rgb("#f9e2af"));
+    assert!(
+        y1 - y0 < 80,
+        "no list rows under the entry: {} px tall",
+        y1 - y0
+    );
+    for _ in 0..4 {
+        panel.key("BackSpace");
+    }
+    panel.type_text("beta");
+    std::thread::sleep(Duration::from_millis(300));
+    panel.key("Return");
+    let status = panel.wait_exit();
+    let out = panel.stdout();
+    assert!(status.success(), "exit 0: {}", panel.stderr());
+    assert_eq!(out, "beta\n", "the secret prints, as typed");
+    panel.clean();
+}
+
+/// `--background-color`, `--border-color` and `--selection-color` reach
+/// the drawn pixels end to end (`apply_colors`): the border ring, the
+/// panel fill and the selected row's fill carry the flags' exact colors,
+/// and a run without the flags draws none of them.
+#[test]
+fn color_flags_reach_the_drawn_pixels() {
+    const BORDER: [u8; 3] = [0x12, 0xe8, 0x34];
+    const FILL: [u8; 3] = [0x20, 0x10, 0x60];
+    const SELECT: [u8; 3] = [0xe0, 0x30, 0x90];
+    let flags = [
+        "--dmenu",
+        "--background-color=201060ff",
+        "--border-color=12e834ff",
+        "--selection-color=e03090ff",
+    ];
+    let Some((session, data_home)) = dmenu_session("colors") else {
+        return;
+    };
+    let mut panel = start_dmenu(session, data_home, b"alpha\nbeta\ngamma\n", &flags, &[]);
+    panel.wait_shown(BORDER);
+    std::thread::sleep(Duration::from_millis(300));
+    let (x0, y0, x1, _) = panel.find_panel(BORDER);
+    let shot = panel.shot();
+    panel.save("dmenu-colors");
+    // Rows sit 21 px apart from y0 + 35 (see `a_click_on_a_row_prints_it`);
+    // the right edge is past any text. Row 0 is selected, row 1 is not.
+    let x = x1 - 12;
+    assert_eq!(shot.at(x, y0 + 35 + 10), SELECT, "the selected row's fill");
+    assert_eq!(shot.at(x, y0 + 35 + 21 + 10), FILL, "the panel fill");
+    assert_eq!(shot.at(x0, y0 + 45), BORDER, "the border");
+    panel.key("Escape");
+    panel.wait_exit();
+    panel.clean();
+
+    // The control: the same points without the flags are none of them.
+    let Some((session, data_home)) = dmenu_session("colors-control") else {
+        return;
+    };
+    let mut panel = start_dmenu(
+        session,
+        data_home,
+        b"alpha\nbeta\ngamma\n",
+        &["--dmenu"],
+        &[],
+    );
+    panel.wait_shown(rgb("#f9e2af"));
+    std::thread::sleep(Duration::from_millis(300));
+    let (_, y0, x1, _) = panel.find_panel(rgb("#f9e2af"));
+    let shot = panel.shot();
+    for (name, point, color) in [
+        ("selection", (x1 - 12, y0 + 45), SELECT),
+        ("fill", (x1 - 12, y0 + 66), FILL),
+    ] {
+        assert_ne!(shot.at(point.0, point.1), color, "default {name} differs");
+    }
+    panel.key("Escape");
+    panel.wait_exit();
+    panel.clean();
+}
+
 /// Two screenshots of identical content are pixel-identical: the
 /// compositor renders the same scene the same way, so any difference
 /// is the panel drawing differently.

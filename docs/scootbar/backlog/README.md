@@ -237,7 +237,7 @@ hits the wall:
 - [launch-iconless-tile-cache-share](resolved/launch-iconless-tile-cache-share-done.md) (low): letter tiles never enter the cache, so icon-less rows draw their own letters — RESOLVED 2026-10-21
 - [release-plz-changelog-include-shell-apps](resolved/release-plz-changelog-include-shell-apps-done.md)
 - [launch-spawn-detach-cwd-and-close](launch-spawn-detach-cwd-and-close.md)
-- [launch-dmenu-doc-and-pin-notes](launch-dmenu-doc-and-pin-notes.md)
+- [launch-dmenu-doc-and-pin-notes](resolved/launch-dmenu-doc-and-pin-notes-done.md) (low): password mode is list-less (no side channel), edge behaviors documented, `apply_colors` pinned — RESOLVED 2026-11-04
 - [notify-popups-review-notes](notify-popups-review-notes.md)
 - [packaging-workflows-red-on-main](resolved/packaging-workflows-red-on-main-done.md)
 - [check scootbar for the glibc 2.44 huge-page arena](thp-arena-check.md)
