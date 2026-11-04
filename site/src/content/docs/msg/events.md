@@ -39,7 +39,7 @@ $ scoot msg subscribe global-shortcut
 ```
 
 `scoot msg subscribe` prints the answer, then one compact JSON object per
-line per event, until killed or the connection ends — a desktop
+line per event, until killed or the connection ends. A desktop
 notification is one pipe away (`scoot msg subscribe | ... notify-send`).
 It exits 0 at a clean end of stream; re-run to resubscribe.
 
@@ -52,17 +52,14 @@ Three rules, matching the request/reply contract beside them:
 - **Filtering is by kind, not by field.** The server sends every event of
   the subscribed kinds, and the client filters or debounces further
   itself. The removal/add pair below (plus a restore when
-  the monitor held windows) fires on every monitor standby too;
-  that is accepted, and it is the difference
-  from a notification pushed at the user unconditionally, which is why
-  scoot still draws and sends nothing itself. `output_changed` fires
-  only on an applied resize, never on standby, and a refused resize fires nothing.
-- **The same socket and the same credentials.** There is no second channel:
-  a subscriber connects to the same `0600`, same-user control socket every
-  other client uses.
+  the monitor held windows) fires on every monitor standby too.
+  `output_changed` fires only on an applied resize, never on standby,
+  and a refused resize fires nothing.
+- **The same socket and the same credentials.** A subscriber connects to
+  the same `0600`, same-user control socket every other client uses.
 
 **`output_added`** — an output was added: a monitor plugged in (or back
-in) under `--tty`. It fires on **every** add — a first plug, a replug
+in) under `--tty`. It fires on **every** add: a first plug, a replug
 that held no windows, and a replug that brings
 windows back, which sends `output_added` first and `output_restored`
 after it. "The connected set changed" is `output_added` plus
@@ -102,10 +99,10 @@ the restore and after it returns to its pre-adopt view (`null` when the
 adopter itself is gone — then nothing moved either).
 
 **`output_changed`** — an output's mode changed in place: the same
-connector at a new framebuffer size, keeping its scale. This is the re-probe resize — a
+connector at a new framebuffer size, keeping its scale. This is the re-probe resize: a
 `--tty` hotplug offering a new mode for a connected
 connector (a VM window moving between displays of different densities), or a
-`--nested` host window being resized — not a removal: no workspace is
+`--nested` host window being resized. It is not a removal: no workspace is
 adopted, nothing moves, and no restore follows. A script watching density
 recomputes the scale it wants from `width` / `height` and applies it with a
 config reload (`output.scale` and `outputs.<name>.scale` apply live).
@@ -121,19 +118,17 @@ size; a refused resize fires nothing.
 
 **`keyboard_changed`** — the seat keyboard's effective layout (xkb group)
 changed: the same `name` and `index` the `keyboard` query answers with,
-naming the layout
-now in effect. No standard Wayland protocol reports this to an unfocused
-client, so this event (and
-the query) is the channel a layout indicator reads.
+naming the layout now in effect. No standard Wayland protocol reports this
+to an unfocused client, so this event and the query are the channel a
+layout indicator reads.
 
 It fires once per change, never per keypress: typing on one layout sends
 nothing, and one group switch sends exactly one event. Rapid successive
 switches each send their own — every event names the layout in effect when
 it was sent, so a reader that processes them in order ends where the
 keyboard is. As with the query, this is read-only: nothing over IPC
-switches the layout, and scoot has no layout-switch bind or action — the
-group moves only through the keymap's own mechanics (a toggle key from the `XKB_DEFAULT_OPTIONS` the session started with). Layout switching UI and
-per-window layouts are out of scope.
+switches the layout, and scoot has no layout-switch bind or action. The
+group moves only through the keymap's own mechanics (a toggle key from the `XKB_DEFAULT_OPTIONS` the session started with).
 
 A subscriber that stops reading is disconnected rather than buffered
 without bound: past the same 1 MiB queued-reply bound, or with no byte leaving for the same 10-second stall window, the
@@ -143,9 +138,10 @@ leaves no record behind.
 
 **`workspaces`** — one output's workspace occupancy changed: which of its
 workspaces hold windows, as a full snapshot rather than a delta, so a
-subscriber that missed one is never wrong. What a bar's workspace module
-draws without polling `windows`. No standard Wayland
-protocol reports the "holds windows" bit to an unfocused client — `ext-workspace-v1` carries the list, positions and the one `active` bit but not that bit —
+subscriber that missed one is never wrong. A bar's workspace module draws
+from it without polling `windows`. No standard Wayland
+protocol reports the "holds windows" bit to an unfocused client:
+`ext-workspace-v1` carries the list, positions and the one `active` bit but not that bit,
 and no other standard protocol maps a toplevel to a workspace.
 
 | Field | Meaning |
@@ -155,28 +151,26 @@ and no other standard protocol maps a toplevel to a workspace.
 | `active` | The output's active workspace, 0-based — the same numbering `focus-workspace-index N` takes. |
 | `counts` | One entry per workspace, in order: how many windows sit on it (`counts[i] > 0` is the occupied flag a bar draws; the number itself is what an agent reads). |
 
-One event per output whose snapshot moved — a window opened, closed or
+One event per output whose snapshot moved: a window opened, closed or
 moved between workspaces, the active workspace switched, or an output
-added (a removed output sends nothing: its removal is already an
-`output_removed`). Coalesced to
-at most one event per output per frame tick, however fast windows churn. A fresh subscription starts silent, like
-`keyboard` — read `windows` once for the baseline (the counts are the
+added (a removed output sends nothing, because its removal is already an
+`output_removed`). Events are coalesced to
+at most one per output per frame tick, however fast windows churn. A fresh subscription starts silent, like
+`keyboard`. Read `windows` once for the baseline (the counts are the
 histogram of each window's `workspace` on its `output`) and apply snapshots
-after it — so subscribing never replays the unsubscribed interval as one
-change.
+after it.
 
 **`lock_changed`** — the session locked or unlocked: the same `locked`
 flag the `locked` query answers with,
 naming the state it moved to. No standard Wayland protocol
-reports this to an unfocused client, so this event (and the query) is the
+reports this to an unfocused client, so this event and the query are the
 channel that watches the lock.
 
 It fires once per transition, never per request: a refused lock
 changes nothing and sends nothing, and
 a takeover of an already-locked session is no transition either. A fresh
-subscription starts silent — read
-`locked` once for the baseline and apply changes after it — so
-subscribing never replays the unsubscribed interval as one change. As
+subscription starts silent: read
+`locked` once for the baseline and apply changes after it. As
 with the query, this is read-only: nothing over IPC locks or unlocks the
 session.
 
@@ -184,42 +178,28 @@ session.
 `name` (`null` when the layer went away) and its `source_hash` from the
 render's `render.json`. Fires once per identity change, as seen by a
 reload; a reload that changes nothing emits nothing. A fresh
-subscription starts silent — the current look is whatever the last
+subscription starts silent: the current look is whatever the last
 `look_changed` said, or no look if none arrived yet.
 
 **`shortcut_activated` / `shortcut_deactivated`** — a portal global
 shortcut's chord was pressed / released: `app_id` and `shortcut_id`
 naming the registration, `timestamp_ms` the compositor clock at
-intercept time. Sent only to `global-shortcut` subscribers — the
-stage-2 portal backend turns them into the portal `Activated` /
-`Deactivated` signals. Compositor binds always win, so a chord the live
+intercept time. Sent only to `global-shortcut` subscribers. Compositor binds always win, so a chord the live
 keymap holds never produces these; nothing fires while locked; key
 repeat never re-fires. **`shortcuts_changed`** — the registered set
 moved (register, unregister, bind, unbind, reload, registrant
-disconnect): re-list with `shortcuts` for the new state — the stage-2
-backend turns it into the portal `ShortcutsChanged` signal. A fresh
-subscription starts silent — read `shortcuts` once for the baseline.
+disconnect): re-list with `shortcuts` for the new state. A fresh
+subscription starts silent: read `shortcuts` once for the baseline.
 
-Versioning: the subscription is IPC protocol 5 — the `subscribed`,
-`output_removed` and `output_restored` tags under the 3 → 4 bump, plus the
-`output_changed` tag under 4 → 5 — the keyboard half is protocol 6: the
-`keyboard` reply and the `keyboard_changed` tag — the workspace
-occupancy event is protocol 7: the `workspaces` tag — the lock query
-and event are protocol 8: the `locked` reply and the `lock_changed` tag —
-and the output-added event is protocol 10: the `output_added` tag, on
-the existing `output` kind, so an `output` subscriber built against
-protocol 9 or older fails to decode it (rebuild it; `scoot msg` from the
-same build as the session is always in step) — and the look-layer event
-is protocol 11: the `look_changed` tag on the new `look` kind — and the
-global-shortcut requests and events are protocol 13: the
-`shortcut_register`, `shortcut_unregister`, `shortcuts` and
-`shortcut_bind` request tags with the `shortcuts` reply, plus the
-`shortcut_activated`, `shortcut_deactivated` and `shortcuts_changed`
-tags on the new `global-shortcut` kind. A client that
-never sends `subscribe` (or `keyboard`, or `locked`) never receives any of them. An unknown event kind
-in a `subscribe` is answered with an ordinary `error` like any unknown
-request tag, so an older server meets a newer subscriber with an error,
-not a kill. The look swap itself is protocol 12: the `look_apply` and
-`looks` request tags with their `look_applied` and `looks` replies --
-an older server answers either request with an ordinary `error`, never a
-misapplied swap.
+Protocol versions, by the version that introduced each part:
+
+- **5**: the subscription (`subscribed`, `output_removed` and `output_restored` tags under the 3 → 4 bump, plus `output_changed` under 4 → 5).
+- **6**: the `keyboard` reply and the `keyboard_changed` tag.
+- **7**: the `workspaces` tag.
+- **8**: the `locked` reply and the `lock_changed` tag.
+- **10**: the `output_added` tag, on the existing `output` kind. An `output` subscriber built against protocol 9 or older fails to decode it: rebuild it (`scoot msg` from the same build as the session is always in step).
+- **11**: the `look_changed` tag on the new `look` kind.
+- **12**: the look swap. The `look_apply` and `looks` request tags with their `look_applied` and `looks` replies. An older server answers either request with an ordinary `error`, never a misapplied swap.
+- **13**: global shortcuts. The `shortcut_register`, `shortcut_unregister`, `shortcuts` and `shortcut_bind` request tags with the `shortcuts` reply, plus the `shortcut_activated`, `shortcut_deactivated` and `shortcuts_changed` tags on the new `global-shortcut` kind.
+
+A client that never sends `subscribe` (or `keyboard`, or `locked`) never receives any of them. An unknown event kind in a `subscribe` is answered with an ordinary `error` like any unknown request tag, so an older server meets a newer subscriber with an error, not a kill.
