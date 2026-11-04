@@ -151,8 +151,9 @@ Enter (or a click) on an entry launches it, then the panel closes:
   `ActivateAction` for a desktop action), with the token in
   `platform_data`. No owner on the bus falls back to `Exec`.
 
-A spawn failure draws its error in the panel for 2 s and the panel
-stays open; nothing is recorded. Ctrl+Enter runs the typed text
+A spawn failure draws its error in the panel for 2 s in place of the
+rows (a click on it launches nothing) and the panel stays open; nothing
+is recorded. Ctrl+Enter runs the typed text
 split on spaces, under the same rules (its scope derives from the
 command's name).
 

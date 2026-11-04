@@ -15,41 +15,42 @@ d9ba8ef54.
 
 ## The gap
 
-1. **Bottom padding exceeds top by a few device pixels at 1.5x.** The panel's
-   logical height comes from `Layout::new(em, radius, 1.0).height(rows)`
-   (`crates/scootlaunch/src/panel.rs` near line 284), is rounded once, and
-   `paint_panel` scales it to device pixels (`scale_len`) while the rows are
-   laid out by `device_layout(look, scale)` from the device em, so the
-   content ends short of the buffer. #805 measured about 9 px of bottom
-   padding against 15 px on top for `music-desk` at 1.5x, and called it
-   pre-existing in kind. Compute the panel height from
-   `device_layout().height()` instead.
-2. **Square search field above the rounded selection pill.** The search field
-   keeps square corners while the selected row is a rounded pill.
+Checked against `main` at ba66456c6 (2026-11-04). Items 1, 4 and 5 landed;
+2 and 3 stay open.
+
+1. **Bottom padding exceeded top at 1.5x.** Mostly fixed already by #849
+   (the fit remainder joins the top and bottom padding). A residue was left:
+   when the rounded rows stood short of the scaled height by less than a row,
+   the spare pooled under the last row (11 px text, 1.8x, four rows: 12 px
+   above, 16 below). `fit_rows` now splits that spare too; bottom and top
+   differ by at most the one pixel an odd remainder cannot split
+   (`panel/padding_tests.rs`, every scale from 1x to 3x, six font sizes).
+   RESOLVED.
+2. **Square search field above the rounded selection pill.** Open. The field
+   has no fill; what is square is its focus ring, drawn by
+   `scootui::entry::paint::paint_entry`, which the bar and the other apps
+   share. Rounding it is a visual call and a shared-crate change, so it needs
+   a decision on the look first, not a drive-by edit here.
 3. **The inverted match chip stays square** inside the rounded highlight on a
-   selected row (visible in the `moonrise` screenshot #805 added to the docs).
-   Pre-existing chip behavior.
-4. **The icon cache copies pixels and builds a key every draw.**
-   `crates/scootlaunch/src/icons.rs`: `Cache::get` builds
-   `(name.to_string(), side)` on every call, and a hit returns
-   `Icon::Image(decoded.clone())`, cloning the pixel `Vec`. The visible rows
-   pay this on each redraw. Hold the pixels in an `Rc`/`Arc` and look up
-   without allocating a key. Pre-existing; #805's bench adds no allocation of
-   its own.
-5. **A click on the error line over a populated list hits a hidden row.**
-   When `error` is set, `paint_panel` draws only the error line where the
-   first row would be and returns before drawing any row, but
-   `hit_row` still maps the click onto `ui.list().visible_range()`, so a click
-   on that line selects or launches a row that is not drawn. Pre-existing.
-   (The error shows for 2 s after a failed spawn.)
+   selected row. Open, for the same reason: the chip is filled by the shared
+   list painter in `scootui`.
+4. **The icon cache built a key every draw.** The pixel clone was already
+   gone (`Decoded.pixels` is an `Arc<[u8]>`); the owned `(String, u32)` key
+   was the remaining allocation per visible row. The map is now keyed by side,
+   then name, and a hit looks up by `&str`. A warm hit allocates nothing
+   (`a_cache_hit_allocates_nothing`). Measured with `bench_cache_hits` (64
+   warm hits, release): 5.6, 6.2, 5.8 us before; 5.7, 5.1, 5.4 us after, so the
+   time barely moves and the per-redraw allocations are what is saved.
+   RESOLVED.
+5. **A click on the error line hit a hidden row.** `hit_row` now returns
+   `None` while the spawn error is drawn. RESOLVED
+   (`a_click_on_the_error_line_hits_no_row`).
 
 ## What to do
 
-Fix 1 first (it is visible on every 1.5x output), with a test that the
-bottom padding equals the top padding at 1x, 1.5x and 2x. Fix 5 by having
-`hit_row` return `None` while the note is drawn. The rest are polish and a
-small hot-path saving; measure 4 against the `paint_panel` bench before and
-after.
+Decide the look for items 2 and 3 (round the field's ring and the chip, or
+keep them square on purpose), then change `scootui`'s painters with a
+byte-pin update for each app that draws them.
 
 ## Not in this ticket
 

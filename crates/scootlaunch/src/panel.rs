@@ -865,8 +865,14 @@ impl App {
             .is_some_and(|claim| claim.accept_close())
     }
 
-    /// The shown list row under the pointer, if the pointer is over one.
+    /// The shown list row under the pointer, if the pointer is over one
+    /// (none while the spawn error is drawn in place of the rows).
     fn hit_row(&self) -> Option<usize> {
+        // A failed spawn's error is drawn where the first row would be
+        // and no row is drawn under it, so none can be hit.
+        if self.spawn_error.is_some() {
+            return None;
+        }
         let (_, pointer_y) = self.panel_point()?;
         let list = match &self.model {
             Model::Apps(ui) | Model::Run(ui) => ui.list(),
@@ -2594,6 +2600,8 @@ mod bytes_tests;
 mod closed_tests;
 #[cfg(test)]
 mod dmenu_staged_tests;
+#[cfg(test)]
+mod padding_tests;
 #[cfg(test)]
 mod staged_tests;
 
