@@ -279,10 +279,13 @@ decode runs on the bus turn.
   A limit tighter than they need still ends the bar. Both are bounded by
   constants here (decoder: the 16 MiB budget and header checks; glyph:
   `raster_size`). Said in `troubleshooting.md`.
-- `modules/volume/mod.rs::cookie` reads `~/.config/pulse/cookie` with
-  `std::fs::read`, unbounded. It is the user's own file (not external input),
-  so it is not an allocation hazard worth a change here, but a FIFO there
-  would block the open; not touched, noted.
+- `modules/volume/cookie.rs` (was `volume/mod.rs::cookie`, an unbounded
+  `std::fs::read`): **fixed.** Opened `O_NONBLOCK`, the opened fd must be a
+  regular file, and at most 257 bytes are read into a stack buffer (the
+  cookie is exactly 256), so a FIFO or device no longer blocks the bar and a
+  huge file is never read whole. Any failure is the missing-cookie case (a
+  zero cookie, no log). A symlink is followed on purpose: dotfile managers
+  link this file, and the check is on the opened fd.
 - Strict overcommit remains racy where a limit is probabilistic: a refusal is
   honored when it comes, but memory taken by another process after a check is
   not a case a check can close.
