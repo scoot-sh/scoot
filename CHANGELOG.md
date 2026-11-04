@@ -17,6 +17,16 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.2](https://github.com/scoot-sh/scoot/compare/v0.7.1...v0.7.2) - 2026-11-04
+
+### scootlaunch
+
+- fixed: even the fitted padding, no hit on a hidden row, no key allocation per icon hit ([#918](https://github.com/scoot-sh/scoot/pull/918))
+
+### scootnotify
+
+- fixed: queue clicks, keep a replace paused under hover, arm idle on a late seat ([#917](https://github.com/scoot-sh/scoot/pull/917))
+
 ## [0.7.0](https://github.com/scoot-sh/scoot/compare/v0.6.43...v0.7.0) - 2026-11-04
 
 ### scootlaunch
