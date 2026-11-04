@@ -13,14 +13,16 @@
 /// Fits `pixels` (`width × height` premultiplied `b, g, r, a`, rows
 /// packed) into `out`, `side × side` premultiplied pixels. `out` shorter
 /// than that is left untouched; a zero source or side draws nothing.
-pub fn scale_into(pixels: &[u8], width: usize, height: usize, side: u32, out: &mut [u8]) {
+/// `false` only when the allocator refused the working buffer (`out` is
+/// then transparent); every other outcome is `true`.
+pub fn scale_into(pixels: &[u8], width: usize, height: usize, side: u32, out: &mut [u8]) -> bool {
     let side = side as usize;
     let Some(out) = out.get_mut(..side * side * 4) else {
-        return;
+        return true;
     };
     out.fill(0);
     if side == 0 || width == 0 || height == 0 {
-        return;
+        return true;
     }
     // The size drawn: the image's aspect ratio in a square.
     let fit = |long: usize, other: usize| ((other * side + long / 2) / long).clamp(1, side);
@@ -32,7 +34,13 @@ pub fn scale_into(pixels: &[u8], width: usize, height: usize, side: u32, out: &m
     let horizontal = Taps::new(width, dw);
     let vertical = Taps::new(height, dh);
     // Across, into `dw × h`, then down into `dw × dh`.
-    let mut across = vec![0.0f32; dw * height * 4];
+    // Up to 8 MiB at the cache's bounds. Fallible: a refused block reports
+    // `false` (`out` is already cleared) instead of aborting.
+    let mut across = Vec::new();
+    if across.try_reserve_exact(dw * height * 4).is_err() {
+        return false;
+    }
+    across.resize(dw * height * 4, 0.0f32);
     for y in 0..height {
         for x in 0..dw {
             let (start, weights) = horizontal.at(x);
@@ -72,6 +80,7 @@ pub fn scale_into(pixels: &[u8], width: usize, height: usize, side: u32, out: &m
             }
         }
     }
+    true
 }
 
 /// The filter's taps for resampling `from` samples to `to`: for each

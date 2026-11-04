@@ -176,7 +176,7 @@ fn the_scratch_is_reused_between_fills() {
     raster.fill(&vector, 64, &mut out);
     let (allocations, result) = {
         let mut out = vec![0u8; 32 * 32];
-        let ((), count) = scootbg_mem::count_allocations(|| raster.fill(&vector, 32, &mut out));
+        let (_, count) = scootbg_mem::count_allocations(|| raster.fill(&vector, 32, &mut out));
         (count, out)
     };
     assert_eq!(allocations, 0, "a fill at a smaller size allocated");

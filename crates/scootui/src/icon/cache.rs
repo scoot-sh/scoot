@@ -70,14 +70,23 @@ impl Cache {
             self.arena.clear();
         }
         let offset = self.arena.len();
+        // Fallible: a refused block draws no icon, and is asked for again
+        // on the next frame, rather than ending the bar.
+        self.arena.try_reserve(len).ok()?;
         self.arena.resize(offset + len, 0);
         let out = self.arena.get_mut(offset..offset + len)?;
-        match art {
+        let drawn = match art {
             Art::Vector(vector) => self.raster.fill(vector, side, out),
             #[cfg(feature = "png")]
             Art::Image(image) => image.scale_into(side, out),
             #[cfg(feature = "tray")]
             Art::Tray(icon) => icon.scale_into(side, out),
+        };
+        if !drawn {
+            // The allocator refused the draw's working buffer: no entry,
+            // so the next ask draws again instead of finding a blank one.
+            self.arena.truncate(offset);
+            return None;
         }
         self.entries.push(Entry {
             id,

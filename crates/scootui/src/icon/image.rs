@@ -57,6 +57,9 @@ pub enum Error {
     Png(String),
     /// A width or height of 0, or past the bounds.
     Dimensions(u32, u32),
+    /// The allocator refused this many bytes (an address-space limit such
+    /// as `LimitAS=` or `ulimit -v`, or strict overcommit).
+    NoMemory(usize),
 }
 
 impl fmt::Display for Error {
@@ -72,6 +75,7 @@ impl fmt::Display for Error {
                 "{w} x {h} pixels: at least 1 and at most {MAX_SIDE} on a side, \
                  {MAX_PIXELS} pixels in all"
             ),
+            Self::NoMemory(bytes) => write!(f, "out of memory: cannot allocate {bytes} bytes"),
         }
     }
 }
@@ -117,7 +121,13 @@ pub fn load(path: &Path) -> Result<Image, Error> {
     }
     // A file that grew past its size since `fstat` is cut at the bound
     // and refused, not read without end.
-    let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+    // Fallible, and one byte past `size` so reaching the end of the file
+    // never grows the block (growing is infallible).
+    let mut bytes = Vec::new();
+    let wanted = usize::try_from(size).unwrap_or(0).saturating_add(1);
+    bytes
+        .try_reserve_exact(wanted)
+        .map_err(|_| Error::NoMemory(wanted))?;
     std::fs::File::from(fd)
         .take(MAX_FILE + 1)
         .read_to_end(&mut bytes)
@@ -159,7 +169,11 @@ pub fn decode(bytes: &[u8]) -> Result<Image, Error> {
         .output_buffer_size()
         .filter(|&size| size <= MAX_DECODE)
         .ok_or(Error::Dimensions(width, height))?;
-    let mut buffer = vec![0u8; size];
+    // Fallible and lazily committed (`scootbg_mem::zeroed_bytes`): the
+    // decoder's output is the biggest block here, up to `MAX_DECODE`. The
+    // decoder's own working memory is the `png` crate's and stays
+    // infallible (a few hundred KiB; see the backlog audit).
+    let mut buffer = scootbg_mem::zeroed_bytes(size).ok_or(Error::NoMemory(size))?;
     let frame = reader.next_frame(&mut buffer).map_err(png)?;
     let data = buffer.get(..frame.buffer_size()).unwrap_or(&[]);
     let channels = match frame.color_type {
@@ -177,7 +191,9 @@ pub fn decode(bytes: &[u8]) -> Result<Image, Error> {
     if data.len() < count * channels {
         return Err(Error::Png("too little image data".into()));
     }
-    let mut pixels = vec![0u8; count * 4].into_boxed_slice();
+    let mut pixels = scootbg_mem::zeroed_bytes(count * 4)
+        .ok_or(Error::NoMemory(count * 4))?
+        .into_boxed_slice();
     for (out, src) in pixels
         .as_chunks_mut::<4>()
         .0
@@ -209,14 +225,14 @@ impl Image {
     }
 
     /// The image fitted into `out`, `side × side` premultiplied pixels
-    /// (see the module docs). `out` shorter than that is left untouched.
-    pub fn scale_into(&self, side: u32, out: &mut [u8]) {
+    /// (see the module docs). `out` shorter than that is left untouched. `false` when the allocator refused the working buffer.
+    pub fn scale_into(&self, side: u32, out: &mut [u8]) -> bool {
         super::sample::scale_into(
             &self.pixels,
             self.width as usize,
             self.height as usize,
             side,
             out,
-        );
+        )
     }
 }

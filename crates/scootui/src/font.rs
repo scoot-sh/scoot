@@ -129,6 +129,9 @@ pub enum FileError {
     NotRegular,
     Empty,
     TooLarge(u64),
+    /// The allocator refused the bytes to read it into (an address-space
+    /// limit such as `LimitAS=` or `ulimit -v`, or strict overcommit).
+    NoMemory(u64),
     /// ttf-parser cannot read it as a TrueType or OpenType font.
     NotAFont,
 }
@@ -141,6 +144,9 @@ impl fmt::Display for FileError {
             Self::Empty => write!(f, "empty"),
             Self::TooLarge(size) => {
                 write!(f, "{size} bytes, larger than the {MAX_FONT} a font may be")
+            }
+            Self::NoMemory(size) => {
+                write!(f, "out of memory: cannot allocate {size} bytes to read it")
             }
             Self::NotAFont => write!(f, "not a TrueType or OpenType font"),
         }
@@ -386,8 +392,15 @@ pub fn load(path: &Path) -> Result<Font, FileError> {
 /// The file's bytes, at most [`MAX_FONT`]: a file that grew past it since
 /// `fstat` is refused rather than read without end.
 fn read_capped(fd: std::os::fd::OwnedFd, size: u64) -> Result<Vec<u8>, FileError> {
-    // At most `MAX_FONT`, which fits a `usize` on every Linux target.
-    let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+    // At most `MAX_FONT`, which fits a `usize` on every Linux target. One
+    // byte past the size `fstat` gave, so `read_to_end` reaches the end of
+    // the file without growing the block (growing is infallible). Fallible:
+    // this is the largest block the bar owns, and a refusal is a named
+    // error, not an abort.
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(usize::try_from(size).unwrap_or(0).saturating_add(1))
+        .map_err(|_| FileError::NoMemory(size))?;
     std::fs::File::from(fd)
         .take(MAX_FONT + 1)
         .read_to_end(&mut bytes)

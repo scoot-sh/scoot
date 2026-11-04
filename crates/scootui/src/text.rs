@@ -511,6 +511,9 @@ impl Text {
             index = 0;
         }
         let offset = self.arena.len();
+        // Fallible: a refused block draws no glyph, asked for again on the
+        // next draw, rather than ending the bar.
+        self.arena.try_reserve(len).ok()?;
         self.arena.resize(offset + len, 0);
         let target = self.arena.get_mut(offset..offset + len)?;
         outline.draw(|gx, gy, c| {

@@ -38,6 +38,17 @@ use crate::output::Size;
 /// `wp_fractional_scale_v1` scales are in 120ths.
 pub const DENOMINATOR: u32 = 120;
 
+/// The largest scale the compositor can ask for, as an integer factor (a
+/// real output is at most 4, scoot's own cap). Every table the bar builds
+/// grows with the square of a length times the scale (a corner's coverage
+/// is `radius²` bytes, an infallible `Vec`), and a compositor may send any
+/// positive `uint`; past this the scale is cut back, so a bogus one costs
+/// a few megabytes at the worst, not an abort.
+pub const MAX_SCALE: u32 = 16;
+
+/// [`MAX_SCALE`] in 120ths, for a fractional scale.
+pub const MAX_V120: u32 = MAX_SCALE * DENOMINATOR;
+
 /// The scale a surface is drawn at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scale {
@@ -191,12 +202,19 @@ impl Preferred {
     /// surface's integer one and the output's (`wl_output.scale`). A
     /// fraction whose rounding up is below `wl_output.scale` is taken as
     /// stale and the integer used (see the module docs).
+    ///
+    /// Never past [`MAX_SCALE`]: what the compositor sent is cut back to it.
     pub fn scale(&self, output_scale: u32) -> Scale {
         match self.fractional {
             Some(v120) if v120.div_ceil(DENOMINATOR) >= output_scale.max(1) => {
-                Scale::Fractional(v120)
+                Scale::Fractional(v120.min(MAX_V120))
             }
-            _ => Scale::Integer(self.buffer_scale.unwrap_or(1).max(output_scale.max(1))),
+            _ => Scale::Integer(
+                self.buffer_scale
+                    .unwrap_or(1)
+                    .max(output_scale.max(1))
+                    .min(MAX_SCALE),
+            ),
         }
     }
 

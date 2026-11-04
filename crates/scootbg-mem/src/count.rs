@@ -11,7 +11,9 @@
 //!
 //! Nothing here allocates: the counter is a thread-local `Cell` (with no
 //! destructor, so touching it never allocates), so counting cannot recurse
-//! into the allocator. Unarmed allocations cost one relaxed load each.
+//! into the allocator. Unarmed allocations cost two relaxed loads each (the
+//! armed flag, and [`refuse_from`]'s threshold, which refuses nothing by
+//! default).
 //! The count lives on the thread that armed it, so two windows armed on two
 //! threads at once (the tests of one binary under `cargo test`) each see
 //! only their own allocations.
@@ -23,6 +25,26 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// Whether any thread is armed: the fast path keeping unarmed allocations
 /// to one relaxed load.
 static ANY_ARMED: AtomicUsize = AtomicUsize::new(0);
+
+/// The size from which [`CountingAlloc`] refuses a block (returns null, as
+/// an allocator out of memory does); `usize::MAX` refuses nothing.
+static REFUSE_FROM: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+/// From now on, every block of `bytes` or more asked of [`CountingAlloc`]
+/// is refused, the answer a real allocator gives under `RLIMIT_AS` or
+/// strict overcommit: `try_reserve` reports it, `vec![0; n]` aborts. For a
+/// test of what a refusal does, in a process of its own (it is global to
+/// the process, and the abort of a block the code under test should have
+/// asked for fallibly ends it).
+pub fn refuse_from(bytes: usize) {
+    REFUSE_FROM.store(bytes, Ordering::Relaxed);
+}
+
+/// Whether a block of `size` bytes is refused.
+#[inline]
+fn refused(size: usize) -> bool {
+    size >= REFUSE_FROM.load(Ordering::Relaxed)
+}
 
 thread_local! {
     /// `Some(n)` while this thread is armed and has made `n` allocations
@@ -58,6 +80,9 @@ pub struct CountingAlloc;
 unsafe impl GlobalAlloc for CountingAlloc {
     #[inline]
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if refused(layout.size()) {
+            return std::ptr::null_mut();
+        }
         // SAFETY: the caller's layout is passed through unchanged.
         let block = unsafe { System.alloc(layout) };
         note();
@@ -66,6 +91,9 @@ unsafe impl GlobalAlloc for CountingAlloc {
 
     #[inline]
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        if refused(layout.size()) {
+            return std::ptr::null_mut();
+        }
         // SAFETY: the caller's layout is passed through unchanged.
         let block = unsafe { System.alloc_zeroed(layout) };
         note();
@@ -81,6 +109,11 @@ unsafe impl GlobalAlloc for CountingAlloc {
 
     #[inline]
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        // A refused `realloc` leaves the old block alive, as the contract
+        // says a null return does.
+        if refused(new_size) {
+            return std::ptr::null_mut();
+        }
         // SAFETY: `ptr` is a `System` block with `layout`, and the caller's
         // `new_size` contract is passed through unchanged.
         let block = unsafe { System.realloc(ptr, layout, new_size) };

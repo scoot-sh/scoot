@@ -225,6 +225,9 @@ plain reload.
   without those two gets the bar drawn at its integer scale (the fraction
   rounded up) and scaled down: sharp, not device-exact. The daemon says so
   on stderr at start-up.
+  A scale past 16 (a compositor that reports one is broken; scoot's own
+  cap is 4) is drawn as 16, so a bad value cannot size a buffer or a
+  table without bound.
 - **It draws only when something changes** (a new size or scale, or a
   module's content), and otherwise makes no system calls. Idle with the
   clock it wakes **twice a minute**: the clock's tick, and about a

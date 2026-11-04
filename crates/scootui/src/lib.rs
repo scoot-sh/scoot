@@ -91,6 +91,15 @@ pub mod entry;
 #[cfg(feature = "icons")]
 pub mod icon;
 
+/// Run a test body where the allocator refuses large blocks, in a child
+/// process: how the tests pin that a refused allocation is an error, not an
+/// abort.
+#[cfg(any(test, feature = "test-support"))]
+pub mod refusal;
+
+#[cfg(test)]
+mod refused_alloc;
+
 /// The seven-segment test font, built in code: test support for scootui's
 /// own pixel tests and for the apps' integration tests (which write it to a
 /// file and pass it as `--font`).
