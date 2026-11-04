@@ -98,7 +98,10 @@ pub struct Layout {
     pub radius: u32,
     /// Extra vertical pixels split between the top and bottom padding so
     /// the panel height matches the scaled height: the top takes `extra /
-    /// 2` and the bottom the rest. Zero when the rows already fit.
+    /// 2` and the bottom the rest. Zero when the rows fit with a whole row
+    /// or more to spare (a panel the compositor configured bigger); the
+    /// shortfall otherwise, under a row, whether the rows were trimmed to
+    /// fit or fell short.
     pub extra: u32,
 }
 
