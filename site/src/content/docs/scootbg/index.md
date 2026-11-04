@@ -43,8 +43,7 @@ color = "#101014"
 ```
 
 A link works where a path does: `image = "https://example.com/hills.jpg"`
-is downloaded once and cached by scootbg, so an example look can name
-an image nobody commits. `sha256` pins the download's bytes.
+is downloaded once and cached by scootbg. `sha256` pins the download's bytes.
 
 | Field | Type | Reload | Meaning |
 |---|---|---|---|
@@ -100,7 +99,7 @@ On a compositor with `wp_single_pixel_buffer_manager_v1` and
 memory at all: one single-pixel buffer scaled to the output. Without
 single-pixel buffers it is a 1×1 `wl_shm` buffer under the viewport, and
 without a viewporter a full-size buffer. A static color asks for no frame
-callbacks and wakes the daemon for nothing.
+callbacks and never wakes the daemon.
 
 Once on screen a wallpaper costs no CPU (no wakeups in a minute, measured)
 and one buffer per output at most: about 4.0 MB RSS with a color, 36.8 MB
@@ -120,9 +119,9 @@ One daemon per display: its socket is
 `$XDG_RUNTIME_DIR/scootbg-NAME.sock`, `NAME` being the last component of
 `$WAYLAND_DISPLAY` (`wayland-0` when it is unset or empty). A second `scootbg daemon` refuses while one runs, and
 a socket left by a dead one is replaced. The socket
-is `0600` from the moment its name exists, whatever your umask (a crash in
-the instant of start-up can leave an empty `.scootbg-*` directory beside it,
-safe to delete). It exits 0 on `kill` and 1 when
+is `0600` from the moment its name exists, whatever your umask (a crash at
+start-up can leave an empty `.scootbg-*` directory beside it,
+safe to delete). The daemon exits 0 on `kill` and 1 when
 the compositor goes away, removing its socket either way. A signal
 (SIGTERM, Ctrl-C) ends it on the spot and leaves the socket file; the other
 commands then say no daemon is running (exit 1), and the next

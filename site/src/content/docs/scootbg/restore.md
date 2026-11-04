@@ -22,8 +22,7 @@ state, and nothing is restored or saved), and `scootbg daemon` shows it again wh
 - **When it is saved:** a color or a `clear` as soon as the daemon has it,
   an image once it has decoded (one that cannot be shown changes nothing,
   so saves nothing). The file is written off the daemon's loop,
-  atomically (a fresh temporary file that never follows a symbolic link,
-  `fsync`, `rename`), private (0600, in a 0700 directory; a state
+  atomically, private (0600, in a 0700 directory; a state
   directory that already exists and is someone else's, or writable by
   its group or others, is a warning at start-up); `scootbg kill` waits
   for a write under way, and a signal leaves the old file or the new one, never half
@@ -60,7 +59,6 @@ state, and nothing is restored or saved), and `scootbg daemon` shows it again wh
   ([README.md](https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/README.md#restore)).
 - **A restored image is decoded once**, when its outputs are configured:
   about 450 ms to a 6000×4000 JPEG on screen on a 4K output, the same as a
-  `set` on a running daemon. So is an image `set` sent the moment the
-  daemon starts: it waits for the outputs' `configure` (bounded by a
-  round trip already sent) rather than decode once to check the file and
-  again to draw it.
+  `set` on a running daemon. An image `set` sent the moment the
+  daemon starts also decodes once: it waits for the outputs' `configure`
+  first.

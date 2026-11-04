@@ -85,7 +85,7 @@ link, no `curl`, no network, an HTTP error, an error page, a file past
 saying why, and every output keeps what it showed. An animated GIF, APNG
 or animated WebP shows its first frame: at most 64 frames and 64 MiB of
 frames, past which the `set` is refused — pass `--no-animate` for the
-first frame as a still instead (playing frame by frame is a follow-up).
+first frame as a still instead.
 A workspace-mapped animated image shows its first frame the same way
 (caps checked when it is set): `--no-animate` beside `--workspace`
 stills it; a slideshow cannot be mapped per workspace (usage error).
@@ -181,7 +181,7 @@ descriptor, no wakeups. With one, the daemon wakes at most once a minute.
 > names.
 >
 > **Symptom:** *the slideshow stopped after the directory moved.*
-> That is the design above, not a crash: the daemon says so on stderr
+> That is intended, not a crash: the daemon says so on stderr
 > and `query` drops `rotation`. Diagnose with `scootbg query` (no
 > `rotation` object) and re-`set` the new path.
 
@@ -199,8 +199,8 @@ stands alone: an output's image does not take the top level's `mode`);
 and `command` (scoot's, ignored). Anything else (an unknown key, a key
 given twice, `null`, a relative path, a non-`http(s)` URL, a bad color,
 hash, mode or filter, over
-256 outputs or 63 KiB) is refused with exit 2, so a typo is never a
-setting silently not applied.
+256 outputs or 63 KiB) is refused with exit 2, so a typo is never
+silently ignored.
 
 - **Whichever you changed last wins.** The section is applied only if it
   changed since the last `apply-config` for that profile (a SHA-256
@@ -241,8 +241,8 @@ the protocol are in
 
 **`scootbg check-image PATH`** validates one image file without showing
 it: what `scoot look apply` runs over a look's wallpaper before a swap.
-The byte cap (32 MiB) from the file's size, then the pixel cap from the
-header, then a full decode. The byte cap is a `check-image` gate: a
+It checks the byte cap (32 MiB) from the file's size, then the pixel cap
+from the header, then decodes the whole file. The byte cap is a `check-image` gate: a
 swap-time apply enforces the pixel cap and the decode. Prints `ok: <format> <WxH>, <bytes> bytes` and exits 0. A symlink,
 a directory, a FIFO, a device, a missing file, an unknown format and a
 corrupt or oversize image refuse with exit 1, naming the reason. Opening
@@ -307,8 +307,7 @@ slideshow runs (`scootbg set DIR --every`, below), a `rotation` object
 follows `profile`: `{"directory":"/home/me/wallpapers","every_secs":1800,
 "shuffle":false,"files":12}` — what it cycles, every how many seconds, in
 what order, and how many files that is. Which file shows now is each
-output's `shows`, as for a `set`. Absent while no slideshow runs, so a
-static wallpaper's reply is what it was. `workspace` names the workspace active on the output now (`"1"`, `"2"`,
+output's `shows`, as for a `set`. Absent while no slideshow runs. `workspace` names the workspace active on the output now (`"1"`, `"2"`,
 ... on scoot), or `null` while unknown — no mapping, no workspace
 protocol, or no events yet. After the outputs, `workspaces` lists the
 live per-workspace mappings: each with its `output` (`null` for every
@@ -323,4 +322,4 @@ says so once on stderr, and retries every second rather than exit. The
 control protocol itself (one JSON object per line, for scripts that skip
 the CLI) is in [README.md](https://github.com/scoot-sh/scoot/tree/main/docs/scootbg/README.md#the-control-protocol).
 scoot's `[wallpaper]` section, which runs `apply-config`, is in
-([The `[wallpaper]` section](./index.md#the-wallpaper-section)).
+[The `[wallpaper]` section](./index.md#the-wallpaper-section).

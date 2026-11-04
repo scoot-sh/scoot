@@ -81,8 +81,8 @@ Two modules, one switch. `programs.scootlaunch` manages the
 launcher's own file; the desktop profile already runs the launcher
 behind the keymap's binds. The look reaches the panel as a
 runtime layer: a value you set still wins per key. Stylix reaches it
-only as the `stylix` look — there is no Stylix switch and no unit
-here (nothing runs when the panel is closed).
+only as the `stylix` look. There is no Stylix switch and no unit,
+since nothing runs when the panel is closed.
 
 | Option | Type / default | Example | Reload |
 |---|---|---|---|

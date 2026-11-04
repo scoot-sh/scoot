@@ -7,8 +7,8 @@ A different wallpaper on each workspace: while workspace 2 is active,
 the outputs show one image; on workspace 1, another. It follows the
 standard `ext-workspace-v1` protocol scoot already speaks, so it works
 on any compositor with it — not only scoot — and costs nothing when
-unused (the daemon binds the protocol only while a mapping exists: no
-extra wakeups, verified idle).
+unused (the daemon binds the protocol only while a mapping exists, so
+there are no extra wakeups).
 
 ```sh
 scootbg set '#1e1e2e'                              # the base, every output
@@ -70,9 +70,8 @@ a `set --workspace` is refused naming the cap — clear one first.
 
 Mapping the same file on two workspaces decodes and holds it twice (one
 buffer per mapping per size): 64 mappings of one 4K file hold about
-64 × 33 MB. Each `set` re-reads the file (it may have changed), so the
-daemon never shares pixels between mappings by path; the 64-mapping cap
-bounds the worst case. Map colors, or fewer images, where memory is
+64 × 33 MB. Each `set` re-reads the file, so the daemon never shares pixels
+between mappings by path; the 64-mapping cap bounds the worst case. Map colors, or fewer images, where memory is
 tight.
 
 ## Animated images
@@ -90,13 +89,12 @@ scootbg set ~/Pictures/anim.gif --workspace 2 --no-animate   # first frame, caps
 
 A slideshow cannot be mapped per workspace:
 `set DIR --every DURATION --workspace NAME` is refused (usage error,
-exit 2) on the CLI and on the wire.
+exit 2) on the CLI and on the wire. Map images or colors instead.
 
 A `--no-animate` still is live-only: the state file never persists the
 flag, so after a restart the caps are checked again and an over-cap
 mapping is refused then (the output shows its own wallpaper until the
-next `set --workspace`). A slideshow cannot be mapped per workspace at
-all: map images or colors per workspace instead. The `[wallpaper]` workspace
+next `set --workspace`). The `[wallpaper]` workspace
 tables always animate: there is no `animate` key, so if the caps refuse an
 animated file, map a still or a smaller file.
 

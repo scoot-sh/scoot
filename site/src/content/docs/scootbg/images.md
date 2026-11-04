@@ -17,7 +17,7 @@ yours) and must be valid UTF-8. PNG, JPEG, GIF and WebP are read, told
 apart by content, not by name (an animated GIF, APNG or animated WebP
 shows its first frame: at most 64 frames and 64 MiB of frames; past
 that the `set` is refused — pass `--no-animate` for the first frame
-instead; playing frame by frame is a follow-up; a `--no-animate` still
+instead; a `--no-animate` still
 is live-only, re-checked after a restart);
 transparency is shown over the fill color, and EXIF orientation is
 applied (a JPEG's, a WebP's, or a PNG's `eXIf` chunk). `--mode` fits it to each output:
@@ -71,5 +71,5 @@ happens for a moment when the compositor has not yet told a surface its
 new scale (sway does not while nothing is shown on it): the image is on
 screen when `set` returns, drawn larger and scaled down, never stretched,
 and redrawn exact once the compositor sends the scale. A compositor scale that is
-not a multiple of 1/120 (1.33, say) cannot be drawn exactly by any client,
-since the protocol cannot say it.
+not a multiple of 1/120 (1.33, say) cannot be drawn exactly by any client:
+the protocol cannot express it.

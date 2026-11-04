@@ -23,10 +23,8 @@ Ctrl+Enter runs the typed text as a command. A dmenu pick prints
 instead of launching (the line, or its index with `--index`); run
 mode launches executables by basename. Flags, the stdin/stdout
 contract and exit codes are in the [CLI reference](./cli.md).
-Nothing prints for an apps or run launch: the
-launch replaces the id the panel used to print. The panel links
-`libxkbcommon.so.0` for its keyboard (the reference
-XKB implementation); a scoot desktop already carries it.
+Nothing prints for an apps or run launch. The panel links
+`libxkbcommon.so.0` for its keyboard; a scoot desktop already carries it.
 
 The panel draws at the output's real device pixels, fractional scales
 included (`wp_fractional_scale_v1` with `wp_viewporter`): on a 2x output
@@ -73,9 +71,8 @@ and a missing theme all fall back to the tile. Icons render at device
 pixels: the side is about 1.2 times the font size, times the surface
 scale, so a 1.5 output draws a 1.5x bitmap through the viewport.
 
-The stripped release is 1446648 bytes without `svg` (budget 1.8 MB)
-and 2167544 bytes with it (the `svg` row, for the waiver ruling; the
-index-only 1053368-byte row predates icons).
+The stripped release is 1446648 bytes without `svg` and 2167544 bytes
+with it.
 
 ## Keys
 
@@ -99,9 +96,9 @@ output. The click then goes on to whatever is under it. A compositor
 that keeps the keyboard on an exclusive surface and has no such rule
 leaves the panel open; Escape or a second invocation closes it. A
 second `scootlaunch` while the panel is open dismisses it, so one
-bind toggles: no pid file, no abstract name, just a socket in
-`$XDG_RUNTIME_DIR` with the peer's uid checked, plus a
-`scootlaunch-<display>.lock` file that serialises two opens at once.
+bind toggles. The toggle uses a socket in `$XDG_RUNTIME_DIR` with the
+peer's uid checked, plus a `scootlaunch-<display>.lock` file that
+serialises two opens at once.
 
 ## Config
 
@@ -206,8 +203,7 @@ panel from the same roles:
 ## Depth and motion
 
 A look can give the panel a shadow, a gradient fill and motion. All are
-off by default, and a look that sets none draws and behaves exactly as
-before. Set them in `look.toml`:
+off by default. Set them in `look.toml`:
 
 ```toml
 [effects]
@@ -401,5 +397,5 @@ app landed in. No scope at all means the move was refused or timed
 out (500 ms): the app keeps running in the launcher's cgroup, and
 the run says why on stderr. A bus with no user manager behind it
 answers `ServiceUnknown` the same way; with no bus at all the app
-starts detached instead, and the docs say it stays in the
+starts detached instead and stays in the
 compositor's cgroup.
