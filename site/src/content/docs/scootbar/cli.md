@@ -67,7 +67,7 @@ Each flag at most once, as `--flag VALUE` or `--flag=VALUE`.
 | `--exclusive` | `true` or `false` | `true` | Whether the bar reserves its height, so windows are arranged beside it, or floats over them, reserving nothing. |
 | `--height` | 1 to 1024 | 28 | The bar's height in logical pixels. On a scaled output it is drawn at the output's real pixels: 28 at scale 1.5 is 42 device pixels. |
 | `--margin` | one to four of 0 to 1024, comma-separated | `0` | Space between the bar and the output's edges, in logical pixels, in CSS order: `ALL`, `VERTICAL,HORIZONTAL`, `TOP,HORIZONTAL,BOTTOM` or `TOP,RIGHT,BOTTOM,LEFT`. See [Margins](./configure.md#margins). |
-| `--background` | `'#rrggbb'` | `'#1e1e2e'` | The bar's color, six hex digits in either case. Quote it: the shell reads `#` as a comment. Its opacity is the file's `[bar] opacity`: see [Shape and opacity](./configure.md#shape-and-opacity). |
+| `--background` | `'#rrggbb'` | `'#1e1e2e'` | The bar's color, six hex digits in either case. Quote it: the shell reads `#` as a comment. Its opacity is the file's `[bar] opacity`: see [Shape, opacity and depth](./configure.md#shape-opacity-and-depth). |
 | `--foreground` | `'#rrggbb'` | `'#cdd6f4'` | The text's color (the theme's `fg` token: see [Colors](./configure.md#colors)). |
 | `--font` | a path | the first [well-known font](./configure.md#fonts) found | The font file, TrueType or OpenType (`.ttf`, `.otf`; a collection's first face). Any bytes: a path need not be UTF-8. |
 | `--font-size` | 1 to 256 | 14 | The text's size, the em, in logical pixels; drawn at the output's real pixels like the bar. An `[output."NAME"]` table's `font-size` overrides it for that output only. |
@@ -213,7 +213,7 @@ right = ["clock"]
 `margin` takes an integer (every side) or the `--margin` shorthand
 string. `radius`, `popup-radius`, `opacity`, `separator`, the modules' `margin` and the
 pill's keys are file-only: they have no flags (see
-[Shape and opacity](./configure.md#shape-and-opacity), [Spacing](./configure.md#spacing) and
+[Shape, opacity and depth](./configure.md#shape-opacity-and-depth), [Spacing](./configure.md#spacing) and
 [the pill](./modules.md#the-active-workspaces-pill)). The module lists take the ids in [Modules](./modules.md#modules), with `"|"`
 entries marking where a separator goes (see [Spacing](./configure.md#spacing)); giving any
 of the three sets the whole layout, as the flags do. An `[output."NAME"]`
