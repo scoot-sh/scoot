@@ -5,9 +5,8 @@ description: "The look.toml schema v1: tokens, defaults, validation and rendered
 
 A look is a directory of plain files. `look.toml` holds the tokens.
 `validate` and `build` read that directory with the `scoot-look`
-binary. No step needs Nix: a plain binary install renders the same
-sources with the same binary. A Nix install renders them at build
-time with the same binary.
+binary. No step needs Nix: a plain binary install renders the sources
+with the same binary a Nix install uses at build time.
 
 ## A look is a directory
 
@@ -26,8 +25,9 @@ A rendered look is the output of a build: `scoot.toml`, `bar.toml`,
 daemon leaves (`mako`, `wob.ini`, `fcitx5/theme.conf`, `nightlight` when
 the look names a temperature) and the terminal static leaves
 (`apps/helix.toml`, `apps/nvim.lua`, `apps/btop.theme`,
-`apps/starship.toml`, each only when the look carries it). It is never edited and never a source for
-anything. The two never share a path.
+`apps/starship.toml`, each only when the look carries it). A rendered
+look is never edited and never a source for anything. A source look and
+a rendered look never share a path.
 
 The catalog is the union of the source directories, in fixed order:
 user looks, installed looks, home-manager, system, shipped. Origin
@@ -85,7 +85,7 @@ color = "#2B3648"
 | `fonts.nix` | Nixpkgs attribute paths: `ui`, `sans` or `mono` to one to eight `Name.segment` paths. Resolved only with `lib.attrByPath` against `pkgs`. Nix-only; a non-Nix box resolves families with `fc-match`. |
 | `opacity` | `bar`, `popups`, `terminal`: 0.0 to 1.0, each default 1.0. |
 | `shape` | `radius`: 0 to 64, default 0. `ring-width`: 0 to 64, required. `ring-inactive-width`: default = `ring-width`. No `gap` in v1: gap is layout, not presentation. |
-| `effects` | Depth and motion tokens, all optional and unset by default. `shadow`: `none`, `soft`, `deep` or `glow`. `fill`: `solid` or `gradient`. `motion`: `none`, `ease-out` or `spring`. `motion-duration-ms`: 0 to 1000. `motion-bounce`: 0.0 to 1.0. `scootnotify`, `scootlaunch` and `scootbar` read them; a look that sets none renders exactly the fragments it did before. See [notification depth](../scootnotify/configure.md#depth) and [motion](../scootnotify/configure.md#motion), the [launcher's](../scootlaunch/panel.md#depth-and-motion), and the [bar's](../scootbar/configure.md#shape-opacity-and-depth). To set them for every look without editing one, use the `[effects]`, `[card]` and `[title]` tables of `notify.toml` and `launch.toml` ([notifier](../scootnotify/configure.md#effects-over-any-look), [launcher](../scootlaunch/panel.md#effects-over-any-look)), and the `[effects]` table of `bar.toml` (the [bar's own](../scootbar/configure.md#effects-over-any-look)). |
+| `effects` | Depth and motion tokens, all optional and unset by default. `shadow`: `none`, `soft`, `deep` or `glow`. `fill`: `solid` or `gradient`. `motion`: `none`, `ease-out` or `spring`. `motion-duration-ms`: 0 to 1000. `motion-bounce`: 0.0 to 1.0. `scootnotify`, `scootlaunch` and `scootbar` read them. See [notification depth](../scootnotify/configure.md#depth) and [motion](../scootnotify/configure.md#motion), the [launcher's](../scootlaunch/panel.md#depth-and-motion), and the [bar's](../scootbar/configure.md#shape-opacity-and-depth). To set them for every look without editing one, use the `[effects]`, `[card]` and `[title]` tables of `notify.toml` and `launch.toml` ([notifier](../scootnotify/configure.md#effects-over-any-look), [launcher](../scootlaunch/panel.md#effects-over-any-look)), and the `[effects]` table of `bar.toml` (the [bar's own](../scootbar/configure.md#effects-over-any-look)). |
 | `cursor` | `theme`: name, required. `size`: 4 to 256, default 24. `accent`: `#rrggbb` or `"none"`, default = `focus`. `body`: optional `#rrggbb`; a look leaves it alone unless set. |
 | `wallpaper` | One unit, never merged per key: `image` or `color`, never both. `image` is a path inside the look dir, or `https://` plus a required 64-hex `sha256`. `mode`: `fill`, `fit`, `stretch`, `center` or `tile` (image only; a color wallpaper carries no `mode` or `fill`). `fill`: default = `background`. `transition`: `none`, `fade`, `wipe` or `grow` (default `none`; the five shipped looks set `fade`, which animates at scootbg's defaults: 500 ms, `ease-out`). |
 | `icons` | `theme`: name. Default `Adwaita`. |
@@ -109,17 +109,17 @@ Only one `.workspace.` layer parses: a second one under a
 `wallpaper.workspace.` prefix refuses.
 Output and workspace names hold 1 to 64 ASCII letters, digits,
 spaces and `_.+-`. Anything else in the suffix refuses, as does any
-key with a newline, `=`, `[` or quote. The renderer quotes every
-key on top of that. No override names an `image`: only the
-top-level `wallpaper.image`, resolved to an absolute path at build
-time, does. Per-output and per-workspace images belong in the
-user's own file.
+key with a newline, `=`, `[` or quote. The renderer also quotes every
+key. No override names an `image`: only the top-level
+`wallpaper.image`, resolved to an absolute path at build time, does.
+Per-output and per-workspace images belong in the user's own file.
 
 `scootbar` takes its six colors, bar style and per-module visual
 keys, plus `bar.shadow`, `bar.fill`, `bar.motion`, `bar.motion-duration-ms`
-and `bar.motion-bounce` (the `[effects]` tokens, per app). The bar's `font` and `fallback-fonts` are not overrides: scootbar
-reads file paths there, so only the tool's resolved `--ui-font-file`
-supplies them, and a fragment without one carries neither key.
+and `bar.motion-bounce` (the `[effects]` tokens, per app). The bar's
+`font` and `fallback-fonts` are not overrides: scootbar reads file
+paths there, so only the tool's resolved `--ui-font-file` supplies
+them, and a fragment without one carries neither key.
 `scootnotify`, `scootlaunch` and `scootgreet` take the thirteen
 color roles plus face, size, opacity and radius. `scootnotify`,
 `scootlaunch` and `scootbar` also take `shadow` and `fill` (`scootbar` as
@@ -132,8 +132,8 @@ takes `card.enter`, `card.exit`, `card.mark`, `card.shape`,
 what they do not read, since they would report an unknown key on every
 load.
 
-Every allowlisted key has a value kind, checked at parse. There is
-no key whose value gets only a length check.
+Every allowlisted key has a value kind, checked at parse. No key's
+value gets only a length check.
 
 | Key | Value |
 |---|---|
@@ -216,7 +216,7 @@ Four pairs refuse below their bar: foreground on background at
 3.0, focus on background at 3.0. Four more pairs report only: `dim`
 on background at 3.0, `urgent` on background at 3.0, `dim` on
 `surface` at 4.5, and `border` on background at 3.0. A warning
-names the pair and the ratio to two decimals; bars compare on the
+names the pair and the ratio to two decimals. Bars compare on the
 unrounded value, so a warning always means below the bar (ratios print
 truncated to two decimals, so a failing pair never prints as its bar).
 
@@ -252,11 +252,11 @@ only with `--ui-font-file`: scootbar reads a file path there, and
 without one the bar falls back to its well-known font paths.
 Per-app overrides merge into those tables: each section renders
 once, with the override winning, so every fragment reparses.
-`gtk/gtk-3.0.css` carries the look's selection as direct rules
-(proven amber live; a `:root` block breaks its parser and
-`@define-color` has no effect on it). `gtk/gtk-4.0.css` carries the look's accent and surfaces as the named
-colors libadwaita paints with, plus the matching `:root` vars (plain
-GTK 4 widgets keep the stock accent). `qt/scoot-look.conf` carries the
+`gtk/gtk-3.0.css` carries the look's selection as direct rules (a
+`:root` block breaks its parser and `@define-color` has no effect on
+it). `gtk/gtk-4.0.css` carries the look's accent and surfaces as the
+named colors libadwaita paints with, plus the matching `:root` vars
+(plain GTK 4 widgets keep the stock accent). `qt/scoot-look.conf` carries the
 Qt color scheme.
 `foot.ini` carries `[main]` with `initial-color-theme` from the look's
 polarity, and the 16 `[terminal]` hues as `regular0-7` then
@@ -265,7 +265,7 @@ has no `[colors]`), each with `alpha` from `opacity.terminal`. Both
 themes hold the same hues, so new terminals match whatever theme is
 in effect.
 `fuzzel.ini` carries the seven launcher colors as a `[colors]`
-table in fuzzel's `rrggbbaa` spelling; it sets no font, so the launcher
+table in fuzzel's `rrggbbaa` spelling. It sets no font, so the launcher
 keeps the user's own. `swaylock` carries the fourteen locker colors as
 `key=value` lines in swaylock's `rrggbb` spelling. Both are
 next-launch: fuzzel reads its config on every start, swaylock on
@@ -309,11 +309,10 @@ first-party fragments: a refused `[apps.scootlaunch]` key fails the
 build the same way a bad bar key does.
 
 `render.json` names the source, its hash and the resolved inputs
-(font files, wallpaper path). The inputs come from the
-environment: the tool resolves font files and the wallpaper's
-absolute path, and the Nix build passes the font packages. The
-fragments must pass the apps' own strict parsers; that check
-lives in the caller. The daemon leaves need only the look's tokens:
+(font files, wallpaper path). The inputs come from the environment:
+the tool resolves font files and the wallpaper's absolute path, and the
+Nix build passes the font packages. The fragments must pass the apps'
+own strict parsers; that check lives in the caller. The daemon leaves need only the look's tokens:
 `mako` the notification colors, `wob.ini` a complete OSD config
 without a `timeout` line (the hide timeout is desktop configuration,
 not a look token), `fcitx5/theme.conf` the classic UI theme,
@@ -376,8 +375,8 @@ scoot-look import-base16 scheme.yaml --name my-look --out /tmp/my-look
 ```
 
 One mapping turns any base16 scheme (or the base24 superset) into a
-source look. It is what Stylix gives a Nix user, for a plain install:
-no Nix involved, plain files in and out. It reads base16 YAML and the
+source look. It does for a plain install what Stylix does for a Nix
+user: plain files in and out, no Nix. It reads base16 YAML and the
 JSON form the Nix side serializes, with or without a leading `#`, any
 case, `palette:`-nested or flat. A leading UTF-8 BOM strips first.
 The input caps at 64 KiB. The YAML subset refuses tabs for indent,
@@ -396,8 +395,8 @@ a named error.
 | `match` | `base0A` |
 | `[terminal]` | ANSI 0-15 as `base00, base08, base0B, base0A, base0D, base0E, base0C, base05, base03, base08, base0B, base0A, base0D, base0E, base0C, base07` (base16's terminal order: foot `regular0-7` then `bright0-7`), only without `--extends` |
 
-This matches the Nix modules for the slots they use today. Companion
-data applies when present: `variant` (or `polarity`) sets dark or
+This matches the Nix modules for the slots they use. Companion data
+applies when present: `variant` (or `polarity`) sets dark or
 light, else `base00` against `base05` decides. `fonts` maps `sansSerif`
 to `sans` and `ui`, `monospace` to `mono`. `sizes` maps `desktop`,
 `popups`, `applications` and `terminal` to the four point sizes.

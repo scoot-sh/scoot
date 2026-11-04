@@ -3,8 +3,8 @@ title: Look targets
 description: "Theme any app from a template: target.toml, tokens, reload, wiring."
 ---
 
-One look themes every app together, including apps scoot never
-hard-codes. A target is a template plus a line saying where the
+One look themes every app together, including apps scoot does not
+know about. A target is a template plus a line saying where the
 rendered file goes and how to tell the app. Make one per app you want
 themed; `scoot look apply` renders each into the active look beside the
 built-in fragments and runs your reload command.
@@ -50,9 +50,9 @@ under the same swap, cache key and rollback as the built-in fragments.
 `look validate` and `look build` cover targets the same way. A sync
 with targets configured (hand-written or Nix-declared) renders fresh
 instead of pointing at the Nix catalog render (built without the
-templates) and says so. An in-tree example (kitty, all sixteen
-terminal colors) lives in `docs/examples/look-targets/kitty-colors/`,
-beside the six-app starter pack below.
+templates) and says so. An in-tree example (kitty, all sixteen terminal
+colors) is in `docs/examples/look-targets/kitty-colors/`, beside the
+six-app starter pack below.
 
 ## target.toml
 
@@ -76,9 +76,9 @@ include ~/.local/state/scoot/look/targets/kitty/colors.conf
 ```
 
 (`~/.local/state/scoot` is the default state dir; the `look` link
-inside it points at the active render.) Leave a foreign file alone:
-when the app's own module or another tool owns the path, keep that
-ownership and let the look stay out of it.
+inside it points at the active render.) Leave a file that another tool
+owns alone: when the app's own module or another tool owns the path,
+keep that ownership and let the look stay out of it.
 
 ## Template tokens
 
@@ -86,8 +86,8 @@ A token is `{{ dotted.path }}`, exactly the look's own spelling
 (`palette.accent-fg`, `terminal.color4`, `fonts.mono`). Tokens a look
 does not set (a missing `[terminal]` table, an unset `[effects]` key)
 refuse instead of rendering empty. There are no conditionals, loops, or
-includes: pure substitution, and templates are data — nothing in one
-ever executes. A template needing a literal `{{` has no escape in v1;
+includes: it is pure substitution, and nothing in a template ever
+executes. A template needing a literal `{{` has no escape in v1;
 a stray `}}` with no opening `{{` stays literal (JSON nests `}}`).
 
 | Token | Renders |
@@ -116,10 +116,9 @@ The reload runs after the swap stands: a zero exit counts as reloaded,
 anything else (missing binary, timeout, non-zero exit) is a note naming
 what happened. A reload that writes past 64 KiB on stdout or stderr is
 killed instead, and the note says its output was truncated. A failing
-reload never undoes the swap. A failing render
-does the opposite: unknown token, unreadable template, duplicate or
-escaping output — the swap refuses before anything is recorded, the way
-a refused reload does.
+reload never undoes the swap. A failing render does the opposite
+(unknown token, unreadable template, duplicate or escaping output): the
+swap refuses before anything is recorded.
 
 Installed looks (someone else's) can never supply templates, output
 paths, or reload commands. A `look.toml` with a `[targets]` table or a
@@ -153,15 +152,15 @@ allowlist, so only these user-owned directories are ever read.
 
 ## Starter pack
 
-Seven maintained targets ship in-tree in `docs/examples/look-targets/<name>/`:
-the kitty example above plus the six below (each with its `target.toml` and template, each rendering in a test so the
-example cannot rot). Add the ones you want with
-[`scoot look target add`](#add-a-pack) (or copy a directory into
-`~/.config/scoot/look-targets/<name>/` by hand), then add the wiring line
-to the app's own config, once, by hand. Keys you set in your own config after the
-include win per key. All six need a look with a `[terminal]` table;
-against a look without one `validate` names the missing token. None of
-the six declares a `[reload]`: the middle
+Seven maintained targets ship in-tree in
+`docs/examples/look-targets/<name>/`: the kitty example above plus the
+six below, each with its `target.toml` and template. Add the ones you
+want with [`scoot look target add`](#add-a-pack) (or copy a directory
+into `~/.config/scoot/look-targets/<name>/` by hand), then add the
+wiring line to the app's own config, once, by hand. Keys you set in
+your own config after the include win per key. All six need a look
+with a `[terminal]` table; against a look without one `validate` names
+the missing token. None of the six declares a `[reload]`: the last
 column says how each app picks up the re-render.
 
 | Target | What it themes | Picks up a swap |
@@ -173,8 +172,8 @@ column says how each app picks up the re-render.
 | `zathura` | page, status bar, input bar, completion, index, search highlight, font | restart: `R` reloads the document, not the config |
 | `rofi` | window, input bar, list, selected and urgent rows, messages, font | next launch: rofi reads its theme on every start |
 
-Wire each one at its rendered path (the look state dir's `look` link plus
-`targets/<output>`):
+Wire each one at its rendered path (the look state dir's `look` link
+plus `targets/<output>`):
 
 ```text title="~/.config/alacritty/alacritty.toml"
 import = ["~/.local/state/scoot/look/targets/alacritty/colors.toml"]
@@ -236,7 +235,7 @@ every swap, so the add is gated like `look install --trust`. Without
 `--trust` it prints, for each target, what it writes, its `RELOAD` command
 on a line of its own (or `reload: none`), and the whole template, then
 exits 1 having written nothing. With `--trust` the same review prints
-first and the targets land. Nothing runs at add time; the files are read,
+first and the targets land. Nothing runs at add time: the files are read,
 checked and copied, and the bytes you read are the bytes written.
 
 | Check | What refuses |

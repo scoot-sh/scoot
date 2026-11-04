@@ -3,59 +3,55 @@ title: Builds and renderers
 description: "The one scoot package, how the renderer is chosen, and the CPU-only minimal build."
 ---
 
-There is one build: `scoot`. It runs everywhere — on real hardware it
-scans out from the GPU, in a VM or container it renders on the CPU —
-and its default (`auto`) picks the right renderer per session. This page
-is about how that choice works, how to override it, and the one
-special case: X11 apps and the CPU-only minimal build.
+There is one build: `scoot`. It runs everywhere: on real hardware it
+scans out from the GPU, and in a VM or container it renders on the CPU.
+Its default (`auto`) picks the renderer per session. This page covers
+how that choice works, how to override it, and the special cases: X11
+apps and the CPU-only minimal build.
 
 ## Which build do I need?
 
 Just `scoot`, from the binary cache
 ([Use the binary cache](../start/binary-cache.md)). The GPU scanout
-tier is compiled in and reaches the GPU libraries at run time, so the
+tier is compiled in and loads the GPU libraries at run time, so the
 same binary starts with and without a GPU stack installed.
 
-The only remaining knob for X11 apps is **whether you turn them on**,
-not which package you install: every `scoot` already carries the
-`xwayland` build feature, and only if you run X11 apps should you pay
-Xwayland's own ~344 MiB of closure (all but ~12 MiB of it Xwayland's
-own, which links Mesa) and its trust decision — any X client can read
-other X clients' keys by design. To run X11 apps: install the `Xwayland`
-binary beside scoot (the Nix package already has it on `PATH` via its
-wrapper) and turn the knob on (`--xwayland` or `[xwayland] enabled`).
-(More in [XWayland](../scoot/xwayland.md).)
+For X11 apps the choice is **whether you turn them on**, not which
+package you install: every `scoot` already carries the `xwayland` build
+feature. Turn them on only if you run X11 apps, because Xwayland adds
+~344 MiB of closure (all but ~12 MiB of it Xwayland's own, which links
+Mesa) and a trust decision: any X client can read other X clients' keys
+by design. To run X11 apps, install the `Xwayland` binary beside scoot
+(the Nix package already has it on `PATH` via its wrapper) and turn the
+knob on (`--xwayland` or `[xwayland] enabled`). More in
+[XWayland](../scoot/xwayland.md).
 
-One visible side effect of the wrapper: it leaves the process name as
-`.scoot-wrapped`, not `scoot` — so `pgrep -x scoot` finds nothing there;
-use `pgrep -x .scoot-wrapped`.
+The wrapper leaves the process name as `.scoot-wrapped`, not `scoot`, so
+`pgrep -x scoot` finds nothing there; use `pgrep -x .scoot-wrapped`.
 
 ### Do I have a GPU?
 
-You do not need to answer this to pick a build — but `auto`
-behaves differently with and without one, so it is still worth one
-command:
+You do not need the answer to pick a build, but `auto` behaves
+differently with and without a GPU, so check with one command:
 
 ```sh
 ls /dev/dri/renderD*
 ```
 
 - **No output (no such directory, no matches)** → no GPU to use.
-  The VM and container case is first-class, not degraded: `auto`
-  resolves to the CPU renderer there — running with no GPU is a hard
-  requirement, not a fallback tier.
+  `auto` resolves to the CPU renderer. Running with no GPU is fully
+  supported, not a degraded fallback.
 - **A render node listed (for example `renderD128`)** → a GPU exists.
   On real hardware, `auto` picks the GPU renderer under `--tty`. On a
-  VM the node is usually software (llvmpipe) — there the GPU renderer
+  VM the node is usually software (llvmpipe), and there the GPU renderer
   runs several times *slower* than the CPU renderer, so `auto` stays on
-  the CPU renderer unless you measured otherwise (pass `--renderer gpu`
-  explicitly to override it).
+  the CPU renderer. Pass `--renderer gpu` to override it.
 
 ### Say it in the config
 
-The package knob is `programs.scoot.package` (home-manager and NixOS
-alike; the desktop profile never sets it — the choice stays yours).
-Leave the default (omit `package`): there is only one package now.
+The package option is `programs.scoot.package` (home-manager and NixOS
+alike; the desktop profile never sets it). Leave the default (omit
+`package`): there is only one package.
 
 ```nix title="configuration.nix"
 programs.scoot = {
@@ -78,20 +74,20 @@ The same name works with `nix profile add` and `nix run`.
 renderer in VMs, containers, nested and headless sessions. An
 explicit `--renderer cpu` or `--renderer gpu` always wins over `auto`.
 
-Every session logs one line saying what was decided and why —
-`requested=… source=… tier=… reason=…` with `renderer chosen` on it.
-When the tier is not what you expected, read `reason=` there first.
+Every session logs one `renderer chosen` line saying what was decided
+and why: `requested=… source=… tier=… reason=…`. When the tier is not
+what you expected, read `reason=` there first.
 Full rules, per-session table and symptoms:
 [Backends and rendering](../scoot/backends.md#which-renderer-draws-the-frames).
 
-`--renderer gpu` on a box with no GPU stack does not silently degrade:
-the session warns naming what was missing and keeps the CPU renderer
+`--renderer gpu` on a box with no GPU stack does not degrade silently:
+the session warns, naming what was missing, and keeps the CPU renderer
 with dumb buffers. `auto` on the same box resolves to the CPU renderer
 with the reason in the log line — it never fails startup.
 
 On real hardware the GPU renderer uses about a quarter of the
 compositor CPU of the CPU renderer under damage (measured on Apple
-Silicon; method and numbers:
+Silicon; method and numbers in
 [Backends and rendering](../scoot/backends.md#which-renderer-draws-the-frames)).
 
 ## The smallest build: CPU only

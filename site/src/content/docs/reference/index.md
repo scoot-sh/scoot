@@ -3,9 +3,9 @@ title: Reference hub
 description: "Every complete reference in one place, and what each is for."
 ---
 
-The whole reference shelf, each beside the guide that teaches it.
-Guides first (the task you have), references here (the exact shape of
-everything).
+Every complete reference, each beside the guide that teaches it. Start
+with the guide for your task; use these for the exact shape of
+everything.
 
 | Reference | What it pins down |
 |---|---|
