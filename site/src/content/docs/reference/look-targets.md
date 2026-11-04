@@ -3,8 +3,8 @@ title: Look targets
 description: "Theme any app from a template: target.toml, tokens, reload, wiring."
 ---
 
-One look themes every app together, including apps scoot does not
-know about. A target is a template plus a line saying where the
+One look themes every app together, including apps scoot has no
+built-in fragment for. A target is a template plus a line saying where the
 rendered file goes and how to tell the app. Make one per app you want
 themed; `scoot look apply` renders each into the active look beside the
 built-in fragments and runs your reload command.
