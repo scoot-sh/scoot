@@ -1262,58 +1262,56 @@ Worth knowing before you write against it:
 scoot publishes its window list through **two** protocols at once:
 
 - **`ext-foreign-toplevel-list-v1`** (version 1, global
-  `ext_foreign_toplevel_list_v1`) — the compositor-agnostic successor, and
+  `ext_foreign_toplevel_list_v1`): the compositor-agnostic successor, and
   what a standards-following taskbar, dock or alt-tab switcher should prefer.
   Enumeration only; the protocol has no requests.
 - **`wlr-foreign-toplevel-management-unstable-v1`** (version 3, global
-  `zwlr_foreign_toplevel_manager_v1`) — the older protocol, which is what
-  every Quickshell-based shell (DMS, Noctalia) actually binds today. Stock
-  quickshell 0.3.1 is offered the `ext-` list and never binds it, because its
+  `zwlr_foreign_toplevel_manager_v1`): the older protocol, which every
+  Quickshell-based shell (DMS, Noctalia) binds today. Stock quickshell 0.3.1
+  is offered the `ext-` list and never binds it, because its
   `ToplevelManager` is a wlr client; without the wlr protocol both shells'
   window sections render empty. It enumerates *and* controls.
 
-Both are the protocol-side twin of `scoot msg windows`: the same windows, the
-same lifetime, live rather than polled — and, because they are driven from
-the same three window-lifecycle events inside the compositor, a client bound
-to both sees one window list described twice rather than two lists that can
-drift.
+Both are the protocol-side twin of `scoot msg windows`: the same windows and
+lifetime, live rather than polled. Both are driven from the same three
+window-lifecycle events, so a client bound to both sees one window list
+described twice, not two lists that can drift.
 
 ### `ext-foreign-toplevel-list-v1`
 
 - **One `ext_foreign_toplevel_handle_v1` per window**, carrying `identifier`,
   `title` and `app_id`. Binding the global announces every window that
   already exists, so registry order doesn't matter.
-- **Changes arrive in batches closed by `done`.** A window is announced the
-  moment its `xdg_toplevel` exists, which is *before* the toolkit has sent
-  its app id and title: the first batch is usually two empty strings,
-  followed a moment later by a batch per field as they arrive.
+- **Changes arrive in batches closed by `done`.** A window is announced
+  the moment its `xdg_toplevel` exists, *before* the toolkit has sent its
+  app id and title. The first batch is usually two empty strings, followed
+  by a batch per field as they arrive.
 - **`closed` when the window goes**, after which nothing else is sent on that
   handle.
 - **`stop` is answered with `finished`**, and means "no more *new* windows":
   handles the client already has keep reporting title and app id changes
-  until it destroys them, which is what the protocol's own teardown sequence
-  requires.
+  until it destroys them, as the protocol's teardown sequence requires.
 - **Binding counts against the same 8-bind per-client budget** as the
   workspace manager; a ninth bind is answered `finished` rather than
   announced.
 
-**The identifier is `<generation>-<window id>`** — e.g. `a3e689a2-1`: eight
+**The identifier is `<generation>-<window id>`**, e.g. `a3e689a2-1`: eight
 hex digits of per-session randomness (the "opaque generation value" the
 protocol recommends, so identifiers from two scoot sessions never collide)
 and, after the last dash, the window id `scoot msg windows` reports. That
-suffix is the bridge between the two: this protocol has no requests at all,
-so a client that finds a window here and wants to *act* on it sends `scoot
-msg action focus-window-id N` with the number after the dash.
+suffix is the bridge between the two. This protocol has no requests, so a
+client that finds a window here and wants to *act* on it sends `scoot msg
+action focus-window-id N` with the number after the dash.
 
-Worth knowing before you write against it:
+Before you write against it:
 
 - **There is no control half, by design.** No `activate`, `close`,
-  `minimize`, `fullscreen`, geometry or per-output state — those are meant
+  `minimize`, `fullscreen`, geometry or per-output state; those are meant
   for extension protocols that don't exist yet. Use the wlr protocol below,
   or scoot's IPC.
 - **A handle covers a window's whole life, not the time it is mapped.** The
   protocol talks about "mapped" toplevels, but scoot has no map/unmap
-  boundary at all — a window is in the layout, the focus order and `scoot msg
+  boundary: a window is in the layout, the focus order and `scoot msg
   windows` from the moment its `xdg_toplevel` exists.
 - **An identifier is never reused.** Close a window and open another and it
   gets a new one, even from the same client.
@@ -1325,13 +1323,13 @@ Per window, on a `zwlr_foreign_toplevel_handle_v1`:
 
 - **`title` and `app_id`**, and **`output_enter`** naming the screen it is
   on. Binding the global announces every window that already exists, oldest
-  first — and a client that binds `wl_output` *after* the manager is sent the
+  first. A client that binds `wl_output` *after* the manager is sent the
   `output_enter` it missed as soon as it does.
-- **`state`, carrying `activated` and `fullscreen`** — scoot's real window
-  focus, the same one `scoot msg windows` reports as `focused`, and whether
-  the window is fullscreen, the same flag `scoot msg windows` reports.
-  `fullscreen` only exists from version 2 of the protocol, so a client that
-  bound version 1 is never sent it (a change to it alone sends such a client
+- **`state`, carrying `activated` and `fullscreen`**: scoot's real window
+  focus (the `focused` flag in `scoot msg windows`), and whether the window
+  is fullscreen (the same flag `scoot msg windows` reports). `fullscreen`
+  only exists from version 2 of the protocol, so a client that bound
+  version 1 is never sent it (a change to it alone sends such a client
   nothing).
 - **Changes arrive in batches closed by `done`.** A window is announced
   before its toolkit has sent a title or taken focus, so its first batch is
@@ -1348,7 +1346,7 @@ What a client can ask for:
   a click on the window itself: if your panel is a layer surface that took
   the keyboard when the user clicked it, `activate` hands the keyboard on to
   the window. It does that whether or not the window was already focused.
-  `scoot msg action focus-window-id N` behaves the same way — see
+  `scoot msg action focus-window-id N` behaves the same way; see
   [ipc.md](../msg/index.md#rules-an-agent-needs).
 - **`close`** sends the window's `xdg_toplevel.close`. Whether the window
   actually goes is up to its own client; `closed` follows if and when it
@@ -1365,33 +1363,32 @@ What a client can ask for:
   state bit is reported to every handle version (unlike `fullscreen`, it
   exists from version 1). Refused while the session is locked, like
   `set_fullscreen`.
-- **`set_minimized`, `unset_minimized`
-  and `set_rectangle` are accepted and do nothing.** `set_rectangle` is a minimise-animation hint scoot reads
-  nothing from; unlike wlroots, an invalid rectangle is ignored rather than
+- **`set_minimized`, `unset_minimized` and `set_rectangle` are accepted and
+  do nothing.** `set_rectangle` is a minimise-animation hint scoot reads
+  nothing from. Unlike wlroots, an invalid rectangle is ignored rather than
   answered with a protocol error, because disconnecting a shell over a number
   nothing looks at would be worse.
 
-Worth knowing before you write against it:
+Before you write against it:
 
 - **`activate` needs a seat, and a headless shell may not have one.**
   quickshell sources the `wl_seat` argument from Qt's last input device, so a
-  `ShellRoot` with no window and no input event sends nothing at all when you
-  call `activate()` — no request reaches the compositor. With a real
-  `PanelWindow` and a real click it works. Test it with a window.
+  `ShellRoot` with no window and no input event sends nothing when you call
+  `activate()`: no request reaches the compositor. With a real `PanelWindow`
+  and a real click it works. Test it with a window.
 - **`output_leave` is sent when a move carries the window across
-  outputs** — one `output_leave` for the old screen plus one `output_enter`
-  for the new one, closed by `done`, on exactly the window that moved (which
-  is the only thing that can change a window's screen: new windows open on
-  the pointer's output, and switching workspaces does not move one). Closing a
-  window sends `closed` with no `leave` first — the handle's death is the
-  `closed` event, and nothing may be sent on it after. A client holding no
-  `wl_output` for either screen hears nothing about the move, not even a
-  bare `done`.
+  outputs:** one `output_leave` for the old screen plus one `output_enter`
+  for the new one, closed by `done`, on exactly the window that moved. Only
+  a move can change a window's screen: new windows open on the pointer's
+  output, and switching workspaces does not move one. Closing a window sends
+  `closed` with no `leave` first; the handle's death is the `closed` event,
+  and nothing may be sent on it after. A client holding no `wl_output` for
+  either screen hears nothing about the move, not even a bare `done`.
 - **`parent` is never sent** (the version 3 event). scoot's layout has no
   parent/child relation; every `xdg_toplevel` is an independent column entry,
   dialogs included.
 - **The list stays live while the session is locked, but the two requests are
-  refused** — a window you cannot see must not be focused or closed from
+  refused:** a window you cannot see must not be focused or closed from
   behind the lock screen.
 
 ## Display information (`wlr-output-management-v1`)
@@ -1399,23 +1396,22 @@ Worth knowing before you write against it:
 `zwlr_output_manager_v1` version 4, which is what `wlr-randr`, `kanshi` and a
 shell's Settings → Display page read the screen's modes, position, scale and
 transform from. `wl_output` says what the screen *is*; this is the management
-protocol on top of it. This is the wlr protocol rather than an `ext-` one
-only because no `ext-` successor exists yet.
+protocol on top of it. It is the wlr protocol because no `ext-` successor
+exists yet.
 
 **It is read-only. `apply` and `test` always answer `failed`.** scoot's
 outputs are never moved, disabled, rescaled or re-moded by a client; each
 output's scale and mode come from the config file
 ([`[[outputs]]`](./outputs.md)), whose scales a `scoot msg
-reload` re-applies -- so there is nothing a configuration could change; a
-configuration that reported `succeeded` and changed nothing would give you
-a Display page whose buttons appear to work. `wlr-randr --output <name>
---pos 100,100` (or `--scale 2`) prints `failed to apply configuration` and
-exits non-zero. The heads do report each output's own scale and mode, so a
-config file with per-output entries reads back correctly through
-`wlr-randr`.
+reload` re-applies. A configuration that reported `succeeded` and changed
+nothing would give you a Display page whose buttons appear to work.
+`wlr-randr --output <name> --pos 100,100` (or `--scale 2`) prints `failed to
+apply configuration` and exits non-zero. The heads report each output's own
+scale and mode, so a config file with per-output entries reads back
+correctly through `wlr-randr`.
 
 - **One `zwlr_output_head_v1` per output**, each carrying its own `name` (the
-  same one `wl_output` reports — a DRM connector name like `HDMI-A-1` under
+  same one `wl_output` reports: a DRM connector name like `HDMI-A-1` under
   `--tty`, `headless`, `headless-2`, … otherwise), `description`, `make`,
   `model`, `enabled`, `position`, `transform`, `scale` and `adaptive_sync`
   (always `disabled`; scoot has no VRR support).
@@ -1428,19 +1424,18 @@ config file with per-output entries reads back correctly through
   objects the client already has stay valid until it destroys them.
 - **Binding counts against the same 8-bind per-client budget.**
 
-Worth knowing before you write against it:
+Before you write against it:
 
 - **The refresh rate is always 60 Hz**, including under `--tty` on a faster
-  panel. `wl_output` reports the same thing; this mirrors it rather than
-  adding a second, differently-wrong number.
+  panel. `wl_output` reports the same value, and this mirrors it.
 - **No `physical_size` and no `serial_number`.** scoot knows neither (its
   physical size is `0x0` on `wl_output` too, and its serial is a
   placeholder), and the protocol allows omitting both. A client that keys a
   saved per-monitor profile off a serial would otherwise match every scoot
   session on every machine.
 - **The mode list only grows, never shrinks.** A new mode is added rather
-  than replacing the old one, matching what `wl_output` does. Under `--tty`
-  that happens once per mode the display actually changes to, so a VM window
+  than replacing the old one, matching `wl_output`. Under `--tty` that
+  happens once per mode the display actually changes to, so a VM window
   moved between a 2x and a 1x screen a few times leaves a mode for each
   distinct size. Under `--nested` it happens once per size the host
   configures scoot's window to, which for a window dragged to resize is once
@@ -1450,20 +1445,18 @@ Worth knowing before you write against it:
   the size scoot is already at does not even resize the output.
 - **A `--tty` VT switch changes nothing by itself.** The output does not go
   away when you switch to another VT, it just stops being drawn, so the head
-  stays enabled with the same mode and no `done` is sent. The one thing a
-  switch *back* can produce is a mode change, and the switch is not what
-  caused it: a display plugged in or resized while scoot was on another VT
-  could not be acted on then, so the switch back re-probes and applies
-  whatever moved.
+  stays enabled with the same mode and no `done` is sent. A switch *back* can
+  produce a mode change, but only because a display plugged in or resized
+  while scoot was on another VT could not be acted on then. The switch back
+  re-probes and applies whatever moved.
 - **One head per output, still read-only.** `--headless --outputs N`
-  announces N heads (see above); `apply`/`test` stay refused — more outputs
-  don't change that.
+  announces N heads; `apply`/`test` stay refused.
 
 ## Screen capture (`ext-image-copy-capture-v1`)
 
-Version 1 together with `ext-image-capture-source-v1` (version 1) — what
+Version 1 together with `ext-image-capture-source-v1` (version 1), used by
 `grim`, a shell's workspace-overview live preview, a screen recorder or a
-conferencing screen-share uses. Three globals:
+conferencing screen-share. Three globals:
 
 | Global | What it is for |
 | ------ | -------------- |
@@ -1482,51 +1475,47 @@ This is separate from `scoot msg screenshot`, which goes over the privileged,
 owner-only IPC socket and is what an agent uses. This is the
 standard-protocol path, for tools that will never speak scoot's own IPC.
 
-What to know before pointing a client at it:
+Before pointing a client at it:
 
 - **Each output is captured from its own framebuffer.** A source made from
   the second output (`grim -o headless-2`) is accepted and reads that
-  output's own pixels — never the first output's. A source naming no output
+  output's own pixels, never the first output's. A source naming no output
   of this compositor is answered `stopped`.
 - **Output capture only.** A source can be made from a `wl_output`; there is
   no toplevel capture source manager, so a *single window* cannot be captured
   on its own. The global is not advertised at all, so a client takes its
-  fallback path immediately instead of discovering a refusal at runtime. The
-  remaining thumbnail fallback (region crop out of the output) needs no
-  compositor work — a screen-source `ScreencopyView` in a clipped container
-  at the window's rect — but DMS's `TileItem.qml` hard-requires a `Toplevel`
-  source, so the shells must change.
+  fallback path immediately instead of meeting a refusal at runtime. DMS's
+  `TileItem.qml` hard-requires a `Toplevel` source, so that shell's window
+  thumbnails need a change on the shell side.
 - **`wl_shm` buffers only, `Xrgb8888` or `Argb8888`.** A capture session
-  never offers to write into a dma-buf — capture is the direction where scoot
-  does the writing, and `wl_shm` already works everywhere at no extra cost to
-  a CPU renderer. This is unchanged by the renderer-derived import formats
-  below: importing a client's buffer and *rendering into* one are different
-  capabilities, and the second has no code path here.
+  never offers to write into a dma-buf. Importing a client's buffer and
+  *rendering into* one are different capabilities, and capture has only the
+  first.
 
   `Xrgb8888` is offered first: if `[appearance]
   background_color` has an alpha below 1.0 then the framebuffer really is
   translucent, and an `Xrgb8888` capture forces the fourth byte opaque so you
   get a screenshot rather than a translucent image. With the default opaque
-  background that pass is skipped — same bytes either way. An `Argb8888`
-  capture hands you the framebuffer's own alpha.
+  background that pass is skipped, and the bytes are the same either way. An
+  `Argb8888` capture hands you the framebuffer's own alpha.
 - **The buffer size is the framebuffer's, and it is re-advertised on a
   resize.** If `--tty` follows a hotplug to a new mode, every live session
   gets a fresh `buffer_size` + `done`. A capture whose buffer is now *too
   small* is answered `failed(buffer_constraints)`, asking the client to
-  re-allocate — but one whose buffer is still large enough (the output
-  shrank) succeeds into the oversized buffer, with the client's own margin
-  pixels left untouched outside the captured region.
+  re-allocate. One whose buffer is still large enough (the output shrank)
+  succeeds into the oversized buffer, with the client's own margin pixels
+  left untouched outside the captured region.
 - **A session's first capture is served on the next frame; later ones wait
-  for the screen to change.** The protocol allows exactly this, and it is
-  what keeps a live-preview client from costing a full-screen copy every
-  frame on a desktop that is not moving. A capture parked this way is served
-  the moment anything redraws.
+  for the screen to change.** The protocol allows exactly this, and it keeps
+  a live-preview client from costing a full-screen copy every frame on a
+  desktop that is not moving. A capture parked this way is served the moment
+  anything redraws.
 - **Captures show rounded corners.** `screenshot` and `screencopy` read the
   composited frame, so a non-zero `[appearance] corner_radius` appears in
   captures: window corners show whatever is behind the window. An agent
   diffing screenshots against expected pixels must account for the session's
   configured radius.
-- **At most one *outstanding capture* per session** — a second `capture`
+- **At most one *outstanding capture* per session.** A second `capture`
   request before the first has been answered is failed rather than queued.
   And at most sixteen live frame *objects* per client, across all of its
   sessions: a further `create_frame` is refused with the protocol's own
@@ -1554,38 +1543,35 @@ What to know before pointing a client at it:
 - **A cursor session accepts one `get_capture_session`.** A second request
   is refused with the protocol's `duplicate_session` error, which
   disconnects the client that sent it.
-- **While the session is locked, a capture sees the lock screen** — never the
-  windows behind it, and never a half-drawn transition.
+- **While the session is locked, a capture sees the lock screen**, never the
+  windows behind it and never a half-drawn transition.
 - **On the GPU scanout tier a capture never sees a stale screen, including
   under a fullscreen window scanned out directly.** A capture of such a
-  frame forces one composite frame first. A session that keeps capturing —
-  a frame waiting, or one asked for within the last second — keeps the
-  output composited instead, so a recorder or screen-share costs what it
-  always did; the output goes back to direct scanout about a second after
-  the last capture.
+  frame forces one composite frame first. A session that keeps capturing (a
+  frame waiting, or one asked for within the last second) keeps the output
+  composited instead, so a recorder or screen-share costs what it always
+  did. The output goes back to direct scanout about a second after the last
+  capture.
 - **`paint_cursors` is honoured, on every backend and renderer.** A session
   that asked for it (`grim -c`) gets the pointer composited into every
-  capture, exactly as the screen draws it — image, hotspot, scale, over
-  whatever is under it; a session that did not (plain `grim`) never does,
-  whichever the frame it was read from held. That includes `--headless` and
+  capture, exactly as the screen draws it (image, hotspot, scale, over
+  whatever is under it). A session that did not (plain `grim`) never does,
+  whichever frame it was read from. That includes `--headless` and
   `--nested`, which draw no cursor on screen, and the `--tty` GPU scanout
-  tier, whose cursor rides a hardware plane. It is done by re-rendering
-  just the cursor's region for the capture where the frame does not
-  already match the request; mechanics and measured cost per tier in
-  [tty.md](./backends.md#captures-and-the-pointer) (nothing measurable on
-  pixman; a 0.4-0.9 ms region render per capture on the dev VM's
-  software-rendered GPU tier). Where the cursor rode an overlay plane that
-  may be an underlay — which leaves a transparent hole in the frame a
-  capture reads — that place is re-rendered whether or not the pointer was
-  asked for, so no capture shows the hole. A session that asked for the
-  pointer is also served a new frame when only the pointer moves — nothing
-  else has to redraw — while one that did not keeps waiting for the scene
-  itself to change, including under `--tty`, where moving the pointer
-  redraws the frame. The pointer is only in the capture of the output it is
-  on.
+  tier, whose cursor rides a hardware plane. Where the frame does not
+  already match the request, scoot re-renders just the cursor's region for
+  the capture; the mechanics are in
+  [tty.md](./backends.md#captures-and-the-pointer). Where the cursor rode an
+  overlay plane that may be an underlay, which leaves a transparent hole in
+  the frame a capture reads, that place is re-rendered whether or not the
+  pointer was asked for, so no capture shows the hole. A session that asked
+  for the pointer is also served a new frame when only the pointer moves,
+  while one that did not keeps waiting for the scene itself to change
+  (under `--tty`, moving the pointer redraws the frame). The pointer is only
+  in the capture of the output it is on.
 - **Pointer cursor sessions are served.** `create_pointer_cursor_session`
   hands a client the pointer's *image* in a buffer of its own, with `enter`,
-  `leave`, `position` and `hotspot` events — what wayvnc uses to send the
+  `leave`, `position` and `hotspot` events. wayvnc uses it to send the
   pointer to a VNC viewer as a cursor shape instead of painting it into the
   screen.
   - The buffer is `Argb8888` only (a cursor needs its alpha), sized to the
@@ -1595,9 +1581,9 @@ What to know before pointing a client at it:
     size is announced with a fresh buffer-size batch and the client's waiting
     frame fails with `buffer_constraints`, which is the protocol's cue to
     allocate again.
-  - A frame is answered when the image changes — a new shape, a cursor
+  - A frame is answered when the image changes (a new shape, a cursor
     surface committing, hiding and reshowing, a reload that changes
-    `cursor_size`, `cursor_color` or `cursor_theme` — and the first one
+    `cursor_size`, `cursor_color` or `cursor_theme`) and the first one
     immediately. Moving the pointer is not a new image: it only moves
     `position`, sent at most once per frame interval.
   - A hidden cursor (`set_cursor` with no surface, or hidden after idle) and
@@ -1610,97 +1596,91 @@ What to know before pointing a client at it:
 ### GPU-rendering clients (`zwp_linux_dmabuf_v1`)
 
 `zwp_linux_dmabuf_v1` is advertised (version 6), and dmabufs really are
-imported — a GPU-rendering client works here under either renderer. On
+imported: a GPU-rendering client works here under either renderer. On
 the CPU renderer (`--renderer cpu`, or `auto` wherever there is no GPU
-hardware stack) there is no GPU on the compositor side at all:
-the client renders with the GPU and hands over a dma-buf, and scoot `mmap`s
+hardware stack) there is no GPU on the compositor side at all. The
+client renders with the GPU and hands over a dma-buf, and scoot `mmap`s
 it and composites it on the CPU, next to `wl_shm` clients in the same
 session. No `LIBGL_ALWAYS_SOFTWARE=1` needed. Under `--renderer gpu` the
 buffer goes to the GPU driver instead, as a texture.
 
-What is advertised is **what the renderer this session is actually running
-can import**, because a format in the table that could not then be imported
+What is advertised is **what the renderer this session is running can
+import**, because a format in the table that could not then be imported
 would kill the client that believed it
 (`zwp_linux_buffer_params_v1.create_immed` has no soft refusal). The table
-is derived from that renderer rather than fixed, and pinned over the wire by
-test:
+is derived from that renderer rather than fixed:
 
-- **CPU (`--renderer cpu`):** `Xrgb8888` then `Argb8888`, `LINEAR` only, single-plane only —
-  the only layout a CPU mapping can read — minus either one the CPU renderer cannot
-  import.
+- **CPU (`--renderer cpu`):** `Xrgb8888` then `Argb8888`, `LINEAR` only,
+  single-plane only (the only layout a CPU mapping can read), minus either
+  one the CPU renderer cannot import.
 - **GPU (`--renderer gpu`, on every backend, including the `--tty` GPU
   scanout tier):** every format and modifier the GPU driver says it
-  imports. On real hardware that means GPU clients get their **native
+  imports. On real hardware, GPU clients get their **native
   tiled/compressed layouts** instead of being forced into slow linear
   buffers, and video players can hand over **multi-plane YUV** (`NV12`,
   `P010`, three-plane `YUV420`, packed `YUYV`, …) straight from a decoder,
   composited through the driver's own YUV sampling. `Xrgb8888` and
   `Argb8888` are listed first, each at whatever layouts the driver names
-  for it, so wherever the driver offers both at `LINEAR` the CPU table is
-  the head of the GPU one — but not on a driver that lists them only as
-  tiled, which then gets no `LINEAR` entry for them at all.
+  for it. Wherever the driver offers both at `LINEAR`, the CPU table is
+  the head of the GPU one; a driver that lists them only as tiled gets no
+  `LINEAR` entry for them at all.
 
   Two things are deliberately left out of the GPU table. An **implicit
   modifier** (`DRM_FORMAT_MOD_INVALID`, "the driver's default layout") is
   never offered for a format the driver named explicit layouts for: a YUV
   buffer imported that way is sampled as if it were RGB and shows the wrong
-  colors (measured, not assumed). And a format the driver lists without
-  naming *any* layout — a display without
-  `EGL_EXT_image_dma_buf_import_modifiers`, or a driver that refuses the
-  modifier query for it — is offered only if it is `Xrgb8888`/`Argb8888`,
-  at `LINEAR`, which such a driver is known to import; anything else there
-  would be a guess.
+  colors. And a format the driver lists without naming *any* layout (a
+  display without `EGL_EXT_image_dma_buf_import_modifiers`, or a driver that
+  refuses the modifier query for it) is offered only if it is
+  `Xrgb8888`/`Argb8888`, at `LINEAR`, which such a driver is known to
+  import. Anything else there would be a guess.
 
 A client too old for feedback (protocol version 1 or 2) is told only
-fourccs, with no layout, and allocates implicitly; for a YUV format under
-GLES that is the wrong-colors path below — a wrong picture rather than a
-disconnect on the drivers measured (llvmpipe only; a driver that refuses
-implicit YUV imports would refuse it instead).
+fourccs, with no layout, and allocates implicitly. For a YUV format under
+GLES that is the wrong-colors path below: a wrong picture rather than a
+disconnect on llvmpipe; a driver that refuses implicit YUV imports would
+refuse it instead.
 
 A client that ignores the feedback and offers a layout the table never
 named gets whatever the renderer says: `failed` on the asynchronous
 `create`, which it survives, and a protocol error on `create_immed`, which
 the protocol prescribes. (Under GLES a client that allocates an implicit
-YUV buffer anyway is not killed — it just draws the wrong colors.)
+YUV buffer anyway is not killed; it just draws the wrong colors.)
 
-On the dev VM's software GL (Mesa llvmpipe) the GLES table is 57 formats,
-all at `LINEAR` — Mesa lists no other layout there. On an Apple M2 (Mesa's
-`asahi` driver) it is 162 pairs: 54 formats, each at
-`APPLE_GPU_TILED_COMPRESSED`, `APPLE_GPU_TILED` and `LINEAR`, and Mesa's GL
-and Vulkan clients allocate the compressed layout (`Asahi.md`, Test 6).
-Other hardware is recorded per machine, not promised here. The line to
-look for is logged once at startup:
+The size of the GLES table depends on the driver: Mesa's software GL lists
+every format at `LINEAR` only, while a hardware driver such as Apple's
+`asahi` lists tiled and compressed layouts as well. The line to look for is
+logged once at startup:
 `dmabuf feedback: advertising the renderer's importable formats pairs=… fourccs=…`
 (and the whole table at `RUST_LOG=scoot=debug`).
 
-Two edges of that derivation are worth knowing before you debug one of
-them. If the active renderer can import *nothing* this compositor can
-vouch for — an EGL display with no dma-buf import capability at all —
-**no dmabuf global is advertised**. That steers GL clients onto `wl_shm`
-rather than killing them, but it is not free: they then render in
-software, and a shell that waits for dmabuf feedback before capturing
-(below) waits forever. scoot logs `reported no dma-buf format it can be
-trusted to import` when it happens, and `--renderer cpu` is the working
-session on such a machine. A compositor with no renderer at all advertises
-nothing here for the same reason.
+Two edges of that derivation to know before you debug one of them. If the
+active renderer can import *nothing* this compositor can vouch for (an EGL
+display with no dma-buf import capability at all), **no dmabuf global is
+advertised**. That steers GL clients onto `wl_shm` rather than killing them,
+but they then render in software, and a shell that waits for dmabuf feedback
+before capturing (below) waits forever. scoot logs `reported no dma-buf
+format it can be trusted to import` when it happens, and `--renderer cpu`
+is the working session on such a machine. A compositor with no renderer at
+all advertises nothing here for the same reason.
 
 `main_device` names a **render node**: the active renderer's own, where it
 can name one, else `/dev/dri/renderD128`, else `card0`, else `0`. The
 renderer's own device leads because that is the device an import can
-actually succeed against — on a two-GPU machine a client that allocated
-against the other node would hand over a buffer this renderer cannot
-import. Which rung answered is logged once at startup
+succeed against: on a two-GPU machine a client that allocated against the
+other node would hand over a buffer this renderer cannot import. Which rung
+answered is logged once at startup
 (`dmabuf feedback main device device=… source=…`).
 
-The global also gates screen capture for some shells: quickshell's buffer
-manager instantiates no capture context at all — not even the `wl_shm` one
-— until it has seen real dmabuf feedback, so without this advertisement
+The global also gates screen capture for some shells. quickshell's buffer
+manager instantiates no capture context at all, not even the `wl_shm` one,
+until it has seen real dmabuf feedback, so without this advertisement
 every quickshell `ScreencopyView` stays blank despite the capture protocol
 working.
 
-**This follows `--renderer`**, and no longer asks you to avoid one: the
-table is the active renderer's, so `gpu` advertises what the GPU driver
-can import and `cpu` advertises what the CPU renderer can. See
+**This follows `--renderer`:** the table is the active renderer's, so `gpu`
+advertises what the GPU driver can import and `cpu` advertises what the CPU
+renderer can. See
 [tty.md](./backends.md#which-renderer-draws-the-frames).
 
 **Limits.** Every plane `add`ed is one fd, and counts against the client's
@@ -1708,21 +1688,19 @@ can import and `cpu` advertises what the CPU renderer can. See
 while it sits in a params object, while it is part of a buffer, and after
 the client destroys that `wl_buffer` if a surface still shows it. A
 four-plane buffer is four. Under a GLES renderer that keeps its own copy
-of each imported plane (Mesa's software renderer, measured on the dev VM:
-a three-plane `YU12` buffer costs scoot six fds; Apple's AGX driver too,
-`Asahi.md` Test 10) the copies count too,
-from the `add`; scoot measures this once per session, on the first import
+of each imported plane (Mesa's software renderer and Apple's AGX driver
+do: a three-plane `YU12` buffer costs scoot six fds) the copies count too,
+from the `add`. scoot measures this once per session, on the first import
 it can measure cleanly, and logs it
 (`dmabuf: learned how many fds the renderer keeps of each imported
 plane`). A dma-buf `wl_buffer` also counts against the same 512 live
 buffers per client as every other buffer, and both `create` and
 `create_immed` claim. Planes that have been `add`ed to a
 `zwp_linux_buffer_params_v1` object which has not yet been turned into a
-buffer are also bounded on their own: without that, a client could add
-planes and never create anything; review measured 220 params objects x 4
-planes holding 927 fds. A client may have **32** such planes at once,
-across all its params objects. (Under fd pressure there is no separate
-grace for them any more; the client's whole fd count is what the
+buffer are also bounded on their own, because otherwise a client could add
+planes and never create anything. A client may have **32** such planes at
+once, across all its params objects. (Under fd pressure there is no separate
+grace for them; the client's whole fd count is what the
 [pressure limit](#per-client-limits-on-what-scoot-keeps) reads.) A plane
 stops counting as pending when its params object is consumed by
 `create`/`create_immed` (whatever the import's outcome) or destroyed, and
@@ -1730,14 +1708,13 @@ when the client disconnects. An `add` past the bound
 disconnects the client with `wl_display.error` `no_memory`; the params
 interface has no error for "too many". A client that adds one buffer's
 planes (at most four) and creates it straight away, which is how the
-protocol is meant to be used, stays far below; that is reasoned from the
-protocol, not checked against each GPU client, since none makes a dma-buf
-on the dev VM.
+protocol is meant to be used, stays far below (reasoned from the protocol,
+not measured per client).
 
 #### Per-surface feedback: the scanout tranche
 
-The default feedback — the one every client gets, and what
-`get_surface_feedback` answers for almost every surface — is one tranche
+The default feedback, which every client gets and which
+`get_surface_feedback` answers for almost every surface, is one tranche
 with no `scanout` flag. There is one exception, and it exists only on the
 GPU scanout tier (`--tty --renderer gpu`, `gpu-scanout` build): the
 **fullscreen window covering an output** is sent per-surface feedback whose
@@ -1748,7 +1725,7 @@ that acts on it reallocates into one of those layouts, and its buffers can
 then be shown straight from its own memory instead of being composited.
 
 - **Nothing new is promised.** The scanout tranche is a subset of the
-  default table — the entries the plane would accept — so every pair in it
+  default table (the entries the plane would accept), so every pair in it
   already imports; the format table and main tranche are the default's, entry
   for entry. A client that allocates from it and then gets composited anyway
   (a notification drawn over it, a capture stream) is imported like any
@@ -1759,48 +1736,44 @@ then be shown straight from its own memory instead of being composited.
   the one the display would be offered: the window opaque over the whole
   output (an opaque-format buffer or an opaque region), or a black
   background with no wallpaper under it (a black single-pixel-buffer
-  wallpaper counts as black background). Otherwise -- a transparent window
-  over the default background, or over a wallpaper -- the display is never
+  wallpaper counts as black background). Otherwise (a transparent window
+  over the default background, or over a wallpaper) the display is never
   offered the window's buffer, and steering the client would cost it a
-  reallocation for nothing (the rules in [tty.md](./backends.md)). One known cost:
-  the scanout feedback reaches a window only after it has redrawn at the
+  reallocation for nothing (the rules in [tty.md](./backends.md)). The
+  scanout feedback reaches a window only after it has redrawn at the
   fullscreen size (before that it does not span the output), so a client
-  that acts on it reallocates its buffers twice on entering fullscreen --
-  once for the size, once for the layout. Subsurfaces are not steered. A surface that first asks
-  for feedback after its window went fullscreen gets the scanout feedback on
-  that first answer.
+  that acts on it reallocates its buffers twice on entering fullscreen:
+  once for the size, once for the layout. Subsurfaces are not steered. A
+  surface that first asks for feedback after its window went fullscreen gets
+  the scanout feedback on that first answer.
 - **When it changes.** Only on a change, never per frame. When the covering
   window changes (it leaves fullscreen, unmaps, another window or workspace
   takes the output) the old one gets the default feedback back at once. When
   the same window still covers the output but a lock, a capture stream or a
   translucent moment stops it going direct, it keeps the scanout feedback,
   and gets the default back on the first frame drawn two seconds or more
-  later if it still cannot — so a shell refreshing a thumbnail, which counts
+  later if it still cannot. So a shell refreshing a thumbnail, which counts
   as streaming for a second, never makes the game reallocate. (The check
   rides on drawn frames: a screen that draws nothing, like a still lock
-  screen, keeps the scanout feedback until it next draws, which is harmless —
-  every pair in it imports.) A notification or popup drawn over the window changes
-  nothing: it is transient, and the window goes direct again the moment it is
-  gone.
+  screen, keeps the scanout feedback until it next draws, which is harmless
+  because every pair in it imports.) A notification or popup drawn over the
+  window changes nothing: it is transient, and the window goes direct again
+  the moment it is gone.
 - **What the plane accepts.** Explicit tiled or compressed modifiers only
   where the plane names them (`IN_FORMATS`), `LINEAR` where the plane names
-  it, or — on a plane that names no modifiers at all, like the dev VM's
-  virtio-gpu — `LINEAR` for single-plane formats the plane lists. An
-  alpha format counts as its opaque twin (the display ignores alpha on the
-  bottom plane). Never an implicit modifier. A modifier the display's buffer
-  manager has been seen to lose on import is dropped from the tranche and the
-  window re-sent, because such a buffer can only ever composite.
+  it, or `LINEAR` for single-plane formats the plane lists, on a plane that
+  names no modifiers at all (virtio-gpu). An alpha format counts as its
+  opaque twin (the display ignores alpha on the bottom plane). Never an
+  implicit modifier. A modifier the display's buffer manager has been seen to
+  lose on import is dropped from the tranche and the window re-sent, because
+  such a buffer can only ever composite.
 - **Logged once per plane set:** `dmabuf feedback: scanout tranche for
   fullscreen windows pairs=… lost=… device=…`, or `the primary plane takes
   none of the advertised formats; no scanout tranche` when there is nothing to
-  offer (then nothing is ever sent). On the dev VM it is `XR24` and `AR24` at
-  `LINEAR`. On an Apple M2 it is 10 formats at `LINEAR` and names the
-  display card, not the render node. Mesa's GL clients (es2gears, mpv) move
-  from their compressed layout to `LINEAR` when it arrives and back when it
-  is withdrawn, and mpv then goes direct. Vulkan's `vkcube` rebuilt its
-  swapchain for the fullscreen size about 7 ms before the tranche arrived,
-  and did not rebuild again, so whether it would act on the tranche is
-  open (`Asahi.md`, Tests 5 and 6).
+  offer (then nothing is ever sent). Whether a client acts on the tranche
+  is up to the client: Mesa's GL clients (es2gears, mpv) move from their
+  compressed layout to `LINEAR` when it arrives and back when it is
+  withdrawn, and mpv then goes direct.
 
 No other backend or tier sends per-surface feedback that differs from the
 default.
@@ -1812,33 +1785,33 @@ together with two points on DRM timeline syncobjs: an *acquire* point its
 GPU signals when the buffer is finished, and a *release* point scoot signals
 when it is done reading the buffer. NVIDIA's driver effectively requires
 it, and Mesa's Vulkan WSI uses it where the compositor offers it and the
-driver supports it; without it a GPU
-client depends on implicit fencing, which not every driver provides.
-It has been verified with Mesa drivers only, not yet on NVIDIA.
+driver supports it. Without it a GPU client depends on implicit fencing,
+which not every driver provides. Only Mesa drivers have been verified, not
+NVIDIA.
 
 **Where it is offered.** Only on the GPU scanout tier (`--tty --renderer
 gles` in a `gpu-scanout` build), and only when a DRM device passes
 Smithay's syncobj-eventfd probe (timeline syncobjs plus
 `DRM_IOCTL_SYNCOBJ_EVENTFD`). The display device scoot drives is tried
-first; if its driver has no syncobj support -- possible on a machine whose
-display controller is not its GPU, like Apple Silicon -- the render nodes
-(`/dev/dri/renderD*`, in name order) are tried instead (a syncobj works on
-any DRM device that supports them, whichever GPU made it). The startup log says which:
+first. If its driver has no syncobj support (possible on a machine whose
+display controller is not its GPU, like Apple Silicon), the render nodes
+(`/dev/dri/renderD*`, in name order) are tried instead; a syncobj works on
+any DRM device that supports them, whichever GPU made it. The startup log
+says which:
 `drm: explicit sync (wp_linux_drm_syncobj_manager_v1) offered device=…`,
 or `drm: no device here has syncobj timeline eventfd support; explicit
-sync … is not offered`. The dev VM's virtio-gpu passes on the display
-device.
+sync … is not offered`.
 
 **Where it is not, and why.** Not on the CPU renderer (`--renderer cpu`,
 or `auto` on `--headless`, `--nested`, and dumb-buffer `--tty`), and not
-under `--renderer gpu` on `--headless`/`--nested`. Honouring the points needs a way to wait on an
-acquire point without blocking the compositor and a render fence to wait
-out before signalling a release point, and only the scanout tier has both
-wired. A client that binds the global and then has its points ignored is
-worse off than one that never saw it (it would scan out or composite
-unfinished buffers), so everywhere else the global does not exist and the
-client falls back to implicit sync, as it would on any compositor without
-the protocol.
+under `--renderer gpu` on `--headless`/`--nested`. Honouring the points needs
+a way to wait on an acquire point without blocking the compositor and a
+render fence to wait out before signalling a release point, and only the
+scanout tier has both wired. A client that binds the global and then has its
+points ignored is worse off than one that never saw it (it would scan out or
+composite unfinished buffers), so everywhere else the global does not exist
+and the client falls back to implicit sync, as it would on any compositor
+without the protocol.
 
 What scoot does with the points:
 
@@ -1854,9 +1827,9 @@ What scoot does with the points:
 - **Release.** A buffer's release point is signalled when scoot is done
   reading it. For a composited frame, that means once the frame's GPU work
   has finished and it has flipped, not merely when the client commits its
-  next buffer (a frame that will never be shown -- the session switched
-  away, a refused commit -- lets its buffers go at once). For
-  a fullscreen buffer scanned out directly, it means once the display has
+  next buffer (a frame that will never be shown, such as one after the
+  session switched away or a refused commit, lets its buffers go at once).
+  For a fullscreen buffer scanned out directly, it means once the display has
   stopped scanning it out. A buffer replaced before it was ever shown, or
   whose surface is destroyed, is released straight away. Buffers committed
   without sync points keep the release timing they always had.
@@ -1878,10 +1851,8 @@ What scoot does with the points:
   for as long as the timeline object lives: a sync point set on a surface
   keeps its timeline's fd open after the object is destroyed (the protocol
   says destroying a timeline does not unset its points), until the point
-  itself goes -- replaced, the surface destroyed, or its buffer released.
-  Those count too. Before this, the bound counted objects, and review
-  measured 440 surfaces with points on destroyed timelines holding 927 fds
-  with nothing counted. An import that finds the client at 128 first checks
+  itself goes: replaced, the surface destroyed, or its buffer released.
+  Those count too. An import that finds the client at 128 first checks
   which of them are really still open, so timelines a client destroyed and
   that nothing references cost it nothing however many it churns. The
   import is refused, with `invalid_timeline`, only if more than 112 are
@@ -1891,8 +1862,6 @@ What scoot does with the points:
   with `wl_display.error` `no_memory`. A real client stays far below both:
   Mesa's Vulkan WSI imports two timelines per swapchain image, and a
   swapchain cannot run more than its image count ahead.
-
-**A leak fixed by forking Smithay.** Each `import_timeline` leaked a kernel syncobj handle until scoot exits; scoot builds against a scoot-sh fork of Smithay that adds the missing `Drop`, with the measurements and verification record in [`dev/forks.md`](https://github.com/scoot-sh/scoot/tree/main/dev/forks.md), [`dev/research/compositor-protocol-evidence.md`](https://github.com/scoot-sh/scoot/tree/main/dev/research/compositor-protocol-evidence.md), [`backlog/resolved/syncobj-handle-leak-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/syncobj-handle-leak-done.md) and [`Asahi.md`](https://github.com/scoot-sh/scoot/tree/main/Asahi.md) Test 7 (virtio-gpu and Apple hardware verified; `--nested` not run live).
 
 ## Screen locking (`ext-session-lock-v1`)
 
@@ -1904,7 +1873,7 @@ a layer surface asking politely. The global is
 **What is guaranteed while the session is locked:**
 
 - **Nothing but the lock client's own surfaces is drawn.** Not "drawn behind
-  an opaque backdrop" — windows, layer surfaces (on every layer including
+  an opaque backdrop": windows, layer surfaces (on every layer including
   `overlay`) and the focus ring are not gathered into the frame at all. The
   screen is the lock surface, an opaque backdrop where it doesn't cover, and
   the pointer cursor. A `scoot msg screenshot` reads that same framebuffer
@@ -1915,7 +1884,7 @@ a layer surface asking politely. The global is
   window that happened to be under the pointer. Pointer focus is re-derived
   again on the commit that maps the lock surface, so the first click lands on
   it without the mouse having to move first. Any grab in flight is dropped as
-  well — not only when the lock is taken, but at every transition that
+  well, not only when the lock is taken but at every transition that
   changes which lock surfaces count (a lock surface destroyed, a lock given
   up, a locker that died), because a grab outlives focus changes by design.
   That covers an open popup menu, whose grab holds the *keyboard* and would
@@ -1926,43 +1895,43 @@ a layer surface asking politely. The global is
   question as "does this surface still belong to the lock that owns the
   session". A surface from a lock that was given up, or replaced, stops being
   drawn and stops receiving input immediately.
-- **A destroyed lock surface falls back to the backdrop straight away** — the
-  protocol's own rule, and "straight away" means without waiting for anything
-  else to change on screen, including when the client destroys only the
-  `ext_session_lock_surface_v1` and keeps the `wl_surface` under it alive.
-- **Keybindings that run an action don't fire — except the ones the config
-  explicitly allows.** `Super+Q`, an unflagged `spawn` bind, every layout
-  motion: suppressed, and forwarded to the lock client as ordinary
+- **A destroyed lock surface falls back to the backdrop straight away.** That
+  is the protocol's own rule, and "straight away" means without waiting for
+  anything else to change on screen, including when the client destroys only
+  the `ext_session_lock_surface_v1` and keeps the `wl_surface` under it
+  alive.
+- **Keybindings that run an action don't fire, except the ones the config
+  explicitly allows.** `Super+Q`, an unflagged `spawn` bind and every layout
+  motion are suppressed and forwarded to the lock client as ordinary
   keystrokes instead. Two exceptions, both deliberate. The `--tty`
   `Ctrl+Alt+F1`..`F12` VT switches are a session-level escape hatch, not a
-  way in — the VT it switches to has its own login, and this session stays
+  way in: the VT it switches to has its own login, and this session stays
   locked behind it. And a `spawn` bind flagged `allow_when_locked`
-  ([binds](./keybindings.md#the-bind-grammar)) fires: volume, brightness and media keys
-  from the lock screen, which a daily-driven laptop needs. The rule is
-  narrow on purpose — only `spawn`, only when flagged, only its
-  config-pinned command, and only through a keypress, real
-  or IPC-injected.
-- **`scoot msg action ...` is refused**, with an error saying why — even a
+  ([binds](./keybindings.md#the-bind-grammar)) fires, so volume, brightness
+  and media keys work from the lock screen. The rule is narrow on purpose:
+  only `spawn`, only when flagged, only its config-pinned command, and only
+  through a keypress, real or IPC-injected.
+- **`scoot msg action ...` is refused**, with an error saying why, even a
   `spawn` naming a command some bind allows. An IPC request carries an
   arbitrary command from whoever sent it, while a bind can only run its
   config-pinned command, so allowing IPC spawns while locked would turn
   "volume keys work on the lock screen" into "anything with socket access
   runs anything while locked". Injected keyboard and pointer input still
-  works, and reaches only the lock screen. So is an `ext-workspace-v1`
-  client's `activate` refused.
+  works, and reaches only the lock screen. An `ext-workspace-v1` client's
+  `activate` is refused too.
 - **Ordinary clients stop drawing.** They get no frame callbacks while
-  locked, which is what the protocol asks for and also what keeps them from
-  burning CPU behind a lock screen.
+  locked, as the protocol asks, which also keeps them from burning CPU behind
+  a lock screen.
 
 **If the lock client dies, the session stays locked.** That is the protocol's
-rule and the point of it. The recovery story:
+rule and the point of it. To recover:
 
 - the screen turns **solid red**, so you can tell "my locker crashed" from
-  "my locker is showing a black screen" — including when the locker had a
+  "my locker is showing a black screen", including when the locker had a
   surface up and drawing at the moment it went;
-- **run a lock client again and it takes over** — it puts its own surface up
+- **run a lock client again and it takes over:** it puts its own surface up
   and can unlock once you authenticate. It is told `locked` immediately when
-  the lock it replaces had already blanked the screen; if that lock went in
+  the lock it replaces had already blanked the screen. If that lock went in
   the window *before* its first blanked frame, the replacement waits for one
   exactly like a fresh lock does, because until then your actual desktop is
   still what's on the display.
@@ -1975,18 +1944,18 @@ the surfaces that client had up stop being drawn and stop receiving input at
 that moment, even though its connection and its `wl_surface`s are still
 alive.
 
-**What is *not* guaranteed — read this before trusting it:**
+**What is *not* guaranteed. Read this before trusting it:**
 
 - **A same-uid process is inside the boundary, and always was.** Anything
   that can reach scoot's Wayland socket can take over a lock whose client has
-  died and then unlock the session; anything that can reach its IPC socket
+  died and then unlock the session. Anything that can reach its IPC socket
   can screenshot the lock screen and inject keystrokes into it (that is how
   an agent drives a lock screen). Both sockets are owner-only. This lock
   keeps *someone at the keyboard* out, not a process already running as you.
 - **`scoot msg windows` still lists your windows while locked**, titles
   included, and `scoot msg outputs` still answers. Nothing is drawn from
   them, but the IPC surface is not blanked.
-- **So do both foreign-toplevel protocols**: handles stay, titles keep
+- **So do both foreign-toplevel protocols:** handles stay, titles keep
   updating, and a window opened behind the lock screen is still announced.
   Sending `closed` for windows that did not close would be a lie a taskbar
   could not recover from, since the `ext-` protocol forbids reusing their
@@ -1997,21 +1966,21 @@ alive.
   `locked` waits for the vblank confirming the page flip that carries it, so
   the previous, possibly unlocked, frame can no longer outstay the event by a
   vblank. That costs up to one vblank of lock latency under contention. If no
-  vblank can arrive at all — you switched VT away, a modeset discarded the
-  flip — the lock is confirmed anyway after one second (logged as a warning)
+  vblank can arrive at all (you switched VT away, a modeset discarded the
+  flip), the lock is confirmed anyway after one second (logged as a warning)
   rather than hanging the locker forever.
 - **Up to one frame of the unlocked screen can still be on the display**
-  between the lock request and the first blanked frame. That is inherent —
-  the protocol's `locked` ordering exists precisely because of it. Input is
-  already captured during that frame, so nothing typed in that window reaches
-  the unlocked session.
+  between the lock request and the first blanked frame. That is inherent;
+  the protocol's `locked` ordering exists because of it. Input is already
+  captured during that frame, so nothing typed in that window reaches the
+  unlocked session.
 - **scoot blanks immediately rather than waiting for the lock client to
   draw.** Some compositors wait up to a second for lock surfaces so the
   transition doesn't flash black; waiting means rendering the unlocked
   session for that whole second.
 - **One lock surface per output.** A lock surface is configured to the size
   of the `wl_output` it names, and each output's frame shows that output's
-  own surface over the opaque backdrop -- never another output's. The
+  own surface over the opaque backdrop, never another output's. The
   keyboard goes to the surface on the output under the pointer (falling back
   to the first surface when the pointer is over no output, or its output has
   none), and pointer input is hit-tested per output the same way, so exactly
@@ -2020,14 +1989,14 @@ alive.
   its backdrop frame, but (with more than one output) one whose surface is
   admitted and not yet drawn holds the confirmation open, because its screen
   is still showing a placeholder rather than the locker's blank. If that
-  surface never draws, `locked` never fires — that wedge is the secure
+  surface never draws, `locked` never fires. That wedge is the secure
   default (confirming would show an unblanked screen as locked); kill the
-  locker and the abandoned path takes every screen red. A surface admitted after the
-  lock already confirmed is sized and shown with no second confirmation. A
-  second `get_lock_surface` for an already-covered output is refused with
-  the protocol's `duplicate_output` error even when it names the output
-  through a different `wl_output` bind (destroying the first surface frees
-  the output for a rebuild).
+  locker and the abandoned path takes every screen red. A surface admitted
+  after the lock already confirmed is sized and shown with no second
+  confirmation. A second `get_lock_surface` for an already-covered output is
+  refused with the protocol's `duplicate_output` error even when it names the
+  output through a different `wl_output` bind (destroying the first surface
+  frees the output for a rebuild).
 
 ## Idle detection
 
@@ -2035,20 +2004,20 @@ alive.
 the seat has been quiet N milliseconds and dim the screen, lock it or suspend
 the machine. Every input source resets the timers: real devices under
 `--tty`, host-forwarded input under `--nested`, and IPC-injected input
-(`scoot msg type`/`key`/`pointer` count as a user at the machine, which is
-what keeps an agent's own activity from looking like idleness). What does
-*not* reset them is the compositor re-running its own hit test on a lock
-transition — that is not input.
+(`scoot msg type`/`key`/`pointer` count as a user at the machine, which keeps
+an agent's own activity from looking like idleness). The compositor re-running
+its own hit test on a lock transition does *not* reset them; that is not
+input.
 
 `zwp_idle_inhibit_manager_v1` (version 1) is the reverse: a video player or
 presentation app creates an inhibitor on one of its surfaces and `idled`
-holds off until the inhibitor is gone — destroyed explicitly, or released
+holds off until the inhibitor is gone, destroyed explicitly or released
 implicitly when the surface dies or the client disconnects. The
 input-specific watch (`get_input_idle_notification`, for daemons with their
 own inhibit policy) ignores inhibitors by design.
 
-Two things to know: there is no built-in auto-locker — the timeouts and
-commands are the daemon's config, not scoot's, the swayidle way — and an
+Two things to know: there is no built-in auto-locker (the timeouts and
+commands are the daemon's config, not scoot's, the swayidle way), and an
 inhibitor counts while its surface is *alive*, whether or not it is visible.
 
 ## Screen power
@@ -2057,27 +2026,27 @@ inhibitor counts while its surface is *alive*, whether or not it is visible.
 panels off and back on: the standard `swayidle timeout 900 'wlopm --off *'
 resume 'wlopm --on *'` setup (see
 [configuration.md](./configure.md#idle-locking-and-screen-power)). Any
-client may bind it — unrestricted like every other global (see the trust
-note at the top of this file) — and any number of clients may hold a power
+client may bind it (unrestricted like every other global; see the trust
+note at the top of this file), and any number of clients may hold a power
 object for one output: the last `set_mode` wins, with no exclusivity
 transfer. Anything but `off` (0) or `on` (1) is `invalid_mode`.
 
 Off means off, on every backend: no page flips, no render work, no frame
 callbacks for the windows and bars only on that output (their clients
 simply paint late; nothing they committed is lost), while the pointer and
-keyboard keep working. Input by itself never turns a screen back on — that
+keyboard keep working. Input by itself never turns a screen back on; that
 is the daemon's `resume` job. Every `mode` event goes to every object for
 the output, including when scoot itself changed the mode (the IPC
 `output-power` request, see [ipc.md](../msg/requests.md#requests)); `failed` means the
-object is dead — the output went away, or the hardware refused the change.
+object is dead: the output went away, or the hardware refused the change.
 
 Only `--tty` touches hardware (the connector's DPMS property). Under
 `--headless`/`--nested` there is no panel to power down: the mode is
-tracked and reported honestly, the render work is still skipped, and an IPC
+tracked and reported, the render work is still skipped, and an IPC
 screenshot of a powered-off output is refused rather than answered from its
 stale framebuffer. A parked `ext-image-copy-capture-v1` frame due on a
-powered-off output fails with `unknown` for the same reason — the client
-may retry once the screen is back on — so neither capture path serves the
+powered-off output fails with `unknown` for the same reason (the client
+may retry once the screen is back on), so neither capture path serves the
 stale frame. Locking blanks the screens that are on and leaves the
 dark ones dark (a powered-off output counts as blanked for lock
 confirmation); unplugging an output fails its power objects, and the
@@ -2095,7 +2064,7 @@ All three selection globals, on every backend:
   generations are exposed side by side, as current compositors do, so a
   manager speaks whichever one it was written for.
 - **`zwp_primary_selection_device_manager_v1`** (version 1): middle-click
-  paste. Unlike the clipboard, this one is focus-gated — the compositor only
+  paste. Unlike the clipboard, this one is focus-gated: the compositor only
   accepts a `set_selection` from the client holding the keyboard, and only
   offers the selection to devices whose client holds it. A background client
   setting the primary selection is silently denied, not queued.
@@ -2105,49 +2074,48 @@ All three selection globals, on every backend:
 `zwlr_gamma_control_manager_v1` (version 1), so `gammastep` and `wlsunset`
 work, on every backend. One control per output: a second `get_gamma_control`
 on the same output transfers control, the old control gets `failed` and stops
-affecting anything, while a control on any other output is untouched — and
-destroying a live control (or disconnecting with one held) restores the
+affecting anything, while a control on any other output is untouched.
+Destroying a live control (or disconnecting with one held) restores the
 default linear ramp.
 
 - **Under `--tty`**, the ramp is pushed to the CRTC gamma LUT where one
   exists, so the screen really warms. Where the CRTC has no LUT but a
   `CTM` color-matrix property (Apple DCP on Asahi), the ramp's white
-  endpoints go out as a diagonal matrix instead — exact at the daemons'
+  endpoints go out as a diagonal matrix instead: exact at the daemons'
   default gamma, and equally invisible to screenshots (both transforms
   sit after the framebuffer). The advertised `gamma_size` is the CRTC's
-  own LUT length (256 on the hardware measured so far), or 256 synthetic
+  own LUT length (256 on the hardware seen so far), or 256 synthetic
   on a LUT-less CRTC, re-read whenever a hotplug moves the session to a
-  different CRTC; a live control hears `failed` over that move either way,
+  different CRTC. A live control hears `failed` over that move either way,
   so it re-reads `gamma_size` and re-pushes (a modeset moves planes, not
   LUT or matrix contents). Anything the DRM device refuses retires the
   control with `failed` and the session keeps running.
 - **Under `--headless`/`--nested`** there is no color hardware, so the ramp is
-  accepted but changes nothing on screen — and a `scoot msg screenshot` reads
+  accepted but changes nothing on screen, and a `scoot msg screenshot` reads
   the framebuffer, which is pre-LUT and pre-CTM, so captures show the unmodified
   frame either way. `gamma_size` is 256 there.
 
 A `set_gamma` fd must hold exactly three ramps of `gamma_size` little-endian
-`u16` entries (red, green, blue); anything else — short, long, empty,
-unreadable — is an `invalid_gamma` protocol error. Gamma control keeps
+`u16` entries (red, green, blue); anything else (short, long, empty,
+unreadable) is an `invalid_gamma` protocol error. Gamma control keeps
 working while the session is locked: it changes no pixel's content, only the
 output's color temperature.
 
 ## Cursor shapes (`wp-cursor-shape-v1`)
 
 `wp_cursor_shape_manager_v1` (version 2), so a client can *name* the cursor
-it wants — `text`, `ew-resize`, `not-allowed` — instead of loading an xcursor
+it wants (`text`, `ew-resize`, `not-allowed`) instead of loading an xcursor
 theme and uploading a surface of its own. Modern GTK4/Qt6 toolkits and `foot`
 prefer this when it exists; without it `foot` logs "compositor does not
 implement server-side cursors".
 
 A named shape is answered from **the cursor theme already installed on the
 machine**: scoot resolves `[appearance] cursor_theme`, else `$XCURSOR_THEME`,
-else `default`, and draws that theme's own artwork — the same pixels the
-client would have loaded for itself. Parsing is the MIT-licensed `xcursor`
-crate.
+else `default`, and draws that theme's own artwork, the same pixels the
+client would have loaded for itself.
 
-**When no theme is installed** — a linuxserver webtop or any minimal
-container — named shapes fall back to scoot's built-in cursors: the CC0
+**When no theme is installed** (a linuxserver webtop or any minimal
+container), named shapes fall back to scoot's built-in cursors: the CC0
 [Mocu](https://github.com/sevmeyer/mocu-xcursor) theme, built in and
 rasterised by scoot itself, Mocu's cursor of the same name for every CSS
 name (`move` draws Mocu's `grabbing` and `all-resize` its `all-scroll`, as
@@ -2177,15 +2145,15 @@ primitive, so scoot checks the token three ways:
 
 - **The token must name a real, recent input event that went to the client
   asking.** `set_serial(serial, seat)` is how a client says which click or
-  keypress caused it to ask, and a token that names none of them — no serial
-  at all, a seat scoot doesn't own, or a stale or made-up number — is refused
+  keypress caused it to ask. A token that names none of them (no serial
+  at all, a seat scoot doesn't own, or a stale or made-up number) is refused
   when it is created. What counts is a serial scoot issued for a key or
   button event (press *or* release; pointer motion never counts, and neither
   does a *focus* event, which every newly mapped window gets for free) within
   the last few input events **and the last 10 seconds**, **and that was
-  delivered to that same client**. Both bounds are needed: an idle session —
-  an agent driving scoot over IPC makes one, since injected actions are not
-  input events — never rotates the event history, so without the clock a
+  delivered to that same client**. Both bounds are needed: an idle session
+  (an agent driving scoot over IPC makes one, since injected actions are not
+  input events) never rotates the event history, so without the clock a
   click from this morning would still be spendable tonight. Wayland serials
   come from one process-wide counter shared with non-input events, so a
   number alone is cheap to observe and guess; pairing it with who actually
@@ -2202,24 +2170,24 @@ a launcher hands its token to a process that may take seconds to start, by
 which point plenty of newer input has happened, and re-checking then would
 break the one case this protocol exists for.
 
-An app scoot itself started — a keybinding or `msg action spawn` — gets its
+An app scoot itself started (a keybinding or `msg action spawn`) gets its
 token a different way: the compositor mints one and hands it to the child in
 `$XDG_ACTIVATION_TOKEN` (and, while XWayland is live, `$DESKTOP_STARTUP_ID`
-for X toolkits — see [XWayland](#xwayland-opt-in)), so the child can
-activate its own window when it maps one. That covers the slow cold start, where focus has moved elsewhere
-before the window appears. The token lives under the same two bounds; a spawn
-past a full table simply gets no token, and the window is still focused on
-map.
+for X toolkits; see [XWayland](#xwayland-opt-in)), so the child can
+activate its own window when it maps one. That covers the slow cold start,
+where focus has moved elsewhere before the window appears. The token lives
+under the same two bounds; a spawn past a full table gets no token, and the
+window is still focused on map.
 
 What a refused token costs depends on what was being activated. For a **fresh
 spawn** it is invisible: the app maps a window, and mapping focuses it. For
-**something already running** — a single-instance app (Firefox, Chromium,
-anything on `GApplication`) re-invoked from a launcher, or the notification
-daemon case — nothing maps, so nothing else focuses it and the activation
-simply does not happen. Worth knowing because of the one case scoot refuses
-that the protocol would allow: a launcher that mints its token from a *focus*
-serial rather than a key or button one (fuzzel does this when an entry is
-picked with the mouse) gets no activation.
+**something already running** (a single-instance app such as Firefox,
+Chromium or anything on `GApplication` re-invoked from a launcher, or the
+notification daemon case), nothing maps, so nothing else focuses it and the
+activation does not happen. scoot refuses one case the protocol would allow:
+a launcher that mints its token from a *focus* serial rather than a key or
+button one (fuzzel does this when an entry is picked with the mouse) gets no
+activation.
 
 A redeemed token is removed whether or not it was honored, so one user action
 cannot be replayed into focus later. Activation goes through the same action
@@ -2231,8 +2199,8 @@ state to raise instead.
 ## Window icons (`xdg-toplevel-icon-v1`)
 
 `xdg_toplevel_icon_manager_v1` (version 1), so a client can say which icon
-belongs to its window. scoot draws no icons itself — it has no titlebars,
-taskbar or window switcher — so this exists for the two consumers outside it:
+belongs to its window. scoot draws no icons itself (it has no titlebars,
+taskbar or window switcher), so this exists for the two consumers outside it:
 a bar or dock showing a window list, and an agent driving the session, which
 reads the name off `scoot msg windows`' `icon` field.
 
@@ -2241,14 +2209,14 @@ draws an icon and so it has no size to prefer; and a client that supplies raw
 pixel buffers instead of a name reads as having no icon, since handing those
 over IPC would mean re-encoding shm buffers to PNG per query. An X window's
 icon (`_NET_WM_ICON`) is raw pixels too, never a name, so X windows always
-read as having no icon — the same parity; bars show their icons from the
-app id (`WM_CLASS` class) through `.desktop` files.
+read as having no icon. Bars show their icons from the app id (`WM_CLASS`
+class) through `.desktop` files.
 
 The buffer half, for the toolkit author: pixel buffers must be square and
 `wl_shm`-backed (anything else is refused with `invalid_buffer`), and they
 are ordinary live `wl_buffer`s under the 512-per-client bound, so a client
 already at its budget is refused further creations. There is no `release` for
-icon buffers — the protocol leaves the event unused — and a buffer destroyed
+icon buffers (the protocol leaves the event unused), and a buffer destroyed
 while its icon still lives disconnects that client (`no_buffer`); destroying
 the icon first makes destroying its buffers safe. Pixels never leave the
 compositor: neither foreign-toplevel protocol has an icon event, and IPC
@@ -2257,7 +2225,7 @@ carries the name only.
 ## Input methods (`text-input-v3`, `input-method-v2`)
 
 `zwp_text_input_manager_v3` (version 1) and `zwp_input_method_manager_v2`
-(version 1) — the two halves of IME support, neither of which is useful
+(version 1) are the two halves of IME support, neither of which is useful
 alone. An application binds the first to say "there is a text field here"; an
 input method (fcitx5, ibus, an on-screen keyboard) binds the second to
 compose into it. Without the first, `foot` logs "text input interface not
@@ -2265,17 +2233,17 @@ implemented by compositor; IME will be disabled".
 
 Which text field is focused follows keyboard focus automatically, so it works
 for a layer-shell surface with a search field as well as for an ordinary
-window. What scoot owns is the input method's **popup** — the candidate
-window beside the text cursor — which is tracked against whichever surface
+window. What scoot owns is the input method's **popup**, the candidate
+window beside the text cursor. It is tracked against whichever surface
 has the field and drawn with that surface's own popups, so it follows the
 window, gets frame callbacks, and disappears when the field is disabled. That
 includes a lock screen's password field: while the session is locked the
 candidate window is drawn over the lock screen at the caret, and only that
-popup is — background windows' popups stay hidden and callback-starved until
+popup is; background windows' popups stay hidden and callback-starved until
 unlock.
 
-An input method is more privileged than a clipboard manager — it can grab the
-keyboard and inject text into the focused client — and there is still no
+An input method is more privileged than a clipboard manager (it can grab the
+keyboard and inject text into the focused client), and there is still no
 client filter, for the trust-model reason at the top of this page. That grab
 outranks an `xdg_popup.grab` in both orders, so no context menu opens in a
 text field while an IME is active there.
@@ -2290,35 +2258,35 @@ HiDPI laptop panel beside an ordinary monitor); see
 [configuration.md](./outputs.md). Each output's scale is
 advertised three ways, matching what clients actually support:
 
-- **`wl_output.scale`** — the integer `ceil(scale)`. Every client that binds
+- **`wl_output.scale`:** the integer `ceil(scale)`. Every client that binds
   an output gets it automatically (re-sent on bind and whenever the output's
   state changes). A scale of `1.5` is advertised as `2` here, which is what a
   client that only understands integer scaling should draw at.
-- **`wp_fractional_scale_v1`** — the configured value resolved to the
+- **`wp_fractional_scale_v1`:** the configured value resolved to the
   nearest 1/120th, the finest the protocol can express (`preferred_scale`
   is a count of 120ths, so `1.33` arrives as 160). A client that
   creates a `wp_fractional_scale_v1` for one of its surfaces is sent
   that `preferred_scale` (`1.5`, not `2`), and can render a larger buffer and let
   the compositor scale it down. The `wp_viewporter` global is advertised
   alongside it, because that is the protocol a client uses to submit such a
-  buffer — without it, a fractional client has no way to render. Rendering
+  buffer; without it, a fractional client has no way to render. Rendering
   uses the same resolved value, so a buffer sized for the announced scale
   lands one to one.
-- **`wl_surface.preferred_buffer_scale`** (needs client `wl_compositor` v6) —
+- **`wl_surface.preferred_buffer_scale`** (needs client `wl_compositor` v6):
   the integer preference that accompanies the fractional value, sent with the
   default `preferred_buffer_transform` (`normal`). It is a separate event on
   a separate object, so a client that opts into fractional scaling receives
-  **both**: the exact `1.5` *and* the integer `2`. This is protocol
-  completeness (it is what wlroots sends). A client below `wl_compositor` v6
-  is not sent the event and keeps the implicit default of 1.
+  **both**: the exact `1.5` *and* the integer `2`. This is what wlroots
+  sends. A client below `wl_compositor` v6 is not sent the event and keeps
+  the implicit default of 1.
 
-Real limits rather than polish:
+Limits:
 
 - **Per output, one answer per surface.** `scoot msg reload` re-applies
   every output's scale live (re-advertised on every output's `wl_output`, moved or not,
   re-sent to every live surface, geometry recomputed). A surface is told
-  one scale -- the scale of the output it belongs to, not of every output
-  it overlaps: a window the output it is placed on (its workspace's; a
+  one scale: the scale of the output it belongs to, not of every output
+  it overlaps. A window gets the output it is placed on (its workspace's; a
   floating window straddling two outputs follows that one), re-told when
   it moves to another; its popups and subsurfaces the same; a layer or
   lock surface its own output's; a cursor surface the pointer's output's,
@@ -2327,16 +2295,16 @@ Real limits rather than polish:
   output (see [More than one output](./outputs.md)),
   so a client choosing its buffer scale from the outputs it has entered
   reaches the same answer.
-- **X apps** (with `--xwayland`) draw at `ceil(scale)` -- or at `floor(scale)`
-  at a non-integer scale with `[xwayland] fractional = "light"` -- the largest
-  among the outputs, when they differ, since X has one scale for every
-  screen -- and are scaled to each output like a client rendering at the
-  `wl_output.scale` integer -- see [XWayland](#x-windows-in-the-layout).
+- **X apps** (with `--xwayland`) draw at `ceil(scale)`, or at `floor(scale)`
+  at a non-integer scale with `[xwayland] fractional = "light"`, using the
+  largest among the outputs when they differ, since X has one scale for every
+  screen. They are scaled to each output like a client rendering at the
+  `wl_output.scale` integer; see [XWayland](#x-windows-in-the-layout).
 - **`--nested` is scale-1 only.** The host compositor owns the scale of the
   window scoot is drawn inside, so a non-1.0 `scale` there would double-count
   it; scoot logs a warning and uses `1.0`, and ignores every `[[outputs]]`
   entry the same way.
-- **Screenshots are physical pixels; layout coordinates are logical** — see
+- **Screenshots are physical pixels; layout coordinates are logical.** See
   [ipc.md](../msg/index.md#rules-an-agent-needs).
 
 ## Single-pixel buffers
@@ -2348,11 +2316,11 @@ shm pool for a single pixel. The buffer is what the channels say (the full
 renders as a solid fill; a client that wants it bigger scales it through
 `wp_viewporter` rather than by uploading a larger buffer.
 
-- **No shm, no pool budget — but inside the buffer bound.** These buffers
+- **No shm, no pool budget, but inside the buffer bound.** These buffers
   allocate nothing, so the per-client `wl_shm` pool count and fd count never
-  move for them. They still count against the 512-live-`wl_buffer` bound (uniform
-  accounting — the hook can't observe buffer kind, and excluding them would
-  let cheap destroys drain retaining units).
+  move for them. They still count against the 512-live-`wl_buffer` bound
+  (uniform accounting; excluding them would let cheap destroys drain
+  retaining units).
 - **Destroying the manager leaves its buffers working.** The spec says the
   child objects are unaffected, and they are.
 - **Destroying an attached buffer is legal and safe.** Wayland lets a client
@@ -2373,10 +2341,10 @@ scroll a bare compositor would send.
   wheel, or continuous device keeps the source libinput reported; a
   `--nested` session keeps the source its host sent (accumulated over the
   host's pointer frame, so one host frame is one client frame). Injected
-  `pointer scroll` is a wheel that also carries its detents -- see
+  `pointer scroll` is a wheel that also carries its detents; see
   [ipc.md](../msg/requests.md#requests).
 - **A finger scroll ends with a stop.** libinput ends the gesture with a
-  zero-amount event, which arrives as `axis_stop` with no motion -- never
+  zero-amount event, which arrives as `axis_stop` with no motion, never
   as a zero scroll, and never synthesized for any other source.
 - **A bare source with no motion is not a scroll.** A host frame carrying
   only `axis_source` (or only a direction) sends nothing.
@@ -2396,9 +2364,9 @@ relative motion deltas off its relative-pointer object.
 - **Except a motion off an X window, which reports no relative motion.**
   XWayland (24.1.13) keeps a delta that arrives in the same frame as its
   pointer leaving an X window and applies it after the pointer next enters
-  one, on top of the position the enter set. The X pointer then sat off the
-  window entered until the next motion, so a click right after the move --
-  every `scoot msg pointer click` onto the other of two X apps -- reached
+  one, on top of the position the enter set. The X pointer then sits off the
+  window entered until the next motion, so a click right after the move
+  (every `scoot msg pointer click` onto the other of two X apps) would reach
   some other window or none. X apps reading raw motion miss that one
   crossing delta.
 - **Unaccelerated means pre-libinput-acceleration on `--tty`.** A `--tty`
@@ -2424,11 +2392,11 @@ relative motion deltas off its relative-pointer object.
   resumes with absolute still held.
 
 An agent driving the pointer during a game or 3D session sees `ok` replies
-with a frozen cursor — see [ipc.md](../msg/index.md#rules-an-agent-needs).
+with a frozen cursor; see [ipc.md](../msg/index.md#rules-an-agent-needs).
 
 ## Drawing tablets (`tablet-v2`)
 
-`zwp_tablet_manager_v2` version 1 — the most Smithay carries at the pinned
+`zwp_tablet_manager_v2` version 1, the most Smithay carries at the pinned
 revision; the protocol's own version 2 only adds a tablet bustype event and
 pad dials, neither of which scoot mints. libinput tool events reach
 tablet-aware clients (Krita, Xournal++) on `--tty` hardware, and every other
@@ -2464,12 +2432,12 @@ flags) or that the update was superseded before it ever got there
   framebuffer is the final image, so the timestamp is when the frame finished
   rendering. Under `--nested` it is when the frame was committed to the host
   compositor. Under `--tty` it is when the page flip was issued to DRM, up to
-  one vblank before the photons — and the `vsync` flag is set there, because
+  one vblank before the photons, and the `vsync` flag is set there because
   the flip is vblank-synchronized; the other backends report no flags.
 - **`zero_copy` means the buffer went to the display directly.** Only on the
   GPU scanout tier (`--tty --renderer gpu`, `gpu-scanout` build), and only
   for the surface whose buffer was scanned out on the primary plane that
-  frame — the covering fullscreen window, on a frame that
+  frame: the covering fullscreen window, on a frame that
   [went direct](#per-surface-feedback-the-scanout-tranche). Every composited
   frame, and every other surface, is reported without it. A client cursor
   carried by a hardware cursor or overlay plane is not reported `zero_copy`:
@@ -2494,17 +2462,17 @@ flags) or that the update was superseded before it ever got there
 ## Rendering hints
 
 `wp_alpha_modifier_v1` (version 1) and `wp_content_type_manager_v1` (version
-1). One of them works, and the other is stored and honestly ignored.
+1). One of them works, and the other is stored and ignored.
 
 - **Alpha does what it says.** A client names a `u32` multiplier on its
-  surface (`0` transparent, `u32::MAX` opaque) and the compositor blends it —
+  surface (`0` transparent, `u32::MAX` opaque) and the compositor blends it:
   windows, layer surfaces, lock surfaces and client cursor surfaces alike,
   all through the same render path. Destroying the modifier object is
   `set_multiplier(u32::MAX)` on the next commit, and destroying the manager
   leaves existing modifier objects working.
 - **Content type is accepted and has no effect.** A client can label a
   surface `photo`, `video`, `game` or `none`; the compositor stores the label
-  and changes no pixel for it — a CPU renderer with no adaptive-sync story
-  has no consumer for the hint.
+  and changes no pixel for it, since a CPU renderer with no adaptive-sync
+  story has no consumer for the hint.
 - **Neither touches any bound.** No pool, buffer or fd is created anywhere on
   either path.
