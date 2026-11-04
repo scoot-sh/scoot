@@ -820,6 +820,7 @@ fn a_window_manager_that_cannot_attach_withdraws_the_display() {
         return;
     }
     let mut fixture = Fixture::unstarted();
+    super::socket_dir::ensure_default();
     let display_handle = fixture.state.display_handle.clone();
     let (xwayland, client) = XWayland::spawn(
         &display_handle,

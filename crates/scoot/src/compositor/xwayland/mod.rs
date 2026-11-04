@@ -160,6 +160,8 @@ mod moveresize;
 pub(in crate::compositor) mod scale;
 #[cfg(feature = "xwayland")]
 pub(in crate::compositor) mod selection;
+#[cfg(feature = "xwayland")]
+mod socket_dir;
 #[cfg(test)]
 mod tests;
 #[cfg(feature = "xwayland")]
@@ -263,6 +265,7 @@ pub fn start(
 ) -> Result<u32, StartError> {
     use std::process::Stdio;
 
+    socket_dir::ensure_default();
     let display_handle: DisplayHandle = state.display_handle.clone();
     let (xwayland, client) = XWayland::spawn(
         &display_handle,
