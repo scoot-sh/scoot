@@ -69,8 +69,8 @@ programs.scoot.desktop.notifications.bar.icons = {
 };
 ```
 
-scootnotify pushes DND and the unread count to the `push` module
-itself, with no feed script beside it, and the bar's click runs
+A future daemon keeps these option names. scootnotify pushes DND and
+the unread count to the `push` module itself, with no feed script beside it, and the bar's click runs
 `scootnotify msg dnd toggle`:
 
 ```nix title="configuration.nix and home.nix"
