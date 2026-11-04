@@ -16,8 +16,8 @@ The docs migration has landed M1 to M6 and the README rewrite (M4) is in
 flight. Left:
 
 - **M7**: ~~split the desktop page~~ done 2026-10-28: `site/src/content/docs/desktop/` is a hub (flake setup, NixOS, Home Manager, session units, slot table) plus one page per piece; the hub keeps a stub heading per moved section so old `/desktop/#section` links still land.
-- **M8**: a STE-100 style pass over the remaining pages, keeping the logo's dry
-  voice in headings and intros only.
+- **M8**: ~~a STE-100 style pass over the remaining pages~~ done 2026-11-04,
+  keeping the logo's dry voice in headings and intros only.
   Slices done 2026-11-04: `site/src/content/docs/scootbar/` (all six pages),
   then `scootbg/` and `scootlaunch/`, then `scootnotify/`, then `looks/`, `start/`, `agents/` and
   `troubleshooting/`, then `msg/` (wording only, no headings, options or code
@@ -25,8 +25,8 @@ flight. Left:
   release procedure keep every rule, key and step), then `desktop/` (every step,
   command, option and caveat kept), then `scoot/` except `protocols.md` (config and
   keybinding reference entries unchanged), then `scoot/protocols.md` up to
-  "Window lists" (limits and table rows unchanged). Remaining: `scoot/protocols.md`
-  from "Window lists" onward.
+  "Window lists" (limits and table rows unchanged), then the rest of `protocols.md`
+  from "Window lists" to the end (limits unchanged). All sections done.
 - **M9**: flip each "coming" slot (deb, rpm, Arch, ISO, shortcut teacher app) as
   its channel goes live.
 
