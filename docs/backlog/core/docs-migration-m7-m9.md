@@ -18,6 +18,9 @@ flight. Left:
 - **M7**: ~~split the desktop page~~ done 2026-10-28: `site/src/content/docs/desktop/` is a hub (flake setup, NixOS, Home Manager, session units, slot table) plus one page per piece; the hub keeps a stub heading per moved section so old `/desktop/#section` links still land.
 - **M8**: a STE-100 style pass over the remaining pages, keeping the logo's dry
   voice in headings and intros only.
+  Slice done 2026-11-04: `site/src/content/docs/scootbar/` (all six pages;
+  wording only, no headings, options or code blocks changed). Remaining:
+  every other section.
 - **M9**: flip each "coming" slot (deb, rpm, Arch, ISO, shortcut teacher app) as
   its channel goes live.
 

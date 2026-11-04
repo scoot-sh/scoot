@@ -4,10 +4,10 @@ description: "Every scootbar command and flag, scootbar msg, the agent interface
 ---
 
 Every `scootbar` command and flag, and how it behaves at the edges. What
-scootbar is for is in [Overview](./index.md). Every option lives in
-the [config file](./cli.md#the-config-file) too
-(`$XDG_CONFIG_HOME/scoot/bar.toml`);
-the flags stay and override its values, one by one, at start-up and on
+scootbar is for is in [Overview](./index.md). Every option is also in
+the [config file](./cli.md#the-config-file)
+(`$XDG_CONFIG_HOME/scoot/bar.toml`).
+A flag overrides the file's value for its option, at start-up and on
 every reload.
 
 The bar shows a clock in the center, and workspaces wherever
@@ -43,10 +43,10 @@ scootbar --help --json                       # the same content as JSON (see bel
 scootbar --version
 ```
 
-`scootbar help daemon` and `scootbar help msg` print each command's page, and `scootbar --help --json`
+`scootbar help daemon` and `scootbar help msg` print each command's page. `scootbar --help --json`
 emits commands, daemon flags (with types and defaults), msg commands, the
-modules in the build, exit codes and environment — see
-[Generated CLI pages](../reference/cli.md) for the contract.
+modules in the build, exit codes and environment; see
+[Generated CLI pages](../reference/cli.md).
 
 `scootbar daemon` runs in the foreground until the compositor goes away
 (start it with `&`, or from your compositor's autostart). It connects to
@@ -79,7 +79,7 @@ Each flag at most once, as `--flag VALUE` or `--flag=VALUE`.
 | `--check` | nothing (a switch) | off | Validate and exit instead of running: see [`--check`](./cli.md#--check-validate-without-running). |
 
 A malformed or out-of-range value, an unknown flag or a flag given twice is
-a usage error (exit status 2), and nothing starts; so is an unknown module
+a usage error (exit status 2) and nothing starts. So is an unknown module
 id, a module placed twice, or a clock format with an unknown specifier or a
 control character.
 
@@ -88,16 +88,16 @@ control character.
 ## The config file
 
 `scootbar daemon` reads `$XDG_CONFIG_HOME/scoot/bar.toml`
-(`~/.config/scoot/bar.toml` when `XDG_CONFIG_HOME` is unset or empty), its
-own file separate from scoot's `config.toml`, so it works on other
+(`~/.config/scoot/bar.toml` when `XDG_CONFIG_HOME` is unset or empty). It is
+separate from scoot's `config.toml`, so it works on other
 compositors and a bar change never breaks scoot. `--config PATH` reads
-another file instead. A missing file is the defaults; an explicit
+another file instead. A missing file means the defaults; an explicit
 `--config` naming nothing is a refusal. The file must be a regular file:
-a FIFO, device or directory is refused rather than read, since reading
-one could hang the daemon (a reload re-reads it on the daemon's loop).
+a FIFO, device or directory is refused, since reading
+one could hang the daemon.
 
 Every section is optional; absent is the default. Precedence is defaults,
-then the file, then the flags: a flag given replaces the file's value for
+then the file, then the flags. A flag replaces the file's value for
 its own option, any of `--left`/`--center`/`--right` replaces just that
 section of the file's layout, and a reload keeps the flags over the file,
 as at start-up.
@@ -219,12 +219,12 @@ entries marking where a separator goes (see [Spacing](./configure.md#spacing)); 
 of the three sets the whole layout, as the flags do. An `[output."NAME"]`
 table takes `edge`, `layer`, `exclusive`, `height`, `margin`,
 `font-size` (1 to 256, as `[bar] font-size`; absent is the shared value)
-and the three module lists — see [Outputs](./configure.md#outputs). An unknown key
-anywhere is a loud error naming it, as is a bad value, which names its
+and the three module lists; see [Outputs](./configure.md#outputs). An unknown key
+anywhere is an error naming it, as is a bad value, which names its
 dotted key (`bar.height`, `colors.background`, `left`, `clock.format`;
 `output."eDP-1".height` in an output table).
 A bad file refuses to start the daemon (exit status 1); a bad `reload`
-is refused and the running bar stands undisturbed.
+is refused and the running bar is left as is.
 
 
 
@@ -240,17 +240,16 @@ the config file, merges the look layer under it, applies the other flags
 over both, starts the placed modules
 and loads the font. It prints `ok` on stdout and exits 0, or prints the
 error a start would print (a bad key, a bad value, a font that cannot load,
-a missing `--config` file) on stderr and exits 1; a flag the file clashes
+a missing `--config` file) on stderr and exits 1. A flag the file clashes
 with is a usage error, status 2, as at a start. It never connects to the
-compositor and never claims the control socket, so it needs no
-`WAYLAND_DISPLAY` and no runtime directory, and it runs beside a live bar
-without touching it. Its use is a build step or a pre-flight over a file about
+compositor or claims the control socket, so it needs no
+`WAYLAND_DISPLAY` or runtime directory, and it runs beside a live bar
+without touching it. Use it as a build step or a pre-flight over a file about
 to be installed: the Nix module's check runs it over every rendered file
 (`checks.<system>.scootbar-modules`).
 Modules that report themselves unavailable at start (the clock without a
 time zone database, say) print their note as a start does and are left out;
-that is not a failure. It moves startup code into a function the start also
-uses; nothing is on a per-frame path.
+that is not a failure.
 
 
 
@@ -258,9 +257,9 @@ uses; nothing is on a per-frame path.
 
 Asks the running daemon over its control socket,
 `$XDG_RUNTIME_DIR/scootbar-DISPLAY.sock`, a lock-guarded, owner-only
-socket with line-framed JSON, one daemon per display: a second daemon
-refuses, saying one already runs. The socket is `0600` from the
-moment its name exists, whatever your umask. A crash in the instant of
+socket with line-framed JSON, one daemon per display. A second daemon
+refuses and says one already runs. The socket is `0600` from the
+moment its name exists, whatever your umask. A crash at the instant of
 start-up can leave an empty `.scootui-*` directory beside it; delete it.
 
 ```sh
@@ -305,12 +304,12 @@ one), absent where there is no adapter).
 This is the agent hook: the
 bar read as data instead of OCR. `query ID` lists only that module (an id that
 is not placed is an error naming the ones that are). The reply is bounded
-(512 KiB; an agent's bar is a few hundred bytes a module, text and tooltip
-each capped at 256 bytes), and is written from the very state the screen is
+(512 KiB; text and tooltip
+are each capped at 256 bytes), and comes from the same state the screen is
 drawn from, so it cannot disagree with a screenshot.
-`reload` re-reads the file and live-applies it — geometry, style, layout,
-modules, the font — after fully validating it first; a bad file is
-refused and the running bar stands. A reload that changes only style
+`reload` re-reads the file and live-applies it (geometry, style, layout,
+modules, the font) after fully validating it; a bad file is
+refused and the running bar is left as is. A reload that changes only style
 (`[colors]`; `[bar]` `radius`, `popup-radius`, `opacity`, `font`,
 `fallback-fonts`, `font-size`; the layout's `padding`, `spacing`,
 `separator` and per-module `margins`; `tooltip-delay`) keeps every module
@@ -322,10 +321,10 @@ modules as at start-up: a module's own colors (like `workspaces`
 reload while a module is left out as unavailable, which retries it.
 `reload --look` re-reads only the look layer, under a snapshot of the file,
 so a look swap never applies pending edits; with no layer it is refused.
-On the wire the scoped reload is its own `reload-look` request (never a
+On the wire the scoped reload is its own `reload-look` request, not a
 `reload` with a field: a bar older than the look scope ignores unknown
-fields and would run a plain reload on the field form, applying pending
-edits before any refusal). A scoped success answers
+fields and would run a plain reload, applying pending
+edits. A scoped success answers
 `{"type":"ok","scope":"look"}`; an old bar answers the `reload-look`
 request with an ordinary
 `{"type":"error","message":"unknown request \`reload-look\`"}` and applies
@@ -334,12 +333,12 @@ nothing.
 [below](./configure.md#hiding-the-bar). `query`, `layout`, `version`, `reload`, `hide`, `show` and
 `toggle` print the reply; `kill`, `set` and `invoke` print nothing on success,
 and `subscribe` prints what the daemon sends until it closes (below). A request
-peer that stops reading is dropped past 30 seconds with nothing delivered:
-while its reply is queued the daemon answers nothing more on that connection,
-and past the deadline the connection just ends. `set`
-writes to a [`push` module](./modules.md#button-push-and-exec-modules): an id that is not
+peer that stops reading is dropped after 30 seconds with nothing delivered:
+while its reply is queued the daemon answers nothing more on that connection.
+`set`
+writes to a [`push` module](./modules.md#button-push-and-exec-modules). An id that is not
 placed, a module that takes no value (every one but `push`) and a value it
-refuses are each a loud error naming why, never a silent ok. Without a
+refuses are each an error naming why, never a silent ok. Without a
 daemon, every command fails saying so (exit status 1).
 
 
@@ -355,19 +354,18 @@ while the bar is hidden or not yet configured) and the `modules` that show
 something, left to right, each with `id`, `section` and an `x`, `y`,
 `width`, `height` rectangle in the same global logical pixels. It is the
 layout **as last drawn**: the spans (in device pixels) the last committed
-frame used, converted with the output's **current** scale (the reply does not
-record the scale a frame was drawn at, so a scale change that has not been
-redrawn yet is the one moment a rectangle and the pixels can disagree) and
+frame used, converted with the output's **current** scale and
 rounded outward, so a pointer anywhere on a drawn pixel of a module is inside
-its rectangle. Aim scoot's pointer injection at the middle of a rectangle
+its rectangle. (A scale change that has not been redrawn yet is the one
+moment a rectangle and the pixels can disagree.) Aim scoot's pointer
+injection at the middle of a rectangle
 (`scoot msg pointer click X Y`, which moves there and presses and releases the
-left button; `right` and `middle` name the others) and the module is pressed; a test clicks the first and last logical pixel of
-every rectangle and one pixel outside it, on two outputs at scales 1 and
-1.5. A hidden bar has no rectangles at all. A module whose text is empty
+left button; `right` and `middle` name the others) and the module is pressed.
+A hidden bar has no rectangles at all. A module whose text is empty
 takes no space and is not listed.
 
 **`invoke ID ACTION [N] [--output NAME]`** runs an action exactly as a click
-or scroll would: the same code a pointer press ends in, so what an agent does
+or scroll would, through the same code, so what an agent does
 and what a user does cannot diverge. `ACTION` is one of the module's own
 actions (`scootbar msg --help`, or the refusal, lists them: the workspaces
 module's `activate N`, `activate-position N`, `previous`, `next`), or a
@@ -377,15 +375,15 @@ which runs the binding configured for it. A scroll's `N` is its steps (1 to
 names the output whose module is meant (default: the first that shows it).
 A module that is not placed, an action it does not have (or a trigger it has
 no binding for), a number where none is taken or a missing or out-of-range
-one, and an output that does not show the module are each a named error and
+one, and an output that does not show the module are each an error naming why and
 run nothing. Success prints nothing.
 
 **`subscribe [module] [output]`** keeps the connection open and prints one
 JSON line per event, after one `{"type":"subscribed","events":[...]}` line.
-No kind named is both. **There is no snapshot**: a subscription starts from
+With no kind named, it is both. **There is no snapshot**: a subscription starts from
 now and only changes follow, so to read the state and then follow it,
-**subscribe first, then `query`** (the other order can miss a change between
-the two; this one at worst repeats one the `query` already shows). A `module` event is a `query` entry with `"type":"module"`,
+**subscribe first, then `query`**. The other order can miss a change between
+the two; this one at worst repeats one the `query` already shows. A `module` event is a `query` entry with `"type":"module"`,
 sent when that module's view changed, once per output that shows it; an
 `output` event is `{"type":"output","change":"added"|"removed","name":...}`.
 Events are **coalesced to the frame rate**: a module that changes a hundred
@@ -395,11 +393,10 @@ tells every module again. A subscribed connection serves no further requests
 (it gets one error line, however many it sends), at most 4 may be subscribed
 at once (a fifth is refused saying so), and **a subscriber that stops
 reading is disconnected, never buffered**: each batch is one nonblocking
-write, and one the socket cannot take whole ends the connection. With no
-subscriber the daemon does one branch a loop turn.
+write, and one the socket cannot take whole ends the connection.
 
-**How a subscription ends, and what a script may conclude.** The command
-prints whole lines only, and there are endings it can tell apart and one it
+**How a subscription ends.** The command
+prints whole lines only. It can tell some endings apart, and one it
 cannot:
 
 - A `{"type":"dropped"}` line, the last one (printed, then the command exits
@@ -407,7 +404,7 @@ cannot:
   subscriber and said so. It is sent only when the daemon can write it
   without waiting, which is the rare drop: closing a subscriber when out of
   file descriptors with nothing but subscribers to close. A flood of ordinary
-  connections never does it: the oldest *non-subscriber* is closed first, and
+  connections never causes it: the oldest *non-subscriber* is closed first, and
   subscribers are at most 4 of the 16 connections the daemon holds.
 - A line cut in the middle (exit **1**, stderr says the connection ended in
   the middle of a line): the daemon dropped the subscriber part-way through
@@ -419,45 +416,41 @@ cannot:
   pipe: its socket is full, so there is no room for a `dropped` line) looks
   like, as does a drop whose partial write happened to stop on a line
   boundary. A script cannot tell these apart, so after **any** end, exit 0
-  included: subscribe again, then `query`.
+  included, subscribe again, then `query`.
 
 
 
 ## Edge cases
 
 - **Side margins wider than the output** leave the bar no width. It is
-  then drawn one pixel wide rather than not at all, on scoot and on sway
+  then drawn one pixel wide, on scoot and on sway
   (which sends the negative width it works out as a huge unsigned one;
   scootbar treats any side past `i32::MAX` as "yours to choose"). The zone
   is still reserved.
-- **A bar taller than the output** is the compositor's to clamp, and they
-  differ: scoot gives the bar the output's height and reserves all of it;
+- **A bar taller than the output** is the compositor's to clamp, and
+  compositors differ: scoot gives the bar the output's height and reserves all of it;
   sway 1.12 configures the full `--height` (1024 on a 720-tall output),
   so the bar runs off the edge, and reserves the whole output too. Either
-  way no window has room: this is a value to avoid, not a layout.
-- **No flag value can make a buffer overflow**: the bounds keep every size
-  far from it. A buffer too large for `wl_shm` (a compositor asking for an
-  absurd surface) is refused with a message; the draw is tried a few more
+  way no window has room: avoid this value.
+- **A buffer too large for `wl_shm`** (a compositor asking for an
+  absurd surface) is refused with a message. The draw is tried a few more
   times, then not again until the size or scale changes.
 - **The compositor going away** (it exits, crashes, or sends a protocol
   error) ends the daemon with exit status 1 and one line on stderr saying
   why. There is no reconnect; your session's autostart starts it again with
   the compositor.
-- **An output name past 128 bytes** is ignored, like a non-positive mode:
-  what the bar keeps sizes `query` replies and policy matches, so a broken
-  compositor cannot grow it through a name.
-- **SIGTERM and SIGINT** end it at once, running no destructor: it keeps no
+- **An output name past 128 bytes** is ignored, like a non-positive mode.
+- **SIGTERM and SIGINT** end it at once: it keeps no
   state, and the compositor removes its surfaces with the connection. Its
   `exec` commands end with it all the same (the kernel's parent-death
   signal, see `exec` above); only what such a command started in turn is
   left to finish. **SIGHUP keeps its default action** (it ends the daemon)
   rather than reloading; a reload is `scootbar msg reload`.
 - **Vertical bars** (`left` and `right` edges) are not offered. The layout, the modules and the click
-  hit-test are horizontal; a vertical bar would be a second layout, not an
-  option.
+  hit-test are horizontal.
 - **One daemon per display** holds the control socket: a second daemon
-  for the same display refuses at start-up, saying one already runs. A
-  socket file left by a crash is recognised by its free lock and
+  for the same display refuses at start-up and says one already runs. A
+  socket file left by a crash is recognized by its free lock and
   replaced; the lock file itself is never removed.
 - **Linux only:** it does not build on any other system (the build stops
   with "scootbg-mem, scootbg and scootbar run on Linux only").

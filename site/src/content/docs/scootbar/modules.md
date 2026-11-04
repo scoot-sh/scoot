@@ -3,7 +3,7 @@ title: Modules
 description: "Every module — clock, workspaces, title, volume, network, brightness, battery, tray, media, bluetooth, power — plus pointer, popups, tooltips, button, push and exec."
 ---
 
-Every module lives here, each with its own section. Each module is placed by id in `--left`/`--center`/`--right` or the file's `left`/`center`/`right` lists.
+Each module has its own section here. Place a module by id in `--left`/`--center`/`--right` or the file's `left`/`center`/`right` lists.
 
 ## Modules
 
@@ -25,14 +25,14 @@ Every module lives here, each with its own section. Each module is placed by id 
 A build can leave a module out (`cargo build --no-default-features`, then
 `--features clock`); naming one that is not built is a usage error that
 lists those that are. Every module takes the five
-[interaction keys](./modules.md#pointer-input). Besides these two, the config can define
-modules of its own by name, a [`button`, a `push` and an `exec`
+[interaction keys](./modules.md#pointer-input). The config can also define
+modules of its own by name: a [`button`, a `push` and an `exec`
 module](./modules.md#button-push-and-exec-modules), each a Cargo feature (`button`,
-`push`, `exec`) on by default. The `popup` feature is not a module either:
-it is the [popup](./modules.md#popups) code the volume and microphone modules use, on
-by default, and a build without it has none of it and does not bind
+`push`, `exec`) on by default. The `popup` feature is not a module: it is the
+[popup](./modules.md#popups) code the volume and microphone modules use, on
+by default. A build without it has no popups and does not bind
 `xdg_wm_base`. The `icon-image` feature adds the PNG
-decoder for [image icons](./modules.md#icons), and is off by default.
+decoder for [image icons](./modules.md#icons) and is off by default.
 
 
 
@@ -67,7 +67,7 @@ subset. The default, `%-I:%M %P`, is a 12-hour clock with no leading zero:
 - **Everything else in the format is shown as it is**, any Unicode
   included (as long as the font has it).
 - **Its timer fires once a minute** (on the minute), or **once a second**
-  when the format shows seconds (`%S`, `%T`): no polling. Each tick that
+  when the format shows seconds (`%S`, `%T`). It does not poll. Each tick that
   changes the text is one frame, and the compositor answers each frame
   with one `wl_buffer.release`, so an idle minute clock wakes the bar twice
   a minute ([What it does on the compositor](./configure.md#what-it-does-on-the-compositor)).
@@ -83,20 +83,18 @@ subset. The default, `%-I:%M %P`, is a 12-hour clock with no leading zero:
   names) is checked once each wake, so `timedatectl set-timezone` takes
   effect within the minute. A zone file that disappears keeps the zone last
   read until one is back.
-- **Clock steps, suspend and summer time** show at once or on the boundary:
-  the timer is on the wall clock and cancelled by any step (NTP, `date
-  -s`, a resume from suspend), which wakes the bar at once to redraw; a
-  summer-time change shows at the first tick after it.
+- **Clock steps, suspend and summer time**: any step of the wall clock (NTP, `date
+  -s`, a resume from suspend) cancels the timer and wakes the bar at once to
+  redraw. A summer-time change shows at the first tick after it.
 
 
 
 ## Workspaces
 
-Each output's workspace numbers, spoken over `ext-workspace-v1`, with the
+Each output's workspace numbers, over `ext-workspace-v1`, with the
 active one marked by a pill in the accent color (its number drawn in the
-bar's background). One number per workspace the compositor reports for the
-output the bar is on, sorted by position: what scoot reports is what is
-shown, no fixed slots. A workspace adopted from an unplugged monitor shows
+bar's background). The bar shows one number per workspace the compositor reports for the
+output it is on, sorted by position, with no fixed slots. A workspace adopted from an unplugged monitor shows
 its number (`"2 DP-1"` shows `2`). A name with no leading number (a foreign
 compositor's free-form name) shows its 1-based position.
 
@@ -111,19 +109,19 @@ so on a second monitor's bar use `focus-output` first, then click.
   a pill, or a circle.
 - **The protocol is bound only while the module is placed.** A bar with no
   workspaces module never binds `ext_workspace_manager_v1` or `wl_seat`, so
-  it wakes for none of it. A `scootbar msg reload` that adds the module binds both then; one
+  it wakes for none of it. A `scootbar msg reload` that adds the module binds both; one
   that removes it releases them (a seat below version 5 cannot be released
   and stays bound). A compositor that starts advertising the protocol later
-  is bound if the module is placed, even if nothing was bound before; one that finishes the manager and
+  is bound if the module is placed. One that finishes the manager and
   re-advertises it is not rebound until a reload removes and re-adds the
   module.
 - **Without `ext-workspace-v1`** the module shows nothing (one stderr note
   at start-up says the protocol is missing) and takes no space.
-  **Without `wl_seat`** clicks do nothing (said too: see [Pointer input](./modules.md#pointer-input)). The bar still starts;
-  the clock is unaffected.
+  **Without `wl_seat`** clicks do nothing (also noted on stderr; see [Pointer input](./modules.md#pointer-input)). The bar still starts
+  and the clock is unaffected.
 - **The list grows and shrinks with the trailing empty workspace**,
-  renumbering what follows; only the `active` state bit is shown so far
-  (occupied and urgent need scoot-side work, in the module's entry).
+  renumbering what follows. Only the `active` state is shown; occupied and
+  urgent are not.
 
 
 
@@ -197,7 +195,7 @@ disc = true            # grow the span to the tile, so it stays square
   even where a grown circle or tile overlaps the neighbour's own click area; a press
   on the padding around any other number still activates that workspace.
 - **Not built**: urgent and occupied workspace
-  colors. The bar reads only the protocol's `Active` state so far.
+  colors. The bar reads only the protocol's `Active` state.
 
 
 
@@ -227,21 +225,19 @@ window activated on it; with none focused the module shows its
   with closing off is refused when the file is read. The module's own
   actions are `activate` and `close`, both taking no number.
 - **Cost.** Event-driven, no polling: the protocol is bound only while
-  the module is placed (a bar with no window-title module is never told a
-  title), and without it the module shows nothing and takes no space. A
-  retitle flood draws about ten times a second — focus, output, close and
-  fullscreen changes always draw at once; only title and app-id text waits
-  — and only this module's span is redrawn. Titles are untrusted text:
-  kept at 256 bytes, control characters stripped before they reach the
-  view (and the glyph cache).
-- **Only the wlr protocol.** The module binds `wlr-foreign-toplevel-management-v1`
-  (the newer `ext-foreign-toplevel-list-v1` has no activation state or requests).
+  the module is placed, and without the protocol the module shows nothing and takes no space. A
+  retitle flood draws about ten times a second (focus, output, close and
+  fullscreen changes always draw at once; only title and app-id text waits),
+  and only this module's span is redrawn. Titles are untrusted text:
+  kept at 256 bytes, with control characters stripped.
+- **Only the wlr protocol.** The module binds `wlr-foreign-toplevel-management-v1`;
+  the newer `ext-foreign-toplevel-list-v1` has no activation state or requests.
 
 
 
 ## Volume
 
-The default sink's level and mute, spoken over the PulseAudio native
+The default sink's level and mute, over the PulseAudio native
 protocol (PipeWire's `pipewire-pulse` answers it, as does PulseAudio
 itself). The `microphone` module is the same code for the default
 source (its level and mute, the `source` key in `query`), configured under
@@ -275,14 +271,14 @@ by default.
   (never accumulated steps, so a touchpad flood cannot drift), one in
   flight at most, and every answered set is re-read, so what the server
   clamped to is what is shown. The server is `$PULSE_SERVER` when that names a unix socket,
-  else `$XDG_RUNTIME_DIR/pulse/native`; device names are untrusted text,
+  else `$XDG_RUNTIME_DIR/pulse/native`. Device names are untrusted text,
   kept at 128 bytes.
 
 
 
 ## Network
 
-Link state, WiFi name and signal, spoken over rtnetlink and nl80211. A
+Link state, WiFi name and signal, over rtnetlink and nl80211. A
 Cargo feature (`network`), on by default.
 
 - **What it shows** is one interface's state: the default route's (the
@@ -293,30 +289,30 @@ Cargo feature (`network`), on by default.
   up beside the shown interface appends `· VPN`. The tooltip adds the
   signal (`Wimbly · −54 dBm on wlan0`). Before the first event it shows
   nothing and takes no space. An icon can stand before the text, or
-   alone: `icon`, `icon-path` with `icon-viewbox`, or `icon-image` (at
-   most one, as the [clock's](./modules.md#icons)) for every state, or one glyph each
-   in `icon-ethernet`, `icon-wifi`, `icon-vpn` and `icon-offline` — see
-   [Per-state and per-level icons](./modules.md#per-state-and-per-level-icons). The
-   WiFi level is four at −55 dBm and better, one at −78 and worse, as
-   `query`'s `bars` counts it.
+  alone: `icon`, `icon-path` with `icon-viewbox`, or `icon-image` (at
+  most one, as the [clock's](./modules.md#icons)) for every state, or one glyph each
+  in `icon-ethernet`, `icon-wifi`, `icon-vpn` and `icon-offline`; see
+  [Per-state and per-level icons](./modules.md#per-state-and-per-level-icons). The
+  WiFi level is four at −55 dBm and better, one at −78 and worse, as
+  `query`'s `bars` counts it.
 - **At idle on WiFi the bar wakes about twice every 10 seconds**: the
   signal has no kernel event, so the module re-reads it on a 10 s timer,
-  armed only while WiFi is shown. The redraw follows only when the shown level moves.
-  The tooltip's exact dBm is drawn live from the latest re-read, so it
+  armed only while WiFi is shown. A redraw follows only when the shown level moves.
+  The tooltip's exact dBm comes from the latest re-read, so it
   is fresh whenever it opens, and an open tooltip refreshes with the
   next redraw.
 - **A click opens the picker**, with no binding at all: `network.menu-command`
   is spawned with the cached scan's SSIDs on stdin (one per line), a
-  dmenu-style launcher fed from the scan list. Connecting is the
-  command's own business, for example
+  dmenu-style launcher fed from the scan list. Connecting is up to the
+  command, for example
   `menu-command = ["sh", "-c", "fuzzel --dmenu | xargs -d '\\n' -r -n1 nmcli device wifi connect"]`
   (no shell sees the SSID: it travels by pipe into `xargs`, which passes
   it as one argument). With `show-ssid = false` the picker refuses to
   open instead: the scan list would expose the SSIDs the bar hides. The module's own action is `menu`, taking no
-  number (`scootbar msg invoke network menu`); it is refused naming why
-  with no command configured or no networks seen. A second `menu` while
+  number (`scootbar msg invoke network menu`); it is refused, with the reason,
+  when no command is configured or no networks were seen. A second `menu` while
   one runs ends the running picker and opens a fresh one, so a picker
-  left open never blocks the next; only a menu that will open ends the
+  left open never blocks the next. Only a menu that will open ends the
   old one.
 - **A native list**, opt-in as the volume popup is: `on-click = "popup"`
   opens the scan as a [popup](./modules.md#popups) list instead of the dmenu picker
@@ -364,7 +360,7 @@ Cargo feature (`network`), on by default.
 - **`query`** reports `{"state": "wifi", "ssid": "Wimbly", "signal": -54,
   "bars": 4, "interface": "wlan0", "vpn": false}`, `"ethernet"` and
   `"vpn"` with the interface, or `{"state": "disconnected"}`.
-- **Cost.** Event-driven, no polling (except the 10 s signal re-read while WiFi is shown: signal has no event on drivers without CQM). `Unavailable` (nothing shown) where the machine has no network interface. Interfaces that appear later (a
+- **Cost.** Event-driven, no polling, except the 10 s signal re-read while WiFi is shown (signal has no event on drivers without CQM). Where the machine has no network interface, the module shows nothing. Interfaces that appear later (a
   plugged-in dongle) are picked up by `scootbar msg reload`.
 
 
@@ -379,7 +375,7 @@ A Cargo feature (`brightness`), on by default.
   draws only the icon — see [Per-state and per-level
   icons](./modules.md#per-state-and-per-level-icons)). The tooltip names the device: `apple-panel-bl: 49%`. Where
   there is no backlight at all (a desktop, a VM) it shows nothing and
-  takes no space, owning no fd.
+  takes no space.
 - **A scroll raises or lowers**, with no binding at all; a binding you set
   runs instead, as on every module. The module's own actions are `raise`
   and `lower`, neither taking a number (a scroll's steps arrive through
@@ -391,17 +387,16 @@ A Cargo feature (`brightness`), on by default.
   in sorted name order. **`step`** (default 5, 1 to 50) is the percent
   points per scroll notch and per raise.
 - **Writes need permission**: the bar writes the raw value to the device's
-  `brightness` file directly (no daemon; logind's `SetBrightness` waits for
-  the shared D-Bus client), and a udev rule for the backlight
+  `brightness` file directly, and a udev rule for the backlight
   class or the `video` group grants it. Without it the action is refused
-  naming that. Every write is an absolute level from what is shown (never
+  and says so. Every write is an absolute level from what is shown (never
   accumulated steps, so a touchpad flood cannot drift), re-read before the
   call returns, and never below raw 1: 0 blanks the panel on some drivers,
   and the bar never darkens its own screen past what a scroll
   can bring back.
 - **Cost.** No timer, no polling, no
-  wakeups with no backlight activity. Sysfs values are digits only; a zero
-  range or a missing file skips its device.
+  wakeups with no backlight activity. A device with a zero
+  range or a missing file is skipped.
 
 
 
@@ -421,21 +416,19 @@ A Cargo feature (`battery`), on by default.
   `battery.icon-charging` and `battery.icon-full` for those states;
   `battery.show-text = false` draws only the icon — see [Per-state and
   per-level icons](./modules.md#per-state-and-per-level-icons)). Where there is no battery at all (a desktop, a VM) it
-  shows nothing and takes no space, owning no fd.
+  shows nothing and takes no space.
 - **Several batteries** are combined by default (`batteries =
   "combine"`: the mean capacity, discharging winning the state), or the
   first in sorted name order with `batteries = "first"`. A battery
-  removed at runtime hides the module until one is back: one stderr line, not
-  one per wake, and the uevent socket stays as the appearance watch, so a
-  reinsert shows again with no polling. The percentage
+  removed at runtime hides the module until one is back, with one stderr line.
+  A reinserted battery shows again with no polling. The percentage
   always comes from `capacity`, never `charge_now`/`charge_full` (about 4
-  points apart at full). No time-remaining is shown: it needs rate
-  smoothing to be honest, and a wrong estimate is worse than none.
+  points apart at full). No time-remaining is shown.
 - **`on-low = { exec = [...] }`** runs once per downward crossing of
   `urgent-below` (and re-arms when the level rises back above, so the next
   crossing fires again; starting below it is not a crossing). It runs
-  through the bar's own spawner, like a click binding: bounded and
-  reaped, never through a shell. The module defines no actions of its
+  like a click binding: never through a shell, and bounded as
+  in [Pointer input](./modules.md#pointer-input). The module defines no actions of its
   own, so its five interaction keys take commands only.
 - **Cost.** One wake per kernel event, whatever the subsystem (filtered in
   userspace), and a re-read once a minute only
@@ -451,8 +444,7 @@ A Cargo feature (`battery`), on by default.
 The applications' tray icons: the StatusNotifierItem watcher and host over
 the session bus, one icon per item, drawn at the output's real device
 pixels. A Cargo feature (`tray`), on by default; the smallest build
-(`--no-default-features`) has none of it. It speaks D-Bus through the
-bar's own client (no `zbus`, no libdbus, no thread).
+(`--no-default-features`) has none of it.
 
 - **The bar is the watcher.** It owns `org.kde.StatusNotifierWatcher` (and
   the `org.freedesktop` twin) when they are free, answers apps'
@@ -492,9 +484,7 @@ bar's own client (no `zbus`, no libdbus, no thread).
   keeps it while alarmed). An item whose `Status` is `Passive` (the spec's "hide
   me"), or whose name resolves to nothing (missing theme, SVG-only,
   hostile name), is tracked and reachable by index but takes no room.
-  Overlay icons are read for shape and not drawn (compositing a badge
-  is a second scaled draw a frame for something real items rarely
-  send), and tooltip icons are not drawn. A theme installed or changed
+  Overlay icons and tooltip icons are not drawn. A theme installed or changed
   is picked up on the item's next update, or on restart: nothing polls
   the theme directories. The tooltip over the module lists the shown
   items' titles.
@@ -509,15 +499,14 @@ bar's own client (no `zbus`, no libdbus, no thread).
   `scootbar msg invoke tray activate 0`), `menu` (taking the index too),
   and the popup rows' own `menu-select`, `menu-drill` and `menu-back`
   (a row's dbusmenu id, or nothing for `menu-back`).
-  (The wheel actions are not called `scroll-up` and `scroll-down`: those
-  are the names of the interaction keys, and `msg invoke` reads them as
-  those.) `Activate` and `SecondaryActivate` are sent with position `(0,
+  (The wheel actions are not called `scroll-up` and `scroll-down`, because
+  `msg invoke` reads those as the interaction keys.) `Activate` and `SecondaryActivate` are sent with position `(0,
   0)` (a bar has no screen coordinates to give), and a wheel action sends
   `Scroll(n, "vertical")`: `"gtk"` (the default) sends the notch count
   clamped to 64, negative for `wheel-up` and positive for `wheel-down`.
-  KDE items speak Qt's convention
+  KDE items use Qt's convention
   instead (up positive at 120 a notch). One sign cannot serve both stacks,
-  so the convention is one choice for the whole tray, GTK unless asked:
+  so the convention is one choice for the whole tray, GTK unless you change it:
 
   ```toml
   [tray]
@@ -604,13 +593,13 @@ bar's own client (no `zbus`, no libdbus, no thread).
   address has no directory to watch, so it polls once every 30 s): zero wakeups with
   no bus, with a bus and no items, and with items on it. An item that
   re-announces its icon continuously is read at most every 50 ms (0.7% of
-  a core, against 9.7% with no floor).
+  a core, against 9.7% with no limit).
 
 
 ## Media
 
 What the players on the session bus are playing, and play/pause, next and
-previous, spoken over MPRIS (`org.mpris.MediaPlayer2.*`: mpv, VLC,
+previous, over MPRIS (`org.mpris.MediaPlayer2.*`: mpv, VLC,
 Spotify, Firefox, Chromium and most others). A
 Cargo feature (`media`), on by default; the smallest build
 (`--no-default-features`) has none of it.
@@ -674,9 +663,9 @@ Cargo feature (`media`), on by default; the smallest build
   once and dials once more, and one that keeps dropping the bar is left
   alone for 30 seconds, said once on stderr (the [tray's](./modules.md#tray) rules).
 - **Bounds, for a hostile or broken player.** Anything on the session bus
-  can claim a player name and say anything. It
+  can claim a player name and say anything, but it
   cannot crash or hang the bar or grow it without
-  bound: only the bus's own `NameOwnerChanged` is believed, and
+  bound. Only the bus's own `NameOwnerChanged` is believed, and
   `PropertiesChanged` only from the connection that owns a held name. At most 8 players are held, one a connection; the rest wait in
   a list of 16 names (an evicted player that starts playing is not seen
   until a held one is removed: 9+ MPRIS names). Titles and artists are cleaned (controls stripped) and
@@ -697,7 +686,7 @@ Cargo feature (`media`), on by default; the smallest build
 
 ## Bluetooth
 
-The adapter's power and the connected devices, spoken over BlueZ
+The adapter's power and the connected devices, over BlueZ
 (`org.bluez`) on the **system bus**. A Cargo feature
 (`bluetooth`), on by default; the smallest build (`--no-default-features`)
 has none of it.
@@ -727,8 +716,8 @@ has none of it.
 - **Picking a device** is `bluetooth.menu-command`, spawned with the
   device list on stdin (one per line, a connected device marked
   `(connected)`), a dmenu-style launcher fed from the held set, e.g.
-  `menu-command = ["sh", "-c", "fuzzel --dmenu | ..."]`. Connecting is the
-  command's own business; the bar never reads the choice back.
+  `menu-command = ["sh", "-c", "fuzzel --dmenu | ..."]`. Connecting is up to the
+  command; the bar never reads the choice back.
 - **`query`** reports `{"state": "connected", "adapters": 1, "powered":
   true, "connected": 1, "device": "Headset", "battery": 72}` (`state` is
   `off`, `on` or `connected`; `device` is the device shown; `battery`
@@ -749,7 +738,7 @@ has none of it.
   more, and one that keeps dropping the bar is left alone for 30 seconds,
   said once on stderr (the [tray's](./modules.md#tray) rules).
 - **Bounds, for a hostile or missing BlueZ.** Anything on the system bus
-  can own `org.bluez` when BlueZ itself is absent and say anything. It
+  can own `org.bluez` when BlueZ itself is absent and say anything, but it
   cannot crash or hang the bar or grow it without
   bound. Only the bus's own `NameOwnerChanged` is believed, every other
   signal only from the tracked `org.bluez` owner; a
@@ -831,12 +820,11 @@ on-click = "popup"
   [interaction keys](./modules.md#pointer-input).
 - **Idle cost: nothing while closed.** The system-bus connection is made
   when the popup first opens (or an invoke first needs logind), never at
-  start: a bar whose menu is never opened holds no bus fd and makes no
-  round trips. Afterwards one
+  start, so a bar whose menu is never opened holds no bus fd. Afterwards one
   connection stays, woken only by its own replies; no match rules are
   installed, so nothing else on the system bus wakes the bar.
 - **Bounds, for a hostile logind.** On a bus without logind anything can
-  own `org.freedesktop.login1` and say anything. It cannot crash or hang the bar:
+  own `org.freedesktop.login1` and say anything, but it cannot crash or hang the bar:
   a reply that does not parse keeps the last state, said once per connection;
   an answer other than `yes`/`challenge`/`no`/`na` never hides a row;
   the error text kept is cut to 256 bytes.
@@ -893,12 +881,11 @@ icon = "★"
 
 ## Pointer input
 
-Clicks, scrolls and hover, on every module. The bar never takes the keyboard
-outside a [popup](./modules.md#popups)'s lifetime (its layer surface asks for no
-keyboard interactivity, so it cannot disturb focus; a popup that grabbed
-takes it, for Escape, arrows and Enter, while it is open), and **touch is ignored**: the bar binds the seat's pointer only, so
-a touch screen's taps reach nothing here (until a touch design exists,
-they are not translated into clicks).
+Clicks, scrolls and hover, on every module. The bar takes the keyboard
+only while a [popup](./modules.md#popups) that grabbed is open (for Escape, arrows and Enter);
+its layer surface asks for no keyboard interactivity, so it cannot disturb focus.
+**Touch is ignored**: the bar binds the seat's pointer only, so
+a touch screen's taps reach nothing here.
 
 **Interaction keys.** Each module's table takes five keys, each holding one
 action:
@@ -932,12 +919,12 @@ on-click = { exec = ["foot", "-e", "btop"] }     # a command, run directly
 - **`exec`** is an array, the command then its arguments, at most 32 of
   them of at most 4096 bytes each, none holding a NUL. **It is never run
   through a shell**; write `["sh", "-c", "..."]` to use one, and the
-  quoting is yours. A string instead of an array is a refusal that says
-  so. The command's stdin, stdout and stderr are `/dev/null`, it leads its
+  quoting is yours. A string instead of an array is refused.
+  The command's stdin, stdout and stderr are `/dev/null`, it leads its
   own process group, and it inherits none of the file descriptors the bar
   opens (a descriptor the launcher left open without close-on-exec when it
   started the bar is handed on, as with any child). Its environment is the bar's. It is reaped the moment it
-  exits (no zombie, no timer), and at most 8 launched commands run at once:
+  exits, and at most 8 launched commands run at once:
   a ninth is refused with a line on stderr (and, for `invoke`, an error),
   not queued, so a hung command and a flood of clicks cannot fill the
   process table. The refusal names what holds the table, oldest first, each
@@ -948,19 +935,18 @@ on-click = { exec = ["foot", "-e", "btop"] }     # a command, run directly
   not running `foo`: 8 launched commands are still running (stop one by hand to free a slot): `sleep` pid 4121 for 2h 05m, `sh` pid 4188 for 12s, ...
   ```
 
-  Stop one with `kill PID`; the bar never signals a command it launched. It
-  does not supervise them either: a command lives as long as it likes (see
-  [the unit's `KillMode`](./index.md) for what a
+  Stop one with `kill PID`; the bar never signals a command it launched, and
+  it does not supervise them (see [the unit's `KillMode`](./index.md) for what a
   restart of the bar does to it).
 - **`{ scoot = "quit" }`** asks scoot to end the session over its control
   socket (`SCOOT_SOCKET`, else `$XDG_RUNTIME_DIR/scoot.sock`) with no
   process spawn: one line, with a 250 ms bound each way on a fresh
   connection, so a wedged scoot cannot hang the bar. Under another
-  compositor, or with no session, it says it cannot reach scoot on stderr
+  compositor, or with no session, it says on stderr that it cannot reach scoot
   and does nothing. `quit` is the only value.
-- **A key you do not set keeps the module's default**: the workspaces
-  module's left click on a number switches to it, and
-  other modules have defaults of their own, which their sections list. A binding replaces the default.
+- **A key you do not set keeps the module's default**: a left click on a
+  workspaces number switches to it, and other modules have defaults of
+  their own, listed in their sections. A binding replaces the default.
 - **A failing action** (a program that is not there, a full table) is one
   line on stderr, at most one a second, with a count of the ones held back.
   The bar carries on.
@@ -971,9 +957,8 @@ module. A release anywhere else (the pointer slid off, left the bar, or
 the module went away meanwhile: a reload, a module that now shows nothing)
 does nothing and leaves nothing armed. A second button pressed while one
 is held cancels both. Buttons other than left, right and middle (back,
-forward, touch) are ignored. A click lands on the layout that is on screen
-(what the last draw committed), so a click during a redraw goes to what you
-saw.
+forward, touch) are ignored. A click lands on the layout that is on screen,
+so a click during a redraw goes to what you saw.
 
 **What a scroll is.** Vertical scroll only; horizontal scroll is ignored.
 A wheel notch is one step (`axis_value120`, or `axis_discrete` on an older
@@ -983,9 +968,7 @@ reverses, the scroll ends or the pointer leaves. Down is `on-scroll-down`.
 **However fast the device sends events, a scroll binding runs at most once
 a frame (16 ms)**, carrying the steps that piled up (at most 32: a flood
 past that is dropped, not queued): a module action moves that many
-places, and an `exec` command runs once however many steps it covers. While
-steps wait the loop sleeps only until the frame is due; with nothing
-waiting it sleeps as before.
+places, and an `exec` command runs once however many steps it covers.
 
 **Hover.** A module with a binding is drawn in the `hover` color while
 the pointer is over it, and only that module's span is redrawn, on that
@@ -998,8 +981,7 @@ itself, so the tint lands there rather than over its text). Unset,
 **Cost.** The bar asks the seat for a pointer only while a placed module
 has a binding or a default of its own.
 A clock-only bar with no bindings never takes the pointer. A reload that adds or removes bindings
-takes or drops it. A motion event stores two numbers; no pointer event
-or hover repaint allocates.
+takes or drops it.
 
 
 
@@ -1007,9 +989,8 @@ or hover repaint allocates.
 
 A module's **popup** is a small panel drawn in an `xdg_popup` parented to the
 bar's layer surface (`zwlr_layer_surface_v1.get_popup`), opened under the
-module and gone when closed: nothing of it exists while it is not open, so
-a bar that never opens one costs what it did before. The `popup` Cargo
-feature (on by default) is the code; a build without it has none of it.
+module and gone when closed. Nothing of it exists while it is not open. The `popup` Cargo
+feature (on by default) is the code; a build without it has no popups.
 
 **Opt-in.** Nothing opens a popup until the config binds one. The first
 consumer is the volume module (and `microphone`, which shares its code):
@@ -1058,8 +1039,8 @@ the dmenu-style launcher are still how a click connects); `on-click =
   closes the popup and runs `connect N` on the network module. Without
   a grab (an agent's `invoke`-opened popup) there is no keyboard: the
   list is pointer-only there.
-- **Opened on the press, not the release.** The one exception to "clicks
-  fire on release" ([pointer input](./modules.md#pointer-input)): a compositor may refuse
+- **Opened on the press, not the release.** This is the one exception to "clicks
+  fire on release" ([pointer input](./modules.md#pointer-input)), because a compositor may refuse
   a popup grab whose serial is not a button still held. The release after it does nothing.
 - **Where it goes.** Anchored to the module's span on the bar, centered under
   it (above, on a bottom bar), and the compositor slides it along the bar and
@@ -1075,30 +1056,28 @@ the dmenu-style launcher are still how a click connects); `on-click =
   output being unplugged, the bar being hidden (`msg hide`) or made again,
   a scale change, a `reload`, and, for a popup that grabbed, the session
   locking (scoot dismisses popup grabs on lock; one opened with `invoke` has
-  no grab and is not dismissed by it, and is not drawn over the lock screen). Every one leaves the bar running and
-  says nothing on stderr.
-- **The keyboard.** The bar's layer surface asks for no keyboard and still
-  does not. A `wl_keyboard` is taken from the seat **only while a popup that
+  no grab and is not dismissed by it, and is not drawn over the lock screen). None of these
+  stops the bar or writes to stderr.
+- **The keyboard.** The bar's layer surface asks for no keyboard. A `wl_keyboard` is taken from the seat **only while a popup that
   grabbed is open** (the grab is what gives the popup the keyboard), and
   released with it: **Escape** closes the popup, **Up/Down** move the hover
   among its button rows (clamped at the first and last, the scroll following
   so the hovered row stays visible), and **Enter** activates the hovered row
   with its `closes` flag honored, exactly as a release over it would.
-  Anything else typed is ignored, and no keymap is ever read (the codes are
+  Anything else typed is ignored, and no keymap is read (the codes are
   matched directly, so the bar needs no xkb). Without a grab (an agent's
-  `invoke`-opened popup) there is no keyboard at all. Keybindings of the
-  compositor still win.
+  `invoke`-opened popup) there is no keyboard at all. The
+  compositor's keybindings still win.
 - **Limits.** One popup at a time (a [tooltip](./modules.md#tooltips) is not one: it closes
   when a popup opens, and none shows while one is open). A drag ends when the pointer leaves the
   popup (the compositor's popup grab moves the pointer's focus off it, so
   nothing more of the drag arrives); past the slider's ends but still over the
-  popup it clamps to them. Up/Down move the hover among the button rows and
-  Enter activates the hovered one (above). A compositor
+  popup it clamps to them. A compositor
   without `xdg_wm_base` refuses `popup` (said on stderr, or to `invoke`);
   the global is bound while some binding in the config names `popup`, and
-  by an `invoke` for a bar with none — that one stays bound until the next
-  `reload`. A bar that never opts in and never invokes binds
-  nothing new, and a click is the mute it always was.
+  by an `invoke` for a bar with none (that one stays bound until the next
+  `reload`). A bar that never opts in and never invokes binds
+  nothing, and a click mutes.
 - **Cost.** Opening and closing are the only costs: one surface, a
   positioner, two `wl_shm` buffers made on demand and dropped on close, and a
   keyboard. An open popup that nothing changes makes no wakeups.
@@ -1107,12 +1086,11 @@ the dmenu-style launcher are still how a click connects); `on-click =
 
 ## Tooltips
 
-A module's `tooltip` (the line a module's view carries beside its text) is
+A module's `tooltip` is
 shown in a small panel under the module after the pointer has rested on it for
-`bar.tooltip-delay` milliseconds, and gone when the pointer leaves. It is the
-[popup](./modules.md#popups) machinery without a grab, so the `popup` Cargo feature (on by
-default) is also the code of tooltips, and a build without it has no
-tooltips and refuses the `tooltip-delay` key.
+`bar.tooltip-delay` milliseconds, and gone when the pointer leaves. It is a
+[popup](./modules.md#popups) without a grab, so a build without the `popup` Cargo feature (on by
+default) has no tooltips and refuses the `tooltip-delay` key.
 
 ```toml
 [bar]
@@ -1121,8 +1099,8 @@ tooltip-delay = 300     # ms, 0 to 10000; 0 turns tooltips off (default 500)
 
 There is no flag for it: the config file only.
 
-- **Which modules have one**, with nothing new read to make it: each module's
-  tooltip is the one its view already carried (the window title's full title,
+- **Which modules have one**: each module's
+  tooltip is the one its view already carries (the window title's full title,
   uncut by the span; the network's interface, SSID and signal; the battery's
   `Charging 80%`; the volume and microphone's device and level; the
   brightness's device; the tray's item titles; the media module's player and line; a `push` or `exec` module's
@@ -1130,7 +1108,7 @@ There is no flag for it: the config file only.
   tooltip, or whose tooltip is empty right now, shows none and arms nothing:
   the clock, workspaces and `button` modules have none.
 - **When.** The delay runs from the pointer entering the module (motion
-  within it does not restart it), and a pointer that crosses a module and
+  within it does not restart it). A pointer that crosses a module and
   moves on before the delay shows nothing. Moving to another module hides the
   tooltip and starts that module's delay over.
 - **It goes** on: the pointer leaving the module or the bar, **any press**
@@ -1153,30 +1131,30 @@ There is no flag for it: the config file only.
   and nothing under it is hidden from a click.
 - **Where it goes and how big.** Anchored to the module's span like a popup,
   centered under it (above, on a bottom bar), slid along the bar and flipped
-   across it by the compositor where the output's edge would cut it. Text is
-   wrapped at spaces at 30 ems (never wider than the bar), at most six lines,
-   the last ending in an ellipsis (`…`) where it was cut; a word longer than
-   the line is broken where it fills it. A newline in a tooltip
-   breaks a line (the `push` and `exec` payloads turn control characters,
-   newlines included, into spaces, so theirs wrap only). The frame, shape and
-   colors are the popup's.
+  across it by the compositor where the output's edge would cut it. Text is
+  wrapped at spaces at 30 ems (never wider than the bar), at most six lines,
+  the last ending in an ellipsis (`…`) where it was cut; a word longer than
+  the line is broken where it fills it. A newline in a tooltip
+  breaks a line (the `push` and `exec` payloads turn control characters,
+  newlines included, into spaces, so theirs wrap only). The frame, shape and
+  colors are the popup's.
 - **While it is shown** a changed tooltip text (a clock-like tooltip) redraws it
   in place when the new text fits the size it opened at, damage limited to the
   tooltip's own surface; a text that needs more room, or its module moving
   along the bar (a neighbor's text grew), makes it again at once with no
   delay.
-- **Cost.** With nothing hovered there is nothing: no timer and no wakeup.
+- **Cost.** With nothing hovered there is no timer and no wakeup.
   `xdg_wm_base` is bound when the first tooltip shows (kept until the next
-  `reload`), so a bar nobody hovers binds nothing new. Showing one is a surface, a positioner, an empty region and two
-  `wl_shm` buffers made then and dropped when it goes; a shown tooltip makes
-  no wakeups. A failure to show one is silent: a hover is not a request.
+  `reload`), so a bar nobody hovers binds nothing. Showing one costs a surface, a positioner, an empty region and two
+  `wl_shm` buffers, made then and dropped when it goes; a shown tooltip makes
+  no wakeups. A failure to show one is silent.
 
 
 
 ## Button, push and exec modules
 
 Three modules that extend the bar without writing Rust. Each is defined by a
-table named for its kind and **a name of your choosing**, and the lists then
+table named for its kind and **a name of your choosing**. The lists then
 place it by that name like any built-in module:
 
 ```toml
@@ -1202,8 +1180,8 @@ is not a built-in module's id (`clock`, `workspaces`) and is unique across the
 three kinds; at most 32 modules are defined. Every table also takes `margin`
 (as the clock's) and the five [interaction keys](./modules.md#pointer-input), so any of
 them can run a command or send `{ scoot = "quit" }` on a click or a scroll.
-A table no list names is never started and costs nothing. These modules are
-named in the config file's lists only: `--left`, `--center` and `--right`
+A table no list names is never started and costs nothing. Name these modules
+in the config file's lists only: `--left`, `--center` and `--right`
 take the built-in ids. A bad table is refused naming its dotted key
 (`exec.weather.command`), and a bad `reload` changes nothing.
 
@@ -1215,16 +1193,15 @@ An icon and/or text that never changes: a launcher, a power menu, a toggle.
 `text` and the three icon keys (`icon`, `icon-path` with `icon-viewbox`,
 `icon-image`, at most one) are the clock's, with the same refusals. A button
 with neither shows nothing and takes no space. It has no fd and no wakeup.
-`on-click = { exec = ["scootlaunch"] }` is the launcher and
-`on-click = { scoot = "quit" }` log out, in the config
-that is the whole of them.
+`on-click = { exec = ["scootlaunch"] }` makes a launcher and
+`on-click = { scoot = "quit" }` makes a log-out button.
 
 
 
 ### `push`
 
-A place anything can write to with `scootbar msg set ID VALUE`, costing
-nothing until it is: no fd of its own beyond the control socket, no timer, no
+A place anything can write to with `scootbar msg set ID VALUE`. It costs
+nothing until written to: no fd beyond the control socket, no timer, no
 thread. `VALUE` is JSON, the [payload](./modules.md#the-update-payload) below:
 
 ```sh
@@ -1244,8 +1221,8 @@ A static `icon` (one glyph, or `icon-path` with `icon-viewbox`, or
 text, and `show-text = false` draws only the icon
 (see [Per-state and per-level icons](./modules.md#per-state-and-per-level-icons)).
 An update's own `icon` is drawn instead of the static one while set, so a
-script can change it per update (a VPN that drops); with neither the
-module shows text alone, as before.
+script can change it per update (a VPN that drops). With neither, the
+module shows text alone.
 
 #### The `notifications` module
 
@@ -1280,13 +1257,15 @@ either side.
 Runs a command and shows what it prints, one line per update. **It streams,
 it does not poll**: the command runs once and the bar waits on its output, so
 a script that can wait for an event prints when it has one and the bar does
-nothing in between. There is **no `interval` key**, on purpose: a script
+nothing in between. There is **no `interval` key**. A script
 that has to poll writes `while :; do ...; sleep 60; done` (print first, so
-the module shows its line at once, not after the first sleep), which puts the
-cost (a process every minute, whatever it spawns) in a script you can see,
-not in a bar option. A command that prints once and exits (`["date"]`) is a
+the module shows its line at once, not after the first sleep), which keeps the
+cost (a process every minute, whatever it spawns) in a script you can see.
+A command that prints once and exits (`["date"]`) is a
 poll too: the restart rule below runs it again, backing off to once a
-minute, so write the loop yourself when you want a different rhythm. `command` is an array, the program and its arguments, **never
+minute, so write the loop yourself when you want a different rhythm.
+
+`command` is an array, the program and its arguments, **never
 run through a shell** (write `["sh", "-c", "..."]` to use one), at most 32
 arguments of at most 4096 bytes. `format` says how a line is read: `text`
 (the line is the text, the default) or `json` (one object per line, below).
@@ -1295,8 +1274,8 @@ A static `icon` (one glyph, or `icon-path` with `icon-viewbox`, or
 text, and `show-text = false` draws only the icon
 (see [Per-state and per-level icons](./modules.md#per-state-and-per-level-icons)).
 A JSON line's own `icon` is drawn instead of the static one while set; a
-text line carries none, so it shows the static one. With neither the
-module shows text alone, as before.
+text line carries none, so it shows the static one. With neither, the
+module shows text alone.
 
 - **What is shown** is the last line of what the bar read at once (an
   update is a state, so earlier ones in the same read are already stale).
@@ -1345,19 +1324,17 @@ module shows text alone, as before.
   command through itself, which needs /proc mounted).
 - **Count**: at most 8 `exec` modules are placed (on any output); each
   holds a child, a `timerfd` and at most two polled fds.
-- **Start-up**: a command is started right after the bar's first frame, not
-  before it, so a slow `fork` never delays the bar.
+- **Start-up**: a command is started right after the bar's first frame, so a
+  slow `fork` never delays the bar.
 
 
 
 #### CPU, memory and pressure-stall recipes
 
-There is no built-in CPU, memory, temperature or disk module, on purpose:
-those files carry state with no change notification, so the only way to show
-them live is to sample on a timer.
-Each of these is one `exec` module instead: a user who wants a CPU readout
-writes the loop with the interval they choose, and pays for it knowingly.
-Place them by name like any module:
+There is no built-in CPU, memory, temperature or disk module: those files
+have no change notification, so showing them live means sampling on a timer.
+Each recipe below is one `exec` module instead, so you choose the interval
+and pay for it knowingly. Place them by name like any module:
 
 ```toml
 right = ["cpu", "mem", "pressure", "clock"]
@@ -1506,8 +1483,8 @@ treatment per line ([below](./modules.md#the-update-payload)).
 
 ### The update payload
 
-What a `push` takes and an `exec` in `json` mode prints per line, scootbar's
-own and deliberately not Waybar's (no `alt`, no `percentage`, no class lists),
+What a `push` takes and an `exec` in `json` mode prints per line. It is scootbar's
+own format, not Waybar's (no `alt`, no `percentage`, no class lists),
 version 1:
 
 ```json
@@ -1515,12 +1492,11 @@ version 1:
 ```
 
 Every key is optional. `text` and `tooltip` are strings, `class` is one of
-`normal`, `warn`, `urgent` or `muted` (colored by the theme's tokens: the
-`urgent` and `dim` colors and so on), `icon` is exactly one character (a
+`normal`, `warn`, `urgent` or `muted` (colored by the theme's tokens), `icon` is exactly one character (a
 glyph from a symbol font, as a static `icon` key takes), drawn before the
 text instead of the module's static icon while set, `version` is the shape this was
-written for; a `version` above 1 is refused by name,
-and keys it does not know are ignored, so an older bar reads an update
+written for; a `version` above 1 is refused by name.
+Unknown keys are ignored, so an older bar reads an update
 carrying `icon` as if it were not there. Text and tooltip are cut at 256 bytes on a character boundary, and
 every control character (a tab, a carriage return, an escape) becomes a
 space, so nothing but printable text reaches the bar. A line or value
@@ -1532,8 +1508,7 @@ shown as a [tooltip](./modules.md#tooltips) where the module has one.
 ### Icons
 
 An icon is drawn before a module's text, `em` device pixels on a side (the size
-of the text, at the output's real scale, so it is sharp at 1.5x and never a
-smaller bitmap stretched), with a space after it when text follows. Three keys
+of the text, at the output's real scale, so it is sharp at 1.5x), with a space after it when text follows. Three keys
 give one, at most one of them per module; the clock, `button`, `push`,
 `exec`, volume,
 microphone, network, battery, brightness, bluetooth, media, window-title
@@ -1560,8 +1535,7 @@ icon-path = "M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"
 ![A path icon at scale 1.5](../../../assets/scootbar-path-1.5x.png)
 
 A path that is not valid is a config error naming `clock.icon-path` and the
-byte it stopped at (a refused reload leaves the running bar as it was): the
-whole path grammar is accepted, and nothing else, with no guessing. A viewbox
+byte it stopped at (a refused reload leaves the running bar as it was). A viewbox
 without a path, or two of the three icon keys, is an error too. A PNG is
 decoded when the config is read, so a missing, unreadable, non-regular (a FIFO,
 a device), huge (past 1024 x 1024 or 8 MiB), truncated or corrupt file is a
@@ -1578,9 +1552,9 @@ error says so. **SVG files are not read**: put the `d` string of a one-color ico
 
 #### Per-state and per-level icons
 
-Where one glyph cannot say it — a charge, a signal, a state — the key takes
-one glyph, or one glyph per level picked by the value, the shape the
-[network module](./modules.md#network) establishes. Each entry takes exactly one
+Where one glyph cannot say it (a charge, a signal, a state), the key takes
+one glyph, or one glyph per level picked by the value, as the
+[network module](./modules.md#network) does. Each entry takes exactly one
 character, as `icon` does; an array takes exactly the count named, each one
 glyph; anything else is a config error naming the dotted key. A per-state
 glyph wins over the static icon for its own state (any other state shows
@@ -1600,13 +1574,13 @@ vector or PNG icons are out of scope.
 | `exec` | `icon` | one static glyph, drawn before the text; a JSON line's own `icon` wins for its own line (a text line carries none) |
 
 `show-text = false` draws only the icon, with the text moved into the
-tooltip — which already names what the text said on every one of these
+tooltip, which already names what the text said on every one of these
 modules (the battery's `Discharging 72%`, the brightness's device, the
 bluetooth state and device list, the media line, the full window title, the
 network's SSID and signal, and whatever tooltip a `push` update or an
-`exec` line named, or the text itself where it named none) — so an icon can stand alone where the text is
-just a value: brightness and bluetooth especially. Without any icon the
-module shows text alone, as before.
+`exec` line named, or the text itself where it named none), so an icon can stand alone where the text is
+just a value, as with brightness and bluetooth. Without any icon the
+module shows text alone.
 
 #### Example: Nerd Font icons for every module
 

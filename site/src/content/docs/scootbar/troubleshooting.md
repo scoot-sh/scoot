@@ -38,13 +38,12 @@ description: "Bar symptoms and their fixes — placement, fonts, modules, the da
   naming an icon image or a font, or an icon is blank.* The bar runs under
   an address-space limit (`ulimit -v`, systemd's `LimitAS=`) or strict
   overcommit (`vm.overcommit_memory=2`), and the allocator refused a block.
-  The blocks the bar sizes from a file or the bus are asked for so a
-  refusal is an answer, not the end of the bar: a font or `icon-image`
+  A refusal does not end the bar: a font or `icon-image`
   PNG that does not fit is refused with that error, naming the file; a
   tray icon is left out; an icon or glyph
   that cannot be drawn this frame is blank and tried again on the next
-  one. The PNG decoder's and the glyph rasterizer's own working memory belong
-  to those libraries and are not fallible, so a limit tighter than they
+  one. The PNG decoder's and the glyph rasterizer's own working memory is
+  not fallible, so a limit tighter than they
   need still ends the bar. Give it
   address space rather than shrinking the config:
 
@@ -61,8 +60,8 @@ cat /proc/sys/vm/overcommit_memory       # 2 means strict overcommit
   `[autostart]`, it stays gone until started again. See
   [When the bar exits](./index.md#when-the-bar-exits).
 - *Crash on start before the compositor.* The unit retries every two
-  seconds until `WAYLAND_DISPLAY` is imported — start clean is normal,
-  not an error.
+  seconds until `WAYLAND_DISPLAY` is imported — a failed first start is
+  normal, not an error.
 
 ## Diagnose without running
 

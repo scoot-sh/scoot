@@ -14,15 +14,14 @@ The layer carries the six `[colors]` tokens, the `[bar]` style keys
 `separator`, `shadow`, `fill`, `motion`, `motion-duration-ms`, `motion-bounce`), the workspaces pill keys and the per-module glyph icons.
 It never carries geometry, placement, module lists, commands or
 actions. `hover` follows a custom `accent` when unset: a file that sets
-only `accent` derives its hover from it; a file that sets only `hover`
+only `accent` derives its hover from it, and a file that sets only `hover`
 keeps the look's `accent`. `shadow` (`none`, `soft`, `deep` or `glow`)
 and `fill` (`solid` or `gradient`) lift the bar and its popups off the
 windows behind them; how the shadow uses the bar's margin is in
 [Shape, opacity and depth](./configure.md#shape-opacity-and-depth).
 `motion` (`none`, `ease-out` or `spring`), `motion-duration-ms`
 (0 to 1000) and `motion-bounce` (0 to 1) slide popups open; a look that sets none
-renders the fragment it
-always did. Ginger-night (the default) takes a soft shadow; radial-burst
+renders as before. Ginger-night (the default) takes a soft shadow; radial-burst
 takes a glow and a spring entrance.
 
 A bar without scoot has no state link. It pins a rendered fragment
@@ -35,8 +34,8 @@ layer = "/run/current-system/sw/share/scoot/rendered/moonrise/bar.toml"
 
 Without Nix, render the fragment with `scoot-look build` and point
 `[look] layer` at it (or place it at the state link). See
-[Look layer](./configure.md#look-layer) for the full precedence, the
-fixed layer, and the reload scopes.
+[Look layer](./configure.md#look-layer) for the precedence, the
+fixed layer and the reload scopes.
 
 The shipped looks, and what each gives the bar:
 
@@ -48,16 +47,16 @@ The shipped looks, and what each gives the bar:
 | `moonrise` | navy, cream and amber |
 | `vinyl-sunset` | espresso, cream and orange |
 
-Opt out per target while the rest follows the look, under the one
-`programs.scoot.desktop.theme.targets.<name>.enable` namespace every
+To opt out per target while the rest follows the look, use
+`programs.scoot.desktop.theme.targets.<name>.enable`, the namespace every
 desktop piece uses (as with the [lock screen](../desktop/idle-lock.md)).
 
 ## From Stylix
 
 Without scoot, a bar under Stylix themes from the `stylix` look
-instead of eval-time values: nothing Stylix lands in `settings`.
+instead of eval-time values: nothing from Stylix lands in `settings`.
 With a scoot catalog in the configuration, the bar follows the
-`stylix` look like any look (through `scoot look sync`), and this
+`stylix` look like any look (through `scoot look sync`) and this
 path stays off.
 
 - `programs.scootbar.stylix.enable` — Type: bool. Default: `true`.
@@ -74,17 +73,15 @@ path stays off.
 
 Your file and flags still win per key over the layer; every other
 key follows it. The fragment carries its own face, and the
-plain-default font stays out while the layer is active, so the
-layer's face shows. The face is the regular file found in the Stylix
+plain-default font stays out while the layer is active. The face is the regular file found in the Stylix
 sans package (`DejaVuSans.ttf` for "DejaVu Sans",
 `Family-Regular.ttf` for Noto or a Nerd Font). Variable fonts,
-`.ttc` collections and odd namings are not resolved — the bar then
-falls back to its default face with a build-time warning rather than
+`.ttc` collections and odd namings are not resolved; the bar then
+falls back to its default face with a build-time warning, not
 a failed build.
 
 With a catalog present the option does nothing and warns at
-evaluation: the bar follows the active look instead of a fixed Stylix
-layer. Set it to `false` to silence the warning.
+evaluation, because the bar follows the active look. Set it to `false` to silence the warning.
 
 Precedence, highest first, per key: daemon flags, the file, the look
 layer, the module's plain default.
