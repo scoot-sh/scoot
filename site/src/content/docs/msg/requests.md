@@ -15,8 +15,8 @@ Every request, `type` vs `key`, and what the replies carry. All of these work as
 | `keyboard` | The active keyboard layout's name and index — what a layout indicator shows, and which layout the next `type` will produce. |
 | `locked` | Whether the session is locked — the side-effect-free lock probe, answered locked or not (`{"type":"locked","locked":false}`). What tells an agent whether injected input would reach the lock screen instead of the desktop. |
 | `binds [--json]` | The live keymap: every combo in canonical spelling, its action string, where it came from, its `repeat`/`allow_when_locked` flags, plus skipped config binds with reasons — see [Show the keymap](../scoot/keybindings.md#show-the-keymap). The human view is an aligned table grouped like the [keybindings page](../scoot/keybindings.md); `--json` is the same reply as JSON. Answered locked or not. |
-| `output-power ID\|all on\|off` | Switch an output's panel off or on — the IPC half of `zwlr_output_power_v1` (see [protocols.md](../scoot/protocols.md#screen-power)). `all` powers every output at once; an unknown id is refused. Session-level like `outputs`, not an action: it applies while locked (the idle cycle is off-after-lock, on-at-resume). On the wire an additive request tag (`{"type":"output_power","output":1,"powered":false}`, `output` omitted for `all`); `PROTOCOL_VERSION` did not change. |
-| `output-scale ID\|NAME SCALE\|reset` | Set an output's scale live, by id or connector name (`DP-1`), or `reset` it to the config file's. Range 0.5 to 4 (resolved to 1/120 like the file's); a value outside it, or not a number, is refused instead of clamped; an unknown id or name is refused too. Runtime state, like `output-power`: it beats the file's scale for that connector (a replugged monitor comes back at it), and a successful `reload` or restart returns to the file's scales. A repeat set, or a reset with nothing to reset, changes nothing. Applies while locked; refused under `--nested`. What the [display profiles](../desktop/displays.md) watcher drives. On the wire an additive request tag: `output` is a number (id) or a string (name), `scale` a number or `null` for reset, required either way (`{"type":"output_scale","output":"DP-1","scale":1.5}`); answered with the existing `ok`, so no newer protocol is needed (an older server refuses the unknown tag with an `error`). |
+| `output-power ID\|all on\|off` | Switch an output's panel off or on — the IPC half of `zwlr_output_power_v1` (see [protocols.md](../scoot/protocols.md#screen-power)). `all` powers every output at once; an unknown id is refused. Session-level like `outputs`, not an action: it applies while locked (the idle cycle is off-after-lock, on-at-resume). On the wire an additive request tag, with no `PROTOCOL_VERSION` change (`{"type":"output_power","output":1,"powered":false}`, `output` omitted for `all`). |
+| `output-scale ID\|NAME SCALE\|reset` | Set an output's scale live, by id or connector name (`DP-1`), or `reset` it to the config file's. Range 0.5 to 4 (resolved to 1/120 like the file's); a value outside it, or not a number, is refused instead of clamped; an unknown id or name is refused too. Runtime state, like `output-power`: it beats the file's scale for that connector (a replugged monitor comes back at it), and a successful `reload` or restart returns to the file's scales. A repeat set, or a reset with nothing to reset, changes nothing. Applies while locked; refused under `--nested`. What the [display profiles](../desktop/displays.md) watcher drives. On the wire an additive request tag: `output` is a number (id) or a string (name), `scale` a number or `null` for reset, required either way (`{"type":"output_scale","output":"DP-1","scale":1.5}`); answered with the existing `ok`; an older server refuses the unknown tag with an `error`. |
 | `action ACTION [ARGUMENT...]` | Run a layout action — see [Actions](./actions.md). |
 | `reload [--look] [--wait-wallpaper]` | Re-read the config file the session started from and re-apply what can be re-applied live (layout, output scale -- the default and each `[[outputs]]` entry's, `[[outputs]]` mode (a live resize per backend, refused under `--nested`), appearance, keybindings, new autostart spawn entries) — see [configuration.md](../scoot/configure.md#reloading-the-config). A successful reload also drops every live `output-scale` scale, and each one the file disagrees with is listed in `applied` as `outputs.<name>.scale`. Answers `reloaded` with applied-vs-refused field lists plus the `shadowed` file keys that override the active look (and the `invalid` ones whose bad values fell back to it), or `error` (running config untouched, live scales kept) when the file cannot load or validate. With `--look` only the look layer is re-read, under a snapshot of the file from the last successful plain load: appearance and wallpaper swap, pending edits wait, no autostart entry spawns and no bind swaps. The reply carries the scope that ran (`"scope":"look"` on a scoped reload, absent on a plain one). With `--wait-wallpaper` the same plain reload parks its `reloaded` reply until the wallpaper run lands (or 30 s passes, reporting handed-over-but-unwaited-on) instead of answering once handed over — see below. `--look` with `--wait-wallpaper` is refused. |
 | `look-apply NAME` | Swap the active look and wait for the swap to land — what `scoot look apply` does to local files, for a client with no files (a Mac driving a VM). Answers `look_applied` when the swap's child exits, or `error` when the swap is refused (unknown look, a path as the name, a second swap while one runs) with nothing touched. Applies while locked. |
@@ -24,16 +24,16 @@ Every request, `type` vs `key`, and what the replies carry. All of these work as
 | `shortcut-register APP_ID SHORTCUT_ID [--trigger COMBO] [--description TEXT]` | Register a portal global shortcut (the stage-1 half of the `org.freedesktop.portal.GlobalShortcuts` portal — see [Global shortcuts](../scoot/keybindings.md#global-shortcuts)). The trigger is a hint only, stored and listed but never auto-bound; the user assigns the chord in `[global_shortcuts]` or with `shortcut-bind`. Idempotent by `(app_id, shortcut_id)`; answers `shortcuts`, re-listing. Bounded: at most 64 per connection and 512 compositor-wide, trigger at most 256 bytes, description at most 1024 bytes — past any of those the register is refused with an ordinary `error` and nothing is stored (a re-register of an owned id never counts against the count caps). |
 | `shortcut-unregister APP_ID SHORTCUT_ID` | Remove one registration (unknown ids are refused; any same-user connection may drop any id). Answers `shortcuts`. |
 | `shortcuts` | List every registered shortcut: app and shortcut id, the app's description and preferred trigger, the user-assigned chord if bound, and whether it is shadowed (`conflicted`: a live compositor bind holds the chord, or another registration won the grab for it). Bounded by the register caps above. |
-| `shortcut-bind APP_ID SHORTCUT_ID COMBO\|reset` | Bind a registered shortcut to a user chord (`reset`, the wire `null`, clears it). Binding to a chord a live compositor bind holds stays listed but conflicted and never fires (as does colliding with another registration's chord — the loser stays listed but conflicted). Unknown ids and bad chords are refused. Any same-user connection may bind any id (the portal backend, stage 2, will restrict that to the owning session). Answers `shortcuts`. |
-| `screenshot [--output ID] [--out FILE] [--no-cursor]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture; every output has a framebuffer of its own, so the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. Omitting it means the primary output. The pointer is drawn in unless `--no-cursor` — see [The pointer in a screenshot](./screenshots.md#the-pointer-in-a-screenshot). |
+| `shortcut-bind APP_ID SHORTCUT_ID COMBO\|reset` | Bind a registered shortcut to a user chord (`reset`, the wire `null`, clears it). A shortcut bound to a chord a live compositor bind holds stays listed but conflicted and never fires. Colliding with another registration's chord does the same to the loser. Unknown ids and bad chords are refused. Any same-user connection may bind any id. Answers `shortcuts`. |
+| `screenshot [--output ID] [--out FILE] [--no-cursor]` | Capture the screen as PNG. Without `--out`, the PNG goes to stdout. `--output` names which output to capture, and the capture is that output's own pixels. An id naming no output is refused rather than answered with another output's pixels. Omitting it means the primary output. The pointer is drawn in unless `--no-cursor` — see [The pointer in a screenshot](./screenshots.md#the-pointer-in-a-screenshot). |
 | `pointer move X Y` | Move the pointer to logical coordinates. |
 | `pointer click X Y [left\|right\|middle\|back\|forward]` | Move, then press and release (default button `left`). |
 | `pointer button left\|right\|middle\|back\|forward press\|release` | Half a click, for drags. |
-| `pointer scroll DX DY` | Scroll by a delta. Sent as a wheel scroll that also carries its detents (eight v120 units per delta unit, so `pointer scroll 0 15` is exactly one detent) -- clients that only listen for steps still see it. Runs [scroll binds](../scoot/keybindings.md#scroll-binds) the way a wheel does, so a bind a held modifier (or none) matches takes the scroll and no client sees it; the request presses no modifier of its own, so it fires a scroll bind with no modifier (or one whose modifier is physically held). |
+| `pointer scroll DX DY` | Scroll by a delta. Sent as a wheel scroll that also carries its detents (eight v120 units per delta unit, so `pointer scroll 0 15` is exactly one detent), so clients that only listen for steps still see it. Runs [scroll binds](../scoot/keybindings.md#scroll-binds) the way a wheel does, so a bind a held modifier (or none) matches takes the scroll and no client sees it; the request presses no modifier of its own, so it fires a scroll bind with no modifier (or one whose modifier is physically held). |
 | `key COMBO` | Press one key combination — see [`type` vs `key`](#type-vs-key). |
 | `type TEXT` | Type text on the active keyboard layout. |
 | `wait-idle [--quiet-ms N] [--timeout-ms N]` | Block until nothing on screen has redrawn for `--quiet-ms` (default 200), giving up after `--timeout-ms` (default 5000). |
-| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output`, `keyboard`, `workspace`, `lock`, `look`, `global-shortcut`; `scoot msg subscribe` with no names sends `output`; an empty `events` list on the raw socket is refused), streaming them until the session ends or drops the subscription — see [Events](./events.md). A fresh `keyboard` subscription starts silent, so issue one `keyboard` query for the baseline and listen for changes after it. A fresh `workspace` subscription starts silent too — read `windows` once for the baseline and apply snapshots after it. A fresh `lock` subscription starts silent too — read `locked` once for the baseline and apply changes after it. A fresh `look` subscription starts silent too — nothing has changed until the first `look_changed` arrives. A fresh `global-shortcut` subscription starts silent too — read `shortcuts` once for the baseline and apply presses, releases and re-lists after it. |
+| `subscribe [EVENT...]` | Dedicate this connection to events of the named kinds (`output`, `keyboard`, `workspace`, `lock`, `look`, `global-shortcut`; `scoot msg subscribe` with no names sends `output`; an empty `events` list on the raw socket is refused), streaming them until the session ends or drops the subscription — see [Events](./events.md). Every subscription starts silent. For a baseline, issue one `keyboard` query, read `windows` once (`workspace`), read `locked` once (`lock`) or read `shortcuts` once (`global-shortcut`), then apply events after it. A `look` subscription has no baseline: nothing has changed until the first `look_changed` arrives. |
 
 ```sh
 scoot msg windows
@@ -71,20 +71,20 @@ A character no single keypress produces goes through a second path: the
 two-key dead-led sequence from the session-locale compose table (`dead_acute`
 then `e` for `é` on a German layout), pressed as the two keypresses a person
 would type, each with its own level's modifiers. All 95 printable ASCII
-characters type on every one of the fourteen swept Latin layouts (`us`,
+characters type on each of these fourteen Latin layouts (`us`,
 `us(intl)`, `gb`, `de`, `de(neo)`, `fr`, `fr(oss)`, `es`, `it`, `pt`, `se`,
 `no`, `dk`, `pl`).
 
 - A character the active layout can't produce is an error naming it (``no key
   for `é` in this layout``). The compose table counts as well as the keymap:
-  a character with no two-key dead-led sequence there stays refused — plain
+  a character with no two-key dead-led sequence there stays refused. Plain
   `us` carries no dead keys and no Compose key, so `é` is still "no key" on
   it, and three-key `Multi_key` sequences are never driven. A character on an *inactive* layout group is refused
   too: nothing here switches the session's layout to find it. A
   character on a level the layout only reaches through a *locking or
   latching* modifier gets its own message (``[character] needs a modifier
-  this layout only locks or latches``) — scoot will not press Caps Lock,
-  since that would leave it on afterwards.
+  this layout only locks or latches``); scoot will not press Caps Lock,
+  because that would leave it on afterwards.
   Sequences come from your own XCompose file if you have one
   (`$XCOMPOSEFILE`, then `$XDG_CONFIG_HOME/XCompose`, then `~/.XCompose`),
   otherwise from the session locale's table (`LC_ALL`, then `LC_CTYPE`,
@@ -103,12 +103,12 @@ the key as it is with nothing held, plus the modifiers: `shift+1`, not
 `exclam`; `shift+a`, not `A`. A name this layout only carries above its
 unmodified level is refused — `scoot msg key exclam` would press
 the `1` key and deliver `1`. Some characters can't be named as a combination
-at all (`@` on a German layout needs AltGr, which `key` has no name for);
-`type` works the modifiers out from the layout, and is the one
-to reach for text rather than a chord. Modifiers resolve
-from the active layout too — whichever key actually holds
+at all (`@` on a German layout needs AltGr, which `key` has no name for).
+`type` works the modifiers out from the layout; use it for text and `key` for
+chords. Modifiers resolve
+from the active layout too: whichever key actually holds
 Shift/Control/Alt/Super is what gets held (either hand's key, or the one a
-layout option like `grp:lshift_toggle` left in place) — so a combo is refused
+layout option like `grp:lshift_toggle` left in place), so a combo is refused
 for its modifier only when no key on the layout can hold it.
 
 ## What the replies carry
@@ -121,7 +121,7 @@ for its modifier only when no key on the layout can hold it.
 | `name` | `HDMI-A-1`, `eDP-1`, … under `--tty` — the DRM connector name; `headless`, `headless-2`, … otherwise. |
 | `rect` | The output's full rectangle, in logical pixels. |
 | `usable` | The full output minus whatever a bar reserved at its edges (layer-shell exclusive zones) — where windows actually go. |
-| `scale` | This output's own scale -- outputs need not share one (see [`[[outputs]]`](../scoot/outputs.md); `rect` and `usable` are logical, screenshots are physical. |
+| `scale` | This output's own scale. Outputs need not share one (see [`[[outputs]]`](../scoot/outputs.md)); `rect` and `usable` are logical, screenshots are physical. |
 | `powered` | Whether the output is powered on — `false` while `output-power` (or `wlopm` over `zwlr_output_power_v1`) has it switched off. A powered-off output does no render work and takes no screenshots (refused, naming the recovery). |
 | `live` | Whether the output is currently driven — `false` while a `--tty` session has lost DRM master (usually a VT switch seatd failed to re-acquire master for; see [VT switching](../scoot/backends.md#hotplug-vt-switching-captures)). Always `true` off `--tty`, and on servers predating the field. The composited frame outlives master, so a screenshot of a `live: false` output is stale. |
 
@@ -130,7 +130,7 @@ for its modifier only when no key on the layout can hold it.
 | Field | Meaning |
 | --- | --- |
 | `id` | The window id. What `action focus-window-id N` takes, and what follows the last dash of an `ext-foreign-toplevel-list-v1` identifier. |
-| `app_id` | The toplevel's app id, or `""` before the toolkit has sent one. An X11 window's (under [`--xwayland`](../scoot/xwayland.md) is its `WM_CLASS` class -- `XTerm` for `xterm` -- falling back to the instance; X windows are listed like any other, with nothing on the wire to mark them. |
+| `app_id` | The toplevel's app id, or `""` before the toolkit has sent one. Under [`--xwayland`](../scoot/xwayland.md), an X11 window's is its `WM_CLASS` class (`XTerm` for `xterm`), falling back to the instance; X windows are listed like any other, with nothing on the wire to mark them. |
 | `title` | The toplevel's title, same caveat. An X11 window's is `_NET_WM_NAME`, falling back to `WM_NAME`. An X title or class is cut at its first NUL byte (X allows one; a Wayland string cannot carry it). |
 | `icon` | The freedesktop icon name the client committed through `xdg-toplevel-icon-v1`, or `null` — read off the surface's current state when asked, so never stale. A client that supplied raw pixel buffers instead of a name reads as `null`, and so does every X11 window (`_NET_WM_ICON` is not read). |
 | `output` | The id of the output the window is on. |
@@ -152,8 +152,8 @@ for its modifier only when no key on the layout can hold it.
 | `index` | The active group, 0-based — the same numbering `type` resolves each character in, so an agent reads off which layout its next `type` will produce. |
 | `name` | The keymap's own name for that group (`us` reads as `"English (US)"`, `ru` as `"Russian"`) — what a bar shows. |
 
-Read live off the compositor's keymap on every request. Read-only — scoot has no layout-switch bind, option or action, so nothing over IPC switches the
-layout; the group moves only through the keymap's own mechanics (a toggle
+Read live off the compositor's keymap on every request. Read-only: scoot has no layout-switch bind, option or action, so nothing over IPC switches the
+layout. The group moves only through the keymap's own mechanics (a toggle
 key from the `XKB_DEFAULT_OPTIONS` the session started with, e.g.
 `grp:caps_toggle`).
 
@@ -161,12 +161,10 @@ key from the `XKB_DEFAULT_OPTIONS` the session started with, e.g.
 
 | Field | Meaning |
 | --- | --- |
-| `locked` | `true` while the session is locked, `false` otherwise — read live off the compositor's lock state on every request, so there is no copy to go stale. |
+| `locked` | `true` while the session is locked, `false` otherwise, read live off the compositor's lock state on every request. |
 
-Unlike every `action`, this answers locked or not: it is the
-side-effect-free probe that tells an agent whether injected input would
-reach the lock screen instead of the desktop. Read-only: nothing over IPC locks or unlocks the
-session.
+Unlike every `action`, this answers locked or not. Read-only: nothing
+over IPC locks or unlocks the session.
 
 ```sh
 $ scoot msg locked
@@ -190,9 +188,7 @@ default `Super+Shift+/` bind opens in a terminal:
 One row per effective binding — built-ins first in their canonical order,
 then config binds (fresh combos and overrides alike) sorted by combo, then
 any session-managed rows — followed by one row per default a config unbind
-removed. The config sort is what keeps `--json` stable from run to run: a
-config file loads out of a hash map, whose order has no relationship to the
-file's. A second list, `skipped`, holds every config entry that never made
+removed. Sorting config rows keeps `--json` stable from run to run. A second list, `skipped`, holds every config entry that never made
 it in, sorted by combo — each with its `bind` (as written), its `value` (in
 TOML form), and its `reason` (a parse error, a colliding group, or an unbind
 with nothing to remove).
@@ -218,29 +214,28 @@ Derived by diffing the live table against the defaults on every request,
 so it is always the merged result — never a re-read of the file. Like
 `locked`, this answers locked or not: listing keys is not a
 window-management operation (the `Super+Shift+/` bind itself never fires
-while locked). A new reply variant, so this moved `PROTOCOL_VERSION`
-8 → 9: an older client handed one would fail its decode, which can only
-happen to a client new enough to have asked; a `binds` sent to an older
+while locked). `binds` is a new reply variant and moved `PROTOCOL_VERSION`
+8 → 9. An older client handed one would fail its decode, but only a client
+new enough to have asked receives one; a `binds` sent to an older
 server answers an ordinary `error`.
 
 Every `ok` reply also carries a **`locked` field**: the session-lock state it was
 built under. An agent typing a password over IPC learns the unlock landed
-from the very next reply.
+from the next reply.
 
 `locked`, `usable`, `scale`, `icon`, `popup_grab`, `fullscreen`,
-`maximized` and `floating` are additive and defaulted — an older server omits them rather than bumping
-`PROTOCOL_VERSION`, so read each asymmetrically. `locked: true`,
+`maximized` and `floating` are additive and defaulted: an older server omits them, with no `PROTOCOL_VERSION`
+bump, so read each asymmetrically. `locked: true`,
 `popup_grab: true`, `fullscreen: true`, `maximized: true` and `floating: true` are always truthful, while `false` means "no, *or* a
 server predating the field"; an all-zero `usable` means the same (fall back
 to `rect`), and a missing `scale` decodes as `1.0`.
 
-**`reloaded`**, the answer to `reload`, is the exception that proves the
-rule above: it is a new reply variant, not a defaulted field, and it moved
-`PROTOCOL_VERSION` 2 → 3 (an older client handed one would fail its decode
-— in practice only a client new enough to send `reload` ever receives one).
-Read it asymmetrically from the other direction: a `reload` sent to a
-server predating the request answers an ordinary `error`, not a kill — an
-unknown request tag is a decode error the server answers and keeps serving.
+**`reloaded`**, the answer to `reload`, is a new reply variant, not a
+defaulted field, and moved `PROTOCOL_VERSION` 2 → 3. An older client handed
+one would fail its decode, but only a client new enough to send `reload`
+ever receives one. A `reload` sent to a server predating the request
+answers an ordinary `error`, not a kill: an unknown request tag is a decode
+error the server answers and keeps serving.
 
 ```json
 { "type": "reloaded", "applied": ["layout.gap", "binds"],
@@ -252,7 +247,7 @@ A look-scoped reload (`{"type":"reload_look"}`, sent as
 `"scope":"look"`: only the look layer was re-read, so `applied` names
 appearance and wallpaper fields only, and a half-written file cannot
 turn it into an `error`. A plain reload omits `scope`. The scoped tag is
-additive, so `PROTOCOL_VERSION` did not move: an older compositor answers
+additive (`PROTOCOL_VERSION` did not move). An older compositor answers
 it with an ordinary unknown-request `error` (the client prints the error
 and exits non-zero, the running config untouched), never a silent plain
 reload.
@@ -268,17 +263,17 @@ when it comes. A wait with no wallpaper run in flight answers at once,
 like a plain reload; an `error` (unreadable file, bad layer) also answers
 at once, never parked. Two waits park two replies, each answered when its
 own run (or the newest, if superseded) exits; a disconnected client drops
-its park. `SIGHUP` never parks -- it has no reply channel, so it runs the
-plain path. The tag is additive for the same reason as the scoped one, so
-`PROTOCOL_VERSION` does not move: an older compositor answers it with an
-ordinary unknown-request `error`, never a silent immediate answer (which
-would read as "landed" when it only handed over).
+its park. `SIGHUP` never parks: it has no reply channel, so it runs the
+plain path. The tag is additive like the scoped one (`PROTOCOL_VERSION` does not
+move). An older compositor answers it with an ordinary unknown-request
+`error`, never a silent immediate answer (which would read as "landed"
+when it only handed over).
 
 `applied` names the fields re-applied live (including `autostart.commands`
-when new spawn entries started -- a spawn entry that fails to start is
-refused by name instead, and stays pending for the next reload -- and
+when new spawn entries started, where a spawn entry that fails to start is
+refused by name instead and stays pending for the next reload, and
 `wallpaper` / `wallpaper.command` when the `[wallpaper]` section or its
-`command` changed: handed to scootbg, whose outcome is in the compositor
+`command` changed, which is handed to scootbg: its outcome is in the compositor
 log, not in this reply), `refused` the ones that
 differed but cannot be (each with its reason: the two restart fields, a
 non-`spawn` autostart entry by name, a locked-skipped autostart delta,
@@ -296,20 +291,20 @@ active (`name`), the apps reloaded in order (`applied`: `compositor`,
 `bar <display>`, …), and every user-file key that overrides a look token
 (`shadowed`). `refused` is empty on this reply: a refusal fails the swap
 and answers `error` instead, naming the rollback. The reply arrives when
-the swap lands -- the compositor runs `scoot look apply` in a child and
-answers off the loop when the child exits, so one swap at a time (a
-second is refused).
+the swap lands: the compositor runs `scoot look apply` in a child and
+answers when the child exits, so only one swap runs at a time (a
+second is refused). Ring, background and cursor are on screen with the
+reply. The wallpaper follows through scootbg (handed over, never waited
+on; its outcome is in the compositor log), so screenshot after
+`wait-idle` to see it.
+
 A timed preview (`{"type":"look_apply","name":"moonrise","for_ms":20000}`
 on the raw socket; `scoot msg` sends a stay) swaps back when the hold
 expires, unless a newer choice moved meanwhile. A swap still running when
 the hold expires holds the revert until it finishes, then re-checks, so
 the preview never sticks with no timer left. Zero holds nothing (a
-stay, like omitting it). A restart drops a pending revert -- the swap
-stays. The reply lands when the
-swap's reloads complete: ring, background and cursor are on screen with
-it, and the wallpaper follows through scootbg (handed over, never waited
-on -- its outcome is in the compositor log, so screenshot after
-`wait-idle` to see it).
+stay, like omitting it). A restart drops a pending revert; the swap
+stays.
 
 ```json
 { "type": "look_applied", "name": "moonrise",
@@ -330,9 +325,9 @@ and the session's state directory (`state_dir`).
     "source": "/prefix/share/scoot/looks/moonrise" }] }
 ```
 
-`look_applied` and `looks` are new reply variants, so they moved
-`PROTOCOL_VERSION` 11 → 12: an older client handed one would fail its
-decode, which can only happen to a client new enough to have asked. The
+`look_applied` and `looks` are new reply variants and moved
+`PROTOCOL_VERSION` 11 → 12. An older client handed one would fail its
+decode, but only a client new enough to have asked receives one. The
 request halves are additive (`{"type":"look_apply","name":"…"}`
 optionally with `"for_ms"`, `{"type":"looks"}`): an older server answers
 either with an ordinary `error`, never a misapplied swap.

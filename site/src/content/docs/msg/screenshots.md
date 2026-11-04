@@ -44,8 +44,8 @@ session (`drm_info`, `modetest`).
 ## Retry rules
 
 Captures are paced: one per connection per 16 ms frame (a second inside
-the same frame is refused — and note the reply order: the refusal
-arrives *first*, so match replies by content, not position), one in
+the same frame is refused, and its refusal arrives *first*, so match
+replies by content, not position), one in
 flight per connection, four in flight across every client. On the
 `--tty` GPU scanout tier a capture can also be refused with a retry
 while the screen shows a client's buffer directly — treat both
@@ -64,21 +64,17 @@ renderer**, unless the request says not to. On the wire that is an optional
 
 Omitted means drawn in (`SCREENSHOT_CURSOR_DEFAULT` in `scoot-ipc`);
 `false` leaves it out, and `scoot msg screenshot --no-cursor` sends that.
-An agent's script sees the pointer the
-same way under `--headless` and `--nested` (whose screens have no drawn
-cursor at all), on `--tty`'s CPU renderer, and on the GPU scanout tier
-(whose cursor rides a hardware plane) — the pointer's own image, hotspot and
-scale, at its position on the captured output and on no other output. A
+Scripts see the pointer the same way under `--headless` and `--nested`
+(whose screens have no drawn cursor at all), on `--tty`'s CPU renderer,
+and on the GPU scanout tier (whose cursor rides a hardware plane): the
+pointer's own image, hotspot and scale, at its position on the captured
+output and on no other output. A
 fresh session's pointer sits at the centre of the first output, so a
 default screenshot shows it there until something moves it. Leave it out
-to diff two screenshots, or
-to read the pixels it would cover. (Until this field existed, `--headless`
-and `--nested` screenshots never showed the pointer.)
+to diff two screenshots, or to read the pixels it would cover.
 
-The field was added without an IPC protocol bump: a request that omits it is
-the old request byte for byte, so older clients are unaffected. The flip
-side: a server that predates the field silently ignores it rather than
-refusing it, so on one of those `cursor: false` has no effect, and whether
-the pointer shows depends on the backend as it used to (drawn only under
-`--tty`, and missing where a cursor plane carries it). A client cannot tell
-such a server apart: `version` reports the same protocol number either way.
+The field is additive: `PROTOCOL_VERSION` did not change. A server that
+predates it silently ignores it rather than refusing it, so `cursor: false`
+has no effect there, and the pointer shows only under `--tty` (and is
+missing where a cursor plane carries it). `version` reports the same
+protocol number either way, so a client cannot tell such a server apart.

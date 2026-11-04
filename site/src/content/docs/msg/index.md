@@ -14,13 +14,13 @@ for agents: `scoot msg --help` (topics `requests`, `actions`,
 Every keybinding action, and typing and clicking, is also a request on a Unix socket. This page is the reference for scripts and
 for agents doing computer-use tasks.
 
-`scoot msg` is part of the compositor binary itself — there is
-no separate client to install.
+`scoot msg` is part of the compositor binary; there is no separate client
+to install.
 
 ## The socket
 
-The socket can inject any keystroke, so it is privileged: it lives
-in `$XDG_RUNTIME_DIR/scoot.sock`, is created `0600`, and serves only
+The socket can inject any keystroke, so it is privileged. It lives in
+`$XDG_RUNTIME_DIR/scoot.sock`, is created `0600` and serves only
 connections from the same user as the compositor. A missing
 `$XDG_RUNTIME_DIR` is a one-line startup error.
 
@@ -29,12 +29,11 @@ Override the path with `$SCOOT_SOCKET` (read by the compositor and
 compositors at once means giving each its own socket.
 
 `scoot msg` opens one connection per invocation and closes it once it has its
-answer. A client that sends many requests should pipeline them on
-*one* connection — the per-connection bounds below keep the socket fair, and reconnecting
-resets them.
+answer. Pipeline many requests on *one* connection: reconnecting resets the
+per-connection bounds that keep the socket fair.
 
 `scoot msg` prints an `error` reply and exits non-zero. It builds on
-every platform -- on a Mac `scoot` is client-only -- so a Mac can drive a compositor running in a VM.
+every platform (on a Mac `scoot` is client-only), so a Mac can drive a compositor running in a VM.
 
 ## Rules an agent needs
 
@@ -59,8 +58,8 @@ focused:
 - `toggle-floating-focus`.
 
 A `focus-window-id` naming no window
-is a miss: it answers `ok` and changes nothing, leaving the click -- and
-the keyboard it placed -- alone. The other actions — `move-*`, `close`,
+is a miss: it answers `ok` and changes nothing, leaving the click and
+the keyboard it placed alone. The other actions — `move-*`, `close`,
 `spawn`, `cycle-column-width`, `set-column-width`, `toggle-fullscreen`, `set-fullscreen`, `toggle-maximize`, `set-maximized`, `quit` — change arrangement rather than focus, so they leave a deliberate keyboard placement alone,
 as does a keybinding. An `exclusive` layer surface keeps the keyboard through
 all of them, by protocol, until it unmaps. The one exception is the `top`
@@ -99,7 +98,7 @@ and it is per output: with [`[[outputs]]`](../scoot/outputs.md)
 entries two screens can run at different scales, so convert with the scale of the output the window is on (its `output`).
 X windows (`--xwayland`) follow the same rule: their
 `rect` is logical and a click at a logical point lands on the X widget
-drawn there, whatever the scale -- the X server's own pixels (`ceil(scale)`
+drawn there, whatever the scale. The X server's own pixels (`ceil(scale)`
 per logical pixel by default, `floor(scale)` with `[xwayland] fractional = "light"`, see [protocols.md](../scoot/protocols.md#x-windows-in-the-layout))
 are never what an agent reads or sends.
 
@@ -112,5 +111,5 @@ surface like a real mouse, and unlocking re-arms the game's lock. A lock you obs
 
 **`wait-idle` waits for nothing on screen to have redrawn.** With a `waybar` clock ticking once a second, a
 short `--quiet-ms` settles normally while a long one never does and times
-out. Keep `--quiet-ms` below your bar's redraw interval — the
-same applies to an animated cursor.
+out. Keep `--quiet-ms` below your bar's redraw interval, and likewise for
+an animated cursor.
