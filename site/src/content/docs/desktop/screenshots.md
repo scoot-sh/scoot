@@ -4,8 +4,9 @@ description: "Portals for screen sharing in browsers and OBS, and screenshots in
 ---
 
 Share your screen in a Meet call, or screenshot a region into
-`~/Pictures` — on with the profile, through the standard portals.
-Chrome, Meet, OBS and Telegram work with nothing extra to start.
+`~/Pictures`. Both are on with the profile, through the standard
+portals. Chrome, Meet, OBS and Telegram work with nothing extra to
+start.
 
 ```nix title="configuration.nix and home.nix"
 programs.scoot.desktop = {
@@ -21,17 +22,16 @@ programs.scoot.desktop = {
 What runs: the portal backends system-wide
 (`xdg-desktop-portal-wlr` 0.8.4 or later for ScreenCast and
 Screenshot, `xdg-desktop-portal-gtk` for the file chooser and the
-rest — a too-old backend fails evaluation naming the floor, never a
-cast that binds nothing), the `scoot` backend selection beside them
+rest; a too-old backend fails evaluation naming the floor), the
+`scoot` backend selection beside them
 (ScreenCast and Screenshot to `wlr`, everything else to `gtk`: the
 same file the home-manager side installs per user, which wins where
 both exist), PipeWire running for the cast, `grim` plus `slurp` for
 the screenshot binds, and the output chooser xdpw asks through before
 each cast. The portals start on demand over D-Bus and hold nothing
-until a cast asks — no daemon, no memory, no wakeups when you are
-not sharing. Push notifications need nothing: the profile installs no
-Push backend, and no installed backend advertises the Push portal, so
-a pure scoot session runs no push daemon at all.
+until a cast asks, so nothing runs when you are not sharing. The
+profile installs no Push backend and no installed backend advertises
+the Push portal, so a pure scoot session runs no push daemon at all.
 
 Three binds, each plain (fire once, never behind the lock screen):
 
@@ -46,27 +46,22 @@ look's ring and accent (slurp's own style without a look, or with
 `theme.targets.capture.enable = false`).
 
 Before each cast, xdpw asks *which screen*: a dmenu list of every
-output through the profile's menu — the same `--dmenu` contract
-the clipboard picker and the launcher speak, themed from the look,
-so the three menus read as one. The list, not a
-click, is the default on purpose: in a Meet flow the call lives on
-one screen while the thing to share is on the other, and a menu
-names outputs from the keyboard where a click-picker needs the
-pointer on the right screen first. The alternatives are one option
-away: `chooser = "slurp"` picks by clicking a screen, and `chooser = "none"` casts
-`outputName` — a connector name as `wayland-info` lists it, e.g.
-`"eDP-1"` — with no picker at all (leave it null and any output
-casts). Casts are capped at 30 frames per second (`maxFps`, `0`
-lifts the cap): plenty for a call, and it bounds the compositor's
-copy cost. The menu, in the moonrise look, over a call:
+output through the profile's menu, the same `--dmenu` contract the
+clipboard picker and the launcher speak, themed from the look. The
+list works from the keyboard, where a click-picker needs the pointer
+on the right screen first. `chooser = "slurp"` picks by clicking a
+screen, and `chooser = "none"` casts `outputName` (a connector name as
+`wayland-info` lists it, e.g. `"eDP-1"`) with no picker at all (leave
+it null and any output casts). Casts are capped at 30 frames per second
+(`maxFps`, `0` lifts the cap). The menu, in the moonrise look, over a
+call:
 
 ![The output chooser over the session: a dmenu list naming each output, in moonrise navy and cream](../../../assets/screencast-chooser.png)
 
-One limit: scoot captures **outputs only**.
-There is no per-window capture source, so a call's window picker
-falls back to screens — share a screen, not a window. The window
-list itself is still live (taskbars and Alt-Tab see every window),
-only its pixels are not separately capturable.
+One limit: scoot captures **outputs only**. There is no per-window
+capture source, so a call's window picker falls back to screens;
+share a screen, not a window. The window list itself is still live
+(taskbars and Alt-Tab see every window).
 
 If you drive scoot from an agent or a script, skip the portals:
 `scoot msg screenshot` captures an output over the privileged IPC
@@ -92,11 +87,11 @@ Troubleshooting, by symptom:
 - *Meet's share dialog offers nothing, or the request fails at
   once.* Check the chain in order: the portals are up
   (`systemctl --user status xdg-desktop-portal
-  xdg-desktop-portal-wlr` — both D-Bus activated, so a dead one
+  xdg-desktop-portal-wlr`; both are D-Bus activated, so a dead one
   here means activation itself failed and the logs name it), the
   session names scoot (`echo $XDG_CURRENT_DESKTOP` must print
-  `scoot`, and the D-Bus activation environment must carry it too —
-  the launcher imports it past the display import; a hand-started
+  `scoot`, and the D-Bus activation environment must carry it too;
+  the launcher imports it past the display import, and a hand-started
   session needs `dbus-update-activation-environment --systemd
   WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE`), and PipeWire runs
   (`wpctl status` lists sinks).
@@ -105,8 +100,8 @@ Troubleshooting, by symptom:
   capturer only with `XDG_SESSION_TYPE=wayland` in its own
   environment (`echo $XDG_SESSION_TYPE` in the terminal that
   started it; Chrome blanks its own `/proc/PID/environ`, so reading
-  that file shows nothing either way). Every launcher login exports `wayland`, greeter
-  or console; a hand-started session needs the three-var activation
+  that file shows nothing either way). Every launcher login exports
+  `wayland`, greeter or console; a hand-started session needs the three-var activation
   line in the entry above, and a Chrome started outside the session
   (over ssh, from another desktop's terminal) needs a restart from
   inside it.
@@ -117,27 +112,25 @@ Troubleshooting, by symptom:
 - *`Print` (or `Shift+Print`, `Ctrl+Print`) does nothing.* The slot
   renders those binds only with `capture.enable` beside the keymap
   (both on with the profile); either off leaves the combo unbound.
-  Then check the tool: `grim -o eDP-1 /tmp/t.png` from a terminal —
-  outside the session it names grim's own cause.
+  Then check the tool: `grim -o eDP-1 /tmp/t.png` from a terminal.
+  Outside the session it names grim's own cause.
 - *The call's window list is empty.* Expected: outputs only (above).
   Share a screen.
 - *A screenshot taken while locked shows the lock, not the
-  desktop.* While locked the
-  compositor draws nothing but the lock client's own surfaces, so a
+  desktop.* While locked the compositor draws nothing but the lock client's own surfaces, so a
   capture holds no locked pixels. The portal Screenshot and `grim`
   see the same frame `scoot msg screenshot` does.
 - *Two portal configs fight.* The per-user
   `~/.config/xdg-desktop-portal/scoot-portals.conf` (the profile's)
   beats the system's `/etc/xdg/xdg-desktop-portal/scoot-portals.conf`
-  (also the profile's, for sessions without home-manager) — read the
+  (also the profile's, for sessions without home-manager); read the
   user one first. A hand-written file in either place wins over both
-  only if it sorts earlier in the lookup; don't.
+  only if it sorts earlier in the lookup, so avoid that.
 - *`kunifiedpush-distributor` sits in the session at ~15 MB.* It rode
   in with Plasma 6, not this profile: nixpkgs installs it
   unconditionally beside Plasma and it starts in every graphical
   session. A pure scoot session never installs it. If this box also
   runs Plasma, `systemctl --user mask kunifiedpush-distributor.service`
-  stops it (`unmask` restores it); nothing the session needs breaks —
-  no Push backend exists in this closure. The mask is per-user, so it
-  covers that user's Plasma sessions too, where push would stop with
-  it.
+  stops it (`unmask` restores it); nothing the session needs breaks.
+  The mask is per-user, so it covers that user's Plasma sessions too,
+  where push would stop with it.

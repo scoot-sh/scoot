@@ -9,18 +9,17 @@ description: "The ReGreet greeter, and starting the session from a TTY autologin
 `programs.scoot.desktop.greeter` is `programs.scoot.greeter` under the
 profile's name (same options, same assertions, same forced session
 entry). In particular `desktop.enable` never touches the login screen:
-no default session, no autologin, nothing that could strand a login —
-the greeter stays an explicit opt-in on top of the profile. Logging in
+no default session, no autologin, nothing that could strand a login.
+The greeter stays an explicit opt-in on top of the profile. Logging in
 through it starts the same session [First session](../start/first-session.md)
 describes.
 
 **The login screen follows its own look.**
 `programs.scoot.greeter.look` names the login screen's look: one entry
 of `programs.scoot.looks`. It resolves at system build time into
-ReGreet's CSS, backdrop, dark setting and sans — a live swap repoints
+ReGreet's CSS, backdrop, dark setting and sans. A live swap repoints
 only the session's own state and never reaches the login screen. The
-look also renders a `greet.toml` fragment, which nothing reads yet (it
-is for the future scootgreet).
+look also renders a `greet.toml` fragment, which nothing reads yet.
 
 | Option | Type | Default | Reload | Meaning |
 |---|---|---|---|---|
@@ -42,7 +41,7 @@ custom catalog look themes from its manifest down the `extends` chain.
 out while the rest follows the look.
 
 Writing your own ReGreet CSS instead of using a look's? Scope card
-rules to `frame.background`, never bare `frame` — see
+rules to `frame.background`, never bare `frame`; see
 [Theming](../scoot/theming.md#what-stays-a-static-file-and-why).
 
 **No buildup across logins.**
@@ -80,7 +79,7 @@ services.getty.autologinUser = "alice";
 users.users."alice".linger = true;
 ```
 
-On `tty1` that is the whole setup — the shell profile execs the
+On `tty1` that is the whole setup. The shell profile execs the
 session on that console only, so SSH logins keep a shell:
 
 ```sh
@@ -94,21 +93,20 @@ rebuild warns naming the user and the fix (a display-manager
 autologin never warns: that path registers a full login, whose
 manager starts).
 
-Why lingering is the step: recent systemd gives TTY autologin
+Lingering is the step because recent systemd gives TTY autologin
 sessions the `user-light` class, which never starts
-`user@UID.service` — so without it `scoot-session` finds no user
+`user@UID.service`. Without lingering `scoot-session` finds no user
 manager and falls back to a bare `scoot --tty` with no bar, no
 notifications, no clipboard history, no portal and no session target.
 The launcher names that cause on stderr and mirrors it into the
-system journal (the compositor takes over the console on startup,
-burying stderr), so the diagnosis survives the login. An autologin
-is also one of the logins the keyring cannot prime from the login
-password ([Privilege prompts](./auth.md)): the first
-secrets use of each login unlocks once, then stays unlocked till
-logout.
+system journal, since the compositor takes over the console on startup
+and buries stderr. An autologin is also one of the logins the keyring
+cannot prime from the login password ([Privilege prompts](./auth.md)):
+the first secrets use of each login unlocks once, then stays unlocked
+until logout.
 
 > **Symptom:** the session starts with no bar, no popups, no
-> clipboard history — but the compositor itself runs.
+> clipboard history, but the compositor itself runs.
 >
 > The session fell back to a bare `scoot --tty`: the user manager
 > never started. Check the class (`loginctl show-session

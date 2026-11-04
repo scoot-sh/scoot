@@ -23,9 +23,7 @@ value in `lock.settings` winning per key, `theme.targets.lock.enable =
 false` dropping the themed block while the rest follows the look).
 Locked, the look's wallpaper shows behind everything, blurred at build
 time, with the indicator always visible and a message saying what to
-do — no blank frame, no guessing. The music-desk palette over its
-blurred wallpaper (captured from a real session through scoot's own
-IPC screenshot path):
+do. The music-desk palette over its blurred wallpaper:
 
 ![The scoot lock screen in the music-desk look: the blurred wallpaper behind the always-visible indicator ring and an unlock message](../../../assets/idle-lock-screen.png)
 
@@ -33,12 +31,12 @@ Without a wallpaper the lock falls back to a navy screen, still with
 the indicator and the message; with no look at all it is the same navy
 screen with a white ring. A wrong password says so
 (`Wrong password. Try again.`), and the screen still locks even if an
-image cannot load — an unthemed lock beats no lock.
+image cannot load.
 
 The blur is built from the wallpaper of the look you configure in Nix.
 A wallpaper you set at runtime (`scootbg set`, a slideshow, `scoot look
 apply`) is not picked up, even by a rebuild: the lock keeps the built
-blur. Per-output runtime blur is tracked as follow-up work.
+blur.
 
 If you set `desktop.idle.lock.package` yourself, it must match
 `desktop.idle.lock.daemon`. A locker that does not know a key in the
@@ -47,7 +45,7 @@ be a flat color with no message.
 
 Unlock checks your password through PAM, as `swaylock`. On NixOS the
 scoot module names that service itself, so unlocking works with no
-extra setup. On any other Linux, home-manager cannot provide it: set
+extra setup. On any other Linux, home-manager cannot provide it, so set
 up `/etc/pam.d/swaylock` wherever PAM is configured, or no password
 will ever unlock.
 
@@ -67,7 +65,7 @@ into the new config; no re-login):
 | `desktop.idle.offTimeout` | int (seconds) | `300` | inactivity before outputs power off; `0` disables the step |
 | `desktop.idle.mediaInhibit.enable` | bool | `true` with the profile | hold idle while audio plays (needs PipeWire or PulseAudio running) |
 | `desktop.idle.lock.enable` | bool | `true` with the profile | lock through the locker below |
-| `desktop.idle.lock.command` | string | `loginctl lock-session` (system path on NixOS) | the stable lock action: what the timeout runs, and what the keymap's `Super+Escape` bind runs — lid-close and manual locks share this path through logind |
+| `desktop.idle.lock.command` | string | `loginctl lock-session` (system path on NixOS) | the stable lock action: what the timeout runs, and what the keymap's `Super+Escape` bind runs (lid-close and manual locks share this path through logind) |
 | `desktop.idle.lock.daemon` | enum (`"swaylock-effects"`, `"swaylock"`) | `"swaylock-effects"` | the locker behind the action: the effects fork (blurred screen, always-visible indicator, unlock message; a future scootlock widens this without renaming anything), or stock swaylock one line back (the same blurred screen, hidden-until-you-type indicator, no message) |
 | `desktop.idle.lock.settings` | attrset of string | `{ }` | extra locker lines over the themed ones (a value here wins per key) |
 | `desktop.theme.targets.lock.enable` | bool | `true` | theme the locker from the look; `false` keeps swaylock's own style while the rest follows the look |
@@ -97,24 +95,24 @@ Troubleshooting, by symptom:
 > wherever PAM is configured. A locker already running keeps failing:
 > it reads PAM once at launch. Kill it (`pkill -x swaylock`); the
 > session stays locked behind a red screen, and the next lock starts a
-> new locker that reads the new service. Check Caps Lock second — the
+> new locker that reads the new service. Check Caps Lock second; the
 > indicator shows its state while you type.
 
 - *Screens never dim or power off.* Check the unit is running:
-  `systemctl --user status scoot-idle` — and that it started with the
+  `systemctl --user status scoot-idle`, and that it started with the
   display (a hand-started session must reach `scoot-session.target`
   with `WAYLAND_DISPLAY` imported, [on the desktop page](./index.md#which-sessions-start-the-units)). The generated config is at
-  `~/.config/swayidle/config`: read it, the timeouts are literal. Dim
+  `~/.config/swayidle/config`; the timeouts are literal. Dim
   specifically needs the seat: logind grants the *active* login
   backlight access, so dim works in the seat session and logs EPERM
   anywhere else (over ssh, from a timer with no session).
 - *The timeout passes and the session never locks.* The locker is
   probably exiting immediately: run `swaylock -f -C
-  ~/.config/swaylock/config` by hand — if it drops straight back to the
+  ~/.config/swaylock/config` by hand. If it drops straight back to the
   prompt, its error names the cause.
 - *`loginctl lock-session` does nothing visible.* Something must listen
-  for logind's Lock: that is the policy's `lock` event, so `scoot-idle`
-  is not running or `lock.enable` is off.
+  for logind's Lock (the policy's `lock` event), so `scoot-idle` is
+  not running or `lock.enable` is off.
 - *Music dims the panel.* The hold needs the inhibitor unit *and* an
   audio server: `systemctl --user status scoot-audio-inhibit` plus
   something actually playing. Without a server the unit backs off and
@@ -122,5 +120,5 @@ Troubleshooting, by symptom:
 - *Closing the docked lid suspends.* Something beat the profile's
   docked-lid lock rule: your own logind setting wins over it.
 
-Without the flake, the same policy is a hand-written swayidle setup —
+Without the flake, the same policy is a hand-written swayidle setup;
 see [Idle in the compositor reference](../scoot/configure.md#idle-locking-and-screen-power).

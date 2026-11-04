@@ -79,9 +79,8 @@ reference](../reference/nix.md).
 
 ## NixOS
 
-The session entry comes on with the profile (without it, `session.enable`
-stays an explicit opt-in — a login-screen change is a change to your way
-back in, and that stays deliberate). The entry adds scoot *alongside*
+The session entry comes on with the profile. Without the profile,
+`session.enable` stays an explicit opt-in. The entry adds scoot *alongside*
 your existing sessions, never replacing the default. The greeter replaces
 the login screen, so it is opt-in twice over; it is refused at eval
 beside GDM or SDDM. Logging in through it starts the same session [First
@@ -90,21 +89,19 @@ session](../start/first-session.md) describes.
 ### What a switch does
 
 A switch never ends your session. The running compositor keeps running
-from its old store path — even a switch that ships a new scoot build —
+from its old store path, even when the switch ships a new scoot build,
 and the new build takes over at the next login. Session-bound units
-whose own files changed (the bar, the notification daemon, the clipboard watchers) restart
-against the still-running compositor; the display socket never moves,
-so they reattach to the same session. If the compositor itself exits
-instead — quitting, crashing, or being stopped — the session targets
-stop with it, so nothing is left restart-looping on a missing display;
-log back in for a fresh session on the new build. That includes
-`systemctl --user restart scoot.service`: restarting the compositor ends
-the session, so use it only when you mean to log out.
+whose own files changed (the bar, the notification daemon, the clipboard
+watchers) restart against the still-running compositor and reattach to
+the same display socket. If the compositor itself exits (quit, crash or
+stop), the session targets stop with it, so nothing restart-loops on a
+missing display; log back in for a fresh session on the new build. That
+includes `systemctl --user restart scoot.service`: restarting the
+compositor ends the session, so use it only when you mean to log out.
 
 > **Symptom:** after a switch the bar logs "cannot connect to the
 > Wayland compositor" over and over while the session targets stay
-> active. That is a session outliving its compositor — the shape this
-> unit setup replaced. Check which side went missing first
+> active. That is a session outliving its compositor. Check which side went missing first
 > (`systemctl --user status scoot.service` names the state; `journalctl
 > --user -u scoot.service` names the exit), stop the leftovers
 > (`systemctl --user stop scoot.service scoot-session.target`), and log
@@ -127,29 +124,26 @@ under **Nix on another Linux**.
 
 A home-manager-only setup still needs two things from wherever PAM
 and the seat are configured: a `/etc/pam.d/swaylock` service for the
-locker (else no password unlocks it — see [Idle and
+locker (else no password unlocks it; see [Idle and
 lock](./idle-lock.md)), and backlight rights for dimming (else the dim
 step logs EPERM and does nothing).
 
 ## Which sessions start the units
 
-Every profile unit — the idle pair, the notification daemon and its bar feed, both
-clipboard watchers, and the profile-managed bar — starts in
+Every profile unit (the idle pair, the notification daemon and its bar feed, both
+clipboard watchers, and the profile-managed bar) starts in
 `scoot-session.target`, scoot's own session scope, and stops when it
 ends. That scope is what the launcher starts past the display import,
 so the display is already in the user manager when the units start.
 No other desktop starts them: logging in to GNOME, KDE, niri or
 Hyprland with the same home-manager config leaves scoot's notification
-daemon,
-locker policy and clipboard history stopped, instead of running
-them inside someone else's session. (A standalone bar — the bar
-module without the profile — stays a generic
-`graphical-session.target` unit.)
+daemon, locker policy and clipboard history stopped instead of running
+them inside someone else's session. (A standalone bar, the bar module
+without the profile, stays a generic `graphical-session.target` unit.)
 
-Without the launcher — a hand-written greetd entry or `startwm.sh`
-that runs `scoot --tty` directly instead of `scoot-session` — start
-the scope by hand once the display is known, and stop it on the way
-out:
+Without the launcher (a hand-written greetd entry or `startwm.sh` that
+runs `scoot --tty` directly instead of `scoot-session`), start the scope
+by hand once the display is known, and stop it on the way out:
 
 ```sh
 systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
@@ -162,21 +156,21 @@ The home-manager side installs the scope's target file itself, so
 this works with no NixOS login entry. Units ordered after the scope
 inherit the imported display from the user manager. A
 `sessionScript` entry (`scoot --tty -- session.sh`) gets none of this
-wiring — for startup programs, use `[autostart]`
-instead.
+wiring. For startup programs, use `[autostart]` instead.
 
 ## Without flakes
 
 `nix run github:scoot-sh/scoot -- --nested -- foot` tries it with
 nothing installed, and `nix profile add` keeps it (see
-[Install](../start/install.md)). Not on NixOS at all? The same page's build-from-source
-route plus your own bar, launcher and session script — the profile is
-optional, and everything it automates is documented
+[Install](../start/install.md)). Not on NixOS at all? Use the same page's
+build-from-source route plus your own bar, launcher and session script.
+The profile is optional, and everything it automates is documented
 across this site.
 
-Which build sits underneath is still your call: the profile never sets
-`programs.scoot.package`, so [pick a build](../start/install.md#which-build-do-i-need)
-there (the default; X11 is a runtime knob, not a package) and the whole desktop follows it.
+The profile never sets `programs.scoot.package`, so
+[pick a build](../start/install.md#which-build-do-i-need)
+there (the default; X11 is a runtime knob, not a package) and the whole
+desktop follows it.
 
 Two loud refusals instead of silent no-ops: `desktop.enable` without
 `programs.scoot.enable`, and a `look` without `desktop.enable`, each fail
@@ -279,13 +273,12 @@ fcitx5 for CJK and compose input (opt-in). See [Input method](./input-method.md)
 
 **XWayland** is a runtime knob on the single package: the profile's
 `desktop.xwayland.enable` defaults the compositor's `[xwayland] enabled`
-on, and the default `scoot` package already carries XWayland — leave
+on, and the default `scoot` package already carries XWayland, so leave
 `programs.scoot.package` at the default and turn the knob on as in
 [the install page](../start/install.md#which-build-do-i-need).
 
-**Every later piece has its slot already**, off and inert: one boolean
-(plus a package override where a package is involved) per paved-path
-child, so those children fill bodies without renaming options:
+Every piece has one boolean (plus a package override where a package is
+involved):
 
 | Slot | Type | Default | Child |
 |---|---|---|---|
@@ -303,6 +296,5 @@ child, so those children fill bodies without renaming options:
 | `desktop.inputMethod.enable` (+ `daemon`, `addons`, package) | bool (+ enum, list, package) | `false` (opt-in, never with the profile — [Input method](./input-method.md): fcitx5 as a user unit, toolkit variables where needed, candidate window themed) | input-method engine (fcitx5 now; a future engine keeps the names) |
 | `desktop.automount.enable` | bool + package | `true` ([Terminal, files, and removable media](./apps.md): udiskie trayless over udisks2, internal disks ignored) | removable-media automount |
 
-Every slot above has its body: `false` means its daemon is not
-started, not that the option is reserved. Changes apply on
+`false` means the daemon is not started. Changes apply on
 rebuild/switch.

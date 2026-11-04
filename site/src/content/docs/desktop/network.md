@@ -6,13 +6,13 @@ description: "The WiFi and Bluetooth pickers on Super+w and Super+b, and the bar
 `Super+w` opens the WiFi picker and `Super+b` the Bluetooth one. The
 bar opens the same pickers: a click on the network module (fed the
 bar's own scan), and a click on the bluetooth module (the whole
-`Super+b` menu; the module's own default click toggles the adapter's
-power, which would drop a Bluetooth keyboard with one stray click, so
-the profile rebinds the picker in its place (the module's own default click is the power toggle). The bluetooth module's
+`Super+b` menu). The bluetooth module's own default click toggles the
+adapter's power, which would drop a Bluetooth keyboard with one stray
+click, so the profile rebinds the click to the picker. The module's
 `menu` action (`scootbar msg invoke bluetooth menu`) opens the picker
 fed the bar's device list. Both are dmenu menus through the
 [launcher's dmenu contract](./launcher.md), themed like it, and both are
-scripts over the stock CLIs (`nmcli`, `bluetoothctl`): nothing runs
+scripts over the stock CLIs (`nmcli`, `bluetoothctl`). Nothing runs
 between picks.
 
 ![The WiFi picker over a live session: networks in range, saved first](../../../assets/picker-wifi.png)
@@ -20,10 +20,10 @@ between picks.
 The profile installs the CLIs and never takes over a service:
 NetworkManager and BlueZ are yours to enable
 (`networking.networkmanager.enable`, `hardware.bluetooth.enable`).
-Without them the pickers fail loud (below).
+Without them the pickers fail with an error (below).
 
 **WiFi.** The menu lists the networks in range from the cached scan
-— saved ones first — then saved networks out of range. Pick one:
+(saved ones first), then saved networks out of range. Pick one:
 
 - A saved network (matched by its SSID, whatever its profile is
   named) connects at once: NetworkManager kept its key.
@@ -34,12 +34,12 @@ Without them the pickers fail loud (below).
   reaches `nmcli` on stdin, never in an argument (the process table
   is readable by every user), and NetworkManager keeps it after the
   first join (system-owned, in `/etc/NetworkManager/system-connections`).
-- A wrong key fails loud, and the failed join leaves no profile
+- A wrong key fails with an error, and the failed join leaves no profile
   behind, so the next pick asks again. A key from the keyring that the
   network refuses (a changed password) brings up the prompt at once:
   the typed key joins, and NetworkManager keeps that one.
   Update the keyring entry yourself; the picker never writes it.
-- Hidden and enterprise (802.1X) networks fail loud with no prompt: a
+- Hidden and enterprise (802.1X) networks fail with no prompt: a
   key cannot join them. Join those once from a terminal (`nmtui`, or
   `nmcli device wifi connect NAME hidden yes --ask`); after that they
   are saved networks.
@@ -57,8 +57,7 @@ connected)*), and picking that row does nothing, so a stray `Enter`
 never drops a device. Under it are the paired devices, starred while
 connected: picking one connects it, or disconnects it if connected.
 Low-energy devices (earbuds, mice) are listed too when they are not
-advertising as discoverable. `bluetoothctl` prints those rows in gray,
-and the picker lists them like any other.
+advertising as discoverable (`bluetoothctl` prints those rows in gray).
 Below them:
 
 - *Pair a new device…* listens for 10 seconds, then lists the devices
@@ -67,8 +66,8 @@ Below them:
 
   ![The Bluetooth picker's pair list: two devices found in pairing mode](../../../assets/picker-bluetooth-pair.png)
 
-  Pick one and it pairs, is trusted (so it reconnects on its
-  own) and connects. The picker registers no pairing agent of its
+  Pick one and it pairs, is trusted (so it reconnects on its own) and
+  connects. The picker registers no pairing agent of its
   own, so BlueZ pairs the "just works" way (`NoInputNoOutput`), or
   through your session's default agent if one runs:
   headsets, mice, speakers and most keyboards pair this way. A device
@@ -81,9 +80,9 @@ Below them:
 
 A device is named by the name `bluetoothctl devices` lists (its
 alias: the device's own name unless you renamed it) or by its own
-name, which is what the bar shows; two devices answering to one name
-are refused rather than guessed between (pick by address from
-`Super+b`, which lists them).
+name, which is what the bar shows. Two devices answering to one name
+are refused rather than guessed between; pick by address from
+`Super+b`, which lists them.
 
 Failures say why, as a notification and on stderr (the session
 journal): no Wi-Fi device (a VM, a desktop without a card) or one
@@ -91,12 +90,11 @@ whose radio is off, NetworkManager not running (nmcli's own reason),
 no Bluetooth controller, no BlueZ at all, or BlueZ's own reason for a
 failed connect, pair or power switch (a failed pair stops there:
 nothing is trusted or connected). Every `bluetoothctl` call is
-bounded, since with no `bluetoothd` on the bus it waits forever: a
+bounded, because with no `bluetoothd` on the bus it would wait forever: a
 query (the list, a device's details) gives up after 5 seconds, a
 connect after 30, a pair after 60, and the message names the bound it
-hit ("BlueZ is not answering (no reply within 5 s …)" for a query). With
-BlueZ running a call returns as soon as BlueZ answers, so `Super+b`
-opens its menu at once. Cancelling a menu (`Escape`) joins and pairs
+hit ("BlueZ is not answering (no reply within 5 s …)" for a query).
+Cancelling a menu (`Escape`) joins and pairs
 nothing.
 
 The same scripts run from a terminal:
@@ -132,7 +130,7 @@ Troubleshooting, by symptom:
   first: every failure raises one. None at all means the bind never
   fired: the slot (`apps.network.enable` / `apps.bluetooth.enable`)
   or the keymap is off, or your own `settings.binds` took the combo
-  (an older bar setup toggling the bar on `super+b`, say: yours wins.
+  (an older bar setup toggling the bar on `super+b`, say; yours wins).
   To keep both, give the picker another combo with
   `binds.bluetooth.enable = false` plus a `settings.binds` entry
   running `scoot-bluetooth-pick pick`).
