@@ -26,8 +26,8 @@ Sans.)
 
 ## Enable it
 
-With Nix, the bar's module is separate from the compositor's. Importing
-one changes nothing about the other:
+With Nix, the bar's modules (home-manager and NixOS) are separate from the
+compositor's. Importing one changes nothing about the other:
 
 ```nix title="home.nix"
 imports = [ inputs.scoot.homeModules.scootbar ];   # skip if the Install flake already loads it

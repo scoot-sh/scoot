@@ -189,7 +189,8 @@ layer = "/run/current-system/sw/share/scoot/rendered/moonrise/bar.toml"
 Reload: a plain `scootbar msg reload` re-reads the file and the layer;
 `--look` re-reads only the layer, under a snapshot of the file, so a
 look swap never applies pending edits. A `--look` reload with no layer
-is refused, and so is an unknown scope (by name).
+is refused. An unknown scope is refused by name, never treated as a
+plain reload.
 
 > **Symptom:** a look applies and nothing changes. The file sets those
 > keys itself, and the file wins per key. Remove the file's own values
