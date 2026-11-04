@@ -236,7 +236,7 @@ hits the wall:
 - [launch-match-on-selection-contrast](resolved/launch-match-on-selection-contrast-done.md) (low): selected-row match spans now resolve through `Theme::match_on_selection` (readable `hover` kept, else the inverted chip) — RESOLVED 2026-10-21
 - [launch-iconless-tile-cache-share](resolved/launch-iconless-tile-cache-share-done.md) (low): letter tiles never enter the cache, so icon-less rows draw their own letters — RESOLVED 2026-10-21
 - [release-plz-changelog-include-shell-apps](resolved/release-plz-changelog-include-shell-apps-done.md)
-- [launch-spawn-detach-cwd-and-close](launch-spawn-detach-cwd-and-close.md)
+- [launch-spawn-detach-cwd-and-close](resolved/launch-spawn-detach-cwd-and-close-done.md) (low): both nits were already handled or not worth doing (the helper only ever gets the resolved absolute cwd; a close cannot undo a spawned app); the detached relative-`Path=` leg is now pinned — RESOLVED 2026-11-04
 - [launch-dmenu-doc-and-pin-notes](resolved/launch-dmenu-doc-and-pin-notes-done.md) (low): password mode is list-less (no side channel), edge behaviors documented, `apply_colors` pinned — RESOLVED 2026-11-04
 - [notify-popups-review-notes](notify-popups-review-notes.md)
 - [packaging-workflows-red-on-main](resolved/packaging-workflows-red-on-main-done.md)
