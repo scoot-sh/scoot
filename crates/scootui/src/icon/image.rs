@@ -225,14 +225,14 @@ impl Image {
     }
 
     /// The image fitted into `out`, `side × side` premultiplied pixels
-    /// (see the module docs). `out` shorter than that is left untouched.
-    pub fn scale_into(&self, side: u32, out: &mut [u8]) {
+    /// (see the module docs). `out` shorter than that is left untouched. `false` when the allocator refused the working buffer.
+    pub fn scale_into(&self, side: u32, out: &mut [u8]) -> bool {
         super::sample::scale_into(
             &self.pixels,
             self.width as usize,
             self.height as usize,
             side,
             out,
-        );
+        )
     }
 }

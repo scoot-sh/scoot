@@ -237,8 +237,8 @@ reverted; the sizes below are the aborts seen):
 | `icon::image::load` read, `decode` output and pixels | the PNG file | 8 + 16 + 4 MiB (4,194,304 B) | `Error::NoMemory`, `zeroed_bytes` |
 | `tray::theme::read_from_file`, `decode`, downscale | an item's `IconThemePath` PNG | same (1,048,576 B, 4,194,304 B) | icon left out |
 | `icon::tray::TrayIcon::take` | a bus pixmap | 1 MiB (1,048,576 B) | no icon |
-| `icon::sample::scale_into` row buffer | an icon's height | 8 MiB (8,388,608 B) | transparent icon |
-| `icon::cache` arena, `raster` buffer | the size drawn | 256 KiB, 1 MiB (262,400 B, 1,052,672 B) | no icon / blank mask, retried next frame |
+| `icon::sample::scale_into` row buffer | an icon's height | 8 MiB (8,388,608 B) | no icon, no entry cached, retried next frame |
+| `icon::cache` arena, `raster` buffer | the size drawn | 256 KiB, 1 MiB (262,400 B, 1,052,672 B) | no icon, no entry cached, retried next frame |
 | `text` glyph arena | a glyph's bounds | 1 MiB (293,970 B) | glyph not drawn, retried |
 
 The tray-theme row is the most reachable of these: an item chooses its

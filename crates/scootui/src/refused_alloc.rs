@@ -150,9 +150,12 @@ refused!(
         let small_source = vec![0xffu8; 4 * 4 * 4];
         let mut small = vec![0xaau8; 4 * 4 * 4];
         refusing.from(2 * 1024 * 1024);
-        scale_into(&source, 1024, 1024, 512, &mut out);
+        assert!(
+            !scale_into(&source, 1024, 1024, 512, &mut out),
+            "reported success"
+        );
         assert!(out.iter().all(|&b| b == 0), "not transparent");
-        scale_into(&small_source, 4, 4, 4, &mut small);
+        assert!(scale_into(&small_source, 4, 4, 4, &mut small));
         assert!(small.iter().all(|&b| b == 0xff), "the control did not draw");
     }
 );
@@ -211,3 +214,50 @@ refused!(a_glyph_the_allocator_refuses_is_not_drawn, |refusing| {
     );
     assert_eq!(text.cached().0, 1);
 });
+
+// A refusal inside the draw (the rasterizer's buffer, the resampler's row
+// buffer) leaves no entry behind, so the icon is drawn again when memory is
+// back instead of staying blank until the cache is dropped.
+#[cfg(feature = "icons")]
+refused!(
+    a_refused_draw_caches_nothing_and_the_next_ask_draws,
+    |refusing| {
+        use crate::icon::path::{Vector, ViewBox};
+        use crate::icon::{Art, Cache};
+        let art = Art::Vector(std::sync::Arc::new(
+            Vector::parse("M0 0H24V24H0z", ViewBox::default()).unwrap(),
+        ));
+        let mut cache = Cache::default();
+        assert!(cache.get(&art, 16).is_some());
+        let held = cache.cached();
+        // The mask (256 KiB) is allowed; the rasterizer's 1 MiB is not.
+        refusing.from(512 * 1024);
+        assert!(cache.get(&art, 512).is_none(), "a refused draw was cached");
+        assert_eq!(cache.cached(), held, "the refused draw left an entry");
+        refusing.from(usize::MAX);
+        assert!(cache.get(&art, 512).is_some(), "the retry did not draw");
+        assert_eq!(cache.cached().0, held.0 + 1);
+    }
+);
+
+#[cfg(feature = "tray")]
+refused!(
+    a_refused_resample_caches_nothing_and_the_next_ask_draws,
+    |refusing| {
+        use crate::icon::tray::TrayIcon;
+        use crate::icon::{Art, Cache};
+        let pixmap = vec![0xffu8; 512 * 512 * 4];
+        let art = Art::Tray(std::sync::Arc::new(
+            TrayIcon::take(1, 512, 512, &pixmap).unwrap(),
+        ));
+        let mut cache = Cache::default();
+        assert!(cache.get(&art, 16).is_some());
+        let held = cache.cached();
+        // The 1 MiB bitmap is allowed; the resampler's 4 MiB row buffer is not.
+        refusing.from(2 * 1024 * 1024);
+        assert!(cache.get(&art, 512).is_none(), "a refused draw was cached");
+        assert_eq!(cache.cached(), held, "the refused draw left an entry");
+        refusing.from(usize::MAX);
+        assert!(cache.get(&art, 512).is_some(), "the retry did not draw");
+    }
+);

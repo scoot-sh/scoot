@@ -29,7 +29,8 @@ const CHILD: &str = "SCOOTUI_REFUSAL_CHILD";
 pub struct Refusing(());
 
 impl Refusing {
-    /// From now on, a block of `bytes` or more is refused.
+    /// From now on, a block of `bytes` or more is refused (`usize::MAX`
+    /// lifts the refusal).
     pub fn from(&self, bytes: usize) {
         scootbg_mem::refuse_from(bytes);
     }

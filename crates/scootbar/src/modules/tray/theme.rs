@@ -539,7 +539,15 @@ fn decode(item_id: &str, bytes: &[u8]) -> Option<TrayIcon> {
     let bound = super::MAX_STORED_SIDE;
     let (width, height, pixels) = if width.max(height) > bound {
         let mut out = scootbg_mem::zeroed_bytes(bound as usize * bound as usize * 4)?;
-        crate::icon::sample::scale_into(&pixels, width as usize, height as usize, bound, &mut out);
+        if !crate::icon::sample::scale_into(
+            &pixels,
+            width as usize,
+            height as usize,
+            bound,
+            &mut out,
+        ) {
+            return None;
+        }
         (bound, bound, out.into_boxed_slice())
     } else {
         (width, height, pixels)

@@ -43,25 +43,27 @@ pub struct Rasterizer {
 
 impl Rasterizer {
     /// Fills `vector` into `out`, `side × side` coverage bytes, row by
-    /// row. `out` shorter than that is left untouched.
-    pub fn fill(&mut self, vector: &Vector, side: u32, out: &mut [u8]) {
+    /// row. `out` shorter than that is left untouched. `false` only when
+    /// the allocator refused the buffer (`out` is then all zero); every
+    /// other outcome, an empty shape included, is `true`.
+    pub fn fill(&mut self, vector: &Vector, side: u32, out: &mut [u8]) -> bool {
         let side = side as usize;
         let Some(len) = side.checked_mul(side) else {
-            return;
+            return true;
         };
         let Some(out) = out.get_mut(..len) else {
-            return;
+            return true;
         };
         out.fill(0);
         if side == 0 {
-            return;
+            return true;
         }
         self.side = side;
         self.stride = side + 2;
         self.acc.clear();
         // Fallible: a refused buffer leaves the mask empty (cleared above).
         if self.acc.try_reserve(self.stride * side).is_err() {
-            return;
+            return false;
         }
         self.acc.resize(self.stride * side, 0.0);
 
@@ -112,6 +114,7 @@ impl Rasterizer {
                 *pixel = (sum.abs().min(1.0) * 255.0 + 0.5) as u8;
             }
         }
+        true
     }
 
     /// A cubic as lines: as many as keep it within 0.025 px (the deviation
