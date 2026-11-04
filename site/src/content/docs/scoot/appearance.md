@@ -3,11 +3,10 @@ title: Appearance
 description: "Focus ring, background, corners, cursor, and client decorations."
 ---
 
-scoot draws no titlebars by design — a focused window gets a colored
-ring drawn *around* it (in the layout's own gap), and there's a solid
-background behind everything. This table controls the ring, the
-background, and the built-in pointer cursor. Everything here re-applies
-live by `scoot msg reload`.
+scoot draws no titlebars. A focused window gets a colored ring drawn
+*around* it, in the layout's gap, over a solid background. This table
+controls the ring, the background and the built-in pointer cursor.
+Everything here re-applies live with `scoot msg reload`.
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
@@ -15,10 +14,10 @@ live by `scoot msg reload`.
 | `focus_ring_inactive_width` | integer (pixels) | unset (same as `focus_ring_width`) | Ring thickness around every window that is not focused. `0` draws no ring at all on unfocused windows. |
 | `focus_ring_active_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#6ba6fa` (accent blue) | Ring color around the focused window. |
 | `focus_ring_inactive_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#595961` (muted gray) | Ring color around every other window. |
-| `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black) | Cleared behind all window content — the frame clear color; what shows wherever [wallpaper](../scootbg/index.md) shows nothing. |
+| `background_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#141419` (near-black) | Cleared behind all window content (the frame clear color). Shows wherever [wallpaper](../scootbg/index.md) shows nothing. |
 | `corner_radius` | integer (pixels) | `0` (square) | Window corner radius in logical pixels. Rounds window content and ring together; clamped per window to half its smaller dimension. Also clips each window to its window geometry, so a client's own frame or shadow drawn outside it does not show (see [client frames outside the window](#client-frames-outside-the-window)). Costs a little per frame when non-zero. Popups stay square and are never clipped. |
-| `cursor_size` | integer (pixels) | `16` | The **logical** size of the built-in pointer cursor, both dimensions (clamped `4..=256`; drawn only under `--tty`). The bitmap is rasterised at `round(cursor_size × output scale)` physical pixels -- 16 at 1x, 24 at 1.5x, 32 at 2x -- so the on-screen size never changes but a high-DPI output samples native art 1:1 instead of a stretched bitmap. A real cursor theme likewise contributes the image nearest the physical size; `XCURSOR_SIZE` still exports the logical size. Where no theme is installed the cursors are Mocu, drawn by scoot itself -- see [the built-in cursors](#the-built-in-cursors) below. |
-| `cursor_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#fcfcfc` (Mocu white) | Fill color of the built-in cursors. The outline follows Mocu's pairing: `#222222` around a light fill, `#f9f9f9` around a dark one, both at the fill's own alpha. So the default is Mocu's white theme and `"#111111"` is its black theme. A translucent fill genuinely composites (outline and shadow follow its alpha). No effect inside a real theme's artwork. |
+| `cursor_size` | integer (pixels) | `16` | The **logical** size of the built-in pointer cursor, both dimensions (clamped `4..=256`; drawn only under `--tty`). The bitmap is rasterised at `round(cursor_size × output scale)` physical pixels (16 at 1x, 24 at 1.5x, 32 at 2x), so the on-screen size stays the same and a high-DPI output uses native art 1:1 instead of a stretched bitmap. A real cursor theme likewise contributes the image nearest the physical size; `XCURSOR_SIZE` exports the logical size. Where no theme is installed, scoot draws Mocu itself (see [the built-in cursors](#the-built-in-cursors) below). |
+| `cursor_color` | `"#rrggbb"` / `"#rrggbbaa"` | `#fcfcfc` (Mocu white) | Fill color of the built-in cursors. The outline follows Mocu's pairing: `#222222` around a light fill, `#f9f9f9` around a dark one, both at the fill's own alpha. So the default is Mocu's white theme and `"#111111"` is its black theme. A translucent fill composites, and the outline and shadow follow its alpha. No effect inside a real theme's artwork. |
 | `cursor_theme` | string | unset | Which installed xcursor theme named cursor shapes are drawn from. Unset follows `$XCURSOR_THEME`, then `default`. A name matching nothing installed is not an error: named shapes come from scoot's own drawn set. |
 | `cursor_hide_after_ms` | integer (milliseconds) | `0` (never hides) | How long the pointer sits still over a covering fullscreen window before scoot hides it. While hidden, frames carry no cursor elements, so a fullscreen window can scan out directly even where the pointer cannot ride a plane of its own (no cursor plane and no free overlay, the pointer at a screen edge, a client's shared-memory cursor image; see [backends](./backends.md#which-renderer-draws-the-frames)). Next motion, button or scroll shows it again. Never arms behind the session lock. |
 | `prefer_no_csd` | boolean | `true` | Answer decoration requests with `ServerSide`, so a well-behaved client stops drawing its own titlebar (which would double up with the ring). |
@@ -36,11 +35,12 @@ cursor_color = "#111111"   # Mocu's black theme
 ```
 
 Under home-manager with Stylix, the ring and background colors and the
-cursor theme and size default from the scheme instead — a value written
-here always wins. The three built-in color defaults are stored as raw
-floats no hex string reproduces exactly: leave a color field unset to
-get the real default; only set it to change it. (The cursor color
-is the exception: its default, `#fcfcfc`, is exactly representable.)
+cursor theme and size default from the scheme instead. A value written
+here always wins. The three built-in color defaults (both rings and the
+background) are raw floats no hex string reproduces exactly, so leave a
+color field unset to get the real default and set it only to change it.
+The cursor color is the exception: its default, `#fcfcfc`, is exactly
+representable.
 
 The look you picked in [the desktop profile](../desktop/look.md#pick-a-look)
 writes these same keys — `settings.appearance.background_color =
@@ -58,7 +58,7 @@ tiled or floating, that is not fullscreen. XWayland windows are rounded at
 the corners but keep their margin: the geometry clip covers a toplevel's
 Wayland surface tree, and an X window has no `xdg_toplevel` geometry to
 clip to. Popups and menus are separate surfaces and
-extend past the geometry as they always did.
+extend past the geometry.
 
 With `corner_radius = 0` the window is drawn unclipped, so a client's frame
 stays visible over the ring's inner edge.
@@ -88,7 +88,7 @@ The reload reply lists every key of yours that overrides the look
 that key, and is listed as `invalid` (and shadowing). A look fragment
 with a forbidden key or a bad value is refused whole: startup runs
 without it and logs, and a reload answers an error and keeps everything.
-With no look active, this file behaves as before.
+With no look active, this file alone applies.
 
 Where the look lives: the active look's fragment is
 `$XDG_STATE_HOME/scoot/look/scoot.toml` (usually
@@ -99,14 +99,13 @@ is a link to the rendered look, so switching looks swaps one link.
 and `render.json` into DIR and creates no link: pass `--out <state>/look`
 to render in place, or point `<state>/look` at DIR afterwards. With Nix
 the catalog install does this.
-When the link is absent there is no look layer and this file behaves as
-before. A dangling link or an unreadable fragment warns at startup and
+When the link is absent there is no look layer and this file alone
+applies. A dangling link or an unreadable fragment warns at startup and
 refuses a reload whole, keeping everything. A look swap drives a
 look-scoped reload (`scoot msg reload --look`), which re-reads only this
-fragment under a snapshot of this file — see
-[Reloading the config](./configure.md#reloading-the-config). It works the
-same on a Nix install and a plain binary install: no Nix-only step is
-involved.
+fragment under a snapshot of this file (see
+[Reloading the config](./configure.md#reloading-the-config)). It works the
+same on a Nix install and a plain binary install.
 
 ## The built-in cursors
 
@@ -119,11 +118,10 @@ Mocu draws them: white fill, dark outline, a faint drop shadow. The busy
 spinners show the first frame of Mocu's animation. `cursor_color` picks the
 fill (see above). Nothing is loaded from an image file at runtime.
 
-With the desktop profile you rarely see these: the profile installs Mocu
-as real XCursor theme files too (same vendored art, white at its native
-24 px with `Mocu-Black` beside it), names it in `cursor_theme`, and
-exports it for X11 apps — so theme and fallback are the same family
-either way. See [the desktop profile](../desktop/look.md#app-theme).
+With the desktop profile you rarely see these. The profile installs Mocu
+as real XCursor theme files too (same art, white at its native 24 px with
+`Mocu-Black` beside it), names it in `cursor_theme` and exports it for X11
+apps, so theme and fallback are the same family. See [the desktop profile](../desktop/look.md#app-theme).
 
 Mocu is drawn on a 24-pixel grid, which is how scoot draws it at 24px and
 on multiples of it. The default 16px is Mocu downscaled, with each shape
@@ -131,9 +129,8 @@ fitted to the pixel grid so straight edges stay one crisp pixel and no
 stem or finger gap blurs away. On a high-DPI output the cursors are
 rasterised natively at the physical size (`round(cursor_size × scale)`
 device pixels), so edges stay sharp where a stretched logical bitmap would
-go soft. Mixed-DPI sessions keep one bitmap set per output scale
-(bounded, evicted when no output uses a scale); screenshots and captures
-draw the same per-scale pixels the frame shows. A theme image padded
+go soft. On mixed-DPI sessions each output gets bitmaps at its own scale, and
+screenshots and captures show the same pixels the frame does. A theme image padded
 beyond its nominal size draws at that nominal size, like everything else.
 
 ![The built-in cursors](../../../assets/cursor-family.png)

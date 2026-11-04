@@ -5,7 +5,7 @@ description: "Every default keybinding, grouped by what you want to do, plus how
 
 Every default binding, grouped by intent. `Super` is scoot's own modifier
 throughout; directions are vim's <kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd>.
-The rightmost column is the action string — the same grammar `scoot msg action`
+The rightmost column is the action string, in the same grammar `scoot msg action`
 takes and `[binds]` uses, so each row doubles as a rebind recipe.
 
 ## Cheat sheet
@@ -41,9 +41,9 @@ The whole map on one card:
 | <kbd>Super</kbd>+<kbd>comma</kbd> / <kbd>period</kbd> | Focus output left / right (wraps) | `focus-output-left\|right` |
 | <kbd>Super</kbd>+<kbd>Space</kbd> | Move focus between floating windows and the strip | `toggle-floating-focus` |
 
-Targeting a workspace that doesn't exist yet does nothing — it neither
-creates one nor falls back. (Empty workspaces are dropped, so an index
-is only valid against the list it was read from.)
+Targeting a workspace that doesn't exist yet does nothing: it neither
+creates one nor falls back. Empty workspaces are dropped, so an index
+is only valid against the list it was read from.
 
 ## Move windows
 
@@ -87,22 +87,22 @@ changes on each step; `scoot look current` names the active look. See
 timed previews.
 
 Quit is <kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>e</kbd> rather than
-<kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>q</kbd>: one slipped Shift away from
-"close window", and a slip shouldn't end the whole session.
+<kbd>Super</kbd>+<kbd>Shift</kbd>+<kbd>q</kbd>, so a slipped Shift cannot
+end the session.
 
 The desktop profile adds three groups on top of these defaults:
 <kbd>Super</kbd>+<kbd>d</kbd> opens the app launcher and
 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Space</kbd> its run mode (PATH
-executables beside the apps) — see
-[the desktop profile](../desktop/launcher.md) — the Fn-row
+executables beside the apps), see
+[the desktop profile](../desktop/launcher.md); the Fn-row
 hardware keys (brightness, volume and mute, mic mute, media) plus
-`Print` screenshots and the `Super` desktop actions, and an
-on-screen display over the volume, brightness and mic-mute keys —
-see [the desktop profile](../desktop/keys.md)
+`Print` screenshots and the `Super` desktop actions; and an
+on-screen display over the volume, brightness and mic-mute keys, see
+[the desktop profile](../desktop/keys.md)
 and [the OSD](../desktop/sound.md).
 
 Under `--tty`, <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>F1</kbd>…<kbd>F12</kbd>
-additionally switch VTs — always winning over config binds, so the recovery
+additionally switch VTs. They always win over config binds, so the recovery
 path survives a bad config.
 
 ## Show the keymap
@@ -120,13 +120,13 @@ scoot msg binds --json
 The table is the default view, grouped the way this page groups it;
 `--json` is the same reply as JSON, for agents and scripts. Config rows
 sort by combo, so the JSON order is stable from run to run. Either way it
-is the live merged result — defaults, your `[binds]`, and `--tty`'s VT
-switches — never a re-read of the file. The bind itself never fires while
+is the live merged result (defaults, your `[binds]`, and `--tty`'s VT
+switches), never a re-read of the file. The bind itself never fires while
 the session is locked, like any other non-hardware bind.
 
 Which terminal opens follows your setup, in this order: `xdg-terminal-exec`
 when it is on `PATH` (the desktop-preferred terminal); otherwise the
-`Super+Return` bind's terminal when that bind is a `spawn` — rebind
+`Super+Return` bind's terminal when that bind is a `spawn`: rebind
 `Super+Return` to `ghostty` and the keymap opens in ghostty too, with its
 own arguments; otherwise `foot`, the default terminal. Inside, the
 keymap pages through `less` when it is installed, and prints plainly and
@@ -152,7 +152,7 @@ Then apply it without restarting:
 scoot msg reload
 ```
 
-Keybindings reload live — like the layout, outputs, appearance, floating
+Keybindings reload live, like the layout, outputs, appearance, floating
 rules and autostart. Only `[tty] gpu`, `[renderer] backend`,
 `[xwayland] enabled` and `[virtual_input]` need a restart, and a reload
 names them instead of silently ignoring them. A mistake never stops
@@ -165,7 +165,7 @@ writes it once (and refuses rather than overwriting).
 
 A `[binds]` entry is `"combo" = "action string"`. A combo is
 `modifier+modifier+...+key` (`super+shift+h`), or a bare key with no
-modifier (`"Return" = "close"` — legal, intercepting every press of that
+modifier (`"Return" = "close"` is legal and intercepts every press of that
 key with no modifier held). Whitespace around `+` is ignored. Modifier
 names are case-insensitive: `ctrl`/`control`, `shift`, `alt`,
 `super`/`logo`/`meta`/`cmd`. The key is an xkb keysym name, tried
@@ -175,10 +175,10 @@ symbol, so `"A"` means plain `a`, exactly like `"a"`: write
 
 Two failure behaviors, both degrading rather than failing
 startup: a bind that doesn't parse is skipped with a warning naming just
-that bind (everything else still loads — and `scoot msg binds` lists it
+that bind (everything else still loads, and `scoot msg binds` lists it
 with its reason); and two combo strings resolving to the same combination
-(`"Super+H"` vs `"super+h"`) are *both* skipped — "last one wins" would be
-run-to-run-unstable, so the colliding group is dropped instead.
+(`"Super+H"` vs `"super+h"`) are *both* skipped ("last one wins" would be
+run-to-run-unstable, so the colliding group is dropped instead).
 
 To remove a default outright instead of rebinding its combo, unbind it:
 
@@ -187,19 +187,17 @@ To remove a default outright instead of rebinding its combo, unbind it:
 "super+h" = "none"
 ```
 
-`none` is not an action — no such verb exists, so the spelling cannot
-collide with a real bind — in the string form or the table form
-(`{ action = "none" }`; flags beside one are ignored). The combo goes
-unbound: the key forwards to the client like any other unbound key, and
-the bind stops firing. Removing the line falls back to the default, as
-before. `scoot msg binds` shows the removal as
+`none` is not an action, so it cannot collide with a real bind. It works
+in the string form and the table form (`{ action = "none" }`; flags
+beside it are ignored). The combo goes unbound: the key forwards to the
+client like any other unbound key, and the bind stops firing. Removing
+the line falls back to the default. `scoot msg binds` shows the removal as
 `config (unbinds default: <old action>)`; an unbind with nothing to remove
-warns and is listed as skipped. Unbinding is purely additive — no existing
+warns and is listed as skipped. Unbinding is additive: no existing
 config changes meaning.
 
 A bind can also be a table with the action under `action` plus two
-opt-ins — one entry carrying everything about one combo, rather than
-a second list of combos elsewhere that could disagree with the action:
+opt-ins, so one entry carries everything about one combo:
 
 ```toml
 [binds]
@@ -209,27 +207,27 @@ a second list of combos elsewhere that could disagree with the action:
 To hold volume-up and have it keep stepping: `repeat = true`. To have
 the key work on the lock screen too: `allow_when_locked = true` beside it.
 
-- **`repeat` re-fires the bind while its key is held** — after a 200 ms
+- **`repeat` re-fires the bind while its key is held**, after a 200 ms
   delay, then 25 times a second (the seat keyboard's own rate, so
   binds step exactly the way a held key repeats in a terminal). The
   timer exists only while such a key is held. `quit` and `close`
-  never repeat, even when flagged — holding quit must never end the
+  never repeat, even when flagged: holding quit must never end the
   session. Flagging either warns and runs the bind once.
 - **`allow_when_locked` lets a `spawn` bind fire while the session is
-  locked** — volume, brightness and media keys from the lock screen.
-  Anything else keeps today's refusal even when flagged, and `scoot
+  locked**: volume, brightness and media keys from the lock screen.
+  Anything else is refused even when flagged, and `scoot
   msg action ...` stays refused while locked too: an IPC request
   carries an arbitrary command from whoever sent it, while a bind can
   only run its config-pinned command.
 
-Both default off, so a plain `"combo" = "action"` string behaves exactly
-as before: fire once, never locked. A table entry missing its `action`,
+Both default off, so a plain `"combo" = "action"` string fires once and
+never while the session is locked. A table entry missing its `action`,
 or a non-boolean flag, warns and falls back; an unknown field warns
 and is ignored, while the rest of the entry applies.
 
 `Super+f` covers the whole output
-while its column is focused — gaps, ring and a bar's reserved strip
-included — keeping its place in the strip (focus away and the view
+while its column is focused, gaps, ring and a bar's reserved strip
+included, keeping its place in the strip (focus away and the view
 scrolls on; focus back and it covers again). Surfaces on the `top`
 layer hide under it; `overlay` and the lock screen stay above.
 `Super+m` fills the usable area instead (bar visible, gaps and ring
@@ -274,8 +272,8 @@ instead, which needs `[virtual_input] binds = true` (the
   without an event.
 - **The client never sees a scroll a bind took.** With the modifier held
   and a bind for that direction, the event is removed before any window
-  receives it. With no matching bind, the scroll reaches the window exactly
-  as it did before, so a bind on `super+scroll-down` leaves plain scrolling
+  receives it. With no matching bind, the scroll reaches the window
+  unchanged, so a bind on `super+scroll-down` leaves plain scrolling
   alone. A scroll that moves both ways is taken one axis at a time: bind
   only the vertical directions and the sideways half still reaches the
   window.
@@ -362,7 +360,7 @@ scoot does not receive its host's swipes; use scroll binds there too.
 
 ## Global shortcuts
 
-Some apps want a key that works no matter which window holds focus — a
+Some apps want a key that works no matter which window holds focus: a
 push-to-talk key, a record toggle. Those live outside `[binds]`: the app
 registers its shortcut over IPC, and *you* assign the chord, in
 `[global_shortcuts]` keyed by `app-id:shortcut-id`:
@@ -372,7 +370,7 @@ registers its shortcut over IPC, and *you* assign the chord, in
 "org.example.recorder:toggle-record" = "super+ctrl+r"
 ```
 
-The app's own preferred trigger is a hint only — stored and listed, never
+The app's own preferred trigger is a hint only, stored and listed, never
 auto-bound. Nothing fires until you bind it, either here or with
 `scoot msg shortcut-bind`:
 
@@ -384,8 +382,8 @@ scoot msg subscribe global-shortcut
 ```
 
 Rules, in one place: compositor binds always win (a chord the live
-keymap holds stays listed but `conflicted` and never fires -- and two
-registrations sharing one chord collide the same way: the loser stays
+keymap holds stays listed but `conflicted` and never fires; two
+registrations sharing one chord collide the same way, and the loser stays
 listed but `conflicted` and never fires); nothing
 fires while the session is locked (a press while locked is forwarded, no
 `Activated`; a release pairing a pre-lock press still closes with
@@ -398,21 +396,21 @@ as `global_shortcuts`) and tells subscribers to re-list.
 
 Bounded: at most 64 shortcuts per connection and 512 compositor-wide,
 `preferred_trigger` at most 256 bytes and `description` at most 1024
-bytes -- past any of those `shortcut-register` is refused with an
-ordinary error and nothing is stored. The caps also bound the
-`shortcuts` list reply (the fullest possible reply fits under the 1 MiB
-IPC line). Re-registering an id you already own is an upsert and never
-counts against the count caps. `shortcut-bind` and `shortcut-unregister`
+bytes. Past any of those, `shortcut-register` is refused with an
+ordinary error and nothing is stored. The caps also bound the `shortcuts`
+list reply: the fullest possible reply fits under the 1 MiB IPC line.
+Re-registering an id you already own is an upsert and never counts against
+the count caps. `shortcut-bind` and `shortcut-unregister`
 check the id exists but not that the caller owns it: any same-user
 connection can bind or drop any registration, and any same-user
 connection can subscribe to `global-shortcut` and receive presses. The
 portal backend does not change that: it is the same user, not a sandbox
-boundary (an IPC client can already inject keystrokes and screenshots,
-so these primitives grant nothing new).
+boundary, and an IPC client can already inject keystrokes and take
+screenshots.
 
 ### Portal backend
 
-Portal clients (OBS, chat apps) do not speak scoot IPC -- they speak
+Portal clients (OBS, chat apps) do not speak scoot IPC; they speak
 `org.freedesktop.portal.GlobalShortcuts`. That side is served by
 `scoot-globalshortcuts-portal`, which owns
 `org.freedesktop.impl.portal.desktop.scoot` and turns the compositor's
@@ -431,7 +429,7 @@ scoot-globalshortcuts-portal --version
 ```
 
 Rules, in one place: one portal session holds one app's shortcuts, and
-a session's shortcuts die with it -- closing the session or killing the
+a session's shortcuts die with it: closing the session or killing the
 app unregisters what the backend registered for it. If the compositor
 restarts, the backend re-registers what it remembers (your chords come
 back from `[global_shortcuts]`) and tells clients to re-list. Asking

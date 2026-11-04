@@ -50,9 +50,9 @@ drawing at 1.
 
 ## Moving across outputs
 
-Three pairs of actions reach across screens — stepping relatively, and
-naming a screen by position or by id. The relative pair has the default
-binds:
+Three pairs of actions reach across screens: stepping relatively,
+naming a screen by position, and naming it by id. The relative pair has
+the default binds:
 
 ```toml
 [binds]
@@ -63,13 +63,13 @@ binds:
 ```
 
 Each steps to the neighbouring output in geometry order, wrapping
-around — with two monitors either key names the other. Positions
+around; with two monitors either key reaches the other. Positions
 (`focus-output-index N`, 0-based in creation order) and ids
 (`focus-output ID`, from `scoot msg outputs`) name fixed screens
-instead. The stability rule: output ids are never reused, so a monitor
-that is unplugged and plugged back in comes back under a *new* id —
-the default stepping binds keep reaching every monitor across a
-replug, while an explicit id bind names the output that went away.
+instead. Output ids are never reused, so a monitor that is unplugged
+and plugged back in comes back under a *new* id. The default stepping
+binds keep reaching every monitor across a replug, while an explicit id
+bind names the output that went away.
 
 A returning monitor gets its windows back: when an output is removed
 its workspaces are adopted by the remaining output, and when a monitor
@@ -79,13 +79,13 @@ workspaces announce themselves to bars with their monitor's name
 (`"2 DP-1"`, back to `"2"` on restore).
 
 > **Symptom:** after a replug, a bind reaches the wrong (or no) screen.
-> `scoot msg outputs` lists the fresh ids — rebind the new one, or stick
+> `scoot msg outputs` lists the fresh ids. Rebind the new one, or stick
 > to the stepping binds, which never name an id at all.
 
 ## Arranging monitors
 
 Without a `position`, outputs pack left to right in creation order from
-the origin — the second monitor lands immediately right of the first, the
+the origin. The second monitor lands immediately right of the first, the
 third right of the second. A `position` pins one monitor's origin in
 logical pixels (what `scoot msg outputs` shows as `x` and `y`), so a
 monitor standing left of the laptop goes at `[-1920, 0]` and one stacked
@@ -100,8 +100,8 @@ Three consequences to know before spreading monitors around:
   their own strip; the left/right stepping binds still ring them in
   `x`-then-`y` order. scoot will not refuse or nudge them apart.
 - **Gaps are allowed too.** The pointer roams the bounding box of every
-  output, so it can rest in a gap where no output is — exactly as it
-  already can over uneven heights. Windows never strand there: each one
+  output, so it can rest in a gap where no output is, as it
+  can over uneven heights. Windows never strand there: each one
   sits on exactly one output.
 - **A mistyped `position` costs only the position.** `position = "left"`
   or `position = [0]` warns naming the entry and packs that output,
@@ -111,5 +111,5 @@ Three consequences to know before spreading monitors around:
 > **Symptom:** the pointer vanishes between two monitors, then reappears
 > on the next one. It is crossing a gap: the pointer roams the bounding
 > box of every output, and no screen draws the cursor where no output is.
-> `scoot msg outputs` shows the rectangles — placing the outputs adjacent
+> `scoot msg outputs` shows the rectangles. Placing the outputs adjacent
 > removes the dead zone.

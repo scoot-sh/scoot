@@ -23,7 +23,8 @@ flight. Left:
   `troubleshooting/`, then `msg/` (wording only, no headings, options or code
   blocks changed), then `reference/` (the look format and targets specs and the
   release procedure keep every rule, key and step), then `desktop/` (every step,
-  command, option and caveat kept). Remaining: `scoot/`.
+  command, option and caveat kept), then `scoot/` except `protocols.md` (config and
+  keybinding reference entries unchanged). Remaining: `scoot/protocols.md`.
 - **M9**: flip each "coming" slot (deb, rpm, Arch, ISO, shortcut teacher app) as
   its channel goes live.
 
