@@ -50,7 +50,7 @@ edges:
   `bottom-left` or `bottom-right`. Default: `top-right`. Example:
   `anchor = "bottom-right"`. Reload: `msg reload`.
 - `output`: the output the stack shows on. Type: string (1 to 256
-  printable bytes) or absent. Default: absent, a null output — the
+  printable bytes) or absent. Default: absent, the
   compositor's choice. Example: `output = "HDMI-1"`. Reload: `msg reload`.
   On hotplug the stack moves if its output left; with zero outputs the
   cards wait with their clocks stopped.
@@ -62,8 +62,8 @@ edges:
 ## Timeouts and urgency
 
 To change how long cards stay, set the per-urgency defaults and the
-clamp. The clock starts on the frame that first presents the card —
-never at arrival — so a card held by the lock or by missing outputs
+clamp. The clock starts on the frame that first presents the card,
+not at arrival, so a card held by the lock or by missing outputs
 expires normally once shown. Cards already on screen keep expiring
 through a manual lock.
 
@@ -125,8 +125,8 @@ through a manual lock.
 ## History
 
 Every closed card lands in the in-memory ring (newest last, at most
-`history_max`), and so does every card that skips the screen — held by
-DND, hidden by a rule, or past the rate bucket. `transient`
+`history_max`), and so does every card that skips the screen (held by
+DND, hidden by a rule, or past the rate bucket). `transient`
 notifications never enter. Entries keep app, summary, body, urgency,
 category, time and an icon name or path — never pixels. The ring
 survives a reload, never a restart. Read it with
@@ -153,8 +153,8 @@ scootnotify msg dnd status   # or with no argument: on or off
 
 ## The bar feed
 
-On every change of DND or of the unread count — an arrival, a
-dismissal, an expiry, a restore, a DND toggle — and only then, the
+On every change of DND or of the unread count (an arrival, a
+dismissal, an expiry, a restore, a DND toggle), and only then, the
 daemon sends `set notifications <payload>` to the bar's control
 socket. The bar needs a `notifications` push module placed (see
 [Button, push and exec modules](../scootbar/modules.md#button-push-and-exec-modules));
@@ -180,7 +180,7 @@ with class `muted` while DND is on, the count `n` with class `urgent`
 > The module is not placed, or the bar is not running: the daemon
 > says which on its stderr, once for the module, once per failed
 > change for the bar. A running bar that still shows its placeholder
-> is waiting for the next change — unless a send is owed, which lands when the bar's socket appears.
+> is waiting for the next change, unless a send is owed, which lands when the bar's socket appears.
 
 > **Symptom:** the count survives dismissing everything.
 > Turning DND off shows nothing retroactively, but it reshapes the bar
@@ -227,9 +227,8 @@ Match keys (all optional, all must hold):
 
 Action keys:
 
-- `set_urgency`: the card's urgency, over the hint's (the design's
-  `urgency` action, renamed: one table cannot carry the match
-  `urgency` and the action under the same name). Type: `low`, `normal`
+- `set_urgency`: the card's urgency, over the hint's (not named
+  `urgency`, since that is the match key). Type: `low`, `normal`
   or `critical`. Example: `set_urgency = "low"`. Reload: `msg reload`.
 - `timeout_ms`: expiry over the resolved one. Type: integer, 0 to
   86400000 (0 never expires). Example: `timeout_ms = 30000`. Reload:
@@ -271,12 +270,12 @@ out-of-range value.
 Every key above applies live: edit the file, then `scootnotify msg
 reload`. A refused file keeps the running config and cards, and says
 why. `msg reload --look` re-reads only the look layer, never touching
-the file — a look swap under a half-edited file.
+the file, so a look swap works under a half-edited file.
 
 ## The look layer
 
-Colors, font, opacity and corners come from the active look, under the
-cards — never from this file. Depth, motion, card styles and title weight
+Colors, font, opacity and corners come from the active look, not from
+this file. Depth, motion, card styles and title weight
 come from the look too, unless this file sets them: see
 [Effects over any look](#effects-over-any-look). The daemon reads
 `<state>/look/notify.toml` at start (a dangling or missing link means
@@ -388,8 +387,7 @@ tables for you (see [Look and theme](../../desktop/look/#look-independent-effect
 ### Depth
 
 A look can give the cards a shadow and a gradient fill. Both are off by
-default, and a look that sets neither paints exactly what it did
-before. Set them in `look.toml`:
+default. Set them in `look.toml`:
 
 ```toml
 [effects]
@@ -448,11 +446,9 @@ and an `[apps.scootbar]` `shadow` key refuses at validation.
 ### Card styles
 
 A look can mark each card with an accent, give the cards a pill outline
-and color each app's cards differently. All three are off by default, and
-a look that sets none paints what it did before. One layout fix
-applies to every look: a progress bar or buttons on a card with an icon now
-start below the icon, not through it, so such a card (a volume OSD, say) is
-up to 24 px taller.
+and color each app's cards differently. All three are off by default.
+In every look, a progress bar or buttons on a card with an icon start
+below the icon, so such a card (a volume OSD, say) is up to 24 px taller.
 They are notifier keys, in the look's `[apps.scootnotify]` table, quoted:
 
 ```toml
@@ -486,8 +482,7 @@ lightened (on a dark-on-light one) until the look's `foreground` reaches
 a 4.5:1 contrast ratio on it, WCAG AA for normal text. That is what makes
 the letter on a `badge` tile readable; on a dark look it also means
 accents are deep rather than bright. An app with no name has no accent and
-uses the look's `accent`. The color is worked out when the card is laid
-out, not on every repaint. `card.app-accent` with `card.mark = "none"`
+uses the look's `accent`. `card.app-accent` with `card.mark = "none"`
 draws nothing.
 
 | `card.shape` | What it draws |
@@ -559,10 +554,9 @@ file (`--font`, `font-file`, a well-known file) it is the `Bold` file in
 the same folder: `DejaVuSans.ttf` or `NotoSans-Regular.ttf` take
 `DejaVuSans-Bold.ttf` or `NotoSans-Bold.ttf`.
 It draws the summary and `<b>` runs, and wraps and ellipsizes them with
-their own width. A family with no bold file keeps the old look: the regular
-face drawn twice, 1 px apart. This applies with no look font set too: a
-`DejaVuSans-Bold.ttf` beside the well-known `DejaVuSans.ttf` is used, so
-summaries are a little wider than they were.
+their own width. A family with no bold file draws the regular
+face twice, 1 px apart. With no look font set, a
+`DejaVuSans-Bold.ttf` beside the well-known `DejaVuSans.ttf` is used.
 
 The files are read at start and when a `msg reload --look` changes the
 family or the file, never when a card draws. A `--font` file keeps its font through a
@@ -596,7 +590,7 @@ The look renders them into `notify.toml` as a `[title]` table with
 | `title.weight` | What it draws |
 |---|---|
 | 100 to 500 | The summary in the regular weight, like the body. |
-| 501 to 700 | Bold, as the summary always was. The default is 700. |
+| 501 to 700 | Bold. The default is 700. |
 | 701 to 900 | Heavier: the bold face drawn once more, 1 px to the right, so the strokes are a pixel thicker again. |
 
 A weight is three steps, not nine: scootnotify has no variable-font
@@ -618,8 +612,7 @@ of the card.
 By default cards appear and disappear at once and the stack jumps when a
 card closes. A look can make them move: a new card slides, fades, grows
 or drops in, a closed card fades out, and the cards beside it spring into
-the space it left. Motion is off by default, and a look that does not set
-it paints and behaves exactly as before.
+the space it left. Motion is off by default.
 
 ```toml
 [effects]
@@ -667,8 +660,7 @@ While a card travels, the surface stays as tall as the motion needs
 (up to the distance a card moves, plus a little for a spring's overshoot)
 and returns to the stack's height when it lands. A spring settling toward
 the screen edge the stack is anchored to stops at the edge instead of
-overshooting off it. Cards that were not moving paint exactly as they do
-without motion.
+overshooting off it.
 
 The `radial-burst` look ships with a glow shadow, a spring and a scale entrance;
 `ginger-night`, the default look, sets no motion. `ginger-night` also draws

@@ -47,8 +47,7 @@ scootnotify daemon
 
 `$XDG_CONFIG_HOME/scoot/notify.toml` beside the bar's (`--config`
 overrides it, `--check` validates it). Every key is optional; a
-missing file is the built-in defaults. Unknown keys are refused (a
-typo that silently did nothing would be worse than an error), and
+missing file is the built-in defaults. Unknown keys are refused, and
 out-of-range numbers name their key. The file is capped at 64 KiB. A
 bad file at daemon start runs on the built-in defaults and reports
 the error; `--check` and `msg reload` exit 1 on it. A bad value in the
@@ -147,9 +146,7 @@ printf '{"protocol":2,"type":"list"}\n' | socat - UNIX-CONNECT:"$XDG_RUNTIME_DIR
 ```
 
 A request whose `protocol` is not `2` is refused with a mismatch
-error, so a client and a daemon from different builds disagree loudly
-rather than misread each other. Compatibility rides on that number,
-never on the crate version.
+error. Compatibility rides on that number, never on the crate version.
 
 ## The JSON view
 
@@ -252,7 +249,7 @@ read.
 
 > **Symptom:** turning DND off shows nothing.
 >
-> That is the design: held cards stay in history, and only `restore`
+> Held cards stay in history, and only `restore`
 > brings one back on screen. The unread count is the entries never
 > shown.
 
@@ -260,7 +257,7 @@ read.
 >
 > The ring holds closed and held cards only; `transient` cards and
 > cards a rule keeps out with `history = false` never enter. A restart
-> empties the ring: it is in-memory by design.
+> empties the ring: it is in memory.
 
 > **Symptom:** `msg subscribe` ends with no error.
 
@@ -294,7 +291,7 @@ retry, or pace the sender.
 > **Symptom:** no icon on the card.
 
 `image-data` must be 8-bit, 3 or 4 channels agreeing with its alpha
-flag, sides 1 to 2048, with pixels covering every row — anything
+flag, sides 1 to 2048, with pixels covering every row. Anything
 else means no image. `image-path` and `app_icon` take a `file://`
 URI, an absolute path, or a theme name; every other scheme means no
 image. A theme name draws the app's initial as a letter tile in v1.
