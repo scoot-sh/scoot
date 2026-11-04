@@ -397,8 +397,10 @@ as `global_shortcuts`) and tells subscribers to re-list.
 Bounded: at most 64 shortcuts per connection and 512 compositor-wide,
 `preferred_trigger` at most 256 bytes and `description` at most 1024
 bytes. Past any of those, `shortcut-register` is refused with an
-ordinary error and nothing is stored. Re-registering an id you already own
-is an upsert and never counts against the count caps. `shortcut-bind` and `shortcut-unregister`
+ordinary error and nothing is stored. The caps also bound the `shortcuts`
+list reply: the fullest possible reply fits under the 1 MiB IPC line.
+Re-registering an id you already own is an upsert and never counts against
+the count caps. `shortcut-bind` and `shortcut-unregister`
 check the id exists but not that the caller owns it: any same-user
 connection can bind or drop any registration, and any same-user
 connection can subscribe to `global-shortcut` and receive presses. The
