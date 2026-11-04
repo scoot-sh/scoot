@@ -58,8 +58,10 @@ each doc's raw body at a stable `/<slug>.md` URL (`/index.md` for home).
   and on unterminated fences — each finding line-numbered.
 - `pnpm check-md-links` (`scripts/check-md-links.mjs`): fails the build
   if any built HTML page links a raw `.md` twin (a relative `href` ending
-  in `.md` or `.md#…`), or if a rewritten page link resolves to no page
-  in `dist/`. The rewrite itself is the `mdLinksToPages` integration
+  in `.md` or `.md#…`), if a rewritten page link resolves to no page
+  in `dist/`, or if a `#fragment` (cross-page or in-page) names no `id` in
+  the target's built HTML (`pnpm test-check-md-links` pins that with a
+  broken and an ok fixture). The rewrite itself is the `mdLinksToPages` integration
   (`scripts/md-links.mjs`, `astro:build:done`): `foo/bar.md` → `foo/bar/`,
   `foo/index.md` → `foo/`, anchors and query strings kept, correct under
   any `base`. It touches `*.html` only — the `.md` twins and the llms.txt

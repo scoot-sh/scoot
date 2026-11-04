@@ -641,7 +641,8 @@ jobs:
   # Rust). `nix build .#docs-site` renders the static site and runs the
   # gates inside the sandbox — `check-llms` (llms.txt covers every page,
   # every `.md` twin exists), `check-md-links` (no built HTML page links a
-  # raw `.md` twin, every rewritten link resolves), `check-assets` (every
+  # raw `.md` twin, every rewritten link and `#fragment` resolves; fixtures
+  # pinned by `test-check-md-links`), `check-assets` (every
   # asset url/src/srcset resolves to a file in `dist/`, base-aware, with
   # its missing-font-plus-image fixture pinned by `test-check-assets`),
   # `test-snippets` (fenced toml/sh blocks are sound in `.md` and `.mdx`),

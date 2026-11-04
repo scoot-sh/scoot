@@ -7,7 +7,8 @@
 # in `*.html` only) and the five gate scripts run inside the sandbox:
 # `check-llms` (llms.txt covers every page, every `.md` twin exists),
 # `check-md-links` (no built HTML page links a raw `.md` twin, and every
-# rewritten link resolves to a page in `dist/`), `check-assets` (every CSS
+# rewritten link resolves to a page in `dist/` and every `#fragment`
+# names an `id` on its target; `test-check-md-links` pins its fixtures), `check-assets` (every CSS
 # `url()` and every HTML `src`/`href`/`srcset` naming an asset resolves to
 # a file in `dist/`, base-aware; `test-check-assets` pins its fixture: one
 # missing font plus one missing image must fail), `test-snippets` (fenced
@@ -73,6 +74,7 @@ stdenv.mkDerivation (finalAttrs: {
     pnpm build
     pnpm check
     pnpm check-md-links
+    pnpm test-check-md-links
     pnpm check-assets
     pnpm test-check-assets
     pnpm test-snippets
