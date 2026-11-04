@@ -2536,6 +2536,15 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for App {
         // Stale configures for a destroyed surface are dropped by the
         // role comparison, as the surfaces contract asks.
         let live = app.live.as_ref().is_some_and(|live| live.role() == role);
+        app.on_layer_event(live, event);
+    }
+}
+
+impl App {
+    /// Applies one layer-surface event. `live` is whether it came from the
+    /// current role object: events from a destroyed one are dropped.
+    fn on_layer_event(&mut self, live: bool, event: zwlr_layer_surface_v1::Event) {
+        let app = self;
         match event {
             zwlr_layer_surface_v1::Event::Configure {
                 serial,
@@ -2581,6 +2590,8 @@ mod staged;
 
 #[cfg(test)]
 mod bytes_tests;
+#[cfg(test)]
+mod closed_tests;
 #[cfg(test)]
 mod dmenu_staged_tests;
 #[cfg(test)]

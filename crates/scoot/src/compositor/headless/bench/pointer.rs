@@ -192,6 +192,7 @@ fn pointer_motion_allocations() {
 /// adds when no launcher is up (the common case): the check alone, then the
 /// whole press-and-release over a window for scale. The check is the only
 /// thing a press pays for `State::dismiss_launcher_on_outside_press`.
+/// Baseline numbers: `dev/benches/pointer-press/README.md`.
 #[test]
 #[ignore = "prints per-press timings for a human; asserts nothing"]
 fn pointer_press_cost() {

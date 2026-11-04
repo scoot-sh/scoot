@@ -1,9 +1,10 @@
 ---
 title: "scootlaunch click-outside follow-ups from the #803 review"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-04"
 ---
 
 # scootlaunch click-outside follow-ups from the #803 review
@@ -47,22 +48,32 @@ Four loose ends, each checked against `main` at d9ba8ef54:
    the dev VM, release build, but only in the PR body, and with no before/after
    (the call is the only delta, so the check-alone number stands as its cost).
 
-## What to do
+## Resolution (2026-11-04)
 
-1. Add a test that delivers `closed` with no preceding keyboard leave and
-   asserts the exit (a fake compositor, or the client's event handler driven
-   directly), and mutation-check it against the old retry.
-2. State in `site/src/content/docs/scootlaunch/panel.md` (or its
-   troubleshooting page) that the panel closes when its output goes away,
-   rather than moving to another output.
-3. Add the inside/outside rules and the touch gap to the docs where the
-   click-outside behavior is described (`panel.md`, and the layer keyboard
-   section of `site/src/content/docs/scoot/protocols.md`). Decide first
-   whether a popup parented to the panel should count as inside; today it
-   does not, and nothing uses one.
-4. Record the 190 ns and 4.49 us numbers with the machine and commit, where
-   the repo keeps bench baselines, so a later change has something to compare
-   against; or give the bench an assert with a generous ceiling.
+All four done, with one premise corrected:
+
+1. **Client test.** `App::on_layer_event` now holds the layer-surface
+   event handling the `Dispatch` impl used to hold inline, so a test can feed
+   it `Closed` with no seat and no keyboard leave
+   (`crates/scootlaunch/src/panel/closed_tests.rs`:
+   `closed_alone_exits_without_a_keyboard_leave`, plus a stale `closed`
+   from a destroyed role is ignored). Mutation: replacing the `Closed` arm's
+   `app.exit = Some(Exit::Closed)` with a no-op fails the first test.
+2. **Unplugged output.** `panel.md` and the troubleshooting page now say the
+   panel exits and is not moved.
+3. **Inside/outside rules.** The premise about popups was wrong. `layer_hit`
+   walks `WindowSurfaceType::ALL` and the layer map's hit box is
+   `bbox_with_popups` (Smithay fork `b65cbc5`, `LayerSurface::surface_under`
+   and `LayerMap::layer_under`), so a popup the panel opened, even one
+   hanging outside the panel's rectangle, resolves to the panel and counts as
+   inside. No decision was needed. Both rules are now pinned in
+   `launcher_dismiss.rs` (`a_popup_of_the_panel_counts_as_inside`,
+   `a_surface_in_front_of_the_panel_counts_as_outside`) and documented in
+   `panel.md` and `protocols.md`, with the touch gap.
+4. **Baseline.** Recorded in `dev/benches/pointer-press/README.md` (171 ns
+   check alone, 4.434 us press + release, dev VM, release, 737cec6cf). The
+   bench keeps asserting nothing: a ceiling on a 171 ns figure would be
+   either flaky or too loose to catch anything.
 
 ## Not in this ticket
 

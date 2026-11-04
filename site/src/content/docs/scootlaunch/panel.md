@@ -92,7 +92,14 @@ otherwise) and Ctrl+Enter always prints the typed text. A click picks
 the row; the wheel scrolls. A click outside the panel dismisses it
 (exit 1, like Escape) on scoot, which closes an exclusive launcher
 panel on a press anywhere else: the desktop, a window, a bar, another
-output. The click then goes on to whatever is under it. A compositor
+output. The click then goes on to whatever is under it. A press on the
+panel or on a popup it opened is inside (the shadow is not the panel); a press on
+anything else is outside, including another layer-shell surface stacked
+in front of the panel at that point. Pointer buttons from a mouse, a
+tablet tip, `scoot msg` clicks and virtual pointers all count; scoot has
+no touch input yet, so a touch does not dismiss. If the panel's output is
+unplugged the compositor closes the panel the same way, and it exits
+instead of moving to another output. A compositor
 that keeps the keyboard on an exclusive surface and has no such rule
 leaves the panel open; Escape or a second invocation closes it. A
 second `scootlaunch` while the panel is open dismisses it, so one
