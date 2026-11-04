@@ -34,6 +34,11 @@ description: "Bar symptoms and their fixes — placement, fonts, modules, the da
 - *Popup won't open / tooltip never shows.* Popups come from the
   module's own state ([Popups](./modules.md#popups)); tooltips wait
   `tooltip-delay` (default 500 ms, `0` is off — [Tooltips](./modules.md#tooltips)).
+- *Bar vanished after the compositor restarted.* The bar exits with
+  status 1 when the compositor goes away and does not reconnect. The
+  unit starts it again after two seconds; run by hand or from
+  `[autostart]`, it stays gone until started again. See
+  [When the bar exits](./index.md#when-the-bar-exits).
 - *Crash on start before the compositor.* The unit retries every two
   seconds until `WAYLAND_DISPLAY` is imported — start clean is normal,
   not an error.

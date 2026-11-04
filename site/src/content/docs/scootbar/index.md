@@ -69,6 +69,19 @@ service above (or `[autostart]` without Nix) is the one route that
 starts the bar, and a config change restarts it through the service
 (`scootbar msg reload` by hand).
 
+### When the bar exits
+
+The bar never reconnects. When the compositor goes away it exits with
+status 1 (see [Exit status](./cli.md#exit-status)), and so does a crash.
+The Nix units set `Restart=on-failure` and `RestartSec=2` with no start
+limit, so either is followed by a fresh start two seconds later, which
+retries until the compositor is back. `scootbar msg kill` and a plain
+stop exit cleanly and stay stopped.
+
+Without the unit nothing restarts it: a compositor restart leaves no
+bar until your session's autostart, or you, run `scootbar daemon` again.
+scoot does not supervise its clients.
+
 Modules are Cargo features, reachable through `.override` — a bar
 with no modules needs no font, and `icon-image` (the PNG decoder,
 +115 KB) builds the same way (each block is one alternative):

@@ -104,9 +104,13 @@ notes it could not reach Reddit or Hacker News), the failures that recur are
 - **Restart policy** (*built*: the NixOS and home-manager units set
   `Restart=on-failure` with `RestartSec=2`, bound to
   `scoot-session.target` (#454); scoot itself does not supervise clients).
-  What is left is the docs half of
-  [nix-modules-and-stylix](resolved/nix-modules-and-stylix-done.md): say in the
-  docs what happens without the unit.
+  The docs half of
+  [nix-modules-and-stylix](resolved/nix-modules-and-stylix-done.md) is
+  built: "When the bar exits" in the scootbar index page says what the
+  unit does and what happens without it, and troubleshooting has the
+  symptom. The unit behavior is pinned by `scripts/scootbar-unit-test.sh`
+  (S5 and the retry cases) and the exit 1 on compositor loss by
+  `tests/compositor_gone.rs`.
 
 ## Verification
 
@@ -148,8 +152,8 @@ artists (walks the list, keeps 16) and BlueZ managed objects (bounded by
 the 1 MiB message, held to 8 adapters and 64 devices). No new bound was
 invented on top of those decisions.
 
-Genuinely open: the suspend/resume DPMS test, the multi-day soak, the
-allocation-failure audit, and the restart-policy docs half above. This entry
+Genuinely open: the suspend/resume DPMS test, the multi-day soak and the
+allocation-failure audit. This entry
 stays `open` (`ongoing`): it is the checklist, not a task to resolve.
 
 ## Lifecycle tests 2026-11-03
