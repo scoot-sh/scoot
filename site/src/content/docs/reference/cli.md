@@ -3,9 +3,9 @@ title: Generated CLI pages
 description: "The help contract every binary meets, and where the generated pages will live."
 ---
 
-An agent learns scoot from `--help` before anything else, so every
-binary's help meets one contract, pinned by tests — and `--help
---json` carries the same content machine-readably. People read it too.
+An agent learns scoot from `--help` first, so every binary's help
+meets one contract, pinned by tests. `--help --json` carries the same
+content in machine-readable form. People can read it too.
 
 ## The contract
 
@@ -29,9 +29,9 @@ binary's help meets one contract, pinned by tests — and `--help
   the module registry each have one owner; help renders them, never a
   second copy.
 
-One spelling note: a client verb's own row is `scoot msg help <verb>`,
-not `scoot msg <verb> --help` — `--help` after a verb would be ambiguous
-with what the verb itself takes (`scoot msg type --help` types the text `--help`).
+A client verb's own row is `scoot msg help <verb>`, not `scoot msg
+<verb> --help`: `--help` after a verb is ambiguous with what the verb
+itself takes (`scoot msg type --help` types the text `--help`).
 
 ## Topics and JSON per binary
 
@@ -61,7 +61,7 @@ for its profiles.
 
 ## Generated pages (next)
 
-Per-CLI pages rebuilt by the site build from the binaries' own
-`--help --json` output land here when that generation lands — so no
-flag can rot. Until then the hand-written references above (and
-`--help` on any binary, which needs no display) are the source.
+Per-CLI pages, rebuilt by the site build from the binaries' own
+`--help --json` output, will land here so no flag can rot. Until then
+the hand-written references above, and `--help` on any binary (which
+needs no display), are the source.

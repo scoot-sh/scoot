@@ -21,7 +21,8 @@ flight. Left:
   Slices done 2026-11-04: `site/src/content/docs/scootbar/` (all six pages),
   then `scootbg/` and `scootlaunch/`, then `scootnotify/`, then `looks/`, `start/`, `agents/` and
   `troubleshooting/`, then `msg/` (wording only, no headings, options or code
-  blocks changed). Remaining: `scoot/`, `desktop/`, `reference/`.
+  blocks changed), then `reference/` (the look format and targets specs and the
+  release procedure keep every rule, key and step). Remaining: `scoot/`, `desktop/`.
 - **M9**: flip each "coming" slot (deb, rpm, Arch, ISO, shortcut teacher app) as
   its channel goes live.
 

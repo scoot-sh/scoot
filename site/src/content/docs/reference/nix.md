@@ -3,8 +3,8 @@ title: Nix flake reference
 description: "Every flake output scoot ships: packages, apps, modules, the overlay, and the macOS split."
 ---
 
-The install pages show the commands. This page pins down what they
-refer to.
+The install pages show the commands. This page lists what they refer
+to.
 
 ## Outputs
 
@@ -23,8 +23,8 @@ The CPU-only minimal build is cargo-only
 (`cargo build --no-default-features`: no GBM code, no libgbm, no X11
 code); there is no published minimal Nix package.
 
-Apps (`nix run` mirrors three of them — `default`, `scootbar` and
-`scootbar-demo`; no `scootbg` or docs-site app):
+Apps (`nix run` mirrors three of them: `default`, `scootbar` and
+`scootbar-demo`; there is no `scootbg` or docs-site app):
 
 ```sh
 nix run github:scoot-sh/scoot -- --nested -- foot
@@ -48,10 +48,10 @@ nixpkgs.overlays = [ inputs.scoot.overlays.default ];
 ```
 
 They are the flake's own builds, the same derivations as
-`packages.<system>.*`, not rebuilt against your nixpkgs — nothing is
+`packages.<system>.*`, not rebuilt against your nixpkgs, so nothing is
 built twice. With the overlay applied, the modules' `package` and
-`wallpaper.package` default to these, which is what makes the pure
-modules usable without the flake's wrappers. On macOS the overlay adds
+`wallpaper.package` default to these, so the pure modules work without
+the flake's wrappers. On macOS the overlay adds
 the client-only `scoot` and no `scootbg` or `scootbar`. It never adds
 `scootbar-demo`: a demo to run, not a package to build on.
 
@@ -69,13 +69,13 @@ dependency tree.
 
 On macOS, `scoot` is client-only: `scoot msg` drives a compositor
 running on Linux. The home-manager module manages the config file on
-any system (on macOS it also installs the client-only `scoot` — the
-config you edit here deploys to a Linux box), while the NixOS module's
+any system (on macOS it also installs the client-only `scoot`, and the
+config you edit there deploys to a Linux box), while the NixOS module's
 session entry only means anything on NixOS. `scoot-look` builds on
 macOS beside the client (it renders the catalog the Linux box
-installs); `scootbg` and `scootbar`
-are Linux-only: no macOS package, and on macOS a `[wallpaper]` section
-renders as written and installs nothing.
+installs). `scootbg` and `scootbar` are Linux-only: no macOS package,
+and on macOS a `[wallpaper]` section renders as written and installs
+nothing.
 
 ## Symptoms
 

@@ -5,7 +5,7 @@ description: "What a scoot version means, which builds work together, and how to
 
 scoot has one version for every binary, and every binary prints it with
 the protocol it speaks. When something disagrees after an upgrade, this
-page names the half to look at.
+page tells you which half to check.
 
 ## Ask each binary what it is
 
@@ -25,8 +25,8 @@ scootbar 0.2.1
 
 `0.2.1` is the release, the same for all three: one tag, `v0.2.1`,
 releases every binary. `(ipc protocol 11)` is the control protocol
-`scoot msg` speaks, so a client can check compatibility before relying
-on newer requests. `scootbg` names its wallpaper protocol the same way.
+`scoot msg` speaks, so a client can check compatibility before it uses
+newer requests. `scootbg` names its wallpaper protocol the same way.
 `scootbar` prints no protocol number: it speaks standard Wayland
 protocols to the compositor, and its own control protocol to
 `scootbar msg` (both halves come from one install).
@@ -39,10 +39,9 @@ scoot 0.2.1+14.g615608c (ipc protocol 11)
 ```
 
 That reads "14 commits past v0.2.1, at commit `615608c`". The protocol
-number decides compatibility, not the suffix. Before a version
-moves, the maintainer reviews it in a release pull request: a breaking
-change bumps the minor while scoot is below 1.0, anything else the
-patch.
+number decides compatibility, not the suffix. The maintainer reviews
+each version change in a release pull request: a breaking change bumps
+the minor while scoot is below 1.0, anything else the patch.
 
 ## Which versions work together
 
@@ -72,6 +71,5 @@ differ, the compositor's log names the refusal; kill the old daemon
 > **Symptom:** one binary prints a different version from the others.
 
 Something was upgraded on its own. Upgrade the rest to the same
-release, then restart the session so every daemon
-runs the new build. Each release's changelog section lists what moved,
+release, then restart the session so every daemon runs the new build. Each release's changelog section lists what moved,
 grouped by component, so an upgrade note names the binary it changes.

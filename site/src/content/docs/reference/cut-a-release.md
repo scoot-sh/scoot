@@ -7,9 +7,9 @@ A release is one tag, `vX.Y.Z`, that releases every binary at the
 repository's one version. You choose the version in a release pull request
 and merge it. release-plz then creates the tag and starts the
 [release workflow](https://github.com/scoot-sh/scoot/blob/main/.github/workflows/release.yml)
-on it, which builds and publishes everything. What a version means, and how
-bumps are proposed, is on the [versions](./versions.md) page and in
-`docs/versioning.md`.
+on it, which builds and publishes everything. The [versions](./versions.md)
+page and `docs/versioning.md` explain what a version means and how bumps
+are proposed.
 
 ## Set up once: let workflows open the release PR
 
@@ -28,21 +28,22 @@ gh api -X PUT repos/scoot-sh/scoot/actions/permissions/workflow \
 ```
 
 While it is off, the "Open or update the release PR" job fails with
-GitHub's "not permitted to create or approve pull requests" error. Tagging a
-merged release PR does not need it.
+GitHub's "not permitted to create or approve pull requests" error.
+Tagging a merged release PR does not need it.
 
 ## Cut the first release (v0.2.0) by hand (historical)
 
 The first tag was **v0.2.0**, never a 0.1.x: FlakeHub already published
 rolling `0.1.*` versions, and a 0.1 tag would sort below them. The
-workspace read `0.2.0` at the time. release-plz waited for this first tag, so
-it was cut by hand, once. (Both `v0.2.0` and `v0.2.1` exist now; kept as the record for the next project bootstrapping release-plz.)
+workspace read `0.2.0` at the time. release-plz waited for this first
+tag, so it was cut by hand, once. Both `v0.2.0` and `v0.2.1` exist now;
+this section is the record for the next project that bootstraps
+release-plz.
 
 First, a small PR that adds `## [0.2.0] - YYYY-MM-DD` to `CHANGELOG.md`,
-dated the day you tag, directly under the Unreleased heading, so everything
-written so far becomes v0.2.0's notes.
-Merge it, then tag that merge commit on an up-to-date `main` and push the
-tag:
+dated the day you tag, directly under the Unreleased heading, so
+everything written so far becomes v0.2.0's notes. Merge it, then tag
+that merge commit on an up-to-date `main` and push the tag:
 
 ```sh
 git switch main && git pull --ff-only
@@ -54,8 +55,8 @@ git push origin v0.2.0
 
 `release-resolve` refuses a tag whose version is not the workspace
 version, or that is not on main. The push starts the release workflow;
-watch its first run (the next sections say what it does and how to
-recover).
+watch its first run. The next sections say what it does and how to
+recover.
 
 ## Every release after that
 
@@ -71,7 +72,7 @@ notes written under Unreleased.
    `Cargo.toml` and the heading in `CHANGELOG.md` on the PR branch,
    then re-run `scripts/sync-packaging-versions` there so the distro
    packaging follows your edit.
-2. Check the two sync commits release-plz pushed after the PR
+2. Check the two sync commits release-plz pushed to the PR
    (the fuzz lockfiles, then the distro packaging: `pkgver` in the five
    Arch release PKGBUILDs with their `.SRCINFO`, `Version` plus a
    `%changelog` entry in the five RPM specs). The debs need no bump:
@@ -116,9 +117,9 @@ compositor's default-config render).
 Dispatch the workflow by hand with dry-run on (the default) against a
 tag that already exists on main. It runs resolve, vendor, both arch
 builds, the SBOM, the checksums and the notes, then prints what it would
-publish and stops — no release and no attestation (it does upload the
-run's own build artifacts, kept 7 days, which is how the build and
-publish jobs hand files over):
+publish and stops, with no release and no attestation. It does upload
+the run's own build artifacts, kept 7 days, which is how the build and
+publish jobs hand files over:
 
 ```sh
 gh workflow run release --ref main -f tag=v0.2.0 -f dry_run=true
@@ -225,16 +226,15 @@ images. Review the lock diff, then merge once the checks are green.
 ## What else the runs need
 
 Release creation and provenance run on `GITHUB_TOKEN`: there is no
-signing key in secrets and no environment to approve. What the runs need
-from the platform is what they already use elsewhere in this repo:
-GitHub-hosted runners with Docker (the arch builders), and third-party
-actions allowed (every action is pinned by commit SHA). The two pins a
-human bumps over time are the distro base (`debian:bookworm-slim`: the
-glibc floor) and the rustup toolchain (`1.97.0` in
-`.github/workflows/release.yml`: the portable binaries are built with
-Rust 1.97.0) — the toolchain must stay new enough to compile the tree
-(the workspace floor predates the let-chains in it), and the workflow
-asserts the toolchain and the glibc it produces on every run. Verify
-downloads with `gh attestation verify <file> --owner scoot-sh
+signing key in secrets and no environment to approve. The runs need
+only what this repo already uses elsewhere: GitHub-hosted runners with
+Docker (the arch builders), and third-party actions allowed (every
+action is pinned by commit SHA). A human bumps two pins over time: the
+distro base (`debian:bookworm-slim`, the glibc floor) and the rustup
+toolchain (`1.97.0` in `.github/workflows/release.yml`; the portable
+binaries are built with Rust 1.97.0). The toolchain must stay new enough
+to compile the tree (the workspace floor predates the let-chains in it),
+and the workflow asserts the toolchain and the glibc it produces on
+every run. Verify downloads with `gh attestation verify <file> --owner scoot-sh
 --signer-workflow scoot-sh/scoot/.github/workflows/release.yml` (see the
 [releases](./releases.md) page for why the signer pin matters).
