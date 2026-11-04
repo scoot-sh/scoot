@@ -97,10 +97,14 @@ notes it could not reach Reddit or Hacker News), the failures that recur are
   output set; a layer surface `closed` by the compositor is rebuilt once
   the output is still there, then given up on for that output's life
   (#323); a `wl_output.name` past 128 bytes is ignored (#539).
-- **Allocation failure**: know where the bar can abort on refused memory (the
-  scaler in scootbg is the precedent,
+- **Allocation failure** (*built*, audited 2026-11-03, see
+  [Allocation-failure audit](#allocation-failure-audit-2026-11-03)): know where
+  the bar can abort on refused memory (the scaler in scootbg is the precedent,
   [`scaler-oom-abort`](../../scootbg/backlog/resolved/scaler-oom-abort-done.md)); avoid large
-  allocations sized by external input.
+  allocations sized by external input. Every block sized by a file, the bus or
+  the compositor is now fallible or bounded, each pinned by a test that aborts
+  without it; what is left is the libraries' own working memory, listed in the
+  audit.
 - **Restart policy** (*built*: the NixOS and home-manager units set
   `Restart=on-failure` with `RestartSec=2`, bound to
   `scoot-session.target` (#454); scoot itself does not supervise clients).
@@ -186,3 +190,111 @@ already, or to need only a small addition; no bug was found.
   reconnect logic to test, by design. What is not covered: scoot's own
   `--headless` has no runtime output add/remove, so these run on sway
   (skipped without it; `SCOOTBAR_REQUIRE_SWAY` makes that a failure).
+
+## Allocation-failure audit 2026-11-03
+
+Question: which allocations in `scootbar` and `scootui` are sized by something
+outside the process (a file, a D-Bus message, a config value, the compositor's
+scale or size), and can end the bar when the allocator refuses (an address-space
+limit such as `LimitAS=`/`ulimit -v`, or strict overcommit), or overflow? The
+scootbg precedent is the scaler, which is the library's own infallible `Vec`;
+here the infallible allocations were mostly ours.
+
+**One real bug, reachable only through a bogus compositor.** The scale was
+never bounded. `Preferred::scale` passed any positive `wl_output.scale`,
+`preferred_buffer_scale` (an `int`) or `preferred_scale` (a `uint` in 120ths) to
+`Scale`, and every device length is `logical x scale`. The popup path builds its
+corner and shadow tables from `render::device(popup_radius, scale)` cut back
+only to half the popup's size, and the popup's size is the *logical* clamp
+(`MAX_SIDE`, 8192) times the same scale, before any buffer exists to refuse it:
+`Round::new` -> `Corners::new(radius)` is `radius x radius` bytes in an
+infallible `Vec`, and `Shadow::build_corner` the same plus the blur. With
+`wl_output.scale = 100000` and any `popup-radius` (8, say; the default of 0
+follows `bar.radius`, which is 0 too, and builds no table), that is a
+radius of 800,000 and a 640 GB request: `memory allocation of 640000000000
+bytes failed`, `SIGABRT`, the moment a popup opens. The bar's own tables are
+guarded by the fallible `ShmBuffer` created first in `Canvas::draw`, but the
+restyle path (`daemon/surfaces.rs`, `scene.update`) has no buffer in front of
+it, so it is exposed to a hostile configure size as well. Real compositors do
+not send this (scoot caps an output at 4.0, `output_scale::MAX_SCALE`; sway's
+and wlroots' limits were not checked and are not needed), so the exposure is a
+broken or hostile compositor, which `wl_output.name` (#539) is already treated
+as. Fixed at the one choke point: `Preferred::scale` cuts the result to
+`density::MAX_SCALE` (16, 1920 in 120ths), pinned by
+`density::tests::a_bogus_compositor_scale_is_cut_back_before_it_sizes_anything`.
+The worst table that leaves is a 512 px radius at 16x, 8192 px a side, 64 MB,
+which is a configured radius of the maximum at a scale nobody has.
+
+**Made fallible** (each has a test in `crates/scootui/src/refused_alloc.rs` or
+`crates/scootbar/src/modules/tray/theme/refused.rs` that runs in a child
+process whose allocator refuses blocks past a size, `scootui::refusal`, and
+that ends in `memory allocation of N bytes failed` / `SIGABRT` with the fix
+reverted; the sizes below are the aborts seen):
+
+| Site | Sized by | Max | Now |
+|---|---|---|---|
+| `font::read_capped` | the font file | 64 MiB (41,943,041 B in the test) | `FileError::NoMemory` |
+| `icon::image::load` read, `decode` output and pixels | the PNG file | 8 + 16 + 4 MiB (4,194,304 B) | `Error::NoMemory`, `zeroed_bytes` |
+| `tray::theme::read_from_file`, `decode`, downscale | an item's `IconThemePath` PNG | same (1,048,576 B, 4,194,304 B) | icon left out |
+| `icon::tray::TrayIcon::take` | a bus pixmap | 1 MiB (1,048,576 B) | no icon |
+| `icon::sample::scale_into` row buffer | an icon's height | 8 MiB (8,388,608 B) | transparent icon |
+| `icon::cache` arena, `raster` buffer | the size drawn | 256 KiB, 1 MiB (262,400 B, 1,052,672 B) | no icon / blank mask, retried next frame |
+| `text` glyph arena | a glyph's bounds | 1 MiB (293,970 B) | glyph not drawn, retried |
+
+The tray-theme row is the most reachable of these: an item chooses its
+`IconThemePath` (a same-user peer), so the PNG's bytes are the peer's, and the
+decode runs on the bus turn.
+
+**Checked and fine**
+
+- D-Bus: an over-cap message is discarded as it streams (`apply_discard` after
+  every 8 KiB read, at most `DISCARD_BUDGET_PER_PUMP` a turn), never staged, so
+  a 128 MiB declared length costs no memory; reading stops at the cap plus a fixed
+  watermark (`read_watermark`). `read_pixmaps` checks `width x height x 4`
+  against the array length with sides <= 256, so no product overflows or
+  allocates from a declared size; entries are borrowed slices.
+- Config: the file is 64 KiB (`read_bytes`, `take(MAX_FILE + 1)`); every
+  `Vec::with_capacity(items.len())` in `config/` is over an already parsed
+  array of that file. `bar.radius`/`popup-radius` are <= `MAX_RADIUS` (512),
+  height <= `MAX_HEIGHT` (1024).
+- Control socket line buffer: grows to `max + 1` (64 KiB) by `reserve_exact`.
+- Keymap: read `take(MAX_KEYMAP_BYTES + 1)` (1 MiB).
+- `ShmBuffer`/`Canvas::draw`/popup buffers: `Geometry::xrgb8888` checks the
+  `i32` bound, `memfd_create`/`ftruncate`/`mmap` are fallible, and the error is
+  `DrawError::Shm`. `Scale::buffer`, `scaled_length` and `device` are checked or
+  saturating.
+- `Corners`/`Shadow` tables with the scale cut: bounded by `radius` <= 512 x 16.
+- Module count (32), view text (256 B), exec lines (4096 B), tray items,
+  menus, the glyph cache (512 glyphs, 4 MiB) and icon cache (4 MiB): constants.
+- `clock/zone.rs` TZif read: 64 KiB cap.
+- `Layer` (`scootui::paint`, its `begin` is an infallible `resize` up to
+  `MAX_LAYER_PIXELS`, 8 MB) is scootnotify's, not scootbar's, and is left.
+- `snapshots.rs` is test-only.
+
+**Not fixable here, left as it is**
+
+- The `png` crate's decoder working memory and `ab_glyph`'s per-glyph `f32`
+  rasterizer buffer (up to 16 MiB for one glyph at the `MAX_RASTER` bound) are
+  the libraries' own infallible allocations, as the scaler's weight tables were.
+  A limit tighter than they need still ends the bar. Both are bounded by
+  constants here (decoder: the 16 MiB budget and header checks; glyph:
+  `raster_size`). Said in `troubleshooting.md`.
+- `modules/volume/mod.rs::cookie` reads `~/.config/pulse/cookie` with
+  `std::fs::read`, unbounded. It is the user's own file (not external input),
+  so it is not an allocation hazard worth a change here, but a FIFO there
+  would block the open; not touched, noted.
+- Strict overcommit remains racy where a limit is probabilistic: a refusal is
+  honored when it comes, but memory taken by another process after a check is
+  not a case a check can close.
+
+How the tests refuse memory: a real `RLIMIT_AS` was tried first and abandoned,
+because glibc serves a request from address space it already holds (a spawned
+thread's 64 MiB arena reserve, the roughly 2 MiB the first `brk` takes) before
+asking the kernel, so a limit of "now plus a little" refused a 40 MiB block
+only sometimes and a 1 MiB block never (seen with `strace`: an `mmap` refused
+with `ENOMEM` and the `Vec` allocated anyway). The test child's
+`scootbg_mem::CountingAlloc` answers null for every block past a size instead,
+which is what the system allocator does when it is out, deterministically.
+
+Still open from this entry: the suspend/resume test and multi-day soak, and
+the restart-policy docs half.

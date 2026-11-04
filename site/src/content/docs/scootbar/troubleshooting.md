@@ -34,6 +34,27 @@ description: "Bar symptoms and their fixes — placement, fonts, modules, the da
 - *Popup won't open / tooltip never shows.* Popups come from the
   module's own state ([Popups](./modules.md#popups)); tooltips wait
   `tooltip-delay` (default 500 ms, `0` is off — [Tooltips](./modules.md#tooltips)).
+- *Out of memory: the bar says `out of memory: cannot allocate N bytes`
+  naming an icon image or a font, or an icon is blank.* The bar runs under
+  an address-space limit (`ulimit -v`, systemd's `LimitAS=`) or strict
+  overcommit (`vm.overcommit_memory=2`), and the allocator refused a block.
+  The blocks the bar sizes from a file or the bus are asked for so a
+  refusal is an answer, not the end of the bar: a font or `icon-image`
+  PNG that does not fit is refused with that error, naming the file; a
+  tray icon is left out; an icon or glyph
+  that cannot be drawn this frame is blank and tried again on the next
+  one. The PNG decoder's and the glyph rasterizer's own working memory belong
+  to those libraries and are not fallible, so a limit tighter than they
+  need still ends the bar. Give it
+  address space rather than shrinking the config:
+
+```sh
+prlimit --as --pid "$(pidof scootbar)"   # the bar's address-space limit
+cat /proc/sys/vm/overcommit_memory       # 2 means strict overcommit
+```
+
+  Raise or drop the `LimitAS=` line that starts it (or start it with
+  `ulimit -v unlimited`).
 - *Bar vanished after the compositor restarted.* The bar exits with
   status 1 when the compositor goes away and does not reconnect. The
   unit starts it again after two seconds; run by hand or from

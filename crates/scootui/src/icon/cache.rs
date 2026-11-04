@@ -70,6 +70,9 @@ impl Cache {
             self.arena.clear();
         }
         let offset = self.arena.len();
+        // Fallible: a refused block draws no icon, and is asked for again
+        // on the next frame, rather than ending the bar.
+        self.arena.try_reserve(len).ok()?;
         self.arena.resize(offset + len, 0);
         let out = self.arena.get_mut(offset..offset + len)?;
         match art {

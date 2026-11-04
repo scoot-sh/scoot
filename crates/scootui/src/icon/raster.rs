@@ -59,6 +59,10 @@ impl Rasterizer {
         self.side = side;
         self.stride = side + 2;
         self.acc.clear();
+        // Fallible: a refused buffer leaves the mask empty (cleared above).
+        if self.acc.try_reserve(self.stride * side).is_err() {
+            return;
+        }
         self.acc.resize(self.stride * side, 0.0);
 
         let view = vector.view();

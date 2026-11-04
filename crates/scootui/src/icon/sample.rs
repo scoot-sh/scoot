@@ -32,7 +32,13 @@ pub fn scale_into(pixels: &[u8], width: usize, height: usize, side: u32, out: &m
     let horizontal = Taps::new(width, dw);
     let vertical = Taps::new(height, dh);
     // Across, into `dw × h`, then down into `dw × dh`.
-    let mut across = vec![0.0f32; dw * height * 4];
+    // Up to 8 MiB at the cache's bounds. Fallible: a refused block draws
+    // the icon transparent (`out` is already cleared) instead of aborting.
+    let mut across = Vec::new();
+    if across.try_reserve_exact(dw * height * 4).is_err() {
+        return;
+    }
+    across.resize(dw * height * 4, 0.0f32);
     for y in 0..height {
         for x in 0..dw {
             let (start, weights) = horizontal.at(x);

@@ -15,7 +15,8 @@
 //!   scootbg does not use it).
 //! - [`count`]: a counting global allocator for tests that pin an
 //!   allocation-free path (scootbar's warm tick), forwarding everything to
-//!   the system allocator.
+//!   the system allocator, and able to refuse blocks past a size, for tests
+//!   of what a refused allocation does.
 //!
 //! Every `unsafe` block carries a `// SAFETY:` argument and holds exactly
 //! one unsafe operation (clippy's `undocumented_unsafe_blocks` and
@@ -43,6 +44,6 @@ pub mod shm;
 pub mod zeroed;
 
 pub use alloc::LargeAlloc;
-pub use count::{CountingAlloc, count_allocations};
+pub use count::{CountingAlloc, count_allocations, refuse_from};
 pub use shm::{ShmBuffer, ShmError};
 pub use zeroed::zeroed_bytes;

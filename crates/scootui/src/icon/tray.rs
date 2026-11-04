@@ -38,7 +38,10 @@ impl TrayIcon {
         }
         let count = width as usize * height as usize;
         let pixels = argb.get(..count * 4)?;
-        let mut held = Vec::with_capacity(count * 4);
+        // Fallible: a refused block is no icon, like any other pixmap the
+        // bar does not take (at most `MAX_SIDE` squared times 4, 1 MiB).
+        let mut held = Vec::new();
+        held.try_reserve_exact(count * 4).ok()?;
         for quad in pixels.as_chunks::<4>().0 {
             let (a, r, g, b) = (quad[0], quad[1], quad[2], quad[3]);
             // Rounded `c × a ÷ 255`, at most `a`.

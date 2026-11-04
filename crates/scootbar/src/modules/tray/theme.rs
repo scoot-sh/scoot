@@ -451,7 +451,12 @@ fn read_from_file(item_id: &str, file: std::fs::File) -> Option<TrayIcon> {
     if size == 0 || size > MAX_FILE {
         return None;
     }
-    let mut bytes = Vec::with_capacity(size.min(MAX_FILE) as usize);
+    // Fallible (and one byte past the size, so the end of the file does
+    // not grow the block): a refused block is a missing icon, not an abort.
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(size.min(MAX_FILE) as usize + 1)
+        .ok()?;
     file.take(MAX_FILE + 1).read_to_end(&mut bytes).ok()?;
     if bytes.len() as u64 > MAX_FILE {
         return None;
@@ -486,7 +491,8 @@ fn decode(item_id: &str, bytes: &[u8]) -> Option<TrayIcon> {
     let size = reader
         .output_buffer_size()
         .filter(|&size| size <= MAX_DECODE)?;
-    let mut buffer = vec![0u8; size];
+    // Fallible and lazily committed, as `icon::image::decode`'s.
+    let mut buffer = scootbg_mem::zeroed_bytes(size)?;
     let frame = reader.next_frame(&mut buffer).ok()?;
     let data = buffer.get(..frame.buffer_size())?;
     // `Indexed` never arrives here: with `EXPAND` the png 0.18 decoder
@@ -509,7 +515,7 @@ fn decode(item_id: &str, bytes: &[u8]) -> Option<TrayIcon> {
     if data.len() < count * channels {
         return None;
     }
-    let mut pixels = vec![0u8; count * 4].into_boxed_slice();
+    let mut pixels = scootbg_mem::zeroed_bytes(count * 4)?.into_boxed_slice();
     for (out, src) in pixels
         .as_chunks_mut::<4>()
         .0
@@ -532,7 +538,7 @@ fn decode(item_id: &str, bytes: &[u8]) -> Option<TrayIcon> {
     // through the same filter the cache draws with.
     let bound = super::MAX_STORED_SIDE;
     let (width, height, pixels) = if width.max(height) > bound {
-        let mut out = vec![0u8; bound as usize * bound as usize * 4];
+        let mut out = scootbg_mem::zeroed_bytes(bound as usize * bound as usize * 4)?;
         crate::icon::sample::scale_into(&pixels, width as usize, height as usize, bound, &mut out);
         (bound, bound, out.into_boxed_slice())
     } else {
@@ -556,3 +562,6 @@ fn fnv_payload(item_id: &str, width: u32, height: u32, pixels: &[u8]) -> u64 {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod refused;

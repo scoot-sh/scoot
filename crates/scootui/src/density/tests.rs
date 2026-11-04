@@ -200,3 +200,30 @@ fn a_device_position_is_exact_at_scale_one_and_safe_at_the_extremes() {
     assert_eq!(Scale::Fractional(480).to_device(i64::MAX), i64::MAX);
     assert_eq!(Scale::Fractional(480).to_device(i64::MIN), i64::MIN);
 }
+
+#[test]
+fn a_bogus_compositor_scale_is_cut_back_before_it_sizes_anything() {
+    use super::{MAX_SCALE, MAX_V120};
+    // `wl_output.scale` and `preferred_buffer_scale` are any positive int.
+    let mut preferred = Preferred::default();
+    preferred.set_buffer_scale(i32::MAX);
+    assert_eq!(preferred.scale(1), Scale::Integer(MAX_SCALE));
+    assert_eq!(
+        Preferred::default().scale(u32::MAX),
+        Scale::Integer(MAX_SCALE)
+    );
+    // `preferred_scale` is any non-zero uint, in 120ths.
+    let mut preferred = Preferred::default();
+    preferred.set_fractional(u32::MAX);
+    assert_eq!(preferred.scale(1), Scale::Fractional(MAX_V120));
+    // What a real output sends passes unchanged, the cap itself included.
+    preferred.set_fractional(180);
+    assert_eq!(preferred.scale(1), Scale::Fractional(180));
+    preferred.set_fractional(MAX_V120);
+    assert_eq!(preferred.scale(1), Scale::Fractional(MAX_V120));
+    assert_eq!(Preferred::default().scale(4), Scale::Integer(4));
+    // With the cut, the biggest corner table a 512-pixel radius can ask
+    // for is bounded (it was `512 × 4e9` pixels a side).
+    let radius = Scale::Integer(MAX_SCALE).to_device(512);
+    assert_eq!(radius * radius, 8192 * 8192);
+}
