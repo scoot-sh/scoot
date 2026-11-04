@@ -79,6 +79,33 @@ use crate::view::render::{self, Hover, IconBits};
 const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
 const BTN_MIDDLE: u32 = 0x112;
+/// Serves every queued press, oldest first, until the queue is empty. The
+/// mint pumps the Wayland queue, so a press that lands during one token
+/// wait joins the queue and is served in this same turn, never held
+/// until the next Wayland event.
+fn drain_clicks<S>(
+    state: &mut S,
+    take: fn(&mut S) -> Option<Click>,
+    mint: fn(&mut S, u32) -> Option<String>,
+    emit: fn(&mut S, Event),
+) {
+    while let Some(click) = take(state) {
+        let token = mint(state, click.serial);
+        let event = match click.key {
+            Some(key) => Event::ClickButton {
+                id: click.id,
+                key,
+                token,
+            },
+            None => Event::ClickBody {
+                id: click.id,
+                token,
+            },
+        };
+        emit(state, event);
+    }
+}
+
 /// Most presses held while one waits for its token.
 const MAX_CLICKS: usize = 8;
 /// How long a click waits for the compositor's token `done` before the
@@ -1186,24 +1213,12 @@ impl Popup {
         // A click waits for its token here (the queue is ours to pump):
         // the token signal precedes the invoke because the daemon
         // invokes only after this returns.
-        // The mint pumps the queue, so a press that lands during one
-        // wait queues here and is served in the same turn, never held
-        // until the next Wayland event.
-        while let Some(click) = self.app.clicks.pop_front() {
-            let token = self.mint_token(click.serial);
-            let event = match click.key {
-                Some(key) => Event::ClickButton {
-                    id: click.id,
-                    key,
-                    token,
-                },
-                None => Event::ClickBody {
-                    id: click.id,
-                    token,
-                },
-            };
-            self.app.pending.push(event);
-        }
+        drain_clicks(
+            self,
+            |popup| popup.app.clicks.pop_front(),
+            Popup::mint_token,
+            |popup, event| popup.app.pending.push(event),
+        );
         std::mem::take(&mut self.app.pending)
     }
 

@@ -672,3 +672,50 @@ fn a_flood_of_presses_is_bounded() {
     // The oldest survive: the first press is never the one lost.
     assert_eq!(app.clicks.front().map(|click| click.serial), Some(0));
 }
+
+/// A press that lands while an earlier one waits for its token is served in
+/// the same turn, in order (mutation: `while let` to `if let` leaves it
+/// queued).
+#[test]
+fn a_press_during_a_token_wait_is_served_in_the_same_turn() {
+    struct Rig {
+        queue: VecDeque<Click>,
+        minted: Vec<u32>,
+        out: Vec<Event>,
+    }
+    let mut rig = Rig {
+        queue: VecDeque::from([press(1, 10)]),
+        minted: Vec::new(),
+        out: Vec::new(),
+    };
+    drain_clicks(
+        &mut rig,
+        |rig| rig.queue.pop_front(),
+        |rig, serial| {
+            // The second press arrives during the first one's wait.
+            if rig.minted.is_empty() {
+                rig.queue.push_back(press(2, 11));
+            }
+            rig.minted.push(serial);
+            Some(format!("token{serial}"))
+        },
+        |rig, event| rig.out.push(event),
+    );
+    assert_eq!(rig.minted, [10, 11]);
+    assert!(rig.queue.is_empty());
+    let ids: Vec<(u32, Option<String>)> = rig
+        .out
+        .iter()
+        .map(|event| match event {
+            Event::ClickBody { id, token } => (*id, token.clone()),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            (1, Some(String::from("token10"))),
+            (2, Some(String::from("token11")))
+        ]
+    );
+}
