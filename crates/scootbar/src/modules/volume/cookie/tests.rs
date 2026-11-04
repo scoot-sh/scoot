@@ -117,3 +117,31 @@ fn a_fifo_at_the_path_returns_promptly() {
         .expect("read_cookie blocked on a FIFO");
     assert_eq!(got, None);
 }
+
+#[test]
+fn a_fifo_holding_exactly_a_cookie_is_refused_by_the_type_check_alone() {
+    use rustix::fs::{Mode, OFlags, open};
+    use std::io::Write;
+
+    let scratch = Scratch::new("fifo256");
+    let fifo = scratch.0.join("cookie");
+    rustix::fs::mkfifoat(rustix::fs::CWD, &fifo, Mode::from_raw_mode(0o600)).unwrap();
+    // A reader of our own keeps the pipe (and its data) alive; then 256
+    // bytes go in and the writer closes. Without the regular-file check,
+    // `read_cookie` would read exactly a cookie and then see EOF.
+    let keep = open(&fifo, OFlags::RDONLY | OFlags::NONBLOCK, Mode::empty()).unwrap();
+    {
+        let writer = open(&fifo, OFlags::WRONLY | OFlags::NONBLOCK, Mode::empty()).unwrap();
+        std::fs::File::from(writer).write_all(&pattern()).unwrap();
+    }
+    let (tx, rx) = mpsc::channel();
+    let path = fifo.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(read_cookie(&path));
+    });
+    let got = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("read_cookie blocked on a FIFO");
+    drop(keep);
+    assert_eq!(got, None);
+}
