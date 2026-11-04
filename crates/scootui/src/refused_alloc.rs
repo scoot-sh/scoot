@@ -99,6 +99,7 @@ refused!(
 // 512 × 512 is the biggest icon the cache draws: a 256 KiB mask, and 1 MiB
 // of coverage for the rasterizer. The first refusal draws nothing at all
 // (and is asked for again), the second a blank mask.
+#[cfg(feature = "icons")]
 refused!(
     an_icon_bitmap_the_allocator_refuses_draws_nothing,
     |refusing| {
@@ -118,6 +119,7 @@ refused!(
     }
 );
 
+#[cfg(feature = "icons")]
 refused!(
     a_rasterizer_buffer_the_allocator_refuses_leaves_a_blank_mask,
     |refusing| {
