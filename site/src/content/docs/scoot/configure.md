@@ -3,8 +3,8 @@ title: Configure scoot
 description: "The config file, live reload, autostart, and what happens when the file is wrong."
 ---
 
-One TOML file holds everything — layout, appearance, animation,
-outputs, binds, global shortcuts, floating rules, autostart, wallpaper — and most of it
+One TOML file holds everything (layout, appearance, animation,
+outputs, binds, global shortcuts, floating rules, autostart, wallpaper), and most of it
 re-applies live with `scoot msg reload`. No config file yet?
 `--print-default-config` writes a starting one (below).
 
@@ -15,7 +15,7 @@ for `$XDG_CONFIG_HOME/scoot/config.toml`, falling back to
 `~/.config/scoot/config.toml`, and runs on built-in defaults if
 neither exists. Sixteen optional tables: `[layout]`, `[appearance]`,
 `[animation]`, `[scroll]`, `[gestures]`, `[output]`, `[[outputs]]`, `[renderer]`, `[tty]`, `[xwayland]`, `[virtual_input]`,
-`[autostart]`, `[floating]`, `[wallpaper]`, `[binds]`, `[global_shortcuts]` — plus any number of
+`[autostart]`, `[floating]`, `[wallpaper]`, `[binds]`, `[global_shortcuts]`, plus any number of
 `[[window_rule]]` entries. Every field in every table is itself
 optional and defaults independently, so a config that only sets `gap`
 leaves everything else at its built-in default.
@@ -25,18 +25,18 @@ scoot --print-default-config > ~/.config/scoot/config.toml
 ```
 
 writes a starting file to stdout (never to a path, so it cannot clobber
-anything), generated from the same defaults this section documents —
-every key present and commented out with its default as the value, so
-the file as-is is exactly the defaults. `--write` places that same
+anything), generated from the same defaults this section documents. Every
+key is present and commented out with its default as the value, so the
+file as-is is exactly the defaults. `--write` places that same
 emission at the default location directly, private to you (`0o600`),
 and refuses loudly rather than overwriting anything already there.
-(On a machine with no `scoot` binary — an older install without it —
-copy the [example below](#example-configtoml) instead.)
+(On a machine without the `scoot` binary, copy the
+[example below](#example-configtoml) instead.)
 
 ### Failure semantics
 
 An explicit `--config PATH` that doesn't exist or can't be read is a
-hard startup error — you pointed at it on purpose. Every other problem
+hard startup error, since you pointed at it on purpose. Every other problem
 falls back to defaults and logs instead of blocking startup, with two
 exceptions (both cases where guessing would be worse than refusing):
 
@@ -44,37 +44,36 @@ exceptions (both cases where guessing would be worse than refusing):
   install, not a mistake).
 - Malformed TOML, an unknown field, or a wrong-typed field **anywhere
   in the file**: logged as an error, and the *entire* file is discarded
-  for full built-in defaults — a single bad field in `[layout]` also
+  for full built-in defaults. A single bad field in `[layout]` also
   throws away an otherwise-valid `[binds]` table.
 - One bad `[appearance]` color, one bad `[binds]` entry, one bad
   `[autostart]` entry, or one unusable `[[window_rule]]`: logged as a
-  warning, and only that field/bind/entry/rule falls back — everything
+  warning, and only that field/bind/entry/rule falls back and everything
   else still applies.
 - Anything wrong inside `[wallpaper]`: logged as an error, and only the
-  wallpaper is skipped — the rest of the file applies.
+  wallpaper is skipped and the rest of the file applies.
 - A set-but-unusable `[tty] gpu`: a hard startup error naming the key,
   not a silent fallback to the automatic pick. The same for
   `[renderer] backend = "gpu"` with no working EGL.
 
-The reason for the general rule: on `--tty` scoot *is* the session —
-there is no other compositor to fall back to, so it always starts with
-something usable and says what's wrong in the log instead.
+On `--tty` scoot *is* the session, with no other compositor to fall
+back to, so it always starts with something usable and says what's wrong
+in the log.
 
 ## Reloading the config
 
 Two triggers re-read the startup file and re-apply what can go live:
 
-- `scoot msg reload` (and `scoot msg reload`), which answers with an
-  applied-vs-refused report;
+- `scoot msg reload`, which answers with an applied-vs-refused report;
 - `kill -HUP <compositor pid>`, which drives the same path with no
   reply channel (the summary goes to the compositor log instead).
 
-No file watching: a live-edited config would fire mid-keystroke, while
-both triggers above say exactly when.
+There is no file watching: a reload happens only on the two triggers
+above.
 
 **Applied live:** layout (gap, column widths, default width), output
-scales and positions, `[[outputs]]` modes (a live resize per backend —
-`--nested` refuses them, the host owns the size), appearance (ring, background, corners, cursor), animation
+scales and positions, `[[outputs]]` modes (a live resize per backend;
+`--nested` refuses them because the host owns the size), appearance (ring, background, corners, cursor), animation
 (enabled, duration, easing), `[scroll] step`, `[gestures]`, the whole
 `[binds]` table (scroll binds included), the `[global_shortcuts]` chords, new `[autostart]` spawn entries, `[floating]` and the
 `[[window_rule]]`s (for windows that map after the reload), `[wallpaper]`
@@ -98,31 +97,28 @@ lives at `$XDG_STATE_HOME/scoot/look/scoot.toml` (or
 unreadable fragment there is refused whole, keeping everything.
 
 **A look-scoped reload** (`scoot msg reload --look`, driven by
-`scoot look apply`) swaps only what the look layer supplies — appearance
-and wallpaper — merged under a snapshot of the file from the last
+`scoot look apply`) swaps only what the look layer supplies (appearance
+and wallpaper), merged under a snapshot of the file from the last
 successful plain load. It never re-reads the file, so it never applies
 pending edits, spawns no autostart entry and swaps no binds; a
 half-written file cannot refuse it. A missing or broken layer refuses it
-whole, keeping everything. `SIGHUP` always runs the plain reload. No Nix
-is involved on either path: the snapshot is the plain file, the layer is
-plain rendered output, and both reloads work the same on a Nix install
-and a plain binary install.
+whole, keeping everything. `SIGHUP` always runs the plain reload. Both
+reloads work the same on a Nix install and a plain binary install.
 
 **Refused, pending a restart:** `[tty] gpu`, `[renderer]
 backend`, `[xwayland] enabled`, `[virtual_input] enabled` and
-`[virtual_input] binds` — all five take effect on restart, and each
+`[virtual_input] binds`. All five take effect on restart, and each
 refusal says so. A reload
 that cannot load the file answers an `error` instead, keeps the
-running config untouched, and logs — never defaults, never a
-half-applied session, never an exit.
+running config untouched, and logs. It never falls back to defaults,
+half-applies, or exits.
 
 Two guarantees hold across every reload: a key held across a `[binds]`
 rebuild (or a `[global_shortcuts]` re-resolve) neither wedges nor drops; and under `--tty` a reload cannot
-strip the `Ctrl+Alt+F1..F12` VT-switch recovery bindings — they are
+strip the `Ctrl+Alt+F1..F12` VT-switch recovery bindings. They are
 layered back on last, overriding any colliding file bind with a
 warning. A reload applies while the session is locked, except new
-autostart entries (a spawned program at lock time could disclose onto
-the locked session, so those wait for the first unlocked reload).
+autostart entries, which wait for the first unlocked reload.
 
 A successful reload drops every live `scoot msg output-scale`
 scale: the outputs go back to the file's scales (see
@@ -134,7 +130,7 @@ would have come back at that scale). A reload that cannot load the file
 keeps them.
 
 > **Symptom:** a reload changed nothing and both lists are empty.
-> That means "the reload changed nothing it was asked to" — the file
+> That means "the reload changed nothing it was asked to": the file
 > and the session already agree, and no live `output-scale` scale was
 > left to drop. Edit first, then reload.
 
@@ -144,7 +140,7 @@ keeps them.
 |---|---|---|---|---|
 | `commands` | array of strings | `[]` | new `spawn` entries run once each | Action strings to run once each, in file order, at session startup — before the `--` command. |
 
-Each entry is an action string — something `scoot msg action` would
+Each entry is an action string: anything `scoot msg action` would
 accept and a `[binds]` value could contain:
 
 ```toml
@@ -159,17 +155,17 @@ Fail-open per entry: a malformed entry is skipped with a warning
 naming that entry; every other entry still runs, and the session
 always starts. No supervision: an entry that exits instantly is
 reaped, not restarted. A reload runs the spawn delta (entries the
-session has not seen yet run once each; a reloaded non-`spawn` —
-`quit` included — is refused by name, so a reloaded `quit` cannot end
+session has not seen yet run once each; a reloaded non-`spawn`,
+`quit` included, is refused by name, so a reloaded `quit` cannot end
 the session).
 
 ### Idle: locking and screen power
 
-(The manual recipe for sessions outside the flake.) scoot provides the protocols; the policy ships with [the desktop
-profile](../desktop/idle-lock.md). Outside the flake, the
-same policy is a hand-written swayidle setup — `spawn` splits on
-whitespace with no shell, so a swayidle line lives in a small script
-the session starts:
+This is the manual recipe for sessions outside the flake. scoot
+provides the protocols; the policy ships with [the desktop
+profile](../desktop/idle-lock.md). Outside the flake, write the same
+policy as a swayidle setup. `spawn` splits on whitespace with no shell,
+so put the swayidle line in a small script the session starts:
 
 ```sh
 #!/bin/sh
@@ -177,10 +173,10 @@ the session starts:
 exec swayidle timeout 600 'swaylock' timeout 900 'wlopm --off \*' resume 'wlopm --on \*'
 ```
 
-(The `\*` is load-bearing: swayidle runs each command through `sh -c`,
-which would glob a bare `*` against its working directory — the
-backslash reaches `sh` intact inside the single quotes and leaves
-`wlopm` a literal `*`, its "every output".)
+The `\*` is required: swayidle runs each command through `sh -c`,
+which would glob a bare `*` against its working directory. The
+backslash reaches `sh` intact inside the single quotes, so `wlopm`
+receives a literal `*`, its "every output".
 
 ```toml
 [autostart]
@@ -212,22 +208,19 @@ Off by default, and free when off: no timer, no per-frame work, no
 allocation. When on, only the moving windows' old and new rects are
 redrawn per frame; clients are never asked to re-commit. `scoot msg
 windows` and pointer input keep reporting the final geometry while a
-slide runs — a spring overshoot is purely visual; input still hits the
+slide runs. A spring overshoot is purely visual, and input still hits the
 target. New windows fade in from transparent over the same
 `duration_ms`/`easing` instead of appearing instantly, and only genuinely
 new windows do: a window scrolling back into view after a sibling closes
-snaps rather than fading in like a fresh open. Closes snap — there is no
-close fade (a retained window draws nothing once a real client has
-destroyed its surface, so keeping one would hold buffers for an effect
-that never shows). Floating, fullscreen and maximized windows snap
+snaps rather than fading in like a fresh open. Closes snap; there is no
+close fade. Floating, fullscreen and maximized windows snap
 rather than slide or fade. Switching workspaces slides the whole incoming
 strip in from the output edge as one unit (right for a higher workspace,
 left for a lower one) with no per-window fade on top; an empty workspace
 has nothing to draw, so it snaps. Each output animates independently.
-Disabling mid-slide or mid-fade snaps to the final frame. A spring costs
-one table lookup and a lerp per window per frame (no `exp`/`sin` on the
-frame path); the clamped duration still bounds its settle, and a frame
-past its deadline still snaps instead of queuing.
+Disabling mid-slide or mid-fade snaps to the final frame. The clamped
+duration bounds a spring's settle, and a frame past its deadline snaps
+instead of queuing.
 
 ## Scroll
 
