@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.42](https://github.com/scoot-sh/scoot/compare/v0.6.41...v0.6.42) - 2026-11-04
+
+### scootbar,scootui,scootbg-mem
+
+- fixed: allocation-failure audit, fallible file- and bus-sized blocks ([#894](https://github.com/scoot-sh/scoot/pull/894))
+
 ## [0.6.40](https://github.com/scoot-sh/scoot/compare/v0.6.39...v0.6.40) - 2026-11-03
 
 ### scoot
