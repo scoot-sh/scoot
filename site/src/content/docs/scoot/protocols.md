@@ -5,13 +5,11 @@ description: "Which Wayland protocols work and what each means for your apps."
 
 Porting a bar, a launcher, a locker or a shell to scoot? This is the
 user half of every protocol: what works, what each choice means for
-your apps, and where the edges are. (Measurement prose and review
-history live in the repo's backlogs and commit messages, not here.)
+your apps, and where the edges are.
 
-Written for someone porting a bar, a launcher, a locker or a shell to scoot.
-Every global listed here is available to every client — scoot has no
-security-context support to distinguish a privileged client from any other,
-so an allow-list would be theatre. **A same-uid process is inside the trust
+Every global listed here is available to every client. scoot has no
+security-context support to tell a privileged client from any other, so an
+allow-list would be theatre. **A same-uid process is inside the trust
 boundary**: anything that can reach scoot's Wayland socket can read your
 screen, read your clipboard and take over an abandoned session lock. It could
 read your files anyway.
@@ -68,25 +66,25 @@ read your files anyway.
 
 The rest of this list *is* deliberate:
 
-- **`wlr-screencopy-v1`.** The clients that motivated capture already speak
-  the `ext-` protocol: `grim` 1.5.0 carries `ext_image_copy_capture_v1` and
-  nothing else, and stock quickshell 0.3.1 — the build both DMS and Noctalia
-  run on — carries the `ext-` manager and both `ext-` source managers.
+- **`wlr-screencopy-v1`.** The clients that need capture already speak the
+  `ext-` protocol: `grim` 1.5.0 carries `ext_image_copy_capture_v1` and
+  nothing else, and stock quickshell 0.3.1 (the build DMS and Noctalia run
+  on) carries the `ext-` manager and both `ext-` source managers.
 - **`ext_foreign_toplevel_image_capture_source_manager_v1`.** A single window
-  cannot be captured on its own; the global is not advertised, so a client
-  takes its fallback path immediately instead of discovering a refusal at
+  cannot be captured on its own. The global is not advertised, so a client
+  takes its fallback path immediately instead of meeting a refusal at
   runtime.
 - **`hyprland-toplevel-export-v1`.** The other interface a per-window
   thumbnail is commonly requested through, and also not advertised. Stock
   quickshell routes per-window thumbnails here, so it falls back cleanly
   rather than failing.
-- **Minimized window state.** scoot has no concept of it, so the state bit
-  is never sent and the matching requests do nothing — a taskbar's minimise
-  button is inert rather than lying. (Fullscreen and maximized are both
-  real: see [Fullscreen](#fullscreen) and [Maximized](#maximized).) The
-  `xdg_toplevel` `wm_capabilities` event still lists `minimize` — Smithay's
-  default set, unchanged here — so a version 5+ client may show that button;
-  pressing it does nothing.
+- **Minimized window state.** scoot has no such state, so the state bit is
+  never sent and the matching requests do nothing: a taskbar's minimise
+  button is inert. (Fullscreen and maximized are both real: see
+  [Fullscreen](#fullscreen) and [Maximized](#maximized).) The
+  `xdg_toplevel` `wm_capabilities` event still lists `minimize` (Smithay's
+  default set), so a version 5+ client may show that button; pressing it
+  does nothing.
 
 ## Per-client limits on what scoot keeps
 
@@ -101,10 +99,9 @@ the client has destroyed both the `wl_buffer` and the pool, and a sync
 point keeps its timeline's fd after the timeline object is destroyed.
 Where the GLES renderer keeps a copy of each imported dma-buf plane's fd,
 the copy counts too, against the client whose buffer it is, from the
-moment the plane is added. Mesa's software renderer keeps one, and so does
-Apple's AGX driver: one extra fd per plane, the same dma-buf, measured on
-an Apple M2 (`Asahi.md`, Test 10). Hardware drivers were expected not to
-keep one; AGX shows that expectation cannot be assumed.
+moment the plane is added. Mesa's software renderer and Apple's AGX driver
+each keep one: one extra fd per plane, the same dma-buf. Other hardware
+drivers may too.
 
 - **512 fds per client**, every kind together. The request that would take
   the client past 512 is refused; a plane's renderer copy is charged when
@@ -135,7 +132,7 @@ keep one; AGX shows that expectation cannot be assumed.
   limit, the one compositors built on it (mutter, KWin, sway, weston) apply
   unless they raise it. This
   limit lives in scoot's fork of wayland-backend ([forks.md](https://github.com/scoot-sh/scoot/tree/main/dev/forks.md)).
-- **Object limits on top**, unchanged: 512 live `wl_buffer`s, 128 live
+- **Object limits on top:** 512 live `wl_buffer`s, 128 live
   `wl_shm_pool`s, 32 planes added to params objects not yet made into a
   buffer (see [GPU-rendering clients](#gpu-rendering-clients-zwp_linux_dmabuf_v1)),
   128 imported timelines and 64 commits waiting on acquire points (see
@@ -170,29 +167,24 @@ keep one; AGX shows that expectation cannot be assumed.
   separate 128) and its live-buffer limit are a sixteenth of scoot's fd
   table instead of an app's 512: **4096** with the fd limit scoot normally runs with (65536), 512 on
   a machine whose hard fd limit is 1024, in between otherwise (1250 on a
-  20000-fd table). Before, the 257th mapped X window — menus, tooltips and
-  ordinary windows alike, across every X application — got the X server
-  disconnected, closing every X window in the session at once. Past its
+  20000-fd table). Past its
   limit (about 2048 X windows with shared-memory buffers; about 1024 on
   the `--tty` GPU tier with explicit sync, where each X window drawing with
-  the GPU holds about 4 fds) it still is: scoot logs `Xwayland
-  disconnected` with the reason, and X comes back only with a restart.
+  the GPU holds about 4 fds) the X server is disconnected, closing every X
+  window in the session at once: scoot logs `Xwayland disconnected` with
+  the reason, and X comes back only with a restart.
   Where explicit sync is offered (the `--tty` GPU tier), its limit on
   commits waiting for the GPU is scaled the same way: **512** with the
   usual fd limit, 64 (an app's) where the hard fd limit is 1024, 156 on a
   20000-fd table. It holds about one such commit per X window drawing
-  with the GPU, so before, about 64 X windows drawing at once could
-  disconnect every X app. A managed X window refused under the
+  with the GPU. A managed X window refused under the
   per-X-client limit above costs the X server nothing. A refused
   override-redirect window costs it what a drawn one does -- up to 64
   refused menus past the limit, which scoot tolerates (never drawn, never
-  hit-tested, never sent frame callbacks). Past that scoot kills the
-  runaway client's X connection, so one X app mapping menus far past its
-  limit cannot use up the server on its own: its windows go with it and
-  it maps no more, while every other X client stays served. Killing a
-  client for its 193rd menu is a last resort: the client loses everything
-  it had, so the kill fires only past the tolerance, when the alternative
-  is disconnecting the server and losing every X window in the session.
+  hit-tested, never sent frame callbacks). Past that (its 193rd menu) scoot
+  kills the runaway client's X connection, so one X app mapping menus far
+  past its limit cannot use up the server on its own: its windows go with
+  it and it maps no more, while every other X client stays served.
 
   > **Symptom:** one X app's windows all vanish at once and it exits,
   > while other X apps stay up. scoot logs `killed a runaway X11 client
@@ -261,23 +253,21 @@ client that believes it floats may size itself: `foot`'s default
 which left a sliver of background along its right and bottom edges. GTK
 also trims the shadow it draws around a tiled window's edges.
 
-Some clients still draw less than their slot, tiled or not. On the dev VM a
-GTK 4 dialog (`zenity --info`) kept its own 300x223 size in a 966x1083 slot,
-and `mpv` kept its video's size. scoot rounds the corners and draws the focus
+Some clients draw less than their slot, tiled or not: a GTK 4 dialog
+(`zenity --info`) keeps its own 300x223 size in a 966x1083 slot, and `mpv`
+keeps its video's size. scoot rounds the corners and draws the focus
 ring around what such a window actually draws, and reports that area as its
 `rect` over IPC ([ipc.md](../msg/requests.md#what-the-replies-carry)). It does not use the whole slot.
 
-One case needed its own fix. libadwaita dialogs (`zenity --info` above)
-round their own corners, with a larger radius than scoot's. With
-`corner_radius` set, a crescent of background showed at each corner,
-between the dialog's own curve and scoot's tighter ring. Such dialogs now
-[float](#floating-windows) (they carry `xdg_dialog_v1`), so the ring hugs a
-window drawn at its own size rather than a short client in a tall column,
-and a window that never negotiated server-side decorations (GTK never
-creates a `zxdg_toplevel_decoration_v1` object) gets a ring-colored
-backdrop under its drawn rect, so its own corners read as the ring hugging
-its curve. Tracked in
-[`resolved/client-rounded-corners-vs-ring-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/client-rounded-corners-vs-ring-done.md).
+libadwaita dialogs (`zenity --info` above) round their own corners with a
+larger radius than scoot's, which with `corner_radius` set would leave a
+crescent of background at each corner, between the dialog's own curve and
+scoot's tighter ring. So such dialogs [float](#floating-windows) (they carry
+`xdg_dialog_v1`), and the ring hugs a window drawn at its own size rather
+than a short client in a tall column. A window that never negotiated
+server-side decorations (GTK never creates a `zxdg_toplevel_decoration_v1`
+object) gets a ring-colored backdrop under its drawn rect, so its own
+corners read as the ring hugging its curve.
 
 ## Floating windows
 
@@ -312,13 +302,12 @@ is created (before its first commit), so its first configure is the tiled
 one. The first commit's answer adds a second configure: size `0x0` (the
 client chooses) — or a rule's `size` — and no `tiled_*` state. Both arrive
 in the same flush, and a client acks the newest before drawing, so its
-first frame is at the size it chose: on the dev VM `zenity --info` drew its
-300x223 dialog, and `foot --app-id` matched by a rule its 693x500 default,
-rounded to whole cells as a floating `foot` does. From then on it is sent no
+first frame is at the size it chose (`zenity --info` draws its 300x223
+dialog; a `foot` matched by a rule draws its 693x500 default, rounded to
+whole cells). From then on it is sent no
 size unless it draws itself larger than the output's usable area, which asks
 it to fit. Floating a tiled window sends `0x0` with the tiled states
-cleared, and the client picks its floating size again (`foot` went back to
-its 693x500 default on the dev VM). Un-floating sends its column's size with the tiled states back.
+cleared, and the client picks its floating size again. Un-floating sends its column's size with the tiled states back.
 
 **Drawn above the strip, below the `top` layer.** A floating window is drawn
 over every tiled window on its output, with its focus ring drawn over them
@@ -331,8 +320,7 @@ a pointer that is not moving, the pointer is re-entered on whatever is now
 under it, so the next click goes to the dialog, not the window beneath —
 what is drawn under the pointer is what a click reaches, the same rule a
 fullscreen window appearing follows. A click meant for the window beneath,
-made in the instant a dialog appears there, lands on the dialog; for a
-window the user is looking at that is the right target.
+made in the instant a dialog appears there, lands on the dialog.
 
 **Popups** of a floating window are fitted into its output's usable area
 like any window's (see [Popup menus](#popup-menus-xdg_popup)). A popup is
@@ -364,9 +352,8 @@ installed under whatever key or enter serial the client offered) is refused
 ignored: tiled windows are placed by the strip, and the client's own drag
 simply carries on with nothing moving. So is one from a fullscreen window,
 and any while the session is locked. `resize` with edge `none` resizes
-nothing. Only a pointer press can carry a move: scoot has no touch
-input, and a request on a touch serial would find no pointer click grab, so
-it is refused. While the compositor holds the drag, the client gets a pointer
+nothing. Only a pointer press can carry a move: a request on a touch serial is
+refused. While the compositor holds the drag, the client gets a pointer
 `leave`, no button events, and an `enter` when it ends.
 
 The same drag starts from `[floating] modifier` (Super) held with the left
@@ -377,8 +364,7 @@ client. During a resize the window is sent configures carrying the
 `min_size`/`max_size`, re-read when the drag starts, and to the room to the
 usable area's edge, which wins over a minimum that does not fit), paced
 to the client: the drag sends a new size only once the client has acked the
-last, so a 1000Hz mouse does not queue sizes a 60Hz client has to skip.
-Best effort, not a guarantee of one outstanding configure: any other
+last. Best effort, not a guarantee of one outstanding configure: any other
 relayout meanwhile (the client's own resized frame, say) also sends the
 newest size. The edge not being dragged stays put whatever size the client settles
 on (a terminal rounding to whole cells, say). The drag's last configure
@@ -441,7 +427,7 @@ menu, a cursor no plane can carry -- scoot's own pointer rides the
 cursor plane, or an overlay where there is none), a translucent
 window (`wp_alpha_modifier_v1`), a lock screen, or a client capturing the
 screen makes those frames composite instead; nothing changes on screen
-either way. Mechanics and where it has been seen: [tty.md](./backends.md).
+either way. Mechanics: [tty.md](./backends.md).
 
 **What it keeps.** The window keeps its column: focus another column and the
 view scrolls there the usual way. Focused away, the fullscreen window keeps
@@ -480,9 +466,7 @@ same for a fullscreen window in either layer:
 - **While it has focus it covers the output**, and the other floating
   windows on that workspace are hidden — except its own dialogs (windows
   whose parent chain reaches it), which stay up and are drawn and clicked
-  above it. Clicking a fullscreen app does not hide the dialog it opened: a
-  modal dialog blocks input to its app, and one hidden under it would make
-  the app look hung. With a dialog above it the frame stays eligible for
+  above it. Clicking a fullscreen app does not hide the dialog it opened. With a dialog above it the frame stays eligible for
   direct scanout: Smithay composites only when the dialog cannot be given a
   plane of its own (on hardware with a free overlay plane the fullscreen
   window can still go direct, the dialog on the overlay).
@@ -566,9 +550,8 @@ harmless on its own; connecting your first X client is the trust decision.
 session spawns is told it -- a background *Wayland* app included. Any such
 process can connect and read the clipboard (below) whenever an X window
 has the keyboard, which a Wayland client could never do in the background.
-That is the same line wlroots -- and so sway -- draws for XWayland's
-clipboard (reads and new selections refused unless an X surface is focused,
-checked against its `xwayland/selection/` source), not a stricter one.
+wlroots, and so sway, draws the same line for XWayland's clipboard: reads
+and new selections are refused unless an X surface is focused.
 
 It reaches past X windows, too. An X menu or tooltip (an override-redirect
 window) is drawn where its client puts it, above **every** window --
@@ -676,8 +659,7 @@ its startup id by another X client, below.)
   window and refuses them the keyboard and pointer; the X server itself
   keeps running (lock is not logout). An X menu open at lock is hidden and
   inert, not closed: nothing can unmap an override-redirect
-  window, and toolkits keep their menus through the focus release (a GTK 3
-  context menu measured still open 5 s after locking), so it reappears at
+  window, and toolkits keep their menus through the focus release, so it reappears at
   unlock.
 - **Screenshots and screen capture see X windows** like any other: `scoot
   msg screenshot` and [`ext-image-copy-capture-v1`](#screen-capture-ext-image-copy-capture-v1)
@@ -701,27 +683,24 @@ its startup id by another X client, below.)
   X pixels (eight 3840-pixel outputs at 1.25 would be 49152 at 2) the X
   server draws at the largest integer scale at which it fits instead -- 1
   at worst, blurrier but with every X window addressable -- and says so
-  at info in the log; one that does not fit even at 1 stays at 1, the
-  limit X always had, with a warning. The choice follows the layout: an
+  at info in the log; one that does not fit even at 1 stays at 1, with a warning. The choice follows the layout: an
   output added, removed or resized and a reload re-choose it, with
   everything below re-told when it moves. Toolkits are told the scale
   over XSETTINGS (the settings a GNOME session publishes:
   `Gdk/WindowScalingFactor`,
-  `Xft/DPI`, `Gdk/UnscaledDPI`). GTK 3 is measured to draw at the right
-  size and follow a reload live. Qt 6 and Java document reading these
-  settings (Qt 6 takes `Xft/DPI` and its default high-DPI scaling turns
-  that into a device pixel ratio of 2 at scale 2) but neither is measured
-  here; Qt 5 gets scaled fonts only, unless the app turns on high-DPI
-  scaling itself. scoot's X11 side owns the `_XSETTINGS_S0`
-  selection these are published on (it always has); an XSETTINGS daemon
+  `Xft/DPI`, `Gdk/UnscaledDPI`). GTK 3 draws at the right size and follows
+  a reload live. Qt 6 and Java document reading these settings (Qt 6 takes
+  `Xft/DPI` and its default high-DPI scaling turns that into a device pixel
+  ratio of 2 at scale 2), but neither is tested with scoot; Qt 5 gets scaled
+  fonts only, unless the app turns on high-DPI scaling itself. scoot's X11
+  side owns the `_XSETTINGS_S0` selection these are published on; an XSETTINGS daemon
   the user runs (`xsettingsd`, `gsd-xsettings`) that takes the selection
   over replaces them, and scoot's scale no longer reaches X apps -- set
   the scale in that daemon instead. An X app that
   reads none of them (bare Xlib: `xterm`'s default bitmap fonts, `xclock`,
   Wine, Steam's own UI) draws at scale 1 in X pixels and comes out
   that scale times smaller (`ceil(scale)`; with `fractional = "light"`
-  the X scale is 1, so it comes out full-size but blurry): sharp but small,
-  the trade-off every compositor that draws X natively makes. The `Xft.dpi` X resource is not
+  the X scale is 1, so it comes out full-size but blurry): sharp but small. The `Xft.dpi` X resource is not
   written; an app that reads only that takes `xrdb -merge` (`Xft.dpi:
   192` at scale 2). Coordinates stay logical everywhere scoot speaks them
   -- `scoot msg windows`, `pointer click`, window rules, floating positions
@@ -768,11 +747,11 @@ sending `_NET_ACTIVE_WINDOW` (what `xdotool windowactivate` does), is a
    else from its leader (its `WM_HINTS` window group, and only a leader the
    same X client created). **A startup id redeems only for the process it
    was handed to:** the X server reports each client's process id (the
-   X-Resource extension, from the socket's credentials — never the
+   X-Resource extension, from the socket's credentials, never the
    forgeable `_NET_WM_PID`), and the window's process must be the child
    scoot spawned (still running, so its pid cannot have been reused) or
    descend from it within 8 parent links. So a GTK app launched through a
-   wrapper (`sh -c`, measured) or a launcher shim still redeems it;
+   wrapper (`sh -c`) or a launcher shim still redeems it;
    `flatpak run` should too, unverified. Any other X client that copies the
    id -- it is readable by every X client from the moment a toolkit sets
    it, before the app's first window maps -- is refused and the token left
@@ -780,23 +759,20 @@ sending `_NET_ACTIVE_WINDOW` (what `xdotool windowactivate` does), is a
    to, the startup id is refused. **Once the process scoot started has
    exited** without its token being redeemed, the startup id redeems for
    any X window that asks (maps, or sends `_NET_ACTIVE_WINDOW`) naming it,
-   once, within the token's 30 seconds -- the rule from before the
-   binding. That is where two ordinary launches end up: a
+   once, within the token's 30 seconds. That is where two ordinary launches end up: a
    single-instance app whose second launch hands over to the running
    instance and exits (GApplication, `KDBusService`), and an app that forks
    itself into the background and lets the process scoot started exit
-   (`gvim` does by default, per its documentation; unmeasured here). Their
+   (`gvim` does by default, per its documentation; untested here). Their
    window comes from a process that is not a descendant of the one scoot
    started, so binding them would open it without focus behind whatever you
    were typing into. A window that asked with the id while that process
-   still ran, and was refused, takes focus when it exits (a forwarder was
-   measured to exit a few milliseconds after the running instance's window
-   mapped) -- if it asked less than a second before the exit and focus has
+   still ran, and was refused, takes focus when it exits, if it asked less than a second before the exit and focus has
    not moved since; of several, the first to ask. A window that only
    carries the id and never asked gets nothing from the exit, and no other
    process's exit hands anyone focus. For these launches the race stays
    open to an X client that copies the id and *asks* with it before the
-   app's window does, as it always was; and a window whose launched
+   app's window does; and a window whose launched
    process lingers more than a second after the window asked, or whose
    focus moved first, opens unfocused -- and the launch's token is spent
    then, so no window that asks later (a copier) can take the focus
@@ -810,7 +786,7 @@ sending `_NET_ACTIVE_WINDOW` (what `xdotool windowactivate` does), is a
    A token a **Wayland launcher** minted (from a real click; see
    [focus handoff](#focus-handoff-xdg-activation-v1)) and handed an X app
    as its startup id -- GLib-based launchers set `DESKTOP_STARTUP_ID` too --
-   redeems for any X window naming it, as before: scoot never learns which
+   redeems for any X window naming it: scoot never learns which
    process the launcher started (it typically exits straight after,
    reparenting the app away from it), and refusing these would open every
    such X app behind the window it was launched from. A token scoot minted
@@ -839,8 +815,7 @@ boundary every activation token lives inside.)
 
 **The clipboard and the primary selection cross both ways.** Copy in an X
 app and paste in a Wayland app, or the reverse; `xclip`/`xsel` and
-`wl-copy`/`wl-paste` see each other's selections (measured live, both
-selections, both directions, including a 2.9 MB payload). A clipboard
+`wl-copy`/`wl-paste` see each other's selections (both selections, both directions, large payloads included). A clipboard
 manager on `zwlr_data_control` or `ext_data_control` is told about an X
 selection like any other, and one setting the clipboard reaches X clients
 too.
@@ -902,21 +877,19 @@ at most 255 bytes, at most 64 of them), so a hostile atom name cannot reach
 a Wayland client.
 
 **Drag-and-drop works in every direction: X to Wayland, Wayland to X,
-X to X, and within one X app.** A drag that starts in an X app drops into Wayland apps (text from `mousepad` over X into a
-Wayland `mousepad`, measured). It starts only where a Wayland drag would:
+X to X, and within one X app.** A drag that starts in an X app drops into Wayland apps. It starts only where a Wayland drag would:
 from a real, recent button press delivered to an X window whose X client is
 that of the window taking the drag's selection -- never while locked, and
 **never from touch** (X touch drags are refused, as Wayland ones are).
-Without that check (upstream's behaviour, and scoot's before this), any X
-client could turn a press you were holding on a Wayland window into a drag
-of its own data and drop it wherever you released; **presses on Wayland
-windows are now protected. Presses on X windows are not:** X accepts any
+Without that check, any X client could turn a press you were holding on a
+Wayland window into a drag of its own data and drop it wherever you
+released. **Presses on Wayland windows are protected. Presses on X windows
+are not:** X accepts any
 window as the owner of the drag's selection, so a stranger naming the X
 window you pressed on still takes the press over, and the X server
 cannot tell who asked.
 
-A drag from a Wayland app drops onto an X window (text from a Wayland
-`mousepad` into one over X, measured): over one, scoot speaks
+A drag from a Wayland app drops onto an X window: over one, scoot speaks
 XDND -- X's drag-and-drop protocol -- to it on the Wayland app's behalf,
 and the X app reads the dropped data from scoot as it would
 from any X source. The X window has to take drops (`XdndAware`,
@@ -929,8 +902,7 @@ target's window goes, or when an X app starts a new drag that scoot lets
 start (from a pointer press held on an X window). An X app that takes the
 drag's selection with no such drag behind it is refused -- scoot
 takes the selection back and the drop stands -- so no X app can
-end a drop in flight (scoot's Smithay fork, `7388af13`, `9515d7e5` and
-`d3a4cd73`).
+end a drop in flight.
 
 A drag from an X app onto an X window -- another X app's, or inside one X
 app, like moving selected text within an X editor -- lands too, and X does
@@ -938,22 +910,13 @@ it itself: while an X drag is over an X window, scoot hides
 the full-screen window it relays X drags to Wayland through, so the X app
 finds the real window under the pointer and speaks XDND to it directly;
 when the drag moves on, that window is shown again, so the same drag can
-still drop on a Wayland app. Upstream Smithay queues the requests that
-show it again but never flushes them to the X server, so they sat unsent
-until some unrelated request went out, and an X drag that had crossed an X
-window could not drop on a Wayland one; scoot's Smithay fork flushes them
-(`6e6fe896`, [forks.md](https://github.com/scoot-sh/scoot/tree/main/dev/forks.md))
-([`backlog/resolved/xwayland-pointer-focus-x11-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/xwayland-pointer-focus-x11-done.md)).
+still drop on a Wayland app.
 
 A quick drag straight from one X app onto another lands too, released on
 the first motion that reaches the other window. GTK and Qt start an X drag
-without telling anyone what they are dragging, and upstream Smithay's drag
-enters no window until it knows, so the full-screen window stayed over the
-target and such a drop went nowhere (GTK `mousepad` over X: 0 of 20
-landed). scoot's Smithay fork lets an X drag enter another client's X
-window at once, and go from one X window to the next without showing the
-full-screen window in between (`b1ac3ca7`; 20 of 20)
-([`backlog/resolved/xwayland-x-drag-first-motion-race-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/xwayland-x-drag-first-motion-race-done.md)).
+without telling anyone what they are dragging, so scoot lets an X drag
+enter another client's X window at once, and go from one X window to the
+next without showing the full-screen window in between.
 One limit is GTK's own, on any X server: a release that arrives together
 with the motion that brings the pointer onto the target (an agent sending
 `pointer move` and the button release back to back, with no pause) is
@@ -961,8 +924,7 @@ decided on the window the pointer was over *before* that motion, so it
 drops nothing. Let the move settle before the release. The same holds
 between two windows of one app instance (most GTK apps run every window in
 one process): the drag waits for the app to say what it is dragging only
-over the window it started on (`b16cd6a2`,
-[`backlog/resolved/xwayland-same-client-quick-drag-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/xwayland-same-client-quick-drag-done.md)).
+over the window it started on.
 
 **Input methods: XIM is not provided.** X clients compose text through XIM
 (an X-side protocol an input-method daemon speaks as an X client); XWayland
@@ -973,14 +935,8 @@ XIM server under XWayland (fcitx5's X frontend, for instance) is untested.
 An input method's keyboard grab does pre-empt an X window's keyboard like
 any other: while it holds the grab, keys go to it, not to the X window.
 
-**Most of the bounds above, and the hooks the rules need, live in scoot's
-Smithay fork**, each measured first and listed in [forks.md](https://github.com/scoot-sh/scoot/tree/main/dev/forks.md):
-upstream, large transfers were cut to 64 KiB both ways, a stuck reader made
-the compositor buffer a whole selection, an owner appending without waiting
-was re-read on every append, transfers of either direction piled up without
-bound or stalled for good, and a new Wayland selection could sit unsent to
-the X server; `X11Wm::selection_owner`, `X11Wm::selection_generation` and
-`XwmHandler::allow_drag` are fork additions.
+**Most of the bounds and rules above live in scoot's Smithay fork**, listed
+in [forks.md](https://github.com/scoot-sh/scoot/tree/main/dev/forks.md).
 
 ## Layer shell (bars, wallpapers, launchers)
 
@@ -1117,8 +1073,7 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   `xdg_popup.reposition`, and redone afterwards for a `reactive` popup: when
   its window scrolls, its output is resized, or a bar's exclusive zone
   changes, it is re-fitted and told with a fresh configure pair (a
-  non-reactive popup is never re-configured — the protocol forbids it; see
-  [`docs/backlog/resolved/popup-reactive-reconstrain-done.md`](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/popup-reactive-reconstrain-done.md)).
+  non-reactive popup is never re-configured, as the protocol requires).
 - **Popups nest at most 64 deep, and cannot loop.** A menu, its submenu,
   that submenu's submenu and so on may go 64 levels deep — real menus stop
   at a handful — and a 65th is refused. That holds for how scoot itself
@@ -1126,9 +1081,7 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
   application popup ever sits more than 64 levels down, however the client
   got it there (an input method's candidate window over the deepest one
   can add a 65th level; it is never anyone's parent). So is a popup that
-  is its own ancestor (its own `xdg_surface` named as its parent). Before, a chain a
-  few thousand deep crashed the compositor, and a loop froze it, taking
-  every other client down too. A refused popup's client is disconnected
+  is its own ancestor (its own `xdg_surface` named as its parent). A refused popup's client is disconnected
   with a protocol error, and so is a client that breaks one of the
   protocol's rules that keep an open chain from growing afterwards, which
   scoot enforces where the pinned Smithay does not:
@@ -1153,11 +1106,7 @@ surfaces, and all of them map, draw, take clicks and take the keyboard.
 - **One client may hold at most 128 live popups.** Side by side counts as
   much as nested: a client already holding 128 popups that opens one more
   is disconnected with `wl_display.error` `no_memory` — see
-  [Per-client limits](#per-client-limits-on-what-scoot-keeps). Thousands of
-  popups in one burst used to stall the compositor for seconds (every
-  popup's tracking searched the whole tree for its parent, and every first
-  commit walked every tree again); now the burst is cut off in
-  milliseconds.
+  [Per-client limits](#per-client-limits-on-what-scoot-keeps).
 - **The grab's serial has to name a real interaction.** A grab is refused —
   dismissed, with a warning in the compositor log naming the client and
   serial, since the protocol posts no error — unless its serial is a recent
@@ -1216,8 +1165,7 @@ protocol says, with one limit.
   hanging below the surface being attached, so a tree built bottom-up,
   re-attached after `wl_subsurface.destroy`, or re-attached after its
   parent `wl_surface` was destroyed is held to the same limit as one built
-  a level at a time. Before, a tree a few thousand levels deep crashed the
-  compositor, taking every other client down too.
+  a level at a time.
 
   | What the client did | Protocol error | Posted on |
   |---|---|---|
@@ -1241,7 +1189,7 @@ protocol says, with one limit.
   near it: the deepest measured is 2 levels.
 
   A parent that is the surface itself, or one of its own subsurfaces, is
-  still refused as before, with `wl_subcompositor.bad_surface`.
+  refused with `wl_subcompositor.bad_surface`.
 
 ## Workspaces (`ext-workspace-v1`)
 
@@ -1296,8 +1244,7 @@ Worth knowing before you write against it:
   focus-workspace-index N` drives the same core action `activate` does, on
   the focused output; `focus-workspace-index N --output ID` names the
   output, the way a bar's click on another monitor does.
-- **With one output the wire is exactly what it always was** — one group,
-  one `done` per batch. A second output adds a second group block before
+- **With one output the wire is one group and one `done` per batch.** A second output adds a second group block before
   that `done`, nothing else.
 - **A group never changes outputs, so `output_leave` never fires on one.**
   Each group is announced with its own output and keeps it: moving a window

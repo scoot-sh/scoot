@@ -24,7 +24,9 @@ flight. Left:
   blocks changed), then `reference/` (the look format and targets specs and the
   release procedure keep every rule, key and step), then `desktop/` (every step,
   command, option and caveat kept), then `scoot/` except `protocols.md` (config and
-  keybinding reference entries unchanged). Remaining: `scoot/protocols.md`.
+  keybinding reference entries unchanged), then `scoot/protocols.md` up to
+  "Window lists" (limits and table rows unchanged). Remaining: `scoot/protocols.md`
+  from "Window lists" onward.
 - **M9**: flip each "coming" slot (deb, rpm, Arch, ISO, shortcut teacher app) as
   its channel goes live.
 
