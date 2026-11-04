@@ -23,8 +23,7 @@ to a `looks/` directory, or install a handed-over tarball as below).
 
 There are no per-command help pages: `scoot look apply --help`
 refuses. This page and `scoot look --help` list every command and
-flag; the [drift gate](#exit-codes-and-json) keeps the three in
-agreement.
+flag.
 
 ```sh
 scoot look list                       # the catalog, in search order
@@ -54,24 +53,22 @@ look; it does nothing while the session is locked. Each step applies
 through the same transaction as `apply`, with the same reloads and
 rollback. Two quick presses can land on the same look: each press picks
 its target before the swap takes its lock. A look that refuses to apply
-(a missing font is now a fallback, not a refusal — see below — but a
-refused fragment or wallpaper still refuses) is skipped, and the step
-lands on the next look that applies; the skipped looks are reported, and
-a degraded step posts one desktop notification (through `notify-send` to
-whichever daemon serves `org.freedesktop.Notifications`), since the
-shortcut's output goes nowhere. Clean steps stay silent.
+(a refused fragment or wallpaper; a missing font falls back instead) is
+skipped, and the step lands on the next look that applies. The skipped
+looks are reported. A degraded step posts one desktop notification
+through `notify-send` (to whichever daemon serves
+`org.freedesktop.Notifications`), since the shortcut's output goes
+nowhere. Clean steps stay silent.
 
 `apply NAME --for SECONDS` previews a look and reverts after the delay.
-The revert records the generation it reverts from: a newer `apply` before
-the timer fires cancels the revert, so a preview never undoes a newer
-choice. A preview over a pending preview chains the reverts: each timer
-restores the choice it replaced, and an older timer stands down once a
-newer choice lands. The timer is a detached child of the applying CLI, so
-closing the terminal never strands it, and a compositor restart does not
-drop it either (only the IPC `for_ms` timer is dropped by a restart). A
-swap running when the delay ends waits the reverter out (bounded retries
-with the guard re-checked), instead of dropping the revert. `SECONDS`
-is 1 or more. `scoot look apply --keep` keeps the preview (and cancels
+A newer `apply` before the timer fires cancels the revert, so a preview
+never undoes a newer choice. A preview over a pending preview chains the
+reverts: each timer restores the choice it replaced, and an older timer
+stands down once a newer choice lands. The timer is a detached child of
+the applying CLI, so closing the terminal does not stop it, and neither
+does a compositor restart (a restart drops only the IPC `for_ms` timer).
+If a swap is running when the delay ends, the revert waits for it and
+retries a bounded number of times. `SECONDS` is 1 or more. `scoot look apply --keep` keeps the preview (and cancels
 the timer); `apply NAME --keep` applies for good and cancels any pending
 preview; bare `--keep` with no pending preview refuses.
 
@@ -84,12 +81,11 @@ prints one name per line, for scripting.
 the state link, reloads each running app's look layer in order (the
 compositor first, then every bar of the session), and signals the
 third-party daemons (mako, scootnotify, fcitx5, the OSD and night-light
-units).
-scootlaunch needs no reload (it reads `launch.toml` at every open);
-`scoot look apply` reloads the running scootnotify live (`msg reload
---look` does the same by hand).
-Apps that are not running are skipped, never an error. With nothing
-running, only the link moves, and the next session starts on the new look. A shipped look names its Nerd families (`DroidSansM Nerd Font Propo`, `FiraCode Nerd Font`) plus DejaVu Sans. A named family that is not installed no longer refuses the swap: the apply falls back through the look's other families, then fontconfig's generic sans-serif/monospace answer, with a note naming the substitution, and refuses only when no usable font file exists at all. The same fallback (and the same note) covers `validate`. On Nix the profile installs all three families and points fontconfig at them, so the fallback rarely fires there; a direct `notify-send` names a degraded swap for the shortcut path, since that output goes nowhere.
+units). scootlaunch needs no reload (it reads `launch.toml` at every
+open). `scoot look apply` reloads the running scootnotify live (`msg
+reload --look` does the same by hand). Apps that are not running are
+skipped, never an error. With nothing
+running, only the link moves, and the next session starts on the new look. A shipped look names its Nerd families (`DroidSansM Nerd Font Propo`, `FiraCode Nerd Font`) plus DejaVu Sans. A named family that is not installed does not refuse the swap: the apply falls back through the look's other families, then fontconfig's generic sans-serif/monospace answer, with a note naming the substitution. It refuses only when no usable font file exists at all. `validate` falls back the same way, with the same note. On Nix the profile installs all three families and points fontconfig at them, so the fallback rarely fires there.
 
 Two pickers drive the same command. The bar's `looks` module shows the
 active look's name and opens the catalog as a popup — one row per look,
@@ -102,37 +98,34 @@ scoot look pick                 # choose a look in fuzzel, apply it
 scoot look list --names         # names in catalog order, for scripting
 ```
 
-`pick` still uses fuzzel even now that the scootlaunch panel has
-landed (overlay exclusive-keyboard surface, [its own
-panel](../scootlaunch/panel.md)): the look picker has not moved to the
-panel yet. `pick` needs a live Wayland display plus `scoot` and `fuzzel` on PATH;
+`pick` uses fuzzel, not the [scootlaunch panel](../scootlaunch/panel.md):
+the look picker has not moved to the panel yet. `pick` needs a live Wayland display plus `scoot` and `fuzzel` on PATH;
 `list` needs only `scoot`. No Nix, no running session either way. A
 cancel applies nothing and prints nothing (`{"applied": null,
-"cancelled": true}` under `--json`); a missing or stale display (an
+"cancelled": true}` under `--json`). A missing or stale display (an
 ssh session, a restarted compositor: no socket, or a plain file where
-the socket was), a missing or broken fuzzel fails loudly instead of
+the socket was) or a missing or broken fuzzel fails loudly instead of
 applying.
 
 A swap reports three lists: what reloaded, what was skipped, and every
-shadowed key — a key in your own files that overrides a look token. A
+shadowed key (a key in your own files that overrides a look token). A
 swap that changes nothing it was asked to still answers applied; check
 `current` when the screen disagrees with the reply.
 
 On refusal nothing half-applies. An invalid look refuses before anything
 is touched. A refused reload rolls the swap back: the record and the link
-go back to the previous look, the reloads that may hold the new layer run
-again against the restored choice, and the reply names the refusal. That
-is a positive receipt, a partial one (the compositor applied some fields
-and refused others), and a sent-but-unanswered one (a timeout, a
-connection closed after the write). A peer that refused outright — an old
-compositor or bar included — never accepted the new layer, so it is never
-re-run and nothing ever retries as a plain reload. If a rollback reload
-also refuses, the reply
-says `ROLLED BACK WITH ERRORS` with both reasons; each app is on its old
-or its new look, never between — except a first-ever apply with no
-previous look: there is nothing to reload back to, so whatever may hold
-the new look still shows it while no look is recorded, and the
-reply names exactly that.
+go back to the previous look, the reply names the refusal, and the reloads
+run again against the restored choice for every peer that may hold the new
+layer. That is a peer that answered ok, one that applied some fields and
+refused others, or one that was sent the request and never answered (a
+timeout, a connection closed after the write). A peer that refused
+outright, an old compositor or bar included, never accepted the new layer,
+so it is not re-run and nothing retries as a plain reload. If a rollback
+reload also refuses, the reply says `ROLLED BACK WITH ERRORS` with both
+reasons. Each app is on its old or its new look, never between. The
+exception is a first-ever apply with no previous look: there is nothing to
+reload back to, so whatever may hold the new look still shows it while no
+look is recorded, and the reply names exactly that.
 
 Every command takes `--json` (the reply as JSON on stdout, notes on
 stderr); the shapes and the exit codes are under [Exit codes and
@@ -206,10 +199,9 @@ render until the next watched save. An unwritable state dir
 refuses loudly. The rendered look holds `fuzzel.ini` and `swaylock`
 beside the first-party fragments: layer them over your own configs and
 the next launch picks the look up, no Nix involved. It also holds
-`greet.toml` for the login screen, which nothing reads yet (it is for
-the future scootgreet): on Nix the login screen takes the look's
-ReGreet CSS, backdrop, dark setting and sans at system build time, and
-a live swap never reaches it.
+`greet.toml` for the login screen, which nothing reads yet. On Nix the
+login screen takes the look's ReGreet CSS, backdrop, dark setting and
+sans at system build time, and a live swap never reaches it.
 
 Your own configs stay the base. Neither file is ever passed to its app
 as the whole config: fuzzel's `--config` and swaylock's `-C` each read
@@ -267,9 +259,9 @@ leaves it alone and names it. A file the tool did not write (hand-made,
 or linked into the Nix store by home-manager) is left alone and named.
 A box without `dconf` gets a note, not a refusal.
 
-Qt limits, both measured: under the Adwaita style the look's palette
-never reaches QWidget apps (adwaita-qt replaces it with its fixed one —
-a style honoring `custom_palette` paints the scheme), and an in-place
+Qt limits: under the Adwaita style the look's palette never reaches
+QWidget apps (adwaita-qt replaces it with its fixed one; a style that
+honors `custom_palette` paints the scheme), and an in-place
 scheme change fires no watcher in a running app (qt6ct watches its own
 directory for added and removed files only). New Qt processes read the
 new palette; running ones keep theirs.
@@ -310,9 +302,9 @@ the fragment against foot's own parser; `build --out` writes
 
 The themed fragment needs foot 1.26 or newer. Against an older foot
 (Debian 13 ships 1.21.0 as its newest) the apply renders the legacy
-`[colors]` fragment instead — one section with the same hues, which
-that era parses — with a note naming the refused key and the 1.26
-floor, and applies everything else. A foot whose version does not
+`[colors]` fragment instead: one section with the same hues, which
+that era parses. A note names the refused key and the 1.26 floor, and
+everything else applies. A foot whose version does not
 parse renders the themed fragment first, and the same downgrade runs
 off its `--check-config` refusal. Only a fragment broken beyond the
 themed keys still refuses the look.
@@ -323,8 +315,8 @@ Each shipped look with an `apps/` directory carries static leaves:
 `apps/helix.toml` (the Helix theme), `apps/nvim.lua` (the Neovim
 colorscheme), `apps/btop.theme` (the btop theme) and
 `apps/starship.toml` (the prompt). `apply` copies them into the
-rendered look verbatim — they are the author's files, never generated
-from tokens — then `SIGUSR1` reaches your own `hx` processes (Helix
+rendered look verbatim (they are the author's files, never generated
+from tokens). Then `SIGUSR1` reaches your own `hx` processes (Helix
 re-reads its config and theme from disk) and `SIGUSR2` your own `btop`
 (it re-reads its config and theme). Starship is a new process per
 prompt, so the next prompt draws the look with no signal. Neovim
@@ -411,7 +403,7 @@ first).
 ## The Nix catalog
 
 `programs.scoot.looks` lists the catalog (default: every shipped
-look — add paths to your own source look directories beside the
+look; add paths to your own source look directories beside the
 names); each look renders at build time and installs as
 `~/.local/share/scoot/looks/<name>` (sources) beside
 `~/.local/share/scoot/rendered/<name>` (renders).
@@ -459,7 +451,7 @@ invocation was wrong.
 `look-nix-targets` beside the default names the opted-out theme
 targets (`cursor`, `fonts`, one per line, written from the Nix
 `desktop.theme.targets` switches): the synced render leaves those
-pieces out — no cursor keys in the compositor layer, no bar font in
+pieces out: no cursor keys in the compositor layer, no bar font in
 the bar layer, no matching toolkit keys or files — so an explicit
 opt-out holds through the managed sync. A hand-written targets file
 works with no Nix involved; a manual `apply` still themes everything
@@ -492,8 +484,8 @@ applies once. Each save takes the look lock and swaps through the same
 transaction as `apply`: the watched directory wins over any same-named
 catalog entry, its `extends` base resolves through the catalog, and it
 renders into one reused cache slot (`<cache>/<name>-watch/`), so the
-cache never grows per save. An invalid save is refused loudly — the
-reply names the file and the reason — and the last good look stays:
+cache never grows per save. An invalid save is refused loudly. The
+reply names the file and the reason, and the last good look stays:
 the record, the link and the slot are untouched. A plain `apply`
 cancels a pending timed preview before the loop starts. `--no-toolkit`
 skips the toolkit step per save; `--origin` sets the origin the
@@ -516,9 +508,8 @@ Write a directory with a `look.toml` (see the
 [format](../reference/look-format.md)), then `scoot look validate DIR`
 and `scoot look build DIR --out OUT`. `validate` resolves, contrast-checks
 and runs the effectful checks: fonts through fontconfig (a missing named
-family falls back with a note — through the look's other families, then
-the generic answer — and refuses only with no usable font file at all;
-a `[fonts.files]` path must exist), the wallpaper
+family falls back with a note, as in `apply`, and refuses only with no
+usable font file at all; a `[fonts.files]` path must exist), the wallpaper
 through `scootbg check-image`, the bar fragment through the installed
 bar's own parser.
 
