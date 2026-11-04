@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.6.43](https://github.com/scoot-sh/scoot/compare/v0.6.42...v0.6.43) - 2026-11-04
+
+### scootbar
+
+- fixed: read the pulse cookie without blocking or allocating ([#908](https://github.com/scoot-sh/scoot/pull/908))
+
 ## [0.6.42](https://github.com/scoot-sh/scoot/compare/v0.6.41...v0.6.42) - 2026-11-04
 
 ### scootbar,scootui,scootbg-mem
