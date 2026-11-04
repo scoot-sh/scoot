@@ -189,12 +189,7 @@ fn secret_mode_types_and_prints_while_hiding_the_type() {
     // The masked widget holds the secret; the draw reads through
     // `secret_entry` (never the bytes), and the widget's own `Debug`
     // is redacted (pinned in scootui).
-    let mut ui = DmenuUi::open_secret(
-        vec!["alpha".to_string(), "beta".to_string()],
-        10,
-        false,
-        true,
-    );
+    let mut ui = DmenuUi::open_secret(vec!["alpha".to_string(), "beta".to_string()], 10, false);
     assert!(ui.secret_entry().is_some());
     assert!(ui.plain_entry().is_none());
     let secret = ui.secret_entry().expect("masked in secret mode");
@@ -204,10 +199,45 @@ fn secret_mode_types_and_prints_while_hiding_the_type() {
     let secret = ui.secret_entry().expect("masked in secret mode");
     assert_eq!(secret.secret_bytes(), b"s3cret!");
     assert_eq!(ui.query(), "s3cret!");
-    // The list still filters on the masked query; nothing matches.
     assert_eq!(
         ui.key(KEY_RETURN, false, ""),
         Outcome::Print(Print::Text("s3cret!".to_string()))
+    );
+}
+
+/// A password prompt with a stdin list never reveals the secret through
+/// the list: no rows shown, none highlighted, none selected (so Enter
+/// prints the secret, never a matching line), and no folded copy of the
+/// secret in the ranking scratch buffers.
+#[test]
+fn secret_mode_never_filters_or_highlights_on_the_secret() {
+    let mut ui = DmenuUi::open_secret(
+        vec![
+            "alpha".to_string(),
+            "beta".to_string(),
+            "alphabet".to_string(),
+        ],
+        10,
+        false,
+    );
+    assert!(ui.shown().is_empty(), "no list before typing");
+    for typed in ["al", "alpha", "xyz"] {
+        ui.key(0, false, typed);
+        assert!(ui.shown().is_empty(), "{typed}: no rows shown");
+        assert_eq!(ui.list().count(), 0, "{typed}: nothing to select");
+        assert!(ui.list().highlights().is_empty(), "{typed}: no highlight");
+        assert!(ui.selected_line().is_none(), "{typed}: nothing selected");
+        assert!(ui.fold_scratch.is_empty(), "{typed}: no folded secret");
+        assert!(ui.query_codes.is_empty(), "{typed}: no secret code points");
+        for _ in 0..typed.len() {
+            ui.key(scootui::entry::KEY_BACKSPACE, false, "");
+        }
+    }
+    ui.key(0, false, "alpha");
+    assert_eq!(
+        ui.key(KEY_RETURN, false, ""),
+        Outcome::Print(Print::Text("alpha".to_string())),
+        "Enter prints the secret even when it equals a stdin line"
     );
 }
 

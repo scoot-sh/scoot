@@ -178,7 +178,9 @@ impl EntryKind {
 /// heap): it draws `*` per character, refuses copy, paste and IME,
 /// never logs the secret (its `Debug` is redacted), and is wiped on
 /// drop, so an early return or an unwinding panic leaves no secret
-/// behind. There is no `Debug` on this type either.
+/// behind. There is no `Debug` on this type either. Password mode is
+/// always list-less ([`DmenuUi::open_secret`]): the list never ranks,
+/// highlights or selects on the secret, and no folded copy of it is made.
 pub struct DmenuUi {
     entry: EntryKind,
     list: List,
@@ -211,25 +213,15 @@ impl DmenuUi {
 
     /// Opens with a masked entry: the query types into a widget that
     /// draws `*` per character (never the secret) and is wiped on
-    /// drop, while the list still filters the stdin lines. The widget
-    /// borrows a caller-owned 1 KiB buffer, leaked for the session
-    /// (see [`EntryKind`]): one box per open, wiped before the process
-    /// exits.
-    pub fn open_secret(
-        lines: Vec<String>,
-        visible: usize,
-        only_match: bool,
-        prompt_only: bool,
-    ) -> Self {
+    /// drop. The panel is list-less, as `--prompt-only` (Enter prints
+    /// the secret): a list that filtered or highlighted on the secret
+    /// would leak it through which rows match. The widget borrows a
+    /// caller-owned 1 KiB buffer, leaked for the session (see
+    /// [`EntryKind`]): one box per open, wiped before the process exits.
+    pub fn open_secret(lines: Vec<String>, visible: usize, only_match: bool) -> Self {
         let buf: &'static mut [u8; SECRET_CAP] = Box::leak(Box::new([0u8; SECRET_CAP]));
         let secret = PasswordEntry::new(&mut buf[..]);
-        Self::with_entry(
-            EntryKind::Secret(secret),
-            lines,
-            visible,
-            only_match,
-            prompt_only,
-        )
+        Self::with_entry(EntryKind::Secret(secret), lines, visible, only_match, true)
     }
 
     fn with_entry(
@@ -402,16 +394,28 @@ impl DmenuUi {
     /// ranks through the matcher's order (ties keep stdin order).
     /// Reuses every buffer: a warmed-up call allocates nothing.
     fn rerank(&mut self) {
-        crate::rank::fuzzy::fold_into(self.entry.text(), &mut self.fold_scratch);
+        self.fold_scratch.clear();
         self.query_codes.clear();
-        self.query_codes
-            .extend(self.fold_scratch.chars().map(|char| char as u32));
         self.displayed.clear();
         // A prompt-only panel shows no list: nothing is ever shown or
-        // selected, whatever the query.
-        if self.prompt_only {
-            // Nothing to show.
-        } else if self.fold_scratch.is_empty() {
+        // selected, whatever the query. The query is not even read
+        // (password mode is always prompt-only), so a secret leaves no
+        // folded copy in the scratch buffers.
+        if !self.prompt_only {
+            crate::rank::fuzzy::fold_into(self.entry.text(), &mut self.fold_scratch);
+            self.query_codes
+                .extend(self.fold_scratch.chars().map(|char| char as u32));
+            self.rank_into_displayed();
+        }
+        self.list.set_count(self.displayed.len());
+        self.list.select(0);
+        self.rehighlight();
+    }
+
+    /// Fills `displayed` from the folded query: stdin order when it is
+    /// empty, else the matcher's order.
+    fn rank_into_displayed(&mut self) {
+        if self.fold_scratch.is_empty() {
             self.displayed.extend(0..self.lines.len());
         } else {
             // `order` borrows the ranker; the extend reads the other
@@ -422,9 +426,6 @@ impl DmenuUi {
             self.displayed.reserve(order.len());
             self.displayed.extend(order.iter().map(|row| *row as usize));
         }
-        self.list.set_count(self.displayed.len());
-        self.list.select(0);
-        self.rehighlight();
     }
 
     /// Recomputes the visible window's highlights into the reused slots.

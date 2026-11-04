@@ -77,8 +77,13 @@ order — the writer's order, with no frecency to break it.
 next argument. `--prompt-only` is an input field with no list: stdin
 is not read at all (a password or WiFi-key prompt reading from
 `/dev/null`). `--password` masks the entry with `*`; the secret is written to stdout
-only on Enter, never logged, and wiped when the panel closes. `--no-run-if-empty` exits 1 without
-opening on empty stdin. `--only-match` makes Enter with no match do
+only on Enter, never logged, and wiped when the panel closes.
+`--password` also hides the list, as `--prompt-only` does, so stdin
+lines are never filtered or highlighted on the secret and Enter prints
+what was typed. `--no-run-if-empty` exits 1 without
+opening on empty stdin. With `--prompt-only` stdin is never read, so
+`--prompt-only --no-run-if-empty` always exits 1 without opening.
+`--only-match` makes Enter with no match do
 nothing (without it the typed text prints); Ctrl+Enter still prints
 the typed text, even with `--only-match`. `--index` prints the
 0-based stdin position of the pick instead of its line. The panel is
@@ -101,6 +106,11 @@ and Enter launches the pick by basename through a `PATH` lookup —
 under the same token, scope and fallback rules as an apps pick, and
 recording the same history. Ctrl+Enter runs the typed text split on
 spaces. Nothing prints; dismissing exits 1.
+
+Run mode shares the panel's single-instance toggle with the bare
+panel. A second `scootlaunch --run` (or bare `scootlaunch`) while one
+is open dismisses the first, which exits 1, and itself exits 0 without
+opening or launching anything.
 
 ```sh
 scootlaunch --run

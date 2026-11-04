@@ -125,7 +125,7 @@ pub enum Mode {
 
 /// What a dmenu open carries: the resolved prompt (`> ` when neither
 /// `--prompt` nor `--prompt-only` names one), whether the list is
-/// hidden (`--prompt-only`), the mask (`--password`), the match rules,
+/// hidden (`--prompt-only`; `--password` hides it too), the mask (`--password`), the match rules,
 /// the dim hint (empty by default), the stdin lines, and the color
 /// overrides. A pick prints (the line, or its 0-based stdin index with
 /// `--index`) and launches nothing.
@@ -138,6 +138,14 @@ pub struct DmenuConfig {
     pub index: bool,
     pub placeholder: String,
     pub colors: ColorOverrides,
+}
+
+impl DmenuConfig {
+    /// Whether the panel shows no list: `--prompt-only`, and always
+    /// `--password` (a list filtering on the secret would leak it).
+    fn list_hidden(&self) -> bool {
+        self.prompt_only || self.password
+    }
 }
 
 /// Opens the panel and runs it to a launch, a print or a dismiss: 0
@@ -242,7 +250,7 @@ pub fn open(opts: Options) -> i32 {
     let now = crate::rank::frecency::now_secs();
     let rows = config.rows as usize;
     // A prompt-only dmenu panel shows the entry alone: no gap, no list.
-    let prompt_only = matches!(&opts.mode, Mode::Dmenu(config) if config.prompt_only);
+    let prompt_only = matches!(&opts.mode, Mode::Dmenu(config) if config.list_hidden());
     let list_rows = if prompt_only { 0 } else { config.rows };
     let prompt_color = colors.prompt.unwrap_or(look.theme.foreground);
     // The dmenu presentation and the empty-list text: borrowed out of
@@ -253,7 +261,7 @@ pub fn open(opts: Options) -> i32 {
             placeholder: config.placeholder.clone(),
             index: config.index,
             prompt_color,
-            prompt_only: config.prompt_only,
+            prompt_only: config.list_hidden(),
         }),
         _ => None,
     };
@@ -274,9 +282,9 @@ pub fn open(opts: Options) -> i32 {
             BuiltModel::Run(Ui::open(crate::run::to_entries(&names), history, now, rows))
         }
         Mode::Dmenu(config) => BuiltModel::Dmenu {
+            prompt_only: config.list_hidden(),
             lines: config.lines,
             only_match: config.only_match,
-            prompt_only: config.prompt_only,
             password: config.password,
         },
     };
@@ -467,7 +475,7 @@ fn run_panel(
             prompt_only,
             password,
         } => Model::Dmenu(match password {
-            true => DmenuUi::open_secret(lines, spec.rows as usize, only_match, prompt_only),
+            true => DmenuUi::open_secret(lines, spec.rows as usize, only_match),
             false => DmenuUi::open(lines, spec.rows as usize, only_match, prompt_only),
         }),
     };
