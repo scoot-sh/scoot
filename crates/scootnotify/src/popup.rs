@@ -36,7 +36,7 @@
 //! refused bind, a failed draw or a gone compositor reads as a degraded
 //! mode or a clean exit, never a crash.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::os::fd::BorrowedFd;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -79,6 +79,35 @@ use crate::view::render::{self, Hover, IconBits};
 const BTN_LEFT: u32 = 0x110;
 const BTN_RIGHT: u32 = 0x111;
 const BTN_MIDDLE: u32 = 0x112;
+/// Serves every queued press, oldest first, until the queue is empty. The
+/// mint pumps the Wayland queue, so a press that lands during one token
+/// wait joins the queue and is served in this same turn, never held
+/// until the next Wayland event.
+fn drain_clicks<S>(
+    state: &mut S,
+    take: fn(&mut S) -> Option<Click>,
+    mint: fn(&mut S, u32) -> Option<String>,
+    emit: fn(&mut S, Event),
+) {
+    while let Some(click) = take(state) {
+        let token = mint(state, click.serial);
+        let event = match click.key {
+            Some(key) => Event::ClickButton {
+                id: click.id,
+                key,
+                token,
+            },
+            None => Event::ClickBody {
+                id: click.id,
+                token,
+            },
+        };
+        emit(state, event);
+    }
+}
+
+/// Most presses held while one waits for its token.
+const MAX_CLICKS: usize = 8;
 /// How long a click waits for the compositor's token `done` before the
 /// invoke goes out without one (the panel's own budget).
 const TOKEN_TIMEOUT: Duration = Duration::from_millis(200);
@@ -202,7 +231,9 @@ pub struct App {
     presented: std::collections::HashSet<u32>,
     dirty: bool,
     pending: Vec<Event>,
-    click: Option<Click>,
+    /// Presses waiting for their token, oldest first: a press that lands
+    /// while an earlier one waits for its token queues behind it.
+    clicks: VecDeque<Click>,
     gone: bool,
 }
 
@@ -293,7 +324,7 @@ impl App {
             presented: std::collections::HashSet::new(),
             dirty: true,
             pending: Vec::new(),
-            click: None,
+            clicks: VecDeque::new(),
             gone: false,
         }
     }
@@ -886,6 +917,14 @@ impl App {
         self.arm_idle(qh);
     }
 
+    /// Queues a press for its token; presses past [`MAX_CLICKS`] are
+    /// dropped (a person cannot press that fast, a stuck button can).
+    fn push_click(&mut self, click: Click) {
+        if self.clicks.len() < MAX_CLICKS {
+            self.clicks.push_back(click);
+        }
+    }
+
     /// Arms the idle notification once the seat exists: `pause_when_idle
     /// = 0` disables, a notifier without v2 warns once and never pauses.
     fn arm_idle(&mut self, qh: &QueueHandle<Self>) {
@@ -1174,21 +1213,12 @@ impl Popup {
         // A click waits for its token here (the queue is ours to pump):
         // the token signal precedes the invoke because the daemon
         // invokes only after this returns.
-        if let Some(click) = self.app.click.take() {
-            let token = self.mint_token(click.serial);
-            let event = match click.key {
-                Some(key) => Event::ClickButton {
-                    id: click.id,
-                    key,
-                    token,
-                },
-                None => Event::ClickBody {
-                    id: click.id,
-                    token,
-                },
-            };
-            self.app.pending.push(event);
-        }
+        drain_clicks(
+            self,
+            |popup| popup.app.clicks.pop_front(),
+            Popup::mint_token,
+            |popup, event| popup.app.pending.push(event),
+        );
         std::mem::take(&mut self.app.pending)
     }
 
@@ -1447,6 +1477,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                 }
                 "wl_seat" => {
                     app.seat_proxy = Some(registry.bind(name, 7.min(version), qh, ()));
+                    // A seat that appears after connect arms the idle
+                    // pause too (a no-op when already armed).
+                    app.arm_idle(qh);
                 }
                 "zwlr_layer_shell_v1" => {
                     app.layer_shell = Some(registry.bind(name, 4.min(version), qh, ()));
@@ -1463,6 +1496,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for App {
                 "ext_idle_notifier_v1" => {
                     if version >= 2 {
                         app.idle_notifier = Some(registry.bind(name, 2, qh, ()));
+                        app.arm_idle(qh);
                     } else if !app.idle_warned {
                         app.idle_warned = true;
                         warn(format_args!(
@@ -1622,14 +1656,14 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                         let Some(key) = key else {
                             return;
                         };
-                        app.click = Some(Click {
+                        app.push_click(Click {
                             id,
                             key: Some(key),
                             serial,
                         });
                     }
                     None => {
-                        app.click = Some(Click {
+                        app.push_click(Click {
                             id,
                             key: None,
                             serial,

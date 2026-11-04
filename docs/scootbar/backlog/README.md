@@ -238,7 +238,7 @@ hits the wall:
 - [release-plz-changelog-include-shell-apps](resolved/release-plz-changelog-include-shell-apps-done.md)
 - [launch-spawn-detach-cwd-and-close](resolved/launch-spawn-detach-cwd-and-close-done.md) (low): both nits were already handled or not worth doing (the helper only ever gets the resolved absolute cwd; a close cannot undo a spawned app); the detached relative-`Path=` leg is now pinned — RESOLVED 2026-11-04
 - [launch-dmenu-doc-and-pin-notes](resolved/launch-dmenu-doc-and-pin-notes-done.md) (low): password mode is list-less (no side channel), edge behaviors documented, `apply_colors` pinned — RESOLVED 2026-11-04
-- [notify-popups-review-notes](notify-popups-review-notes.md)
+- [notify-popups-review-notes](resolved/notify-popups-review-notes-done.md) (low): clicks queue, a replace under hover stays paused, idle arms on a late seat, libm named in the docs — RESOLVED 2026-11-04
 - [packaging-workflows-red-on-main](resolved/packaging-workflows-red-on-main-done.md)
 - [check scootbar for the glibc 2.44 huge-page arena](thp-arena-check.md)
 - [notify-look-radius-unread](resolved/notify-look-radius-unread-done.md): the look's `radius` now reaches the cards, the config file's `radius` winning when set

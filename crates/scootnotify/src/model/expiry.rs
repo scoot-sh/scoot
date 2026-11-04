@@ -73,14 +73,21 @@ impl Clock {
         self.deadline = timeout_ms.map(|ms| now + Duration::from_millis(u64::from(ms)));
     }
 
-    /// A replace on a shown card: the expiry restarts from `now`.
+    /// A replace on a shown card: the expiry restarts from `now`. A
+    /// paused clock (the pointer rests on the card, or input is idle)
+    /// stays paused with the fresh timeout parked, so the card does not
+    /// expire under the pointer.
     pub fn restart(&mut self, now: Instant, timeout_ms: Option<u32>) {
         if !self.shown {
             return;
         }
-        self.paused = false;
-        self.remaining_ms = None;
-        self.deadline = timeout_ms.map(|ms| now + Duration::from_millis(u64::from(ms)));
+        if self.paused {
+            self.deadline = None;
+            self.remaining_ms = timeout_ms;
+        } else {
+            self.remaining_ms = None;
+            self.deadline = timeout_ms.map(|ms| now + Duration::from_millis(u64::from(ms)));
+        }
     }
 
     /// Idle began: a running deadline parks as its remaining time.

@@ -114,3 +114,31 @@ fn resume_without_pause_changes_nothing() {
     clock.resume(start + Duration::from_millis(50));
     assert!(clock.due(start + Duration::from_millis(100)));
 }
+
+#[test]
+fn a_replace_on_a_paused_card_keeps_it_paused_with_the_fresh_timeout() {
+    let start = now();
+    let mut clock = Clock::waiting();
+    clock.presented(start, Some(1_000));
+    clock.pause(start + Duration::from_millis(400));
+    // Replaced under the pointer: still parked, nothing due or armed.
+    clock.restart(start + Duration::from_millis(500), Some(5_000));
+    assert_eq!(clock.deadline(), None);
+    assert!(!clock.due(start + Duration::from_secs(3600)));
+    // The hover ends: the fresh timeout, not the old remainder, runs.
+    let end = start + Duration::from_secs(10);
+    clock.resume(end);
+    assert!(!clock.due(end + Duration::from_millis(4_999)));
+    assert!(clock.due(end + Duration::from_millis(5_000)));
+}
+
+#[test]
+fn a_replace_to_never_on_a_paused_card_resumes_to_never() {
+    let start = now();
+    let mut clock = Clock::waiting();
+    clock.presented(start, Some(1_000));
+    clock.pause(start);
+    clock.restart(start, None);
+    clock.resume(start + Duration::from_secs(1));
+    assert_eq!(clock.deadline(), None);
+}

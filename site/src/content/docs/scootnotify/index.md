@@ -14,7 +14,7 @@ scootnotify daemon                        # own the name and serve until killed
 scootnotify daemon --check                # validate the config file and exit
 ```
 
-One binary, linking nothing beyond glibc and libgcc_s. Without a
+One binary, linking nothing beyond glibc, libm and libgcc_s. Without a
 compositor it stays headless: the bus still serves, and cards wait with
 their clocks stopped. It answers every call, including oversized
 ones: a call past the 4 MiB cap gets `LimitsExceeded`, never silence.
@@ -45,7 +45,9 @@ ones: a call past the 4 MiB cap gets `LimitsExceeded`, never silence.
   of 1024 in `$XDG_RUNTIME_DIR`, so a restart never reissues an id a
   client may still hold.
 - Honors `replaces_id` for the same sender or the same app, in place
-  with the expiry restarted. A stranger's id is a fresh card.
+  with the expiry restarted (a card the pointer rests on, or one paused
+  by input idle, stays paused until the pause ends, then runs the fresh
+  timeout). A stranger's id is a fresh card.
 - Counts expiry from presentation with per-urgency defaults: low 5 s,
   normal 10 s, critical never. A positive timeout is honored up to one
   hour.

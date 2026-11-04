@@ -1,9 +1,10 @@
 ---
 title: "scootnotify: popup review notes (libm sentence, click coalescing, replace unpauses, late seat)"
-status: "open"
-area: "scootbar"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-04"
 ---
 
 # scootnotify: popup review notes
@@ -20,3 +21,19 @@ Filed 2026-10-19 from the independent review of PR #683. Serves **daily-drive**.
 ## Docs (same PR)
 
 The libm sentence is the docs change; the other items change site text only where behavior changes.
+
+## Resolution
+
+Landed in one PR:
+
+- Docs: the site's scootnotify page now says "glibc, libm and libgcc_s".
+- Click coalescing: presses queue (oldest first, at most 8) instead of
+  overwriting one slot. This also fixed a stall the ticket did not name: a
+  press read while an earlier one waited for its token sat in the slot until
+  the next Wayland event, so `dispatch` now drains the queue in the same turn.
+- Replace on a paused card: `Clock::restart` keeps a paused clock paused and
+  parks the fresh timeout, so a card under the pointer (or idled) does not
+  expire on a replace. Decision: hover survives a replace.
+- Late seat: the idle notification arms when the seat or the idle notifier
+  global arrives, not only at connect (`arm_idle` is idempotent). No
+  automated test: headless scoot never advertises a global late.

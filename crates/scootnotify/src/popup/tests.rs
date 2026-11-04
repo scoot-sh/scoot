@@ -644,3 +644,78 @@ fn a_surface_that_goes_away_forgets_the_region_it_was_given() {
     app.region.begin();
     assert!(app.region.stale());
 }
+
+fn press(id: u32, serial: u32) -> Click {
+    Click {
+        id,
+        key: None,
+        serial,
+    }
+}
+
+#[test]
+fn presses_queue_in_order_instead_of_overwriting() {
+    let mut app = App::new(Config::default(), Look::default());
+    app.push_click(press(1, 10));
+    app.push_click(press(2, 11));
+    let serials: Vec<u32> = app.clicks.iter().map(|click| click.serial).collect();
+    assert_eq!(serials, [10, 11]);
+}
+
+#[test]
+fn a_flood_of_presses_is_bounded() {
+    let mut app = App::new(Config::default(), Look::default());
+    for serial in 0..100 {
+        app.push_click(press(1, serial));
+    }
+    assert_eq!(app.clicks.len(), MAX_CLICKS);
+    // The oldest survive: the first press is never the one lost.
+    assert_eq!(app.clicks.front().map(|click| click.serial), Some(0));
+}
+
+/// A press that lands while an earlier one waits for its token is served in
+/// the same turn, in order (mutation: `while let` to `if let` leaves it
+/// queued).
+#[test]
+fn a_press_during_a_token_wait_is_served_in_the_same_turn() {
+    struct Rig {
+        queue: VecDeque<Click>,
+        minted: Vec<u32>,
+        out: Vec<Event>,
+    }
+    let mut rig = Rig {
+        queue: VecDeque::from([press(1, 10)]),
+        minted: Vec::new(),
+        out: Vec::new(),
+    };
+    drain_clicks(
+        &mut rig,
+        |rig| rig.queue.pop_front(),
+        |rig, serial| {
+            // The second press arrives during the first one's wait.
+            if rig.minted.is_empty() {
+                rig.queue.push_back(press(2, 11));
+            }
+            rig.minted.push(serial);
+            Some(format!("token{serial}"))
+        },
+        |rig, event| rig.out.push(event),
+    );
+    assert_eq!(rig.minted, [10, 11]);
+    assert!(rig.queue.is_empty());
+    let ids: Vec<(u32, Option<String>)> = rig
+        .out
+        .iter()
+        .map(|event| match event {
+            Event::ClickBody { id, token } => (*id, token.clone()),
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            (1, Some(String::from("token10"))),
+            (2, Some(String::from("token11")))
+        ]
+    );
+}
