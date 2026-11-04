@@ -43,7 +43,7 @@ Try it: open three terminals, then <kbd>Super</kbd>+<kbd>h</kbd> and
 ## How the layout works
 
 Windows sit in **columns**; columns form a **strip** that scrolls sideways.
-A new window never covers an old one — the strip grows and the view follows:
+A new window never covers an old one. The strip grows and the view follows:
 
 ```text
 ┌────────┐  ┌────────┐  ┌────────┐
@@ -79,4 +79,4 @@ you can never strand yourself.
 
 You already know the three that run everything: <kbd>Super</kbd>+<kbd>Return</kbd> (terminal), <kbd>Super</kbd>+<kbd>h</kbd>/<kbd>Super</kbd>+<kbd>l</kbd> (move between columns), <kbd>Super</kbd>+<kbd>q</kbd> (close).
 
-Next: [Keybindings](../scoot/keybindings.md) — the full default map, and how to make it yours. Or [build your desktop](./compose.md) — bar, wallpaper, launcher and notifications.
+Next: [Keybindings](../scoot/keybindings.md), the full default map and how to make it yours. Or [build your desktop](./compose.md) — bar, wallpaper, launcher and notifications.

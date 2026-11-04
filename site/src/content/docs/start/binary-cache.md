@@ -21,7 +21,7 @@ nix.settings = {
 };
 ```
 
-Home Manager (your home config — writes the same `nix.conf` for your user):
+Home Manager (your home config; it writes the same `nix.conf` for your user):
 
 ```nix title="home.nix"
 nix.settings = {
@@ -96,7 +96,7 @@ The CPU-only minimal build is cargo-only
 (`cargo build --no-default-features`) and is not cached: there is no
 published minimal package to push.
 
-Not cached, by decision: the docs site (built where it deploys, never
+Not cached: the docs site (built where it deploys, never
 installed), the dev shell (contributors realise it from nixpkgs plus the
 toolchain), and macOS builds (macOS CI is check-only, so the Darwin
 client is never pushed — install it from source or take the Linux
@@ -120,9 +120,8 @@ nix --store ~/fx/cache-demo/store run github:scoot-sh/scoot#scootbar --accept-fl
 ```
 
 prints `scootbar 0.1.0` in 14.6 seconds with 7 paths fetched (1.1 MB
-download, 58.6 MB unpacked) — the bar itself coming from
-`scoot-sh.cachix.org`, nothing compiled. The ticket's original cold
-build measured 5m10s for two packages on four vCPUs; current CI on a
+download, 58.6 MB unpacked); the bar itself came from
+`scoot-sh.cachix.org` and nothing compiled. Current CI on a
 code-change push takes ~19–21 minutes per architecture (317
 dependencies substituted, then the changed crates compiled), while a
 push with nothing to rebuild substitutes everything in about a minute
@@ -142,19 +141,19 @@ nix show-config | grep -E "substituters|trusted-public-keys"
 ```
 
 - **Empty, or missing `scoot-sh`:** the two config lines are not
-  active — re-check which file you edited and rebuild / restart the
+  active. Re-check which file you edited and rebuild or restart the
   shell.
 - **The flake asked about `nixConfig` and you said no:** re-run with
   `--accept-flake-config`, or use the `nix.settings` lines so no
   prompt is needed.
 - **`follows` is on:** `scoot.inputs.nixpkgs.follows = "nixpkgs"`
-  changes every store path (see above) — turn it off or accept the
+  changes every store path (see above). Turn it off or accept the
   compile.
 - **A local change, or a commit ahead of `main`:** your tree's store
   paths do not exist yet — they land on the cache with the next merge
   to `main`.
-- **macOS, or the docs site:** not pushed by CI (see the table) —
-  expected to build locally.
+- **macOS, or the docs site:** not pushed by CI (see the table), so
+  they build locally.
 
 To confirm a single path is cached without downloading it:
 
@@ -177,7 +176,7 @@ secret scoped to this repo); every other run takes the pull-only step,
 which passes no token and references no secret, so a dispatch run never
 receives it. Signing is Cachix-managed: the project holds no private
 key. The FlakeHub publish job runs only after both architectures push,
-on `push` to `main`, over GitHub OIDC with no secret — and publishes
+on `push` to `main`, over GitHub OIDC with no secret, and publishes
 the flake only, never binaries (`include-output-paths: false`).
 
 What a poisoned entry would require: a push to `main` (a reviewed merge,
@@ -211,6 +210,6 @@ is configured and the dashboard totals are not publicly visible. What
 each merge adds is what changed: a code-only merge re-pushes only the
 rebuilt packages (each a few MB compressed, see the table); a lockfile
 or fork-rev change rebuilds the five compiled-dependency derivations
-(~420 MB each in the store, ~130 MB compressed — about 690 MB per
+(~420 MB each in the store, ~130 MB compressed; about 690 MB per
 architecture). Packaging notes for distro builders live under
 [Package scoot offline](../reference/packaging.md).

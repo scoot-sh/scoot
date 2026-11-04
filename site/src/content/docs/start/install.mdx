@@ -217,9 +217,9 @@ side does its half (the system installs the service, your user runs
 it), so set them in both.
 
 On real hardware with a GPU, the same default package scans out through
-it — nothing to pick — once the OS provides the drivers
-(`hardware.graphics.enable = true;` on NixOS). VMs
-and containers stay on the default.
+it once the OS provides the drivers
+(`hardware.graphics.enable = true;` on NixOS). There is nothing to pick.
+VMs and containers stay on the default.
 
 The login screen, every piece and every option: [The scoot
 desktop](../../desktop/).
@@ -292,8 +292,8 @@ login entry then runs the script's scoot, not the flake's, so keep the
 two on one version (the flake follows `main`; the script installs the
 newest tagged release, so they can differ). Two
 pieces need your distro rather than home-manager: a `/etc/pam.d/swaylock`
-service for the lock screen (or no password will ever unlock — see
-[Idle and lock](../../desktop/idle-lock/)) and backlight access (see [home-manager setup on the desktop page](../../desktop/#home-manager)).
+service for the lock screen (without it, no password unlocks the screen;
+see [Idle and lock](../../desktop/idle-lock/)) and backlight access (see [home-manager setup on the desktop page](../../desktop/#home-manager)).
 
 </TabItem>
 <TabItem label="Any Linux">
@@ -331,7 +331,7 @@ Minimal Fedora and Arch images ship no usable font, and the bar refuses
 to start without one (`no font: none of the usual font files is usable`).
 The script names the package for your distro
 when that is you (`fonts-dejavu-core` on Debian and Ubuntu, `dejavu-sans-fonts` on
-Fedora, `dejavu-fonts` on openSUSE, `ttf-dejavu` on Arch) — or point the
+Fedora, `dejavu-fonts` on openSUSE, `ttf-dejavu` on Arch). Or point the
 bar at any file with `--font PATH` instead.
 
 The command it prints waits for confirmation; for a non-interactive run,
@@ -376,7 +376,7 @@ If you used `--system`, log out and pick **scoot** on your login screen.
   (`--force` reinstalls anyway). "Up to date" is per destination:
   the script records where it installed (covering `--prefix` and
   `--system`), so re-running with a different `--prefix` installs
-  there instead of reporting up to date — and if the installed
+  there instead of reporting up to date. If the installed
   binaries are gone, it reinstalls rather than claiming to be
   current. `--check` only compares the installed version with the
   newest tag, or with the `--version` you name (exit 0 if current,
@@ -437,12 +437,12 @@ the same binds out of the box: `Super+d` lists XDG apps,
 `Ctrl+Alt+Space` lists PATH executables, and the clipboard picker,
 the WiFi/Bluetooth pickers and the screencast chooser follow through
 its `--dmenu`. The launcher's own file (`font`,
-`width_em`, `rows`) is `programs.scootlaunch.settings` — import
+`width_em`, `rows`) is `programs.scootlaunch.settings`. Import
 `scoot.homeModules.scootlaunch` (`scoot.nixosModules.scootlaunch` on
 the system side) to manage it; the profile runs the flake's
 build with no file. To go back to fuzzel, set
 `programs.scoot.desktop.launcher.daemon = "fuzzel"`
-and switch again — see [Migrating from
+and switch again. See [Migrating from
 fuzzel](../../desktop/launcher/#migrating-from-fuzzel).
 
 ## Try scootnotify
@@ -450,9 +450,9 @@ fuzzel](../../desktop/launcher/#migrating-from-fuzzel).
 Both Nix setups above run [scootnotify](../../scootnotify/) behind the
 same binds and the same bar module out of the box: `notify-send hello`
 draws scootnotify's own card from the look. The keymap's three binds
-sit on `scootnotify msg` (dismiss, DND toggle, restore), the bar's
-click toggles DND through it, and there is no mako package, no mako
-config and no feed script — mako's flat `notifications.settings` do
+sit on `scootnotify msg` (dismiss, DND toggle, restore), and the bar's
+click toggles DND through it. There is no mako package, no mako
+config and no feed script, and mako's flat `notifications.settings` do
 not carry over (a non-empty one warns at eval, naming
 `programs.scootnotify.settings` instead). The daemon's own file
 (`max_visible`, timeouts, rules) is
@@ -463,7 +463,7 @@ already have it). A look swap re-renders that file and `scoot look
 apply` reloads the running daemon live (cards, history and DND
 survive). To go back to mako, set
 `programs.scoot.desktop.notifications.daemon = "mako"`
-and switch again — see [Migrating from
+and switch again. See [Migrating from
 mako](../../desktop/notifications/#migrating-from-mako).
 
 ## Check that it works
@@ -500,7 +500,7 @@ mako](../../desktop/notifications/#migrating-from-mako).
 
 </Steps>
 
-All four work — you are done.
+If all four work, you are done.
 
 ## Which build do I need?
 
