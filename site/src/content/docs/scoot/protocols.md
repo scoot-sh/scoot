@@ -1489,7 +1489,7 @@ Before pointing a client at it:
   thumbnails need a change on the shell side.
 - **`wl_shm` buffers only, `Xrgb8888` or `Argb8888`.** A capture session
   never offers to write into a dma-buf. Importing a client's buffer and
-  *rendering into* one are different capabilities, and scoot only has the
+  *rendering into* one are different capabilities, and capture has only the
   first.
 
   `Xrgb8888` is offered first: if `[appearance]
@@ -1708,7 +1708,8 @@ when the client disconnects. An `add` past the bound
 disconnects the client with `wl_display.error` `no_memory`; the params
 interface has no error for "too many". A client that adds one buffer's
 planes (at most four) and creates it straight away, which is how the
-protocol is meant to be used, stays far below.
+protocol is meant to be used, stays far below (reasoned from the protocol,
+not measured per client).
 
 #### Per-surface feedback: the scanout tranche
 
