@@ -4,7 +4,7 @@ description: "The terminal, file opening, the user directories and automounting.
 ---
 
 The compositor's built-in `Super+Return` opens `foot`, so the profile
-installs foot — a bind that names a missing binary is a dead key. The
+installs foot, since a bind that names a missing binary is a dead key. The
 look themes it (the [terminal target](./look.md#app-theme) writes `foot.ini`);
 this slot owns the package, `TERMINAL=foot` for anything that asks,
 and the plumbing every "open this" goes through:
@@ -20,17 +20,17 @@ and the plumbing every "open this" goes through:
   drive (without the second, `xdg-open` on a mount falls through to a
   browser).
 
-The file manager is optional and off: nothing in the desktop needs
-one, and a graphical one carries a toolkit. Turn it on for
-mouse-driven browsing:
+The file manager is optional and off. Turn it on for mouse-driven
+browsing:
 
 ```nix title="configuration.nix and home.nix"
 programs.scoot.desktop.apps.fileManager.enable = true;   # pcmanfm
 ```
 
 Without it `xdg-open` keeps working for files and links. A directory
-has no default then, and `xdg-open` falls back: to a web browser's file listing if one is installed, or "no
-method available" if not. Nothing hangs.
+has no default then, and `xdg-open` falls back to a web browser's file
+listing if one is installed, or "no method available" if not. Nothing
+hangs.
 
 A default text editor makes `git`, `xdg-open` on a text file and
 every `EDITOR` reader agree:
@@ -53,8 +53,8 @@ Removable media mounts on insert: `udiskie` runs trayless as a user
 unit (`scoot-automount.service`, wanted by `scoot-session.target`)
 over the udisks2 daemon the NixOS side enables. Insert a drive and it
 mounts under `/run/media/$USER/`, with a notification whose *Browse*
-action opens the mount through `xdg-open` — the file manager, when it
-is on. An encrypted (LUKS) drive asks for its passphrase, then mounts
+action opens the mount through `xdg-open` (the file manager, when it
+is on). An encrypted (LUKS) drive asks for its passphrase, then mounts
 its unlocked filesystem the same way. It runs on udiskie's stock
 device rules, which leave the machine's own disks alone: udisks2
 marks an internal disk `HintSystem`, and udiskie skips it and every
@@ -63,12 +63,11 @@ stay unmounted, with no admin prompt at login. A
 `~/.config/udiskie/config.yml` of your own still applies (the unit
 passes no `-c`; its `-a -n -T` flags win over the file's). A file
 udiskie cannot parse makes every start fail, so the unit gives up
-after 5 failed starts in a minute rather than retrying forever (see
-troubleshooting below).
+after 5 failed starts in a minute (see troubleshooting below).
 With home-manager's own `services.udiskie` on, that one runs instead
-and this unit stays out: two automounters would race to mount every
-drive and both ask for a passphrase. udiskie stays installed either
-way, so `udiskie-umount` is there for safe removal.
+and this unit stays out, because two automounters would race to mount
+every drive. udiskie stays installed either way, so `udiskie-umount`
+is there for safe removal.
 
 **Safe removal: unmount before you unplug.** A yanked drive loses
 whatever was still buffered. One command unmounts and powers it off:
@@ -81,14 +80,13 @@ Wait for the command to return, then unplug. `udiskie-umount -a`
 unmounts every drive udiskie handles at once; the machine's own disks
 are not among them.
 
-Why these, measured on the M2 (`aarch64-linux`): full closures at
-the pinned rev (`8ce4ef6`) by `nix path-info --closure-size`;
-"new over the profile" as the store paths the tool adds to the whole
-desktop profile as deployed on the M2 (its system built with and
-without the slot); idle cost under a headless scoot in its own
-`dbus-run-session`, over every process the app brought
-(D-Bus-activated helpers included): VmRSS, and context switches
-summed over the threads alive across 60 s idle after a 30 s settle:
+Measured on the M2 (`aarch64-linux`) at the pinned rev (`8ce4ef6`):
+full closures by `nix path-info --closure-size`; "new over the profile"
+is the store paths the tool adds to the whole desktop profile (system
+built with and without the slot); idle cost is VmRSS and context
+switches over every process the app brought (D-Bus-activated helpers
+included) under a headless scoot in its own `dbus-run-session`, summed
+over the threads alive across 60 s idle after a 30 s settle:
 
 | File manager | Version | Full closure | New over the profile | Idle RSS | Idle wakeups | Left after closing | Why / why not |
 |---|---|---|---|---|---|---|---|
@@ -96,13 +94,13 @@ summed over the threads alive across 60 s idle after a 30 s settle:
 | thunar | 4.20.9 | 376.2 MiB | 27.0 MiB (13 paths) | ~52 MB | 2 in 60 s | nothing | as quiet and as light at runtime, five times the marginal (the xfce libraries) |
 | yazi (in foot) | 26.9.1 | 524.7 MiB | 75.1 MiB (13 paths) | ~54 MB with its foot (~27 MB without) | 418 in 60 s | nothing | the terminal shape, but wrapped with its previewers it is the heaviest closure, and its async runtime wakes about seven times a second at idle |
 
-pcmanfm is the pick: smallest everywhere it differs, and nothing
-left running once its window closes (no `menu-cached`, `gvfsd` or
-thumbnailer: checked live after closing it). Point `fileManager.package` at another (with its `desktopEntry`) to
-choose differently.
+pcmanfm is the smallest everywhere it differs, and nothing is left
+running once its window closes (no `menu-cached`, `gvfsd` or
+thumbnailer). Point `fileManager.package` at another (with its
+`desktopEntry`) to choose differently.
 
-Why udiskie, same method, measured live in the session (the
-automounter's own unit, after the drive test below):
+The automounter, measured the same way live in the session (its own
+unit, after the drive test below):
 
 | Process | Idle RSS | Idle wakeups | Closure over the profile |
 |---|---|---|---|
@@ -110,16 +108,15 @@ automounter's own unit, after the drive test below):
 | `udisksctl monitor` (the floor a hand-rolled automounter would start from) | ~8 MB | 0 in 60 s | 0 (ships with udisks2) |
 | udisksd (needed either way) | ~18 MB | 0 in 60 s, with `/etc/nvme` present (see below) | ~25 MiB more with its filesystem tools (the slot is 73.5 MiB, 70 paths, in all) |
 
-Neither polls; udiskie costs about 50 MB more than the bare floor,
-for per-partition handling, an encrypted-drive passphrase prompt,
-the *Browse* action, the device rules above, and `udiskie-umount`
-for safe removal. A scootmount on the floor's shape is the lighter
-path if the memory ever matters more than that list.
+Neither polls. udiskie costs about 50 MB more than the bare floor, for
+per-partition handling, an encrypted-drive passphrase prompt, the
+*Browse* action, the device rules above, and `udiskie-umount` for safe
+removal.
 
 The profile also creates `/etc/nvme` (an empty `/etc/nvme/.keep`,
 through `environment.etc`, so it exists under an immutable `/etc`
-too): udisksd watches that directory (NVMe-oF host identity), and
-GLib retries a watch on a missing path every 4 seconds — 15 wakeups a
+too). udisksd watches that directory (NVMe-oF host identity), and
+GLib retries a watch on a missing path every 4 seconds: 15 wakeups a
 minute, forever, measured on the M2 (all
 `inotify_add_watch("/etc/nvme") = ENOENT`), and 0 once the directory
 exists.
@@ -163,7 +160,7 @@ Troubleshooting, by symptom:
   (and `x-scheme-handler/http`, `text/html`).
 - *A drive does not mount.* `systemctl --user status scoot-automount`
   first: *skipped* (condition failed) means no udisks2 on the system
-  bus — a home-manager-only setup needs `services.udisks2.enable` on
+  bus; a home-manager-only setup needs `services.udisks2.enable` on
   the system. Running but nothing mounted: `udisksctl status` lists
   what udisks2 sees, and `udisksctl mount -b /dev/sdX1` names the
   refusal. *failed* with `start-limit-hit` means udiskie failed 5

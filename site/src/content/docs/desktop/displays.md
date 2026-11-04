@@ -3,8 +3,8 @@ title: Displays
 description: "Scale and power that follow the connected set when you dock and undock."
 ---
 
-A laptop moving between a desk monitor and no monitor keeps its
-scale and power following the connected set: dock, and the external
+A laptop moving between a desk monitor and no monitor gets scale and
+power that follow the connected set: dock, and the external
 panel comes up at its own scale (and, with `disabled`, the lid panel
 goes dark); undock, and the laptop panel takes over again, lit even
 if the docked profile turned it off:
@@ -27,7 +27,7 @@ programs.scoot.desktop.displays.profiles = [
 ];
 ```
 
-What a profile does is narrow: **scale and power, at hotplug.** It
+A profile sets **scale and power, at hotplug.** It
 names the exact connected set it answers (connector names, as
 `scoot msg outputs` lists them: `eDP-1`, `DP-1` on real hardware) and,
 per output, a scale and whether the panel stays off. It does not place
@@ -66,13 +66,12 @@ written:
 
 The record of its own offs is `$XDG_RUNTIME_DIR/scoot-displays.off`.
 It goes when your last session logs out (unless lingering is on), but
-it survives a compositor restart inside one login,
-so a fresh scoot can find an old record:
-until the watcher's first apply in that session, an entry whose name
-and id match a live output can turn that output on once. It only ever
-lights a screen, never darkens one. Everything else is live runtime
-state, not config: your config file (under home-manager, a read-only
-link into the Nix store) is never touched. A successful
+it survives a compositor restart inside one login. Until the watcher's
+first apply in that session, an entry whose name and id match a live
+output can turn that output on once. It only ever lights a screen,
+never darkens one. Everything else is live runtime state, not config:
+your config file (under home-manager, a read-only link into the Nix
+store) is never touched. A successful
 `scoot msg reload` or a restart goes back to the config's scales until
 the watcher applies again (at the next output event, idle resume or
 login). A home-manager rebuild never reloads the session, so it never
@@ -80,18 +79,16 @@ drops an applied scale. The apply reports `applied` only when every
 call succeeded. Otherwise it exits non-zero and names each failed
 call, and the unit's journal shows the line.
 
-Why a scoot-native watcher instead of kanshi: stock kanshi runs its
-hooks only after the compositor answers an output configuration with
-success, and scoot's output-management write half answers every
-configuration with failure by design: kanshi matches the profile
-through the read half and then fails it, every hotplug, applying
-nothing. The watcher speaks scoot's own IPC instead (`subscribe` for
-events, `outputs` for matching, `output-scale` and `output-power` for
-applying), waking on hotplug the same event-driven way kanshi does:
-blocking read, no polling, no idle wakeups. It is a stopgap. The
-durable answer is a writable output-management protocol, which would
-let kanshi (and positions and modes) work as-is; that work is tracked
-in [the output-management reconfiguration entry](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/output-management-reconfiguration-done.md).
+The watcher is scoot-native because stock kanshi does not work here:
+kanshi runs its hooks only after the compositor answers an output
+configuration with success, and scoot's output-management write half
+answers every configuration with failure, so kanshi matches the profile
+and then fails it on every hotplug, applying nothing. The watcher uses
+scoot's own IPC (`subscribe` for events, `outputs` for matching,
+`output-scale` and `output-power` for applying). It blocks on events,
+with no polling and no idle wakeups. It is a stopgap until a writable
+output-management protocol lets kanshi (and positions and modes) work
+as-is; that work is tracked in [the output-management reconfiguration entry](https://github.com/scoot-sh/scoot/tree/main/docs/backlog/resolved/output-management-reconfiguration-done.md).
 
 ```sh
 scoot-displays status

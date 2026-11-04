@@ -3,10 +3,10 @@ title: Hardware keys and desktop actions
 description: "The profile keymap for hardware keys and desktop actions."
 ---
 
-The profile ships one keymap for hardware keys and desktop actions —
-on with the profile. The compositor's own
-built-in defaults stay window management only: hardware binds spawn
-tools scoot does not ship, so they live in the profile.
+The profile ships one keymap for hardware keys and desktop actions,
+on with the profile. The compositor's built-in defaults stay window
+management only, because hardware binds spawn tools scoot does not
+ship.
 
 | Press | Does | Needs (beside the profile) |
 |---|---|---|
@@ -33,18 +33,13 @@ On an Apple keyboard these are the Fn row: `F1`/`F2` brightness,
 `F7`/`F8`/`F9` previous/play/next, `F10` mute, `F11`/`F12` volume
 down/up. Volume, brightness and mic-mute show the
 [on-screen display](./sound.md);
-every other bind runs silent. Every
-hardware keysym and every `Super` combo above has no overlap with the
-compositor defaults, including `Super+Shift+e` (quit) and
+every other bind runs silent. No hardware keysym or `Super` combo above
+overlaps the compositor defaults, including `Super+Shift+e` (quit) and
 `Super+Space` (float focus).
 
-Why these two combos: `Super+d` is the launcher in niri, and
-`Super+Space` — the other candidate —
-already moves focus between floating windows and the strip, so taking
-it would rename a shipped default out from under existing users.
-`Ctrl+Alt+Space` keeps the run menu on the combo the old `wofi`
-example used (hands that already know it keep a menu there; the drun
-half moves to `Super+d`, where the rest of the desktop expects it).
+`Super+Space` stays the float-focus default, so the launcher is on
+`Super+d`. `Ctrl+Alt+Space` is the run menu, the combo the old `wofi`
+example used.
 
 Every value is an option, applied on rebuild/switch plus a session
 reload (`scoot msg reload`) or re-login:
@@ -54,8 +49,8 @@ reload (`scoot msg reload`) or re-login:
 | `desktop.keys.enable` | bool | `true` with the profile | render the keymap into `[binds]` |
 | `desktop.keys.binds.<name>.enable` | bool | `true` | bind that key (`brightnessUp`, `brightnessDown`, `volumeUp`, `volumeDown`, `volumeMute`, `micMute`, `mediaPlay`, `mediaPause`, `mediaStop`, `mediaNext`, `mediaPrev`, `lock`, `launcher`, `launcherRun`, `clipboard`, `notifDismiss`, `notifDnd`, `notifHistory`, `powerProfile`, `captureOutput`, `captureRegion`, `captureClipboard`, `network`, `bluetooth`); `false` leaves its combo unbound |
 
-Each bind renders as a default a value you set in `settings.binds` wins
-over — override or remove one bind like this:
+Each bind renders as a default that a value you set in `settings.binds`
+wins over. Override or remove one bind like this:
 
 ```nix title="home.nix"
 programs.scoot.desktop.keys.binds.volumeUp.enable = false;
@@ -63,7 +58,7 @@ programs.scoot.settings.binds."XF86AudioRaiseVolume" = "spawn wpctl set-volume @
 ```
 
 Overriding with a plain string like that drops the bind's repeat and
-lock-screen behavior (a string carries no flags). To keep them, override with the table form — action plus flags:
+lock-screen behavior (a string carries no flags). To keep them, override with the table form, action plus flags:
 
 ```nix title="home.nix"
 programs.scoot.settings.binds."XF86AudioRaiseVolume" = {
@@ -73,8 +68,8 @@ programs.scoot.settings.binds."XF86AudioRaiseVolume" = {
 };
 ```
 
-A bind whose tool is missing fails quietly — scoot logs a warning and
-carries on, input never wedges — so a partial setup degrades to dead
+A bind whose tool is missing fails quietly: scoot logs a warning and
+carries on, and input never wedges. A partial setup degrades to dead
 keys, never to a broken session.
 
 Troubleshooting, by symptom:
@@ -84,10 +79,10 @@ Troubleshooting, by symptom:
   `playerctl status`. Then check the bind reached the file (`[binds]`
   in `~/.config/scoot/config.toml`, after a reload). Then check scoot
   saw the key: `scoot msg key XF86AudioRaiseVolume` should do what the
-  key does — if it does, the compositor never received the keystroke.
+  key does. If it does, the compositor never received the keystroke.
 - *Volume or brightness keys die at the lock screen.* Those binds
   fire while locked by default. If yours do not, the bind
-  lost its flags — overriding one with a plain string drops
+  lost its flags: overriding one with a plain string drops
   `allow_when_locked`, and removing it through
   `binds.<name>.enable = false` leaves the combo unbound entirely.
   Check the rendered `[binds]` in `~/.config/scoot/config.toml`: a
@@ -97,16 +92,15 @@ Troubleshooting, by symptom:
   `repeat` flag the same way: a plain-string override, which the
   rendered `[binds]` shows as a bare string instead of a table with
   `repeat = true`. (Overriding with a plain string drops both flags;
-  to keep them, override with the table form — action plus flags.
+  to keep them, override with the table form, action plus flags.
   See [the bind grammar](../scoot/keybindings.md#the-bind-grammar).)
 - *`Super+d` opens nothing.* The launcher slot is off: that bind
   renders only with `launcher.enable` beside the keymap (both on
   with the profile), and either off leaves the combo unbound. Same
   for `Ctrl+Alt+Space` (the run bind) and for the three capture
-  binds ([Screenshots](./screenshots.md)) — while `Super+v` runs the clipboard
+  binds ([Screenshots](./screenshots.md)). `Super+v` runs the clipboard
   picker ([Clipboard](./clipboard.md)) whenever `clipboard.enable` is on
   beside the keymap, as does the `Super+n` family (the notification
-  daemon's own
-  commands) whenever `notifications.enable` is, and `Super+w` /
+  daemon's own commands) whenever `notifications.enable` is, and `Super+w` /
   `Super+b` ([the pickers](./network.md)) whenever
   `apps.network.enable` / `apps.bluetooth.enable` is.

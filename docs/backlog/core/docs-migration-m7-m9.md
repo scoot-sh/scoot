@@ -22,7 +22,8 @@ flight. Left:
   then `scootbg/` and `scootlaunch/`, then `scootnotify/`, then `looks/`, `start/`, `agents/` and
   `troubleshooting/`, then `msg/` (wording only, no headings, options or code
   blocks changed), then `reference/` (the look format and targets specs and the
-  release procedure keep every rule, key and step). Remaining: `scoot/`, `desktop/`.
+  release procedure keep every rule, key and step), then `desktop/` (every step,
+  command, option and caveat kept). Remaining: `scoot/`.
 - **M9**: flip each "coming" slot (deb, rpm, Arch, ISO, shortcut teacher app) as
   its channel goes live.
 
