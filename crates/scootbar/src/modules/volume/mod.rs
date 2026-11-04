@@ -58,6 +58,7 @@ use crate::control::paths::runtime_dir;
 use crate::icon::path::{Vector, ViewBox};
 use crate::icon::{Art, Icon};
 
+mod cookie;
 mod icons;
 pub mod proto;
 
@@ -246,24 +247,6 @@ fn best_watch_dir(socket: &Path) -> PathBuf {
         .unwrap_or_else(runtime_dir)
 }
 
-/// The cookie `AUTH` sends: the user's 256 bytes, or zeros when no cookie
-/// file is readable (pipewire-pulse takes any cookie from the same user;
-/// a real server refuses a wrong one with an error, and the module waits).
-fn cookie() -> [u8; 256] {
-    let mut cookie = [0u8; 256];
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| Path::new(&home).join(".config")));
-    if let Some(path) = base.map(|base| base.join("pulse").join("cookie"))
-        && let Ok(bytes) = std::fs::read(&path)
-        && bytes.len() == 256
-    {
-        cookie.copy_from_slice(&bytes);
-    }
-    cookie
-}
-
 /// The module: what it shows, and the one connection or watch it owns.
 struct Volume {
     kind: Kind,
@@ -405,7 +388,7 @@ impl Volume {
         // the cookie. A socket that never answers is found by the hang-up
         // when the server goes away; nothing here blocks.
         let mut writer = proto::Writer::new();
-        if proto::auth_payload(&cookie(), &mut writer).is_none() {
+        if proto::auth_payload(&cookie::cookie(), &mut writer).is_none() {
             return false;
         }
         let payload = writer.done().to_vec();
