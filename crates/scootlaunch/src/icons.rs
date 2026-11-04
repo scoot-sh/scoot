@@ -522,7 +522,12 @@ pub struct Cache {
     /// was blank): remembered so a redraw of the same row costs a lookup,
     /// not a theme walk and a decode. The tile letter is per label, so it
     /// is never stored.
-    entries: HashMap<(String, u32), Option<Decoded>>,
+    ///
+    /// Keyed by side, then name, so a hit looks the name up as a `&str`
+    /// without building an owned key.
+    entries: HashMap<u32, HashMap<String, Option<Decoded>>>,
+    /// Entries across every side, for the [`MAX_ENTRIES`] bound.
+    count: usize,
     bytes: usize,
 }
 
@@ -548,8 +553,7 @@ impl Cache {
         let Some(name) = icon.filter(|name| !name.is_empty()) else {
             return Icon::Tile(tile_letter(label));
         };
-        let key = (name.to_string(), side);
-        if let Some(hit) = self.entries.get(&key) {
+        if let Some(hit) = self.entries.get(&side).and_then(|names| names.get(name)) {
             return match hit {
                 Some(decoded) => Icon::Image(decoded.clone()),
                 None => Icon::Tile(tile_letter(label)),
@@ -558,12 +562,17 @@ impl Cache {
         let decoded =
             find_file(configured, name, side, bases).and_then(|path| decode_file(&path, side));
         let bytes = decoded.as_ref().map_or(0, |decoded| decoded.pixels.len());
-        if self.entries.len() + 1 > MAX_ENTRIES || self.bytes + bytes > MAX_BYTES {
+        if self.count + 1 > MAX_ENTRIES || self.bytes + bytes > MAX_BYTES {
             self.entries.clear();
+            self.count = 0;
             self.bytes = 0;
         }
         self.bytes += bytes;
-        self.entries.insert(key, decoded.clone());
+        self.count += 1;
+        self.entries
+            .entry(side)
+            .or_default()
+            .insert(name.to_string(), decoded.clone());
         // A miss draws the row's own tile, and only the miss is cached:
         // caching the letter under the name would hand one row's letter
         // to every other row sharing that name.
@@ -576,7 +585,7 @@ impl Cache {
     /// Cached icons and their bytes, for tests.
     #[cfg(test)]
     pub fn cached(&self) -> (usize, usize) {
-        (self.entries.len(), self.bytes)
+        (self.count, self.bytes)
     }
 }
 

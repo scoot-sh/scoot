@@ -122,7 +122,9 @@ pub(crate) fn scale_len(logical: u32, scale: Scale) -> u32 {
 /// after the padding and the gap (never below the text's own height);
 /// the floor division's remainder (under one row) is split between the
 /// top and bottom padding so the panel height matches the scaled height.
-/// When the rows already fit, nothing changes (`extra` 0). Rows stay
+/// When the rows already fit with less than a row to spare, that spare
+/// joins the padding the same way; with a row or more (a panel the
+/// compositor configured bigger) nothing changes (`extra` 0). Rows stay
 /// uniform, so [`Layout::row`] hit-testing stays a division.
 fn fit_rows(natural: u32, inner: u32, gap: u32, em: f32, fit: Option<Fit>) -> (u32, u32) {
     let Some(fit) = fit else {
@@ -131,7 +133,12 @@ fn fit_rows(natural: u32, inner: u32, gap: u32, em: f32, fit: Option<Fit>) -> (u
     let fixed = inner.saturating_mul(2).saturating_add(gap);
     let natural_height = fixed.saturating_add(natural.saturating_mul(fit.rows.saturating_add(1)));
     if natural_height <= fit.height {
-        return (natural, 0);
+        // Rounding left the rows short of the scaled height by less than
+        // a row: that remainder joins the padding too, or it would all
+        // pool under the last row. A larger gap is the compositor's
+        // (a panel configured bigger than asked): nothing changes.
+        let slack = fit.height - natural_height;
+        return (natural, if slack < natural { slack } else { 0 });
     }
     let each = fit.height.saturating_sub(fixed) / fit.rows.saturating_add(1);
     let row_h = natural.min(each.max(em.ceil() as u32));

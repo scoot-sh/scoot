@@ -144,9 +144,17 @@ fn the_device_layout_fits_the_scaled_panel_at_every_scale() {
                     let what = format!("font {font} scale {factor} rows {rows} dmenu {dmenu}");
                     let scaled = scale_len(height, scale);
                     worst = worst.max(natural.height(rows).saturating_sub(scaled));
+                    // Too tall shrinks to the scaled height; short by less
+                    // than a row grows to it (the spare joins the padding);
+                    // a bigger gap is the compositor's and stays natural.
+                    let wanted = match natural.height(rows) {
+                        tall if tall > scaled => scaled,
+                        short if scaled - short < natural.row_h => scaled,
+                        short => short,
+                    };
                     assert_eq!(
                         layout.height(rows),
-                        natural.height(rows).min(scaled),
+                        wanted,
                         "{what}: the fit lands on the scaled height"
                     );
                     // The rows only ever give pixels up, never below the text.
@@ -219,6 +227,23 @@ fn a_click_lands_on_the_row_the_pixels_show_at_every_scale() {
             }
         }
     }
+}
+
+/// The error line replaces the rows while it shows, so a click on it
+/// reaches no row; once it clears, the same spot hits the first row.
+#[test]
+fn a_click_on_the_error_line_hits_no_row() {
+    let mut app = app();
+    let layout = Layout::dmenu(Look::default().font_size_px);
+    app.pointer_in = true;
+    app.origin = (0, 0);
+    app.pointer_x = 10;
+    app.pointer_y = layout.list_y() + layout.row_h / 2;
+    assert_eq!(app.hit_row(), Some(0), "the premise: the row is there");
+    app.spawn_error = Some((String::from("no such file"), std::time::Instant::now()));
+    assert_eq!(app.hit_row(), None);
+    app.spawn_error = None;
+    assert_eq!(app.hit_row(), Some(0));
 }
 
 #[test]

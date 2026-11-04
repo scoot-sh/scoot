@@ -358,3 +358,65 @@ fn blankness_is_alpha_only() {
     assert!(is_blank(&[9, 9, 9, 0, 0, 0, 0, BLANK_ALPHA - 1]));
     assert!(!is_blank(&[0, 0, 0, 0, 1, 1, 1, BLANK_ALPHA]));
 }
+
+/// A redraw of rows already loaded costs a lookup: no owned key, no pixel
+/// copy (the pixels are shared), for an image and for a remembered miss.
+#[test]
+fn a_cache_hit_allocates_nothing() {
+    let home = tmp();
+    let file = home.path().join("warm.png");
+    fs::write(&file, png_bytes(8, 8)).expect("png");
+    let path = file.to_string_lossy().into_owned();
+    let bases = vec![];
+    let mut cache = Cache::default();
+    let first = cache.get("Adwaita", &bases, Some(&path), "App", 16);
+    let Icon::Image(first) = first else {
+        panic!("the premise: the png decodes");
+    };
+    // The miss is remembered too.
+    let missing = cache.get("Adwaita", &bases, Some("no-such-icon"), "App", 16);
+    assert!(matches!(missing, Icon::Tile('A')));
+    let (image, allocs) = scootbg_mem::count_allocations(|| {
+        let image = cache.get("Adwaita", &bases, Some(&path), "App", 16);
+        let miss = cache.get("Adwaita", &bases, Some("no-such-icon"), "Zed", 16);
+        assert!(matches!(miss, Icon::Tile('Z')));
+        image
+    });
+    assert_eq!(allocs, 0, "a warm hit allocates");
+    let Icon::Image(again) = image else {
+        panic!("a hit returns the image");
+    };
+    assert!(
+        Arc::ptr_eq(&first.pixels, &again.pixels),
+        "the pixels are shared, not copied"
+    );
+}
+
+/// One redraw's worth of cache hits (64 visible rows), timed. Not an
+/// assertion: `cargo test --release -p scootlaunch bench_cache_hits --
+/// --ignored --nocapture`.
+#[test]
+#[ignore = "a benchmark; run it with --release --ignored --nocapture"]
+fn bench_cache_hits() {
+    let home = tmp();
+    let mut paths = Vec::new();
+    for i in 0..64 {
+        let file = home.path().join(format!("bench{i}.png"));
+        fs::write(&file, png_bytes(24, 24)).expect("png");
+        paths.push(file.to_string_lossy().into_owned());
+    }
+    let bases = vec![];
+    let mut cache = Cache::default();
+    for path in &paths {
+        cache.get("Adwaita", &bases, Some(path), "App", 24);
+    }
+    let redraws = 20_000;
+    let start = std::time::Instant::now();
+    for _ in 0..redraws {
+        for path in &paths {
+            std::hint::black_box(cache.get("Adwaita", &bases, Some(path), "App", 24));
+        }
+    }
+    let each = start.elapsed() / redraws;
+    println!("64 warm hits: {each:?} per redraw");
+}
