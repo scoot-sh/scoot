@@ -38,6 +38,12 @@ click, so the panel stays until Escape or a second `scootlaunch`. On
 scoot, a panel run with a different namespace, or a layer surface that
 asks for `on_demand` keyboard, is not closed this way.
 
+> **Symptom:** the panel disappears when a monitor is unplugged.
+
+The compositor closes a layer surface whose output goes away, and
+`scootlaunch` exits (code 1) rather than re-creating the panel on another
+output. Open it again with your bind.
+
 > **Symptom:** the panel opens on the wrong monitor.
 
 The panel names no output. An output-less layer surface lands on the

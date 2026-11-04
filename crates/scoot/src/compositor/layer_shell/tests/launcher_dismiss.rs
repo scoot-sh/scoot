@@ -209,3 +209,57 @@ fn typing_does_not_close_the_panel() {
     fixture.settle();
     assert_eq!(closes(&mut fixture), vec![0]);
 }
+
+/// A surface stacked in front of the panel at the pressed point is what the
+/// press lands on, so it is outside the panel: the panel is closed.
+#[test]
+fn a_surface_in_front_of_the_panel_counts_as_outside() {
+    let mut fixture = Fixture::new();
+    fixture.run(Step::MapWindow);
+    open_panel(&mut fixture);
+    // Same corner, same overlay layer, mapped later so it is front-most;
+    // `none` keyboard so the panel keeps the keyboard.
+    fixture.run(Step::CreateLayer(
+        LayerSpec::launcher(60).with_keyboard(KeyboardInteractivity::None),
+    ));
+    fixture.run(Step::MapLayer {
+        index: 1,
+        color: POPUP_BGRA,
+    });
+    fixture.click(ON_LAUNCHER.0, ON_LAUNCHER.1);
+    assert_eq!(
+        fixture.pointer_focus(),
+        Some(Focused::Layer(1)),
+        "the press landed on the front surface"
+    );
+    assert_eq!(closes(&mut fixture), vec![1, 0]);
+}
+
+/// A popup the panel opened (`zwlr_layer_surface_v1.get_popup`) is part of
+/// the panel: a press on it, even where it hangs outside the panel's own
+/// rectangle, is inside. `layer_hit` walks `WindowSurfaceType::ALL`, which
+/// includes the layer's popups, and the layer map's hit box includes them.
+#[test]
+fn a_popup_of_the_panel_counts_as_inside() {
+    let mut fixture = Fixture::new();
+    open_panel_without_window(&mut fixture);
+    // The panel is 60 square in the bottom-right corner, so its left edge
+    // is at x = 140. A 50 square popup anchored 30 left of that edge, on
+    // the panel's top row, covers x 110..160: 30 px of it hangs outside.
+    let Ack::PopupConfigured(configured) = fixture.run(Step::MapReactivePopup {
+        parent: PopupParent::Layer(0),
+        color: POPUP_BGRA,
+        grab: None,
+        anchor_x: -30,
+    }) else {
+        panic!("the popup step should report whether a configure arrived");
+    };
+    assert!(configured);
+    fixture.click(125.0, 160.0);
+    assert_eq!(
+        fixture.pointer_focus(),
+        Some(Focused::Popup(0)),
+        "the press landed on the popup, outside the panel's rectangle"
+    );
+    assert_eq!(closes(&mut fixture), vec![0], "the panel stays open");
+}

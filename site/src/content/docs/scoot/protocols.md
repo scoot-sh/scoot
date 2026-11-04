@@ -999,8 +999,12 @@ fullscreen window, where the `top` layer is hidden and holds no keyboard
   gets `zwlr_layer_surface_v1.closed` when any button is pressed anywhere
   but on the surface itself (the desktop, a window, a bar, another output;
   never while the session is locked). The press still goes on to what is
-  under it. Any other `exclusive` surface keeps the keyboard until it
-  unmaps.
+  under it. The surface's subsurfaces and any popup it opened count as the
+  surface; a layer surface stacked in front of it at the press point does
+  not. Pointer buttons from every source count (mouse, tablet tip,
+  `scoot msg` clicks, virtual pointer); touch is not handled, as scoot has
+  no `wl_touch` path. Any other `exclusive` surface keeps the keyboard
+  until it unmaps.
 - `on_demand` is click-to-focus, exactly like a window: click the surface to
   give it the keyboard, click a window, a bar or bare desktop to take it
   back. `exclusive` on `bottom` or `background` is treated the same way — the
