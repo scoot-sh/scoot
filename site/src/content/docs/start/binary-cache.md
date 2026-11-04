@@ -75,8 +75,9 @@ above. A substituter can serve any store path your Nix asks for, so this trusts
 CI's builds the way installing the flake already trusts its source. The
 signing key is what stops a cache-only compromise from doing more than serve
 stale or signed paths or go away; whoever holds the key can make your Nix
-accept arbitrary binaries, which is why the key lives only in CI secrets and
-the rotation runbook below exists.
+accept arbitrary binaries. Cachix holds the signing key; the project holds
+no private key, and the only CI secret is the push auth token. That is why
+you check the public key above and why the rotation runbook below exists.
 Only `trusted-users` (root, and NixOS's `trusted-users` list) may add
 substituters through the flake's `nixConfig`; everyone else opts in
 through the system config above, which is the auditable path.

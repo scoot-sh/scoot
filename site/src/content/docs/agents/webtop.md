@@ -30,9 +30,9 @@ D-Bus activation half is the session script's (see [the portal
 setup](../scoot/index.md#starting-a-session), s6 flavor).
 
 `auto` resolves to pixman here, so there is no driver to install and
-no device to pass through. The one-command check on
-[Install](../start/install.md#which-build-do-i-need) answers "no
-render node" here: take the default `scoot`.
+no device to pass through. The one-command check in
+[Builds and renderers](../reference/builds.md#do-i-have-a-gpu) answers
+"no render node" here: take the default `scoot`.
 Drive it over [IPC](../msg/index.md) and read it back with
 [Screenshots](../msg/screenshots.md), like a headless
 agent session.
