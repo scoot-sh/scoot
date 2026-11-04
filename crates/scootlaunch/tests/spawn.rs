@@ -49,6 +49,47 @@ fn without_a_bus_a_pick_still_launches_detached() {
     panel.clean();
 }
 
+/// The detached fallback keeps the direct path's `Path=` rule: a
+/// relative `Path=` is not trusted, so the app starts in `$HOME`.
+#[test]
+fn a_relative_path_key_starts_the_detached_app_in_home() {
+    let Some((session, data_home, markers)) = session_with_stubs("detach-cwd", &["alpha"]) else {
+        return;
+    };
+    let home = session.scratch.0.join("home");
+    fs::create_dir_all(home.join("rel")).unwrap();
+    let home = fs::canonicalize(&home).unwrap();
+    let desktop = data_home.join("applications/alpha.desktop");
+    let mut body = fs::read_to_string(&desktop).unwrap();
+    body.push_str("Path=rel\n");
+    fs::write(&desktop, body).unwrap();
+    let Some(mut panel) = Panel::start_on(
+        session,
+        data_home,
+        &[],
+        &[
+            (
+                "DBUS_SESSION_BUS_ADDRESS",
+                "unix:path=/nonexistent-scootlaunch-bus",
+            ),
+            ("HOME", home.to_str().unwrap()),
+        ],
+    ) else {
+        return;
+    };
+    panel.wait_shown(rgb("#f9e2af"));
+    std::thread::sleep(Duration::from_millis(300));
+    panel.key("Return");
+    let status = panel.wait_exit();
+    assert!(status.success(), "the launch exits 0: {}", panel.stderr());
+    let line = wait_marker(&markers[0]);
+    assert!(
+        line.trim_end().ends_with(home.to_str().unwrap()),
+        "a relative Path= falls back to $HOME, not ./rel: {line}"
+    );
+    panel.clean();
+}
+
 /// A mouse-picked `DBusActivatable` entry re-activates its running
 /// instance: the fake service owning the name gets `Activate` with
 /// the click's token, and the `Exec` stub never runs.
