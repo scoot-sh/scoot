@@ -24,8 +24,8 @@ scootnotify daemon --check
 
 Nothing on the socket means no daemon for this display
 (`WAYLAND_DISPLAY` names the socket, so a nested session and its host
-never share one). Exit 3 at start means the name is taken — mako (or
-dunst, swaync) still runs; stop it and remove its D-Bus activation
+never share one). Exit 3 at start means the name is taken: mako (or
+dunst, swaync) still runs. Stop it and remove its D-Bus activation
 file or it comes back on the next notification. A bad config runs on
 built-in defaults and says why; `--check` refuses loudly instead.
 Cards that arrive while locked or with no outputs wait with their
@@ -37,8 +37,8 @@ never enters history, and a `hide` rule sends straight to history.
 > **Symptom:** popups vanish under fullscreen.
 
 Popups use `layer=overlay`, so they stay above fullscreen windows.
-With the mako escape hatch, something set `layer` back to `top` —
-read the generated mako config, the first content line is the layer.
+With the mako escape hatch, something set `layer` back to `top`.
+Read the generated mako config; the first content line is the layer.
 scootnotify has no layer knob to mis-set. See
 [Desktop notifications](../../desktop/notifications/).
 
@@ -75,7 +75,7 @@ scootnotify msg history
 While DND is on, new cards skip the screen for history, except
 criticals (while `dnd_allows_critical` holds, the default) and cards
 a rule lets through with `dnd_bypass`. Turning DND off shows nothing
-retroactively — only `restore` brings one back on screen. The unread
+retroactively; only `restore` brings one back on screen. The unread
 count is live cards plus unseen history; each `restore` marks one
 entry seen.
 
@@ -84,7 +84,7 @@ entry seen.
 The ring holds closed and held cards only (newest last, at most
 `history_max`, 64 by default): `transient` cards and cards a rule
 keeps out with `history = false` never enter, and a restart empties
-the ring — it is in memory by design. A card that never expires is
+the ring: it is in memory. A card that never expires is
 usually correct: critical never expires unless the sender passed a
 positive timeout, and `expire_timeout = 0` means never. Hover pauses
 that card's clock and input idling pauses them all; the defaults apply

@@ -19,8 +19,8 @@ flight. Left:
 - **M8**: a STE-100 style pass over the remaining pages, keeping the logo's dry
   voice in headings and intros only.
   Slices done 2026-11-04: `site/src/content/docs/scootbar/` (all six pages),
-  then `scootbg/` and `scootlaunch/` (wording only, no headings, options or
-  code blocks changed). Remaining: `scoot/`, `scootnotify/`, `desktop/`,
+  then `scootbg/` and `scootlaunch/`, then `scootnotify/` (wording only, no
+  headings, options or code blocks changed). Remaining: `scoot/`, `desktop/`,
   `reference/`, `msg/`, `looks/`, `start/`, `agents/`, `troubleshooting/`.
 - **M9**: flip each "coming" slot (deb, rpm, Arch, ISO, shortcut teacher app) as
   its channel goes live.

@@ -108,7 +108,7 @@ The install script's missing-library report names it for your
 distro. Distro packages (deb, rpm, Arch) are recipes in `packaging/`
 so far, not published repositories. Only one daemon can own
 `org.freedesktop.Notifications`: the installer refuses while another
-one (mako, dunst, swaync) holds the name, and names it — stop or
+one (mako, dunst, swaync) holds the name, and names it. Stop or
 disable that daemon first, and keep only one daemon's unit enabled
 (the packages install the user unit and the D-Bus activation file).
 
@@ -152,11 +152,10 @@ Devanagari draw wrong until shaping lands; Latin, Cyrillic, CJK and
 monochrome-fallback emoji are acceptable. There is no sound: the
 `sound` capability is not advertised.
 
-Do Not Disturb, the history ring with restore, and `[[rule]]` tables
-landed with the control socket: `msg dnd`, `msg history`,
-`msg restore` and the rules are in the [CLI reference](./cli.md) and
-[Configure](./configure.md). The bar feed pushes DND and the unread
-count to the bar; see [the bar feed](./configure.md#the-bar-feed).
+`msg dnd`, `msg history`, `msg restore` and the `[[rule]]` tables are in
+the [CLI reference](./cli.md) and [Configure](./configure.md). The bar
+feed pushes DND and the unread count to the bar; see
+[the bar feed](./configure.md#the-bar-feed).
 
 ## Nix
 
@@ -166,7 +165,7 @@ picks the daemon behind the keymap's binds and the bar module. The
 look reaches the cards as a runtime layer; the Nix profile's
 `theme.targets.notifications.enable = false` turns it off (it writes
 `look = false` into `settings`; an explicit `settings.look` wins).
-Stylix reaches it only as the `stylix` look — there is
+Stylix reaches it only as the `stylix` look; there is
 no Stylix switch.
 
 | Option | Type / default | Example | Reload |
@@ -180,8 +179,8 @@ no Stylix switch.
 The file lands at `scoot/notify.toml` under `$XDG_CONFIG_HOME`
 (home-manager) or `/etc/scoot/notify.toml` (NixOS) and holds
 only these settings, verbatim. The keys are the daemon's own
-(`max_visible`, `dnd_allows_critical`, timeouts, rules — see
-[Configure](./configure.md)); anything else is refused by name —
+(`max_visible`, `dnd_allows_critical`, timeouts, rules; see
+[Configure](./configure.md)). Anything else is refused by name, and
 `daemon --check` says which. An empty file is the built-in defaults.
 
 The profile runs scootnotify behind `Super+n` (dismiss),
@@ -201,11 +200,10 @@ config and no feed script. The profile already imports the module, so
 `programs.scootnotify.settings` is managed with no extra import (an
 explicit `scoot.homeModules.scootnotify` /
 `scoot.nixosModules.scootnotify` beside it merges harmlessly). A look
-swap re-renders `notify.toml` and `scoot look apply` reloads the
-running daemon live (cards, history and DND survive) — `scootnotify msg
-reload --look` does the same by hand. To go
-back to mako, set `daemon
-= "mako"` and switch again — see [Migrating from
+swap re-renders `notify.toml`, and `scoot look apply` reloads the
+running daemon live (cards, history and DND survive). `scootnotify msg
+reload --look` does the same by hand. To go back to mako, set
+`daemon = "mako"` and switch again; see [Migrating from
 mako](../desktop/notifications/#migrating-from-mako).
 
 `desktop.notifications.settings` does not carry over: it is mako's
@@ -214,7 +212,7 @@ eval, naming `programs.scootnotify.settings` instead.
 
 > **Symptom:** the unit starts and stops at once, exit 3.
 >
-> The bus name is taken — mako (or dunst, or swaync) still runs.
+> The bus name is taken: mako (or dunst, or swaync) still runs.
 > Stop it (`systemctl --user stop mako`) and remove its D-Bus
 > activation file, or the bus activates it again on the next
 > notification.
