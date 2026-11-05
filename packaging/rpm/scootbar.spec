@@ -12,7 +12,7 @@
 # here unchanged (the same release tarball, under the same name).
 
 Name:           scootbar
-Version:        0.7.9
+Version:        0.7.10
 Release:        1%{?dist}
 # No -debuginfo/-debugsource subpackages: see scoot.spec.
 %global         debug_package %{nil}
@@ -72,6 +72,9 @@ cd source
 %doc source/packaging/rpm/bar.toml.example
 
 %changelog
+* Thu Nov 05 2026 scoot-sh <packages@scoot.sh> - 0.7.10-1
+- Built from the v0.7.10 release tag.
+
 * Thu Nov 05 2026 scoot-sh <packages@scoot.sh> - 0.7.9-1
 - Built from the v0.7.9 release tag.
 
