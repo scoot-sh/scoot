@@ -127,7 +127,7 @@ lists exactly those three, plus each one's `dev` dependency on `test-support`).
 `cargo tree --target x86_64-unknown-linux-gnu -p <app> -e normal --prefix none`
 shows `xkbcommon` in `scootlaunch` only, and no `xkbcommon` in `scootbar` or
 `scootnotify`. `scootui::wayland` was enabled in `scootnotify` without being
-called: that feature is dropped in #923 (same size, same libraries; the table lists scootnotify's features after it). Shipped builds are one package each, so Cargo never unifies one
+called: that feature is dropped in #923 (same size, same libraries); the table and the `cargo tree` counts hold at either state, and the table lists scootnotify's features as they are once #923 lands. Shipped builds are one package each, so Cargo never unifies one
 app's `scootui` features into another: `nix/scootbar.nix`, `nix/scootnotify.nix`
 and `nix/scootlaunch.nix` pass `-p <app>`, and `release.yml` builds
 `cargo build --release --locked --offline -p "$bin"` per binary. (CI's
@@ -146,7 +146,7 @@ target dirs, the harnesses from B. Raw results, logs and commands are in
 The history between A and B is confounded: it holds the epic's moves and also
 unrelated work on `scootbar` and `scootbg` (look depth tokens #861, popup entrance
 #863, bar opacity #850, floating-bar shadow #878, the allocation-failure audit
-#894, #788 for `scootbg`). The harness's own noise rule (margin = the largest of 5%
+#894, the huge-page arena in the `scootbg` daemon #788). The harness's own noise rule (margin = the largest of 5%
 of the value, the spread, and a floor) decides "same".
 
 - `scootbar` (`scripts/scootbar-bench`, clock scope, 5 startups, 300 s idle, 240 workspace
@@ -169,11 +169,16 @@ of the value, the spread, and a floor) decides "same".
   MiB each. The flagged rows are this box's noise: switching CPU is 0.9 and 0.2 on the
   *same* binary A (run 1 and run 2), and 1.3 and 0.2 on B; no CPU row separates the trees
   from run-to-run variation.
-  The size growth is not the extraction: every child measured its own step against its
-  own base (the table above), and the steps sum to under 5 KB; the rest came with the
-  feature commits listed above. The step from 3,019,520 B (keyboard) to 3,085,056 B
-  (entry-and-list) is +65,536 B, one alignment step, and also not from the epic (both
-  children recorded byte-identical binaries against their own `main`).
+  The size growth is not the extraction. Bisected on the same VM (release, same method):
+  A is 3,019,624 B; `655c56307` (#677, the epic's last commit) is 3,019,656 B, so the epic's
+  final tree is +32 B on `scootbar`. The growth is after the epic, in two steps of exactly
+  65,536 B (64 KiB, likely segment alignment): the first, to 3,085,192 B, lands between
+  `655c56307` and `43d700402` (candidates #776, #791, #805, #810, #811, #812, #814; not
+  narrowed) and holds through `1595794ea`, `4f52f9c3f` and `5e0c0f14f`; #850, #863 and #878
+  add 0 B; the second, to 3,150,728 B, is `97248764e` (#861), and B is the same. The
+  children's own pairs agree (the steps they recorded sum to under 5 KB, and `keyboard`'s
+  3,019,520 B and `entry-and-list`'s 3,085,056 B were each measured against that child's own
+  `main`, which had moved in between).
 - `scootbg` (`scripts/scootbg-bench`, `--only startup,restore,idle --daemons scootbg
   --rounds 5`, 1x1080p and 2x4K, color and the 6000x4000 JPEG recorded in the
   harness): 0 regressions beyond the margin for B against A run 1, B against A run 2 and A run 2
@@ -181,9 +186,9 @@ of the value, the spread, and a floor) decides "same".
   binary is 1,905,576 B in both). Restore CPU for the JPEG: A 639 / 585 ms, B 601 ms;
   startup to a color on screen: A 34.6 / 37.2 ms, B 33.3 ms; idle wakeups and CPU
   0 in every cell. B is *better* on idle memory (RSS 5.4 vs 3.5 MiB and PSS 4.1 vs
-  2.1 MiB with a color; RSS 37.4 vs 35.9 MiB with a 2x4K image), which `scootbg`'s own
-  commits in the window account for (not `scootui`, which it does not use; the cause
-  was not chased). The `2026-10-08-restore-idle` runs were on the Asahi M2 and
+  2.1 MiB with a color; RSS 37.4 vs 35.9 MiB with a 2x4K image), which is not
+  `scootui` (`scootbg` does not use it); #788 (the huge-page arena in the daemon) is the
+  plausible candidate, not verified. The `2026-10-08-restore-idle` runs were on the Asahi M2 and
   cannot be compared with a VM, so the A-B pair on one machine stands in for them.
 - `scootbg` is not on `scootui` (`cargo tree -p scootbg -e all` has no `scootui`), so
   the guard rail's "leave it on its own copy and say so" branch applies. `scootbg-mem`
