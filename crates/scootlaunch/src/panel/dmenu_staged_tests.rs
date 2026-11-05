@@ -104,6 +104,7 @@ impl Rig {
     fn frame_into(&mut self, out: &mut [u8], dirty: bool, now: Instant) -> (u32, u32) {
         let (size, dims) = self.surface();
         let shape = Shape {
+            drawn_height: None,
             size: (self.width, self.height),
             radius: self.look.radius,
             tint: self.look.focus,
@@ -497,6 +498,7 @@ fn an_empty_prompt_only_or_tiny_dmenu_draws_without_a_panic() {
     let dims = (rig.width / 2, rig.height / 2);
     let mut out = vec![0u8; dims.0 as usize * dims.1 as usize * 4];
     let shape = Shape {
+        drawn_height: None,
         size: (rig.width, rig.height),
         radius: rig.look.radius,
         tint: Color { r: 1, g: 2, b: 3 },

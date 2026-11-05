@@ -96,7 +96,11 @@ fn an_apps_panel_attaches_a_2x_buffer_at_output_scale_2() {
     // in device pixels.
     let (x0, y0, x1, y1) = panel.find_panel(rgb(BORDER));
     assert!(x1 - x0 + 1 >= 2 * 380, "{x0}..{x1} wide for a 2x panel");
-    assert!(y1 - y0 + 1 >= 2 * 200, "{y0}..{y1} tall for a 2x panel");
+    // Three apps draw the three-row minimum (about 120 logical pixels):
+    // twice that on screen, inside a buffer that stays the full surface.
+    let drawn = y1 - y0 + 1;
+    assert!(drawn >= 2 * 110, "{y0}..{y1} tall for a 2x panel");
+    assert!(drawn < height * 2, "{y0}..{y1}: shorter than its surface");
     panel.key("Escape");
     let status = panel.wait_exit();
     assert_eq!(status.code(), Some(1));

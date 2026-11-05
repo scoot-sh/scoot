@@ -20,8 +20,14 @@ use scootui::text::Text;
 
 /// What the stage needs to know about a panel, apart from how it is drawn.
 pub(super) struct Shape {
-    /// The panel's logical size.
+    /// The panel's logical size when it draws every row: what the surface
+    /// holds it in, so the shadow's room is fitted against it and the
+    /// panel's origin stays put as rows come and go.
     pub size: (u32, u32),
+    /// The panel's height in device pixels as drawn now, when it draws
+    /// fewer rows than `size` holds ([`crate::layout::Layout::drawn_height`]);
+    /// `None` for the whole of `size`.
+    pub drawn_height: Option<u32>,
     /// Its corner radius, logical.
     pub radius: u32,
     /// What a glow is tinted with.
@@ -64,8 +70,10 @@ pub(super) fn paint_staged(
     dirty: bool,
     now: Instant,
 ) -> (u32, u32) {
+    let layout = super::device_layout(view.look, view.scale, view.height, view.rows);
     let shape = Shape {
         size: (view.width, view.height),
+        drawn_height: view.drawn_height(&layout),
         radius: view.look.radius,
         tint: view.look.focus,
         scale: view.scale,
@@ -79,7 +87,7 @@ pub(super) fn paint_staged(
             .filter(|row| visible.contains(row))
             .map(|row| row - visible.start),
         slots: visible.len(),
-        row_h: super::device_layout(view.look, view.scale, view.height, view.rows).row_h,
+        row_h: layout.row_h,
         generation: view.ui.generation(),
     };
     stage_frame(
@@ -122,7 +130,11 @@ pub(super) fn stage_frame(
     let len = |logical| scale_len(logical, shape.scale);
     let panel = (
         len(shape.size.0).min(dims.0).max(1),
-        len(shape.size.1).min(dims.1).max(1),
+        shape
+            .drawn_height
+            .unwrap_or_else(|| len(shape.size.1))
+            .min(dims.1)
+            .max(1),
     );
     let origin = (
         len(room.0).min(dims.0.saturating_sub(panel.0)),
