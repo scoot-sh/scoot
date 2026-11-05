@@ -10205,20 +10205,89 @@ let
       true
     )
     # ...and every `scootnotify` bind the profile renders is a command the
-    # CLI accepts (`crates/scootnotify/src/cli.rs`: `msg dismiss` needs an
-    # id or `--all`, which a bare bind once lacked and the compositor log
-    # was the only place the refusal showed).
+    # CLI accepts. The grammar mirrors `parse_args` in
+    # `crates/scootnotify/src/cli.rs`: `msg dismiss` takes `--all` or a
+    # `u32` id other than 0 (leading zeros and a `+` parse), `msg dnd` takes
+    # nothing (reads) or on|off|toggle|status, `msg restore` takes nothing.
+    # It is a mirror, not the parser: this check evaluates against the
+    # `fakeNotifyScoot` stand-in, and building the real binary into an
+    # eval-only check would cost a Rust build for a string test. The
+    # grammar's own accepts and rejects are pinned below, so a drift on
+    # either side shows as a failure here.
     (
       let
-        binds = hmNotif.config.programs.scoot.settings.binds;
-        scootnotifyBinds = lib.filter (b: builtins.isString b && lib.hasInfix "/bin/scootnotify " b) (
-          lib.attrValues binds
-        );
+        # The id: digits, value 1..4294967295 (`u32::MAX`), zeros allowed
+        # in front as `u32::from_str` allows.
+        idOk =
+          w:
+          let
+            m = builtins.match "\\+?0*([1-9][0-9]*)" w;
+          in
+          m != null
+          && builtins.stringLength (builtins.head m) <= 10
+          && lib.toInt (builtins.head m) <= 4294967295;
+        # A bind's command string: a plain string, or the table form's
+        # `action`; anything else is not a bind this guard can read.
+        actionOf = b: if builtins.isAttrs b then b.action or null else b;
         accepted =
           b:
-          builtins.match "spawn [^ ]+/bin/scootnotify msg (dismiss (--all|[0-9]+)|dnd (on|off|toggle|status)|restore)" b
-          != null;
+          let
+            a = actionOf b;
+            m = builtins.match "spawn [^ ]+/bin/scootnotify msg (dismiss|dnd|restore)( (.*))?" a;
+            cmd = builtins.elemAt m 0;
+            arg = builtins.elemAt m 2;
+          in
+          builtins.isString a
+          && m != null
+          && (
+            if cmd == "dismiss" then
+              arg != null && (arg == "--all" || idOk arg)
+            else if cmd == "dnd" then
+              arg == null
+              || builtins.elem arg [
+                "on"
+                "off"
+                "toggle"
+                "status"
+              ]
+            else
+              arg == null
+          );
+        ok = c: accepted "spawn /nix/store/x-scootnotify/bin/scootnotify msg ${c}";
+        binds = hmNotif.config.programs.scoot.settings.binds;
+        scootnotifyBinds = lib.filter (b: lib.hasInfix "/bin/scootnotify " (toString (actionOf b))) (
+          lib.attrValues binds
+        );
       in
+      # the guard agrees with the CLI, accepting...
+      assert ok "dismiss --all";
+      assert ok "dismiss 1";
+      assert ok "dismiss 4294967295";
+      assert ok "dismiss 007";
+      assert ok "dnd";
+      assert ok "dnd status";
+      assert ok "dnd on" && ok "dnd off" && ok "dnd toggle";
+      assert ok "restore";
+      # ...and refusing what the CLI refuses
+      assert !ok "dismiss";
+      assert !ok "dismiss 0";
+      assert !ok "dismiss 000";
+      assert !ok "dismiss 4294967296";
+      assert !ok "dismiss 99999999999999999999";
+      assert !ok "dismiss -1";
+      assert !ok "dismiss 1 2";
+      assert !ok "dismiss 5 --all";
+      assert !ok "dnd maybe";
+      assert !ok "dnd on off";
+      assert !ok "restore now";
+      # the table form is read through its `action`, not skipped
+      assert accepted { action = "spawn /x/bin/scootnotify msg dismiss --all"; };
+      assert !accepted { action = "spawn /x/bin/scootnotify msg dismiss 0"; };
+      assert !accepted { };
+      # every profile bind is a string or a table with a string action
+      assert lib.all (
+        b: builtins.isString b || (builtins.isAttrs b && builtins.isString (b.action or null))
+      ) (lib.attrValues binds);
       assert scootnotifyBinds != [ ];
       assert lib.all accepted scootnotifyBinds;
       true

@@ -1,9 +1,10 @@
 ---
 title: "nix test's scootnotify bind guard disagrees with the CLI"
-status: "open"
-area: "testing"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-05"
 ---
 
 # nix test's scootnotify bind guard disagrees with the CLI
@@ -41,3 +42,15 @@ drift, if the check can depend on the built binary.
 ## Not in this ticket
 
 Changing the CLI's grammar.
+
+## Resolution
+
+2026-11-05, `nix/tests.nix` only (no crate change). The guard now mirrors
+`parse_args`: `dismiss` takes `--all` or an id in 1..4294967295 (leading zeros
+and `+` parse, as `u32::from_str` does), `dnd` takes nothing or
+on|off|toggle|status, `restore` takes nothing. A bind may be a string or the
+table form (read through its `action`); any other shape fails the check. The
+grammar's accepts and rejects are pinned as asserts, so drift on either side
+fails. It stays a mirror, not the real parser: the check evaluates against the
+`fakeNotifyScoot` stand-in, and building the binary into an eval-only check
+would cost a Rust build for a string test.
