@@ -32,6 +32,9 @@ no XWayland support, and a default build whose `PATH` lacks the
 binary logs `` `Xwayland` must be on PATH `` with the path it
 searched. Both then run a Wayland-only session.
 
+On a machine where nothing has made `/tmp/.X11-unix` yet (a fresh container),
+scoot creates it, world-writable with the sticky bit, as an X server would.
+
 | Field | Type | Default | Reload | Meaning |
 |---|---|---|---|---|
 | `[xwayland] enabled` | bool | `false` | restart only | Run an XWayland server inside the session (flag `--xwayland` ORs with it). |
