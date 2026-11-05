@@ -477,6 +477,76 @@ fn a_command_gets_the_default_sigpipe_not_the_bars_ignored_one() {
     );
 }
 
+/// The `THP_enabled` of `pid` from `/proc/PID/status` (Linux 5.0 on): `0`
+/// once `PR_SET_THP_DISABLE` is set. `None` where the line is absent.
+#[cfg(any(feature = "button", feature = "exec"))]
+fn thp_enabled(pid: impl std::fmt::Display) -> Option<u8> {
+    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    status
+        .lines()
+        .find_map(|l| l.strip_prefix("THP_enabled:"))
+        .and_then(|v| v.trim().parse().ok())
+}
+
+/// The value after `THP_enabled:` in the line a command wrote.
+#[cfg(any(feature = "button", feature = "exec"))]
+fn thp_of(line: &str) -> Option<u8> {
+    line.strip_prefix("THP_enabled:")?.trim().parse().ok()
+}
+
+#[cfg(feature = "exec")]
+#[test]
+fn the_bar_opts_out_of_huge_pages_and_its_exec_command_does_not() {
+    // glibc 2.44 backs a growing heap with a resident 2 MiB huge page on a
+    // `madvise` kernel; the bar opts its own process out. The setting is
+    // inherited across fork and exec, so the command a module runs (through
+    // the guard) must get the huge pages of whoever started the bar back.
+    let tables = "[exec.out]\ncommand = [\"sh\", \"-c\", \
+                  \"grep THP_enabled /proc/self/status > DIR/thp; echo 1; sleep 600\"]\n";
+    let Some(mut rig) = Rig::start("exec-thp", "right = [\"out\"]\n", tables) else {
+        return;
+    };
+    rig.wait_text("1");
+    let Some(own) = thp_enabled("self") else {
+        eprintln!("skipped -- no THP_enabled in /proc/PID/status");
+        return;
+    };
+    assert_eq!(
+        thp_enabled(rig.pid()),
+        Some(0),
+        "the bar left huge pages on"
+    );
+    let lines = rig.wait_lines("thp", 1);
+    assert_eq!(
+        thp_of(&lines[0]),
+        Some(own),
+        "the command inherited the bar's opt-out: {lines:?}"
+    );
+}
+
+#[cfg(feature = "button")]
+#[test]
+fn a_button_command_gets_the_huge_pages_back() {
+    // A click's command is started by the bar directly (no guard), which
+    // turns the setting back on for the one fork.
+    let tables = "[button.go]\ntext = \"7\"\n\
+                  on-click = { exec = [\"sh\", \"-c\", \"grep THP_enabled /proc/self/status >> DIR/thp\"] }\n";
+    let Some(mut rig) = Rig::start("button-thp", "left = [\"go\"]\n", tables) else {
+        return;
+    };
+    rig.wait_text("7");
+    let Some(own) = thp_enabled("self") else {
+        eprintln!("skipped -- no THP_enabled in /proc/PID/status");
+        return;
+    };
+    let click = r#"{"type":"click","x":30,"y":30,"button":"left"}"#;
+    assert_eq!(rig.session.scoot_ipc(click)["type"], "ok");
+    let lines = rig.wait_lines("thp", 1);
+    assert_eq!(thp_of(&lines[0]), Some(own), "{lines:?}");
+    // And the bar is back to opted out after launching it.
+    assert_eq!(thp_enabled(rig.bar.0.id()), Some(0));
+}
+
 #[cfg(feature = "exec")]
 #[test]
 fn a_command_that_is_not_found_is_one_warning_a_restart_naming_it() {

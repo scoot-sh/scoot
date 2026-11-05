@@ -172,8 +172,7 @@ impl Spawner {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .process_group(0);
-        let child = command
-            .spawn()
+        let child = crate::thp::spawn(&mut command)
             .map_err(|error| format!("cannot run `{program}`: {error}"))?;
         let pidfd = if self.pidfds {
             pidfd_open(Pid::from_child(&child), PidfdFlags::empty()).ok()

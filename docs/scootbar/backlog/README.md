@@ -240,7 +240,7 @@ hits the wall:
 - [launch-dmenu-doc-and-pin-notes](resolved/launch-dmenu-doc-and-pin-notes-done.md) (low): password mode is list-less (no side channel), edge behaviors documented, `apply_colors` pinned — RESOLVED 2026-11-04
 - [notify-popups-review-notes](resolved/notify-popups-review-notes-done.md) (low): clicks queue, a replace under hover stays paused, idle arms on a late seat, libm named in the docs — RESOLVED 2026-11-04
 - [packaging-workflows-red-on-main](resolved/packaging-workflows-red-on-main-done.md)
-- [check scootbar for the glibc 2.44 huge-page arena](thp-arena-check.md)
+- [thp-arena-check](resolved/thp-arena-check-done.md): a many-module bar's main heap was a resident 2 MiB huge page in 4 of 8 runs; the daemon now opts out, and what it launches gets huge pages back — RESOLVED 2026-11-05
 - [notify-look-radius-unread](resolved/notify-look-radius-unread-done.md): the look's `radius` now reaches the cards, the config file's `radius` winning when set
 - [shell-font-resolution](resolved/shell-font-resolution-done.md): scootnotify and scootlaunch resolve the look's font family to a file, and scootnotify draws a real bold face beside it
 - [**launcher-scaled-composite-cost**](resolved/launcher-scaled-composite-cost-done.md) — RESOLVED 2026-11-01: the scaled path blends rows vertically into a pooled scratch row then horizontally, byte-identical output, 3x entrance 19.8 ms to 13.7 ms median (under 16.6 ms), `bench_effects` now covers 3x

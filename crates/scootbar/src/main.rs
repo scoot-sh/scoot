@@ -49,6 +49,7 @@ mod snapshots;
 mod spawn;
 #[cfg(test)]
 mod testfds;
+mod thp;
 #[cfg(test)]
 pub use scootui::testfont;
 pub use scootui::text;
@@ -77,6 +78,9 @@ fn main() -> ExitCode {
     if let Some(code) = modules::exec::guard::run(std::env::args_os().skip(1)) {
         return code;
     }
+    // Before anything is allocated that matters: the settled heap is what it
+    // keeps small (`thp`).
+    thp::disable();
     let command = match cli::parse(std::env::args_os().skip(1)) {
         Ok(command) => command,
         Err(error) => {

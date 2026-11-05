@@ -382,8 +382,7 @@ impl Bluetooth {
         command.stdin(Stdio::from(read));
         command.stdout(Stdio::inherit());
         command.stderr(Stdio::inherit());
-        let child = command
-            .spawn()
+        let child = crate::thp::spawn(&mut command)
             .map_err(|_| InvokeError::Refused("cannot start the menu command"))?;
         // The list is a few kilobytes against a 64 KiB pipe: one write
         // carries it, even when the menu never reads. A short write still
