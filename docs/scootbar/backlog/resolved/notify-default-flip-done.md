@@ -26,7 +26,7 @@ breaking entry in the same PR. Evidence: raw eval outputs and red
 proofs in the PR body; every check green on the exact head.
 
 Deferred, not dropped: the honest M2 headless measurement
-([scootnotify vs mako A/B](../notify-ab-bench.md)) — no numbers are
+([scootnotify vs mako A/B](notify-ab-bench-done.md)) — no numbers are
 published or claimed.
 
 ## Docs (same PR)

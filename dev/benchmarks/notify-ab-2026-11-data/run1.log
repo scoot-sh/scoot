@@ -1,0 +1,79 @@
+--- machine ---
+Linux scoot-vm 6.18.50 #1-NixOS SMP PREEMPT Mon Sep  7 15:23:00 UTC 2026 aarch64 GNU/Linux
+date: 2026-11-05T11:39:56Z
+load at start: 0.00 0.02 0.00 1/188 4092292
+nproc: 6
+--- other compositors/daemons already running (not ours; left alone) ---
+1446274 dbus-daemon     dbus-daemon --session --fork --print-address
+1446335 dbus-daemon     dbus-daemon --session --fork --print-address
+1446368 dbus-daemon     dbus-daemon --session --fork --print-address
+1446419 dbus-daemon     dbus-daemon --session --fork --print-address
+1446841 dbus-daemon     dbus-daemon --session --fork --print-address
+1446891 dbus-daemon     dbus-daemon --session --fork --print-address
+1446957 dbus-daemon     dbus-daemon --session --fork --print-address
+1447614 dbus-daemon     dbus-daemon --session --fork --print-address
+1447799 dbus-daemon     dbus-daemon --session --fork --print-address
+1931633 dbus-daemon     dbus-daemon --nofork --print-address 4 --session
+2063918 .scoot-wrapped  /nix/store/i1p1n1ryqk22xxs2lviycfcxglcn6mpg-scoot-0.6.28/bin/scoot --headless --width 800 --height 600 --outputs 1 --socket /tmp/depth-dbg-Q7lSQW/scoot.sock --config /tmp/depth-dbg-Q7lSQW/scoot.toml
+2064319 .scoot-wrapped  /nix/store/i1p1n1ryqk22xxs2lviycfcxglcn6mpg-scoot-0.6.28/bin/scoot --headless --width 800 --height 600 --outputs 1 --socket /tmp/depth-dbg2-GieElI/scoot.sock --config /tmp/depth-dbg2-GieElI/scoot.toml
+--- binaries ---
+7f8ee087be7fda9ce1e4e4f047eac76c20d491398ac6b8ac05e541b06f368c49  /home/dev/nab/bin/scoot
+0cccfd4567874149864a00c8dbc96ab7cc893fd39b1178823fdb5afeb1f51cb6  /home/dev/nab/bin/scootnotify
+822961341716fa9576ba5a283795d581a699ce6b865493d9a6505fb5140d4fda  /nix/store/5x3nwidxrwmc531l7ia6a2xrisnq1qzv-mako-1.11.0/bin/mako
+scoot 0.7.7 (ipc protocol 13)
+scootnotify 0.7.7
+mako: /nix/store/5x3nwidxrwmc531l7ia6a2xrisnq1qzv-mako-1.11.0/bin/mako (makoctl: /nix/store/5x3nwidxrwmc531l7ia6a2xrisnq1qzv-mako-1.11.0/bin/makoctl)
+--- font ---
+FONT=/nix/store/33wfvwgr4vy0gaznf3wafla7mfni1znw-dejavu-fonts-minimal-2.37/share/fonts/truetype/DejaVuSans.ttf
+MAKO_FONT=DejaVu Sans 10
+--- parameters ---
+N=30 IDLE_N=30 IDLE_SECS=60 IDLE_STATES=fresh closed ORDER=scootnotify mako
+=== latency scootnotify ===
+floor screenshot RTT (ms): timeouts=0 n=30 min=8 median=11 p95=13 max=14 mean=11
+floor bus round trip (ms): timeouts=0 n=30 min=4 median=7 p95=8 max=13 mean=6
+floor bus+screenshot (ms): timeouts=0 n=30 min=13 median=16 p95=19 max=19 mean=16
+warm notify-to-first-frame (ms): timeouts=0 n=30 min=15 median=20 p95=24 max=25 mean=20
+cold first card (ms): timeouts=0 n=30 min=11 median=22 p95=26 max=27 mean=21
+cold idle Rss kB: timeouts=0 n=30 min=3584 median=3600 p95=3604 max=3640 mean=3596
+cold idle Pss kB: timeouts=0 n=30 min=1987 median=1989 p95=1993 max=2029 mean=1990
+cold idle USS kB: timeouts=0 n=30 min=1768 median=1768 p95=1772 max=1808 mean=1770
+card-showing Rss kB: timeouts=0 n=30 min=3732 median=3748 p95=3752 max=3752 mean=3743
+card-showing Pss kB: timeouts=0 n=30 min=2087 median=2089 p95=2093 max=2093 mean=2089
+card-showing USS kB: timeouts=0 n=30 min=1820 median=1820 p95=1824 max=1824 mean=1820
+after the warm run (N+3 cards shown and closed) rss/pss/uss kB: 3676 2075 1856
+=== latency mako ===
+floor screenshot RTT (ms): timeouts=0 n=30 min=6 median=12 p95=16 max=19 mean=11
+floor bus round trip (ms): timeouts=0 n=30 min=3 median=7 p95=9 max=11 mean=6
+floor bus+screenshot (ms): timeouts=0 n=30 min=8 median=16 p95=22 max=24 mean=15
+warm notify-to-first-frame (ms): timeouts=0 n=30 min=15 median=21 p95=26 max=28 mean=21
+cold first card (ms): timeouts=0 n=30 min=26 median=40 p95=44 max=46 mean=38
+cold idle Rss kB: timeouts=0 n=30 min=8408 median=8428 p95=8432 max=8432 mean=8426
+cold idle Pss kB: timeouts=0 n=30 min=5464 median=5507 p95=5511 max=5511 mean=5506
+cold idle USS kB: timeouts=0 n=30 min=4120 median=4168 p95=4172 max=4172 mean=4167
+card-showing Rss kB: timeouts=0 n=30 min=14748 median=14768 p95=14768 max=14776 mean=14765
+card-showing Pss kB: timeouts=0 n=30 min=11326 median=11365 p95=11365 max=11373 mean=11363
+card-showing USS kB: timeouts=0 n=30 min=9496 median=9544 p95=9544 max=9552 mean=9542
+after the warm run (N+3 cards shown and closed) rss/pss/uss kB: 15076 11673 9852
+=== idle scootnotify fresh (30 windows of 60s) ===
+voluntary ctxt switches per window: timeouts=0 n=30 min=0 median=0 p95=0 max=1 mean=0
+cpu ticks per window: timeouts=0 n=30 min=0 median=0 p95=0 max=0 mean=0
+threads: timeouts=0 n=30 min=1 median=1 p95=1 max=1 mean=1
+rss/pss/uss kB start: 3636 1053 224  end: 3636 1052 224
+=== idle scootnotify closed (30 windows of 60s) ===
+voluntary ctxt switches per window: timeouts=0 n=30 min=0 median=0 p95=0 max=1 mean=0
+cpu ticks per window: timeouts=0 n=30 min=0 median=0 p95=0 max=0 mean=0
+threads: timeouts=0 n=30 min=1 median=1 p95=1 max=1 mean=1
+rss/pss/uss kB start: 3640 1068 240  end: 3640 1844 1628
+=== idle mako fresh (30 windows of 60s) ===
+voluntary ctxt switches per window: timeouts=0 n=30 min=0 median=0 p95=0 max=0 mean=0
+cpu ticks per window: timeouts=0 n=30 min=0 median=0 p95=0 max=0 mean=0
+threads: timeouts=0 n=30 min=1 median=1 p95=1 max=1 mean=1
+rss/pss/uss kB start: 8408 3013 912  end: 8408 3014 912
+=== idle mako closed (30 windows of 60s) ===
+voluntary ctxt switches per window: timeouts=0 n=30 min=0 median=0 p95=0 max=0 mean=0
+cpu ticks per window: timeouts=0 n=30 min=0 median=0 p95=0 max=0 mean=0
+threads: timeouts=0 n=30 min=2 median=2 p95=2 max=2 mean=2
+rss/pss/uss kB start: 15060 8926 6548  end: 15060 11154 9836
+load at end: 0.05 0.03 0.00 1/190 4098556
+--- leftovers (ours should be none) ---
+=== done ===
