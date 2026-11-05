@@ -144,7 +144,7 @@ What exists today is in scootbar, which is binary-only (no `lib.rs`;
 
 ## The shared crates: `scootui` and `scoot-dbus`
 
-The [extract-scootui](../../docs/scootbar/backlog/extract-scootui.md) entry
+The [extract-scootui](../../docs/scootbar/backlog/resolved/extract-scootui-done.md) entry
 waits for a second consumer before cutting the seam ("so the seam comes from real
 use rather than guesswork"). scootnotify is that consumer, and these plans
 define it. Two crates, not one:
@@ -158,7 +158,7 @@ extract-scootui: "Feature-gate the parts a consumer does not use".
 | Feature | Moves from scootbar | New |
 |---|---|---|
 | (always) | `paint.rs`, `color.rs`, `theme.rs` (tokens grow: below), `text.rs`, `font.rs`, `modules/ellipsis.rs`, `testfont.rs` (test-support), `snapshots.rs` (test-support) | `#aarrggbb` parsing; a token map that is not hard-wired to the bar's six |
-| `widgets` | `popup/{mod,layout,interact,paint,hover,wrap}.rs` (the pure half; `extract-scootui.md`, "Popups") | `Activate` carries an owned id instead of `&'static str`; a virtualized list (row count unbounded, drawing bounded by the visible rows); a text-entry widget; wrapped paragraphs past 6 lines with a line cap the caller sets |
+| `widgets` | `popup/{mod,layout,interact,paint,hover,wrap}.rs` (the pure half; `resolved/extract-scootui-done.md`, "Popups") | `Activate` carries an owned id instead of `&'static str`; a virtualized list (row count unbounded, drawing bounded by the visible rows); a text-entry widget; wrapped paragraphs past 6 lines with a line cap the caller sets |
 | `icons` | `icon/{mod,path,raster,cache,sample}.rs`; `icon/image.rs` behind `png` | icon-theme lookup with `index.theme` inheritance (today hicolor-only, `modules/tray/theme.rs:13-19`); optional `svg` (below) |
 | `wayland` | `outputs.rs`, `density.rs`, `region.rs`, `daemon/surfaces.rs`, `daemon/canvas.rs`, the Wayland half of the `poll` loop (`daemon/mod.rs`): moved by `scootui-extract-wayland`, with nothing new in that PR | in a **separate** PR (`scootui-surfaces-on-demand`): a layer-surface lifecycle that is *on demand* (created when there is something to show, destroyed when empty, no surface held at idle) beside the bar's one-per-output; a full-screen `xdg_toplevel` surface kind (scootgreet); the memfd name parameter in `scootbg-mem` |
 | `keyboard` | none | keymap, modifiers, repeat, keysym to text ([below](#keyboard-and-text-entry)) |

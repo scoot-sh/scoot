@@ -42,7 +42,7 @@ Its own small binary in the same shell family as the bar and
 - An `overlay` layer surface with `keyboard_interactivity: exclusive`, which is
   what scoot already supports for launchers
   (`docs/protocols.md`, keyboard focus). It exists only while open.
-- Drawn with [`scootui`](extract-scootui.md); text input through the normal
+- Drawn with [`scootui`](resolved/extract-scootui-done.md); text input through the normal
   keyboard path (no IME at first, stated).
 - **A dmenu mode**: lines on stdin, the selection on stdout. This is what lets
   the bar's pickers (WiFi networks, power menu, audio sinks) work before

@@ -1,0 +1,103 @@
+=== run pre1 02:30:33
+scootbar's code: 94,775 lines of Rust in `crates/scootbar/src`, 63,422 outside `tests.rs` files; 12 direct dependencies on Linux (ab_glyph, png, rustix, scoot-ipc, scoot-look, scootbg-mem, serde, serde_json, toml, wayland-client, wayland-protocols, wayland-protocols-wlr).
+
+Gate (no competitor beats scootbar): 0 loss(es).
+=== run head1 02:37:34
+scootbar's code: 78,487 lines of Rust in `crates/scootbar/src`, 52,306 outside `tests.rs` files; 15 direct dependencies on Linux (ab_glyph, png, rustix, scoot-dbus, scoot-ipc, scoot-look, scoot-rt, scootbg-mem, scootui, serde, serde_json, toml, wayland-client, wayland-protocols, wayland-protocols-wlr).
+
+Gate (no competitor beats scootbar): 0 loss(es).
+=== run head2 02:44:35
+scootbar's code: 78,487 lines of Rust in `crates/scootbar/src`, 52,306 outside `tests.rs` files; 15 direct dependencies on Linux (ab_glyph, png, rustix, scoot-dbus, scoot-ipc, scoot-look, scoot-rt, scootbg-mem, scootui, serde, serde_json, toml, wayland-client, wayland-protocols, wayland-protocols-wlr).
+
+Gate (no competitor beats scootbar): 0 loss(es).
+=== run pre2 02:51:37
+scootbar's code: 94,775 lines of Rust in `crates/scootbar/src`, 63,422 outside `tests.rs` files; 12 direct dependencies on Linux (ab_glyph, png, rustix, scoot-ipc, scoot-look, scootbg-mem, serde, serde_json, toml, wayland-client, wayland-protocols, wayland-protocols-wlr).
+
+Gate (no competitor beats scootbar): 0 loss(es).
+=== compare
+--- compare head1 vs pre1
+| Compositor | Row | baseline | now | verdict |
+|---|---|---|---|---|
+| scoot | Startup to first frame | 28.8 [21.6–37.2] | 30.1 [23.4–41.4] | same |
+| scoot | Idle RSS | 4.7 | 4.8 | same |
+| scoot | Idle PSS | 3.1 | 3.2 | same |
+| scoot | Idle heap (`RssAnon`) | 0.5 | 0.5 | same |
+| scoot | Peak memory (`VmHWM`) | 4.7 | 4.8 | same |
+| scoot | Idle wakeups per minute | 2 | 2 | same |
+| scoot | Idle CPU in the window | 4.7 | 4.0 | better |
+| scoot | CPU while switching workspaces | 0.9 | 1.3 | **REGRESSED** |
+| scoot | Wakeups while switching workspaces | 2 | 2 | same (not gated) |
+| scoot | Threads | 1 | 1 | same (not gated) |
+| any | Size: stripped binary + non-glibc `ldd` closure | 3,152,720 | 3,283,824 | same |
+| any | Bare executable, stripped | 3,019,624 | 3,150,728 | same (not gated) |
+
+1 regression(s) beyond the margin.
+--- compare head2 vs pre1
+| Compositor | Row | baseline | now | verdict |
+|---|---|---|---|---|
+| scoot | Startup to first frame | 28.8 [21.6–37.2] | 40.4 [22.2–45.8] | same |
+| scoot | Idle RSS | 4.7 | 4.8 | same |
+| scoot | Idle PSS | 3.1 | 3.2 | same |
+| scoot | Idle heap (`RssAnon`) | 0.5 | 0.5 | same |
+| scoot | Peak memory (`VmHWM`) | 4.7 | 4.8 | same |
+| scoot | Idle wakeups per minute | 2 | 2 | same |
+| scoot | Idle CPU in the window | 4.7 | 3.1 | better |
+| scoot | CPU while switching workspaces | 0.9 | 0.2 | better |
+| scoot | Wakeups while switching workspaces | 2 | 2 | same (not gated) |
+| scoot | Threads | 1 | 1 | same (not gated) |
+| any | Size: stripped binary + non-glibc `ldd` closure | 3,152,720 | 3,283,824 | same |
+| any | Bare executable, stripped | 3,019,624 | 3,150,728 | same (not gated) |
+
+0 regression(s) beyond the margin.
+--- compare head1 vs pre2
+| Compositor | Row | baseline | now | verdict |
+|---|---|---|---|---|
+| scoot | Startup to first frame | 38.8 [32.6–48.2] | 30.1 [23.4–41.4] | same |
+| scoot | Idle RSS | 4.7 | 4.8 | same |
+| scoot | Idle PSS | 3.1 | 3.2 | same |
+| scoot | Idle heap (`RssAnon`) | 0.5 | 0.5 | same |
+| scoot | Peak memory (`VmHWM`) | 4.7 | 4.8 | same |
+| scoot | Idle wakeups per minute | 2 | 2 | same |
+| scoot | Idle CPU in the window | 3.8 | 4.0 | **REGRESSED** |
+| scoot | CPU while switching workspaces | 0.2 | 1.3 | **REGRESSED** |
+| scoot | Wakeups while switching workspaces | 2 | 2 | same (not gated) |
+| scoot | Threads | 1 | 1 | same (not gated) |
+| any | Size: stripped binary + non-glibc `ldd` closure | 3,152,720 | 3,283,824 | same |
+| any | Bare executable, stripped | 3,019,624 | 3,150,728 | same (not gated) |
+
+2 regression(s) beyond the margin.
+--- compare head2 vs pre2
+| Compositor | Row | baseline | now | verdict |
+|---|---|---|---|---|
+| scoot | Startup to first frame | 38.8 [32.6–48.2] | 40.4 [22.2–45.8] | same |
+| scoot | Idle RSS | 4.7 | 4.8 | same |
+| scoot | Idle PSS | 3.1 | 3.2 | same |
+| scoot | Idle heap (`RssAnon`) | 0.5 | 0.5 | same |
+| scoot | Peak memory (`VmHWM`) | 4.7 | 4.8 | same |
+| scoot | Idle wakeups per minute | 2 | 2 | same |
+| scoot | Idle CPU in the window | 3.8 | 3.1 | better |
+| scoot | CPU while switching workspaces | 0.2 | 0.2 | same |
+| scoot | Wakeups while switching workspaces | 2 | 2 | same (not gated) |
+| scoot | Threads | 1 | 1 | same (not gated) |
+| any | Size: stripped binary + non-glibc `ldd` closure | 3,152,720 | 3,283,824 | same |
+| any | Bare executable, stripped | 3,019,624 | 3,150,728 | same (not gated) |
+
+0 regression(s) beyond the margin.
+--- compare pre2 vs pre1 (noise)
+| Compositor | Row | baseline | now | verdict |
+|---|---|---|---|---|
+| scoot | Startup to first frame | 28.8 [21.6–37.2] | 38.8 [32.6–48.2] | same |
+| scoot | Idle RSS | 4.7 | 4.7 | same |
+| scoot | Idle PSS | 3.1 | 3.1 | same |
+| scoot | Idle heap (`RssAnon`) | 0.5 | 0.5 | same |
+| scoot | Peak memory (`VmHWM`) | 4.7 | 4.7 | same |
+| scoot | Idle wakeups per minute | 2 | 2 | same |
+| scoot | Idle CPU in the window | 4.7 | 3.8 | better |
+| scoot | CPU while switching workspaces | 0.9 | 0.2 | better |
+| scoot | Wakeups while switching workspaces | 2 | 2 | same (not gated) |
+| scoot | Threads | 1 | 1 | same (not gated) |
+| any | Size: stripped binary + non-glibc `ldd` closure | 3,152,720 | 3,152,720 | same |
+| any | Bare executable, stripped | 3,019,624 | 3,019,624 | same (not gated) |
+
+0 regression(s) beyond the margin.
+DONE

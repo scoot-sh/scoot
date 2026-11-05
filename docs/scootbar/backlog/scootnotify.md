@@ -43,7 +43,7 @@ Its own binary, not a bar module. Outline, from the planning:
   [D-Bus client](resolved/dbus-client-done.md).
 - Popups are layer-shell `overlay` surfaces created on demand and destroyed
   when empty, so an idle daemon holds no surface. Drawn with
-  [`scootui`](extract-scootui.md).
+  [`scootui`](resolved/extract-scootui-done.md).
 - Talks to the bar over the bar's control socket (`push`): DND state and the
   unread count as a module, with a click to toggle DND.
 - Scoot draws and sends nothing itself
