@@ -19,14 +19,16 @@
 //! 1. **It already committed a buffer.** A client may ask for a callback
 //!    before its first attach, and withholding it would stall the very frame
 //!    that unsticks it. A surface with no committed buffer is always served.
-//! 2. **It is below the opaque cover.** `overlay` is above every window, so
-//!    it is never covered and always served. `top` is drawn above windows --
+//! 2. **It is below the cover.** `overlay` is above every window, so it is
+//!    never covered and always served. `top` is drawn above windows --
 //!    except under a covering fullscreen window, which hides it entirely
-//!    (see [`above_windows`](super::above_windows)) -- so it is withheld
-//!    only then. `bottom`/`background` are below every window, so any opaque
+//!    whatever that window's opacity (see
+//!    [`above_windows`](super::above_windows)) -- so it is withheld exactly
+//!    then. `bottom`/`background` are below every window, so only an opaque
 //!    window spanning the output covers them.
-//! 3. **The cover is really opaque, over the whole output, and drawn on
-//!    this output.** Either the core's covering fullscreen window, or (for
+//! 3. **For `bottom`/`background`, the cover is really opaque, over the
+//!    whole output, and drawn on this output.** (`top` needs none of this.)
+//!    Either the core's covering fullscreen window, or (for
 //!    the layers below windows) a square -- never rounded, whose clip would
 //!    cut its corners back to the layer -- window placed on this output (a
 //!    frame draws only the windows placed on it; see `output_clip.rs`),
@@ -104,9 +106,9 @@ pub(in crate::compositor) fn withhold_frame(
         Layer::Overlay => false,
         // Above windows, hence visible -- unless a fullscreen window covers
         // the output, which hides the whole layer (see `above_windows`).
-        Layer::Top => {
-            state.covered_by_fullscreen(output) && covering_window_is_opaque(state, output)
-        }
+        // The cover's opacity is irrelevant: the layer is not drawn at all,
+        // so a translucent cover has nothing of it to show through.
+        Layer::Top => state.covered_by_fullscreen(output),
         // Below every window: any opaque window spanning the output covers
         // them, fullscreen or not.
         Layer::Background | Layer::Bottom => opaque_window_spans_output(state, output),

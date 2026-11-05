@@ -245,6 +245,76 @@ fn a_hidden_bar_is_withheld_but_a_notification_is_served() {
     );
 }
 
+/// A `top` layer is not drawn at all under any covering fullscreen window,
+/// so its callbacks are withheld whether or not the cover is opaque. Body
+/// shared by the translucent-cover tests: `cover` makes the (already
+/// fullscreen) window 0 translucent, then the bar (`top`) is withheld, the
+/// notification (`overlay`) is served, and the bar's callback completes on
+/// the first frame after the cover leaves.
+fn assert_translucent_cover_withholds_top(fixture: &mut Fixture) {
+    fixture.request_layer_frame(0);
+    fixture.request_layer_frame(1);
+    fixture.render();
+    assert_eq!(
+        fixture.layer_frames(),
+        vec![0, 1],
+        "the hidden top bar waits, the overlay notification is served"
+    );
+    fixture.configured(Step::UnsetFullscreen { window: 0 });
+    fixture.done(Step::Draw {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
+    fixture.render();
+    assert_eq!(
+        fixture.layer_frames(),
+        vec![1, 1],
+        "the bar's callback completes on the first frame after the cover lifts"
+    );
+}
+
+/// Fullscreen window with an alpha-format buffer and no opaque region: the
+/// wallpaper shows through it (served, see the module's other tests), but a
+/// `top` bar is not drawn, so it is withheld. Fails against the old rule,
+/// which also required the cover to be opaque.
+#[test]
+fn an_alpha_format_cover_withholds_a_top_bar() {
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    fixture.done(Step::CreateLayer(Layer::Bar));
+    fixture.done(Step::CreateLayer(Layer::Notification));
+    fixture.configured(Step::SetFullscreen {
+        window: 0,
+        output: None,
+    });
+    fixture.done(Step::Draw {
+        window: 0,
+        color: WINDOW_BGRA,
+    });
+    assert_translucent_cover_withholds_top(&mut fixture);
+}
+
+/// A `wp_alpha_modifier_v1` multiplier under 1.0 on an otherwise opaque
+/// fullscreen window: still hides the `top` layer entirely.
+#[cfg(feature = "gpu-scanout")]
+#[test]
+fn a_half_alpha_cover_withholds_a_top_bar() {
+    let mut fixture = Fixture::new();
+    fixture.map(WINDOW_BGRA);
+    fixture.done(Step::CreateLayer(Layer::Bar));
+    fixture.done(Step::CreateLayer(Layer::Notification));
+    fixture.configured(Step::SetFullscreen {
+        window: 0,
+        output: None,
+    });
+    fixture.done(Step::DrawXrgb { window: 0 });
+    fixture.done(Step::SetAlpha {
+        window: 0,
+        multiplier: u32::MAX / 2,
+    });
+    assert_translucent_cover_withholds_top(&mut fixture);
+}
+
 /// A window placed on one output never covers another output's layers,
 /// however far its surface spills past its slot: the neighbour's frame
 /// draws only the windows placed on it (`output_clip.rs`), so an opaque
