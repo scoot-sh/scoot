@@ -228,17 +228,30 @@ so an agent driving the VM keeps notifications flowing normally.
 (`crates/scoot/src/compositor/layer_shell.rs:100-133`, `ABOVE_FULLSCREEN`), so cards show over
 a fullscreen video or game, as mako on `layer=overlay` does today. That is v1's only behavior.
 
-A "hold while fullscreen" mode is an **experiment, not v1**: [`notify-fullscreen-hold-spike`](../../docs/scootbar/backlog/notify-fullscreen-hold-spike.md).
-The cheap idea it tests needs no foreign-toplevel machinery. Put non-critical cards on a
+A "hold while fullscreen" mode is **not v1**. The spike [`notify-fullscreen-hold-spike`](../../docs/scootbar/backlog/resolved/notify-fullscreen-hold-spike-done.md)
+measured it on 2026-11-05 (conditional GO; numbers in its Resolution). The idea needs no
+foreign-toplevel machinery. Put non-critical cards on a
 `top` surface. scoot withholds frame callbacks from a `top` surface that has committed a
 buffer, while an opaque fullscreen window covers the output
 (`crates/scoot/src/compositor/layer_shell/occlusion.rs:15-26,96-113`). The
 presentation-started expiry clock then holds those cards for free. Critical cards stay on
-a second, `overlay` surface. Its caveats, measured there:
+a second, `overlay` surface. What the spike measured:
 
-- under a translucent fullscreen window the callback is served, so a hidden card's clock starts;
-- it is scoot-specific;
-- it costs a second surface.
+- **Opaque cover (XRGB, or ARGB with a full opaque region): held.** The `top` surface gets no
+  callback while covered, and one 27 ms after the window leaves fullscreen.
+- **Any other fullscreen window: not held on v0.7.9.** The card is not drawn (scoot hides `top`
+  under every fullscreen window) but its callback is served, so the clock runs unseen. That is a
+  scoot mismatch with a one-line fix, filed as
+  [`top-layer-withhold-under-any-fullscreen`](../../docs/backlog/core/top-layer-withhold-under-any-fullscreen.md);
+  the mode waits for it.
+- **Not scoot-specific:** sway 1.12 holds under both opaque and translucent windows. Other
+  compositors were not measured, and the hold is compositor behavior, not protocol, so it is
+  best-effort.
+- **A second surface is cheap in memory and frames** (+96 to +124 kB in the compositor, no extra
+  frames, none at all while covered) **and expensive in design**: one merged stack across two
+  corner-anchored surfaces with no atomic cross-surface commit.
+- **Known limit:** a card already shown when fullscreen starts keeps expiring, as with lock.
+  `msg history` recovers it; only a fullscreen-state signal would fix it.
 
 **Outputs.** v1 places the stack on the compositor's choice: a null `wl_output`, which scoot
 resolves to its primary output today (`crates/scoot/src/compositor/layer_shell.rs:228-239`).
@@ -594,7 +607,7 @@ entries.
 | [`notify-popups`](../../docs/scootbar/backlog/notify-popups.md): cards, stack, lock and idle rules, outputs, the look layer | daily-drive | `notify-server`, `scootui-surfaces-on-demand`, `look-format` |
 | [`notify-control`](../../docs/scootbar/backlog/notify-control.md): the control socket, `msg`, JSON, `subscribe`, `wait`, scoped `reload` | computer use | `notify-popups`, `scootui-extract-control` |
 | [`notify-dnd-history-rules`](../../docs/scootbar/backlog/notify-dnd-history-rules.md): DND, the history ring and `restore`, `[[rule]]` with `exec` | daily-drive | `notify-control` |
-| [`notify-fullscreen-hold-spike`](../../docs/scootbar/backlog/notify-fullscreen-hold-spike.md) (research): the `top`-surface hold | daily-drive | `notify-popups` |
+| [`notify-fullscreen-hold-spike`](../../docs/scootbar/backlog/resolved/notify-fullscreen-hold-spike-done.md) (research): the `top`-surface hold | daily-drive | `notify-popups` |
 | [`notify-bar-feed`](../../docs/scootbar/backlog/notify-bar-feed.md): native push to the bar | daily-drive | `notify-dnd-history-rules` |
 | [`notify-nix`](../../docs/scootbar/backlog/notify-nix.md): modules, the look layer, profile switch (opt-in) | daily-drive | `notify-bar-feed`, `look-format` |
 | [`notify-packaging`](../../docs/scootbar/backlog/notify-packaging.md): deb, rpm, Arch, install.sh | daily-drive | `notify-nix` |

@@ -164,7 +164,7 @@ Shared foundation ([epic](resolved/extract-scootui-done.md)):
 - [Prototype: the go/no-go gate against mako](resolved/notify-prototype-done.md) (medium)
 - [The D-Bus server and model](resolved/notify-server-done.md), [popups](resolved/notify-popups-done.md), [the control interface](notify-control.md), [DND, history, rules](resolved/notify-dnd-history-rules-done.md), [the bar feed](resolved/notify-bar-feed-done.md)
 - [Nix, the look layer and the opt-in switch](resolved/notify-nix-done.md), [packaging and the site](resolved/notify-packaging-done.md), [flip the default](resolved/notify-default-flip-done.md); follow-ups: [scootnotify vs mako A/B](resolved/notify-ab-bench-done.md), [theme the daemon behind a target](resolved/notify-look-target-done.md), [`look apply` sends `msg reload --look`](resolved/notify-look-reload-done.md)
-- Experiment: [a fullscreen hold through a `top` surface](notify-fullscreen-hold-spike.md)
+- Experiment: [a fullscreen hold through a `top` surface](resolved/notify-fullscreen-hold-spike-done.md): conditional GO, measured 2026-11-05 (needs [a core fix](../../backlog/core/top-layer-withhold-under-any-fullscreen.md) first)
 
 [`scootlaunch`: the launcher](launcher.md) (epic):
 - [Prototype: the go/no-go gate against fuzzel](resolved/launch-prototype-done.md) (medium): GO, measured 2026-10-18 on the dev VM (no M2 access)
