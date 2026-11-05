@@ -1,9 +1,10 @@
 ---
 title: "nix test's scootnotify bind guard disagrees with the CLI"
-status: "open"
-area: "testing"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-05"
 ---
 
 # nix test's scootnotify bind guard disagrees with the CLI
