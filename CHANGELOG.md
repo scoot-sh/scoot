@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.3](https://github.com/scoot-sh/scoot/compare/v0.7.2...v0.7.3) - 2026-11-05
+
+### scoot
+
+- fixed: create /tmp/.X11-unix before spawning XWayland ([#920](https://github.com/scoot-sh/scoot/pull/920))
+
 ## [0.7.2](https://github.com/scoot-sh/scoot/compare/v0.7.1...v0.7.2) - 2026-11-04
 
 ### scootlaunch
