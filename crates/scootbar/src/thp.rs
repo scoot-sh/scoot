@@ -35,15 +35,18 @@ pub fn disable() {
     let _ = rustix::thread::disable_transparent_huge_pages(true);
 }
 
-/// Lets the command this process is about to become, or whatever it
-/// launches, use huge pages again. For the one process that is about to
-/// `exec` a user's command and has nothing left to protect.
+/// Clears the opt-out, unconditionally: huge pages are enabled afterwards
+/// even if whoever started the bar had already disabled them, so a bar
+/// started that way hands its commands huge pages anyway. For the one
+/// process that is about to `exec` a user's command and has nothing left
+/// to protect.
 pub fn restore() {
     let _ = rustix::thread::disable_transparent_huge_pages(false);
 }
 
-/// Starts `command` so that it runs with the huge pages the bar was
-/// started with, and leaves the bar's own heap opted out again after.
+/// Starts `command` with huge pages enabled (see [`restore`]: enabled, not
+/// the bar's starting setting), and leaves the bar's own heap opted out
+/// again after.
 pub fn spawn(command: &mut Command) -> io::Result<Child> {
     restore();
     let child = command.spawn();
