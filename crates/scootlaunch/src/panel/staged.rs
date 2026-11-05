@@ -25,7 +25,7 @@ pub(super) struct Shape {
     /// panel's origin stays put as rows come and go.
     pub size: (u32, u32),
     /// The panel's height in device pixels as drawn now, when it draws
-    /// fewer rows than `size` holds ([`crate::layout::Layout::drawn_height`]);
+    /// fewer rows than `size` holds (`PanelView::drawn_height`, from [`crate::layout::Layout::height`]);
     /// `None` for the whole of `size`.
     pub drawn_height: Option<u32>,
     /// Its corner radius, logical.

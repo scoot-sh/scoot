@@ -51,8 +51,10 @@ around them, and not a bare field when the list is empty), at most `rows`
 - The stage's shadow table is keyed on the radius the panel can draw, not on
   its size, so a changing row count rebuilds nothing (the first version
   allocated 17 times over 18 key frames instead of 9; a test pins it).
-- Typing only narrows the list, so the first frame is the tallest: every pooled
-  layer is already at its largest.
+- The panel opens on the full list, so no later frame is taller than the first
+  and the pooled layers never grow. A test pins both directions: the same key
+  sequence (shrinking on typing, regrowing on backspace, 10 -> 3 -> 10 rows)
+  allocates no more than the same frames at a constant height.
 
 ## Not in this ticket
 
