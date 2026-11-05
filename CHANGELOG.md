@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.5](https://github.com/scoot-sh/scoot/compare/v0.7.4...v0.7.5) - 2026-11-05
+
+### scootlaunch
+
+- added: size the apps panel to its matches ([#925](https://github.com/scoot-sh/scoot/pull/925))
+
 ## [0.7.3](https://github.com/scoot-sh/scoot/compare/v0.7.2...v0.7.3) - 2026-11-05
 
 ### scoot
