@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.6](https://github.com/scoot-sh/scoot/compare/v0.7.5...v0.7.6) - 2026-11-05
+
+### scootbar
+
+- fixed: opt the bar out of transparent huge pages, and not what it launches ([#927](https://github.com/scoot-sh/scoot/pull/927))
+
 ## [0.7.5](https://github.com/scoot-sh/scoot/compare/v0.7.4...v0.7.5) - 2026-11-05
 
 ### scootlaunch
