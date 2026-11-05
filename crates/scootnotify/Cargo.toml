@@ -30,7 +30,7 @@ scoot-rt.workspace = true
 # poll-loop Wayland half and the control socket's server half: the shared
 # crate, behind features so the headless path (no compositor, no control
 # client) links only what it uses. No keyboard (pointer only), no entry.
-scootui = { path = "../scootui", default-features = false, features = ["surfaces", "wayland", "icons", "png", "control"] }
+scootui = { path = "../scootui", default-features = false, features = ["surfaces", "icons", "png", "control"] }
 # The control socket's requests, replies and events (`list`, `dismiss`,
 # `invoke`, `reload`, `subscribe`, `version`; `wait` is client-side): the
 # same versions scootbar speaks, so no new package enters the tree.
