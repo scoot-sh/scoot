@@ -1,9 +1,10 @@
 ---
 title: "Withhold a top-layer surface's frame callbacks under any covering fullscreen window, not only an opaque one"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-05"
 ---
 
 # Withhold a `top` surface's frame callbacks under any covering fullscreen window
@@ -43,3 +44,12 @@ re-run the occlusion tests and the render benchmark.
 ## Not in this ticket
 
 The scootnotify mode itself. See the resolution of the spike entry.
+
+## Resolution
+
+The `Layer::Top` arm of `withhold_frame` is now `state.covered_by_fullscreen(output)`; the
+opacity guard stays for `bottom`/`background` (`covering_window_is_opaque` is still used by
+`opaque_window_spans_output`), and `overlay` is never withheld. Pinned in
+`compositor/fullscreen/tests/occlusion.rs`: an alpha-format cover (no opaque region) and a
+half-alpha `wp_alpha_modifier_v1` cover both withhold `top`, still serve `overlay`, and the held
+callback completes on the first frame after the cover lifts.

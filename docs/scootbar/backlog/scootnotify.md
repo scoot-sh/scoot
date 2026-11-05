@@ -31,7 +31,7 @@ Children, in order (each `blocked` names its predecessors):
 5. [notify-bar-feed](resolved/notify-bar-feed-done.md), then [notify-nix](resolved/notify-nix-done.md),
    [notify-packaging](resolved/notify-packaging-done.md) and [notify-default-flip](notify-default-flip.md).
 
-Experiment: [notify-fullscreen-hold-spike](resolved/notify-fullscreen-hold-spike-done.md): conditional GO, behind [a core fix](../../backlog/core/top-layer-withhold-under-any-fullscreen.md).
+Experiment: [notify-fullscreen-hold-spike](resolved/notify-fullscreen-hold-spike-done.md): conditional GO, behind [a core fix](../../backlog/resolved/top-layer-withhold-under-any-fullscreen-done.md).
 
 Each milestone's resource table is published here, and kept rather than overwritten, until the
 app gets its own backlog. The first targets are the [design's budgets](../../../dev/design/scootnotify.md#budgets),

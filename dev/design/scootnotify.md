@@ -232,18 +232,18 @@ A "hold while fullscreen" mode is **not v1**. The spike [`notify-fullscreen-hold
 measured it on 2026-11-05 (conditional GO; numbers in its Resolution). The idea needs no
 foreign-toplevel machinery. Put non-critical cards on a
 `top` surface. scoot withholds frame callbacks from a `top` surface that has committed a
-buffer, while an opaque fullscreen window covers the output
-(`crates/scoot/src/compositor/layer_shell/occlusion.rs:15-26,96-113`). The
+buffer, while any fullscreen window covers the output
+(`crates/scoot/src/compositor/layer_shell/occlusion.rs`, the `Layer::Top` arm). The
 presentation-started expiry clock then holds those cards for free. Critical cards stay on
 a second, `overlay` surface. What the spike measured:
 
 - **Opaque cover (XRGB, or ARGB with a full opaque region): held.** The `top` surface gets no
   callback while covered, and one 27 ms after the window leaves fullscreen.
-- **Any other fullscreen window: not held on v0.7.9.** The card is not drawn (scoot hides `top`
-  under every fullscreen window) but its callback is served, so the clock runs unseen. That is a
-  scoot mismatch with a one-line fix, filed as
-  [`top-layer-withhold-under-any-fullscreen`](../../docs/backlog/core/top-layer-withhold-under-any-fullscreen.md);
-  the mode waits for it.
+- **Any other fullscreen window: not held on v0.7.9.** The card was not drawn (scoot hides `top`
+  under every fullscreen window) but its callback was served, so the clock ran unseen. Fixed after
+  v0.7.9 by
+  [`top-layer-withhold-under-any-fullscreen`](../../docs/backlog/resolved/top-layer-withhold-under-any-fullscreen-done.md):
+  `top` is now held under any covering fullscreen window, opaque or not.
 - **Not scoot-specific:** sway 1.12 holds under both opaque and translucent windows. Other
   compositors were not measured, and the hold is compositor behavior, not protocol, so it is
   best-effort.

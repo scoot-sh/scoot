@@ -40,7 +40,7 @@ Part of this ticket's work, not a follow-up: update `site/src/content/docs/scoot
 
 **Verdict: conditional GO.** The mechanism works and is cheap, but it cannot ship against scoot
 v0.7.9. A one-line core change comes first
-([`top-layer-withhold-under-any-fullscreen`](../../../backlog/core/top-layer-withhold-under-any-fullscreen.md)),
+([`top-layer-withhold-under-any-fullscreen`](../../../backlog/resolved/top-layer-withhold-under-any-fullscreen-done.md)),
 and the card stack has to be split across two surfaces. Nothing shipped in this PR: it is a
 finding, with the design updated (`dev/design/scootnotify.md`, Fullscreen) and no user-visible
 change, so `site/` is untouched.
