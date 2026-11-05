@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.10](https://github.com/scoot-sh/scoot/compare/v0.7.9...v0.7.10) - 2026-11-05
+
+### scoot
+
+- fixed: withhold a top layer's frame callbacks under any covering fullscreen window ([#939](https://github.com/scoot-sh/scoot/pull/939))
+
 ## [0.7.6](https://github.com/scoot-sh/scoot/compare/v0.7.5...v0.7.6) - 2026-11-05
 
 ### scootbar
