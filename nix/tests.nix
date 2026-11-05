@@ -10223,7 +10223,9 @@ let
           let
             m = builtins.match "\\+?0*([1-9][0-9]*)" w;
           in
-          m != null && builtins.stringLength (builtins.head m) <= 10 && lib.toInt (builtins.head m) <= 4294967295;
+          m != null
+          && builtins.stringLength (builtins.head m) <= 10
+          && lib.toInt (builtins.head m) <= 4294967295;
         # A bind's command string: a plain string, or the table form's
         # `action`; anything else is not a bind this guard can read.
         actionOf = b: if builtins.isAttrs b then b.action or null else b;
@@ -10241,7 +10243,13 @@ let
             if cmd == "dismiss" then
               arg != null && (arg == "--all" || idOk arg)
             else if cmd == "dnd" then
-              arg == null || builtins.elem arg [ "on" "off" "toggle" "status" ]
+              arg == null
+              || builtins.elem arg [
+                "on"
+                "off"
+                "toggle"
+                "status"
+              ]
             else
               arg == null
           );
@@ -10277,9 +10285,9 @@ let
       assert !accepted { action = "spawn /x/bin/scootnotify msg dismiss 0"; };
       assert !accepted { };
       # every profile bind is a string or a table with a string action
-      assert lib.all (b: builtins.isString b || (builtins.isAttrs b && builtins.isString (b.action or null))) (
-        lib.attrValues binds
-      );
+      assert lib.all (
+        b: builtins.isString b || (builtins.isAttrs b && builtins.isString (b.action or null))
+      ) (lib.attrValues binds);
       assert scootnotifyBinds != [ ];
       assert lib.all accepted scootnotifyBinds;
       true
