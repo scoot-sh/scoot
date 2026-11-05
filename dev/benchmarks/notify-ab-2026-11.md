@@ -26,7 +26,7 @@ libseat, systemd-minimal-libs, pixman, libxkbcommon, libgcc; same
 bytes otherwise; `meta.txt` records the sha256 of the copies).
 
 Script: `scripts/notify-ab-bench/bench.sh` (shares `stats.awk` with the
-launcher bench). Raw per-iteration values: 
+launcher bench). Raw per-iteration values:
 `dev/benchmarks/notify-ab-2026-11-data/run1/` (scootnotify measured
 first) and `run2/` (mako first), plus `run1.log`/`run2.log`, each cell
 `timeouts/n/min/median/p95/max/mean` over its file:
@@ -148,13 +148,13 @@ there). mako has a second thread once it has shown a card.
 - **Not the M2; headless only.** The dev VM is a 6-vCPU virtual machine
   and also runs unrelated headless
   scoot sessions and bus daemons from other work (listed in `meta.txt`,
-  left alone; load average 0.00-0.01 at start and end of both passes).
+  left alone; load average 0.00-0.05 at start and end of both passes).
   Absolute milliseconds will not transfer to real hardware; the
   ordering is what to read.
 - **The cards are not identical.** scootnotify draws a three-line card
   (summary, `app · now`, body; rounded border, urgency border color);
   mako a two-line one (summary, body). Heights and buffer sizes differ,
-  so the work per frame differs;
+  so the work per frame differs.
 - **"First frame" means the first frame that differs from base**, so a
   partly faded-in frame counts. scootnotify animates a card in; mako
   draws its final frame at once. The first differing frame is not the
