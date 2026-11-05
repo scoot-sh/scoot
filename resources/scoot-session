@@ -91,6 +91,13 @@ SCOOT_BIN="${SCOOT_BIN:-$(dirname "$0")/scoot}"
 
 die() {
     echo "scoot-session: $*" >&2
+    # greetd hands the session's stderr to the tty the compositor takes
+    # over (nobody reads it), so a refused login leaves no trace at all:
+    # the seat just flips back to the greeter. Mirror the reason into
+    # the system journal (`journalctl -b -t scoot-session`), best-effort.
+    if command -v systemd-cat >/dev/null 2>&1; then
+        printf 'scoot-session: %s\n' "$*" | systemd-cat -t scoot-session -p err 2>/dev/null || true
+    fi
     # A starting agent must not outlive a refused login (it would
     # keep answering prompts for a session that never started):
     # stop it before restoring the environment and exiting. Unset
@@ -396,6 +403,21 @@ fi
 # so the polls below read the new start, not the old death.
 systemctl --user reset-failed "$SERVICE" >/dev/null 2>&1 || true
 
+# is_compositor_socket <name>: exit 0 when a runtime-dir entry is named
+# the way scoot names its display, `wayland-<number>` (it binds
+# `wayland-1` through `wayland-32`, `wayland_accept.rs`). Other
+# `wayland-*` sockets are other programs': Firefox binds
+# `wayland-proxy-<pid>` for its own startup, within the second this
+# launcher's readiness poll sleeps, and counting it as scoot's second
+# socket refused the login and stopped the compositor (a Firefox in
+# `[autostart]` bounced the session back to the greeter, at random).
+is_compositor_socket() {
+    case "${1#wayland-}" in
+        '' | *[!0-9]*) return 1 ;;
+    esac
+    [ "${1#wayland-}" != "$1" ]
+}
+
 # The Wayland sockets already here (stale ones from dead sessions,
 # another compositor's, another login sharing the directory): the
 # display is whichever socket scoot itself creates below, i.e. one not
@@ -407,6 +429,7 @@ systemctl --user reset-failed "$SERVICE" >/dev/null 2>&1 || true
 snap_before=" "
 for sock in "$XDG_RUNTIME_DIR"/wayland-*; do
     [ -S "$sock" ] || continue
+    is_compositor_socket "${sock##*/}" || continue
     snap_before="$snap_before${sock##*/}:$(stat -c %i "$sock" 2>/dev/null || echo 0) "
 done
 
@@ -576,6 +599,7 @@ WAYLAND_DISPLAY=""
 for sock in "$XDG_RUNTIME_DIR"/wayland-*; do
     [ -S "$sock" ] || continue
     name=${sock##*/}
+    is_compositor_socket "$name" || continue
     id=$(stat -c %i "$sock" 2>/dev/null || echo 0)
     case "$snap_before" in
         *" $name:$id "*) continue ;;
