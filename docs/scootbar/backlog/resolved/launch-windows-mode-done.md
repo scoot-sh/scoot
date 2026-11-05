@@ -39,8 +39,8 @@ Window actions beyond activate.
 
 ## Resolution
 
-Landed 2026-11-05 on `feat/scootlaunch-windows-mode` (PR number in the
-PR itself; `feat(scootlaunch): windows mode`).
+Landed 2026-11-05 in PR #941 (`feat(scootlaunch): windows mode over
+wlr-foreign-toplevel-management`), on `feat/scootlaunch-windows-mode`.
 
 What shipped: `scootlaunch --windows` (`src/windows.rs`, the protocol
 session; `src/windows/dispatch.rs`, its events; `src/windows/entries.rs`,
