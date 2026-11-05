@@ -1,0 +1,32 @@
+--- machine ---
+Linux scoot-vm 6.18.50 #1-NixOS SMP PREEMPT Mon Sep  7 15:23:00 UTC 2026 aarch64 GNU/Linux
+date: 2026-11-05T12:19:08Z
+load at start: 0.01 0.02 0.00 1/188 4099143
+nproc: 6
+--- other compositors/daemons already running (not ours; left alone) ---
+1446274 dbus-daemon     dbus-daemon --session --fork --print-address
+1446335 dbus-daemon     dbus-daemon --session --fork --print-address
+1446368 dbus-daemon     dbus-daemon --session --fork --print-address
+1446419 dbus-daemon     dbus-daemon --session --fork --print-address
+1446841 dbus-daemon     dbus-daemon --session --fork --print-address
+1446891 dbus-daemon     dbus-daemon --session --fork --print-address
+1446957 dbus-daemon     dbus-daemon --session --fork --print-address
+1447614 dbus-daemon     dbus-daemon --session --fork --print-address
+1447799 dbus-daemon     dbus-daemon --session --fork --print-address
+1931633 dbus-daemon     dbus-daemon --nofork --print-address 4 --session
+2063918 .scoot-wrapped  /nix/store/i1p1n1ryqk22xxs2lviycfcxglcn6mpg-scoot-0.6.28/bin/scoot --headless --width 800 --height 600 --outputs 1 --socket /tmp/depth-dbg-Q7lSQW/scoot.sock --config /tmp/depth-dbg-Q7lSQW/scoot.toml
+2064319 .scoot-wrapped  /nix/store/i1p1n1ryqk22xxs2lviycfcxglcn6mpg-scoot-0.6.28/bin/scoot --headless --width 800 --height 600 --outputs 1 --socket /tmp/depth-dbg2-GieElI/scoot.sock --config /tmp/depth-dbg2-GieElI/scoot.toml
+--- binaries ---
+7f8ee087be7fda9ce1e4e4f047eac76c20d491398ac6b8ac05e541b06f368c49  /home/dev/nab/bin/scoot
+0cccfd4567874149864a00c8dbc96ab7cc893fd39b1178823fdb5afeb1f51cb6  /home/dev/nab/bin/scootnotify
+822961341716fa9576ba5a283795d581a699ce6b865493d9a6505fb5140d4fda  /nix/store/5x3nwidxrwmc531l7ia6a2xrisnq1qzv-mako-1.11.0/bin/mako
+scoot 0.7.7 (ipc protocol 13)
+scootnotify 0.7.7
+mako: /nix/store/5x3nwidxrwmc531l7ia6a2xrisnq1qzv-mako-1.11.0/bin/mako (makoctl: /nix/store/5x3nwidxrwmc531l7ia6a2xrisnq1qzv-mako-1.11.0/bin/makoctl)
+--- font ---
+FONT=/nix/store/33wfvwgr4vy0gaznf3wafla7mfni1znw-dejavu-fonts-minimal-2.37/share/fonts/truetype/DejaVuSans.ttf
+MAKO_FONT=DejaVu Sans 10
+--- parameters ---
+N=30 IDLE_N=30 IDLE_SECS=60 IDLE_STATES=fresh closed ORDER=mako scootnotify
+load at end: 0.00 0.00 0.00 2/190 4104900
+--- leftovers (ours should be none) ---
