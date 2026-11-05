@@ -52,11 +52,15 @@ color = "#2B3648"
 /// of the wrong path; a pipeline that needs no helper passes either way.
 fn without_helpers_on_path(f: impl FnOnce()) {
     let old = std::env::var_os("PATH");
-    let empty = std::env::temp_dir().join("scoot-look-empty-path");
-    std::fs::create_dir_all(&empty).expect("empty PATH dir");
+    // Removed when the guard drops, after `PATH` is restored below.
+    let empty_dir = tempfile::Builder::new()
+        .prefix("scoot-look-empty-path-")
+        .tempdir()
+        .expect("empty PATH dir");
+    let empty = empty_dir.path();
     // `set_var` is `unsafe` (it can race another thread's `getenv`); the
     // body runs alone here and restores the value before returning.
-    unsafe { std::env::set_var("PATH", &empty) };
+    unsafe { std::env::set_var("PATH", empty) };
     f();
     if let Some(path) = old {
         unsafe { std::env::set_var("PATH", path) };

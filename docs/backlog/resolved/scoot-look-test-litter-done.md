@@ -1,9 +1,10 @@
 ---
 title: "scoot-look test litter in the system temp dir"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-05"
 ---
 
 # scoot-look test litter in the system temp dir
@@ -30,3 +31,12 @@ HOME/XDG (scratch HOME plus every `XDG_*` plus `TMPDIR`).
 ## Not in this ticket
 
 Any behavior change to `scoot-look` itself.
+
+## Resolution
+
+Landed in PR #933. `tmp_case` returns a `tempfile::TempDir` guard and
+`tests/non_nix.rs` uses one for its empty `PATH` dir, so both are removed
+on drop, also after a failed assertion. The FIFO test is unchanged. With a
+private `TMPDIR`, the unfixed tree left 7 entries after
+`cargo nextest run -p scoot-look` and the fixed tree leaves 0 after
+nextest and after `cargo test -p scoot-look`.
