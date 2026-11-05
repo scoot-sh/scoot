@@ -848,11 +848,13 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    fn tmp_case(name: &str) -> std::path::PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("scoot-look-main-{name}-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("tmp case dir");
-        dir
+    /// A scratch directory removed when the guard drops (also on a
+    /// failed assertion), so a run leaves nothing in `$TMPDIR`.
+    fn tmp_case(name: &str) -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix(&format!("scoot-look-main-{name}-"))
+            .tempdir()
+            .expect("tmp case dir")
     }
 
     /// Run `f` on a path, giving up after 10 seconds: a regression to
@@ -870,7 +872,8 @@ mod tests {
     fn fifo_refuses_without_hanging() {
         // Round 2 finding 1: `mkfifo t/look.toml; scoot-look validate t`
         // hung in `File::open`, past the symlink-only pre-check.
-        let dir = tmp_case("fifo");
+        let _guard = tmp_case("fifo");
+        let dir = _guard.path();
         let fifo = dir.join("look.toml");
         let _ = std::fs::remove_file(&fifo);
         let status = std::process::Command::new("mkfifo")
@@ -885,7 +888,8 @@ mod tests {
 
     #[test]
     fn symlink_refuses() {
-        let dir = tmp_case("symlink");
+        let _guard = tmp_case("symlink");
+        let dir = _guard.path();
         let real = dir.join("real.toml");
         std::fs::write(&real, b"schema = 1\n").expect("write");
         let link = dir.join("look.toml");
@@ -904,7 +908,8 @@ mod tests {
 
     #[test]
     fn regular_file_reads() {
-        let dir = tmp_case("regular");
+        let _guard = tmp_case("regular");
+        let dir = _guard.path();
         let file = dir.join("look.toml");
         std::fs::write(&file, b"schema = 1\n").expect("write");
         assert_eq!(
@@ -982,10 +987,11 @@ mode = "fill"
     fn catalog_sources_resolve_extends() {
         // The Nix derivation's shape: every declared source in one
         // directory, a child resolving its base through it.
-        let root = tmp_case("catalog-ok");
-        write_catalog_look(&root, "base-a", "");
-        write_catalog_look(&root, "child-b", "extends = \"base-a\"\n");
-        let sources = read_catalog_sources(&root, Origin::Declared).expect("sources");
+        let _guard = tmp_case("catalog-ok");
+        let root = _guard.path();
+        write_catalog_look(root, "base-a", "");
+        write_catalog_look(root, "child-b", "extends = \"base-a\"\n");
+        let sources = read_catalog_sources(root, Origin::Declared).expect("sources");
         assert_eq!(sources.len(), 2);
         let resolved = resolve(&sources, "child-b").expect("child resolves");
         assert_eq!(resolved.name, "child-b");
@@ -996,11 +1002,12 @@ mode = "fill"
     fn catalog_sources_skip_strays() {
         // Stray files and dirs without a manifest are skipped: a README
         // beside the looks must not fail every look's build.
-        let root = tmp_case("catalog-strays");
+        let _guard = tmp_case("catalog-strays");
+        let root = _guard.path();
         std::fs::write(root.join("README.md"), b"notes").expect("readme");
         std::fs::create_dir_all(root.join("empty")).expect("empty dir");
-        write_catalog_look(&root, "base-a", "");
-        let sources = read_catalog_sources(&root, Origin::Declared).expect("sources");
+        write_catalog_look(root, "base-a", "");
+        let sources = read_catalog_sources(root, Origin::Declared).expect("sources");
         assert_eq!(sources.len(), 1);
     }
 
@@ -1008,12 +1015,13 @@ mode = "fill"
     fn catalog_sources_refuse_invalid_manifest() {
         // A broken manifest fails the build with the look named, before
         // anything renders.
-        let root = tmp_case("catalog-bad");
-        write_catalog_look(&root, "base-a", "");
+        let _guard = tmp_case("catalog-bad");
+        let root = _guard.path();
+        write_catalog_look(root, "base-a", "");
         let dir = root.join("broken-b");
         std::fs::create_dir_all(&dir).expect("look dir");
         std::fs::write(dir.join("look.toml"), b"schema = 1\nname = 42\n").expect("bad toml");
-        let error = read_catalog_sources(&root, Origin::Declared).expect_err("refuses");
+        let error = read_catalog_sources(root, Origin::Declared).expect_err("refuses");
         assert!(error.contains("broken-b"), "names the look: {error}");
     }
 
@@ -1021,11 +1029,12 @@ mode = "fill"
     fn catalog_sources_refuse_misnamed_look() {
         // The manifest name must match its directory, as in the live
         // catalog scan.
-        let root = tmp_case("catalog-misnamed");
+        let _guard = tmp_case("catalog-misnamed");
+        let root = _guard.path();
         let dir = root.join("dir-name");
         std::fs::create_dir_all(&dir).expect("look dir");
         std::fs::write(dir.join("look.toml"), catalog_toml("other-name", "")).expect("look.toml");
-        let error = read_catalog_sources(&root, Origin::Declared).expect_err("refuses");
+        let error = read_catalog_sources(root, Origin::Declared).expect_err("refuses");
         assert!(error.contains("dir-name"), "names the directory: {error}");
     }
 }

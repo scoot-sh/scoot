@@ -1,9 +1,10 @@
 ---
 title: "scoot-look test litter in the system temp dir"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-05"
 ---
 
 # scoot-look test litter in the system temp dir
