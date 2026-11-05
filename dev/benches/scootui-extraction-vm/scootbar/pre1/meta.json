@@ -1,0 +1,120 @@
+{
+ "date": "2026-11-05 02:30:39 UTC",
+ "machine": {
+  "kernel": "6.18.50",
+  "arch": "aarch64",
+  "cpus": 6,
+  "page_size": 4096,
+  "loadavg_start": [
+   0.7197265625,
+   1.3955078125,
+   1.30859375
+  ],
+  "start": {
+   "cpus": {},
+   "temps_c": {},
+   "power": {},
+   "loadavg": [
+    0.7197265625,
+    1.3955078125,
+    1.30859375
+   ]
+  },
+  "cpu": "Apple -",
+  "loadavg_end": [
+   0.52685546875,
+   0.4892578125,
+   0.88427734375
+  ],
+  "end": {
+   "cpus": {},
+   "temps_c": {},
+   "power": {},
+   "loadavg": [
+    0.52685546875,
+    0.4892578125,
+    0.88427734375
+   ]
+  }
+ },
+ "commit": "",
+ "tree_dirty": false,
+ "harness": {
+  "bars.py": "2d7e50acb79e32621a623096c860963b92d383f1a43dc20461cc08bd4da31fb6",
+  "bench.py": "7f12a2cf8b6ea98e3a84fbfac12b2a476ef197a8a4e4b96b9e55a5e3162d0d6b",
+  "machine.py": "281bb9c928a14c9ccfb329f8307c866e8da5889946e0b7d72071179e8424a7af",
+  "measure.py": "c25713b80ef1a0417c6c771fb8a768d85fe11863c68ffdf0774251aee1b7d7e5",
+  "stage.py": "d54fb17628d9e5a1565b45a63640dbd2d2e5db64119d8083d9f4a2a3d794b288",
+  "tables.py": "2a66faf3f77b43d5f6ca22d73113eaff594dc1a310e8edbdf341c215797a5746",
+  "test_scootbar_bench.py": "1610069267cf8c98e288717f0c9ddb62b02c30d6b8af656cfbfd29591dd59cba"
+ },
+ "scope": "clock",
+ "compositors": [
+  "scoot"
+ ],
+ "compositor_versions": {
+  "scoot": "scoot 0.7.3 (ipc protocol 13)"
+ },
+ "compositor_binaries": {
+  "scoot": {
+   "path": "/var/tmp/eb-head-target/release/scoot",
+   "sha256": "115aec88b127438d39a31a5d03f7a7d1f9698fc0616fbef16532b003ff5492d3"
+  }
+ },
+ "tools": {
+  "foot": "/nix/store/v9g00m8vvf13112rph5b0yl1hsd09qfj-foot-1.28.0",
+  "dbus": "/nix/store/y41f5xwsyfzmwh624a5q5xdfaslcv8vf-dbus-1.16.2",
+  "dejavu_fonts": "/nix/store/d960vw5shaaj5dhfqzw7y25d01cqhk36-dejavu-fonts-2.37",
+  "font_file": "/nix/store/bli3rm8975vv5q9mlnd1lfkp0ss7cf5m-dejavu-fonts-minimal-2.37/share/fonts/truetype/DejaVuSans.ttf"
+ },
+ "settings": {
+  "rounds": 5,
+  "settle_secs": 30.0,
+  "idle_secs": 300.0,
+  "switches": 240,
+  "switch_hz": 4.0
+ },
+ "bars": {
+  "scootbar": {
+   "version": "scootbar 0.3.1",
+   "ran": {
+    "scoot": true
+   },
+   "binaries": [
+    {
+     "path": "/var/tmp/eb-pre-target/release/scootbar",
+     "sha256": "ab0a04cdaf5e8679ebea5dc13ffb8640ad61e60318d07667e91369574a7a5a44"
+    }
+   ],
+   "static": {
+    "binaries_bytes": 3019624,
+    "ldd_libraries_bytes": 133096,
+    "size_bytes": 3152720,
+    "runtime_only_bytes": 0
+   },
+   "code": {
+    "lines": 94775,
+    "lines_outside_tests": 63422,
+    "direct_dependencies": 12,
+    "dependency_names": [
+     "ab_glyph",
+     "png",
+     "rustix",
+     "scoot-ipc",
+     "scoot-look",
+     "scootbg-mem",
+     "serde",
+     "serde_json",
+     "toml",
+     "wayland-client",
+     "wayland-protocols",
+     "wayland-protocols-wlr"
+    ]
+   },
+   "source": {
+    "tree": "/var/tmp/eb-pre",
+    "commit": ""
+   }
+  }
+ }
+}

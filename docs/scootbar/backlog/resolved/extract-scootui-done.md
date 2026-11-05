@@ -138,35 +138,59 @@ as it landed: `scootbar`'s release binary byte-identical to `main`'s after
 `surfaces-on-demand`, `keyboard` and `entry-and-list`, and no
 `xkbcommon` edge in `cargo tree -p scootbar`.
 
-**Both benchmarks unchanged within the margin.**
+**Both benchmarks unchanged within the margin.** Measured on the dev VM
+(aarch64, 6 CPUs, `cgroup2`, scoot 0.7.3 headless as the only client), A-B-B-A for
+`scootbar` and A-B-A for `scootbg`, A = `7bc849614` (the claim commit just before
+`extract-draw`, 2026-10-18), B = `73569ff79` (v0.7.3), release builds in their own
+target dirs, the harnesses from B. Raw results, logs and commands are in
+[`dev/benches/scootui-extraction-vm/`](../../../../dev/benches/scootui-extraction-vm/README.md).
+The history between A and B is confounded: it holds the epic's moves and also
+unrelated work on `scootbar` and `scootbg` (look depth tokens #861, popup entrance
+#863, bar opacity #850, floating-bar shadow #878, the allocation-failure audit
+#894, #788 for `scootbg`). The harness's own noise rule (margin = the largest of 5%
+of the value, the spread, and a floor) decides "same".
 
-- `scootbar`: each child re-ran the ratchet rows (stripped size, `.text`, idle
-  RSS and PSS, wakeups, fds) against `main` on the dev VM and recorded no
-  regression: `extract-draw` size 3019488 vs 3019488, RSS 4652 vs 4648, PSS 2791
-  vs 2787, wakeups 2 vs 2; `extract-wayland` size identical, RSS identical,
-  wakeups and fds identical; `extract-control` size 3019520 vs 3019520, RSS
-  4900 vs 4840 (within sharing noise); `scoot-dbus-extract` +2016 B (+0.08%), RSS within one-run noise; `surfaces-on-demand`, `keyboard` and `entry-and-list` byte-identical
-  binaries. The stripped size rose from 3019520 B (`keyboard`) to 3085056 B
-  (`entry-and-list`), exactly 65536 B, one alignment step; each of those children measured its own
-  base, so the growth arrived with other commits on `main`, not with the extraction.
-  Those are paired steps on one machine; there is no single run of the
-  `scripts/scootbar-bench` harness across the whole epic (the last harness
-  runs are `m4-*`, before it), and none was made: weeks of unrelated `scootbar`
-  work would confound it.
-- `scootbg` is not on `scootui` (`cargo tree -p scootbg -e all` has no
-  `scootui`; `crates/scootbg/Cargo.toml` names only `scootbg-mem`), so the guard
-  rail's "leave it on its own copy and say so" branch applies and its release
-  gate was not re-run. No child touched a `scootbg` file. `scootbg-mem` is shared and
-  did change: `ShmBuffer::with_name` (`ShmBuffer::new` still calls it with
-  `scootbg-wallpaper`) and, in #894, the test-only `refuse_from` in the counting
-  allocator. The children's "scootbg byte-identical" is a diff
-  inference (no `scootbg` path), not a `cmp` of binaries.
+- `scootbar` (`scripts/scootbar-bench`, clock scope, 5 startups, 300 s idle, 240 workspace
+  switches; `compare` verdicts):
 
-What this does not claim: a post-extraction `scripts/scootbg-bench` run. The
-`scootbg` gate has not been measured since the last recorded run
-(`dev/benches/scootbg/2026-10-08-restore-idle`), and `scootbg`'s own code changed
-for unrelated reasons since (#776, #788, #802). If a `scootbg-mem` change ever
-affects its hot path, that is where the gate re-runs.
+  | Row | A, run 1 / 2 | B, run 1 / 2 |
+  |---|---|---|
+  | Bare executable, stripped (B) | 3,019,624 / 3,019,624 | 3,150,728 / 3,150,728 |
+  | Size with non-glibc `ldd` closure (B) | 3,152,720 / 3,152,720 | 3,283,824 / 3,283,824 |
+  | Startup to first frame (ms) | 28.8 / 38.8 | 30.1 / 40.4 |
+  | Idle RSS / PSS (MiB) | 4.7 / 3.1 | 4.8 / 3.2 |
+  | Idle wakeups per minute | 2 / 2 | 2 / 2 |
+  | Idle CPU in the window (ms) | 4.7 / 3.8 | 4.0 / 3.1 |
+  | CPU while switching workspaces (ms) | 0.9 / 0.2 | 1.3 / 0.2 |
+
+  Verdicts: B run 1 against A run 1 flags one row (switching CPU, 0.9 to 1.3 ms); B run 1
+  against A run 2 flags two (switching CPU, 1.3 against 0.2, and idle CPU, 4.0 against 3.8
+  ms); B run 2 against either A run flags none. Everything else is `same`. The size grew
+  131,104 B (+4.3%), inside the 5% margin the harness applies, and idle RSS and PSS +0.1
+  MiB each. The flagged rows are this box's noise: switching CPU is 0.9 and 0.2 on the
+  *same* binary A (run 1 and run 2), and 1.3 and 0.2 on B; no CPU row separates the trees
+  from run-to-run variation.
+  The size growth is not the extraction: every child measured its own step against its
+  own base (the table above), and the steps sum to under 5 KB; the rest came with the
+  feature commits listed above. The step from 3,019,520 B (keyboard) to 3,085,056 B
+  (entry-and-list) is +65,536 B, one alignment step, and also not from the epic (both
+  children recorded byte-identical binaries against their own `main`).
+- `scootbg` (`scripts/scootbg-bench`, `--only startup,restore,idle --daemons scootbg
+  --rounds 5`, 1x1080p and 2x4K, color and the 6000x4000 JPEG recorded in the
+  harness): 0 regressions beyond the margin for B against A run 1, B against A run 2 and A run 2
+  against A run 1. Size and Disk rows are identical (2,038,672 and 2,038,763 B; the
+  binary is 1,905,576 B in both). Restore CPU for the JPEG: A 639 / 585 ms, B 601 ms;
+  startup to a color on screen: A 34.6 / 37.2 ms, B 33.3 ms; idle wakeups and CPU
+  0 in every cell. B is *better* on idle memory (RSS 5.4 vs 3.5 MiB and PSS 4.1 vs
+  2.1 MiB with a color; RSS 37.4 vs 35.9 MiB with a 2x4K image), which `scootbg`'s own
+  commits in the window account for (not `scootui`, which it does not use; the cause
+  was not chased). The `2026-10-08-restore-idle` runs were on the Asahi M2 and
+  cannot be compared with a VM, so the A-B pair on one machine stands in for them.
+- `scootbg` is not on `scootui` (`cargo tree -p scootbg -e all` has no `scootui`), so
+  the guard rail's "leave it on its own copy and say so" branch applies. `scootbg-mem`
+  is shared and did change (`ShmBuffer::with_name`; `ShmBuffer::new` still calls it with
+  `scootbg-wallpaper`; the test-only `refuse_from`); the A-B run above is what
+  shows it cost `scootbg` nothing.
 
 The popups paragraph and the duplication table above describe the state when
 the epic was written (2026-09-29 to 2026-10-12); `crates/scootui` now holds
