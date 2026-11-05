@@ -288,3 +288,49 @@ fn an_unknown_msg_command_names_itself() {
     let error = parse(&["scootnotify", "msg", "wat"]).unwrap_err();
     assert!(error.contains("wat"), "{error}");
 }
+
+/// The `msg` grammar the Home Manager bind guard in `nix/tests.nix` (the
+/// `ok` / `!ok` asserts beside `idOk`) mirrors in Nix. That guard cannot
+/// run the real parser, so these are the same accept and reject strings run
+/// through it: if the CLI gets stricter or looser, this fails first. Change
+/// this table and that guard together.
+#[test]
+fn the_msg_grammar_matches_the_nix_bind_guard() {
+    let accepted = [
+        "dismiss --all",
+        "dismiss 1",
+        "dismiss +5",
+        "dismiss 4294967295",
+        "dismiss 007",
+        "dnd",
+        "dnd status",
+        "dnd on",
+        "dnd off",
+        "dnd toggle",
+        "restore",
+    ];
+    let rejected = [
+        "dismiss",
+        "dismiss 0",
+        "dismiss 000",
+        "dismiss 4294967296",
+        "dismiss 99999999999999999999",
+        "dismiss -1",
+        "dismiss 1 2",
+        "dismiss 5 --all",
+        "dnd maybe",
+        "dnd on off",
+        "restore now",
+    ];
+    let parse_msg = |case: &str| {
+        let mut words = vec!["scootnotify", "msg"];
+        words.extend(case.split(' '));
+        parse(&words)
+    };
+    for case in accepted {
+        assert!(parse_msg(case).is_ok(), "`msg {case}` should parse");
+    }
+    for case in rejected {
+        assert!(parse_msg(case).is_err(), "`msg {case}` should be refused");
+    }
+}

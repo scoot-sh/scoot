@@ -10213,7 +10213,9 @@ let
     # `fakeNotifyScoot` stand-in, and building the real binary into an
     # eval-only check would cost a Rust build for a string test. The
     # grammar's own accepts and rejects are pinned below, so a drift on
-    # either side shows as a failure here.
+    # either side shows as a failure here. The same strings run through the
+    # real parser in `the_msg_grammar_matches_the_nix_bind_guard`
+    # (`crates/scootnotify/src/cli/tests.rs`): update both together.
     (
       let
         # The id: digits, value 1..4294967295 (`u32::MAX`), zeros allowed
@@ -10264,6 +10266,7 @@ let
       assert ok "dismiss 1";
       assert ok "dismiss 4294967295";
       assert ok "dismiss 007";
+      assert ok "dismiss +5";
       assert ok "dnd";
       assert ok "dnd status";
       assert ok "dnd on" && ok "dnd off" && ok "dnd toggle";
