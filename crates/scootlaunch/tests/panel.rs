@@ -282,6 +282,93 @@ fn a_click_outside_the_panel_dismisses_it() {
 }
 
 #[test]
+fn a_click_below_a_short_panel_dismisses_it() {
+    // Three apps fill the minimum, three rows, of the ten the panel holds:
+    // the surface keeps its full height, and what lies below the drawn
+    // panel is not the panel, so a press there is a press outside it.
+    let Some((session, data_home, markers)) =
+        session_with_stubs("below-click", &["alpha", "beta", "gamma"])
+    else {
+        return;
+    };
+    let Some(mut panel) = Panel::start_on(session, data_home, &[], &[]) else {
+        return;
+    };
+    panel.wait_shown(rgb("#f9e2af"));
+    std::thread::sleep(Duration::from_millis(300));
+    let g = Geom::new(DEFAULT_EM, DEFAULT_RADIUS);
+    panel.save("shrink-few");
+    let (x0, y0, x1, y1) = panel.find_panel(rgb("#f9e2af"));
+    let drawn = y1 - y0;
+    assert!(
+        drawn.abs_diff(g.height(3)) <= 3,
+        "panel {drawn} px tall for three rows ({})",
+        g.height(3)
+    );
+    // Two rows under the last one, inside the surface, outside the panel.
+    panel.click((x0 + x1) / 2, y1 + 2 * g.row_h);
+    let status = panel.wait_exit();
+    assert_eq!(status.code(), Some(1), "a press below the panel exits 1");
+    for marker in &markers {
+        assert!(
+            fs::read_to_string(marker).unwrap_or_default().is_empty(),
+            "nothing launched"
+        );
+    }
+    panel.clean();
+}
+
+#[test]
+fn a_list_longer_than_the_rows_keeps_the_full_height() {
+    let bodies: Vec<(String, String)> = (0..14)
+        .map(|n| {
+            (
+                format!("app{n}.desktop"),
+                desktop(&format!("App {n}"), "/usr/bin/true"),
+            )
+        })
+        .collect();
+    let refs: Vec<(&str, &str)> = bodies
+        .iter()
+        .map(|(file, body)| (file.as_str(), body.as_str()))
+        .collect();
+    let Some((session, data_home)) = session_with_apps("full-height", &refs) else {
+        return;
+    };
+    let Some(mut panel) = Panel::start_on(session, data_home, &[], &[]) else {
+        return;
+    };
+    panel.wait_shown(rgb("#f9e2af"));
+    std::thread::sleep(Duration::from_millis(300));
+    let g = Geom::new(DEFAULT_EM, DEFAULT_RADIUS);
+    let (_, y0, _, y1) = panel.find_panel(rgb("#f9e2af"));
+    assert!(
+        (y1 - y0).abs_diff(g.height(10)) <= 3,
+        "panel {} px tall for ten rows ({})",
+        y1 - y0,
+        g.height(10)
+    );
+    panel.save("shrink-many");
+    // Typing narrows 14 apps to "App 1", "App 10".."App 13": five rows.
+    // The panel is shorter, and its top, with the search field, has not
+    // moved.
+    panel.type_text("App 1");
+    std::thread::sleep(Duration::from_millis(500));
+    panel.save("shrink-typed");
+    let (_, ty0, _, ty1) = panel.find_panel(rgb("#f9e2af"));
+    assert_eq!(ty0, y0, "the search field stays where it was");
+    assert!(
+        (ty1 - ty0).abs_diff(g.height(5)) <= 3,
+        "panel {} px tall for five rows ({})",
+        ty1 - ty0,
+        g.height(5)
+    );
+    panel.key("Escape");
+    panel.wait_exit();
+    panel.clean();
+}
+
+#[test]
 fn a_click_on_a_row_launches_it() {
     let Some((session, data_home, markers)) =
         session_with_stubs("row-click", &["alpha", "beta", "gamma"])
@@ -424,7 +511,8 @@ fn golden_one(name: &str) {
     let width = 40.0 * em;
     let radius = table["radius"].as_integer().expect("radius") as u32;
     let g = Geom::new(em, radius);
-    let height = g.height(10) as f32;
+    // Three apps: the minimum, not the ten rows the panel holds.
+    let height = g.height(3) as f32;
     assert!(
         (x1 - x0) as f32 >= width - 6.0 && (x1 - x0) as f32 <= width + 2.0,
         "{name}: panel width {} for {width}",

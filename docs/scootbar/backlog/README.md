@@ -226,7 +226,7 @@ hits the wall:
 [keyboard layout event](../../backlog/ipc/keyboard-layout-event.md).
 
 - [Audit the popup and icon zero-allocation pins](resolved/scootui-popup-alloc-pins-audit-done.md): all 12 pins mutation-proved real; `count_allocations` now panics when no counting allocator is installed — RESOLVED 2026-10-27
-- [launch-panel-shrink-to-content](launch-panel-shrink-to-content.md)
+- [launch-panel-shrink-to-content](resolved/launch-panel-shrink-to-content-done.md): the apps and run panel is as tall as its matches (three rows at least), drawn at the top of a full-height surface, so no resize and no allocation on a key — RESOLVED 2026-11-05
 - [launch-panel-bare-desktop-click](resolved/launch-panel-bare-desktop-click-done.md): the compositor sends an exclusive `scootlaunch` panel `closed` on a press outside it; the panel exits 1 on any `closed` — RESOLVED 2026-10-29
 - [launch-toggle-race-and-socket-mode](resolved/launch-toggle-race-and-socket-mode-done.md): atomic lock claim plus `0600`-before-publish staging rename — RESOLVED 2026-10-27
 - [control-socket-mode-window](resolved/control-socket-mode-window-done.md): the control socket is built `0600` in a `0700` staging dir and renamed onto its name; no chmod-after-bind window, in scootui and scootbg — RESOLVED 2026-10-27

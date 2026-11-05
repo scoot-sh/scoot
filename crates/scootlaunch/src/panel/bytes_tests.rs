@@ -93,6 +93,7 @@ pub(super) fn fingerprint(scales: &[scootui::density::Scale], dmenu: bool) -> u6
                         width,
                         height,
                         rows: 10,
+                        shown: 10,
                         error,
                         empty_text: "empty",
                         scale,

@@ -19,7 +19,7 @@
 use scootui::color::Color;
 use scootui::effects::ShadowStyle;
 use scootui::paint::{Canvas, Layer, Shadow, ShadowSpec};
-use scootui::region::Rect;
+use scootui::region::{Rect, effective_radius};
 
 use crate::look::Look;
 use crate::motion::{Motion, Pose, Slide};
@@ -142,7 +142,10 @@ pub fn fit_room(wanted: (u32, u32), surface: (u32, u32), panel: (u32, u32)) -> (
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Built {
     factor: f64,
-    panel: (u32, u32),
+    /// The radius the corner table is for, cut back to what the panel
+    /// holds: the one thing of the panel's size the tables depend on, so a
+    /// panel that grows or shrinks by rows (the apps list follows its
+    /// matches) rebuilds nothing.
     radius: u32,
 }
 
@@ -229,16 +232,15 @@ impl Stage {
         true
     }
 
-    /// Builds the shadow's tables when the scale, the radius or the
-    /// panel's size changed since they were built.
+    /// Builds the shadow's tables when the scale or the radius the panel
+    /// can draw changed since they were built.
     fn prepare(&mut self, at: &Scene) {
         let Some(spec) = self.style.spec() else {
             return;
         };
         let wanted = Built {
             factor: at.factor,
-            panel: at.panel,
-            radius: at.radius,
+            radius: effective_radius(at.radius, at.panel.0, at.panel.1),
         };
         if self.built == Some(wanted) && self.shadow.is_some() {
             return;

@@ -6,8 +6,8 @@ description: "Open, type, pick: keys, mouse, config, and theming for the scootla
 ![The launcher panel in moonrise, with a terminal PNG icon, a browser SVG icon, and a letter tile](../../../assets/scootlaunch-moonrise.png)
 
 Bare `scootlaunch` opens the panel: an overlay surface with exclusive
-keyboard, centered on the output, 40 em wide with 10 rows by default.
-Type to filter; Enter picks. The panel holds no surface when closed —
+keyboard, centered on the output, 40 em wide with up to 10 rows by
+default. Type to filter; Enter picks. The panel holds no surface when closed —
 one process per open.
 
 ```sh
@@ -33,6 +33,21 @@ instead of a 1x image the compositor scales up. A compositor with only an
 integer scale gets the panel drawn at that scale. If the scale changes
 while the panel is open (the output's scale set, or a monitor swapped), it
 redraws at the new one. Sizes in this page are logical pixels.
+
+## Size
+
+The panel is as tall as the rows it shows: one row per match, at least
+three, at most `rows`. Typing narrows the list and the panel shrinks;
+backspacing grows it back. The search field does not move: the panel keeps
+its top where a full-height panel has it, so a short panel sits a little
+above the middle of the output, and the field stays under your eyes while
+you type. Nothing is drawn below the panel, and a click there counts as
+outside it (it dismisses, as below). A list of three or fewer matches, or
+none, draws the three-row minimum; with `rows` set below three, the panel
+never exceeds `rows`.
+
+Only apps and run mode shrink. `--dmenu` keeps the height its `--lines`
+asks for.
 
 ## Icons
 
@@ -83,7 +98,7 @@ with it.
 | Page Up / Page Down, Ctrl+Home / Ctrl+End | by page, to the ends |
 | Enter | launch the selection |
 | Ctrl+Enter | run the typed text as a command |
-| Escape, or a click outside the panel | dismiss (exit 1); with a [motion](#motion) set, Escape fades out first |
+| Escape, or a click outside the panel (below a short one included) | dismiss (exit 1); with a [motion](#motion) set, Escape fades out first |
 
 Left/Right, Home/End, BackSpace, Delete, Ctrl+W, Ctrl+U and Ctrl+A
 edit the query. In dmenu mode Enter prints the selection (or the
@@ -118,7 +133,7 @@ opening.
 |---|---|---|
 | `font` | path, none (the look's family, else the first well-known file) | `font = "/usr/share/fonts/TTF/DejaVuSans.ttf"` |
 | `width_em` | integer 10–200, `40` | `width_em = 50` |
-| `rows` | integer 1–64, `10` | `rows = 8` |
+| `rows` | integer 1–64, `10`; the most rows the panel shows | `rows = 8` |
 
 Unknown keys are refused, never ignored.
 

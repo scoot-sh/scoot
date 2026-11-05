@@ -30,6 +30,22 @@ pub const DMENU_PAD: u32 = 8;
 pub const DMENU_GAP: u32 = 4;
 pub const DMENU_ROW_SLACK: u32 = 8;
 
+/// The fewest list rows the apps panel draws, however few entries match:
+/// three keep the panel from collapsing to a bare search field (and hold
+/// the one-line "no applications" and spawn-error notes with room around
+/// them). A panel configured with fewer `rows` than this is never taller
+/// than that.
+pub const MIN_ROWS: u32 = 3;
+
+/// How many list rows a panel of up to `rows` draws for `count` matches:
+/// every match, at least [`MIN_ROWS`] (or `rows`, when that is fewer) and
+/// at most `rows`. The panel is as tall as this many rows; the surface
+/// keeps the height of all of them, so a changing count moves no buffer.
+pub fn shown_rows(count: usize, rows: u32) -> u32 {
+    let count = u32::try_from(count).unwrap_or(u32::MAX);
+    count.min(rows).max(MIN_ROWS.min(rows))
+}
+
 /// A pixel rectangle: top-left corner and size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rect {

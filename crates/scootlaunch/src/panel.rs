@@ -85,7 +85,7 @@ use crate::cli::ColorOverrides;
 use crate::dmenu::{DmenuUi, Outcome as DmenuOutcome, Print as DmenuPrint};
 use crate::highlight::fill_round_rect;
 use crate::index::{Action, Entry};
-use crate::layout::{Fit, Layout, Rect, scale_len};
+use crate::layout::{Fit, Layout, Rect, scale_len, shown_rows};
 use crate::look::Look;
 use crate::motion::Slide;
 use crate::spawn::{self, Token};
@@ -599,6 +599,12 @@ struct App {
     /// fractional scale; `None` before the first draw (`layout`, at scale
     /// 1, stands in).
     drawn: Option<(Layout, f64)>,
+    /// The panel's height in logical pixels as last drawn, from the top of
+    /// its box: `height` while every row shows, less when the list is
+    /// short (the apps panel shrinks to its matches). The surface keeps
+    /// the full `height`; what lies below this is not the panel, to the
+    /// pointer and to the input region alike.
+    shown_height: u32,
     launch: LaunchCtx,
     dmenu: Option<DmenuSpec>,
     empty_text: &'static str,
@@ -698,6 +704,7 @@ impl App {
             layout,
             rows,
             drawn: None,
+            shown_height: height,
             launch,
             dmenu,
             empty_text,
@@ -854,7 +861,7 @@ impl App {
         }
         let x = self.pointer_x.checked_sub(self.origin.0)?;
         let y = self.pointer_y.checked_sub(self.origin.1)?;
-        (x < self.width && y < self.height).then_some((x, y))
+        (x < self.width && y < self.shown_height).then_some((x, y))
     }
 
     /// Whether the toggle's `close` arrived (apps/run only; dmenu
@@ -923,6 +930,10 @@ impl App {
             return;
         };
         let layout = self.layout_at(look, frame.scale);
+        let shown = match &self.model {
+            Model::Apps(ui) | Model::Run(ui) => shown_rows(ui.list().count(), self.rows),
+            Model::Dmenu(_) => self.rows,
+        };
         let Some(shm) = self.shm.as_ref() else {
             return;
         };
@@ -939,14 +950,24 @@ impl App {
             }
         };
         // What a click now lands on is what this frame shows.
-        self.drawn = Some((layout, frame.scale.factor().max(MIN_FACTOR)));
+        let factor = frame.scale.factor().max(MIN_FACTOR);
+        self.drawn = Some((layout, factor));
+        self.shown_height = if shown >= self.rows {
+            self.height
+        } else {
+            // Rounded up, so the pointer never misses a drawn pixel.
+            let logical = (f64::from(layout.height(shown)) / factor).ceil();
+            (logical as u32).min(self.height)
+        };
         // A fresh spawn failure, drawn instead of the list until it
         // clears (the drive expires it after 2 s): the failed pick
         // stays visible, and the panel stays open.
         let error = self.spawn_error.as_ref().map(|(text, _)| text.as_str());
         let dmenu = self.dmenu.as_ref();
         let now = Instant::now();
-        let mut region = Region::Surface;
+        let panel = (self.width, self.shown_height);
+        let surface = (self.width, self.height);
+        let mut region = staged_region(false, (0, 0), panel, surface);
         match &self.model {
             Model::Apps(ui) | Model::Run(ui) => {
                 let view = PanelView {
@@ -955,6 +976,7 @@ impl App {
                     width: self.width,
                     height: self.height,
                     rows: self.rows,
+                    shown,
                     error,
                     empty_text: self.empty_text,
                     scale: frame.scale,
@@ -974,7 +996,7 @@ impl App {
                         now,
                     );
                     self.origin = origin;
-                    region = staged_region(self.fading, origin, (self.width, self.height));
+                    region = staged_region(self.fading, origin, panel, surface);
                 } else {
                     paint_panel(slot.pixels_mut(), dims, &view, text, &mut self.icons, None);
                 }
@@ -999,6 +1021,7 @@ impl App {
                 };
                 if self.fx.stage.is_some() {
                     let shape = staged::Shape {
+                        drawn_height: None,
                         size: (self.width, self.height),
                         radius: look.radius,
                         tint: look.focus,
@@ -1016,7 +1039,7 @@ impl App {
                         |pixels, panel_dims, _| paint(pixels, panel_dims),
                     );
                     self.origin = origin;
-                    region = staged_region(self.fading, origin, (self.width, self.height));
+                    region = staged_region(self.fading, origin, panel, surface);
                 } else {
                     paint(slot.pixels_mut(), dims);
                 }
@@ -1191,12 +1214,24 @@ struct PanelView<'a> {
     height: u32,
     /// How many list rows `height` holds.
     rows: u32,
+    /// How many of them the panel draws (at most `rows`): it is as tall
+    /// as these, and the surface below it stays transparent.
+    shown: u32,
     /// A fresh spawn failure, drawn instead of the list.
     error: Option<&'a str>,
     empty_text: &'a str,
     scale: scootui::density::Scale,
     icon_theme: &'a str,
     icon_bases: &'a [PathBuf],
+}
+
+impl PanelView<'_> {
+    /// The panel's device height as drawn, in `layout` (fitted for
+    /// `height` and `rows`), when it shows fewer rows than that: `None`
+    /// for the whole panel, whose height is the scaled `height` itself.
+    fn drawn_height(&self, layout: &Layout) -> Option<u32> {
+        (self.shown < self.rows).then(|| layout.height(self.shown))
+    }
 }
 
 /// The list row at `pointer_y` logical pixels down the panel, of `shown`
@@ -1242,6 +1277,7 @@ fn paint_panel(
         width,
         height,
         rows,
+        shown: _,
         error,
         empty_text,
         scale,
@@ -1250,8 +1286,17 @@ fn paint_panel(
     } = *view;
     let (buffer_w, buffer_h) = dims;
     let width_d = scale_len(width, scale).min(buffer_w).max(1);
-    let height_d = scale_len(height, scale).min(buffer_h).max(1);
     let layout = device_layout(look, scale, height, rows);
+    let height_d = view
+        .drawn_height(&layout)
+        .unwrap_or_else(|| scale_len(height, scale))
+        .min(buffer_h)
+        .max(1);
+    // A pooled buffer still holds the last, taller frame: what lies below
+    // a panel that has shrunk is transparent.
+    if let Some(below) = pixels.get_mut(height_d as usize * buffer_w as usize * 4..) {
+        below.fill(0);
+    }
     let (em, radius_d) = (layout.em, scale_len(look.radius, scale));
     chrome_scaled(
         pixels,
@@ -1364,12 +1409,20 @@ fn paint_panel(
     }
 }
 
-/// The input region of a staged frame: nothing while the panel fades, the
-/// whole surface when the panel fills it, else the panel's rectangle.
-fn staged_region(fading: bool, origin: (u32, u32), panel: (u32, u32)) -> Region {
+/// The input region of a frame: nothing while the panel fades, the whole
+/// surface when the panel fills it (`panel` is the size as drawn, `surface`
+/// the one the panel has when every row shows), else the panel's rectangle,
+/// so a press in the shadow's room or below a short panel lands on the
+/// desktop and counts as outside.
+fn staged_region(
+    fading: bool,
+    origin: (u32, u32),
+    panel: (u32, u32),
+    surface: (u32, u32),
+) -> Region {
     if fading {
         Region::Nothing
-    } else if origin == (0, 0) {
+    } else if origin == (0, 0) && panel == surface {
         Region::Surface
     } else {
         Region::Panel(Rect {
@@ -2603,6 +2656,8 @@ mod dmenu_staged_tests;
 #[cfg(test)]
 mod padding_tests;
 #[cfg(test)]
+mod shrink_tests;
+#[cfg(test)]
 mod staged_tests;
 
 #[cfg(test)]
@@ -2687,6 +2742,7 @@ mod tests {
             width,
             height,
             rows: 10,
+            shown: 10,
             error: None,
             empty_text: "empty",
             scale,
@@ -2777,6 +2833,7 @@ mod tests {
                         width,
                         height,
                         rows: 10,
+                        shown: 10,
                         error: None,
                         empty_text: "empty",
                         scale,
