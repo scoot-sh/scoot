@@ -293,9 +293,16 @@ impl Session {
     /// for [`Session::scoot`]. `app` is the app binary under test (see
     /// [`Session::app`]).
     pub fn sway(app: &Path, tag: &str, outputs: u32) -> Option<Self> {
+        Self::sway_requiring(app, tag, outputs, "SCOOTBAR_REQUIRE_SWAY")
+    }
+
+    /// [`Session::sway`] with the skip's require variable named by the
+    /// caller (`SCOOTLAUNCH_REQUIRE_SWAY` for the launcher's tests), as
+    /// [`Session::scoot_requiring`] does for scoot.
+    pub fn sway_requiring(app: &Path, tag: &str, outputs: u32, require: &str) -> Option<Self> {
         let Some(sway) = sway_bin() else {
             skip(
-                "SCOOTBAR_REQUIRE_SWAY",
+                require,
                 "there is no sway on PATH (or set SCOOTBAR_TEST_SWAY)",
             );
             return None;

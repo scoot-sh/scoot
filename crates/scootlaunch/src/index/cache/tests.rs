@@ -35,6 +35,7 @@ fn test_entry(id: &str) -> super::super::Entry {
         }],
         path: PathBuf::from("/x/a.desktop"),
         workdir: None,
+        startup_wm_class: Some("Wm".to_string()),
         hidden: None,
     }
 }

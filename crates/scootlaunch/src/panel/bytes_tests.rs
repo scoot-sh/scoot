@@ -27,6 +27,7 @@ pub(super) fn entries(count: usize) -> Vec<Entry> {
             actions: Vec::new(),
             path: PathBuf::from("/usr/share/applications/x.desktop"),
             workdir: None,
+            startup_wm_class: None,
             hidden: None,
         })
         .collect()

@@ -105,7 +105,7 @@ const BTN_LEFT: u32 = 0x110;
 const MOD_CTRL: u32 = 0x4;
 
 /// What the panel opens with: `--font PATH`, `--config PATH`, the
-/// index's `--lenient`, and the mode (apps, run, or dmenu).
+/// index's `--lenient`, and the mode (apps, run, windows, or dmenu).
 pub struct Options {
     pub font: Option<PathBuf>,
     pub config: Option<PathBuf>,
@@ -113,13 +113,14 @@ pub struct Options {
     pub mode: Mode,
 }
 
-/// The panel's mode: the apps index, the `$PATH` scan, or the dmenu
-/// lines. Each carries the per-invocation color overrides (above the
+/// The panel's mode: the apps index, the `$PATH` scan, the open windows,
+/// or the dmenu lines. Each carries the per-invocation color overrides (above the
 /// user's file and the look); the dmenu mode carries its input flags
 /// and its lines besides.
 pub enum Mode {
     Apps { colors: ColorOverrides },
     Run { colors: ColorOverrides },
+    Windows { colors: ColorOverrides },
     Dmenu(DmenuConfig),
 }
 
@@ -159,7 +160,7 @@ pub fn open(opts: Options) -> i32 {
     // needing a font, an index or a compositor connection of its own.
     let claim = match &opts.mode {
         Mode::Dmenu(_) => None,
-        Mode::Apps { .. } | Mode::Run { .. } => {
+        Mode::Apps { .. } | Mode::Run { .. } | Mode::Windows { .. } => {
             let socket_path = match crate::socket::live_socket_path() {
                 Ok(path) => path,
                 Err(error) => {
@@ -223,7 +224,7 @@ pub fn open(opts: Options) -> i32 {
         warn(format_args!("scootlaunch: {note}"));
     }
     let colors = match &opts.mode {
-        Mode::Apps { colors } | Mode::Run { colors } => colors,
+        Mode::Apps { colors } | Mode::Run { colors } | Mode::Windows { colors } => colors,
         Mode::Dmenu(config) => &config.colors,
     };
     apply_colors(&mut look, colors);
@@ -232,7 +233,7 @@ pub fn open(opts: Options) -> i32 {
     // history): building the index anywhere else wastes a full scan.
     let env = crate::index::Env::from_env();
     let built = match &opts.mode {
-        Mode::Apps { .. } => Some(crate::index::build(
+        Mode::Apps { .. } | Mode::Windows { .. } => Some(crate::index::build(
             &env,
             &crate::index::BuildOpts {
                 use_cache: true,
@@ -267,9 +268,46 @@ pub fn open(opts: Options) -> i32 {
     };
     let empty_text: &'static str = match &opts.mode {
         Mode::Run { .. } => "No executables",
+        Mode::Windows { .. } => "No windows",
         _ => "No applications",
     };
+    // Windows mode lists the compositor's toplevels on a connection
+    // opened here, before the panel: a compositor without the protocol
+    // is a refusal naming it, ahead of any surface.
+    let mut windows_session = None;
     let model = match opts.mode {
+        Mode::Windows { .. } => {
+            let conn = match Connection::connect_to_env() {
+                Ok(conn) => conn,
+                Err(error) => {
+                    warn(format_args!(
+                        "scootlaunch: cannot reach the Wayland display: {error}"
+                    ));
+                    return 1;
+                }
+            };
+            let windows = match crate::windows::Windows::connect(&conn) {
+                Ok(windows) => windows,
+                Err(error) => {
+                    warn(format_args!("scootlaunch: {error}"));
+                    return 1;
+                }
+            };
+            let apps = built.as_ref().map_or(&[][..], |built| &built.entries[..]);
+            let entries = crate::windows::to_entries(
+                windows
+                    .open_windows()
+                    .map(|(number, item)| (number, item.title.as_str(), item.app_id.as_str())),
+                apps,
+            );
+            windows_session = Some(WindowsSession { conn, windows });
+            BuiltModel::Windows(Ui::open(
+                entries,
+                crate::rank::frecency::Frecency::empty(),
+                now,
+                rows,
+            ))
+        }
         Mode::Apps { .. } => match built {
             Some(built) => BuiltModel::Apps(Ui::open(built.entries, history, now, rows)),
             None => {
@@ -347,6 +385,7 @@ pub fn open(opts: Options) -> i32 {
             icon_theme,
             icon_bases,
             fx,
+            windows: windows_session,
         },
     )
 }
@@ -405,6 +444,15 @@ struct PanelSpec {
     icon_theme: String,
     icon_bases: Vec<PathBuf>,
     fx: Effects,
+    /// Windows mode's list and the connection it was read on; the panel
+    /// reuses the connection and activates the pick on `windows`.
+    windows: Option<WindowsSession>,
+}
+
+/// Windows mode's compositor session, opened before the panel.
+struct WindowsSession {
+    conn: Connection,
+    windows: crate::windows::Windows,
 }
 
 /// The dmenu presentation: resolved in [`open`] before the model moves
@@ -429,6 +477,7 @@ struct DmenuSpec {
 enum BuiltModel {
     Apps(Ui),
     Run(Ui),
+    Windows(Ui),
     Dmenu {
         lines: Vec<String>,
         only_match: bool,
@@ -442,6 +491,8 @@ enum BuiltModel {
 enum Model {
     Apps(Ui),
     Run(Ui),
+    /// A windows pick activates the window; nothing launches.
+    Windows(Ui),
     Dmenu(DmenuUi),
 }
 
@@ -453,22 +504,28 @@ fn run_panel(
     look: &Look,
     spec: PanelSpec,
 ) -> i32 {
-    let conn = match Connection::connect_to_env() {
-        Ok(conn) => conn,
-        Err(error) => {
-            warn(format_args!(
-                "scootlaunch: cannot reach the Wayland display: {error}"
-            ));
-            return 1;
-        }
+    // Windows mode connected already (its list was read on it); the
+    // panel gets a queue of its own on the same connection.
+    let (conn, windows) = match spec.windows {
+        Some(session) => (session.conn, Some(session.windows)),
+        None => match Connection::connect_to_env() {
+            Ok(conn) => (conn, None),
+            Err(error) => {
+                warn(format_args!(
+                    "scootlaunch: cannot reach the Wayland display: {error}"
+                ));
+                return 1;
+            }
+        },
     };
     let queue = conn.new_event_queue();
     let qh = queue.handle();
     conn.display().get_registry(&qh, ());
-    let mut pump = Pump { queue, qh };
+    let mut pump = Pump { queue, qh, windows };
     let model = match built {
         BuiltModel::Apps(ui) => Model::Apps(ui),
         BuiltModel::Run(ui) => Model::Run(ui),
+        BuiltModel::Windows(ui) => Model::Windows(ui),
         BuiltModel::Dmenu {
             lines,
             only_match,
@@ -531,6 +588,9 @@ enum Exit {
     /// A dmenu pick: printed on the way out (the line, its index, or
     /// the typed text), never launched.
     Print(String),
+    /// A windows pick: the window's number, activated on the way out once
+    /// the panel is gone.
+    Activate(usize),
     /// Dismissed by the user: Escape or the toggle. The panel fades out
     /// when the look has motion.
     Dismiss,
@@ -882,7 +942,7 @@ impl App {
         }
         let (_, pointer_y) = self.panel_point()?;
         let list = match &self.model {
-            Model::Apps(ui) | Model::Run(ui) => ui.list(),
+            Model::Apps(ui) | Model::Run(ui) | Model::Windows(ui) => ui.list(),
             Model::Dmenu(dui) => dui.list(),
         };
         let (layout, factor) = self.drawn.unwrap_or((self.layout, 1.0));
@@ -918,7 +978,9 @@ impl App {
     fn layout_at(&self, look: &Look, scale: scootui::density::Scale) -> Layout {
         match self.model {
             Model::Dmenu(_) => dmenu_layout(look, scale, self.height, self.rows),
-            Model::Apps(_) | Model::Run(_) => device_layout(look, scale, self.height, self.rows),
+            Model::Apps(_) | Model::Run(_) | Model::Windows(_) => {
+                device_layout(look, scale, self.height, self.rows)
+            }
         }
     }
 
@@ -931,7 +993,9 @@ impl App {
         };
         let layout = self.layout_at(look, frame.scale);
         let shown = match &self.model {
-            Model::Apps(ui) | Model::Run(ui) => shown_rows(ui.list().count(), self.rows),
+            Model::Apps(ui) | Model::Run(ui) | Model::Windows(ui) => {
+                shown_rows(ui.list().count(), self.rows)
+            }
             Model::Dmenu(_) => self.rows,
         };
         let Some(shm) = self.shm.as_ref() else {
@@ -969,7 +1033,7 @@ impl App {
         let surface = (self.width, self.height);
         let mut region = staged_region(false, (0, 0), panel, surface);
         match &self.model {
-            Model::Apps(ui) | Model::Run(ui) => {
+            Model::Apps(ui) | Model::Run(ui) | Model::Windows(ui) => {
                 let view = PanelView {
                     ui,
                     look,
@@ -1168,6 +1232,18 @@ impl App {
                         run_argv: Some(argv),
                         serial: self.key_serial,
                     })));
+                }
+                Outcome::Cancelled => self.exit = Some(Exit::Dismiss),
+            },
+            // A windows pick activates the window it names. Ctrl+Enter
+            // has no typed command to run here: it does nothing.
+            Model::Windows(ui) => match ui.key(keysym, self.ctrl, decoded) {
+                Outcome::Ignored | Outcome::Run(_) => {}
+                Outcome::Changed => self.dirty = true,
+                Outcome::Selected(id) => {
+                    if let Some(number) = crate::windows::window_number(&id) {
+                        self.exit = Some(Exit::Activate(number));
+                    }
                 }
                 Outcome::Cancelled => self.exit = Some(Exit::Dismiss),
             },
@@ -1768,6 +1844,8 @@ fn chrome_scaled(
 struct Pump {
     queue: wayland_client::EventQueue<App>,
     qh: QueueHandle<App>,
+    /// Windows mode's list: the pick is activated on it after teardown.
+    windows: Option<crate::windows::Windows>,
 }
 
 impl Pump {
@@ -1964,6 +2042,15 @@ impl Pump {
                 Exit::Closed => return self.finish(app, 1, Some(Exit::Closed)),
                 Exit::Failed => return self.finish(app, 1, Some(Exit::Failed)),
                 Exit::Print(text) => return self.finish(app, 0, Some(Exit::Print(text))),
+                // The panel fades while the keyboard is released, then
+                // the window is activated from `finish`, once the panel
+                // is gone. Whatever closed the fading panel, the pick
+                // stands.
+                Exit::Activate(number) => {
+                    self.fade_out(&mut app, text, look);
+                    app.exit = None;
+                    return self.finish(app, 0, Some(Exit::Activate(number)));
+                }
             }
         }
     }
@@ -2198,8 +2285,24 @@ impl Pump {
         app.destroy_live();
         self.queue.flush().ok();
         drop(app);
-        drop(self);
+        let Pump {
+            queue, mut windows, ..
+        } = self;
+        drop(queue);
         match exit {
+            // Sent after the panel's surface is destroyed (on the same
+            // socket, so the compositor handles the destroy first): the
+            // exclusive keyboard is released, and the window gets it.
+            Some(Exit::Activate(number)) => match windows.as_mut() {
+                Some(windows) => match windows.activate(number) {
+                    Ok(()) => 0,
+                    Err(error) => {
+                        warn(format_args!("scootlaunch: {error}"));
+                        1
+                    }
+                },
+                None => 1,
+            },
             // Unreachable in practice (a pick needs keyboard focus,
             // which needs a mapped surface, which needs the drive):
             // with no event loop left there is no token to mint, so
@@ -2517,6 +2620,18 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                                 Outcome::Ignored | Outcome::Changed | Outcome::Run(_) => {}
                             }
                         }
+                        Model::Windows(ui) => {
+                            let row = ui.list().visible_range().start.saturating_add(row);
+                            match ui.click(row) {
+                                Outcome::Selected(id) => {
+                                    if let Some(number) = crate::windows::window_number(&id) {
+                                        app.exit = Some(Exit::Activate(number));
+                                    }
+                                }
+                                Outcome::Cancelled => app.exit = Some(Exit::Dismiss),
+                                Outcome::Ignored | Outcome::Changed | Outcome::Run(_) => {}
+                            }
+                        }
                         Model::Dmenu(dui) => {
                             let row = dui.list().visible_range().start.saturating_add(row);
                             match dui.click(row) {
@@ -2547,13 +2662,13 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                 // so its window is empty and the scroll is a no-op).
                 if value > 0.0 {
                     match &mut app.model {
-                        Model::Apps(ui) | Model::Run(ui) => ui.scroll(false),
+                        Model::Apps(ui) | Model::Run(ui) | Model::Windows(ui) => ui.scroll(false),
                         Model::Dmenu(dui) => dui.scroll(false),
                     }
                     app.dirty = true;
                 } else if value < 0.0 {
                     match &mut app.model {
-                        Model::Apps(ui) | Model::Run(ui) => ui.scroll(true),
+                        Model::Apps(ui) | Model::Run(ui) | Model::Windows(ui) => ui.scroll(true),
                         Model::Dmenu(dui) => dui.scroll(true),
                     }
                     app.dirty = true;
@@ -2716,6 +2831,7 @@ mod tests {
             actions: Vec::new(),
             path: std::path::PathBuf::from("/usr/share/applications/red.desktop"),
             workdir: None,
+            startup_wm_class: None,
             hidden: None,
         };
         let ui = Ui::open(vec![entry], Frecency::empty(), 0, 10);
@@ -2812,6 +2928,7 @@ mod tests {
                             actions: Vec::new(),
                             path: std::path::PathBuf::from("/usr/share/applications/x.desktop"),
                             workdir: None,
+                            startup_wm_class: None,
                             hidden: None,
                         })
                         .collect();

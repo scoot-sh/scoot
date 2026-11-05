@@ -29,6 +29,7 @@ fn entry_with_actions(id: &str, name: &str, actions: &[(&str, &str)]) -> index::
             .collect(),
         path: std::path::PathBuf::from("/usr/share/applications/x.desktop"),
         workdir: None,
+        startup_wm_class: None,
         hidden: None,
     }
 }

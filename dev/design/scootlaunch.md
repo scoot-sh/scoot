@@ -587,7 +587,7 @@ TOML only, into `scoot/launch.toml`). There is no `stylix.enable` and no unit.
 | [`launch-icons`](../../docs/scootbar/backlog/launch-icons.md): theme inheritance, PNG first, `resvg` behind `svg` with its size row | daily-drive | `launch-ui` |
 | [`launch-dmenu`](../../docs/scootbar/backlog/launch-dmenu.md): the dmenu contract and run mode | daily-drive | `launch-spawn` |
 | [`launch-agent-json`](../../docs/scootbar/backlog/launch-agent-json.md): `--run-id`, the documented schema | computer use | `launch-spawn` |
-| [`launch-windows-mode`](../../docs/scootbar/backlog/launch-windows-mode.md) (low; after the switch) | daily-drive | `launch-nix` |
+| [`launch-windows-mode`](../../docs/scootbar/backlog/resolved/launch-windows-mode-done.md) (low; landed) | daily-drive | `launch-nix` |
 | [`launch-nix`](../../docs/scootbar/backlog/launch-nix.md): module, the look layer, profile switch (opt-in) | daily-drive | `launch-dmenu`, `launch-icons`, `look-format` |
 | [`launch-packaging`](../../docs/scootbar/backlog/launch-packaging.md) | daily-drive | `launch-nix` |
 | [`launch-default-flip`](../../docs/scootbar/backlog/launch-default-flip.md) | daily-drive | `launch-packaging`, `launch-agent-json` |

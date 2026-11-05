@@ -11,8 +11,9 @@
 //! the single-instance toggle and the look layer), launching (the
 //! activation token, the environment, the systemd scope, the detached
 //! fallback, `DBusActivatable`), the dmenu mode (stdin lines in, the
-//! pick on stdout, `--dmenu`) and run mode (executables on `$PATH`,
-//! `--run`). The plan is `dev/design/scootlaunch.md`.
+//! pick on stdout, `--dmenu`), run mode (executables on `$PATH`,
+//! `--run`) and windows mode (the open windows through
+//! `wlr-foreign-toplevel-management`, the pick activated, `--windows`). The plan is `dev/design/scootlaunch.md`.
 //!
 //! No `unsafe` here. The keyboard links libxkbcommon through `scootui`
 //! (decided in `dev/design/shell-apps.md`); nothing else here links
@@ -37,6 +38,7 @@ mod socket;
 mod spawn;
 mod stage;
 mod ui;
+mod windows;
 
 // Tests pinning the warm-query path count heap allocations through
 // this (scootbg_mem::count), forwarding everything else to the
@@ -95,6 +97,15 @@ fn run(argv: &[String]) -> i32 {
             config: args.config.map(PathBuf::from),
             lenient: args.lenient,
             mode: panel::Mode::Run {
+                colors: args.colors,
+            },
+        })
+    } else if args.windows {
+        panel::open(panel::Options {
+            font: args.font.map(PathBuf::from),
+            config: args.config.map(PathBuf::from),
+            lenient: args.lenient,
+            mode: panel::Mode::Windows {
                 colors: args.colors,
             },
         })

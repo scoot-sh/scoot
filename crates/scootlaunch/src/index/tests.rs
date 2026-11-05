@@ -263,3 +263,32 @@ fn missing_app_dirs_build_empty() {
     assert!(index.entries.is_empty());
     assert!(index.notes.is_empty());
 }
+
+#[test]
+fn startup_wm_class_is_read_and_an_empty_one_is_none() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let system = root.path().join("system");
+    write(
+        &home.join("applications/with.desktop"),
+        "[Desktop Entry]\nType=Application\nName=With\nExec=with\nStartupWMClass=WithClass\n",
+    );
+    write(
+        &home.join("applications/empty.desktop"),
+        "[Desktop Entry]\nType=Application\nName=Empty\nExec=empty\nStartupWMClass=\n",
+    );
+    write(&home.join("applications/none.desktop"), APP);
+    let index = build(&test_env(&home, &system), &opts());
+    let class = |id: &str| {
+        index
+            .entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .unwrap()
+            .startup_wm_class
+            .clone()
+    };
+    assert_eq!(class("with.desktop").as_deref(), Some("WithClass"));
+    assert_eq!(class("empty.desktop"), None);
+    assert_eq!(class("none.desktop"), None);
+}

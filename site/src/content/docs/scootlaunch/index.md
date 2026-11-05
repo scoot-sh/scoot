@@ -15,6 +15,7 @@ scootlaunch --query "fire" --json          # ranked as the UI would rank it
 scootlaunch                                # open the panel
 printf 'a\nb\n' | scootlaunch --dmenu      # pick a line, print it
 scootlaunch --run                          # the panel over $PATH executables
+scootlaunch --windows                      # the panel over open windows
 ```
 
 One binary, holding nothing when closed. It reads the

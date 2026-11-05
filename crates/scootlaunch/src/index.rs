@@ -151,6 +151,10 @@ pub struct Entry {
     /// The `Path=` working directory, if the file names one. The
     /// launch reads it (else `$HOME`); the cache carries it opaquely.
     pub workdir: Option<String>,
+    /// The `StartupWMClass` key: the `app_id` this entry's windows
+    /// carry, when it differs from the desktop id. Windows mode matches
+    /// on it; nothing else reads it.
+    pub startup_wm_class: Option<String>,
     /// Why a hidden entry is hidden. `None` shows.
     pub hidden: Option<filter::HiddenReason>,
 }
@@ -445,6 +449,10 @@ fn entry_from_file(
         .get("Path")
         .filter(|value| !value.is_empty())
         .map(str::to_string);
+    let startup_wm_class = main
+        .get("StartupWMClass")
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
     (
         Some(Entry {
             id: id.to_string(),
@@ -459,6 +467,7 @@ fn entry_from_file(
             actions,
             path: path.to_path_buf(),
             workdir,
+            startup_wm_class,
             hidden,
         }),
         notes,

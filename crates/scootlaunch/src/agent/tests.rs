@@ -19,6 +19,7 @@ fn entry(id: &str) -> Entry {
         actions: Vec::new(),
         path: PathBuf::from("/x"),
         workdir: None,
+        startup_wm_class: None,
         hidden: None,
     }
 }

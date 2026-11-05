@@ -2,8 +2,9 @@
 //! [--all] [--lenient] [--json]`, `scootlaunch --query TEXT [--all]
 //! [--lenient] [--json]`, `scootlaunch --run-id ID [--action A]
 //! [--lenient]`, `scootlaunch --check [--config PATH]`,
-//! `scootlaunch --dmenu [flags]` (lines on stdin, the pick on stdout)
-//! and `scootlaunch --run` (executables on `$PATH`).
+//! `scootlaunch --dmenu [flags]` (lines on stdin, the pick on stdout),
+//! `scootlaunch --run` (executables on `$PATH`) and `scootlaunch
+//! --windows` (the open windows; the pick is activated).
 //!
 //! Anything not listed here is a loud error (exit 2, naming the flag
 //! and the supported list), never silently ignored. A value flag takes
@@ -21,8 +22,8 @@ use scootui::color::Color;
 mod tests;
 
 /// The command line's modes: at most one per invocation. The bare
-/// panel, `--list`, `--query`, `--run-id`, `--check`, `--dmenu` and
-/// `--run` are the commands; everything else modifies one of them.
+/// panel, `--list`, `--query`, `--run-id`, `--check`, `--dmenu`, `--run`
+/// and `--windows` are the commands; everything else modifies one of them.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Args {
     pub list: bool,
@@ -48,6 +49,9 @@ pub struct Args {
     /// `--run` (alias `--list-executables-in-path`): the panel over
     /// executables on `$PATH`. A run pick launches, like an apps pick.
     pub run: bool,
+    /// `--windows`: the panel over the open windows, through
+    /// `wlr-foreign-toplevel-management`. A pick activates the window.
+    pub windows: bool,
     /// `--prompt TEXT`: the prompt drawn before the entry (`> ` when
     /// neither `--prompt` nor `--prompt-only` names one). Dmenu only.
     pub prompt: Option<String>,
@@ -120,6 +124,7 @@ usage: scootlaunch [--font PATH] [--config PATH] [--lenient]
                      [--placeholder TEXT] [--layer overlay]
                      [--background-color RRGGBBAA ...]
        scootlaunch --run
+       scootlaunch --windows
 
   (no command) open the panel: the overlay exclusive-keyboard launcher,
     launching the chosen entry (exit 0), or nothing on dismiss (exit 1)
@@ -146,6 +151,8 @@ usage: scootlaunch [--font PATH] [--config PATH] [--lenient]
   --placeholder TEXT   the dim hint while the entry is empty (default empty)
   --run                the panel over executables on $PATH (alias:
                          --list-executables-in-path, fuzzel's flag)
+  --windows            the panel over the open windows; Enter activates the
+                         chosen one (needs wlr-foreign-toplevel-management)
   --layer overlay      accepted; the panel is always overlay
   --background-color, --text-color, --border-color, --selection-color,
     --selection-text-color, --match-color, --prompt-color (rrggbbaa):
@@ -160,7 +167,7 @@ their value attached (--prompt=TEXT) or as the next argument
 --config are panel options; --all, --json and --lenient modify --list
 and --query (--lenient also shapes the panel's index and --run-id).
 The dmenu flags need --dmenu; --action needs --run-id; the colors and
---layer shape the panel, --run and --dmenu alike. One command per
+--layer shape the panel, --run, --windows and --dmenu alike. One command per
 invocation.
 ";
 
@@ -182,7 +189,7 @@ pub enum Error {
     /// `--layer`, a color) with no value after it.
     NeedsValue(String),
     /// Two commands together (any two of `--list`, `--query`,
-    /// `--run-id`, `--check`, `--dmenu`, `--run`), or `--prompt` with
+    /// `--run-id`, `--check`, `--dmenu`, `--run`, `--windows`), or `--prompt` with
     /// `--prompt-only`: two commands, not modifiers.
     ConflictingCommands,
     /// A value flag with a value outside its grammar: `--layer`
@@ -195,14 +202,14 @@ pub enum Error {
     },
 }
 
-const USAGE: &str = "usage is scootlaunch [--font PATH] [--config PATH] [--lenient], scootlaunch --list [--all] [--lenient] [--json], scootlaunch --query TEXT [--all] [--lenient] [--json], scootlaunch --run-id ID [--action A] [--lenient], scootlaunch --check [--config PATH], scootlaunch --dmenu [flags] or scootlaunch --run";
+const USAGE: &str = "usage is scootlaunch [--font PATH] [--config PATH] [--lenient], scootlaunch --list [--all] [--lenient] [--json], scootlaunch --query TEXT [--all] [--lenient] [--json], scootlaunch --run-id ID [--action A] [--lenient], scootlaunch --check [--config PATH], scootlaunch --dmenu [flags], scootlaunch --run or scootlaunch --windows";
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::UnknownFlag(flag) => write!(
                 f,
-                "unknown flag {flag}: supported flags are --list --query --run-id --action --all --lenient --json --font --config --check --dmenu --run --prompt --prompt-only --password --no-run-if-empty --only-match --index --placeholder --layer --background-color --text-color --border-color --selection-color --selection-text-color --match-color --prompt-color --help --version"
+                "unknown flag {flag}: supported flags are --list --query --run-id --action --all --lenient --json --font --config --check --dmenu --run --windows --prompt --prompt-only --password --no-run-if-empty --only-match --index --placeholder --layer --background-color --text-color --border-color --selection-color --selection-text-color --match-color --prompt-color --help --version"
             ),
             Error::UnexpectedArg(arg) => write!(f, "unexpected argument {arg}: {USAGE}"),
             Error::NeedsCommand(flag) => {
@@ -214,7 +221,7 @@ impl fmt::Display for Error {
             Error::ConflictingCommands => {
                 write!(
                     f,
-                    "cannot combine --list, --query, --run-id, --check, --dmenu, --run or --prompt with --prompt-only: {USAGE}"
+                    "cannot combine --list, --query, --run-id, --check, --dmenu, --run, --windows or --prompt with --prompt-only: {USAGE}"
                 )
             }
             Error::InvalidValue {
@@ -253,6 +260,7 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
         check: false,
         dmenu: false,
         run: false,
+        windows: false,
         prompt: None,
         prompt_only: None,
         password: false,
@@ -350,6 +358,10 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
             "--run" | "--list-executables-in-path" => {
                 no_attached(&argv[index], attached)?;
                 args.run = true;
+            }
+            "--windows" => {
+                no_attached(&argv[index], attached)?;
+                args.windows = true;
             }
             "--prompt" => {
                 args.prompt = Some(take_value(argv, &mut index, attached, "--prompt")?);
@@ -463,6 +475,9 @@ pub fn parse_args(argv: &[String]) -> Result<Args, Error> {
     if args.run {
         commands += 1;
     }
+    if args.windows {
+        commands += 1;
+    }
     if commands > 1 {
         return Err(Error::ConflictingCommands);
     }
@@ -544,6 +559,7 @@ fn empty_args() -> Args {
         check: false,
         dmenu: false,
         run: false,
+        windows: false,
         prompt: None,
         prompt_only: None,
         password: false,
