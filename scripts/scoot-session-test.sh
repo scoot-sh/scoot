@@ -384,6 +384,12 @@ if [ "$n" -ge "${ANSWER_AFTER:-1}" ]; then
         python3 -c 'import socket; s = socket.socket(socket.AF_UNIX); s.bind("'"$XDG_RUNTIME_DIR"'/wayland-100")' \
             && printf 'socket' >"$S/socket-made"
     fi
+    # A second socket a client created while the compositor came up
+    # (FOREIGN_SOCKET names it): Firefox's Wayland proxy binds
+    # `wayland-proxy-<pid>` in the runtime dir from its own startup.
+    if [ -n "${FOREIGN_SOCKET:-}" ] && [ ! -e "$XDG_RUNTIME_DIR/$FOREIGN_SOCKET" ]; then
+        python3 -c 'import socket,sys; s = socket.socket(socket.AF_UNIX); s.bind(sys.argv[1])' "$XDG_RUNTIME_DIR/$FOREIGN_SOCKET"
+    fi
     exit 0
 fi
 exit 1
@@ -470,6 +476,7 @@ new_test() {
         "$HARNESS_STATE/journal.log"
     unset XDG_SESSION_ID
     export ANSWER_AFTER=3 DBUS_FAIL=0
+    unset FOREIGN_SOCKET
     mksock wayland-99
     export SCOOT_BIN="$SCOOT_FAKE"
 }
@@ -1079,6 +1086,48 @@ if grep -q -F "user-light" "$T/stderr.log"; then bad "T22: unasked session diagn
 ok "T22: without loginctl the fallback stays generic, never loud"
 [ ! -f "$HARNESS_STATE/journal.log" ] || bad "T22: generic fallback wrote to the journal"
 ok "T22: generic fallback touches no journal"
+
+# --- T23: a client's own socket is not the compositor's -------------
+# An autostarted Firefox binds `$XDG_RUNTIME_DIR/wayland-proxy-<pid>`
+# within the second the launcher's readiness poll sleeps, so the
+# "exactly one new socket" discovery counted two and refused the login
+# (the scoot-iso qemu-test LIVE-BAR-PROC-FAIL flake: the compositor was
+# stopped ~1 s in, the greeter took the seat, and the reason went to a
+# stderr nobody reads). Only `wayland-<number>` names are the
+# compositor's: the login must complete on wayland-100.
+# Fail-before: "found 2 new Wayland sockets", no session target.
+new_test 23
+export FOREIGN_SOCKET=wayland-proxy-4242
+start_launcher
+wait_log "start scoot-session.target" || bad "T23: a foreign socket stopped the login"
+grep -q -F "found 2 new Wayland sockets" "$T/stderr.log" && bad "T23: the foreign socket counted as the compositor's"
+grep -q '^WAYLAND_DISPLAY=wayland-100$' "$HARNESS_STATE/env-at-graphical" \
+    || bad "T23: the display was not the compositor's wayland-100"
+ok "T23: a client's wayland-proxy-<pid> socket does not stop the login"
+wait_blocked "T23"
+RC="$(end_session)"
+[ "$RC" = "0" ] || bad "T23: launcher exit $RC, expected 0"
+ok "T23: the login ends clean"
+
+# --- T24: a second compositor socket still refuses, and says why ----
+# The guard stays for what it was written for: two `wayland-<number>`
+# sockets mean concurrent sessions, so nothing is imported. The refusal
+# also goes to the system journal: greetd gives the session's stderr to
+# the tty the compositor is about to own, so a login that bounced back
+# to the greeter left no trace anywhere.
+new_test 24
+export FOREIGN_SOCKET=wayland-101
+start_launcher
+RC="$(wait_exit)" || bad "T24: launcher never exited"
+[ "$RC" != "0" ] || bad "T24: two compositor sockets exited 0"
+grep -q -F "found 2 new Wayland sockets" "$T/stderr.log" || bad "T24: refusal reason missing from stderr"
+grep -q -F "start scoot-session.target" "$HARNESS_STATE/calls.log" && bad "T24: session target started over two sockets"
+[ "$(state_of scoot.service)" = "inactive" ] || bad "T24: service left active"
+ok "T24: two compositor sockets refuse the login and stop the service"
+grep -q -F "found 2 new Wayland sockets" "$HARNESS_STATE/journal.log" 2>/dev/null \
+    || bad "T24: the refusal never reached the system journal"
+grep -q -F -e "-t scoot-session" "$HARNESS_STATE/calls.log" || bad "T24: journal entry not tagged scoot-session"
+ok "T24: a refused login leaves its reason in the journal (tag scoot-session)"
 
 echo "---"
 echo "$PASS/$TOTAL asserts passed"

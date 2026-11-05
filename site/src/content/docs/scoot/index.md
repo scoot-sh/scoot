@@ -127,6 +127,15 @@ starts `scoot-shutdown.target` on the way down, so the session targets
 stop with it instead of looping on a missing display, and the display
 variables are restored.
 
+> **Symptom:** the login screen comes back about a second after you log in,
+> and the compositor was running for that second. The launcher refused the
+> login after starting the compositor, and the console that would show why
+> belongs to the compositor by then. Read the reason with `journalctl -b
+> -t scoot-session` (a refused login writes its message there). Two new
+> `wayland-<number>` sockets under `$XDG_RUNTIME_DIR` mean a second compositor
+> started in the same login; sockets with any other name, such as Firefox's
+> `wayland-proxy-<pid>`, are other programs' and are ignored.
+
 > **Symptom:** a login is refused as already running, but no session is up.
 > A crashed session's units can outlive it. Log in again and the launcher
 > heals them itself when nothing answers IPC. If it keeps refusing, check
