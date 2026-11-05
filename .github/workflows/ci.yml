@@ -1106,6 +1106,16 @@ jobs:
       # build, and no separate pair job is needed). The GLES tests in the
       # suite need the same software EGL as the default test steps in
       # `linux`.
+      # Diagnostics for the intermittent "Could not find a free socket for the
+      # XServer" failure (run 41925844828): what Smithay's display scan sees.
+      # Never fatal.
+      - name: X display state before the xwayland suites
+        run: |
+          ls -ld /tmp/.X11-unix 2>&1 || true
+          ls -la /tmp/.X*-lock 2>&1 || true
+          id || true
+          mount | grep ' /tmp ' || true
+
       - name: --features xwayland -- clippy, nextest and cargo test, live suites required
         shell: nix develop --command bash -euo pipefail {0}
         run: |
@@ -1140,6 +1150,14 @@ jobs:
           # cargo cache.
           cargo build -p scootbg
           cp target/debug/scootbg "$RUNNER_TEMP/scootbg-features"
+
+      - name: X display state after a failed xwayland suite
+        if: failure()
+        run: |
+          ls -ld /tmp/.X11-unix 2>&1 || true
+          ls -la /tmp/.X*-lock 2>&1 || true
+          id || true
+          mount | grep ' /tmp ' || true
 
       # The default build's smoke run lives in `linux`, where the xwayland
       # sections take the no-binary branch (the feature is compiled in, but
