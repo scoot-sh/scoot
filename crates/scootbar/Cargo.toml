@@ -119,8 +119,9 @@ wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # poll(2), and the clock's timerfd, `statx` of the zone file and
 # `clock_gettime`, through raw syscalls, no `libc` crate: the same `rustix`
-# the Wayland crates already pull in.
-rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "net", "time", "process"] }
+# the Wayland crates already pull in. `thread` for `prctl(PR_SET_THP_DISABLE)`
+# (`thp`): a module of rustix's own, no dependency.
+rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "net", "time", "process", "thread"] }
 # Text: the M0 choice (its record, §1). Lazily parsed over the font's bytes,
 # so memory follows what is drawn; grayscale coverage, no hinting.
 ab_glyph = "0.2"

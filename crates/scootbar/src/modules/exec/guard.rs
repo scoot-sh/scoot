@@ -179,6 +179,9 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Option<ExitCode> {
         // not wanted.
         return Some(ExitCode::FAILURE);
     }
+    // The bar turned huge pages off for itself and this process inherited
+    // that; the command is not the bar.
+    crate::thp::restore();
     let error = Command::new(plan.program).args(plan.args).exec();
     Some(ExitCode::from(match error.kind() {
         io::ErrorKind::NotFound => NOT_FOUND,

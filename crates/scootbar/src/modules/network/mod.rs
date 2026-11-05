@@ -1683,8 +1683,7 @@ impl Network {
         // Spawning first and killing after would briefly run two pickers
         // — two overlapping windows fighting over the pointer — for a
         // failure mode that needs a broken box to reach.
-        let child = command
-            .spawn()
+        let child = crate::thp::spawn(&mut command)
             .map_err(|_| InvokeError::Refused("cannot start the menu command"))?;
         // The list is a couple of kilobytes against a 64 KiB pipe: one
         // write carries it, even when the menu never reads. A short write
@@ -1789,8 +1788,7 @@ impl Network {
         // Past the kill, like the menu's spawn: there is no earlier
         // fallible step here (no pipe to make), so only the spawn itself
         // can fail with the old child already gone.
-        let child = command
-            .spawn()
+        let child = crate::thp::spawn(&mut command)
             .map_err(|_| InvokeError::Refused("cannot start the connect command"))?;
         let pidfd = rustix::process::pidfd_open(
             rustix::process::Pid::from_child(&child),
