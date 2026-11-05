@@ -28,7 +28,7 @@ Resolved 2026-09-29. What landed:
 - **scootbg's per-output lifecycle, ported and trimmed** (settle round
   trip, staged `wl_output` properties, `closed` retried once then given
   up, ids never reused) as a pure model with a draw plan. The two copies,
-  file by file, are listed in [extract-scootui](../extract-scootui.md) for
+  file by file, are listed in [extract-scootui](extract-scootui-done.md) for
   the day it lands; scootbg was not touched.
 - **Device pixels**: fractional scales through `wp_fractional_scale_v1`
   and a viewport (1067 × 28 logical at 1.5 is a 1601 × 42 buffer), the
@@ -137,7 +137,7 @@ and namespace `scootbar`. It draws a solid bar and nothing else.
   bar so windows never jump when the first buffer lands (scoot applies the zone
   from the buffer-less initial commit, `layer-surface-bufferless-exclusive-zone-done.md`).
 - Reuse scootbg's per-output lifecycle rather than reinventing it; note what
-  would move into a shared crate later ([extract-scootui](../extract-scootui.md)),
+  would move into a shared crate later ([extract-scootui](extract-scootui-done.md)),
   but do not refactor scootbg here.
 
 ## Margins from the first milestone

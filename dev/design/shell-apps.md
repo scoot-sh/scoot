@@ -144,7 +144,7 @@ What exists today is in scootbar, which is binary-only (no `lib.rs`;
 
 ## The shared crates: `scootui` and `scoot-dbus`
 
-The [extract-scootui](../../docs/scootbar/backlog/extract-scootui.md) entry
+The [extract-scootui](../../docs/scootbar/backlog/resolved/extract-scootui-done.md) entry
 waits for a second consumer before cutting the seam ("so the seam comes from real
 use rather than guesswork"). scootnotify is that consumer, and these plans
 define it. Two crates, not one:

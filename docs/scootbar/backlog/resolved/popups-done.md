@@ -24,7 +24,7 @@ module actions `set N` and `toggle-mute`. Reference: [cli.md](../../cli.md#popup
   dmenu-style `menu-command`. A bar with no such binding binds no `xdg_wm_base`
   (traced: zero `bind` requests for it) and takes no keyboard.
 - **Shape.** `src/popup/` is pure (content, layout, the pointer state machine,
-  paint) and shaped for [extraction](../extract-scootui.md) without being
+  paint) and shaped for [extraction](extract-scootui-done.md) without being
   extracted, because that entry waits for a second binary; `src/daemon/popup/`
   is the Wayland half. A `popup` Cargo feature (default on) gates all of it.
 - **One way to act.** What a widget does is a module action by name through
@@ -135,7 +135,7 @@ when that stops being enough.
   (`xdg-popup-input-resolved.md`), and validates the grab serial, so open from the
   click that carries one.
 - A tiny widget set (list, slider, button) drawn with the bar's own primitives.
-  This is the consumer that justifies [extracting `scootui`](extract-scootui.md).
+  This is the consumer that justifies [extracting `scootui`](extract-scootui-done.md).
 - Dismissal: click outside, Escape (the popup grab gives it the keyboard only
   while open), and when its module disappears.
 - Popups must not defeat the bar's "never takes the keyboard" property outside
