@@ -127,8 +127,7 @@ lists exactly those three, plus each one's `dev` dependency on `test-support`).
 `cargo tree --target x86_64-unknown-linux-gnu -p <app> -e normal --prefix none`
 shows `xkbcommon` in `scootlaunch` only, and no `xkbcommon` in `scootbar` or
 `scootnotify`. `scootui::wayland` was enabled in `scootnotify` without being
-called: that feature was dropped in the same PR (the crate checks unchanged
-without it). Shipped builds are one package each, so Cargo never unifies one
+called: that feature is dropped in #923 (same size, same libraries; the table lists scootnotify's features after it). Shipped builds are one package each, so Cargo never unifies one
 app's `scootui` features into another: `nix/scootbar.nix`, `nix/scootnotify.nix`
 and `nix/scootlaunch.nix` pass `-p <app>`, and `release.yml` builds
 `cargo build --release --locked --offline -p "$bin"` per binary. (CI's
