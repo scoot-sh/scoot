@@ -256,6 +256,44 @@ mod goldens {
             assert_eq!(read.focus, rgb(&launch["focus"]), "{name}");
         }
     }
+
+    /// The selected row's contrast floor, per shipped look, read the way the
+    /// panel draws it (the rendered fragment through `look::parse`): the
+    /// row's text on its fill clears the 4.5:1 text bar, the fill stands off
+    /// the panel by the 3:1 UI bar, and the match highlight on the fill
+    /// resolves to at least 3:1. The look pipeline gates `accent-fg` on
+    /// `accent`, which is this pair only while `selection` and
+    /// `selection-text` are not overridden apart; this pins what is drawn.
+    #[test]
+    fn the_selected_row_clears_its_contrast_floor_in_every_shipped_look() {
+        use scootui::theme::SelectedMatch;
+        for name in SHIPPED {
+            let look = resolved(name);
+            let fragment = scoot_look::render_launch(&look, &scoot_look::RenderInputs::default())
+                .unwrap_or_else(|e| panic!("{name}: launch.toml does not render: {e}"));
+            let (read, notes) = crate::look::parse(&fragment);
+            assert!(notes.is_empty(), "{name}: {notes:?}");
+            let fill = read.theme.accent;
+            let text_on_fill = read.theme.background.contrast_ratio(fill);
+            assert!(
+                text_on_fill >= 4.5,
+                "{name}: selected text on its fill is {text_on_fill:.2}:1 (bar 4.5)"
+            );
+            let fill_on_panel = fill.contrast_ratio(read.surface);
+            assert!(
+                fill_on_panel >= 3.0,
+                "{name}: selected fill on the panel is {fill_on_panel:.2}:1 (bar 3.0)"
+            );
+            let matched = match read.theme.match_on_selection() {
+                SelectedMatch::Ink(ink) => ink.contrast_ratio(fill),
+                SelectedMatch::Inverted => text_on_fill,
+            };
+            assert!(
+                matched >= 3.0,
+                "{name}: match on the selected row is {matched:.2}:1 (bar 3.0)"
+            );
+        }
+    }
 }
 
 #[test]
