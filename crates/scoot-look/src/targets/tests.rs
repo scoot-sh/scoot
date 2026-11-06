@@ -259,7 +259,7 @@ fn name_must_match_its_directory() {
 fn look_toml_cannot_declare_targets() {
     // Installed looks (someone else's) can never supply templates,
     // output paths or reload commands. `[targets.<name>]` exists now,
-    // but holds color token overrides only: every smuggling shape
+    // but holds color, font family and font size overrides only: every smuggling shape
     // refuses at parse, whatever the target name.
     for body in [
         // The target.toml fields themselves.
@@ -268,8 +268,12 @@ fn look_toml_cannot_declare_targets() {
         "name = \"kitty-colors\"",
         // A reload, as a string and as the real table shape.
         "reload = \"kitty @ set-colors\"",
-        // Anything that is not one of the allowed color tokens.
-        "\"fonts.mono\" = \"Fira Code\"",
+        // Anything that is not an allowed color, family or size token,
+        // including the font tokens that name files or Nix attributes.
+        "\"fonts.files.mono\" = \"fonts/x.ttf\"",
+        "\"fonts.nix.mono\" = \"pkgs.fira-code\"",
+        "\"opacity.bar\" = 0.5",
+        "\"icons.theme\" = \"Papirus\"",
         "\"cursor.accent\" = \"#ff0000\"",
         "\"palette.nope\" = \"#ff0000\"",
         "\"terminal.color16\" = \"#ff0000\"",
@@ -329,22 +333,43 @@ fn color_overrides_parse_and_hostile_values_refuse() {
 }
 
 #[test]
-fn only_palette_and_sixteen_terminal_colors_are_overridable() {
-    assert!(check_override_key("palette.accent-fg"));
-    assert!(check_override_key("terminal.color0"));
-    assert!(check_override_key("terminal.color15"));
+fn only_colors_families_and_sizes_are_overridable() {
+    use OverrideKind::*;
+    for (key, kind) in [
+        ("palette.accent-fg", Color),
+        ("terminal.color0", Color),
+        ("terminal.color15", Color),
+        ("fonts.ui", Family),
+        ("fonts.sans", Family),
+        ("fonts.mono", Family),
+        ("fonts.size", Size),
+        ("fonts.popup-size", Size),
+        ("fonts.app-size", Size),
+        ("fonts.terminal-size", Size),
+    ] {
+        assert_eq!(override_kind(key), Some(kind), "{key}");
+    }
     for key in [
         "terminal.color16",
         "terminal.color00",
         "terminal.color+1",
         "terminal.color",
-        "fonts.mono",
+        "fonts",
+        "fonts.files",
+        "fonts.nix",
+        "fonts.files.mono",
+        "fonts.mono ",
+        "opacity.bar",
+        "shape.radius",
+        "cursor.theme",
+        "icons.theme",
+        "wallpaper.color",
         "polarity",
         "palette",
         "palette.",
         "",
     ] {
-        assert!(!check_override_key(key), "{key}");
+        assert_eq!(override_kind(key), None, "{key}");
     }
 }
 
@@ -488,4 +513,206 @@ fn unicode_template_stays_allowed() {
         errors.is_empty(),
         "a Unicode template must pass: {errors:?}"
     );
+}
+
+fn refuses(table: &str) -> bool {
+    crate::parse_look_toml(override_look(table).as_bytes()).is_err()
+}
+
+#[test]
+fn font_family_overrides_parse_with_the_fonts_table_grammar() {
+    let ok = override_look(
+        "\"fonts.mono\" = \"JetBrains Mono\"\n\"fonts.sans\" = \"Inter\"\n\"fonts.ui\" = \"A-b_c.d+e 9\"",
+    );
+    let raw = crate::parse_look_toml(ok.as_bytes()).expect("families parse");
+    assert_eq!(raw.targets["kitty-colors"].len(), 3);
+    // The longest the look's own [fonts] accepts (64 bytes) is accepted.
+    let longest = "a".repeat(64);
+    assert!(!refuses(&format!("\"fonts.mono\" = \"{longest}\"")));
+}
+
+#[test]
+fn hostile_font_families_refuse_one_injection_shape_at_a_time() {
+    // Each shape is a way to end the font value and start another config
+    // line (kitty/alacritty/tmux/WezTerm/Ghostty), break out of a quoted
+    // template context, or reach the template engine or a path.
+    let hostile: &[(&str, &str)] = &[
+        ("newline", "\"Fira\\nreload = x\""),
+        ("carriage return", "\"Fira\\rinclude evil.conf\""),
+        ("trailing newline", "\"Fira\\n\""),
+        ("NUL", "\"Fira\\u0000\""),
+        ("tab", "\"Fira\\tMono\""),
+        ("ESC", "\"Fira\\u001b[2J\""),
+        ("DEL", "\"Fira\\u007f\""),
+        ("C1 control", "\"Fira\\u0085Mono\""),
+        ("line separator", "\"Fira\\u2028Mono\""),
+        ("paragraph separator", "\"Fira\\u2029Mono\""),
+        ("bidi override", "\"Fira\\u202eMono\""),
+        ("bidi isolate", "\"Fira\\u2066Mono\""),
+        ("zero-width space", "\"Fira\\u200bMono\""),
+        ("BOM", "\"\\ufeffFira\""),
+        ("non-ASCII family", "\"Fira\\u00e9\""),
+        ("double quote", "\"Fira\\\"; exec = x\""),
+        ("single quote", "\"Fira'\""),
+        ("backtick", "\"Fira`id`\""),
+        ("backslash", "\"Fira\\\\\""),
+        ("hash comment", "\"Fira # x\""),
+        ("semicolon", "\"Fira; x\""),
+        ("equals", "\"Fira = x\""),
+        ("square bracket", "\"Fira]\""),
+        ("brace", "\"Fira}\""),
+        ("template open", "\"{{ palette.accent }}\""),
+        ("template close", "\"Fira }}\""),
+        ("shell expansion", "\"$(reboot)\""),
+        ("env expansion", "\"${HOME}\""),
+        ("percent", "\"Fira%n\""),
+        ("path", "\"../../etc/passwd\""),
+        ("absolute path", "\"/usr/share/fonts/x.ttf\""),
+        ("slash", "\"a/b\""),
+        ("leading dot", "\".hidden\""),
+        ("leading space", "\" Fira\""),
+        ("leading hyphen", "\"-Fira\""),
+        ("empty", "\"\""),
+        (
+            "too long",
+            "\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+        ),
+        ("number", "12"),
+        ("boolean", "true"),
+        ("array", "[\"Fira\"]"),
+    ];
+    for key in ["fonts.mono", "fonts.sans", "fonts.ui"] {
+        for (shape, value) in hostile {
+            assert!(
+                refuses(&format!("\"{key}\" = {value}")),
+                "{key}: {shape} must refuse"
+            );
+        }
+    }
+}
+
+#[test]
+fn font_size_overrides_take_a_number_in_the_fonts_table_range() {
+    for value in ["4", "4.0", "12", "12.5", "192", "192.0"] {
+        for key in [
+            "fonts.size",
+            "fonts.popup-size",
+            "fonts.app-size",
+            "fonts.terminal-size",
+        ] {
+            assert!(!refuses(&format!("\"{key}\" = {value}")), "{key} = {value}");
+        }
+    }
+    for value in [
+        "3.999",
+        "0",
+        "-12",
+        "192.001",
+        "1e9",
+        "nan",
+        "inf",
+        "-inf",
+        "\"12\"",
+        "\"12pt\"",
+        "\"12\\nreload = x\"",
+        "\"\"",
+        "true",
+        "[12]",
+    ] {
+        assert!(
+            refuses(&format!("\"fonts.terminal-size\" = {value}")),
+            "{value}"
+        );
+    }
+}
+
+#[test]
+fn a_color_key_refuses_a_family_or_a_number_and_a_family_key_refuses_a_color_free_pass() {
+    assert!(refuses("\"palette.accent\" = \"Fira Code\""));
+    assert!(refuses("\"palette.accent\" = 12"));
+    assert!(refuses("\"fonts.size\" = \"#112233\""));
+    // A color is a legal identifier shape only without the `#`.
+    assert!(refuses("\"fonts.mono\" = \"#112233\""));
+}
+
+#[test]
+fn font_overrides_replace_only_for_their_own_target_and_render_like_the_fonts_table() {
+    let look = resolved_with(
+        "\n[targets.kitty-colors]\n\"fonts.mono\" = \"Iosevka\"\n\"fonts.terminal-size\" = 13\n\"fonts.size\" = 10.5\n",
+    );
+    let base = target_tokens(&look);
+    let kitty = tokens_for_target(&base, &look, "kitty-colors");
+    assert_eq!(kitty["fonts.mono"], "Iosevka");
+    assert_eq!(
+        kitty["fonts.terminal-size"], "13",
+        "no `.0`, like the table"
+    );
+    assert_eq!(kitty["fonts.size"], "10.5");
+    assert_eq!(kitty["fonts.sans"], base["fonts.sans"], "untouched");
+    assert_ne!(base["fonts.mono"], "Iosevka");
+    let other = tokens_for_target(&base, &look, "tmux");
+    assert!(matches!(other, std::borrow::Cow::Borrowed(_)));
+    assert_eq!(*other, base);
+}
+
+#[test]
+fn overriding_every_font_token_leaves_the_looks_own_fonts_untouched() {
+    let plain = resolved_with("");
+    let look = resolved_with(
+        "\n[targets.kitty-colors]\n\"fonts.ui\" = \"UiOver\"\n\"fonts.sans\" = \"SansOver\"\n\"fonts.mono\" = \"MonoOver\"\n\"fonts.size\" = 31\n\"fonts.popup-size\" = 32\n\"fonts.app-size\" = 33\n\"fonts.terminal-size\" = 34\n",
+    );
+    // Every override really is set (so the comparison below is not vacuous).
+    let table = &look.target_overrides["kitty-colors"];
+    assert_eq!(table.len(), 7);
+    let (a, b) = (&look.fonts, &plain.fonts);
+    assert_eq!(a.ui, b.ui);
+    assert_eq!(a.sans, b.sans);
+    assert_eq!(a.mono, b.mono);
+    assert_eq!(a.size, b.size);
+    assert_eq!(a.popup_size, b.popup_size);
+    assert_eq!(a.app_size, b.app_size);
+    assert_eq!(a.terminal_size, b.terminal_size);
+    for (value, own) in [
+        ("UiOver", &a.ui),
+        ("SansOver", &a.sans),
+        ("MonoOver", &a.mono),
+    ] {
+        assert_ne!(own, value);
+    }
+    // And the base tokens the other targets see are the plain ones.
+    assert_eq!(target_tokens(&look), target_tokens(&plain));
+}
+
+#[test]
+fn a_wrong_value_type_names_what_is_allowed() {
+    for value in ["true", "[1]", "{ a = 1 }", "2020-01-01"] {
+        let err =
+            crate::parse_look_toml(override_look(&format!("\"fonts.size\" = {value}")).as_bytes())
+                .unwrap_err();
+        let text = format!("{err:?}");
+        assert!(
+            text.contains("a quoted string (colors, font families) or a number (font sizes)"),
+            "{value}: {text}"
+        );
+        assert!(!text.contains("untagged"), "{value}: {text}");
+    }
+}
+
+#[test]
+fn a_child_look_merges_font_overrides_per_key() {
+    let base_text = format!(
+        "{}\n[targets.kitty-colors]\n\"fonts.mono\" = \"Iosevka\"\n\"fonts.terminal-size\" = 11\n",
+        crate::schema::tests::minimal_toml()
+    );
+    let base = crate::parse_look_toml(base_text.as_bytes()).expect("base");
+    let child_text = "schema = 1\nname = \"child\"\nextends = \"base\"\n[targets.kitty-colors]\n\"fonts.terminal-size\" = 14.5\n";
+    let child = crate::parse_look_toml(child_text.as_bytes()).expect("child");
+    let map = BTreeMap::from([
+        ("base".to_string(), (base, crate::Origin::User)),
+        ("child".to_string(), (child, crate::Origin::User)),
+    ]);
+    let look = crate::resolve(&map, "child").expect("resolves");
+    let kitty = &look.target_overrides["kitty-colors"];
+    assert_eq!(kitty["fonts.mono"], "Iosevka", "inherited");
+    assert_eq!(kitty["fonts.terminal-size"], "14.5", "child wins per key");
 }

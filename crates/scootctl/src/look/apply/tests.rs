@@ -4940,6 +4940,185 @@ fn changing_an_override_re_renders_instead_of_reusing_the_cache() {
     assert!(text.starts_with("bg #111213\n"), "{text}");
 }
 
+const KITTY_FONT_OVERRIDE: &str = "\n[targets.kitty-colors]\n\"fonts.mono\" = \"Iosevka Term\"\n\"fonts.ui\" = \"UiOverride\"\n\"fonts.sans\" = \"SansOverride\"\n\"fonts.terminal-size\" = 13\n\"fonts.size\" = 10.5\n\"fonts.popup-size\" = 21\n\"fonts.app-size\" = 22\n";
+
+const KITTY_FONT_TEMPLATE: &str = "font_family {{ fonts.mono }}\nfont_size {{ fonts.terminal-size }}\nui {{ fonts.size }}\nsans {{ fonts.sans }}\n";
+
+/// Every regular file under `dir` outside `targets/`, as text.
+fn fragments_outside_targets(dir: &std::path::Path) -> Vec<(PathBuf, String)> {
+    fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(PathBuf, String)>) {
+        for entry in std::fs::read_dir(dir).expect("readable") {
+            let path = entry.expect("entry").path();
+            if path
+                .strip_prefix(root)
+                .is_ok_and(|p| p.starts_with("targets"))
+            {
+                continue;
+            }
+            if path.is_dir() {
+                walk(&path, root, out);
+            } else if let Ok(text) = std::fs::read_to_string(&path) {
+                out.push((path, text));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
+    out
+}
+
+#[test]
+fn font_overrides_render_identically_in_validate_build_and_apply() {
+    let fixture = fixture_with_look("targets-font-override", KITTY_FONT_OVERRIDE);
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_FONT_TEMPLATE,
+        None,
+    );
+    let checks = FakeChecks::default();
+    let validation = validate_entry(
+        &fixture.catalog,
+        "look-a",
+        &checks,
+        false,
+        Some(&fixture.config),
+    )
+    .expect("validatable");
+    assert!(validation.errors.is_empty(), "{:?}", validation.errors);
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    let rendered = PathBuf::from(&report.rendered);
+    let text = std::fs::read_to_string(rendered.join("targets/kitty/colors.conf"))
+        .expect("target contents");
+    assert!(
+        text.starts_with("font_family Iosevka Term\nfont_size 13\nui 10.5\nsans "),
+        "{text}"
+    );
+    assert!(
+        !text.contains("DejaVu Sans Mono"),
+        "the override replaced the look's mono: {text}"
+    );
+    let out = fixture._root.join("out");
+    build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+        false,
+        Some(&fixture.config),
+    )
+    .expect("buildable");
+    let built =
+        std::fs::read_to_string(out.join("targets/kitty/colors.conf")).expect("built target");
+    assert_eq!(built, text, "build renders what apply renders");
+    // The look's own fragments never see any of the overrides: every file
+    // outside `targets/` is byte-identical to the same look rendered
+    // without the `[targets]` table.
+    let plain = fixture_with_look("targets-font-override-plain", "");
+    write_target(
+        &plain.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_FONT_TEMPLATE,
+        None,
+    );
+    let plain_report = offline_apply(&plain, "look-a", &options(), &ScriptedLeaves::ok());
+    let plain_dir = PathBuf::from(&plain_report.rendered);
+    let strip = |dir: &std::path::Path| {
+        fragments_outside_targets(dir)
+            .into_iter()
+            .map(|(path, body)| (path.strip_prefix(dir).expect("under dir").to_owned(), body))
+            // `render.json` records the hash of the look.toml bytes, which
+            // differ by construction (the table is in one of them).
+            .filter(|(path, _)| path != std::path::Path::new("render.json"))
+            .collect::<Vec<_>>()
+    };
+    let (with_table, without_table) = (strip(&rendered), strip(&plain_dir));
+    // Not vacuous: the fragments really carry the look's own UI font,
+    // and its size in pixels (10 pt is 13 px). No fragment in this fixture
+    // renders the mono or sans family; those are guarded on the resolved
+    // look in scoot-look.
+    // If a fragment stopped rendering one, this guard would say so.
+    let carries = |needle: &str| without_table.iter().any(|(_, body)| body.contains(needle));
+    assert!(carries("DejaVu Sans"), "no fragment renders fonts.ui");
+    assert!(carries("font-size = 13"), "no fragment renders fonts.size");
+    assert!(
+        carries("font = \"DejaVu Sans\""),
+        "no fragment renders fonts.ui as a font key"
+    );
+    assert_eq!(
+        with_table, without_table,
+        "an override leaked into a fragment"
+    );
+    for (path, body) in &with_table {
+        for leaked in ["Iosevka", "UiOverride", "SansOverride"] {
+            assert!(
+                !body.contains(leaked),
+                "{} carries {leaked}",
+                path.display()
+            );
+        }
+    }
+}
+
+#[test]
+fn a_hostile_font_override_makes_the_look_refuse_to_load() {
+    // The same parse pipeline `validate`, `build`, `install`, `watch` and
+    // every swap load through: the look never reaches a catalog entry, so
+    // nothing can render or record from it.
+    let scratch = scratch("targets-font-hostile");
+    let sources = scratch.path().join("looks");
+    write_look(
+        &sources,
+        "look-a",
+        "\n[targets.kitty-colors]\n\"fonts.mono\" = \"Fira\\nmap ctrl+x launch sh\"\n",
+    );
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    assert!(catalog.entries.is_empty(), "the look must not load");
+    assert!(
+        catalog
+            .notes
+            .iter()
+            .any(|n| n.contains("targets.kitty-colors[fonts.mono]")),
+        "{:?}",
+        catalog.notes
+    );
+}
+
+#[test]
+fn changing_a_font_override_re_renders_instead_of_reusing_the_cache() {
+    let fixture = fixture_with_look("targets-font-cache", KITTY_FONT_OVERRIDE);
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_FONT_TEMPLATE,
+        None,
+    );
+    let first = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    let look = fixture._root.join("looks/look-a/look.toml");
+    let edited = std::fs::read_to_string(&look)
+        .expect("look.toml")
+        .replace("Iosevka Term", "Hack");
+    std::fs::write(&look, edited).expect("edit");
+    let catalog = discover_ordered(&[(fixture._root.join("looks"), Origin::User)]);
+    let second_fixture = Fixture {
+        catalog,
+        cache: fixture.cache.clone(),
+        state: fixture.state.clone(),
+        config: fixture.config.clone(),
+        _scratch: scratch("targets-font-cache-guard"),
+        _root: fixture._root.clone(),
+    };
+    let second = offline_apply(&second_fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    assert_ne!(first.rendered, second.rendered, "a new key, a new render");
+    let text =
+        std::fs::read_to_string(PathBuf::from(&second.rendered).join("targets/kitty/colors.conf"))
+            .expect("target");
+    assert!(text.starts_with("font_family Hack\n"), "{text}");
+}
+
 #[test]
 fn unknown_token_refuses_validate_and_records_nothing() {
     let fixture = fixture("targets-unknown");

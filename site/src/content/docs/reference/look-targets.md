@@ -120,49 +120,85 @@ reload never undoes the swap. A failing render does the opposite
 (unknown token, unreadable template, duplicate or escaping output): the
 swap refuses before anything is recorded.
 
-## Color overrides from a look
+## Overrides from a look
 
-A look can tune the colors one of your targets renders, per target. It
-adds a `[targets.<name>]` table to its `look.toml`, where `<name>` is the
-name of a target you created or added:
+A look can tune the colors, fonts and font sizes one of your targets
+renders, per target. It adds a `[targets.<name>]` table to its
+`look.toml`, where `<name>` is the name of a target you created or added:
 
 ```toml
 [targets.kitty-colors]
 "palette.background" = "#101820"
 "terminal.color1" = "#E06C75"
+"fonts.mono" = "Iosevka Term"
+"fonts.terminal-size" = 13
 ```
 
 | Option | Type / default | Reload |
 |---|---|---|
 | `"palette.<role>"` | `#rrggbb`. Any of the thirteen palette roles. | next swap |
 | `"terminal.color0"` to `"terminal.color15"` | `#rrggbb`. | next swap |
+| `"fonts.ui"`, `"fonts.sans"`, `"fonts.mono"` | A font family: the same text the look's own `[fonts]` table takes. | next swap |
+| `"fonts.size"`, `"fonts.popup-size"`, `"fonts.app-size"`, `"fonts.terminal-size"` | A number from 4 to 192 (points), not a string. | next swap |
+
+A font family is 1 to 64 ASCII letters, digits, spaces and `-_.+`,
+starting with a letter or digit. Nothing else is accepted: no quotes,
+backslashes, `#`, `;`, `=`, braces, slashes, newlines or other control,
+format or non-ASCII characters, so a family can end neither a config line
+nor a quoted value and cannot name a path. The font must still be
+installed on your system for the app to use it; scoot does not check an
+override's family the way it checks the look's own, and an app falls
+back when it cannot find one.
 
 Rules:
 
 - The override replaces that token for that target only. Your other
   targets and the look's own fragments (`scoot.toml`, `bar.toml`, ...) keep
-  the look's colors.
+  the look's colors and fonts.
 - A `terminal.colorN` override adds the token when the look has no
   `[terminal]` table, so a template that names it renders instead of
   refusing.
 - It does nothing when you have no target of that name. A look is shared
   and your targets are yours, so an unknown name is ignored, not an error.
 - A child look inherits its base's overrides and replaces them key by key.
-- Only the keys above are accepted. Fonts, sizes, paths, `output`,
-  `template`, `reload` and every other key refuse when the look is parsed,
-  in `validate`, `build`, `install` and every swap alike. A value must be
-  exactly `#rrggbb`.
+- Only the keys above are accepted. Paths (`fonts.files`, `fonts.nix`),
+  `opacity.*`, `shape.*`, `cursor.*`, `output`, `template`, `reload` and
+  every other key refuse when the look is parsed, in `validate`, `build`,
+  `install` and every swap alike. A value must fit its key: a color is
+  exactly `#rrggbb`, a family is the text above, a size is a number in
+  range.
+- A size renders like the look's own sizes: `13`, never `13.0`; `12.5` stays `12.5`.
 
 Installed looks (someone else's) can never supply templates, output
-paths, or reload commands. The override table carries colors and nothing
-else, and an `[apps.<app>]` table for a target refuses through the
-allowlist, so only these user-owned directories are ever read.
+paths, or reload commands. The override table carries colors, font
+families and sizes and nothing else, and an `[apps.<app>]` table for a
+target refuses through the allowlist, so only these user-owned
+directories are ever read.
 
-> **Symptom:** `look validate` or `look install` refuses a `[targets.<name>]` key.
+> **Symptom:** `look validate` or `look install` refuses a `[targets.<name>]` key with `not an overridable token`.
 >
-> A look's target table takes only `palette.*` and `terminal.color0` to
-> `terminal.color15`, each set to `#rrggbb`. Remove any other key; a
-> look cannot set a path, a command or a font for your target.
+> A look's target table takes only `palette.*`, `terminal.color0` to
+> `terminal.color15`, `fonts.ui`, `fonts.sans`, `fonts.mono` and the four
+> font sizes. Remove any other key; a look cannot set a path or a command
+> for your target.
+
+> **Symptom:** `look validate` or `look install` refuses `targets.<name>[fonts.mono]` with `must be an identifier: ASCII letters, digits, space and -_.+, 1 to 64 bytes, starting with a letter or digit`.
+>
+> The family has a character outside that set (a quote, a newline, a
+> non-ASCII letter). A family that needs one is not expressible in an
+> override; the look can carry the font file in its own `[fonts.files]`
+> instead.
+
+> **Symptom:** `look validate` or `look install` refuses `targets.<name>[fonts.terminal-size]` with `must be a number from 4 to 192 points`.
+>
+> The size is quoted (`"13"`), out of range, or not a number. Write it
+> bare: `"fonts.terminal-size" = 13`.
+
+> **Symptom:** `look validate` or `look install` refuses a `[targets.<name>]` value with `invalid type: boolean `true`, expected a quoted string (colors, font families) or a number (font sizes); booleans, arrays, tables and dates are not accepted`.
+>
+> The value is a boolean, array, table or date (the message says which,
+> after `invalid type:`) and points at the line. Colors and families are
+> quoted strings; sizes are bare numbers.
 
 > **Symptom:** a look's override has no effect.
 >

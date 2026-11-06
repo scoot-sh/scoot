@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-use crate::grammar::{GrammarError, MAX_FILE_BYTES, is_hex_color, is_name};
+use crate::grammar::{GrammarError, MAX_FILE_BYTES, is_hex_color, is_identifier, is_name};
 use crate::resolved::ResolvedLook;
 
 /// The longest `target.toml` this crate parses: the same 64 KiB as every
@@ -371,11 +371,64 @@ pub fn target_tokens(look: &ResolvedLook) -> BTreeMap<String, String> {
     tokens
 }
 
-/// The color tokens a look's `[targets.<name>]` table may override: the
-/// thirteen palette roles and the sixteen terminal colors. Colors only:
-/// every value is a validated `#rrggbb`, so an override is token data
-/// and cannot carry a path, a command or free text into a template.
-pub fn check_override_key(key: &str) -> bool {
+/// What kind of value a `[targets.<name>]` key takes, which is also the
+/// grammar its value is held to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverrideKind {
+    /// A palette role or terminal color: exactly `#rrggbb`.
+    Color,
+    /// A font family (`fonts.ui`, `fonts.sans`, `fonts.mono`): the same
+    /// identifier the look's own `[fonts]` table takes.
+    Family,
+    /// A font size (`fonts.size`, `fonts.popup-size`, `fonts.app-size`,
+    /// `fonts.terminal-size`): a TOML number, 4 to 192 points, like the
+    /// look's own `[fonts]` table.
+    Size,
+}
+
+/// A `[targets.<name>]` value as written: a string (colors, families) or a
+/// TOML number (sizes). Which one a key takes is [`override_kind`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum OverrideValue {
+    /// A quoted string.
+    Text(String),
+    /// A TOML integer or float.
+    Number(f64),
+}
+
+impl<'de> Deserialize<'de> for OverrideValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Visitor;
+        impl serde::de::Visitor<'_> for Visitor {
+            type Value = OverrideValue;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(
+                    "a quoted string (colors, font families) or a number (font sizes); booleans, arrays, tables and dates are not accepted",
+                )
+            }
+            fn visit_str<E>(self, v: &str) -> Result<OverrideValue, E> {
+                Ok(OverrideValue::Text(v.to_owned()))
+            }
+            fn visit_i64<E>(self, v: i64) -> Result<OverrideValue, E> {
+                Ok(OverrideValue::Number(v as f64))
+            }
+            fn visit_u64<E>(self, v: u64) -> Result<OverrideValue, E> {
+                Ok(OverrideValue::Number(v as f64))
+            }
+            fn visit_f64<E>(self, v: f64) -> Result<OverrideValue, E> {
+                Ok(OverrideValue::Number(v))
+            }
+        }
+        deserializer.deserialize_any(Visitor)
+    }
+}
+
+/// The kind of an overridable token, or `None` when the key is not one:
+/// the thirteen palette roles and sixteen terminal colors (colors), the
+/// three font families and the four font sizes. Every other token
+/// (`opacity.*`, `shape.*`, `cursor.*`, `polarity`, ...) stays
+/// non-overridable.
+pub fn override_kind(key: &str) -> Option<OverrideKind> {
     const PALETTE: [&str; 13] = [
         "palette.background",
         "palette.foreground",
@@ -392,22 +445,34 @@ pub fn check_override_key(key: &str) -> bool {
         "palette.match",
     ];
     if PALETTE.contains(&key) {
-        return true;
+        return Some(OverrideKind::Color);
+    }
+    match key {
+        "fonts.ui" | "fonts.sans" | "fonts.mono" => return Some(OverrideKind::Family),
+        "fonts.size" | "fonts.popup-size" | "fonts.app-size" | "fonts.terminal-size" => {
+            return Some(OverrideKind::Size);
+        }
+        _ => {}
     }
     key.strip_prefix("terminal.color")
-        .is_some_and(|n| n.parse::<u8>().is_ok_and(|v| v <= 15 && v.to_string() == n))
+        .filter(|n| {
+            n.parse::<u8>()
+                .is_ok_and(|v| v <= 15 && v.to_string() == *n)
+        })
+        .map(|_| OverrideKind::Color)
 }
 
 /// Validates every `[targets.<name>]` table of a look at parse time, the
 /// one place `validate`, `build`, `install` and every swap share: the
-/// target name grammar, an allowed color token per key, a `#rrggbb` per
-/// value. A key like `output`, `template` or `reload` is not a token, so
-/// a look cannot smuggle a template, output path or reload command in.
+/// target name grammar, an allowed token per key, and a value held to
+/// that token's own grammar (`#rrggbb`, a font identifier, 4 to 192
+/// points). A key like `output`, `template` or `reload` is not a token,
+/// so a look cannot smuggle a template, output path or reload command in.
 /// Whether a user target of that name exists is not checked here: the
 /// look is shared, the user's targets are local, and an override for a
 /// target the user has not enabled does nothing.
 pub fn validate_overrides(
-    targets: &BTreeMap<String, BTreeMap<String, String>>,
+    targets: &BTreeMap<String, BTreeMap<String, OverrideValue>>,
     errors: &mut Vec<GrammarError>,
 ) {
     for (target, table) in targets {
@@ -420,20 +485,42 @@ pub fn validate_overrides(
         }
         for (key, value) in table {
             let field = format!("targets.{target}[{key}]");
-            if !check_override_key(key) {
-                errors.push(GrammarError::new(
+            match (override_kind(key), value) {
+                (None, _) => errors.push(GrammarError::new(
                     &field,
-                    "not an overridable token: only `palette.*` colors and `terminal.color0` to `terminal.color15`",
-                ));
-            } else if !is_hex_color(value) {
-                errors.push(GrammarError::new(&field, "must be exactly #rrggbb"));
+                    "not an overridable token: only `palette.*` colors, `terminal.color0` to `terminal.color15`, `fonts.ui`/`fonts.sans`/`fonts.mono` and the four font sizes",
+                )),
+                (Some(OverrideKind::Color), OverrideValue::Text(v)) if is_hex_color(v) => {}
+                (Some(OverrideKind::Color), _) => {
+                    errors.push(GrammarError::new(&field, "must be exactly #rrggbb"));
+                }
+                (Some(OverrideKind::Family), OverrideValue::Text(v)) if is_identifier(v) => {}
+                (Some(OverrideKind::Family), _) => errors.push(GrammarError::new(
+                    &field,
+                    "must be an identifier: ASCII letters, digits, space and -_.+, 1 to 64 bytes, starting with a letter or digit",
+                )),
+                (Some(OverrideKind::Size), OverrideValue::Number(pt))
+                    if (4.0..=192.0).contains(pt) => {}
+                (Some(OverrideKind::Size), _) => {
+                    errors.push(GrammarError::new(&field, "must be a number from 4 to 192 points"));
+                }
             }
         }
     }
 }
 
+/// The token text an already-validated override renders as: the string
+/// itself, or a size spelled like the look's own size tokens (`12`, never
+/// `12.0`).
+pub(crate) fn override_text(value: &OverrideValue) -> String {
+    match value {
+        OverrideValue::Text(text) => text.clone(),
+        OverrideValue::Number(number) => format_number(*number),
+    }
+}
+
 /// The tokens one target renders against: the look's own, with that
-/// target's `[targets.<name>]` color overrides replacing (or, for a
+/// target's `[targets.<name>]` overrides replacing (or, for a
 /// `terminal.colorN` the look does not set, adding) their keys. Other
 /// targets never see them.
 pub fn tokens_for_target<'a>(
