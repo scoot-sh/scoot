@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.12](https://github.com/scoot-sh/scoot/compare/v0.7.11...v0.7.12) - 2026-11-06
+
+### scoot
+
+- added: offer zwp_pointer_gestures_v1 behind [gestures] client_gestures ([#946](https://github.com/scoot-sh/scoot/pull/946))
+
 ## [0.7.11](https://github.com/scoot-sh/scoot/compare/v0.7.10...v0.7.11) - 2026-11-06
 
 ### scootlaunch
