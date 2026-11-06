@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.11](https://github.com/scoot-sh/scoot/compare/v0.7.10...v0.7.11) - 2026-11-06
+
+### scootlaunch
+
+- added: windows mode over wlr-foreign-toplevel-management ([#941](https://github.com/scoot-sh/scoot/pull/941))
+
 ## [0.7.10](https://github.com/scoot-sh/scoot/compare/v0.7.9...v0.7.10) - 2026-11-05
 
 ### scoot
