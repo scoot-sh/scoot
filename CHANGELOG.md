@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.15](https://github.com/scoot-sh/scoot/compare/v0.7.14...v0.7.15) - 2026-11-06
+
+### scootctl
+
+- added: scoot look install GIT-URL ([#952](https://github.com/scoot-sh/scoot/pull/952))
+
 ## [0.7.14](https://github.com/scoot-sh/scoot/compare/v0.7.13...v0.7.14) - 2026-11-06
 
 ### scoot-look,scootctl
