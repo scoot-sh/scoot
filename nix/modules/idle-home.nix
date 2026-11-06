@@ -84,18 +84,22 @@ let
   # than a live screenshot: this compositor deliberately publishes no
   # `wlr-screencopy` (it speaks `ext-image-copy-capture` instead), so
   # the fork's `--screenshots` has nothing to capture against scoot and
-  # would always fall back -- the blur has to be baked in. Blurring at
-  # build time also keeps the lock instant (no per-lock image work on
-  # any renderer, CPU included) and per generation (the file a session
-  # locks with is the one it was built with). The blur is built from the
-  # Nix-configured look's wallpaper only: a wallpaper set at runtime
-  # (`scootbg set`, a slideshow step, `scoot look apply`, a [wallpaper]
-  # file) is never read by a rebuild either, so the lock keeps showing
-  # the built blur -- still blurred, still themed, still messaged, just
-  # not that image; per-output runtime blur is a follow-up
-  # (docs/backlog/core/lock-screen-per-output-blur.md). An unreadable
-  # image still locks (the locker falls back to `color`): an unthemed
-  # lock beats no lock.
+  # would always fall back -- the blur has to be made ahead. This one is
+  # the BUILT blur, from the Nix-configured look's wallpaper only: the
+  # fallback under the live pictures below (an output scootbg has no
+  # picture for, a scootbg that is not running) and what a session
+  # without scootbg locks with. Blurring at build time keeps that
+  # fallback instant (no per-lock image work on any renderer, CPU
+  # included). An unreadable image still locks (the locker falls back to
+  # `color`): an unthemed lock beats no lock.
+  #
+  # The wallpaper actually on each output -- `scootbg set`, a slideshow
+  # step, a per-workspace mapping, `scoot look apply` -- is live state a
+  # rebuild never sees. scootbg (which owns it) keeps a blurred picture
+  # per output, and `scoot-locker` passes one `-i OUTPUT:FILE` for each
+  # (`liveBlur` below). swaylock picks an output's own image over the
+  # config's default one and skips an image it cannot load, so the chain
+  # is the live picture, then this blur, then `color`.
   lockWallpaper =
     let
       # The themed image only while the lock target is themed: opted
@@ -195,6 +199,9 @@ let
     swaylockLines (lockImage // lockEffects // idle.lock.settings)
   );
   lookLeafLib = builtins.readFile ./look-leaf.sh;
+  # `scoot_lockscreen_images`, bash-only, so kept out of the shared
+  # POSIX library above: only the locker script (bash) includes it.
+  lockImagesLib = builtins.readFile ./lock-images.sh;
 
   # The lock action is also the keymap's `super+escape` bind (see
   # `keys-home.nix`): with the keymap on and that bind kept, an
@@ -225,17 +232,35 @@ let
   # applied a look has no state file, where the store config stands. A
   # merge that cannot be written still locks (with the store config):
   # an unthemed lock beats no lock.
+  #
+  # The live pictures (`liveBlur`): each output scootbg keeps a blurred
+  # picture for gets its own `-i OUTPUT:FILE`, read at lock time
+  # (`scoot_lockscreen_images`, in `./lock-images.sh`). They go on
+  # BOTH launches, after `-C`, and add to the config's global `image`
+  # rather than replace it: swaylock shows an output's own image when it
+  # has one and the global one otherwise, so an output with no picture
+  # (scootbg not running, an output it has not drawn yet, a picture that
+  # fails to load) shows the built blur, and below that the config's
+  # `color`. Off when the lock is not themed (the navy tile is the
+  # deliberate look there) and when `lock.settings` sets its own `image`
+  # (a hand-pointed image wins, as `lockImage` documents).
+  liveBlur = themed && !(idle.lock.settings ? image);
+  # Quoted so every pair stays two words whatever an output is called.
+  liveArgs = lib.optionalString liveBlur ''"''${lock_images[@]}"'';
+
   lockerScript = pkgs.writeShellScriptBin "scoot-locker" ''
     ${lookLeafLib}
+    ${lib.optionalString liveBlur lockImagesLib}
+    ${lib.optionalString liveBlur "scoot_lockscreen_images"}
     look_conf=${lookSwaylock}
     if [ -f "$look_conf" ]; then
       if merged=$(scoot_swaylock_merged "$look_conf" ${swaylockSettings}); then
-        exec ${lib.getExe idle.lock.package} -f -C "$merged"
+        exec ${lib.getExe idle.lock.package} -f -C "$merged" ${liveArgs}
       else
         echo "scoot-locker: cannot merge the live look, locking with the stored config" >&2
       fi
     fi
-    exec ${lib.getExe idle.lock.package} -f -C ${swaylockConfig}
+    exec ${lib.getExe idle.lock.package} -f -C ${swaylockConfig} ${liveArgs}
   '';
 
   lockerCmd = "${lockerScript}/bin/scoot-locker";

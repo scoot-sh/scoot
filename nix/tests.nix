@@ -2505,6 +2505,14 @@ let
       show-failed-attempts = "";
     };
   };
+  # ...pointing the locker at an image of its own (the live pictures
+  # stand down: a hand-pointed image wins).
+  hmLockOwnImage = evalHome {
+    enable = true;
+    desktop.enable = true;
+    look = "music-desk";
+    desktop.idle.lock.settings.image = "/home/me/lock.png";
+  };
   # ...opted out of locker theming (the look leaves the locker alone,
   # the settings still apply).
   hmThemeTargetOff = evalHome {
@@ -7729,6 +7737,8 @@ let
   idleNoLookConf = hmIdleNoLook.config.xdg.configFile."swaylock/config".source;
   idleLocker = slotScriptBin hmIdle "scoot-locker";
   idleLockerSettings = slotScriptBin hmLockSettings "scoot-locker";
+  idleLockerOwnImage = slotScriptBin hmLockOwnImage "scoot-locker";
+  idleLockerTargetOff = slotScriptBin hmThemeTargetOff "scoot-locker";
   # The notification daemon's generated files: the mako config
   # (overlay layer, DND section, themed leaves, critical ring) from
   # the mako escape-hatch evaluation, plus the lookless, recolored and
@@ -9797,6 +9807,7 @@ let
     )
     (
       assert allAssertionsHold hmLockSettings.config;
+      assert allAssertionsHold hmLockOwnImage.config;
       true
     )
     (
@@ -18244,6 +18255,23 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
     if grep -F -q -- '-C "$look_conf"' ${idleLocker}; then echo "the locker points -C at the bare look file" >&2; exit 1; fi
     echo "ok: the locker merges the live look under the user's settings when applied"
 
+    # 12d1. The live pictures (docs/backlog/resolved/lock-screen-per-output-blur-done.md):
+    #       a themed lock reads scootbg's index at lock time and hands
+    #       swaylock one `-i OUTPUT:FILE` per line, on BOTH launches
+    #       (the merged config and the stored one), as an array so a pair
+    #       stays two words whatever an output is called. The config's
+    #       own global `image` stays: it is the fallback under them. A
+    #       lock that is not themed, or whose settings point at an image
+    #       of their own, passes none.
+    grep -F -x -q 'scoot_lockscreen_images' ${idleLocker}
+    grep -F -q 'scoot_lockscreen_images() {' ${idleLocker}
+    [ "$(grep -F 'exec ' ${idleLocker} | grep -c -F '"''${lock_images[@]}"')" = 2 ] || { echo "want the live pictures on both exec lines" >&2; cat ${idleLocker} >&2; exit 1; }
+    grep -F -q 'image=/nix/store/' ${idleLockConf}
+    for bare in ${idleLockerOwnImage} ${idleLockerTargetOff}; do
+      if grep -F -q 'scoot_lockscreen_images' "$bare" || grep -F -q '"''${lock_images[@]}"' "$bare"; then echo "a lock that is not themed (or has its own image) passes live pictures: $bare" >&2; exit 1; fi
+    done
+    echo "ok: the themed locker passes one -i per scootbg picture on both launches; an own image or an opt-out passes none"
+
     ${lib.optionalString isLinux ''
       # 12d2. The merge, live: the look's colors land first, the user's
       #      own settings after (what swaylock reads last wins), and the
@@ -18305,6 +18333,63 @@ runCommand "scoot-modules-check" { nativeBuildInputs = [ checkPython ]; } ''
       grep -q "Unable to connect to the compositor" "$SWL_T/stderr2" || { echo "fallback swaylock said '$(cat "$SWL_T/stderr2")' (12d2)" >&2; exit 1; }
       [ ! -e "$SWL_T/rt2/scoot-swaylock-config" ] || { echo "a merge appeared with no live look (12d2)" >&2; exit 1; }
       echo "ok: the live merge layers the look under the user's settings, and the store config still locks alone"
+
+      # 12d3. The live pictures, run: scootbg's index becomes one `-i
+      #       NAME:FILE` pair per usable line -- the file must exist and
+      #       be plain path characters (swaylock `wordexp`s it), the name
+      #       must be nonempty and colon-free, and a name with a space
+      #       stays one argument. The display name is scootbg's
+      #       (`paths::display_name`, pinned on the Rust side with the
+      #       same input): last component, each byte outside
+      #       `[A-Za-z0-9._-]` an underscore.
+      export LIVE_T="$SWL_T/live"
+      rm -rf "$LIVE_T"
+      mkdir -p "$LIVE_T/rt/scootbg-wayland-test.lockscreen" "$LIVE_T/rt/scootbg-way_land___.lockscreen" "$LIVE_T/rt/scootbg-wayland-0.lockscreen"
+      pic="$LIVE_T/rt/scootbg-wayland-test.lockscreen"
+      cp "$image" "$pic/output-1.png"
+      cp "$image" "$pic/output-4.png"
+      cp "$image" "$pic/with space.png"
+      printf '%s\t%s\n' \
+        "DP-1" "$pic/output-1.png" \
+        "HDMI-A-1" "$pic/output-2.png" \
+        "bad:name" "$pic/output-1.png" \
+        "" "$pic/output-1.png" \
+        "SPACE" "$pic/with space.png" \
+        "SUB" '/$(touch '"$LIVE_T"'/pwned).png' \
+        "REL" "output-1.png" \
+        "Dell 27" "$pic/output-4.png" > "$pic/index"
+      collect() {
+        env -i PATH=${pkgs.coreutils}/bin "$@" ${pkgs.bash}/bin/bash -c 'source ${./modules/lock-images.sh}; scoot_lockscreen_images; printf "%s\n" "''${lock_images[@]}"'
+      }
+      got="$(collect XDG_RUNTIME_DIR="$LIVE_T/rt" WAYLAND_DISPLAY=/run/user/1/wayland-test)"
+      want="$(printf '%s\n' -i "DP-1:$pic/output-1.png" -i "Dell 27:$pic/output-4.png")"
+      [ "$got" = "$want" ] || { echo "live pictures (12d3): got '$got', want '$want'" >&2; exit 1; }
+      [ ! -e "$LIVE_T/pwned" ] || { echo "an index line ran a command (12d3)" >&2; exit 1; }
+      # The display name: a hostile one maps byte by byte, the same
+      # string as the Rust pin.
+      cp "$image" "$LIVE_T/rt/scootbg-way_land___.lockscreen/output-9.png"
+      printf '%s\t%s\n' "ODD" "$LIVE_T/rt/scootbg-way_land___.lockscreen/output-9.png" > "$LIVE_T/rt/scootbg-way_land___.lockscreen/index"
+      got="$(collect XDG_RUNTIME_DIR="$LIVE_T/rt" "WAYLAND_DISPLAY=way land:é")"
+      [ "$got" = "$(printf '%s\n' -i "ODD:$LIVE_T/rt/scootbg-way_land___.lockscreen/output-9.png")" ] || { echo "display name mapping (12d3): '$got'" >&2; exit 1; }
+      # No WAYLAND_DISPLAY is wayland-0; a missing index, a missing
+      # runtime dir and an empty index all give no arguments.
+      : > "$LIVE_T/rt/scootbg-wayland-0.lockscreen/index"
+      [ -z "$(collect XDG_RUNTIME_DIR="$LIVE_T/rt")" ] || { echo "empty index gave arguments (12d3)" >&2; exit 1; }
+      [ -z "$(collect XDG_RUNTIME_DIR="$LIVE_T/rt" WAYLAND_DISPLAY=nothing-here)" ] || { echo "missing index gave arguments (12d3)" >&2; exit 1; }
+      [ -z "$(collect WAYLAND_DISPLAY=wayland-test)" ] || { echo "no runtime dir gave arguments (12d3)" >&2; exit 1; }
+      # The real swaylock takes the pairs on top of the merged config:
+      # the good picture loads for its output, the one that cannot load
+      # (a file that is not an image) is skipped without ending the
+      # lock, and it still reaches the display connect.
+      rm -f "$pic/output-4.png"
+      printf 'not a png' > "$pic/output-4.png"
+      args=()
+      while IFS= read -r a; do args+=("$a"); done < <(collect XDG_RUNTIME_DIR="$LIVE_T/rt" WAYLAND_DISPLAY=wayland-test)
+      if env -i ${pkgs.swaylock-effects}/bin/swaylock -d --config "$merged" "''${args[@]}" 2>"$LIVE_T/log"; then echo "swaylock locked without a display (12d3)" >&2; exit 1; fi
+      grep -q "Loaded image $pic/output-1.png for output DP-1" "$LIVE_T/log" || { echo "swaylock did not load the live picture (12d3): $(cat "$LIVE_T/log")" >&2; exit 1; }
+      grep -q "Unable to connect to the compositor" "$LIVE_T/log" || { echo "a bad picture ended the lock before the display (12d3): $(cat "$LIVE_T/log")" >&2; exit 1; }
+      if grep -q "unrecognized option" "$LIVE_T/log"; then echo "swaylock refused -i (12d3)" >&2; exit 1; fi
+      echo "ok: the live pictures become -i pairs (unsafe lines skipped), swaylock loads them over the config's image and survives one that cannot load"
     ''}
 
     # 13. Notification daemon on the mako escape hatch, music-desk:

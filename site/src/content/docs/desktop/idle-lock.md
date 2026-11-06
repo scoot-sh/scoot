@@ -21,9 +21,9 @@ unlock. One timeout set covers AC and battery alike.
 The locker follows the look: screen and indicator from its palette (a
 value in `lock.settings` winning per key, `theme.targets.lock.enable =
 false` dropping the themed block while the rest follows the look).
-Locked, the look's wallpaper shows behind everything, blurred at build
-time, with the indicator always visible and a message saying what to
-do. The music-desk palette over its blurred wallpaper:
+Locked, the wallpaper shows behind everything, blurred, with the
+indicator always visible and a message saying what to do. The music-desk
+palette over its blurred wallpaper:
 
 ![The scoot lock screen in the music-desk look: the blurred wallpaper behind the always-visible indicator ring and an unlock message](../../../assets/idle-lock-screen.png)
 
@@ -33,10 +33,24 @@ screen with a white ring. A wrong password says so
 (`Wrong password. Try again.`), and the screen still locks even if an
 image cannot load.
 
-The blur is built from the wallpaper of the look you configure in Nix.
-A wallpaper you set at runtime (`scootbg set`, a slideshow, `scoot look
-apply`) is not picked up, even by a rebuild: the lock keeps the built
-blur.
+Each output shows its own wallpaper, as it is when the lock starts: the
+one you set with `scootbg set` (per output or per workspace), a slideshow's
+current image, or the one `scoot look apply` brought, blurred. scootbg keeps
+the blurred copy up to date and the locker reads it at lock time ([the
+format](/scootbg/#a-picture-for-your-lock-screen)). No rebuild is needed.
+
+Per output, the lock falls back in this order, and it always locks:
+
+1. scootbg's picture of that output's wallpaper.
+2. The blur built from the wallpaper of the look you configure in Nix.
+3. The look's `color` (the navy screen without a look).
+
+So the built blur shows on an output scootbg has no picture for yet, on every
+output when scootbg is not running, and when a picture cannot load. The live
+pictures are off, and the built blur shows everywhere, when
+`theme.targets.lock.enable` is `false` (the navy tile is the look there) or
+when `lock.settings` sets its own `image` (an image you point at wins). A
+solid-color wallpaper locks to a flat screen of that color.
 
 If you set `desktop.idle.lock.package` yourself, it must match
 `desktop.idle.lock.daemon`. A locker that does not know a key in the

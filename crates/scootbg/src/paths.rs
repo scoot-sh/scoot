@@ -35,6 +35,8 @@ pub struct Paths {
     pub display: String,
     pub socket: PathBuf,
     pub lock: PathBuf,
+    /// The directory of lock screen pictures (`crate::lockscreen`).
+    pub lockscreen: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +98,7 @@ pub fn resolve(
     let display = display_name(wayland_display)?;
     let socket = dir.join(format!("scootbg-{display}.sock"));
     let lock = dir.join(format!("scootbg-{display}.lock"));
+    let lockscreen = dir.join(format!("scootbg-{display}.lockscreen"));
     // The lock path is the same length, so one check covers both.
     if socket.as_os_str().len() > MAX_SOCKET_PATH {
         return Err(PathError::TooLong(socket));
@@ -104,6 +107,7 @@ pub fn resolve(
         display,
         socket,
         lock,
+        lockscreen,
     })
 }
 

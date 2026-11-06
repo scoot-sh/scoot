@@ -34,6 +34,8 @@ use crate::image::animated::{Animated, Checked, decode_checked};
 use crate::image::decode::{DecodeError, Decoded, decode_file};
 use crate::image::render::render_each;
 use crate::jobs::Target;
+use crate::lockblur::blurred_png;
+use crate::print::warn;
 use crate::wallpaper::Image;
 
 #[cfg(test)]
@@ -41,7 +43,16 @@ mod tests;
 
 /// What became of one buffer size (pixels), for every target of that size:
 /// its buffer, shared by all of them, or why not (for stderr).
-pub type Rendered = ((u32, u32), Result<ShmBuffer, String>);
+pub type Rendered = ((u32, u32), Result<Drawn, String>);
+
+/// One drawn size: the buffer, and the lock screen's blurred picture of it
+/// (`crate::lockblur`) when that could be made. A picture that could not
+/// leaves the wallpaper unaffected: the lock screen shows its own
+/// background on that output instead.
+pub struct Drawn {
+    pub buffer: ShmBuffer,
+    pub lock: Option<Box<[u8]>>,
+}
 
 /// A finished job: every target drawn (or not), or the image unusable.
 pub type Done = Result<Vec<Rendered>, JobError>;
@@ -293,9 +304,34 @@ pub fn work(image: &Image, targets: &[Target]) -> Done {
     }
     let mut out = Vec::with_capacity(sizes.len());
     render_each(decoded, image.look, &sizes, |dims, drawn| {
-        out.push((dims, drawn.map_err(|error| error.to_string())));
+        let drawn = drawn
+            .map(|buffer| {
+                let lock = lock_picture(&buffer, dims);
+                Drawn { buffer, lock }
+            })
+            .map_err(|error| error.to_string());
+        out.push((dims, drawn));
     });
     Ok(out)
+}
+
+/// The lock screen's blurred picture of a drawn buffer, on this thread
+/// and once per size. Said on stderr, once per job and size, if it cannot
+/// be made.
+fn lock_picture(buffer: &ShmBuffer, dims: (u32, u32)) -> Option<Box<[u8]>> {
+    let geometry = buffer.geometry();
+    // Positive `i32`s (`Geometry` validated them): lossless.
+    let stride = usize::try_from(geometry.stride).ok()?;
+    match blurred_png(buffer.pixels(), dims.0, dims.1, stride) {
+        Ok(png) => Some(png.into_boxed_slice()),
+        Err(error) => {
+            warn(format_args!(
+                "scootbg: no lock screen picture at {}x{}: {error}",
+                dims.0, dims.1
+            ));
+            None
+        }
+    }
 }
 
 /// The still an animation shows: its first, composited frame. The full

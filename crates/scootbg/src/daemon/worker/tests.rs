@@ -77,7 +77,7 @@ fn every_size_gets_one_buffer_from_one_decode() {
     let mut sizes: Vec<(u32, u32)> = done
         .into_iter()
         .map(|(dims, buffer)| {
-            let geometry = buffer.unwrap().geometry();
+            let geometry = buffer.unwrap().buffer.geometry();
             assert_eq!((geometry.width as u32, geometry.height as u32), dims);
             dims
         })
@@ -241,7 +241,7 @@ fn a_thread_that_cannot_start_leaves_no_result_behind() {
         assert!(readable(&worker, 20));
         let mut done = worker.take().unwrap().unwrap();
         let (_, buffer) = done.pop().unwrap();
-        let mut buffer = buffer.unwrap();
+        let mut buffer = buffer.unwrap().buffer;
         assert_eq!(buffer.pixels_mut()[..4], want, "{file:?}: its own pixels");
     }
     std::fs::remove_dir_all(&dir).unwrap();
@@ -349,7 +349,7 @@ fn an_animated_gif_with_checks_draws_its_first_frame() {
     assert_eq!(dims, (2, 1));
     // XRGB8888: red, then green.
     assert_eq!(
-        &buffer.unwrap().pixels_mut()[..8],
+        &buffer.unwrap().buffer.pixels_mut()[..8],
         &[0, 0, 255, 255, 0, 255, 0, 255]
     );
     std::fs::remove_dir_all(&dir).unwrap();
@@ -399,6 +399,41 @@ fn no_animate_draws_the_first_frame_past_the_cap() {
     let (dims, buffer) = done.pop().unwrap();
     assert_eq!(dims, (1, 1));
     // The first frame: black.
-    assert_eq!(&buffer.unwrap().pixels_mut()[..4], &[0, 0, 0, 255]);
+    assert_eq!(&buffer.unwrap().buffer.pixels_mut()[..4], &[0, 0, 0, 255]);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Each drawn size carries the lock screen's picture of it, made on the
+/// worker thread with the pixels, at that size's aspect.
+#[test]
+fn every_drawn_size_carries_its_lock_screen_picture() {
+    let dir = scratch("lockpic");
+    let file = dir.join("q.jpg");
+    std::fs::write(&file, samples::QUADRANTS_JPEG).unwrap();
+    let [a, b] = ids(2)[..] else { unreachable!() };
+    let targets = [
+        Target {
+            output: a,
+            dims: (64, 40),
+        },
+        Target {
+            output: b,
+            dims: (1920, 1080),
+        },
+    ];
+    let done = work(&image(&file, Mode::Stretch), &targets).unwrap();
+    assert_eq!(done.len(), 2);
+    for (dims, drawn) in done {
+        let drawn = drawn.unwrap();
+        let png = drawn.lock.expect("a picture for every size");
+        let decoder = png::Decoder::new(std::io::Cursor::new(&png[..]));
+        let reader = decoder.read_info().unwrap();
+        let info = reader.info();
+        assert_eq!(
+            Some((info.width, info.height)),
+            crate::lockblur::small_dims(dims.0, dims.1),
+            "{dims:?}"
+        );
+    }
     std::fs::remove_dir_all(&dir).unwrap();
 }

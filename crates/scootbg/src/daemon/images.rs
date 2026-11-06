@@ -43,7 +43,7 @@ use super::change::{image_dims, reconcile, sweep};
 use super::respond::Ready;
 use super::surfaces::Objects;
 use super::wayland::{Globals, State};
-use super::worker::{Done, JobError, Rendered, Worker};
+use super::worker::{Done, Drawn, JobError, Rendered, Worker};
 use crate::choices::Choices;
 use crate::control::ConnId;
 use crate::jobs::{Jobs, Target, Trial};
@@ -443,8 +443,10 @@ fn offer(
                 && choices.workspace_image_for(entry.output.info().name.as_deref(), image.serial)
         };
         let shared = match result {
-            Ok(buffer) if outputs.iter().any(|entry| takes(entry) || keeps(entry)) => {
-                canvas::pixels(globals, qh, buffer, Content::Image(image.serial))
+            Ok(Drawn { buffer, lock })
+                if outputs.iter().any(|entry| takes(entry) || keeps(entry)) =>
+            {
+                canvas::pixels_with_lock(globals, qh, buffer, Content::Image(image.serial), lock)
                     .map_err(|error| error.to_string())
             }
             Ok(_) => continue,
