@@ -28,8 +28,9 @@ pub const MAX_CACHE: usize = 1024 * 1024;
 const MAGIC: &[u8; 8] = b"SLIX0001";
 /// The entries gained `workdir` (the `Path=` key) in the launch-spawn
 /// ticket: a version change, so an old cache rescans instead of
-/// misreading the new trailing field.
-const VERSION: u32 = 2;
+/// misreading the new trailing field. `startup_wm_class` (windows mode's
+/// icon match) is version 3.
+const VERSION: u32 = 3;
 
 /// Where the cache lives. `None` (no `$HOME` and no
 /// `$XDG_CACHE_HOME`) means no cache, never an error.
@@ -291,6 +292,7 @@ fn put_entries(bytes: &mut Vec<u8>, entries: &[super::Entry]) {
         }
         put_string(bytes, &entry.path.to_string_lossy());
         put_option(bytes, &entry.workdir);
+        put_option(bytes, &entry.startup_wm_class);
         match &entry.hidden {
             Some(reason) => {
                 bytes.push(1);
@@ -333,6 +335,7 @@ fn take_entry(cursor: &mut Cursor<'_>) -> Result<super::Entry, ()> {
     }
     let path = PathBuf::from(take_string(cursor)?);
     let workdir = take_option(cursor)?;
+    let startup_wm_class = take_option(cursor)?;
     let hidden = match cursor.take_byte()? {
         1 => Some(super::filter::HiddenReason::from_str(take_string(cursor)?.as_str()).ok_or(())?),
         0 => None,
@@ -351,6 +354,7 @@ fn take_entry(cursor: &mut Cursor<'_>) -> Result<super::Entry, ()> {
         actions,
         path,
         workdir,
+        startup_wm_class,
         hidden,
     })
 }

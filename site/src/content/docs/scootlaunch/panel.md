@@ -16,6 +16,7 @@ scootlaunch --font /path/to/font.ttf # open with an explicit typeface
 scootlaunch --check                  # validate the config file and exit
 printf 'a\nb\n' | scootlaunch --dmenu --prompt='pick: '  # pick a line, print it
 scootlaunch --run                    # the panel over executables on $PATH
+scootlaunch --windows                # the panel over open windows; Enter focuses one
 ```
 
 Picking launches the chosen entry and exits 0; dismissing exits 1.
@@ -96,8 +97,8 @@ with it.
 | typing | filters the list |
 | Up / Down, Ctrl+P / Ctrl+N, Shift+Tab / Tab | move the selection |
 | Page Up / Page Down, Ctrl+Home / Ctrl+End | by page, to the ends |
-| Enter | launch the selection |
-| Ctrl+Enter | run the typed text as a command |
+| Enter | launch the selection (windows mode: activate the window) |
+| Ctrl+Enter | run the typed text as a command (windows mode: nothing) |
 | Escape, or a click outside the panel (below a short one included) | dismiss (exit 1); with a [motion](#motion) set, Escape fades out first |
 
 Left/Right, Home/End, BackSpace, Delete, Ctrl+W, Ctrl+U and Ctrl+A
@@ -171,6 +172,79 @@ rows (a click on it launches nothing) and the panel stays open; nothing
 is recorded. Ctrl+Enter runs the typed text
 split on spaces, under the same rules (its scope derives from the
 command's name).
+
+## Windows
+
+`scootlaunch --windows` opens the same panel over the windows that are
+open now, one row each. Type to filter, then Enter (or a click) focuses
+the window and the panel closes. It is a switcher for when a bar or a
+keybind does not get you there; it does nothing else to a window (no
+close, minimize or move).
+
+```sh
+scootlaunch --windows
+```
+
+There is no default key. Bind it in your compositor like any other
+command; on scoot, in `config.toml` (then `scoot msg reload`):
+
+```toml
+[binds]
+"super+slash" = "spawn scootlaunch --windows"
+```
+
+A second `scootlaunch --windows` (or a bare `scootlaunch` or `--run`)
+while one is open dismisses the first, so one bind toggles.
+
+What a row shows:
+
+| Part | From |
+|---|---|
+| Name | the window's title; the `app_id` when the title is empty; `Untitled` when both are |
+| Searchable text | the title and the `app_id` (typing `firefox` finds a Firefox window whatever its page is called) |
+| Icon | the desktop entry the `app_id` names; see below |
+| Order | by title, A to Z, then by the order the compositor listed them (windows have no usage history; the list is not in focus order) |
+
+The icon comes from the first desktop entry that matches the `app_id`,
+in this order: a desktop id equal to `app_id` plus `.desktop`, a
+`StartupWMClass` equal to the `app_id`, then the same two ignoring
+letter case. An entry that matches but has no `Icon=` shows the letter
+tile. With no match the `app_id` is tried as an icon name, and a name
+the theme does not have shows the tile. Entries hidden from the apps
+list (`NoDisplay=true`) still give their windows an icon.
+
+With a [motion](#motion) set, the panel fades out before the window is
+activated, so focus moves up to `motion-duration-ms` after Enter; the
+keyboard is released at the first frame of the fade.
+
+The list is read once, when the panel opens. A title that changes while
+the panel is open is not redrawn, and a window that opens meanwhile is
+not added. A window that closes meanwhile stays in the list; picking it
+prints `that window closed before it could be activated` and exits 1,
+and nothing else is activated.
+
+The mode uses `wlr-foreign-toplevel-management`, which scoot and sway
+(and other wlroots compositors) serve. It does not use
+`ext-foreign-toplevel-list`, whose handles cannot be activated. The
+panel's flags, config, [theming](#theming) and [motion](#depth-and-motion)
+apply as in the other modes; frecency does not (no history is read or
+written). Exit codes: 0 after the window was activated, 1 on dismiss or a
+failure.
+
+> **Symptom:** `the compositor does not offer
+> zwlr_foreign_toplevel_manager_v1, which windows mode needs`.
+> The compositor does not serve the protocol, so it can neither list nor
+> activate windows. Nothing opened. Apps, run and dmenu mode are not
+> affected.
+
+> **Symptom:** the panel says `No windows`.
+> The compositor listed no toplevel windows. Layer-shell surfaces (a bar,
+> a wallpaper) and the launcher itself are not windows.
+
+> **Symptom:** a window is in the list but its icon is a letter tile.
+> Its `app_id` matches no desktop entry. Run the window's app, then check
+> its `app_id` (`scoot msg windows` on scoot, `swaymsg -t get_tree` on
+> sway) against the entry's file name or its `StartupWMClass=` line.
 
 ## Theming
 

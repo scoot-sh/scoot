@@ -93,6 +93,7 @@ pub fn to_entries(names: &[String]) -> Vec<crate::index::Entry> {
             actions: Vec::new(),
             path: PathBuf::new(),
             workdir: None,
+            startup_wm_class: None,
             hidden: None,
         })
         .collect()

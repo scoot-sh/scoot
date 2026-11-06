@@ -2184,16 +2184,28 @@ jobs:
         shell: nix develop --command bash -euo pipefail {0}
         run: cargo clippy -p scootlaunch --all-targets -- -D warnings
 
+      # Windows mode is tested on sway as well as scoot (both serve
+      # wlr-foreign-toplevel-management): a headless sway, pixman, no GPU,
+      # from the flake's own pinned nixpkgs, out of the binary cache. The
+      # tests read it from `SCOOTBAR_TEST_SWAY`, the name the shared
+      # harness (`scootui`'s test support) looks for.
+      - name: Fetch sway
+        run: |
+          sway=$(nix build --inputs-from . nixpkgs#sway --no-link --print-out-paths)
+          echo "SCOOTBAR_TEST_SWAY=$sway/bin/sway" >>"$GITHUB_ENV"
+
       # Both runners, for the reason the Linux job gives: nextest isolates
       # each test in its own process, `cargo test` shares one. The panel
       # integration tests drive the real binary under a headless scoot
       # they start themselves, so this job builds it first; and
-      # `SCOOTLAUNCH_REQUIRE_SCOOT` turns their skips into failures, so
-      # this job cannot go green by skipping.
+      # `SCOOTLAUNCH_REQUIRE_SCOOT` and `SCOOTLAUNCH_REQUIRE_SWAY` turn
+      # their skips into failures, so this job cannot go green by
+      # skipping.
       - name: cargo nextest and cargo test
         shell: nix develop --command bash -euo pipefail {0}
         env:
           SCOOTLAUNCH_REQUIRE_SCOOT: "1"
+          SCOOTLAUNCH_REQUIRE_SWAY: "1"
         run: |
           cargo build -p scoot -p scootlaunch
           cargo nextest run -p scootlaunch --no-fail-fast

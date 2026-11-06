@@ -77,6 +77,10 @@ png = "0.18"
 # real binary through (plus the keyboard/seat pair the unit tests pin):
 # the same crate as the binary's, with test support on.
 scootui = { path = "../scootui", features = ["test-support"] }
+# The windows tests' virtual keyboard on sway (`zwp_virtual_keyboard_v1`,
+# a headless sway has no keyboard): the same version scootui's keyboard
+# test carries, test-only, never in the shipped binary.
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
 # Decoding the compositor's screenshot PNGs when `SCOOTLAUNCH_SHOTS`
 # asks the integration tests to save them: the workspace's existing
 # version.

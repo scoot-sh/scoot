@@ -27,6 +27,7 @@ fn list_alone_parses() {
             check: false,
             dmenu: false,
             run: false,
+            windows: false,
             prompt: None,
             prompt_only: None,
             password: false,
@@ -569,5 +570,61 @@ fn run_id_conflicts_with_other_commands() {
     assert_eq!(
         parse_args(&argv(&["scootlaunch", "--run-id", "x", "--font", "a"])),
         Err(Error::NeedsCommand("--font".to_string()))
+    );
+}
+
+#[test]
+fn windows_opens_windows_mode_with_the_panel_options() {
+    let args = parse_args(&argv(&[
+        "scootlaunch",
+        "--windows",
+        "--font",
+        "f.ttf",
+        "--config=c.toml",
+        "--lenient",
+        "--background-color=102030ff",
+        "--layer",
+        "overlay",
+    ]))
+    .unwrap();
+    assert!(args.windows);
+    assert!(!args.run && !args.dmenu && !args.list);
+    assert_eq!(args.font.as_deref(), Some("f.ttf"));
+    assert_eq!(args.config.as_deref(), Some("c.toml"));
+}
+
+#[test]
+fn windows_is_a_command_not_a_modifier() {
+    for other in [
+        &["--list"][..],
+        &["--query", "x"],
+        &["--run-id", "x"],
+        &["--check"],
+        &["--dmenu"],
+        &["--run"],
+    ] {
+        let mut words = vec!["scootlaunch", "--windows"];
+        words.extend_from_slice(other);
+        assert_eq!(
+            parse_args(&argv(&words)),
+            Err(Error::ConflictingCommands),
+            "{words:?}"
+        );
+    }
+}
+
+#[test]
+fn windows_takes_no_value_and_no_dmenu_flag() {
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--windows=1"])),
+        Err(Error::UnknownFlag("--windows=1".to_string()))
+    );
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--windows", "--prompt", "x"])),
+        Err(Error::NeedsCommand("--prompt".to_string()))
+    );
+    assert_eq!(
+        parse_args(&argv(&["scootlaunch", "--windows", "--json"])),
+        Err(Error::NeedsCommand("--json".to_string()))
     );
 }

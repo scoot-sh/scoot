@@ -1,6 +1,6 @@
 ---
 title: scootlaunch CLI reference
-description: "Every scootlaunch command and flag that ships today: the panel, --list, --query, --run-id, --dmenu, --run, --all, --lenient, --json, --check, and the agent JSON schema."
+description: "Every scootlaunch command and flag that ships today: the panel, --list, --query, --run-id, --dmenu, --run, --windows, --all, --lenient, --json, --check, and the agent JSON schema."
 ---
 
 Every `scootlaunch` command and flag that ships today, and how it
@@ -26,6 +26,7 @@ scootlaunch --query ""                     # empty query: by frecency, then name
 scootlaunch --run-id ID [--action A]       # launch one entry headlessly, one JSON object
 scootlaunch --dmenu [flags]                # lines on stdin, the pick on stdout
 scootlaunch --run                          # the panel over executables on $PATH
+scootlaunch --windows                      # the panel over open windows; Enter activates
 scootlaunch --help                         # print help
 scootlaunch --version                      # print the version
 ```
@@ -34,7 +35,7 @@ scootlaunch --version                      # print the version
 also shapes the panel's index and `--run-id`). `--action` needs
 `--run-id`. `--font` is a panel option; `--config` belongs to the
 panel and `--check`. `--list`, `--query`, `--run-id`, `--check`,
-`--dmenu` and `--run` cannot combine. `--check` refuses a bad config
+`--dmenu`, `--run` and `--windows` cannot combine. `--check` refuses a bad config
 file with exit 1, except a bad value in `[effects]`: that prints on
 stderr and exits 0, as the panel ignores it. TEXT is the next
 argument after `--query`, whatever it holds. Anything else is a loud
@@ -115,6 +116,26 @@ opening or launching anything.
 ```sh
 scootlaunch --run
 scootlaunch --list-executables-in-path
+```
+
+## Windows mode
+
+`--windows` opens the panel over the compositor's open windows through
+`wlr-foreign-toplevel-management`. Enter (or a click) activates the
+chosen window and exits 0; Escape exits 1. It takes the panel's flags
+(`--font`, `--config`, `--lenient` for the icon index, the
+[per-invocation colors](#per-invocation-colors) and `--layer`) and no
+dmenu flag. A compositor without the protocol is a refusal naming it
+(exit 1) before any panel opens. Rows, icons, the bind to use and the
+failure cases are in [The panel](./panel.md#windows).
+
+Windows mode shares the panel's single-instance toggle: a second
+`scootlaunch --windows` (or a bare `scootlaunch` or `--run`) while one
+is open dismisses the first, which exits 1, and itself exits 0 without
+opening. `--dmenu` neither listens nor signals.
+
+```sh
+scootlaunch --windows
 ```
 
 ## Per-invocation colors

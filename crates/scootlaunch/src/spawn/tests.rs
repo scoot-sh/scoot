@@ -376,6 +376,7 @@ fn scope_moves_a_spawn_under_a_user_manager() {
         actions: Vec::new(),
         path: PathBuf::from("/nonexistent-scootlaunch/sleep.desktop"),
         workdir: None,
+        startup_wm_class: None,
         hidden: None,
     };
     launch_entry(&entry, None, None, &ctx).expect("a manager moves the spawn");
