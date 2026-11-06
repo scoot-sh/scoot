@@ -134,8 +134,10 @@ pub enum Command {
         timeout_secs: u64,
         origin: Origin,
     },
-    /// Install someone else's look from a directory or a tarball into
-    /// `installed-looks/`, behind the trust boundary.
+    /// Install someone else's look from a directory, a tarball or an
+    /// `https://`/`ssh://` git URL into `installed-looks/`, behind the
+    /// trust boundary. `path` is the raw word: whether it is a URL or a
+    /// path is decided by its text alone (`install::git::classify`).
     Install { path: PathBuf, trust: bool },
     /// Add a pack of look targets (templates someone else wrote) to the
     /// user's own `look-targets/`, reviewed first and gated on `--trust`.
@@ -181,7 +183,7 @@ pub const LOOK_USAGE: &str = "\
     look new NAME --from BASE [--json]
     look watch DIR [--no-toolkit] [--origin shipped|declared|user|installed] [--json]
     look preview [NAME] [--capture] [--out FILE] [--width N] [--height N] [--timeout SECS] [--origin shipped|declared|user|installed] [--json]
-    look install PATH [--trust] [--json]
+    look install PATH|GIT-URL [--trust] [--json]
     look target add PATH [--trust] [--json]
     look export NAME [--out FILE] [--json]
     look save NAME [--json]
@@ -442,8 +444,10 @@ COMMANDS:
                 look.toml); --width/--height size the output (default
                 1600x1000); --timeout SECS bounds the wait (default 60);
                 --origin sets the origin a directory validates as
-    install     install someone else's look from a directory or a tarball
-                into `installed-looks/`: regular files only, only the file
+    install     install someone else's look from a directory, a tarball or
+                an https:// or ssh:// git URL (the repository root is the
+                look; read without a checkout) into `installed-looks/`:
+                regular files only, only the file
                 kinds a look uses, `license` required, never under another
                 look's name; `apps/` leaves drop unless `--trust` (which
                 prints them first); a URL wallpaper is fetched, verified
@@ -964,8 +968,9 @@ fn parse_preview(positionals: &[String]) -> Result<Command, Error> {
     })
 }
 
-/// `install PATH [--trust]`: the path is positional (a directory or a
-/// plain `.tar` tarball); anything else is a flag error.
+/// `install PATH|GIT-URL [--trust]`: the word is positional (a
+/// directory, a plain `.tar` tarball or a git URL); anything else is a
+/// flag error.
 fn parse_install(positionals: &[String]) -> Result<Command, Error> {
     let mut path: Option<PathBuf> = None;
     let mut trust = false;
@@ -984,7 +989,7 @@ fn parse_install(positionals: &[String]) -> Result<Command, Error> {
             ));
         }
     }
-    let path = path.ok_or(Error::Missing("a look directory or tarball"))?;
+    let path = path.ok_or(Error::Missing("a look directory, tarball or git URL"))?;
     Ok(Command::Install { path, trust })
 }
 
@@ -2765,12 +2770,36 @@ fn run_install(look: &Look, path: &Path, trust: bool) -> Result<(), String> {
     let checks = apply::ProdChecks::new();
     let parent = install::installed_looks_dir()?;
     let fetch = install::ProdFetch;
-    let meta = std::fs::symlink_metadata(path)
-        .map_err(|error| format!("cannot stat {}: {error}", path.display()))?;
-    let report = if meta.is_dir() && !meta.is_symlink() {
-        install::install_dir_into(path, &parent, &catalog, &checks, trust, &fetch)?
-    } else {
-        install::install_tar_into(path, &parent, &catalog, &checks, trust, &fetch)?
+    // A word is a git URL or a path by its text alone (see
+    // `install::git::url`); a non-UTF-8 path can only be a path.
+    let source = match path.to_str() {
+        Some(word) => install::git::classify(word)?,
+        None => install::git::Source::Path,
+    };
+    let report = match source {
+        install::git::Source::Git(url) => {
+            let git = install::git::Git::from_path()?;
+            output::warn(format_args!("cloning {} (depth 1)", url.display()));
+            install::git::install_git_into(
+                &git,
+                &url,
+                &std::env::temp_dir(),
+                &parent,
+                &catalog,
+                &checks,
+                trust,
+                &fetch,
+            )?
+        }
+        install::git::Source::Path => {
+            let meta = std::fs::symlink_metadata(path)
+                .map_err(|error| format!("cannot stat {}: {error}", path.display()))?;
+            if meta.is_dir() && !meta.is_symlink() {
+                install::install_dir_into(path, &parent, &catalog, &checks, trust, &fetch)?
+            } else {
+                install::install_tar_into(path, &parent, &catalog, &checks, trust, &fetch)?
+            }
+        }
     };
     if look.json {
         output::print_line(

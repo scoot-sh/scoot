@@ -67,7 +67,7 @@ a refused reload does.
 
 ## Not in this ticket
 
-Sharing target packs from git (see [`look-share`](look-share.md)); Windows
+Sharing target packs from git (see [`look-share`](../resolved/look-share-done.md)); Windows
 or macOS app targets; anything that runs a look-supplied command.
 
 ## Resolution in progress — slice 1 (user-owned targets only)
