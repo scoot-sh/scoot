@@ -135,7 +135,8 @@ at once, then the timer does the rest.
   light/dark setting) are not available yet.
 
 What it creates: `scoot-look-auto.timer` and `scoot-look-auto.service`
-in `$XDG_CONFIG_HOME/systemd/user` (`~/.config/systemd/user`), each
+in `$XDG_CONFIG_HOME/systemd/user` (`~/.config/systemd/user`; a relative
+`$XDG_CONFIG_HOME` is ignored, as systemd ignores it), each
 starting with a `# Managed by scoot look auto` line, and the timer's enable
 link. systemd keeps its own record of when the timer last ran, which
 `--off` leaves alone. `--off` disables the timer, then
@@ -156,6 +157,13 @@ the unit swaps, as it does for every `scoot look` command.
 > systemd). Nothing was written. Apply looks with `scoot look apply`, or
 > run your own scheduler to call it.
 
+> **Symptom:** `systemd cannot run an executable at a path containing `'`
+> (/home/o'brien/.local/bin/scoot)`.
+> systemd refuses `"`, `'`, `\` and `$` in the path of the program a unit
+> runs. Nothing was written. Install or link `scoot` at a plain path, such
+> as `~/.local/bin/scoot`, and run `scoot look auto` from there. (Spaces,
+> `%` and `;` are fine, and the state directory may hold any of them.)
+
 > **Symptom:** `.../scoot-look-auto.timer exists and was not written by
 > `scoot look auto``.
 > Another file holds the name, often a link home-manager made. Move it
@@ -173,8 +181,9 @@ the unit swaps, as it does for every `scoot look` command.
 > **Symptom:** `auto` says on, but the look never changes.
 > `scoot look auto` shows the timer's state and the next run. A timer that
 > is not `active` was stopped; run `scoot look auto` with the same
-> arguments to start it again. With `--json`, the immediate swap prints its
-> own document after the `auto` one.
+> arguments to start it again. With `--json`, the immediate swap runs first and prints
+> its own document (if it swapped), then the single `auto` document, which
+> carries `apply_error` when the swap failed.
 
 ## Pick and apply
 
@@ -878,7 +887,7 @@ stderr. The shapes:
 | `target add` | `{"added": ..., "targets": [{`name`, `output`, `reload` ({`argv`, `timeout_secs`} or null), `template_file`, `template`}], "notes": [...]}` (`added` is false without `--trust`, which exits 1 after printing the review) |
 | `export` | `{"exported": ..., "tarball": ..., "files": [...], "notes": [...]}` |
 | `save` | `{"saved": ..., "dir": ..., "extends": ..., "tokens": [...], "notes": [...]}` |
-| `auto` | `{"enabled": ..., "light": ..., "dark": ..., "light_from": ..., "dark_from": ..., "due": ..., "active": ..., "exe": ..., "exe_exists": ..., "timer": {`active`, `enabled`, `next`}}` (off: `{"enabled": false}`; installing prints `{"enabled": true, ..., "wrote": [...], "unit_dir": ...}`, then the `apply` document when a swap was needed; `--off`: `{"enabled": false, "removed": [...], "left": [...], "manager_skipped": ...}`) |
+| `auto` | `{"enabled": ..., "light": ..., "dark": ..., "light_from": ..., "dark_from": ..., "due": ..., "active": ..., "exe": ..., "exe_exists": ..., "timer": {`active`, `enabled`, `next`}}` (off: `{"enabled": false}`; installing prints the `apply` document when a swap was needed, then `{"enabled": true, ..., "wrote": [...], "unit_dir": ..., "apply_error": null or the swap's error}`; `--off`: `{"enabled": false, "removed": [...], "left": [...], "manager_skipped": ...}`) |
 | `wiring` | `{"active": {`name`, `rendered`, `generation`}, "items": [{`app`, `status`, `detail`}], "notes": [...]}` (`status` is `wired`, `missing`, `manual` or `absent`) |
 
 Two flags are internal: the compositor's own IPC child passes

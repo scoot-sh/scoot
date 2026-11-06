@@ -6,8 +6,13 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 use super::systemctl::{Systemctl, TimerState, parse_show};
-use super::unit::{Clock, MARKER, Plan, SERVICE, Schedule, Side, TIMER, quote_path, read_service};
-use super::{Action, Slot, fire_target, inspect, install, parse, remove, stable_exe, status};
+use super::unit::{
+    Clock, MARKER, Plan, SERVICE, Schedule, Side, TIMER, quote_exe, quote_path, read_service,
+};
+use super::{
+    Action, Slot, config_home_from, fire_target, inspect, install, parse, remove, stable_exe,
+    status,
+};
 use crate::cli::Error;
 
 fn words(args: &[&str]) -> Vec<String> {
@@ -352,19 +357,14 @@ fn quoting_refuses_what_it_cannot_say() {
 }
 
 #[test]
-fn a_hostile_path_stays_on_one_execstart_line_and_round_trips() {
-    for exe in [
-        "/a b/scoot",
-        "/a\"b/scoot",
-        "/a%h/scoot",
-        "/a$X/scoot",
-        "/a\\b/scoot",
-        "/a;b/scoot",
-        "/é/scoot",
+fn a_hostile_state_path_stays_on_one_execstart_line_and_round_trips() {
+    // The state directory is an ARGUMENT: quotes, backslashes and `$` are
+    // escaped and read back.
+    for dir in [
+        "/a b/st", "/a\"b/st", "/a%h/st", "/a$X/st", "/a\\b/st", "/a;b/st", "/a'b/st", "/é/st",
     ] {
         let p = Plan {
-            exe: PathBuf::from(exe),
-            state: Some(PathBuf::from(format!("{exe}-state"))),
+            state: Some(PathBuf::from(dir)),
             ..plan()
         };
         let text = p.service().unwrap();
@@ -372,9 +372,82 @@ fn a_hostile_path_stays_on_one_execstart_line_and_round_trips() {
             text.lines().filter(|l| l.starts_with("ExecStart=")).count(),
             1
         );
-        assert_eq!(text.lines().count(), 7, "{exe}: no injected line");
+        assert_eq!(text.lines().count(), 7, "{dir}: no injected line");
+        assert_eq!(read_service(&text).unwrap(), p, "{dir}");
+    }
+}
+
+#[test]
+fn the_executable_word_takes_space_percent_and_semicolon() {
+    for exe in ["/a b/scoot", "/a%h/scoot", "/a;b/scoot", "/é/scoot"] {
+        let p = Plan {
+            exe: PathBuf::from(exe),
+            ..plan()
+        };
+        let text = p.service().unwrap();
+        assert_eq!(text.lines().count(), 7, "{exe}");
         assert_eq!(read_service(&text).unwrap(), p, "{exe}");
     }
+    assert!(
+        plan()
+            .service()
+            .unwrap()
+            .contains("ExecStart=\"/usr/bin/scoot\" look")
+    );
+    assert_eq!(
+        quote_exe(Path::new("/a%b/scoot")).unwrap(),
+        "\"/a%%b/scoot\""
+    );
+}
+
+#[test]
+fn the_executable_word_refuses_what_systemd_cannot_run() {
+    // Measured on systemd 261.2: `"`, `\` and `'` fail verify, `$$` fails
+    // to start (203/EXEC). Each refuses before any file is written.
+    for (c, exe) in [
+        ('"', "/a\"b/scoot"),
+        ('\'', "/home/o'brien/.local/bin/scoot"),
+        ('\\', "/a\\b/scoot"),
+        ('$', "/a$b/scoot"),
+    ] {
+        let error = quote_exe(Path::new(exe)).unwrap_err();
+        assert!(error.contains(&format!("containing `{c}`")), "{error}");
+        assert!(error.contains("plain path"), "{error}");
+        let bad = Plan {
+            exe: PathBuf::from(exe),
+            ..plan()
+        };
+        let (_root, dir) = unit_dir();
+        let manager = Fake::default();
+        assert!(install(&dir, &bad, &manager).is_err(), "{exe}");
+        assert!(!dir.exists(), "{exe}: nothing written");
+        assert!(
+            !manager
+                .calls()
+                .iter()
+                .any(|call| call.starts_with("enable")),
+            "{exe}: the manager is never asked to enable"
+        );
+    }
+}
+
+#[test]
+fn a_relative_xdg_config_home_is_ignored() {
+    use std::ffi::OsStr;
+    let home = Some(OsStr::new("/home/u"));
+    assert_eq!(
+        config_home_from(Some(OsStr::new("rel/cfg")), home),
+        Some(PathBuf::from("/home/u/.config"))
+    );
+    assert_eq!(
+        config_home_from(Some(OsStr::new("/x/cfg")), home),
+        Some(PathBuf::from("/x/cfg"))
+    );
+    assert_eq!(
+        config_home_from(Some(OsStr::new("")), home),
+        Some(PathBuf::from("/home/u/.config"))
+    );
+    assert_eq!(config_home_from(Some(OsStr::new("rel")), None), None);
 }
 
 #[test]

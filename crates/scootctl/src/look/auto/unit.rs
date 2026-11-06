@@ -159,6 +159,8 @@ pub struct Plan {
 /// line doubled (`%` specifiers, `$` variables). A path with a control
 /// character or one that is not absolute and UTF-8 refuses: the unit
 /// would not run what was meant, or would run it from the wrong place.
+/// This is the quoting for an argument (the `--state` directory); the
+/// executable word has stricter rules, see [`quote_exe`].
 pub fn quote_path(path: &Path) -> Result<String, String> {
     let text = path.to_str().ok_or_else(|| {
         format!(
@@ -190,6 +192,25 @@ pub fn quote_path(path: &Path) -> Result<String, String> {
     }
     out.push('"');
     Ok(out)
+}
+
+/// Quotes the executable, the first word of `ExecStart=`. systemd reads
+/// that word differently from the arguments after it (measured on systemd
+/// 261.2 with `systemd-analyze --user verify` and a real start): `"`, `\`
+/// and `'` in it are refused ("Executable path contains special
+/// characters"), and a `$$` is not collapsed, so the unit fails to start
+/// with status 203/EXEC. Space, `%` (as `%%`) and `;` work. The four
+/// refused characters refuse here, before anything is written.
+pub fn quote_exe(path: &Path) -> Result<String, String> {
+    if let Some(text) = path.to_str()
+        && let Some(bad) = text.chars().find(|c| matches!(c, '"' | '\'' | '\\' | '$'))
+    {
+        return Err(format!(
+            "systemd cannot run an executable at a path containing `{bad}` ({text}): \
+             install or link scoot at a plain path (such as ~/.local/bin/scoot) and run `scoot look auto` from there"
+        ));
+    }
+    quote_path(path)
 }
 
 /// The inverse of [`quote_path`] over exactly what it writes; `None` for
@@ -225,9 +246,11 @@ fn unquote_path(text: &str) -> Option<(PathBuf, &str)> {
 impl Plan {
     /// The `ExecStart=` value: the binary, then fixed words. Names and
     /// times passed the grammar, so they are written bare; only the
-    /// paths need quoting. Nothing a look supplies reaches this line.
+    /// paths need quoting (the executable by [`quote_exe`], the state
+    /// directory by [`quote_path`]). Nothing a look supplies reaches this
+    /// line.
     pub fn exec_start(&self) -> Result<String, String> {
-        let mut line = quote_path(&self.exe)?;
+        let mut line = quote_exe(&self.exe)?;
         line.push_str(" look");
         if let Some(state) = &self.state {
             line.push_str(" --state ");

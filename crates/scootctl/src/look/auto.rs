@@ -32,7 +32,7 @@ use std::time::Duration;
 use scoot_look::state::{RecordRead, read_capped_follow, read_record, write_atomic};
 
 use super::bounded::run_bounded;
-use super::{Look, apply, cycle, discover, install, output, sync};
+use super::{Look, apply, cycle, discover, output, sync};
 use crate::cli::Error;
 use systemctl::{CliSystemctl, Systemctl, TimerState};
 use unit::{Clock, Plan, SERVICE, Schedule, Side, TIMER};
@@ -145,6 +145,23 @@ fn foreign(path: &Path) -> String {
          move it aside, then run `scoot look auto` again",
         path.display()
     )
+}
+
+/// The config home systemd reads user units from: `$XDG_CONFIG_HOME`
+/// when it is absolute (the XDG spec says to ignore a relative one, and
+/// the manager does), else `~/.config`.
+pub fn config_home_from(xdg: Option<&OsStr>, home: Option<&OsStr>) -> Option<PathBuf> {
+    let xdg = xdg.filter(|dir| Path::new(dir).is_absolute());
+    scoot_look::catalog::config_home(xdg, home)
+}
+
+fn user_config_home() -> Result<PathBuf, String> {
+    let home = std::env::var_os("HOME");
+    config_home_from(
+        std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+        home.as_deref(),
+    )
+    .ok_or_else(|| "no home resolves: set XDG_CONFIG_HOME or HOME".to_owned())
 }
 
 /// The user unit directory under a config home.
@@ -393,6 +410,14 @@ fn run_on(look: &Look, schedule: &Schedule) -> Result<(), String> {
     let exe = std::env::current_exe()
         .map(|exe| stable_exe(&exe, std::env::var_os("PATH").as_deref()))
         .map_err(|error| format!("cannot find the scoot binary to put in the unit: {error}"))?;
+    // A binary replaced while running reads back as `.../scoot (deleted)`:
+    // baked into a unit it would never start.
+    if !exe.exists() {
+        return Err(format!(
+            "the scoot binary {} no longer exists (replaced while running?): run `scoot look auto` again from the installed one",
+            exe.display()
+        ));
+    }
     // The service runs in the user manager's environment, which need not
     // hold this shell's `SCOOT_LOOK_STATE` or `XDG_STATE_HOME`: the
     // resolved directory is written into the unit, so the timer swaps the
@@ -405,7 +430,7 @@ fn run_on(look: &Look, schedule: &Schedule) -> Result<(), String> {
         exe,
         state: Some(state),
     };
-    let dir = unit_dir(&install::config_home_dir()?);
+    let dir = unit_dir(&user_config_home()?);
     let done = install(&dir, &plan, &CliSystemctl)?;
     let mut notes = Vec::new();
     let mut lines = vec![format!(
@@ -430,29 +455,36 @@ fn run_on(look: &Look, schedule: &Schedule) -> Result<(), String> {
                 .to_owned(),
         );
     }
-    emit(
-        look,
-        serde_json::json!({
-            "enabled": true,
-            "light": schedule.light,
-            "dark": schedule.dark,
-            "light_from": schedule.light_from.to_string(),
-            "dark_from": schedule.dark_from.to_string(),
-            "wrote": done.wrote,
-            "unit_dir": dir,
-        }),
-        &lines,
-        &notes,
-    )?;
+    let mut doc = serde_json::json!({
+        "enabled": true,
+        "light": schedule.light,
+        "dark": schedule.dark,
+        "light_from": schedule.light_from.to_string(),
+        "dark_from": schedule.dark_from.to_string(),
+        "wrote": done.wrote,
+        "unit_dir": dir,
+    });
     // Apply what is due now, or the screen stays wrong until the next
-    // boundary. The install already stands if this fails.
-    run_fire(look, schedule).map_err(|error| {
-        format!("the timer is installed, but the look due now was not applied: {error}")
-    })
+    // boundary. The install already stands if this fails. Under `--json`
+    // the swap runs first and its outcome rides in this document, so a
+    // failed swap still leaves exactly one `auto` document on stdout.
+    let swap = |look: &Look| {
+        run_fire(look, schedule).map_err(|error| {
+            format!("the timer is installed, but the look due now was not applied: {error}")
+        })
+    };
+    if look.json {
+        let swapped = swap(look);
+        doc["apply_error"] = serde_json::json!(swapped.as_ref().err());
+        emit(look, doc, &lines, &notes)?;
+        return swapped;
+    }
+    emit(look, doc, &lines, &notes)?;
+    swap(look)
 }
 
 fn run_off(look: &Look) -> Result<(), String> {
-    let dir = unit_dir(&install::config_home_dir()?);
+    let dir = unit_dir(&user_config_home()?);
     let out = remove(&dir, &CliSystemctl)?;
     let mut lines = Vec::new();
     if out.removed.is_empty() && out.left.is_empty() {
@@ -485,7 +517,7 @@ fn run_off(look: &Look) -> Result<(), String> {
 }
 
 fn run_status(look: &Look) -> Result<(), String> {
-    let dir = unit_dir(&install::config_home_dir()?);
+    let dir = unit_dir(&user_config_home()?);
     let found = status(&dir, &CliSystemctl)?;
     let mut lines = Vec::new();
     let mut notes = Vec::new();
