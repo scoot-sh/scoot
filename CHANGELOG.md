@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.16](https://github.com/scoot-sh/scoot/compare/v0.7.15...v0.7.16) - 2026-11-06
+
+### scoot-look,scootctl
+
+- added: font family and size overrides in [targets.<name>] ([#957](https://github.com/scoot-sh/scoot/pull/957))
+
 ## [0.7.15](https://github.com/scoot-sh/scoot/compare/v0.7.14...v0.7.15) - 2026-11-06
 
 ### scootctl
