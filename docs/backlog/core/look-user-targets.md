@@ -250,6 +250,58 @@ smallest coherent shape, chosen over the alternatives:
   an empty or well-formed table parses. Every existing look is unaffected,
   so no `!`.
 
-Still open: non-color overrides, keeping look sources and template
-sources in separate imports, and browsers. No part of any slice runs a
-look-supplied command.
+Still open: keeping look sources and template sources in separate
+imports, and browsers. No part of any slice runs a look-supplied command.
+
+## Resolution in progress — slice 5 (font family and size overrides)
+
+`[targets.<name>]` widens to font tokens, in the same table and through the
+same parse pipeline (`validate_overrides`, now keyed by `override_kind`:
+`Color`, `Family`, `Size`). Each key is held to the grammar of the look's
+own `[fonts]` table:
+
+- `fonts.ui`, `fonts.sans`, `fonts.mono`: `is_identifier` (1 to 64 ASCII
+  letters, digits, space and `-_.+`, starting with a letter or digit).
+  That charset has no newline, control, bidi or format character, quote,
+  backslash, `#`, `;`, `=`, brace, slash or `$`, so a family cannot end a
+  line or a quoted value in kitty, Alacritty, tmux, WezTerm or Ghostty
+  config, cannot spell `{{`, and cannot be a path. One fail-first test
+  walks 40 named injection shapes against all three keys.
+- `fonts.size`, `fonts.popup-size`, `fonts.app-size`,
+  `fonts.terminal-size`: a TOML number (integer or float, not a string),
+  4 to 192; `nan`, `inf` and out-of-range refuse. It renders through the
+  same `format_number` as the look's own sizes (`13`, never `13.0`).
+- Everything else stays refused: `fonts.files`/`fonts.nix` (paths and
+  Nix attributes), `opacity.*`, `shape.*`, `cursor.*`, `icons.theme`,
+  `wallpaper.*`, `polarity`, `night.*`, `effects.*`. Those are safe
+  values but have no template use case yet; adding one is a key in
+  `override_kind`.
+- Mechanics: the raw table value is `OverrideValue` (untagged string or
+  number); the resolved look stores rendered token text, so
+  `tokens_for_target` and the render pipeline are unchanged. `extends`
+  merges per key; a target of that name that the user lacks is inert. The
+  look's own fonts do not change when a target overrides them: pinned on
+  the resolved look for all seven font tokens (`ui`, `sans`, `mono`,
+  `size`, `popup-size`, `app-size`, `terminal-size`), and on the rendered
+  output by comparing every file outside `targets/` (except `render.json`,
+  which hashes the `look.toml` bytes) with the same look rendered without
+  the table. In that fixture only the UI family and the size appear in a
+  fragment (`font = ...`, `font-size = ...`; the test fails if they
+  stop appearing), so the mono and sans families are guarded on the
+  resolved look only. A wrong value type (boolean, array, table, date)
+  refuses with a message naming the allowed types and the line.
+- An override's family is not checked for being installed (the look's own
+  fonts are). The app falls back on a missing family; documented.
+- **`RENDER_VERSION` stays 16.** The key hashes every rendered target
+  file's bytes and the chain's `look.toml` bytes, so any font override
+  change re-renders (pinned). Old-binary caches: a slice-4 binary refuses
+  a look carrying a font override at parse, before any cache lookup, so it
+  can never read or write the directory keyed from such a look; and for
+  every input a slice-4 binary accepts the rendered bytes are unchanged
+  (pinned by the byte-identical test). A downgrade therefore refuses the
+  look loudly instead of reusing a stale render.
+- Not breaking: a table that parsed before still parses and renders
+  identically; no `!`.
+
+Still open: separate imports for look and template sources, and browsers.
+

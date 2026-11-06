@@ -111,12 +111,12 @@ pub struct RawLook {
     pub night: Option<Night>,
     #[serde(default)]
     pub apps: BTreeMap<String, BTreeMap<String, toml::Value>>,
-    /// Per-target color overrides, `[targets.<name>]`: token data for a
-    /// user-owned look target of that name, applied only when the user has
-    /// that target. Never a template, output or reload (see
-    /// [`crate::targets::check_override_key`]).
+    /// Per-target token overrides, `[targets.<name>]`: color, font family
+    /// and font size data for a user-owned look target of that name,
+    /// applied only when the user has that target. Never a template,
+    /// output or reload (see [`crate::targets::override_kind`]).
     #[serde(default)]
-    pub targets: BTreeMap<String, BTreeMap<String, String>>,
+    pub targets: BTreeMap<String, BTreeMap<String, crate::targets::OverrideValue>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

@@ -36,7 +36,7 @@ pub struct ResolvedLook {
     pub icons_theme: String,
     pub night_temperature: Option<i64>,
     pub apps: BTreeMap<String, BTreeMap<String, toml::Value>>,
-    /// `[targets.<name>]` color overrides, merged per key along the chain.
+    /// `[targets.<name>]` overrides as rendered token text, merged per key along the chain.
     pub target_overrides: BTreeMap<String, BTreeMap<String, String>>,
 }
 
@@ -118,7 +118,7 @@ pub(crate) struct Partial {
     pub icons: Option<Icons>,
     pub night: Option<Night>,
     pub apps: BTreeMap<String, BTreeMap<String, toml::Value>>,
-    /// `[targets.<name>]` color overrides, merged per key along the chain.
+    /// `[targets.<name>]` overrides as rendered token text, merged per key along the chain.
     pub target_overrides: BTreeMap<String, BTreeMap<String, String>>,
 }
 
@@ -309,7 +309,11 @@ impl Partial {
             self.target_overrides
                 .entry(target.clone())
                 .or_default()
-                .extend(table.clone());
+                .extend(
+                    table
+                        .iter()
+                        .map(|(key, value)| (key.clone(), crate::targets::override_text(value))),
+                );
         }
     }
 
