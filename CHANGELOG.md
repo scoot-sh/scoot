@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.17](https://github.com/scoot-sh/scoot/compare/v0.7.16...v0.7.17) - 2026-11-06
+
+### scootctl
+
+- added: scoot look auto --schedule, light/dark switching by a systemd user timer ([#959](https://github.com/scoot-sh/scoot/pull/959))
+
 ## [0.7.16](https://github.com/scoot-sh/scoot/compare/v0.7.15...v0.7.16) - 2026-11-06
 
 ### scoot-look,scootctl
