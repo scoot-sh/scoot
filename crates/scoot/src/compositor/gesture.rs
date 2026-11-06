@@ -67,7 +67,7 @@ use smithay::utils::SERIAL_COUNTER;
 use super::State;
 use super::animation::{AnimationSettings, Easing, viewport_position};
 
-mod client;
+pub(in crate::compositor) mod client;
 mod config;
 #[cfg(test)]
 mod tests;

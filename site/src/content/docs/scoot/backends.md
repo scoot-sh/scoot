@@ -38,6 +38,37 @@ back listening without dispatching) makes scoot log `could not reach the
 host compositor during startup` and exit 1, so the supervisor retries.
 There is no knob for the wait.
 
+### Gestures in a nested session
+
+A nested scoot binds the host's `zwp_pointer_gestures_v1` (version 1 to 3)
+when the host offers it, and handles the host's swipe, pinch and hold as
+`--tty` handles the touchpad's:
+
+- **Swipe** is always requested, so `[gestures]` works with
+  `client_gestures` off. A swipe with `swipe_fingers` fingers is scoot's and
+  moves the nested strip; any other goes to the window under the pointer when
+  `client_gestures` is on, and nowhere when it is off.
+- **Pinch and hold** are requested only with `client_gestures = true`.
+  Hold needs a host at version 3; on an older host a nested window gets
+  pinch and swipe but no hold.
+- **Whole gestures only.** An update or end that does not follow a begin is
+  dropped. When the host's pointer leaves the nested window, or the host seat
+  loses its pointer, a gesture still open ends cancelled, so no window is
+  left holding half of one. A pointer that comes back gets fresh gesture
+  objects.
+- **Units are the host's.** Swipe and pinch deltas arrive as the host sends
+  them, not as libinput reports them, so `[gestures] sensitivity` may need
+  its own value nested.
+
+Only the pointer under the host's window sends gestures: the host decides
+which of its windows gets them.
+
+> **Symptom:** a three-finger swipe does nothing in a nested session. The
+> host may not offer `zwp_pointer_gestures_v1` (`WAYLAND_DEBUG=1` shows
+> whether it is in the registry), or may keep three-finger swipes for itself,
+> as many desktops do for workspace switching. Use a different
+> `swipe_fingers`, or [scroll binds](./keybindings.md#scroll-binds).
+
 > **Symptom:** `scoot msg` says `Connection refused` right after the
 > host went away. The nested session is gone, not deaf: check its log for the
 > `lost the connection` line. Restart the session (or let

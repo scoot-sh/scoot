@@ -29,7 +29,7 @@ const CANVAS: i32 = 400;
 
 /// One gesture event as a client's object received it, in arrival order.
 #[derive(Clone, Debug, PartialEq)]
-enum Ev {
+pub(in crate::compositor) enum Ev {
     SwipeBegin(u32),
     SwipeUpdate(f64, f64),
     SwipeEnd(bool),
@@ -40,7 +40,7 @@ enum Ev {
     HoldEnd(bool),
 }
 
-enum Step {
+pub(in crate::compositor) enum Step {
     /// Map a toplevel and paint it at the size the compositor configured.
     Map,
     /// Destroy the mapped toplevel and its surface.
@@ -49,17 +49,17 @@ enum Step {
 }
 
 #[derive(Debug, Default)]
-struct Ack {
+pub(in crate::compositor) struct Ack {
     /// The registry listed `zwp_pointer_gestures_v1`.
-    has_global: bool,
+    pub(in crate::compositor) has_global: bool,
     /// The version the client bound it at.
-    version: u32,
+    pub(in crate::compositor) version: u32,
     /// The pointer is on this client's surface (enter without leave).
-    inside: bool,
+    pub(in crate::compositor) inside: bool,
     /// Gesture events since the last report.
-    events: Vec<Ev>,
+    pub(in crate::compositor) events: Vec<Ev>,
     /// `wl_pointer.frame` events since the last report.
-    frames: u32,
+    pub(in crate::compositor) frames: u32,
 }
 
 #[derive(Default)]
@@ -283,7 +283,11 @@ fn solid_buffer(
     buffer
 }
 
-fn run_client(stream: UnixStream, steps: Receiver<Step>, acks: Sender<Ack>) -> Result<(), String> {
+pub(in crate::compositor) fn run_client(
+    stream: UnixStream,
+    steps: Receiver<Step>,
+    acks: Sender<Ack>,
+) -> Result<(), String> {
     let conn = Connection::from_socket(stream).map_err(|e| e.to_string())?;
     let mut queue = conn.new_event_queue();
     let qh = queue.handle();

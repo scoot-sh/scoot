@@ -35,6 +35,7 @@
 //! for a read-back frame, `Host::present_dmabuf` for a GPU copy).
 
 mod buffers;
+pub(super) mod gestures;
 #[cfg(feature = "gpu-scanout")]
 pub(super) mod gpu;
 mod presenter;
@@ -57,7 +58,7 @@ use wayland_client::protocol::wl_pointer::WlPointer as HostPointer;
 use wayland_client::protocol::wl_seat::WlSeat as HostSeat;
 use wayland_client::protocol::wl_shm::WlShm as HostShm;
 use wayland_client::protocol::wl_surface::WlSurface as HostSurface;
-use wayland_client::{Connection, DispatchError, EventQueue, QueueHandle};
+use wayland_client::{Connection, DispatchError, EventQueue, Proxy, QueueHandle};
 use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface as HostXdgSurface;
 use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel as HostToplevel;
 use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase as HostWmBase;
@@ -243,6 +244,9 @@ pub struct Host {
     seat: HostSeat,
     keyboard: Option<HostKeyboard>,
     pointer: Option<HostPointer>,
+    /// The host's pointer gestures, routed to the gesture entry points
+    /// (`gestures.rs`).
+    gestures: gestures::HostGestures,
     /// The host buffers frames go out in -- `wl_shm` for a read-back, or
     /// dma-bufs the frame is copied into on the GPU (see `presenter.rs`).
     presenter: Presenter,
@@ -570,6 +574,8 @@ fn init_on_bound(
     let shm: HostShm = globals.bind(&qh, 1..=1, ())?;
     let wm_base: HostWmBase = globals.bind(&qh, 1..=6, ())?;
     let seat: HostSeat = globals.bind(&qh, 1..=9, ())?;
+    // Optional: a host without it just sends no gestures.
+    let gestures = gestures::HostGestures::bind(&globals, &qh);
 
     // Whether frames can go to the host as dma-bufs, settled once, against
     // the render target the session already has (built before this runs;
@@ -617,6 +623,7 @@ fn init_on_bound(
         seat,
         keyboard: None,
         pointer: None,
+        gestures,
         presenter: Presenter::Unbuilt,
         #[cfg(feature = "gpu-scanout")]
         gpu,
@@ -1310,6 +1317,23 @@ impl Host {
 
     pub(super) fn set_pointer(&mut self, pointer: HostPointer) {
         self.pointer = Some(pointer);
+    }
+
+    /// Forgets the host pointer: the seat lost the capability. Released (a
+    /// version-3 request) where the host can take it.
+    pub(super) fn take_pointer(&mut self) -> Option<HostPointer> {
+        let pointer = self.pointer.take()?;
+        if pointer.version() >= 3 {
+            pointer.release();
+        }
+        Some(pointer)
+    }
+
+    /// Makes the gesture objects for the current host pointer.
+    pub(super) fn attach_gestures(&mut self, client_gestures: bool) {
+        if let Some(pointer) = &self.pointer {
+            self.gestures.attach(pointer, &self.qh, client_gestures);
+        }
     }
 
     /// The buffer `nested_dispatch.rs` accumulates one host pointer frame's

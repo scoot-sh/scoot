@@ -360,8 +360,13 @@ pointer-gestures protocol.
 > vfkit, UTM or VNC guest sees a plain pointer). Use
 > [scroll binds](#scroll-binds) there.
 
-Swipes come from libinput, so they work on `--tty` sessions. A `--nested`
-scoot does not receive its host's swipes; use scroll binds there too.
+Swipes come from libinput on `--tty`. A `--nested` scoot gets them from its
+host instead, when the host offers `zwp_pointer_gestures_v1` (an outer scoot
+does with `client_gestures = true`). Then
+`[gestures]` works the same inside the window, including the client
+forwarding. A host without the protocol sends nothing, and scoot starts
+without a message; use [scroll binds](#scroll-binds) there. Details:
+[Nested sessions](./backends.md#gestures-in-a-nested-session).
 
 ## Global shortcuts
 
