@@ -1,9 +1,10 @@
 ---
 title: "`zwp_pointer_gestures_v1`: hand swipes, pinches and holds to clients"
-status: "open"
-area: "protocols"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-05"
 ---
 
 # `zwp_pointer_gestures_v1`: hand swipes, pinches and holds to clients
@@ -48,3 +49,35 @@ arm.
 ## Not in this ticket
 
 Touch-screen (multi-touch) gestures, and `scoot msg` injection of gestures.
+
+## Resolution (2026-11-05)
+
+Items 1 to 3 landed; item 4 and the real-pad check moved to
+[`pointer-gestures-followups`](../protocols/pointer-gestures-followups.md).
+
+1. **The global exists, opt-in.** `[gestures] client_gestures = true`
+   advertises `zwp_pointer_gestures_v1` (version 3) once at startup. Off by
+   default, since no real pad was available to check the toolkits against;
+   a reload that disagrees is refused with `takes effect on restart`, like
+   `[virtual_input] enabled`. The pinned fork's `PointerGesturesState` is
+   generic, so there is no `delegate_pointer_gestures!` to invoke:
+   `dispatch.rs`'s blanket `Dispatch` impls already cover the objects.
+2. **Pinch and hold are forwarded.** The libinput arms call
+   `gesture_pinch_*` and `gesture_hold_*` (`gesture/client.rs`), which
+   remember whether a `begin` went out and drop an `update` or `end`
+   otherwise; a `begin` over an open one closes it with a cancelled `end`
+   first. Non-finite pinch values are dropped.
+3. **A focus change mid-gesture needs nothing from scoot.** The ticket's
+   premise, that the `end` goes to the new focus, does not hold at the pinned
+   fork: each gesture object remembers the surface its `begin` was sent for,
+   `PointerTarget::leave` sends the old focus a `cancelled` `end` before
+   `wl_pointer.leave`, and the new focus's objects have nothing open so they
+   hear no `update` or `end` (`src/wayland/pointer_gestures.rs`). Pinned for
+   swipe, pinch and hold, to another client, to nowhere, and from nowhere
+   onto a window, in `gesture/client/tests.rs`. The one case Smithay cannot
+   cover is a surface destroyed mid-gesture: the client that destroyed it
+   holds no state for it, and the object's next `begin` closes the stale one
+   first.
+
+No `wl_pointer.frame` follows a gesture event: the protocol does not group
+them with pointer events, and Smithay's own anvil sends none.

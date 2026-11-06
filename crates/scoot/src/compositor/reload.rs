@@ -94,6 +94,11 @@
 //!   instead, so the whole `[virtual_input]` contract is one restart-only
 //!   gate and a mid-hold flip can never strand virtual suppressed state --
 //!   see `virtual_input.rs`.)
+//! - `[gestures] client_gestures`: refused when it differs from whether
+//!   `zwp_pointer_gestures_v1` is advertised, naming restart. Withdrawing
+//!   the global would strand objects clients already hold, and advertising
+//!   it mid-session changes how running toolkits treat the touchpad. The
+//!   rest of `[gestures]` applies live.
 //! - `[xwayland] fractional`: applied -- the stored choice is swapped and
 //!   the X scale re-chosen through the one chooser
 //!   (`State::refit_xwayland`), exactly like a scale change: the client
@@ -290,6 +295,9 @@ mod field {
     pub const GESTURES_VERTICAL: &str = "gestures.vertical";
     pub const GESTURES_NATURAL: &str = "gestures.natural";
     pub const GESTURES_SENSITIVITY: &str = "gestures.sensitivity";
+    /// `[gestures] client_gestures`: whether `zwp_pointer_gestures_v1` is
+    /// advertised.
+    pub const GESTURES_CLIENT_GESTURES: &str = "gestures.client_gestures";
     pub const GLOBAL_SHORTCUTS: &str = "global_shortcuts";
     pub const WALLPAPER: &str = "wallpaper";
     pub const WALLPAPER_COMMAND: &str = "wallpaper.command";
@@ -1047,7 +1055,8 @@ impl State {
     }
 
     /// The fields with no live state to compare against: `[tty] gpu`,
-    /// `[renderer] backend` and `[xwayland] enabled`. Each diffs against the
+    /// `[renderer] backend`, `[xwayland] enabled`, the `[virtual_input]` pair
+    /// and `[gestures] client_gestures`. Each diffs against the
     /// `startup_*` snapshot (or the fixed live value, where the session
     /// carries one) and refuses when it differs -- see the module doc for
     /// why none applies live.
@@ -1092,6 +1101,16 @@ impl State {
             report.refused.push(refused(
                 field::VIRTUAL_INPUT,
                 "takes effect on restart: the virtual-pointer and virtual-keyboard globals are advertised once at startup",
+            ));
+        }
+        // Same shape as the virtual-input globals above: a global that
+        // clients bind and toolkits change behaviour on, advertised once at
+        // startup (or never). Compared against the live `Option`, which no
+        // reload writes.
+        if fresh.client_gestures != self.client_gestures.is_some() {
+            report.refused.push(refused(
+                field::GESTURES_CLIENT_GESTURES,
+                "takes effect on restart: zwp_pointer_gestures_v1 is advertised once at startup",
             ));
         }
         // The bind gate is read on every virtual key, so it could flip

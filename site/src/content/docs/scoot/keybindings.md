@@ -312,9 +312,11 @@ sideways movement depends on what else your setup already puts on
 A swipe with three fingers (the default; `swipe_fingers` in
 [`[gestures]`](./configure.md#gestures) makes it four) moves the strip.
 Two-finger scrolling is not a gesture and stays the window's. A swipe with
-any other number of fingers is not scoot's, and scoot does not yet hand
-multi-finger swipes to windows (it does not offer the pointer-gestures
-protocol), so those do nothing.
+any other number of fingers is not scoot's. By default nothing hands those to
+windows, so they do nothing; with
+[`client_gestures = true`](./configure.md#gestures) the window under the
+pointer receives them, along with pinch and hold, through the
+pointer-gestures protocol.
 
 - **Sideways.** The strip follows your fingers one to one, with the columns
   that were off screen sliding in. Lift and the nearest column takes the
@@ -338,7 +340,10 @@ protocol), so those do nothing.
   touch to the last. Changing `swipe_fingers`, turning a direction off or
   locking the session mid-swipe never gives a window half of one. A claimed
   swipe that is cut short (a finger lifted early) settles back to where it
-  began and changes nothing.
+  began and changes nothing. With `client_gestures` on, a window that is
+  handed a gesture gets all of it: if the pointer leaves the window
+  mid-gesture, that window receives a cancelled end, and the window the pointer
+  lands on receives nothing of it.
 - **Not while locked, not over a fullscreen window.** On a locked session a
   swipe goes to the lock screen and nothing moves. With a fullscreen window
   covering the output, scoot leaves the swipe alone and no window receives

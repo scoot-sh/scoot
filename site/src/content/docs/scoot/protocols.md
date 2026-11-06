@@ -48,6 +48,7 @@ read your files anyway.
 | `wp-single-pixel-buffer-v1` | 1 | [Single-pixel buffers](#single-pixel-buffers). |
 | `relative-pointer-v1` | 1 | [Relative pointer](#relative-pointer-and-pointer-constraints). |
 | `pointer-constraints-v1` | 1 | Pointer lock and confinement. |
+| `zwp_pointer_gestures_v1` | 3 | Touchpad pinch, hold and swipe for the window under the pointer. Opt-in: [`[gestures] client_gestures`](./configure.md#gestures), read at startup. |
 | `tablet-v2` | 1 | [Drawing tablets](#drawing-tablets-tablet-v2) — tools only, no pads. |
 | `wp-presentation-time` | 2 | [Presentation feedback](#presentation-time-feedback-wp_presentation); `zero_copy` for a buffer scanned out directly. |
 | `wp-alpha-modifier-v1` | 1 | [Whole-surface opacity](#rendering-hints). |

@@ -482,6 +482,9 @@ pub fn run(options: CompositorOptions) -> Result<(), Box<dyn Error>> {
     state.animation = loaded.animation;
     state.scroll_binds.step = loaded.scroll_step;
     state.gestures.config = loaded.gestures;
+    // Advertised once here, never mid-session (see `gesture/client.rs`); the
+    // live `Option` is what reload diffs the file against.
+    gesture::init_client_gestures(&mut state, loaded.client_gestures);
     virtual_input::init(&mut state, loaded.virtual_input);
     if xwayland {
         #[cfg(feature = "xwayland")]

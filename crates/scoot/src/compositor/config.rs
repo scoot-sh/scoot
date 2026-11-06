@@ -761,6 +761,10 @@ pub struct LoadedConfig {
     /// `[gestures]`: touchpad swipes (see `gesture.rs`). Re-applied live by a
     /// reload; a swipe already in progress finishes under the old values.
     pub gestures: super::gesture::GestureConfig,
+    /// `[gestures] client_gestures` (default `false`): whether the session
+    /// advertises `zwp_pointer_gestures_v1` (see `gesture/client.rs`).
+    /// Applied once at startup; a reload that disagrees is refused.
+    pub client_gestures: bool,
 }
 
 impl LoadedConfig {
@@ -789,6 +793,7 @@ impl LoadedConfig {
             animation: super::animation::AnimationSettings::default(),
             scroll_step: super::scroll_binds::DEFAULT_STEP,
             gestures: super::gesture::GestureConfig::default(),
+            client_gestures: false,
         }
     }
 
@@ -882,7 +887,9 @@ impl LoadedConfig {
             FloatingRules::from_config(file.floating, &file.window_rule);
         let animation = file.animation.unwrap_or_default().into_settings();
         let scroll_step = file.scroll.unwrap_or_default().step();
-        let gestures = file.gestures.unwrap_or_default().resolve();
+        let gestures_file = file.gestures.unwrap_or_default();
+        let gestures = gestures_file.resolve();
+        let client_gestures = gestures_file.client_gestures();
         let wallpaper =
             WallpaperSetting::resolve(file.wallpaper, path, std::env::var_os("HOME").as_deref());
         for skipped in &skipped_rules {
@@ -913,6 +920,7 @@ impl LoadedConfig {
                 animation,
                 scroll_step,
                 gestures,
+                client_gestures,
             },
             shadowed,
             invalid,
@@ -1768,9 +1776,9 @@ pub fn default_config_toml() -> String {
          # [autostart] spawn entries, [wallpaper], [xwayland] fractional,\n\
          # [scroll], [gestures] and [animation]\n\
          # re-apply live with `scoot msg reload`; [tty] gpu, [renderer]\n\
-         # backend, [xwayland] enabled, [virtual_input] enabled and\n\
-         # [virtual_input] binds take effect on restart and a reload\n\
-         # refuses them with a message.\n",
+         # backend, [xwayland] enabled, [virtual_input] enabled,\n\
+         # [virtual_input] binds and [gestures] client_gestures take effect on\n\
+         # restart and a reload refuses them with a message.\n",
     );
 
     out.push_str("\n[layout]\n");
@@ -1954,6 +1962,12 @@ pub fn default_config_toml() -> String {
         super::gesture::MIN_SENSITIVITY,
         super::gesture::MAX_SENSITIVITY,
     ));
+    out.push_str(
+        "# Offer clients zwp_pointer_gestures_v1, so a browser or viewer can use the\n\
+         # pad's pinch, hold and (non-scoot) swipe gestures. Off by default: it\n\
+         # changes what some toolkits do with a touchpad. Takes effect on restart.\n\
+         # client_gestures = false\n",
+    );
 
     out.push_str("\n[virtual_input]\n");
     out.push_str(

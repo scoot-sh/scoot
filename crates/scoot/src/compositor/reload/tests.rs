@@ -432,6 +432,56 @@ fn reload_refuses_a_virtual_input_flip_with_restart_named() {
 }
 
 #[test]
+fn reload_refuses_a_client_gestures_flip_with_restart_named() {
+    // The global is advertised once at startup (or never): the file can
+    // neither advertise nor withdraw it mid-session, so the reload refuses a
+    // disagreement -- both ways -- and stays silent on an agreeing file. The
+    // rest of `[gestures]` still applies live beside the refusal.
+    let mut fixture = Fixture::with_config("");
+    fixture.rewrite("[gestures]\nclient_gestures = true\nnatural = false\n");
+    let response = fixture.reload();
+    let refusal = refused(&response)
+        .iter()
+        .find(|entry| entry.starts_with(field::GESTURES_CLIENT_GESTURES))
+        .expect("the client_gestures refusal");
+    assert!(
+        refusal.contains("takes effect on restart"),
+        "the refusal should name restart: {refusal}"
+    );
+    assert!(
+        applied(&response)
+            .iter()
+            .any(|name| name == field::GESTURES_NATURAL),
+        "the live keys still apply beside the refusal: {response:?}"
+    );
+    assert!(
+        fixture.state.client_gestures.is_none(),
+        "a refused reload must not create the global"
+    );
+
+    fixture.rewrite("");
+    let response = fixture.reload();
+    assert!(
+        !refused_names(&response).contains(&field::GESTURES_CLIENT_GESTURES),
+        "an agreeing file should stay silent: {response:?}"
+    );
+
+    // A session that did advertise it refuses the file that drops it.
+    crate::compositor::gesture::init_client_gestures(&mut fixture.state, true);
+    let response = fixture.reload();
+    assert!(
+        refused_names(&response).contains(&field::GESTURES_CLIENT_GESTURES),
+        "withdrawing the global is refused too: {response:?}"
+    );
+    fixture.rewrite("[gestures]\nclient_gestures = true\n");
+    let response = fixture.reload();
+    assert!(
+        !refused_names(&response).contains(&field::GESTURES_CLIENT_GESTURES),
+        "an agreeing file should stay silent: {response:?}"
+    );
+}
+
+#[test]
 fn reload_refuses_a_virtual_binds_flip_with_restart_named() {
     // The bind gate is fixed at startup with the globals: flipping it in
     // the file changes what a connected remote may do without restarting,

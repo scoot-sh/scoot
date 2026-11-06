@@ -24,10 +24,11 @@
 //! open (libinput never does this) closes the old one first: a forwarded swipe
 //! gets a cancelled `end`.
 //!
-//! This compositor does not advertise `zwp_pointer_gestures_v1` yet, so no
-//! client can bind the swipe objects and a forwarded swipe reaches nobody.
-//! The forwarding is in place so the rule above already holds when the global
-//! lands.
+//! Pinch and hold are always forwarded, and the same rule holds for them
+//! (see `client.rs`, which also says what a focus change mid-gesture does).
+//! `zwp_pointer_gestures_v1` is only advertised when
+//! `[gestures] client_gestures = true`; without it a forwarded gesture reaches
+//! nobody.
 //!
 //! # What a claimed swipe does
 //!
@@ -66,10 +67,12 @@ use smithay::utils::SERIAL_COUNTER;
 use super::State;
 use super::animation::{AnimationSettings, Easing, viewport_position};
 
+mod client;
 mod config;
 #[cfg(test)]
 mod tests;
 
+pub(super) use client::init_client_gestures;
 pub(super) use config::GesturesFile;
 
 /// Fingers a swipe needs to be scoot's when `swipe_fingers` is unset.
@@ -514,10 +517,9 @@ impl State {
 
     // -- forwarding --
 
-    // The three forwarders send no `wl_pointer.frame`: with no
-    // `zwp_pointer_gestures_v1` global there is no gesture event to close, and
-    // a bare frame would wake the focused client at update rate for nothing.
-    // Add `pointer.frame(self)` back with the global.
+    // The three forwarders send no `wl_pointer.frame`: the protocol does not
+    // group gesture events with pointer events, and a bare frame would wake
+    // the focused client at update rate for nothing.
 
     fn forward_swipe_begin(&mut self, fingers: u32, time: u32) {
         let Some(pointer) = self.seat.get_pointer() else {

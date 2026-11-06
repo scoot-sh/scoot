@@ -1141,6 +1141,13 @@ pub struct State {
     /// progress and the settle after it (see `gesture.rs`). Idle, one
     /// `Option` test per frame.
     pub(super) gestures: super::gesture::Gestures,
+    /// `zwp_pointer_gestures_v1` (version 3), present only when
+    /// `[gestures] client_gestures` asked for it at startup (see
+    /// `gesture/client.rs`). `None` is the default and means the global does
+    /// not exist; reload compares the file against `is_some()` and refuses a
+    /// flip, since nothing writes this after startup. Held to keep the
+    /// global alive -- Smithay owns the per-client objects.
+    pub(super) client_gestures: Option<smithay::wayland::pointer_gestures::PointerGesturesState>,
     /// Every config `[binds]` entry that never made it into
     /// [`State::keybindings`], each with its reason (see
     /// [`scoot_ipc::SkippedBind`]): what `scoot msg binds` lists beside the
@@ -1587,6 +1594,7 @@ impl State {
             keybindings,
             scroll_binds: Default::default(),
             gestures: Default::default(),
+            client_gestures: None,
             skipped_binds: Vec::new(),
             global_shortcuts: GlobalShortcuts::new(),
             current_conn: 0,
