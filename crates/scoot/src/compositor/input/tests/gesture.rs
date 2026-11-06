@@ -1,7 +1,8 @@
-//! What a client's `wl_pointer` hears of a swipe. scoot offers no
-//! `zwp_pointer_gestures_v1` yet, so the answer is nothing at all: not even
-//! the empty `wl_pointer.frame` a forwarded swipe used to send at update
-//! rate.
+//! What a client's `wl_pointer` hears of a swipe. This fixture does not turn
+//! on `[gestures] client_gestures`, so no gesture object exists and the
+//! answer is nothing at all: not even the empty `wl_pointer.frame` a
+//! forwarded swipe used to send at update rate. (The global on is in
+//! `gesture/client/tests.rs`.)
 
 use super::*;
 

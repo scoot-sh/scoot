@@ -47,10 +47,24 @@ fn the_default_config_emission_names_the_gestures_table_and_loads_back() {
         "# vertical = \"focus-workspace\"",
         "# natural = true",
         "# sensitivity = 1.0",
+        "# client_gestures = false",
     ] {
         assert!(emitted.contains(line), "the emission lost `{line}`");
     }
     let (_dir, path) = write_temp(&emitted);
     let (loaded, _) = load_from(&path, true).expect("the emission loads");
     assert_eq!(loaded.gestures, GestureConfig::default());
+    assert!(!loaded.client_gestures);
+}
+
+#[test]
+fn client_gestures_is_off_unless_the_file_says_true() {
+    assert!(!load("").client_gestures);
+    assert!(!LoadedConfig::defaults().client_gestures);
+    assert!(!load("[gestures]\nswipe_fingers = 4\n").client_gestures);
+    assert!(load("[gestures]\nclient_gestures = true\n").client_gestures);
+    // A wrong type costs that key alone.
+    let loaded = load("[gestures]\nclient_gestures = \"yes\"\nnatural = false\n");
+    assert!(!loaded.client_gestures);
+    assert!(!loaded.gestures.natural);
 }

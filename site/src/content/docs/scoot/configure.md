@@ -74,7 +74,7 @@ above.
 **Applied live:** layout (gap, column widths, default width), output
 scales and positions, `[[outputs]]` modes (a live resize per backend;
 `--nested` refuses them because the host owns the size), appearance (ring, background, corners, cursor), animation
-(enabled, duration, easing), `[scroll] step`, `[gestures]`, the whole
+(enabled, duration, easing), `[scroll] step`, `[gestures]` (all but `client_gestures`), the whole
 `[binds]` table (scroll binds included), the `[global_shortcuts]` chords, new `[autostart]` spawn entries, `[floating]` and the
 `[[window_rule]]`s (for windows that map after the reload), `[wallpaper]`
 (handed to scootbg again), `[xwayland] fractional`. The reply names
@@ -106,9 +106,9 @@ whole, keeping everything. `SIGHUP` always runs the plain reload. Both
 reloads work the same on a Nix install and a plain binary install.
 
 **Refused, pending a restart:** `[tty] gpu`, `[renderer]
-backend`, `[xwayland] enabled`, `[virtual_input] enabled` and
-`[virtual_input] binds`. All five take effect on restart, and each
-refusal says so. A reload
+backend`, `[xwayland] enabled`, `[virtual_input] enabled`,
+`[virtual_input] binds` and `[gestures] client_gestures`. All six take effect
+on restart, and each refusal says so. A reload
 that cannot load the file answers an `error` instead, keeps the
 running config untouched, and logs. It never falls back to defaults,
 half-applies, or exits.
@@ -253,6 +253,7 @@ are in [Touchpad gestures](./keybindings.md#touchpad-gestures).
 | `vertical` | string | `"focus-workspace"` | live | `"focus-workspace"` or `"focus-window"` fires one step when a vertical swipe ends. `"none"` turns it off. |
 | `natural` | bool | `true` | live | The content follows the fingers, as on macOS. `false` reverses both axes. |
 | `sensitivity` | number | `1.0` | live | Scales how far the strip follows the fingers; `1.0` is one logical pixel per libinput swipe unit, about 10 pixels per millimetre of finger travel on the pad this was measured on, and a real pad may differ. The defaults here, this one included, were tuned on a synthetic touchpad, not a real one. Raise it if swipes feel short. Clamped `0.1..=10`; a non-number or non-finite value warns and uses `1.0`. |
+| `client_gestures` | bool | `false` | restart | Offer windows the `zwp_pointer_gestures_v1` protocol, so a browser or viewer can use the pad's pinch and hold and the swipes that are not scoot's. Anything but `true` or `false` warns and uses `false`. |
 
 ```toml
 [gestures]
@@ -265,6 +266,26 @@ Each bad value falls back to its own default and leaves the rest of the
 table alone. With `horizontal` and `vertical` both `"none"`, swipes are not
 scoot's at all. A reload applies from the next swipe: one already under
 way finishes with the values it began with.
+
+`client_gestures` is the exception to "live". The protocol is advertised once,
+at startup, so a reload that changes it is refused with `takes effect on
+restart`; the other keys in the same table still apply. It is off by default
+because a window that sees the protocol changes how it treats the touchpad
+(GTK 4, Firefox and Chromium use it for pinch zoom and swipe navigation), and
+that has not been checked on a real touchpad. Turn it on, restart, and try the
+apps you use. With it on, pinch and hold always go to the window under the
+pointer, and so does a swipe with a finger count other than `swipe_fingers`; a
+swipe that is scoot's never does (see
+[Touchpad gestures](./keybindings.md#touchpad-gestures)).
+
+```toml
+[gestures]
+client_gestures = true
+```
+
+> **Symptom:** pinch-to-zoom does nothing in a browser or image viewer.
+> `client_gestures` is off, so the window cannot ask for the pad's gestures.
+> Set it to `true` and restart scoot; `scoot msg reload` will refuse the change.
 
 ## Example config.toml
 
@@ -319,6 +340,7 @@ scale = 1.0
 # vertical = "focus-workspace"  # "focus-window" or "none"
 # natural = true                # content follows the fingers
 # sensitivity = 1.0             # how far the strip follows the fingers, 0.1..=10
+# client_gestures = false       # offer windows pinch/hold/swipe (zwp_pointer_gestures_v1); restart
 
 # [renderer]
 # Type string, default "auto". One of "auto" (the default: the GPU

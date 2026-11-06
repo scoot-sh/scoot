@@ -22,6 +22,7 @@ pub(in crate::compositor) struct GesturesFile {
     vertical: Option<toml::Value>,
     natural: Option<toml::Value>,
     sensitivity: Option<toml::Value>,
+    client_gestures: Option<toml::Value>,
 }
 
 impl GesturesFile {
@@ -49,6 +50,24 @@ impl GesturesFile {
             natural: self.natural().unwrap_or(default.natural),
             sensitivity: self.sensitivity().unwrap_or(default.sensitivity),
         }
+    }
+
+    /// `client_gestures`: whether the session advertises
+    /// `zwp_pointer_gestures_v1`. Off unless the file says `true`; a value
+    /// that is not a boolean warns and stays off. Kept out of
+    /// [`GestureConfig`](super::GestureConfig) because that is what a reload
+    /// swaps live, and this one only applies at startup.
+    pub(in crate::compositor) fn client_gestures(&self) -> bool {
+        let Some(value) = self.client_gestures.as_ref() else {
+            return false;
+        };
+        value.as_bool().unwrap_or_else(|| {
+            tracing::warn!(
+                client_gestures = %value,
+                "[gestures] client_gestures must be true or false; using false"
+            );
+            false
+        })
     }
 
     fn fingers(&self) -> Option<u32> {
@@ -182,6 +201,23 @@ mod tests {
             DEFAULT_SENSITIVITY
         );
         assert_eq!(resolve("sensitivity = 0.5").sensitivity, 0.5);
+    }
+
+    #[test]
+    fn client_gestures_is_off_unless_the_file_says_true() {
+        let read = |text: &str| {
+            toml::from_str::<GesturesFile>(text)
+                .expect("the table parses")
+                .client_gestures()
+        };
+        assert!(!read(""));
+        assert!(!read("client_gestures = false"));
+        assert!(read("client_gestures = true"));
+        // A wrong type warns and stays off; it does not take the table down.
+        assert!(!read("client_gestures = \"yes\""));
+        assert!(!read("client_gestures = 1"));
+        // And it is not one of the live keys.
+        assert_eq!(resolve("client_gestures = true"), GestureConfig::default());
     }
 
     #[test]

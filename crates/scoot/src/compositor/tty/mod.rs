@@ -75,7 +75,8 @@ use smithay::backend::input::{
     TabletToolTipState,
 };
 use smithay::backend::input::{
-    GestureBeginEvent, GestureEndEvent, GestureSwipeUpdateEvent as SwipeUpdateEvent,
+    GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent as PinchUpdateEvent,
+    GestureSwipeUpdateEvent as SwipeUpdateEvent,
 };
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::session::libseat::LibSeatSession;
@@ -2382,6 +2383,44 @@ fn libinput_event(event: InputEvent<LibinputInputBackend>, _: &mut (), state: &m
         }
         InputEvent::GestureSwipeEnd { event } => {
             state.gesture_swipe_end(
+                GestureEndEvent::<LibinputInputBackend>::cancelled(&event),
+                event.time().millis(),
+            );
+        }
+        // Pinch and hold are never scoot's: forwarded to the pointer focus,
+        // whole, under the same begin-decides-and-end-matches rule
+        // (`gesture/client.rs`).
+        InputEvent::GesturePinchBegin { event } => {
+            state.gesture_pinch_begin(
+                GestureBeginEvent::<LibinputInputBackend>::fingers(&event),
+                event.time().millis(),
+            );
+        }
+        InputEvent::GesturePinchUpdate { event } => {
+            state.gesture_pinch_update(
+                (
+                    PinchUpdateEvent::<LibinputInputBackend>::delta_x(&event),
+                    PinchUpdateEvent::<LibinputInputBackend>::delta_y(&event),
+                ),
+                PinchUpdateEvent::<LibinputInputBackend>::scale(&event),
+                PinchUpdateEvent::<LibinputInputBackend>::rotation(&event),
+                event.time().millis(),
+            );
+        }
+        InputEvent::GesturePinchEnd { event } => {
+            state.gesture_pinch_end(
+                GestureEndEvent::<LibinputInputBackend>::cancelled(&event),
+                event.time().millis(),
+            );
+        }
+        InputEvent::GestureHoldBegin { event } => {
+            state.gesture_hold_begin(
+                GestureBeginEvent::<LibinputInputBackend>::fingers(&event),
+                event.time().millis(),
+            );
+        }
+        InputEvent::GestureHoldEnd { event } => {
+            state.gesture_hold_end(
                 GestureEndEvent::<LibinputInputBackend>::cancelled(&event),
                 event.time().millis(),
             );
