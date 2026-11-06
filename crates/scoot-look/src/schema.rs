@@ -111,6 +111,12 @@ pub struct RawLook {
     pub night: Option<Night>,
     #[serde(default)]
     pub apps: BTreeMap<String, BTreeMap<String, toml::Value>>,
+    /// Per-target color overrides, `[targets.<name>]`: token data for a
+    /// user-owned look target of that name, applied only when the user has
+    /// that target. Never a template, output or reload (see
+    /// [`crate::targets::check_override_key`]).
+    #[serde(default)]
+    pub targets: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -450,6 +456,7 @@ fn validate_raw(raw: &RawLook, errors: &mut Vec<GrammarError>) {
         ));
     }
     validate_apps(&raw.apps, errors);
+    crate::targets::validate_overrides(&raw.targets, errors);
 }
 
 fn validate_palette(p: &RawPalette, errors: &mut Vec<GrammarError>) {

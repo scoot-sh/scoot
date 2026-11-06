@@ -258,16 +258,150 @@ fn name_must_match_its_directory() {
 #[test]
 fn look_toml_cannot_declare_targets() {
     // Installed looks (someone else's) can never supply templates,
-    // output paths or reload commands: a look.toml trying smuggles an
-    // unknown key past nothing, since RawLook denies unknown fields.
-    let errors = crate::parse_look_toml(
-        br#"schema = 1
-name = "evil"
-[targets]
-"#,
-    )
-    .unwrap_err();
-    assert!(!errors.is_empty(), "a [targets] table must refuse");
+    // output paths or reload commands. `[targets.<name>]` exists now,
+    // but holds color token overrides only: every smuggling shape
+    // refuses at parse, whatever the target name.
+    for body in [
+        // The target.toml fields themselves.
+        "output = \"kitty/colors.conf\"",
+        "template = \"colors.tmpl\"",
+        "name = \"kitty-colors\"",
+        // A reload, as a string and as the real table shape.
+        "reload = \"kitty @ set-colors\"",
+        // Anything that is not one of the allowed color tokens.
+        "\"fonts.mono\" = \"Fira Code\"",
+        "\"cursor.accent\" = \"#ff0000\"",
+        "\"palette.nope\" = \"#ff0000\"",
+        "\"terminal.color16\" = \"#ff0000\"",
+        "\"terminal.color04\" = \"#ff0000\"",
+        "\"terminal.color-1\" = \"#ff0000\"",
+    ] {
+        let text = format!("schema = 1\nname = \"evil\"\n[targets.kitty-colors]\n{body}\n");
+        assert!(
+            crate::parse_look_toml(text.as_bytes()).is_err(),
+            "must refuse: {body}"
+        );
+    }
+    // A reload sub-table and a non-table target refuse at the type level.
+    for text in [
+        "schema = 1\nname = \"evil\"\n[targets.kitty-colors.reload]\nargv = [\"sh\"]\n",
+        "schema = 1\nname = \"evil\"\n[targets]\nkitty-colors = \"sh -c x\"\n",
+    ] {
+        assert!(crate::parse_look_toml(text.as_bytes()).is_err(), "{text}");
+    }
+}
+
+fn override_look(table: &str) -> String {
+    format!("schema = 1\nname = \"x\"\n[targets.kitty-colors]\n{table}\n")
+}
+
+#[test]
+fn color_overrides_parse_and_hostile_values_refuse() {
+    let ok =
+        override_look("\"palette.background\" = \"#112233\"\n\"terminal.color15\" = \"#aabbcc\"");
+    let raw = crate::parse_look_toml(ok.as_bytes()).expect("colors parse");
+    assert_eq!(raw.targets["kitty-colors"].len(), 2);
+    for value in [
+        "\"red\"",
+        "\"#12345\"",
+        "\"#1234567\"",
+        "\"#GGGGGG\"",
+        "\"#112233\\n\\nreload = x\"",
+        "\"$(reboot)\"",
+        "\"{{ palette.accent }}\"",
+        "\"\"",
+        "7",
+        "true",
+    ] {
+        let text = override_look(&format!("\"palette.accent\" = {value}"));
+        assert!(
+            crate::parse_look_toml(text.as_bytes()).is_err(),
+            "must refuse value {value}"
+        );
+    }
+    // A bad target name refuses at parse; `none`, uppercase, a path.
+    for name in ["\"Kitty\"", "\"../x\"", "\"a b\"", "\"\""] {
+        let text = format!(
+            "schema = 1\nname = \"x\"\n[targets.{name}]\n\"palette.accent\" = \"#112233\"\n"
+        );
+        assert!(crate::parse_look_toml(text.as_bytes()).is_err(), "{name}");
+    }
+}
+
+#[test]
+fn only_palette_and_sixteen_terminal_colors_are_overridable() {
+    assert!(check_override_key("palette.accent-fg"));
+    assert!(check_override_key("terminal.color0"));
+    assert!(check_override_key("terminal.color15"));
+    for key in [
+        "terminal.color16",
+        "terminal.color00",
+        "terminal.color+1",
+        "terminal.color",
+        "fonts.mono",
+        "polarity",
+        "palette",
+        "palette.",
+        "",
+    ] {
+        assert!(!check_override_key(key), "{key}");
+    }
+}
+
+fn resolved_with(extra: &str) -> crate::ResolvedLook {
+    let text = format!("{}{extra}", crate::schema::tests::minimal_toml());
+    let raw = crate::parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("moonrise".to_string(), (raw, crate::Origin::User))]);
+    crate::resolve(&map, "moonrise").expect("resolves")
+}
+
+#[test]
+fn overrides_replace_only_for_their_own_target() {
+    let look = resolved_with(
+        "\n[targets.kitty-colors]\n\"palette.background\" = \"#010203\"\n\"terminal.color3\" = \"#0a0b0c\"\n",
+    );
+    let base = target_tokens(&look);
+    assert!(!base.contains_key("terminal.color3"), "no [terminal] table");
+    let kitty = tokens_for_target(&base, &look, "kitty-colors");
+    assert_eq!(kitty["palette.background"], "#010203");
+    assert_eq!(kitty["terminal.color3"], "#0a0b0c", "adds a missing color");
+    assert_eq!(kitty["palette.accent"], base["palette.accent"]);
+    // A target the look does not mention sees the plain tokens, borrowed.
+    let other = tokens_for_target(&base, &look, "tmux");
+    assert!(matches!(other, std::borrow::Cow::Borrowed(_)));
+    assert_eq!(*other, base);
+    assert_ne!(base["palette.background"], "#010203");
+}
+
+#[test]
+fn a_look_without_the_table_resolves_to_no_overrides() {
+    let look = resolved_with("");
+    assert!(look.target_overrides.is_empty());
+    let base = target_tokens(&look);
+    assert!(matches!(
+        tokens_for_target(&base, &look, "kitty-colors"),
+        std::borrow::Cow::Borrowed(_)
+    ));
+}
+
+#[test]
+fn a_child_look_merges_overrides_per_key_over_its_base() {
+    let base_text = format!(
+        "{}\n[targets.kitty-colors]\n\"palette.background\" = \"#010203\"\n\"palette.accent\" = \"#040506\"\n",
+        crate::schema::tests::minimal_toml()
+    );
+    let base = crate::parse_look_toml(base_text.as_bytes()).expect("base");
+    let child_text = "schema = 1\nname = \"child\"\nextends = \"base\"\n[targets.kitty-colors]\n\"palette.accent\" = \"#070809\"\n[targets.tmux]\n\"palette.dim\" = \"#0a0a0a\"\n";
+    let child = crate::parse_look_toml(child_text.as_bytes()).expect("child");
+    let map = BTreeMap::from([
+        ("base".to_string(), (base, crate::Origin::User)),
+        ("child".to_string(), (child, crate::Origin::User)),
+    ]);
+    let look = crate::resolve(&map, "child").expect("resolves");
+    let kitty = &look.target_overrides["kitty-colors"];
+    assert_eq!(kitty["palette.background"], "#010203", "inherited");
+    assert_eq!(kitty["palette.accent"], "#070809", "child wins per key");
+    assert_eq!(look.target_overrides["tmux"]["palette.dim"], "#0a0a0a");
 }
 
 #[test]

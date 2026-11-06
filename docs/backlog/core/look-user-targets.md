@@ -205,3 +205,51 @@ print escaped and cannot imitate the `RELOAD` line; a control byte in a
 reload argument refuses at read). The whole `docs/examples/look-targets`
 directory adds as one pack of seven. `RENDER_VERSION` is unchanged:
 rendering is unchanged.
+
+## Resolution in progress — slice 4 (look-supplied color overrides)
+
+A look's `look.toml` may carry `[targets.<name>]`, a table of quoted
+token keys set to `#rrggbb` (`scoot-look/src/targets.rs`,
+`validate_overrides`, called from the one parse pipeline so `validate`,
+`build`, `install`, `watch` and every swap refuse identically). The
+smallest coherent shape, chosen over the alternatives:
+
+- **Override, not new tokens.** Keys name existing template tokens
+  (`palette.*`, `terminal.color0` to `terminal.color15`), so any
+  existing template picks the look's data up with no edit and no fallback
+  grammar. New `target.*` tokens would have made every template refuse
+  against every look that did not supply them, and would have needed a
+  default filter.
+- **Colors only.** The one value kind is `#rrggbb`. Fonts (identifier
+  charset), sizes and strings are a later widening of the same table;
+  nothing a color value can carry reaches a path, a command or free text.
+  The type is `BTreeMap<String, BTreeMap<String, String>>`, so a
+  non-string value, the `output`/`template`/`reload`/`name` keys and a
+  `[targets.x.reload]` sub-table refuse at parse (pinned in
+  `targets/tests.rs`, which fails with the validation call removed).
+- **Applies to the target of that name, nothing else.**
+  `tokens_for_target` (called by `scootctl::look::targets::render_all`,
+  the single choke point `validate`/`build`/`apply` render through) layers
+  the table over a clone of the look's tokens, borrowing the base when a
+  target has no table. The look's own fragments never see it. A
+  `terminal.colorN` override adds the key when the look has no
+  `[terminal]` table.
+- **A name with no user target is ignored, not an error.** A look is
+  shared; the user's targets are local. Refusing would make a look
+  uninstallable for anyone without that app. Names still follow
+  `[a-z0-9-]{1,32}`.
+- **`extends`** merges the tables per key, child over base, like `[apps]`.
+- **Cache key and `RENDER_VERSION`: no bump.** The key already hashes
+  every rendered target file's bytes and the chain's `look.toml` bytes, so
+  a changed override re-renders (pinned by
+  `changing_an_override_re_renders_instead_of_reusing_the_cache`). For
+  every input an older binary accepted, the rendered bytes are unchanged
+  (a look without the table renders byte for byte as before, pinned);
+  inputs with the table were a parse refusal before.
+- **Not breaking.** `[targets]` used to refuse as an unknown field; now
+  an empty or well-formed table parses. Every existing look is unaffected,
+  so no `!`.
+
+Still open: non-color overrides, keeping look sources and template
+sources in separate imports, and browsers. No part of any slice runs a
+look-supplied command.

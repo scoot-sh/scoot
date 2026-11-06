@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 
 use serde::Deserialize;
 
-use crate::grammar::{GrammarError, MAX_FILE_BYTES, is_name};
+use crate::grammar::{GrammarError, MAX_FILE_BYTES, is_hex_color, is_name};
 use crate::resolved::ResolvedLook;
 
 /// The longest `target.toml` this crate parses: the same 64 KiB as every
@@ -369,6 +369,88 @@ pub fn target_tokens(look: &ResolvedLook) -> BTreeMap<String, String> {
         tokens.insert("night.temperature".to_owned(), temperature.to_string());
     }
     tokens
+}
+
+/// The color tokens a look's `[targets.<name>]` table may override: the
+/// thirteen palette roles and the sixteen terminal colors. Colors only:
+/// every value is a validated `#rrggbb`, so an override is token data
+/// and cannot carry a path, a command or free text into a template.
+pub fn check_override_key(key: &str) -> bool {
+    const PALETTE: [&str; 13] = [
+        "palette.background",
+        "palette.foreground",
+        "palette.dim",
+        "palette.accent",
+        "palette.urgent",
+        "palette.surface",
+        "palette.hover",
+        "palette.focus",
+        "palette.border",
+        "palette.accent-fg",
+        "palette.selection",
+        "palette.selection-text",
+        "palette.match",
+    ];
+    if PALETTE.contains(&key) {
+        return true;
+    }
+    key.strip_prefix("terminal.color")
+        .is_some_and(|n| n.parse::<u8>().is_ok_and(|v| v <= 15 && v.to_string() == n))
+}
+
+/// Validates every `[targets.<name>]` table of a look at parse time, the
+/// one place `validate`, `build`, `install` and every swap share: the
+/// target name grammar, an allowed color token per key, a `#rrggbb` per
+/// value. A key like `output`, `template` or `reload` is not a token, so
+/// a look cannot smuggle a template, output path or reload command in.
+/// Whether a user target of that name exists is not checked here: the
+/// look is shared, the user's targets are local, and an override for a
+/// target the user has not enabled does nothing.
+pub fn validate_overrides(
+    targets: &BTreeMap<String, BTreeMap<String, String>>,
+    errors: &mut Vec<GrammarError>,
+) {
+    for (target, table) in targets {
+        if !is_name(target) {
+            errors.push(GrammarError::new(
+                format!("targets.{target}"),
+                "target name must match [a-z0-9-]{1,32}",
+            ));
+            continue;
+        }
+        for (key, value) in table {
+            let field = format!("targets.{target}[{key}]");
+            if !check_override_key(key) {
+                errors.push(GrammarError::new(
+                    &field,
+                    "not an overridable token: only `palette.*` colors and `terminal.color0` to `terminal.color15`",
+                ));
+            } else if !is_hex_color(value) {
+                errors.push(GrammarError::new(&field, "must be exactly #rrggbb"));
+            }
+        }
+    }
+}
+
+/// The tokens one target renders against: the look's own, with that
+/// target's `[targets.<name>]` color overrides replacing (or, for a
+/// `terminal.colorN` the look does not set, adding) their keys. Other
+/// targets never see them.
+pub fn tokens_for_target<'a>(
+    base: &'a BTreeMap<String, String>,
+    look: &ResolvedLook,
+    target: &str,
+) -> std::borrow::Cow<'a, BTreeMap<String, String>> {
+    match look.target_overrides.get(target) {
+        Some(table) if !table.is_empty() => {
+            let mut tokens = base.clone();
+            for (key, value) in table {
+                tokens.insert(key.clone(), value.clone());
+            }
+            std::borrow::Cow::Owned(tokens)
+        }
+        _ => std::borrow::Cow::Borrowed(base),
+    }
 }
 
 /// A whole-number float renders without its `.0` (`10`, never `10.0`),

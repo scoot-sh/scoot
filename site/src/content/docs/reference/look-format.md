@@ -90,6 +90,7 @@ color = "#2B3648"
 | `wallpaper` | One unit, never merged per key: `image` or `color`, never both. `image` is a path inside the look dir, or `https://` plus a required 64-hex `sha256`. `mode`: `fill`, `fit`, `stretch`, `center` or `tile` (image only; a color wallpaper carries no `mode` or `fill`). `fill`: default = `background`. `transition`: `none`, `fade`, `wipe` or `grow` (default `none`; the five shipped looks set `fade`, which animates at scootbg's defaults: 500 ms, `ease-out`). |
 | `icons` | `theme`: name. Default `Adwaita`. |
 | `night` | `temperature`: 1000 to 10000. |
+| `targets.<name>` | Color overrides for your own look target of that name: quoted `palette.*` and `terminal.color0` to `terminal.color15` keys set to `#rrggbb`, nothing else. Ignored when you have no such target. See [Look targets](./look-targets.md#color-overrides-from-a-look). |
 | `apps.<app>` | Per-app overrides. Each key is the app's own dotted config key, quoted. Only allowlisted keys parse, and each key's value is checked against its kind (see below). Anything else refuses by name. `name` must match the look directory name. |
 
 ```toml

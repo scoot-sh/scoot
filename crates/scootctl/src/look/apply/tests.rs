@@ -4780,6 +4780,166 @@ fn user_targets_render_into_the_swap_validate_and_build() {
     );
 }
 
+/// A fixture whose only look (`look-a`) carries `extra` appended to its
+/// `look.toml`: for the `[targets.<name>]` override tests.
+fn fixture_with_look(tag: &str, extra: &str) -> Fixture {
+    let scratch = scratch(tag);
+    let root: PathBuf = scratch.path().to_owned();
+    let sources = root.join("looks");
+    write_look(&sources, "look-a", extra);
+    let catalog = discover_ordered(&[(sources, Origin::User)]);
+    assert_eq!(catalog.entries.len(), 1, "notes: {:?}", catalog.notes);
+    Fixture {
+        catalog,
+        cache: root.join("cache"),
+        state: root.join("state"),
+        config: root.join("config"),
+        _scratch: scratch,
+        _root: root,
+    }
+}
+
+const KITTY_OVERRIDE: &str = "\n[targets.kitty-colors]\n\"palette.background\" = \"#010203\"\n\"terminal.color1\" = \"#0a0b0c\"\n";
+
+const KITTY_OVERRIDE_TEMPLATE: &str =
+    "bg {{ palette.background }}\nfg {{ palette.foreground }}\nc1 {{ terminal.color1 }}\n";
+
+#[test]
+fn look_overrides_render_identically_in_validate_build_and_apply() {
+    let fixture = fixture_with_look("targets-override", KITTY_OVERRIDE);
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_OVERRIDE_TEMPLATE,
+        None,
+    );
+    let checks = FakeChecks::default();
+    let validation = validate_entry(
+        &fixture.catalog,
+        "look-a",
+        &checks,
+        false,
+        Some(&fixture.config),
+    )
+    .expect("validatable");
+    assert!(validation.errors.is_empty(), "{:?}", validation.errors);
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    let text =
+        std::fs::read_to_string(PathBuf::from(&report.rendered).join("targets/kitty/colors.conf"))
+            .expect("target contents");
+    assert_eq!(
+        text, "bg #010203\nfg #F6EEDC\nc1 #0a0b0c\n",
+        "the look's data replaces the palette color and adds the missing one"
+    );
+    let out = fixture._root.join("out");
+    build_to_out(
+        &BuildTarget::Name("look-a".to_owned()),
+        &out,
+        &fixture.catalog,
+        &checks,
+        false,
+        Some(&fixture.config),
+    )
+    .expect("buildable");
+    let built =
+        std::fs::read_to_string(out.join("targets/kitty/colors.conf")).expect("built target");
+    assert_eq!(built, text, "build renders what apply renders");
+    // The override never reaches the look's own fragments: only the
+    // target sees it.
+    let scoot = std::fs::read_to_string(PathBuf::from(&report.rendered).join("scoot.toml"))
+        .expect("the scoot fragment");
+    assert!(
+        scoot.contains("#2B3648") || scoot.contains("#2b3648"),
+        "{scoot}"
+    );
+    assert!(!scoot.contains("#010203"), "{scoot}");
+}
+
+#[test]
+fn an_override_for_a_target_the_user_has_not_enabled_does_nothing() {
+    // The look names `kitty-colors`; the user only has `tmux-theme`. The
+    // other target renders as if the table were absent, and with no
+    // targets at all nothing is written under `targets/`.
+    let with = fixture_with_look("targets-override-other", KITTY_OVERRIDE);
+    let without = fixture_with_look("targets-override-none", "");
+    for fixture in [&with, &without] {
+        write_target(
+            &fixture.config,
+            "tmux-theme",
+            "tmux/theme.conf",
+            "bg {{ palette.background }}\n",
+            None,
+        );
+    }
+    let a = offline_apply(&with, "look-a", &options(), &ScriptedLeaves::ok());
+    let b = offline_apply(&without, "look-a", &options(), &ScriptedLeaves::ok());
+    let read = |r: &ApplyReport| {
+        std::fs::read(PathBuf::from(&r.rendered).join("targets/tmux/theme.conf")).expect("tmux")
+    };
+    assert_eq!(read(&a), read(&b), "a foreign override changes nothing");
+    assert_eq!(read(&a), b"bg #2B3648\n");
+
+    let bare = fixture_with_look("targets-override-no-targets", KITTY_OVERRIDE);
+    let report = offline_apply(&bare, "look-a", &options(), &ScriptedLeaves::ok());
+    assert!(
+        !PathBuf::from(&report.rendered).join("targets").exists(),
+        "no user target, so nothing is rendered from the override"
+    );
+}
+
+#[test]
+fn a_look_without_the_table_renders_a_target_byte_identically() {
+    let fixture = fixture_with_look("targets-override-absent", "");
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_TEMPLATE,
+        None,
+    );
+    let report = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    let text = std::fs::read(PathBuf::from(&report.rendered).join("targets/kitty/colors.conf"))
+        .expect("target contents");
+    assert_eq!(
+        text,
+        b"# kitty colors from the look\nbackground #2B3648\nforeground #F6EEDC\naccent FFA45C\n"
+    );
+}
+
+#[test]
+fn changing_an_override_re_renders_instead_of_reusing_the_cache() {
+    let fixture = fixture_with_look("targets-override-cache", KITTY_OVERRIDE);
+    write_target(
+        &fixture.config,
+        "kitty-colors",
+        "kitty/colors.conf",
+        KITTY_OVERRIDE_TEMPLATE,
+        None,
+    );
+    let first = offline_apply(&fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    let look = fixture._root.join("looks/look-a/look.toml");
+    let edited = std::fs::read_to_string(&look)
+        .expect("look.toml")
+        .replace("#010203", "#111213");
+    std::fs::write(&look, edited).expect("edit");
+    let catalog = discover_ordered(&[(fixture._root.join("looks"), Origin::User)]);
+    let second_fixture = Fixture {
+        catalog,
+        cache: fixture.cache.clone(),
+        state: fixture.state.clone(),
+        config: fixture.config.clone(),
+        _scratch: scratch("targets-override-cache-guard"),
+        _root: fixture._root.clone(),
+    };
+    let second = offline_apply(&second_fixture, "look-a", &options(), &ScriptedLeaves::ok());
+    assert_ne!(first.rendered, second.rendered, "a new key, a new render");
+    let text =
+        std::fs::read_to_string(PathBuf::from(&second.rendered).join("targets/kitty/colors.conf"))
+            .expect("target");
+    assert!(text.starts_with("bg #111213\n"), "{text}");
+}
+
 #[test]
 fn unknown_token_refuses_validate_and_records_nothing() {
     let fixture = fixture("targets-unknown");

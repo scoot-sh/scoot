@@ -106,5 +106,5 @@ pub use static_leaves::{STATIC_LEAVES, StaticKind, StaticLeaf, check_static_leaf
 pub use targets::{
     DEFAULT_RELOAD_TIMEOUT_SECS, MAX_RELOAD_ARGV, MAX_TEMPLATE_BYTES, RawTarget, Reload,
     check_name_matches_dir as check_target_name_matches_dir, check_target_path, parse_target_toml,
-    reload_timeout, render_template, target_tokens,
+    reload_timeout, render_template, target_tokens, tokens_for_target,
 };
