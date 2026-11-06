@@ -46,6 +46,90 @@ fn install_from_git_is_gated_end_to_end() {
     );
 }
 
+/// scoot killed mid-clone (SIGKILL, which no handler could catch): the
+/// watchdog must stop git and its helper and remove the temp directory.
+#[test]
+fn a_killed_scoot_leaves_no_git_and_no_temp_dir() {
+    if std::env::var_os("SCOOT_INSTALL_GIT_HANG_CHILD").is_some() {
+        return hang_child_main();
+    }
+    let root = tempfile::tempdir().expect("a scratch root");
+    let tmp = root.path().join("tmp");
+    let fake = root.path().join("fake-bin");
+    for dir in [&tmp, &fake] {
+        std::fs::create_dir_all(dir).expect("a scratch dir");
+    }
+    let pidfile = root.path().join("helper.pid");
+    let script = fake.join("git");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in --version) echo 'git version 2.45.0'; exit 0;; esac\nsleep 300 &\necho $! > '{}'\nwait\n",
+            pidfile.display()
+        ),
+    )
+    .expect("a stand-in git");
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("exec bit");
+    let exe = std::env::current_exe().expect("the test binary");
+    let mut scoot = std::process::Command::new(exe)
+        .arg("a_killed_scoot_leaves_no_git_and_no_temp_dir")
+        .arg("--exact")
+        .env("SCOOT_INSTALL_GIT_HANG_CHILD", "1")
+        .env("TMPDIR", &tmp)
+        .env("HOME", root.path().join("home"))
+        .env("XDG_DATA_HOME", root.path().join("data"))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                fake.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the child runs");
+    let started = std::time::Instant::now();
+    while !pidfile.exists() {
+        assert!(started.elapsed().as_secs() < 20, "git never started");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    let pid: u32 = std::fs::read_to_string(&pidfile)
+        .expect("a pid")
+        .trim()
+        .parse()
+        .expect("a number");
+    assert!(!process_gone(pid), "the helper should be running");
+    scoot.kill().expect("SIGKILL scoot");
+    scoot.wait().expect("reaped");
+    let started = std::time::Instant::now();
+    while !(process_gone(pid) && is_empty(&tmp)) {
+        assert!(
+            started.elapsed().as_secs() < 20,
+            "helper {pid} gone: {}, temp empty: {}",
+            process_gone(pid),
+            is_empty(&tmp)
+        );
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+fn hang_child_main() {
+    let _ = run(&["install", "ssh://git@example.com/a/b.git"]);
+}
+
+fn process_gone(pid: u32) -> bool {
+    let out = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .expect("ps runs");
+    let stat = String::from_utf8_lossy(&out.stdout);
+    let stat = stat.trim();
+    stat.is_empty() || stat.starts_with('Z')
+}
+
 fn child_main() {
     let root = PathBuf::from(std::env::var_os("SCOOT_INSTALL_GIT_ROOT").expect("a root"));
     let home = root.join("home");
@@ -55,6 +139,7 @@ fn child_main() {
     for dir in [&home, &tmp, &empty, &fake] {
         std::fs::create_dir_all(dir).expect("a scratch dir");
     }
+    let original_path = std::env::var_os("PATH").unwrap_or_default();
     // SAFETY: the child is the only test in its process (re-exec).
     unsafe {
         std::env::set_var("HOME", &home);
@@ -101,14 +186,19 @@ fn child_main() {
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{r}.argv'\nenv > '{r}.env'\necho 'fatal: nope' >&2\nexit 128\n",
+            "#!/bin/sh\ncase \"$1\" in --version) echo 'git version 2.45.0'; exit 0;; esac\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{r}.argv'\nenv > '{r}.env'\necho 'fatal: nope' >&2\nexit 128\n",
             r = record.display()
         ),
     )
     .expect("a stand-in git");
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).expect("exec bit");
     // SAFETY: as above. The stand-in needs `env` and `printf`.
-    unsafe { std::env::set_var("PATH", format!("{}:/usr/bin:/bin", fake.display())) };
+    unsafe {
+        std::env::set_var(
+            "PATH",
+            format!("{}:{}", fake.display(), original_path.to_string_lossy()),
+        )
+    };
     let error = refusal(&["install", "ssh://git@example.com/a/b.git"]);
     assert!(
         error.contains("git failed") && error.contains("fatal: nope"),

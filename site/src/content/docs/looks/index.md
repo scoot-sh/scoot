@@ -578,9 +578,11 @@ default branch's latest commit installs.
 
 How the repository is read:
 
-- `git` must be on `PATH` (git 2.32 or later, for the config isolation
-  below). Without it the command stops with a message saying so;
-  clone the repository yourself and install the directory instead.
+- `git` must be on `PATH`, version 2.32 or later (checked with
+  `git --version`; older refuses, since the config isolation below needs
+  `GIT_CONFIG_GLOBAL`). Without it the command stops with a message
+  saying so; clone the repository yourself and install the directory
+  instead.
 - The clone is `git clone --bare --depth 1 --single-branch --no-tags
   --no-recurse-submodules` into a private temporary directory
   (`scoot-look-clone-*` under `$TMPDIR`, mode 0700) that is removed when
@@ -597,11 +599,18 @@ How the repository is read:
   global git config are off, so there is no `insteadOf` rewrite and no
   credential helper. Only the `https` and `ssh` transports are allowed,
   redirects are not followed, prompts are off, and ssh runs with
-  `BatchMode`. The clone is stopped after 120 seconds or when the
+  `BatchMode`, a connect timeout, keepalives, and agent, X11 and port
+  forwarding off, so a `Host * ForwardAgent yes` in your ssh config
+  cannot hand your agent to the host a pasted URL names. The rest of
+  your ssh config (keys, `Host` blocks, `ProxyJump`) applies. The clone is
+  stopped after 120 seconds or when the
   temporary directory passes 256 MiB (checked every 10 ms and when git
   exits).
-- Press Ctrl-C and git stops with scoot, but the temporary directory
-  stays until you delete it. Every other exit removes it.
+- git and everything it starts (`ssh`, the remote helper) are stopped
+  together at the deadline or the size cap. If scoot itself is killed,
+  Ctrl-C included, a small `sh` watchdog stops them and removes the
+  temporary directory a moment later. On a machine with no `sh` there is
+  no watchdog, and a killed scoot leaves the directory behind.
 
 The repository root is the look directory, so a stray file there refuses
 the install by name, exactly as it would in a directory. A `.gitignore`,
@@ -632,6 +641,10 @@ Remove it from the repository or install a clean copy as a tarball.
 > **Symptom:** `git failed ... The requested URL returned error: 301`.
 > A redirect (a renamed repository, a trailing slash) is not followed.
 > Use the URL the host now serves.
+
+> **Symptom:** `git 2.30 is too old` or `cannot tell which git this is`.
+> Install git 2.32 or later, or clone the repository yourself and
+> install the directory.
 
 > **Symptom:** `refused: .gitignore is not a file a look uses`.
 > The repository has files a look does not use at its root. Ask the

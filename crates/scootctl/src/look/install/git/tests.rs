@@ -12,7 +12,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::super::tests::{PNG, ScriptedNet, empty_catalog, manifest};
-use super::{Git, GitUrl, PROD_PROTOCOLS, install_git_into, parse_listing};
+use super::{Git, GitUrl, PROD_PROTOCOLS, install_git_into, parse_git_version, parse_listing};
 use crate::look::apply::ProdChecks;
 
 /// `git` for building fixtures, isolated from the machine's own config.
@@ -415,7 +415,14 @@ fn a_missing_git_is_a_clear_error_not_a_panic() {
 /// An executable stand-in for git, run through the real runner.
 fn fake_git(dir: &Path, script: &str) -> PathBuf {
     let path = dir.join("fake-git");
-    std::fs::write(&path, format!("#!/bin/sh\n{script}\n")).unwrap();
+    // Every stand-in answers the version check the runner makes first.
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in --version) echo 'git version 2.45.0'; exit 0;; esac\n{script}\n"
+        ),
+    )
+    .unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     path
 }
@@ -645,4 +652,316 @@ fn the_listing_gate_refuses_each_unsafe_entry_shape() {
             .unwrap_err()
             .contains("more than 64 files")
     );
+}
+
+// --- escapes, stderr, process groups, version, caps ---
+
+/// Every dangerous character a repository path or git's stderr can carry.
+const HOSTILE: &str = "\u{1b}]0;PWNED\u{7}\u{1b}[2J";
+
+fn assert_inert(text: &str) {
+    for c in text.chars() {
+        assert!(
+            !super::url::is_unsafe_char(c),
+            "{c:?} reached the message: {text:?}"
+        );
+    }
+}
+
+#[test]
+fn hostile_paths_never_reach_a_message_raw() {
+    let oid = "0123456789abcdef0123456789abcdef01234567";
+    let line = |mode: &str, kind: &str, path: &str| -> Vec<u8> {
+        let mut out = format!("{mode} {kind} {oid}       1\t{path}").into_bytes();
+        out.push(0);
+        out
+    };
+    let names = [
+        format!("{HOSTILE}.png"),
+        "line1\nline2.png".to_owned(),
+        "cr\rname.png".to_owned(),
+        "rtl\u{202e}gnp.exe".to_owned(),
+        "iso\u{2066}x.png".to_owned(),
+        "zw\u{200b}x.png".to_owned(),
+        "bom\u{feff}x.png".to_owned(),
+        "tag\u{e0041}x.png".to_owned(),
+        "del\u{7f}x.png".to_owned(),
+        "c1\u{85}x.png".to_owned(),
+    ];
+    for name in &names {
+        for (mode, kind) in [
+            ("120000", "blob"),
+            ("160000", "commit"),
+            ("100664", "blob"),
+            ("100644", "blob"),
+        ] {
+            let error = parse_listing(&line(mode, kind, name)).unwrap_err();
+            assert_inert(&error);
+            assert_eq!(error.lines().count(), 1, "{error:?}");
+        }
+    }
+    // The escape spelling is visible, so the reader sees what was there.
+    let error = parse_listing(&line("100644", "blob", "a\u{202e}b.png")).unwrap_err();
+    assert!(error.contains("\\u{202e}"), "{error}");
+}
+
+#[test]
+fn a_real_repository_symlink_with_an_escape_name_prints_inert() {
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let url = repo(root.path(), "esc", &[]);
+    let dir = root.path().join("repo");
+    std::os::unix::fs::symlink("/etc/passwd", dir.join(format!("{HOSTILE}.png"))).unwrap();
+    commit(&dir);
+    let (result, base) = install(&test_git(), &url, root.path(), true);
+    let error = result.unwrap_err();
+    assert_inert(&error);
+    assert!(error.contains("control character"), "{error}");
+    assert_clean(&base);
+}
+
+#[test]
+fn git_stderr_with_escapes_newlines_and_bidi_prints_inert() {
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let bin = fake_git(
+        root.path(),
+        r"printf 'remote: \033]0;PWNED\007\033[2J\342\200\256evil\342\201\246x\n' >&2; exit 128",
+    );
+    let git = Git::for_test(bin, &["file"], 1 << 20, Duration::from_secs(30));
+    let (result, _) = install(&git, "file:///x", root.path(), false);
+    let error = result.unwrap_err();
+    assert_inert(&error);
+    assert!(error.contains("PWNED") && error.contains("evil"), "{error}");
+    assert_eq!(error.lines().count(), 1, "{error:?}");
+}
+
+#[test]
+fn the_ssh_host_key_line_survives_gits_three_line_tail() {
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let bin = fake_git(
+        root.path(),
+        r"printf 'Host key verification failed.\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.\n' >&2; exit 128",
+    );
+    let git = Git::for_test(bin, &["file"], 1 << 20, Duration::from_secs(30));
+    let (result, _) = install(&git, "file:///x", root.path(), false);
+    let error = result.unwrap_err();
+    assert!(error.contains("Host key verification failed."), "{error}");
+    assert!(error.contains("and the repository exists."), "{error}");
+}
+
+#[test]
+fn a_long_stderr_keeps_its_first_and_last_lines_and_stays_bounded() {
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let bin = fake_git(
+        root.path(),
+        r#"echo 'Permission denied (publickey).' >&2; i=0; while [ $i -lt 400 ]; do echo "noise line $i" >&2; i=$((i+1)); done; echo 'fatal: the end' >&2; exit 128"#,
+    );
+    let git = Git::for_test(bin, &["file"], 1 << 20, Duration::from_secs(30));
+    let (result, _) = install(&git, "file:///x", root.path(), false);
+    let error = result.unwrap_err();
+    assert!(error.contains("Permission denied (publickey)."), "{error}");
+    assert!(error.contains("fatal: the end"), "{error}");
+    assert!(error.len() < 1500, "{} bytes", error.len());
+}
+
+/// Whether process `pid` is gone (or only a zombie awaiting a reaper).
+fn process_gone(pid: u32) -> bool {
+    let out = Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .expect("ps runs");
+    let stat = String::from_utf8_lossy(&out.stdout);
+    let stat = stat.trim();
+    stat.is_empty() || stat.starts_with('Z')
+}
+
+fn wait_gone(pid: u32) -> bool {
+    (0..100).any(|_| {
+        if process_gone(pid) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        false
+    })
+}
+
+fn read_pid(path: &Path) -> u32 {
+    std::fs::read_to_string(path)
+        .expect("the stand-in wrote its pid")
+        .trim()
+        .parse()
+        .expect("a pid")
+}
+
+#[test]
+fn a_deadline_kills_the_grandchildren_too() {
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let pidfile = root.path().join("grandchild.pid");
+    let bin = fake_git(
+        root.path(),
+        &format!("sleep 300 & echo $! > '{}'; wait", pidfile.display()),
+    );
+    let git = Git::for_test(bin, &["file"], 1 << 20, Duration::from_millis(400));
+    let (result, base) = install(&git, "file:///x", root.path(), false);
+    assert!(result.unwrap_err().contains("did not finish"));
+    assert_clean(&base);
+    let pid = read_pid(&pidfile);
+    assert!(wait_gone(pid), "grandchild {pid} outlived the deadline");
+}
+
+#[test]
+fn the_size_cap_kills_the_grandchildren_too() {
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let pidfile = root.path().join("grandchild.pid");
+    let bin = fake_git(
+        root.path(),
+        &format!(
+            r#"sleep 300 & echo $! > '{}'; head -c 3000000 /dev/zero > "$PWD/big"; wait"#,
+            pidfile.display()
+        ),
+    );
+    let git = Git::for_test(bin, &["file"], 1 << 20, Duration::from_secs(60));
+    let (result, _) = install(&git, "file:///x", root.path(), false);
+    assert!(result.unwrap_err().contains("is larger than"));
+    let pid = read_pid(&pidfile);
+    assert!(wait_gone(pid), "grandchild {pid} outlived the size cap");
+}
+
+#[test]
+fn a_helper_that_outlives_git_is_killed_with_its_group() {
+    // git exits at once, leaving a helper behind in its group.
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let pidfile = root.path().join("helper.pid");
+    let bin = fake_git(
+        root.path(),
+        &format!(
+            "sleep 300 >/dev/null 2>&1 & echo $! > '{}'; exit 128",
+            pidfile.display()
+        ),
+    );
+    let git = Git::for_test(bin, &["file"], 1 << 20, Duration::from_secs(30));
+    let (result, _) = install(&git, "file:///x", root.path(), false);
+    assert!(result.is_err());
+    let pid = read_pid(&pidfile);
+    assert!(wait_gone(pid), "helper {pid} outlived git");
+}
+
+#[test]
+fn the_watchdog_stops_git_and_removes_the_directory_when_scoot_dies() {
+    use std::os::unix::process::{CommandExt as _, ExitStatusExt as _};
+    let base = tempfile::tempdir().expect("a base");
+    let mut scratch = super::Scratch::new(base.path()).expect("a scratch");
+    let dir = scratch.path().to_owned();
+    std::fs::write(dir.join("partial"), b"half a clone").unwrap();
+    let mut git = Command::new("sleep")
+        .arg("300")
+        .process_group(0)
+        .spawn()
+        .expect("a stand-in git");
+    scratch.register_group(git.id());
+    // What scoot being killed does: the pipe to the watchdog closes with
+    // nothing else cleaned up.
+    let mut watchdog = scratch.simulate_death().expect("a watchdog ran");
+    watchdog.wait().expect("the watchdog finishes");
+    let status = git.wait().expect("git is reaped");
+    assert_eq!(status.signal(), Some(9), "git was not killed: {status:?}");
+    assert!(!dir.exists(), "the watchdog left {}", dir.display());
+}
+
+#[test]
+fn a_finished_git_is_not_signalled_by_the_watchdog() {
+    use std::os::unix::process::CommandExt as _;
+    let base = tempfile::tempdir().expect("a base");
+    let mut scratch = super::Scratch::new(base.path()).expect("a scratch");
+    // A bystander in its own group stands for a reused group id.
+    let mut bystander = Command::new("sleep")
+        .arg("300")
+        .process_group(0)
+        .spawn()
+        .expect("a bystander");
+    scratch.register_group(bystander.id());
+    scratch.register_group(0);
+    let mut watchdog = scratch.simulate_death().expect("a watchdog ran");
+    watchdog.wait().expect("the watchdog finishes");
+    assert!(
+        bystander.try_wait().unwrap().is_none(),
+        "the bystander died"
+    );
+    bystander.kill().unwrap();
+    bystander.wait().unwrap();
+}
+
+#[test]
+fn git_versions_parse_and_old_or_unreadable_ones_refuse() {
+    for (said, want) in [
+        ("git version 2.45.0\n", Some((2, 45))),
+        ("git version 2.39.2 (Apple Git-143)\n", Some((2, 39))),
+        ("git version 2.43.0.windows.1\n", Some((2, 43))),
+        ("git version 2.32.0", Some((2, 32))),
+        ("git version 2.9.5", Some((2, 9))),
+        ("git version 10.0.1", Some((10, 0))),
+        ("git version 2.56.0.rc0.gabcdef", Some((2, 56))),
+        ("git version", None),
+        ("git version x.y", None),
+        ("git version 2", None),
+        ("2.45.0", None),
+        ("", None),
+        ("fake git 2.45.0", None),
+    ] {
+        assert_eq!(parse_git_version(said), want, "{said:?}");
+    }
+    let root = tempfile::tempdir().expect("a scratch tree");
+    for (said, needle) in [
+        ("git version 2.31.1", "too old"),
+        ("git version 1.8.3", "too old"),
+        ("garbage", "cannot tell which git"),
+    ] {
+        let bin = root.path().join("old-git");
+        std::fs::write(&bin, format!("#!/bin/sh\necho '{said}'\n")).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let git = Git::for_test(bin, &["file"], 1 << 20, Duration::from_secs(5));
+        let (result, base) = install(&git, "file:///x", root.path(), false);
+        let error = result.unwrap_err();
+        assert!(error.contains(needle), "{said}: {error}");
+        assert_clean(&base);
+    }
+}
+
+#[test]
+fn a_git_that_finishes_over_the_cap_between_two_polls_is_still_refused() {
+    // The stand-in writes a sparse 3 MB file and exits; the poll is slow
+    // enough that the loop looks only before it starts and after it ends,
+    // so only the check after exit can see the file.
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let bin = fake_git(
+        root.path(),
+        r#"dd if=/dev/null of="$PWD/big" bs=1 seek=3000000 2>/dev/null; exit 0"#,
+    );
+    let git = Git::for_test(bin, &["file"], 1 << 20, Duration::from_secs(60))
+        .with_poll(Duration::from_millis(400));
+    // One run, not a whole install: later runs would trip the in-loop
+    // check on the leftover file and hide a missing post-exit check.
+    let mut scratch = super::Scratch::new(root.path()).expect("a scratch");
+    let error = git
+        .run(
+            &mut scratch,
+            &[OsString::from("clone")],
+            None,
+            Duration::from_secs(60),
+        )
+        .expect_err("a run that left 3 MB behind must refuse");
+    assert!(error.contains("is larger than 1048576 bytes"), "{error}");
+}
+
+#[test]
+fn only_a_missing_head_is_called_an_empty_repository() {
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let bin = fake_git(
+        root.path(),
+        r#"case "$*" in *ls-tree*) echo 'fatal: bad object store' >&2; exit 128;; esac; exit 0"#,
+    );
+    let git = Git::for_test(bin, &["file"], 1 << 20, Duration::from_secs(30));
+    let (result, _) = install(&git, "file:///x", root.path(), false);
+    let error = result.unwrap_err();
+    assert!(error.contains("bad object store"), "{error}");
+    assert!(!error.contains("empty repository"), "{error}");
 }

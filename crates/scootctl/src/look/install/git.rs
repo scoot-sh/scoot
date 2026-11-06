@@ -37,22 +37,31 @@
 //! - **Bounded.** The clone gets [`CLONE_SECS`] and the temp directory is
 //!   stopped at [`SCRATCH_CAP_BYTES`], measured every 10 ms while git runs
 //!   and once more when it exits, so an oversized clone fails rather than
-//!   fills the disk, by at most one interval's writes (git itself is killed; the transport helpers it
-//!   started end when their pipes to it close). Each blob read is bounded
-//!   too, and git's own words reach the user only escaped and truncated.
-//!
-//! One gap: git runs in the terminal's foreground process group (it is
-//! deliberately not given its own, so the terminal's Ctrl-C reaches it),
-//! so Ctrl-C stops it with scoot, but no destructor runs on a signal and the temp
-//! directory (at most the cap, mode 0700, `scoot-look-clone-*` in
-//! `$TMPDIR`) stays until the user deletes it. Exit paths scoot controls
-//! (errors, timeouts, the size cap, success) always remove it.
+//!   fills the disk, by at most one interval's writes. Each blob read is
+//!   bounded too, and git's own words reach the user only escaped and
+//!   truncated.
+//! - **No orphans.** Git leads its own process group; a deadline, the size
+//!   cap or an error kills the whole group (git, `ssh`, the remote
+//!   helper). Because the terminal's Ctrl-C reaches only scoot's group,
+//!   a small `sh` watchdog in a third group holds the other end of a pipe
+//!   scoot keeps open: when scoot ends by any means, a signal included, the
+//!   pipe closes and the watchdog kills the registered git group and
+//!   removes the temp directory. Without `sh` there is no watchdog, and a
+//!   killed scoot leaves the 0700 `scoot-look-clone-*` directory.
+//! - **ssh.** The user's ssh configuration applies, except that scoot
+//!   forces `BatchMode`, a connect timeout, keepalives, and no agent, X11
+//!   or port forwarding, so a `Host * ForwardAgent yes` cannot hand the
+//!   agent to whatever host a pasted URL names.
+//! - **Version.** `git --version` is checked once; older than 2.32 (which
+//!   added `GIT_CONFIG_GLOBAL`) refuses.
 
+mod scratch;
 mod url;
 pub use url::{Source, classify};
 
 use std::ffi::OsString;
 use std::fs::File;
+use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -65,7 +74,9 @@ use super::{
     gate_file, kind_cap, not_a_look_file, permitted_rel,
 };
 use crate::look::apply::{self, Checks};
+use scratch::{Scratch, dir_exceeds, stderr_summary};
 pub use url::GitUrl;
+use url::printable;
 
 /// The protocols git may use in production: `GIT_ALLOW_PROTOCOL` and
 /// `protocol.<name>.allow`, with everything else `never`.
@@ -94,6 +105,7 @@ pub struct Git {
     protocols: &'static [&'static str],
     scratch_cap: u64,
     clone_timeout: Duration,
+    poll: Duration,
 }
 
 impl Git {
@@ -110,6 +122,7 @@ impl Git {
             protocols: PROD_PROTOCOLS,
             scratch_cap: SCRATCH_CAP_BYTES,
             clone_timeout: Duration::from_secs(CLONE_SECS),
+            poll: POLL,
         })
     }
 
@@ -128,7 +141,15 @@ impl Git {
             protocols,
             scratch_cap,
             clone_timeout,
+            poll: POLL,
         }
+    }
+
+    /// A slower poll, so a test can finish a run between two looks.
+    #[cfg(test)]
+    pub fn with_poll(mut self, poll: Duration) -> Self {
+        self.poll = poll;
+        self
     }
 
     /// The git configuration passed with `-c` on every run.
@@ -231,7 +252,8 @@ impl Git {
             (
                 "GIT_SSH_COMMAND",
                 "ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 \
-                 -o ServerAliveCountMax=2"
+                 -o ServerAliveCountMax=2 -o ClearAllForwardings=yes -o ForwardAgent=no \
+                 -o ForwardX11=no"
                     .to_owned(),
             ),
         ];
@@ -247,19 +269,20 @@ impl Git {
     /// branch's tip, every one through the gate. Removes its temp
     /// directory (under `scratch_base`) before returning, on every path.
     fn fetch_files(&self, url: &str, scratch_base: &Path) -> Result<Vec<LookFile>, String> {
-        let scratch = Scratch::new(scratch_base)?;
+        self.check_version()?;
+        let mut scratch = Scratch::new(scratch_base)?;
         let repo = scratch.path().join("repo");
         self.run(
-            &scratch,
+            &mut scratch,
             &self.clone_args(url, &repo),
             None,
             self.clone_timeout,
         )?;
-        self.collect(&scratch, &repo)
+        self.collect(&mut scratch, &repo)
     }
 
     /// Lists the tip's tree, gates the listing, then reads each blob.
-    fn collect(&self, scratch: &Scratch, repo: &Path) -> Result<Vec<LookFile>, String> {
+    fn collect(&self, scratch: &mut Scratch, repo: &Path) -> Result<Vec<LookFile>, String> {
         let listing_path = scratch.path().join("listing");
         let mut args = self.repo_args(repo);
         args.extend(["ls-tree", "-r", "-z", "-l", "--full-tree", "HEAD"].map(OsString::from));
@@ -269,7 +292,13 @@ impl Git {
             Some(&listing_path),
             Duration::from_secs(LOCAL_SECS),
         )
-        .map_err(|error| format!("{error} (an empty repository has no look to install)"))?;
+        .map_err(|error| {
+            if error.contains("Not a valid object name") {
+                format!("{error} (an empty repository has no look to install)")
+            } else {
+                error
+            }
+        })?;
         let size = std::fs::symlink_metadata(&listing_path)
             .map_err(|error| format!("cannot read the tree listing: {error}"))?
             .len();
@@ -315,6 +344,40 @@ impl Git {
         Ok(files)
     }
 
+    /// Refuses a git older than [`MIN_GIT`] (or one that will not say), since
+    /// the config isolation below needs `GIT_CONFIG_GLOBAL`.
+    fn check_version(&self) -> Result<(), String> {
+        let out = Command::new(&self.bin)
+            .env_clear()
+            .envs(self.env(|name| std::env::var_os(name)))
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    "cannot install from a git URL: no `git` on PATH".to_owned()
+                } else {
+                    format!("cannot run `{}`: {error}", self.bin.display())
+                }
+            })?;
+        let said = String::from_utf8_lossy(&out.stdout);
+        match parse_git_version(&said) {
+            Some(version) if version >= MIN_GIT => Ok(()),
+            Some((major, minor)) => Err(format!(
+                "git {major}.{minor} is too old: `scoot look install GIT-URL` needs git {}.{} or \
+                 later (or clone the repository yourself and install the directory)",
+                MIN_GIT.0, MIN_GIT.1
+            )),
+            None => Err(format!(
+                "cannot tell which git this is (`git --version` said `{}`): needs git {}.{} or later",
+                printable(said.trim(), 60),
+                MIN_GIT.0,
+                MIN_GIT.1
+            )),
+        }
+    }
+
     fn over_cap(&self) -> String {
         format!(
             "refused: the repository is larger than {} bytes and was stopped",
@@ -329,7 +392,7 @@ impl Git {
     /// scratch directory passes its size cap.
     fn run(
         &self,
-        scratch: &Scratch,
+        scratch: &mut Scratch,
         args: &[OsString],
         stdout_to: Option<&Path>,
         timeout: Duration,
@@ -350,6 +413,10 @@ impl Git {
             .stdin(Stdio::null())
             .stdout(stdout)
             .stderr(Stdio::from(open(&stderr_path)?))
+            // Git leads its own process group, so one signal reaches the
+            // ssh or remote helper it starts too; the scratch watchdog
+            // stops that group if scoot is killed first.
+            .process_group(0)
             .spawn()
             .map_err(|error| {
                 if error.kind() == std::io::ErrorKind::NotFound {
@@ -358,32 +425,35 @@ impl Git {
                     format!("cannot run `{}`: {error}", self.bin.display())
                 }
             })?;
+        scratch.register_group(child.id());
         let deadline = Instant::now() + timeout;
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
                 Ok(None) => {}
                 Err(error) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    stop(&mut child, scratch);
                     return Err(format!("cannot wait on git: {error}"));
                 }
             }
             if Instant::now() >= deadline {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop(&mut child, scratch);
                 return Err(format!(
                     "git did not finish in {}s and was stopped",
                     timeout.as_secs()
                 ));
             }
             if dir_exceeds(scratch.path(), self.scratch_cap) {
-                let _ = child.kill();
-                let _ = child.wait();
+                stop(&mut child, scratch);
                 return Err(self.over_cap());
             }
-            std::thread::sleep(POLL);
+            std::thread::sleep(self.poll);
         };
+        // Git is gone; its group id may be reused, so the watchdog must
+        // not signal it. A helper that outlived git (a detached ssh) is
+        // killed here with the group.
+        kill_group(child.id());
+        scratch.register_group(0);
         // A run that finished inside one poll interval was never measured
         // by the loop: the cap holds for it too.
         if dir_exceeds(scratch.path(), self.scratch_cap) {
@@ -392,7 +462,7 @@ impl Git {
         if status.success() {
             return Ok(());
         }
-        let said = stderr_tail(&stderr_path);
+        let said = stderr_summary(&stderr_path);
         Err(format!(
             "git failed ({status}){}",
             if said.is_empty() {
@@ -402,6 +472,39 @@ impl Git {
             }
         ))
     }
+}
+
+/// Kills the whole process group of `child` (git leads it), then reaps
+/// git, and tells the watchdog the group is gone.
+fn stop(child: &mut std::process::Child, scratch: &mut Scratch) {
+    kill_group(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+    scratch.register_group(0);
+}
+
+/// SIGKILLs process group `group`. Failures are ignored on purpose: the
+/// group may already be gone.
+fn kill_group(group: u32) {
+    if let Some(pgid) = i32::try_from(group)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        let _ = rustix::process::kill_process_group(pgid, rustix::process::Signal::KILL);
+    }
+}
+
+/// The oldest git whose `GIT_CONFIG_GLOBAL` isolation scoot relies on.
+const MIN_GIT: (u32, u32) = (2, 32);
+
+/// `(major, minor)` from `git --version` output: "git version 2.39.2",
+/// "git version 2.39.2 (Apple Git-143)", "git version 2.43.0.windows.1".
+fn parse_git_version(output: &str) -> Option<(u32, u32)> {
+    let version = output.trim().strip_prefix("git version ")?;
+    let mut parts = version.split(|c: char| !c.is_ascii_digit());
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
 }
 
 /// Installs the look at `url`'s default branch into `dest_parent`: clone,
@@ -444,6 +547,18 @@ fn parse_listing(listing: &[u8]) -> Result<Vec<Entry>, String> {
             .ok_or_else(|| "git printed an unreadable tree listing".to_owned())?;
         let path = std::str::from_utf8(&record[tab + 1..])
             .map_err(|_| "refused: a path in the repository is not valid UTF-8".to_owned())?;
+        if let Some(bad) = path.chars().find(|c| url::is_unsafe_char(*c)) {
+            return Err(format!(
+                "refused: a path in the repository holds {}: {}",
+                if bad.is_control() {
+                    "a control character"
+                } else {
+                    "a bidi or format character"
+                },
+                printable(path, 80)
+            ));
+        }
+        let shown = printable(path, 120);
         let meta = record_text(&record[..tab]);
         let mut fields = meta.split_whitespace();
         let (Some(mode), Some(kind), Some(oid), Some(size)) =
@@ -455,25 +570,25 @@ fn parse_listing(listing: &[u8]) -> Result<Vec<Entry>, String> {
             ("100644" | "100755", "blob") => {}
             ("120000", _) => {
                 return Err(format!(
-                    "refused: {path} is a symlink: installed looks carry regular files only"
+                    "refused: {shown} is a symlink: installed looks carry regular files only"
                 ));
             }
             ("160000", _) | (_, "commit") => {
                 return Err(format!(
-                    "refused: {path} is a submodule: installed looks carry regular files only"
+                    "refused: {shown} is a submodule: installed looks carry regular files only"
                 ));
             }
             _ => {
                 return Err(format!(
-                    "refused: {path} is not a regular file: installed looks carry regular files only"
+                    "refused: {shown} is not a regular file: installed looks carry regular files only"
                 ));
             }
         }
         if let Some(error) = check_relative_path("file", path) {
-            return Err(format!("refused: {path}: {error}"));
+            return Err(format!("refused: {shown}: {error}"));
         }
         if !permitted_rel(path) {
-            return Err(not_a_look_file(path));
+            return Err(not_a_look_file(&shown));
         }
         let size: u64 = size
             .parse()
@@ -488,118 +603,11 @@ fn parse_listing(listing: &[u8]) -> Result<Vec<Entry>, String> {
         });
         if entries.len() > MAX_INSTALL_FILES {
             return Err(format!(
-                "refused: more than {MAX_INSTALL_FILES} files: {path} does not fit"
+                "refused: more than {MAX_INSTALL_FILES} files: {shown} does not fit"
             ));
         }
     }
     Ok(entries)
-}
-
-/// A private scratch directory, removed when dropped.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    /// Creates `scoot-look-clone-<pid>-<nanos>-<n>` under `base` with mode
-    /// 0700. `mkdir` fails on anything already there (a planted link
-    /// included), and the name is retried, so an existing path is never
-    /// reused.
-    fn new(base: &Path) -> Result<Self, String> {
-        use std::os::unix::fs::DirBuilderExt as _;
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.subsec_nanos());
-        for attempt in 0..16u32 {
-            let path = base.join(format!(
-                "scoot-look-clone-{}-{nanos}-{attempt}",
-                std::process::id()
-            ));
-            match std::fs::DirBuilder::new().mode(0o700).create(&path) {
-                Ok(()) => return Ok(Self(path)),
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(error) => {
-                    return Err(format!(
-                        "cannot make a private directory under {}: {error}",
-                        base.display()
-                    ));
-                }
-            }
-        }
-        Err(format!(
-            "cannot make a private directory under {}: every name taken",
-            base.display()
-        ))
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-/// Whether the tree under `root` holds more than `cap` bytes (or more than
-/// [`SCRATCH_MAX_ENTRIES`] entries). Never follows a link.
-fn dir_exceeds(root: &Path, cap: u64) -> bool {
-    let mut total: u64 = 0;
-    let mut entries = 0usize;
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(read) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in read.flatten() {
-            entries += 1;
-            if entries > SCRATCH_MAX_ENTRIES {
-                return true;
-            }
-            let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
-                continue;
-            };
-            if meta.is_dir() {
-                stack.push(entry.path());
-            } else {
-                total = total.saturating_add(meta.len());
-                if total > cap {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-/// The last lines git said, for an error: control characters become `?`,
-/// each line and the whole are truncated. Remote servers write some of
-/// these lines, so none reaches the terminal raw.
-fn stderr_tail(path: &Path) -> String {
-    use std::io::{Read as _, Seek as _, SeekFrom};
-    let Ok(mut file) = File::open(path) else {
-        return String::new();
-    };
-    let len = file.metadata().map_or(0, |m| m.len());
-    let start = len.saturating_sub(4096);
-    let mut raw = Vec::new();
-    if file.seek(SeekFrom::Start(start)).is_err() || file.take(4096).read_to_end(&mut raw).is_err()
-    {
-        return String::new();
-    }
-    let text = String::from_utf8_lossy(&raw);
-    let lines: Vec<String> = text
-        .lines()
-        .map(|line| {
-            line.chars()
-                .map(|c| if c.is_control() { '?' } else { c })
-                .take(200)
-                .collect::<String>()
-        })
-        .filter(|line| !line.trim().is_empty())
-        .collect();
-    let keep = lines.len().saturating_sub(3);
-    lines[keep..].join("; ")
 }
 
 #[cfg(test)]

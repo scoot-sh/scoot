@@ -190,20 +190,44 @@ fn check_url(word: &str, scheme: &str, rest: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// `text` cut to `max` characters with every non-printable character
-/// escaped, safe to echo into a terminal.
-fn printable(text: &str, max: usize) -> String {
-    let mut out: String = text
-        .chars()
-        .take(max)
-        .flat_map(|c| {
-            if c.is_control() {
-                c.escape_default().collect::<Vec<_>>()
-            } else {
-                vec![c]
-            }
-        })
-        .collect();
+/// Whether `c` can steer or deceive a terminal or a reader: a control
+/// character, or a Unicode format character (bidi overrides and isolates,
+/// zero-width and joiner characters, the BOM, soft hyphen, interlinear
+/// annotation and tag characters).
+pub(super) fn is_unsafe_char(c: char) -> bool {
+    c.is_control()
+        || matches!(
+            c,
+            '\u{ad}'
+                | '\u{61c}'
+                | '\u{180e}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{202a}'..='\u{202e}'
+                | '\u{2060}'..='\u{206f}'
+                | '\u{feff}'
+                | '\u{fff9}'..='\u{fffb}'
+                | '\u{e0000}'..='\u{e007f}'
+        )
+}
+
+/// `c` itself, or `?` when [`is_unsafe_char`].
+pub(super) fn sanitize(c: char) -> char {
+    if is_unsafe_char(c) { '?' } else { c }
+}
+
+/// `text` cut to `max` characters with every unsafe character written as
+/// its Rust escape (`\n`, `\u{202e}`), safe to echo into a terminal and
+/// never more than one line.
+pub(super) fn printable(text: &str, max: usize) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    for c in text.chars().take(max) {
+        if is_unsafe_char(c) {
+            let _ = write!(out, "{}", c.escape_default());
+        } else {
+            out.push(c);
+        }
+    }
     if text.chars().count() > max {
         out.push_str("...");
     }
