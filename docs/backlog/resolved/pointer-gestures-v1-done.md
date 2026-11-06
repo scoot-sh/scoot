@@ -50,7 +50,7 @@ arm.
 
 Touch-screen (multi-touch) gestures, and `scoot msg` injection of gestures.
 
-## Resolution (2026-11-05)
+## Resolution (2026-11-05, PR #946)
 
 Items 1 to 3 landed; item 4 and the real-pad check moved to
 [`pointer-gestures-followups`](../protocols/pointer-gestures-followups.md).
