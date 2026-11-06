@@ -63,6 +63,7 @@ use super::workspaces::Workspaces;
 use crate::choices::Choices;
 use crate::control::{ConnId, MAX_CONNECTIONS};
 use crate::jobs::MAX_TRIALS;
+use crate::lockscreen::Lockscreen;
 use crate::outputs::Outputs;
 use crate::paint::Path;
 use crate::state::Saved;
@@ -178,6 +179,9 @@ pub struct State {
     /// manager binding that says so. Unbound (and empty) while no
     /// workspace wallpaper is mapped: zero cost (`daemon::workspaces`).
     pub workspaces: Workspaces,
+    /// The pictures the lock screen shows, one per output
+    /// (`daemon::lockscreen`, `crate::lockscreen`).
+    pub lockscreen: Lockscreen,
 }
 
 pub struct Wayland {
@@ -256,6 +260,7 @@ impl Wayland {
             transitions: Transitions::default(),
             rotation: None,
             workspaces: Workspaces::default(),
+            lockscreen: Lockscreen::disabled(),
         };
         let registry = list.registry().clone();
         list.contents().with_list(|advertised| {

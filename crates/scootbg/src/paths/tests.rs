@@ -49,6 +49,25 @@ fn unsafe_bytes_are_replaced() {
     assert_eq!(paths.socket, PathBuf::from("/run/u/scootbg-...sock"));
 }
 
+/// The locker's shell derives the same name from `$WAYLAND_DISPLAY` to find
+/// the lock screen directory (`nix/modules/lock-images.sh`, pinned in
+/// `nix/tests.nix` with this same input and output): change one, change
+/// both.
+#[test]
+fn the_lockers_display_name_is_this_one() {
+    assert_eq!(name("way land:\u{e9}").unwrap(), "way_land___");
+    assert_eq!(name("/run/user/1/wayland-test").unwrap(), "wayland-test");
+    let paths = resolve(
+        Some(OsStr::new("wayland-1")),
+        Some(OsStr::new("/run/user/1000")),
+    )
+    .unwrap();
+    assert_eq!(
+        paths.lockscreen,
+        PathBuf::from("/run/user/1000/scootbg-wayland-1.lockscreen")
+    );
+}
+
 #[test]
 fn paths_sit_in_the_runtime_dir() {
     let paths = resolve(

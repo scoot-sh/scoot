@@ -22,6 +22,8 @@ mod framing;
 mod help;
 mod image;
 mod jobs;
+mod lockblur;
+mod lockscreen;
 mod outputs;
 mod paint;
 mod paths;

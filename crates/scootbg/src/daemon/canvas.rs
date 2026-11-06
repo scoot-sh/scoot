@@ -137,6 +137,11 @@ pub struct Memory {
     pool: WlShmPool,
     dims: (u32, u32),
     content: Content,
+    /// The lock screen's blurred picture of these pixels, a PNG
+    /// (`crate::lockblur`), when the worker made one. Tens of kilobytes,
+    /// kept as long as the pixels are so a workspace switch re-points the
+    /// lock screen without computing anything.
+    lock: Option<Box<[u8]>>,
 }
 
 impl Drop for Memory {
@@ -156,6 +161,11 @@ impl Memory {
     pub(crate) fn bytes_mut(&mut self) -> &mut [u8] {
         self.shm.pixels_mut()
     }
+
+    /// The lock screen's picture of these pixels, if there is one.
+    pub(crate) fn lock_png(&self) -> Option<&[u8]> {
+        self.lock.as_deref()
+    }
 }
 
 /// Pixels to show, shared by every output of one size showing one image
@@ -168,8 +178,19 @@ pub type Pixels = Rc<Shared<Memory>>;
 pub(crate) fn pixels(
     globals: &Globals,
     qh: &QueueHandle<State>,
+    shm: ShmBuffer,
+    content: Content,
+) -> Result<Pixels, ShmError> {
+    pixels_with_lock(globals, qh, shm, content, None)
+}
+
+/// [`pixels`], carrying the lock screen's picture of them.
+pub(crate) fn pixels_with_lock(
+    globals: &Globals,
+    qh: &QueueHandle<State>,
     mut shm: ShmBuffer,
     content: Content,
+    lock: Option<Box<[u8]>>,
 ) -> Result<Pixels, ShmError> {
     let geometry = shm.geometry();
     // Positive `i32`s (`Geometry` validated them): lossless.
@@ -190,6 +211,7 @@ pub(crate) fn pixels(
         pool,
         dims,
         content,
+        lock,
     }))
 }
 

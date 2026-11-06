@@ -55,6 +55,13 @@ use crate::wallpaper::Wallpaper;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutputId(u64);
 
+impl OutputId {
+    /// The number, for a file name: unique for the daemon's life.
+    pub fn number(self) -> u64 {
+        self.0
+    }
+}
+
 /// A width and height, in whatever unit the context says. Serialized as
 /// `{"width":W,"height":H}` in `query` replies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

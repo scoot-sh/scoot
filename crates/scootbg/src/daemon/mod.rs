@@ -42,6 +42,7 @@ mod config;
 mod crash;
 mod images;
 mod listen;
+mod lockscreen;
 mod respond;
 mod restore;
 mod rotation;
@@ -159,6 +160,7 @@ fn serve(options: DaemonOptions, start: Option<&Start>) -> Result<(), Error> {
     let images = Images::new().map_err(Error::Worker)?;
     let (saved, record) = restore::load(options.profile);
     let (mut wayland, missing) = Wayland::connect(images, saved).map_err(Error::Wayland)?;
+    wayland.state.lockscreen = crate::lockscreen::Lockscreen::open(&paths.lockscreen);
     match start {
         None => restore::apply(&mut wayland.state, record, options.restore),
         Some(start) => config::start(&mut wayland.state, record, start),
@@ -186,6 +188,8 @@ fn serve(options: DaemonOptions, start: Option<&Start>) -> Result<(), Error> {
         revents: Vec::new(),
     };
     let result = daemon.run(&claim);
+    // The pictures are of a wallpaper that is going away.
+    daemon.wayland.state.lockscreen.close();
     // Before the socket goes: a `kill` client, answered once it does, then
     // finds the last change on disk.
     let state = &daemon.wayland.state;
@@ -260,6 +264,9 @@ impl Daemon {
                 // before the loop sleeps.
                 continue;
             }
+            // The lock screen's pictures, brought in line with what the
+            // outputs now show: comparisons only unless something changed.
+            lockscreen::sync(&mut self.wayland.state);
             // Transitions whose frame is due: the timer woke the loop for
             // them, or a turn passed. Cheap when idle (no outputs
             // transition: nothing renders).

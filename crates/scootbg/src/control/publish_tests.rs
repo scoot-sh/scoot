@@ -63,6 +63,7 @@ impl Scratch {
             display: "test".to_owned(),
             socket: self.path.join("scootbg-test.sock"),
             lock: self.path.join("scootbg-test.lock"),
+            lockscreen: self.path.join("scootbg-test.lockscreen"),
         }
     }
 
