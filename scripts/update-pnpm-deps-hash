@@ -1,0 +1,79 @@
+#!/bin/sh
+# Recompute the `pnpmDeps` hash pinned in nix/docs-site.nix.
+#
+#     scripts/update-pnpm-deps-hash
+#
+# Run it after site/pnpm-lock.yaml changes (a dependabot site PR, a manual
+# `pnpm update`) and commit the one-line change to nix/docs-site.nix. CI's
+# docs-site job fails with "hash mismatch" until the pin matches the lock.
+#
+# It blanks the pin, builds only the vendored dependencies
+# (`.#docs-site.pnpmDeps`, not the whole site), reads the `got: sha256-...`
+# value Nix prints, and writes it back. The pin is a fixed-output hash at
+# every moment this script is not running; an interrupt, a build failure or
+# a missing `got:` line restores the original file. Already correct: the
+# file is left byte-for-byte as it was.
+#
+# The hash is Linux-specific (a Mac computes a different value), so this
+# refuses to run elsewhere. On a Mac, run it on the dev VM or any Linux box.
+set -eu
+
+die() {
+    printf 'update-pnpm-deps-hash: %s\n' "$*" >&2
+    exit 1
+}
+
+[ "$(uname -s)" = Linux ] ||
+    die "the canonical pnpmDeps hash must be computed on Linux ($(uname -s) computes a different one); run this on the dev VM or another Linux box"
+command -v nix >/dev/null 2>&1 || die "nix not found on PATH"
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+pin="$root/nix/docs-site.nix"
+[ -f "$pin" ] || die "$pin not found"
+
+# The one `hash = "...";` line (the pnpmDeps pin). More or fewer than one
+# means the file's shape changed and this edit would be a guess.
+pattern='^[[:space:]]*hash = "[^"]*";$'
+[ "$(grep -c "$pattern" "$pin")" -eq 1 ] ||
+    die "expected exactly one 'hash = \"...\";' line in nix/docs-site.nix"
+
+orig=$(mktemp)
+log=$(mktemp)
+cp "$pin" "$orig"
+restore() { cp "$orig" "$pin"; }
+cleanup() { rm -f "$orig" "$log"; }
+trap 'cleanup' EXIT
+trap 'restore; cleanup; exit 130' INT TERM HUP
+
+old=$(sed -n 's/^[[:space:]]*hash = "\([^"]*\)";$/\1/p' "$pin")
+
+# Flake evaluation reads the tracked file from the working tree, so the blank
+# must be written in place. sed -i is not portable; rewrite through a temp.
+tmp=$(mktemp)
+sed 's/^\([[:space:]]*hash = \)"[^"]*";$/\1"";/' "$pin" >"$tmp"
+cat "$tmp" >"$pin"
+rm -f "$tmp"
+
+if (cd "$root" && nix build --no-link ".#docs-site.pnpmDeps") >"$log" 2>&1; then
+    restore
+    cat "$log" >&2
+    die "the build succeeded with a blank hash, which should be impossible; pin left as it was"
+fi
+
+new=$(sed -n 's/^[[:space:]]*got:[[:space:]]*\(sha256-[A-Za-z0-9+/]*=*\)[[:space:]]*$/\1/p' "$log" | head -n 1)
+if [ -z "$new" ]; then
+    restore
+    cat "$log" >&2
+    die "no 'got: sha256-...' line in the build output (offline? lockfile unparsable?); pin left as it was"
+fi
+
+tmp=$(mktemp)
+sed "s|^\\([[:space:]]*hash = \\)\"[^\"]*\";\$|\\1\"$new\";|" "$orig" >"$tmp"
+cat "$tmp" >"$pin"
+rm -f "$tmp"
+
+if [ "$new" = "$old" ]; then
+    printf 'pnpmDeps hash already correct: %s\n' "$new"
+else
+    printf 'pnpmDeps hash updated:\n  old %s\n  new %s\ncommit nix/docs-site.nix\n' "$old" "$new"
+fi

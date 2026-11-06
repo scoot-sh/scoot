@@ -21,8 +21,10 @@
 # `nix flake check` runs).
 # `$out` is the static `dist/` tree, ready for GitHub Pages.
 #
-# Reproducing the `pnpmDeps.hash` below: set it to `""`, run
-# `nix build .#docs-site`, and copy the `got: sha256-…` value back here.
+# Updating the `pnpmDeps.hash` below after `site/pnpm-lock.yaml` changes: run
+# `scripts/update-pnpm-deps-hash` on Linux (dev/pnpm-deps-hash.md). By hand:
+# set it to `""`, run `nix build .#docs-site.pnpmDeps`, copy the `got:
+# sha256-…` value back here.
 {
   lib,
   stdenv,
