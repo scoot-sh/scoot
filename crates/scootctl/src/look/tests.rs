@@ -641,6 +641,19 @@ fn target_add_takes_a_path_and_trust() {
 }
 
 #[test]
+fn install_takes_a_git_url_as_the_same_positional() {
+    assert_eq!(
+        command(&["install", "https://example.com/a/look.git", "--trust"]),
+        Ok(Command::Install {
+            path: PathBuf::from("https://example.com/a/look.git"),
+            trust: true,
+        })
+    );
+    // A leading `-` is still a flag error, URL-shaped or not.
+    assert!(command(&["install", "--upload-pack=x"]).is_err());
+}
+
+#[test]
 fn install_takes_a_path_and_trust() {
     assert_eq!(
         command(&["install", "./handed-over"]),
@@ -658,7 +671,7 @@ fn install_takes_a_path_and_trust() {
     );
     assert_eq!(
         command(&["install"]),
-        Err(Error::Missing("a look directory or tarball"))
+        Err(Error::Missing("a look directory, tarball or git URL"))
     );
     assert_eq!(
         command(&["install", "a", "b"]),

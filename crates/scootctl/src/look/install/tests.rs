@@ -26,7 +26,7 @@ use super::{
 
 /// A standalone-valid manifest: moonrise's palette (which clears the
 /// installed-origin contrast bars), every required token, nothing else.
-fn manifest(name: &str) -> String {
+pub(super) fn manifest(name: &str) -> String {
     format!(
         "\
 schema = 1
@@ -91,17 +91,17 @@ fn catalog(user: &Path, installed: &Path, shipped: &Path) -> Catalog {
 }
 
 /// An empty catalog (nothing installed under any name).
-fn empty_catalog() -> Catalog {
+pub(super) fn empty_catalog() -> Catalog {
     Catalog::default()
 }
 
 /// The eight PNG magic bytes: enough for the no-`scootbg` sniff.
-const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
+pub(super) const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
 
 /// A downloader and resolver in one scripted box: `addrs` answers every
 /// resolution in order (so a rebinding resolver answers differently the
 /// second time), `body` is what the download writes.
-struct ScriptedNet {
+pub(super) struct ScriptedNet {
     addrs: RefCell<Vec<Vec<IpAddr>>>,
     body: Vec<u8>,
     resolves: RefCell<usize>,
@@ -118,7 +118,7 @@ impl ScriptedNet {
         }
     }
 
-    fn failing() -> Self {
+    pub(super) fn failing() -> Self {
         Self {
             addrs: RefCell::new(vec![vec![]]),
             body: Vec::new(),

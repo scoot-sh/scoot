@@ -515,12 +515,13 @@ bar's own parser.
 
 ## Sharing
 
-Hand a look over as a tarball, or install one someone handed you. No
-step here needs Nix.
+Hand a look over as a tarball, or install one someone handed you, from a
+file or from a git repository. No step here needs Nix.
 
 ```sh
 scoot look export moonrise --out moonrise.tar   # a tarball of the source look
 scoot look install ./handed-over                # a directory or a tarball
+scoot look install https://example.org/me/my-look   # a git repository
 scoot look target add ./pack                    # review a pack of app targets
 scoot look save my-tweak                        # your own files as a user look
 ```
@@ -541,6 +542,114 @@ can be applied but never extended. Its `apps/` leaves drop unless
 `--trust` keeps them (printed first). A wallpaper given by URL is
 fetched, verified against its `sha256` and cached now — the install
 refuses if that fails — so a later swap makes no network request.
+
+### Install from git
+
+`install GIT-URL` clones a repository and installs the look at its root.
+The checks, the `--trust` rule and the result are the same as for a
+directory: the repository is someone else's data, and nothing installs
+without the review `--trust` prints.
+
+```sh
+scoot look install https://example.org/me/my-look
+scoot look install ssh://git@example.org/me/my-look.git --trust
+```
+
+Scoot decides from the text of the argument alone whether it is a URL or
+a path, and never looks at the filesystem to decide:
+
+- A word starting with `/`, `./` or `../` is a path, whatever it
+  contains. This is how to spell a local path that holds `://` or `:`.
+- Otherwise, a word containing `://` is a URL, always. Only `https://`
+  and `ssh://` (lowercase) install; `http://`, `git://`, `file://`,
+  `ftp://` and the rest refuse, and are never reinterpreted as paths.
+- Otherwise, a word whose first `:` comes before its first `/` is a
+  git remote shorthand (`host:path`, `git@host:path`, `ext::command`)
+  and refuses. Use `ssh://git@host/path`.
+- Anything else is a path.
+
+A URL is ASCII with no spaces or control characters, no query or
+fragment, a host name of letters, digits, dots and hyphens (not
+starting with `-` or `.`; no bracketed IPv6), an optional port, and a
+repository path. An `https://` URL takes no user name. An `ssh://` URL
+takes a bare user name (`git@`) and never a password. Scoot reads and
+stores no credentials. There is no way to name a branch or tag: the
+default branch's latest commit installs.
+
+How the repository is read:
+
+- `git` must be on `PATH`, version 2.32 or later (checked with
+  `git --version`; older refuses, since the config isolation below needs
+  `GIT_CONFIG_GLOBAL`). Without it the command stops with a message
+  saying so; clone the repository yourself and install the directory
+  instead.
+- The clone is `git clone --bare --depth 1 --single-branch --no-tags
+  --no-recurse-submodules` into a private temporary directory
+  (`scoot-look-clone-*` under `$TMPDIR`, mode 0700) that is removed when
+  the command ends. Nothing is checked out. The look is read from git's
+  object store, so no hook, smudge or `filter=` driver (Git LFS
+  included), `.gitattributes` conversion, symlink or submodule is ever
+  created or run, and `.git` is not part of the look. Scoot never runs
+  anything a look supplies.
+- The tree is checked before any file is read: a symlink, a submodule,
+  a path no look uses, more than 64 files or a file over its size cap
+  refuses the install, then the usual directory checks run.
+- git runs with an environment reduced to `PATH`, `HOME`, locale, proxy
+  and CA-certificate variables and `SSH_AUTH_SOCK`. The system and
+  global git config are off, so there is no `insteadOf` rewrite and no
+  credential helper. Only the `https` and `ssh` transports are allowed,
+  redirects are not followed, prompts are off, and ssh runs with
+  `BatchMode`, a connect timeout, keepalives, and agent, X11 and port
+  forwarding off, so a `Host * ForwardAgent yes` in your ssh config
+  cannot hand your agent to the host a pasted URL names. The rest of
+  your ssh config (keys, `Host` blocks, `ProxyJump`) applies. The clone is
+  stopped after 120 seconds or when the
+  temporary directory passes 256 MiB (checked every 10 ms and when git
+  exits).
+- git and everything it starts (`ssh`, the remote helper) are stopped
+  together at the deadline or the size cap. If scoot itself is killed,
+  Ctrl-C included, a small `sh` watchdog stops them and removes the
+  temporary directory a moment later. On a machine with no `sh` there is
+  no watchdog, and a killed scoot leaves the directory behind.
+
+The repository root is the look directory, so a stray file there refuses
+the install by name, exactly as it would in a directory. A `.gitignore`,
+`.gitattributes`, `.gitmodules` or `.github/` in the repository counts.
+Remove it from the repository or install a clean copy as a tarball.
+
+> **Symptom:** ``cannot install from a git URL: no `git` on PATH``.
+> Install git, or clone the repository yourself and run
+> `scoot look install DIRECTORY`. A directory clone also needs its
+> `.git` directory removed, since a directory install refuses it.
+
+> **Symptom:** ``refused: `git@example.com` is a git remote shorthand``,
+> or ``refused: `http://` is not installable``.
+> Only `https://` and `ssh://` URLs install from git. Spell the first as
+> `ssh://git@host/path`; use the `https://` URL for the second.
+
+> **Symptom:** `git failed ... Host key verification failed` or
+> `Permission denied (publickey)` on an `ssh://` URL.
+> The install never prompts. Connect once with `ssh git@host` so the host
+> key is in `known_hosts`, and load the key into your agent
+> (`SSH_AUTH_SOCK`).
+
+> **Symptom:** `git failed ... terminal prompts disabled` or `Repository
+> not found` on a private `https://` repository.
+> `https://` installs are anonymous and ignore your git credential helper.
+> Use the `ssh://` URL for a private repository.
+
+> **Symptom:** `git failed ... The requested URL returned error: 301`.
+> A redirect (a renamed repository, a trailing slash) is not followed.
+> Use the URL the host now serves.
+
+> **Symptom:** `git 2.30 is too old` or `cannot tell which git this is`.
+> Install git 2.32 or later, or clone the repository yourself and
+> install the directory.
+
+> **Symptom:** `refused: .gitignore is not a file a look uses`.
+> The repository has files a look does not use at its root. Ask the
+> author to remove them, or install a tarball made with
+> `scoot look export`.
 
 `target add PATH` adds a pack of app targets (templates that theme apps
 scoot has no renderer for) to your own `look-targets/`. It is not part

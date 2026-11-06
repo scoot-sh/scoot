@@ -1088,7 +1088,7 @@ programs.scoot = {
   against `pkgs` there (D13).
 - `look`: one name in the catalog, or null for no look layer at all.
 - Later, not v1: a flake output `lookPacks.<name>` (a directory of looks
-  usable as a flake input; `look-share` ticket).
+  usable as a flake input; `look-packs-flake` ticket).
 
 ### 6.2 What evaluation produces
 
@@ -1173,7 +1173,7 @@ binary exists for Nix builds and the bar-only path, §3.3, §5.5.)
 | `new NAME --from BASE`, `watch DIR`, `preview --capture` | §8.1 | `look-authoring` |
 | `import-base16 FILE [--extends LOOK]` | §5.3 | `look-import-base16` |
 | `install PATH`, `export NAME`, `save NAME` | §8.3 | `look-install` |
-| `install GIT-URL` | later (D12) | `look-share` |
+| `install GIT-URL` | shipped (D12 deferred it past v1) | `look-share` |
 
 `new --from BASE` writes a source look under `user-looks/` with `extends =
 "BASE"`, where BASE must be a *source* look (shipped, declared or

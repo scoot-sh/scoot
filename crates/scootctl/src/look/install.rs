@@ -41,6 +41,8 @@ use scoot_look::{Origin, parse_look_toml, validate_apps_allowlist, validate_for_
 
 use super::apply::{self, Checks, Validation};
 
+pub mod git;
+
 /// The most files one install or tarball may carry. A look holds about ten;
 /// past this is a mistake or hostile.
 pub const MAX_INSTALL_FILES: usize = 64;
@@ -277,9 +279,7 @@ fn collect_dir_into(
             return Err(format!("refused: {rel}: {error}"));
         }
         if !permitted_rel(&rel) {
-            return Err(format!(
-                "refused: {rel} is not a file a look uses (only look.toml, preview.png, image wallpapers, fonts/*.ttf|otf, the six apps/ leaves, LICENSE*, COPYING*, README.md install)"
-            ));
+            return Err(not_a_look_file(&rel));
         }
         gate_file(&rel, meta.len(), files.len(), *total)?;
         // The pre-check above is `symlink_metadata` (never follows) and
@@ -297,6 +297,13 @@ fn collect_dir_into(
         files.push(LookFile { rel, bytes });
     }
     Ok(())
+}
+
+/// The refusal for a path no look uses, shared by every reader.
+fn not_a_look_file(rel: &str) -> String {
+    format!(
+        "refused: {rel} is not a file a look uses (only look.toml, preview.png, image wallpapers, fonts/*.ttf|otf, the six apps/ leaves, LICENSE*, COPYING*, README.md install)"
+    )
 }
 
 /// The count, declared-size and total caps, shared by the directory and
@@ -432,9 +439,7 @@ fn collect_tar(path: &Path) -> Result<Vec<LookFile>, String> {
             return Err(format!("refused: {rel}: {error}"));
         }
         if !permitted_rel(&rel) {
-            return Err(format!(
-                "refused: {rel} is not a file a look uses (only look.toml, preview.png, image wallpapers, fonts/*.ttf|otf, the six apps/ leaves, LICENSE*, COPYING*, README.md install)"
-            ));
+            return Err(not_a_look_file(&rel));
         }
         if !seen.insert(rel.clone()) {
             return Err(format!("refused: {rel} appears twice in the tarball"));
