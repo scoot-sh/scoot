@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.13](https://github.com/scoot-sh/scoot/compare/v0.7.12...v0.7.13) - 2026-11-06
+
+### scootbg,nix
+
+- added: lock screen shows the live per-output wallpaper ([#948](https://github.com/scoot-sh/scoot/pull/948))
+
 ## [0.7.12](https://github.com/scoot-sh/scoot/compare/v0.7.11...v0.7.12) - 2026-11-06
 
 ### scoot
