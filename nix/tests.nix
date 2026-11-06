@@ -7157,6 +7157,30 @@ let
       assert packRefused [ ./test-look-packs/badname ];
       true
     )
+    # A symlink in a pack refuses loudly (also when it is all the pack
+    # holds), rather than vanishing.
+    (
+      assert packRefused [ ./test-look-packs/symlink ];
+      true
+    )
+    (
+      assert packRefused [ ./test-look-packs/symlinkonly ];
+      true
+    )
+    # A collision between two single entries stays first-wins even
+    # when a pack sits in the same list.
+    (
+      assert
+        packNames [
+          ./test-look-packs/skips
+          ./test-look-packs/dup/one
+          ./test-look-packs/dup/two
+        ] == [
+          "pack-real"
+          "twin"
+        ];
+      true
+    )
     # Without a pack the first-wins rule is unchanged.
     (
       assert

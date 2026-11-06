@@ -57,7 +57,7 @@ without a `look.toml` expands (`nix/look-catalog.nix`, `packEntries`) to
 one entry per subdirectory, each through `toEntry`. The flake exports
 `lookPacks.shipped = ./looks`. Decisions the entry left open: a
 subdirectory that is not a look refuses (files and dot-directories are
-skipped, symlinks not followed); a name two different sources claim
+skipped; symlinks refuse); a name two different sources claim
 refuses when either is from a pack, while pack-free lists keep first-wins;
 a pack look named `stylix` against the synthesized `stylix` is not checked
 (a single path entry has the same gap). Checks: `nix/tests.nix` (pack

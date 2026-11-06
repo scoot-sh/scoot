@@ -826,8 +826,9 @@
 
       # Look packs: a directory whose subdirectories are source looks,
       # for `programs.scoot.looks` (see nix/look-catalog.nix). A plain
-      # path, so a pack evaluates nothing and `nix flake check` has no
-      # unknown-output warning for it. `shipped` is scoot's own looks,
+      # path, so a pack evaluates nothing. `nix flake check` prints
+      # `unknown flake output 'lookPacks'` for it: expected (Nix has no
+      # schema for the name) and harmless. `shipped` is scoot's own looks,
       # also the in-repo example of the layout.
       lookPacks.shipped = ./looks;
 

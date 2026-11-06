@@ -123,22 +123,26 @@ let
   # per subdirectory, sorted by directory name, through `toEntry`, so a
   # pack look gets exactly the checks a single entry gets (manifest
   # parse, `name` present and in the name grammar). Plain files and
-  # dot-directories are skipped (a README, `.git`); symlinks are not
-  # followed. A subdirectory without a `look.toml` is a loud refusal,
-  # not a silent skip: a misnamed manifest would otherwise make a look
+  # dot-directories are skipped (a README, `.git`). A symlink, or a
+  # subdirectory without a `look.toml`, is a loud refusal, not a silent
+  # skip: a misnamed manifest or a link would otherwise make a look
   # vanish. A pack with no look at all refuses too.
   packEntries =
     dir:
     let
       subdirs = builtins.attrNames (
-        lib.filterAttrs (n: type: type == "directory" && !(lib.hasPrefix "." n)) (builtins.readDir dir)
+        lib.filterAttrs (n: type: (type == "directory" || type == "symlink") && !(lib.hasPrefix "." n)) (
+          builtins.readDir dir
+        )
       );
       one =
         n:
         let
           sub = dir + "/${n}";
         in
-        if builtins.pathExists (sub + "/look.toml") then
+        if (builtins.readDir dir).${n} == "symlink" then
+          throw "programs.scoot.looks: look pack ${toString dir}: `${n}` is a symlink (a pack holds look directories, not links to them)"
+        else if builtins.pathExists (sub + "/look.toml") then
           toEntry sub
         else
           throw "programs.scoot.looks: look pack ${toString dir}: subdirectory `${n}` is not a look (no look.toml)";
