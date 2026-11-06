@@ -1,0 +1,13 @@
+# Managed by scoot look auto. Do not edit: `scoot look auto --off` removes it, `scoot look auto` rewrites it.
+[Unit]
+Description=scoot look: light and dark schedule (07:00/19:30)
+
+[Timer]
+OnCalendar=*-*-* 07:00:00
+OnCalendar=*-*-* 19:30:00
+Persistent=true
+AccuracySec=1s
+Unit=scoot-look-auto.service
+
+[Install]
+WantedBy=timers.target

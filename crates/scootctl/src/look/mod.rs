@@ -18,6 +18,7 @@
 //! the link fresh.
 
 pub mod apply;
+pub mod auto;
 pub mod bounded;
 pub mod build_dir;
 pub mod cycle;
@@ -151,6 +152,9 @@ pub enum Command {
     /// wiring step checked against the live files, with the exact
     /// missing command or line. Read-only.
     Wiring,
+    /// Opt-in light/dark switching by a systemd user timer: install, remove
+    /// or show it. `Fire` is the hidden verb the timer's service runs.
+    Auto { action: auto::Action },
 }
 
 /// Which catalog step a `Cycle` command takes.
@@ -166,6 +170,7 @@ pub enum CycleStep {
 pub const COMMANDS: &[&str] = &[
     "list", "current", "show", "validate", "build", "apply", "next", "prev", "random", "pick",
     "sync", "toolkit", "new", "watch", "preview", "install", "target", "export", "save", "wiring",
+    "auto",
 ];
 
 /// The usage line, shared by `scoot look --help` and the top-level help.
@@ -188,6 +193,7 @@ pub const LOOK_USAGE: &str = "\
     look export NAME [--out FILE] [--json]
     look save NAME [--json]
     look wiring [--json]
+    look auto [--light NAME --dark NAME --schedule HH:MM/HH:MM | --off] [--json]
 
     --state DIR takes the look state (default: $SCOOT_LOOK_STATE, then
     $XDG_STATE_HOME/scoot, then ~/.local/state/scoot); --socket PATH takes
@@ -317,6 +323,12 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
             refuse_trailing(&positionals)?;
             Command::Wiring
         }
+        "auto" => Command::Auto {
+            action: auto::parse(&positionals, false)?,
+        },
+        "_auto-fire" => Command::Auto {
+            action: auto::parse(&positionals, true)?,
+        },
         "toolkit" => {
             let action = match positionals.as_slice() {
                 [] => None,
@@ -350,7 +362,7 @@ pub fn parse_look<I: IntoIterator<Item = String>>(args: I) -> Result<Look, Error
                 &[
                     "list", "current", "show", "validate", "build", "apply", "next", "prev",
                     "random", "pick", "sync", "toolkit", "new", "watch", "preview", "install",
-                    "target", "export", "save", "wiring",
+                    "target", "export", "save", "wiring", "auto",
                 ],
                 "scoot look --help",
             ));
@@ -464,6 +476,18 @@ COMMANDS:
                 compositor's `[appearance]` and `[wallpaper]`, the bar's
                 `[colors]`) as a source look in `user-looks/`, extending
                 the recorded live look (apply one first)
+    auto        opt-in light/dark switching by a systemd user timer (never a
+                daemon): `auto --light A --dark B --schedule 07:00/19:00`
+                installs a timer that applies A from 07:00 and B from 19:00
+                (the system's local time zone; a boundary missed while the
+                machine was off runs at the next start) and applies the
+                look due now; naming a look that does not exist refuses
+                at once. Bare `auto` shows what is installed; `auto --off`
+                disables the timer and removes the two unit files it wrote
+                (`scoot-look-auto.timer` and `.service` in
+                ~/.config/systemd/user), leaving any file it did not write.
+                Needs a systemd user manager. Sunset and
+                desktop-setting triggers are not available yet
     wiring      check the one-time non-Nix setup the active look still
                 needs (foot include, mako include, wob command, fcitx5
                 theme link, Helix/btop/starship/nvim pointers, launcher flags,
@@ -1244,6 +1268,7 @@ pub fn run(look: &Look) -> Result<(), String> {
         Command::Export { name, out } => run_export(look, name, out.as_deref()),
         Command::Save { name } => run_save(look, name),
         Command::Wiring => run_wiring(look),
+        Command::Auto { action } => auto::run(look, action),
     }
 }
 

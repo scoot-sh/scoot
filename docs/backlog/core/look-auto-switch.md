@@ -19,6 +19,27 @@ the design has a home, not scheduled. Serves **daily-drive**, opt-in.
 user timers or a path unit, never a daemon; off by default; a swap's own
 `color-scheme` write must not loop back into `--follow-portal`.
 
+## Status (2026-11-06)
+
+`--schedule` landed: `scoot look auto --light A --dark B --schedule
+HH:MM/HH:MM`, bare `auto` for status and `auto --off`, as one systemd user
+timer and a oneshot service (`crates/scootctl/src/look/auto/`). The
+ticket stays open for the other two triggers, split out because each is
+its own design problem:
+
+- `--sun`: [`look-auto-sun`](look-auto-sun.md)
+- `--follow-portal`: [`look-auto-follow-portal`](look-auto-follow-portal.md)
+
+Resolve this ticket when both are done, or close it once they stand alone.
+
+Decisions this ticket left open, settled by the first slice: the units are
+one timer with two `OnCalendar=` lines and one service that reads the wall
+clock when it fires (two per-look `apply` units would race after a suspend
+spanning both boundaries); the unit directory is
+`$XDG_CONFIG_HOME/systemd/user`, written atomically, own-if-absent-or-marked;
+the timer hangs off `timers.target`; a look missing from the catalog
+refuses at `auto` time.
+
 ## Not in this ticket
 
 Per-output looks.
