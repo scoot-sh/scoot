@@ -42,6 +42,7 @@ scoot look sync                       # follow the Nix declared default (below)
 scoot look new my-look --from moonrise  # start a user look extending moonrise
 scoot look watch ./my-look             # validate and apply on every save
 scoot look preview my-look --capture   # screenshot the look into preview.png
+scoot look auto --light dawn --dark moonrise --schedule 07:00/19:00   # switch by the clock
 ```
 
 ## Cycle and preview
@@ -71,6 +72,94 @@ If a swap is running when the delay ends, the revert waits for it and
 retries a bounded number of times. `SECONDS` is 1 or more. `scoot look apply --keep` keeps the preview (and cancels
 the timer); `apply NAME --keep` applies for good and cancels any pending
 preview; bare `--keep` with no pending preview refuses.
+
+## Switch automatically
+
+`scoot look auto` swaps between a light look and a dark look on a daily
+schedule. It is off until you turn it on, and there is no daemon: it
+installs a systemd user timer that runs `scoot look apply` for you and
+exits. It needs a systemd user manager.
+
+```sh
+scoot look auto --light dawn --dark moonrise --schedule 07:00/19:00
+scoot look auto                # show what is installed
+scoot look auto --off          # remove everything it created
+```
+
+`--schedule LIGHT_FROM/DARK_FROM` takes two times as `HH:MM`, `00:00` to
+`23:59`, two digits each, and they must differ. `dawn` is applied from
+07:00 until 19:00 and `moonrise` from 19:00 until 07:00; either window may
+cross midnight (`22:00/06:00` is light overnight). `auto` applies the look
+that is due right now when you run it, so the screen matches the schedule
+at once, then the timer does the rest.
+
+- **Both looks must exist.** A name that is not in the catalog refuses
+  when you run `auto`, not at the first boundary. A look that is removed
+  later makes that boundary's run fail; `systemctl --user status
+  scoot-look-auto.service` and `journalctl --user -u scoot-look-auto`
+  show the refusal.
+- **Time zone.** Times are the system's local time. The decision is made
+  from the wall clock when the timer fires, so a clock change cannot leave
+  the wrong look up past the next boundary. On the day a daylight-saving
+  change skips an hour, a boundary inside that hour does not fire; the
+  next boundary decides. When an hour repeats, the boundary fires once.
+- **Suspend and shutdown.** The timer is persistent: a boundary that passed
+  while the machine was off or you were logged out runs at the next start.
+  If both passed, the run applies the look due now, not the older
+  boundary's.
+- **Your own choices.** The schedule is a live choice like `apply`. A look
+  you pick by hand stays until the next boundary, which applies the
+  scheduled look again. A boundary does nothing when its look is already
+  active.
+- **Nix.** `programs.scoot.look` is the declared default; the schedule
+  swaps the live choice, and the declaration wins again only when you
+  change it there (the [`sync` rule](#scoot-look-sync)). `auto` prints a
+  note when a declaration exists.
+- **Re-running** with the same arguments changes nothing. With new ones it
+  rewrites the two unit files and restarts the timer.
+- **`--sun` and `--follow-portal`** (sunset, or the desktop's own
+  light/dark setting) are not available yet.
+
+What it creates, and all it creates: `scoot-look-auto.timer` and
+`scoot-look-auto.service` in `$XDG_CONFIG_HOME/systemd/user`
+(`~/.config/systemd/user`), each starting with a `# Managed by scoot look
+auto` line, and the timer's enable link. `--off` disables the timer, then
+deletes the two files. A file with either name that does not carry the
+marker (a home-manager link into the store, a unit you wrote) is never
+overwritten or removed: `auto` refuses and names it, and `--off` leaves it
+and says so. The service runs one hidden `scoot` command that carries the two names
+and the times, which passed the same checks as the command line, and
+nothing a look supplies. It starts the `scoot` found first on `PATH` that
+is the same file as the one you ran, so a profile link survives upgrades;
+otherwise the binary you ran. If that path disappears, bare `scoot look auto`
+warns, and running `auto` with the arguments again repairs the unit. `--state DIR`, when you pass
+it, is carried into the unit.
+
+> **Symptom:** `no systemd user manager answers (...): `scoot look auto` runs
+> as a user timer and needs one`.
+> The session has no user manager (a container, or a login started without
+> systemd). Nothing was written. Apply looks with `scoot look apply`, or
+> run your own scheduler to call it.
+
+> **Symptom:** `.../scoot-look-auto.timer exists and was not written by
+> `scoot look auto``.
+> Another file holds the name, often a link home-manager made. Move it
+> aside and run `auto` again.
+
+> **Symptom:** `unknown look `NAME` (available: ...)`.
+> `--light` or `--dark` names a look the catalog does not hold. Nothing was
+> written; `scoot look list` shows the names.
+
+> **Symptom:** `invalid --schedule time (want HH:MM, 00:00 to 23:59, two
+> digits each): `7:5``.
+> Write both times with two digits each, such as `07:05`; `24:00` is not a
+> time, use `00:00`.
+
+> **Symptom:** `auto` says on, but the look never changes.
+> `scoot look auto` shows the timer's state and the next run. A timer that
+> is not `active` was stopped; run `scoot look auto` with the same
+> arguments to start it again. With `--json`, the immediate swap prints its
+> own document after the `auto` one.
 
 ## Pick and apply
 
@@ -774,6 +863,7 @@ stderr. The shapes:
 | `target add` | `{"added": ..., "targets": [{`name`, `output`, `reload` ({`argv`, `timeout_secs`} or null), `template_file`, `template`}], "notes": [...]}` (`added` is false without `--trust`, which exits 1 after printing the review) |
 | `export` | `{"exported": ..., "tarball": ..., "files": [...], "notes": [...]}` |
 | `save` | `{"saved": ..., "dir": ..., "extends": ..., "tokens": [...], "notes": [...]}` |
+| `auto` | `{"enabled": ..., "light": ..., "dark": ..., "light_from": ..., "dark_from": ..., "due": ..., "active": ..., "exe": ..., "exe_exists": ..., "timer": {`active`, `enabled`, `next`}}` (off: `{"enabled": false}`; installing prints `{"enabled": true, ..., "wrote": [...], "unit_dir": ...}`, then the `apply` document when a swap was needed; `--off`: `{"enabled": false, "removed": [...], "left": [...], "manager_skipped": ...}`) |
 | `wiring` | `{"active": {`name`, `rendered`, `generation`}, "items": [{`app`, `status`, `detail`}], "notes": [...]}` (`status` is `wired`, `missing`, `manual` or `absent`) |
 
 Two flags are internal: the compositor's own IPC child passes

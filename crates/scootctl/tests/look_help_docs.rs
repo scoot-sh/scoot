@@ -136,6 +136,24 @@ fn spec() -> Vec<SpecRow> {
         ),
         ("save", vec!["save", "my-tweak"], globals(vec![])),
         ("wiring", vec!["wiring"], globals(vec![])),
+        (
+            "auto",
+            vec![
+                "auto",
+                "--light",
+                "dawn",
+                "--dark",
+                "moonrise",
+                "--schedule",
+                "07:00/19:00",
+            ],
+            globals(vec![
+                ("--light", Some("dawn")),
+                ("--dark", Some("moonrise")),
+                ("--schedule", Some("07:00/19:00")),
+            ]),
+        ),
+        ("auto", vec!["auto"], globals(vec![("--off", None)])),
     ]
 }
 

@@ -790,3 +790,54 @@ fn a_degraded_body_over_the_cap_is_cut_on_a_boundary() {
     assert!(body.ends_with('…'));
     assert!(body.len() <= 400 + '…'.len_utf8());
 }
+
+#[test]
+fn auto_parses_as_a_verb_and_the_fire_verb_is_hidden() {
+    use super::auto::Action;
+    assert_eq!(
+        command(&["auto"]),
+        Ok(Command::Auto {
+            action: Action::Status
+        })
+    );
+    assert_eq!(
+        command(&["auto", "--off", "--json"]),
+        Ok(Command::Auto {
+            action: Action::Off
+        })
+    );
+    assert!(matches!(
+        command(&[
+            "auto",
+            "--light",
+            "dawn",
+            "--dark",
+            "moonrise",
+            "--schedule",
+            "07:00/19:00"
+        ]),
+        Ok(Command::Auto {
+            action: Action::On(_)
+        })
+    ));
+    assert!(matches!(
+        command(&[
+            "--state",
+            "/tmp/s",
+            "_auto-fire",
+            "--light",
+            "dawn",
+            "--dark",
+            "moonrise",
+            "--schedule",
+            "07:00/19:00"
+        ]),
+        Ok(Command::Auto {
+            action: Action::Fire(_)
+        })
+    ));
+    // Not offered as a guess for a typo, like `_preview-revert`.
+    assert!(!super::COMMANDS.contains(&"_auto-fire"));
+    assert!(super::COMMANDS.contains(&"auto"));
+    assert!(super::usage().contains("look auto "));
+}
