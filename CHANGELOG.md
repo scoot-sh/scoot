@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.14](https://github.com/scoot-sh/scoot/compare/v0.7.13...v0.7.14) - 2026-11-06
+
+### scoot-look,scootctl
+
+- added: looks may override colors for the user's own look targets ([#950](https://github.com/scoot-sh/scoot/pull/950))
+
 ## [0.7.13](https://github.com/scoot-sh/scoot/compare/v0.7.12...v0.7.13) - 2026-11-06
 
 ### scootbg,nix

@@ -13,7 +13,7 @@
 # here unchanged (the same release tarball, under the same name).
 
 Name:           scootlaunch
-Version:        0.7.13
+Version:        0.7.14
 Release:        1%{?dist}
 # No -debuginfo/-debugsource subpackages: see scoot.spec.
 %global         debug_package %{nil}
@@ -64,6 +64,9 @@ cd source
 %license source/LICENSE source/NOTICE source/THIRD-PARTY-LICENSES
 
 %changelog
+* Fri Nov 06 2026 scoot-sh <packages@scoot.sh> - 0.7.14-1
+- Built from the v0.7.14 release tag.
+
 * Fri Nov 06 2026 scoot-sh <packages@scoot.sh> - 0.7.13-1
 - Built from the v0.7.13 release tag.
 
