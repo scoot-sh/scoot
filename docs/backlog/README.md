@@ -422,6 +422,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Later: flake `lookPacks` output for `programs.scoot.looks`](./resolved/look-packs-flake-done.md) (low, later)
 - [User and community look targets: render any app from a template](./core/look-user-targets.md) (medium)
 - [Later: opt-in automatic look switching](./core/look-auto-switch.md) (low, later)
+- [Later: accept context-bearing path strings in `programs.scoot.looks`](./core/look-packs-context-strings.md) (low)
 
 ### Found reviewing the shell-app extractions (2026-10-18)
 

@@ -476,9 +476,10 @@ Looks from a pack are declared looks like any path entry: they install
 without `scoot look install`'s `--trust` review, so a pack is as trusted
 as the flake input that supplies it. Pin the input.
 
-A string like `"${inputs.friend}/looks"` also works, since an absolute
-store-path string is a directory; `inputs.friend + "/looks"` evaluates to
-such a string.
+Entries are path values or `inputs.<name>.lookPacks.<pack>` attributes,
+which are path values. A string built from an input, such as
+`"${inputs.friend}/looks"` or `inputs.friend + "/looks"`, does not work:
+it carries store-path context and the evaluation refuses it.
 
 > **Symptom:** ``programs.scoot.looks: look name `twin` is declared twice
 > with different sources: /nix/store/...-source/dup/one and

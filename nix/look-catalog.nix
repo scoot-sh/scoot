@@ -107,7 +107,9 @@ let
     ) [ ] entries;
 
   # A path-or-absolute-string entry as a path value, or null for
-  # anything else (a shipped name, a wrong type).
+  # anything else (a shipped name, a wrong type). A string carrying
+  # store-path context cannot be appended to a path and throws here (and
+  # in `toEntry`); see docs/backlog/core/look-packs-context-strings.md.
   asDirPath =
     item:
     if builtins.isPath item then

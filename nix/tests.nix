@@ -7101,8 +7101,9 @@ let
         ];
       true
     )
-    # An absolute store-path string (what `inputs.foo + "/looks"`
-    # evaluates to) is a pack too.
+    # A context-free absolute path string is a pack too (a string
+    # carrying store-path context is not accepted; see the backlog
+    # entry look-packs-context-strings).
     (
       assert
         packNames [ (toString ./test-looks) ] == [
