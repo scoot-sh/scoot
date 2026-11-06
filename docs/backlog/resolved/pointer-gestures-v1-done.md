@@ -64,9 +64,8 @@ Items 1 to 3 landed; item 4 and the real-pad check moved to
    `dispatch.rs`'s blanket `Dispatch` impls already cover the objects.
 2. **Pinch and hold are forwarded.** The libinput arms call
    `gesture_pinch_*` and `gesture_hold_*` (`gesture/client.rs`), which
-   remember whether a `begin` went out and drop an `update` or `end`
-   otherwise; a `begin` over an open one closes it with a cancelled `end`
-   first. Non-finite pinch values are dropped.
+   rely on Smithay to drop an `update` or `end` with no `begin` and to
+   close a `begin` over an open one with a cancelled `end`. Non-finite pinch values are dropped.
 3. **A focus change mid-gesture needs nothing from scoot.** The ticket's
    premise, that the `end` goes to the new focus, does not hold at the pinned
    fork: each gesture object remembers the surface its `begin` was sent for,

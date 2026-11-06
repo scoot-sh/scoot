@@ -346,8 +346,8 @@ pointer-gestures protocol.
   lands on receives nothing of it.
 - **Not while locked, not over a fullscreen window.** On a locked session a
   swipe goes to the lock screen and nothing moves. With a fullscreen window
-  covering the output, scoot leaves the swipe alone and no window receives
-  it either, so nothing happens.
+  covering the output, scoot leaves the swipe alone. By default nothing
+  happens; with `client_gestures = true` the fullscreen window receives it.
 - **What is drawn is not where the windows are.** While you swipe, and
   while the view settles, the windows are drawn shifted. Clicks, `scoot msg
   windows` and focus go by where the windows will be once it settles.

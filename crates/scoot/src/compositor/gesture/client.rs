@@ -42,7 +42,7 @@
 //!
 //! Smithay already does what a gesture needs here, for all three kinds, so
 //! scoot adds nothing on top (verified against the pinned source, and pinned
-//! by `pointer_gestures/tests.rs`):
+//! by `gesture/client/tests.rs`):
 //!
 //! - Each gesture object remembers the surface its `begin` was sent for.
 //!   When the pointer leaves that surface, `PointerTarget::leave` sends the
