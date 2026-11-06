@@ -45,6 +45,9 @@ use smithay::xwayland::X11Surface;
 
 use super::State;
 
+#[cfg(test)]
+mod tests;
+
 /// The seat's keyboard focus (`SeatHandler::KeyboardFocus`).
 ///
 /// The X arm is large (an `X11Surface` carries its connection's whole atom

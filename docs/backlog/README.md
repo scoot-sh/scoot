@@ -422,7 +422,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 
 ### Found reviewing the shell-app extractions (2026-10-18)
 
-- [Keyboard `leave` when a client destroys its only surface](./core/keyboard-leave-on-last-surface-destroy-probe.md): a headless probe before anyone asserts a compositor bug.
+- [Keyboard `leave` when a client destroys its only surface](./resolved/keyboard-leave-on-last-surface-destroy-probe-done.md) — RESOLVED 2026-11-05 (test-only: `leave` arrives in every case probed; the six-case test is kept).
 - [scootctl look wiring tests race on `STARSHIP_CONFIG`](./resolved/scootctl-starship-env-race-done.md) — RESOLVED 2026-10-27 (test-only, no new code: the injection fix landed in #711; this PR verifies 50/50 under load and audits the remaining env users as safe).
 - [look_ipc second-swap test flakes when the lock holder exits early](./resolved/look-second-swap-timing-flake-done.md) — RESOLVED 2026-10-27 (test-only: in-process exclusive lock held until the second request is answered, 300 ms grace removed; 50/50 green).
 
