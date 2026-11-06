@@ -1,0 +1,10 @@
+# Fixture for the look-pack checks in nix/tests.nix.
+schema = 1
+name = "pack-good"
+title = "pack-good"
+description = "Pack fixture."
+polarity = "dark"
+license = "MIT"
+
+[palette]
+accent = "#7FA36B"

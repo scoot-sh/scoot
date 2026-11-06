@@ -106,7 +106,103 @@ let
       acc: entry: if builtins.elem entry.name (map (done: done.name) acc) then acc else acc ++ [ entry ]
     ) [ ] entries;
 
-  mkEntries = looks: dedupe (map toEntry looks);
+  # A path-or-absolute-string entry as a path value, or null for
+  # anything else (a shipped name, a wrong type).
+  asDirPath =
+    item:
+    if builtins.isPath item then
+      item
+    else if builtins.isString item && lib.hasPrefix "/" item then
+      /. + item
+    else
+      null;
+
+  # A look *pack*: a directory whose subdirectories are source looks
+  # (a flake's `lookPacks.<name>`). An entry is a pack when it is a
+  # directory without a `look.toml` of its own. Expands to one entry
+  # per subdirectory, sorted by directory name, through `toEntry`, so a
+  # pack look gets exactly the checks a single entry gets (manifest
+  # parse, `name` present and in the name grammar). Plain files and
+  # dot-directories are skipped (a README, `.git`); symlinks are not
+  # followed. A subdirectory without a `look.toml` is a loud refusal,
+  # not a silent skip: a misnamed manifest would otherwise make a look
+  # vanish. A pack with no look at all refuses too.
+  packEntries =
+    dir:
+    let
+      subdirs = builtins.attrNames (
+        lib.filterAttrs (n: type: type == "directory" && !(lib.hasPrefix "." n)) (builtins.readDir dir)
+      );
+      one =
+        n:
+        let
+          sub = dir + "/${n}";
+        in
+        if builtins.pathExists (sub + "/look.toml") then
+          toEntry sub
+        else
+          throw "programs.scoot.looks: look pack ${toString dir}: subdirectory `${n}` is not a look (no look.toml)";
+    in
+    if subdirs == [ ] then
+      throw "programs.scoot.looks: ${toString dir} is neither a look (no look.toml) nor a look pack (no subdirectory holds a look)"
+    else
+      map one subdirs;
+
+  # Every `looks` item as `{ pack, entry }` records: one record per
+  # single entry, one per look of a pack.
+  expand =
+    item:
+    let
+      dir = asDirPath item;
+    in
+    if dir != null && !(builtins.pathExists (dir + "/look.toml")) then
+      map (entry: {
+        pack = true;
+        inherit entry;
+      }) (packEntries dir)
+    else
+      [
+        {
+          pack = false;
+          entry = toEntry item;
+        }
+      ];
+
+  # A name two *different* sources claim, where at least one came from
+  # a pack, refuses: which look wins would otherwise depend on list
+  # order, and a pack's contents are not something the user listed one
+  # by one. The same source reached twice (a look listed beside the pack
+  # that holds it) is no collision. Single entries alone keep the
+  # first-wins rule below.
+  refuseCollisions =
+    records:
+    let
+      clash =
+        lib.findFirst
+          (
+            pair:
+            (pair.a.pack || pair.b.pack)
+            && pair.a.entry.name == pair.b.entry.name
+            && toString pair.a.entry.src != toString pair.b.entry.src
+          )
+          null
+          (lib.concatLists (lib.imap0 (i: a: map (b: { inherit a b; }) (lib.drop (i + 1) records)) records));
+    in
+    if clash == null then
+      records
+    else
+      throw "programs.scoot.looks: look name `${clash.a.entry.name}` is declared twice with different sources: ${toString clash.a.entry.src} and ${toString clash.b.entry.src} (a look pack never shadows or is shadowed; rename one look's `name`)";
+
+  mkEntries =
+    looks:
+    let
+      records = lib.concatMap expand looks;
+    in
+    dedupe (
+      map (record: record.entry) (
+        if builtins.any (r: r.pack) records then refuseCollisions records else records
+      )
+    );
 
   # An entry by name, for `extends` walks below.
   findEntry = entries: name: lib.findFirst (entry: entry.name == name) null entries;

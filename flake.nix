@@ -824,6 +824,13 @@
         }
       );
 
+      # Look packs: a directory whose subdirectories are source looks,
+      # for `programs.scoot.looks` (see nix/look-catalog.nix). A plain
+      # path, so a pack evaluates nothing and `nix flake check` has no
+      # unknown-output warning for it. `shipped` is scoot's own looks,
+      # also the in-repo example of the layout.
+      lookPacks.shipped = ./looks;
+
       # `pkgs.scoot` and (Linux only, where they build)
       # `pkgs.scootbg` and `pkgs.scootbar`: this flake's own builds, the
       # same derivations as `packages`, so an overlay user runs exactly

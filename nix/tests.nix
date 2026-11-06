@@ -1191,6 +1191,20 @@ let
     ).names
   );
 
+  # Look packs (`lookPacks.<name>` flake outputs): a directory of
+  # looks given in `programs.scoot.looks`. `packNames` is the entry
+  # names `mkEntries` expands a list to; `packRefused` is whether
+  # forcing them throws (`tryEval` cannot carry the message; the
+  # texts are pinned in the docs from a `nix eval`).
+  packLib = import ./look-catalog.nix {
+    inherit lib pkgs;
+    scootLook = null;
+    fallbackUiPackage = null;
+    fallbackFont = null;
+  };
+  packNames = looks: map (e: e.name) (packLib.mkEntries looks);
+  packRefused = looks: !(builtins.tryEval (builtins.deepSeq (packNames looks) true)).success;
+
   evalHomeStylix =
     stub: cfg:
     lib.evalModules {
@@ -7054,6 +7068,121 @@ let
     # threw "unknown shipped look").
     (
       assert !stylixLiteralOff.success;
+      true
+    )
+
+    # Look packs: a directory of looks expands to one entry per look
+    # directory (sorted), a single look directory stays one entry, and
+    # the pack beside shipped names and single entries composes.
+    (
+      assert
+        packNames [ ./test-looks ] == [
+          "greeter-oak"
+          "greeter-pine"
+          "my-green"
+        ];
+      true
+    )
+    (
+      assert packNames [ ./test-looks/my-green ] == [ "my-green" ];
+      true
+    )
+    (
+      assert
+        packNames [
+          "ginger-night"
+          ./test-looks
+          ./test-looks/my-green
+        ] == [
+          "ginger-night"
+          "greeter-oak"
+          "greeter-pine"
+          "my-green"
+        ];
+      true
+    )
+    # An absolute store-path string (what `inputs.foo + "/looks"`
+    # evaluates to) is a pack too.
+    (
+      assert
+        packNames [ (toString ./test-looks) ] == [
+          "greeter-oak"
+          "greeter-pine"
+          "my-green"
+        ];
+      true
+    )
+    # Files and dot-directories in a pack are skipped.
+    (
+      assert packNames [ ./test-look-packs/skips ] == [ "pack-real" ];
+      true
+    )
+    # Refusals: a name two sources share (inside one pack, against a
+    # shipped name, against a single entry), a subdirectory that is not
+    # a look, an empty pack, and a pack look with a bad name.
+    (
+      assert packRefused [ ./test-look-packs/dup ];
+      true
+    )
+    (
+      assert packRefused [
+        "ginger-night"
+        ./test-look-packs/shadow
+      ];
+      true
+    )
+    (
+      assert packRefused [
+        ./test-look-packs/shadow
+        "ginger-night"
+      ];
+      true
+    )
+    (
+      assert packRefused [
+        ./test-look-packs/dup/one
+        ./test-look-packs/dup
+      ];
+      true
+    )
+    (
+      assert packRefused [ ./test-look-packs/notlook ];
+      true
+    )
+    (
+      assert packRefused [ ./test-look-packs/empty ];
+      true
+    )
+    (
+      assert packRefused [ ./test-look-packs/badname ];
+      true
+    )
+    # Without a pack the first-wins rule is unchanged.
+    (
+      assert
+        packNames [
+          "moonrise"
+          ../looks/moonrise
+        ] == [ "moonrise" ];
+      true
+    )
+    # A look listed beside the pack that holds it is no collision.
+    (
+      assert
+        packNames [
+          ./test-looks/my-green
+          ./test-looks
+        ] == [
+          "my-green"
+          "greeter-oak"
+          "greeter-pine"
+        ];
+      true
+    )
+    # The repo's own `lookPacks.shipped` output expands to the shipped
+    # looks.
+    (
+      assert packNames [ ../looks ] == packLib.shippedNames;
       true
     )
 
