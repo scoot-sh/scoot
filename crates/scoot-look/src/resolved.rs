@@ -36,6 +36,8 @@ pub struct ResolvedLook {
     pub icons_theme: String,
     pub night_temperature: Option<i64>,
     pub apps: BTreeMap<String, BTreeMap<String, toml::Value>>,
+    /// `[targets.<name>]` color overrides, merged per key along the chain.
+    pub target_overrides: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +118,8 @@ pub(crate) struct Partial {
     pub icons: Option<Icons>,
     pub night: Option<Night>,
     pub apps: BTreeMap<String, BTreeMap<String, toml::Value>>,
+    /// `[targets.<name>]` color overrides, merged per key along the chain.
+    pub target_overrides: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Default)]
@@ -301,6 +305,12 @@ impl Partial {
                 .or_default()
                 .extend(table.clone());
         }
+        for (target, table) in &raw.targets {
+            self.target_overrides
+                .entry(target.clone())
+                .or_default()
+                .extend(table.clone());
+        }
     }
 
     pub(crate) fn finish(self, name: &str) -> Result<ResolvedLook, GrammarError> {
@@ -413,6 +423,7 @@ impl Partial {
                 .unwrap_or_else(|| "Adwaita".to_string()),
             night_temperature: self.night.map(|n| n.temperature),
             apps: self.apps,
+            target_overrides: self.target_overrides,
         })
     }
 }

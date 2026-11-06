@@ -9,9 +9,11 @@
 //!
 //! Trust boundary: installed looks (someone else's) can never supply
 //! templates, output paths or reload commands. That rule needs no code
-//! here — a `look.toml` with a `[targets]` table or an `[apps.<target>]`
-//! table refuses at parse through the existing allowlist rules (pinned by
-//! the `scoot-look` tests) — only these user-owned directories are read.
+//! here: a look's `[targets.<name>]` table holds only color token
+//! overrides (`palette.*`, `terminal.colorN`), validated at parse, and
+//! applies only to a target of that name found here; any other key, such
+//! as an output or a reload, refuses at parse (pinned by the `scoot-look`
+//! tests). Only these user-owned directories are read.
 //!
 //! Reloads are the user's own commands, run after a successful swap with
 //! no shell interpretation (argv executed directly), a bounded wait, and
@@ -27,7 +29,7 @@ use std::time::Duration;
 use scoot_look::check_target_path;
 use scoot_look::{
     MAX_TEMPLATE_BYTES, RawTarget, ResolvedLook, check_target_name_matches_dir, parse_target_toml,
-    reload_timeout, render_template, target_tokens,
+    reload_timeout, render_template, target_tokens, tokens_for_target,
 };
 
 /// One discovered user target: the validated manifest plus the template
@@ -216,9 +218,9 @@ fn load_one(dir: &Path, link_name: &str, config_home: &Path) -> Result<TargetDef
     })?;
     // Targets are user-owned by construction (only this directory is
     // ever read): no license rule applies, and installed looks can never
-    // reach this loader — a look.toml smuggling `[targets]` or a
-    // target-shaped `[apps.*]` table refuses at parse through the
-    // allowlist rules.
+    // reach this loader — a look.toml's `[targets.<name>]` carries color
+    // token overrides only, and a target-shaped `[apps.*]` table refuses
+    // at parse through the allowlist rules.
     if let Some(error) = check_target_name_matches_dir(&raw, &dir_name) {
         return Err(format!("target `{dir_name}`: invalid target.toml: {error}"));
     }
@@ -349,7 +351,7 @@ pub fn render_all(defs: &[TargetDef], merged: &ResolvedLook) -> Result<Vec<Targe
     for def in defs {
         let text = std::str::from_utf8(&def.template_bytes)
             .map_err(|_| format!("target `{}`: template is not valid UTF-8", def.name))?;
-        let rendered = render_template(text, &tokens)
+        let rendered = render_template(text, &tokens_for_target(&tokens, merged, &def.name))
             .map_err(|error| format!("target `{}`: cannot render: {error}", def.name))?;
         files.push(TargetFile {
             output: def.output.clone(),

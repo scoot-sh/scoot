@@ -120,10 +120,55 @@ reload never undoes the swap. A failing render does the opposite
 (unknown token, unreadable template, duplicate or escaping output): the
 swap refuses before anything is recorded.
 
+## Color overrides from a look
+
+A look can tune the colors one of your targets renders, per target. It
+adds a `[targets.<name>]` table to its `look.toml`, where `<name>` is the
+name of a target you created or added:
+
+```toml
+[targets.kitty-colors]
+"palette.background" = "#101820"
+"terminal.color1" = "#E06C75"
+```
+
+| Option | Type / default | Reload |
+|---|---|---|
+| `"palette.<role>"` | `#rrggbb`. Any of the thirteen palette roles. | next swap |
+| `"terminal.color0"` to `"terminal.color15"` | `#rrggbb`. | next swap |
+
+Rules:
+
+- The override replaces that token for that target only. Your other
+  targets and the look's own fragments (`scoot.toml`, `bar.toml`, ...) keep
+  the look's colors.
+- A `terminal.colorN` override adds the token when the look has no
+  `[terminal]` table, so a template that names it renders instead of
+  refusing.
+- It does nothing when you have no target of that name. A look is shared
+  and your targets are yours, so an unknown name is ignored, not an error.
+- A child look inherits its base's overrides and replaces them key by key.
+- Only the keys above are accepted. Fonts, sizes, paths, `output`,
+  `template`, `reload` and every other key refuse when the look is parsed,
+  in `validate`, `build`, `install` and every swap alike. A value must be
+  exactly `#rrggbb`.
+
 Installed looks (someone else's) can never supply templates, output
-paths, or reload commands. A `look.toml` with a `[targets]` table or a
-target-shaped `[apps.<app>]` table refuses at parse through the
+paths, or reload commands. The override table carries colors and nothing
+else, and an `[apps.<app>]` table for a target refuses through the
 allowlist, so only these user-owned directories are ever read.
+
+> **Symptom:** `look validate` or `look install` refuses a `[targets.<name>]` key.
+>
+> A look's target table takes only `palette.*` and `terminal.color0` to
+> `terminal.color15`, each set to `#rrggbb`. Remove any other key; a
+> look cannot set a path, a command or a font for your target.
+
+> **Symptom:** a look's override has no effect.
+>
+> You have no target with that name (`look-targets/<name>/`), or the
+> look's table is spelled for another one. The override is ignored by
+> design.
 
 > **Symptom:** `validate` names an unknown token.
 >
@@ -287,7 +332,7 @@ reload arguments are raw there.
 ## Not here yet
 
 Browsers (no live reload for Firefox without an extension, and the
-Chrome policy needs a root or managed path), look-supplied token data and
-per-app overrides for the targets you enabled, and keeping look sources
-and template sources in separate imports. Each is a later slice; the
+Chrome policy needs a root or managed path), look overrides for tokens
+other than colors, and keeping look sources and template sources in
+separate imports. Each is a later slice; the
 ticket lists them.
