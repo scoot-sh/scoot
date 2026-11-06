@@ -32,7 +32,7 @@ use std::time::Duration;
 use scoot_look::state::{RecordRead, read_capped_follow, read_record, write_atomic};
 
 use super::bounded::run_bounded;
-use super::{Look, apply, discover, install, output, sync};
+use super::{Look, apply, cycle, discover, install, output, sync};
 use crate::cli::Error;
 use systemctl::{CliSystemctl, Systemctl, TimerState};
 use unit::{Clock, Plan, SERVICE, Schedule, Side, TIMER};
@@ -74,7 +74,7 @@ pub fn parse(positionals: &[String], fire: bool) -> Result<Action, Error> {
             }
             "--sun" | "--follow-portal" => {
                 return Err(Error::Invalid {
-                    what: "trigger (`scoot look auto` takes --schedule only so far; --sun and --follow-portal are filed in docs/backlog/core/)",
+                    what: "trigger (`scoot look auto` takes --schedule only so far; --sun and --follow-portal are not available yet)",
                     value: word.clone(),
                 });
             }
@@ -318,14 +318,17 @@ pub fn stable_exe(current: &Path, path_var: Option<&OsStr>) -> PathBuf {
 }
 
 /// The look to apply for `schedule` at `now`, or `None` when the active
-/// look already is it (a swap would only churn the reloads).
+/// look already is it (a swap would only churn the reloads). A pending
+/// preview never counts as active: its reverter would put the old look
+/// back, so the target applies (and keeps) even when the preview is of it.
 pub fn fire_target<'a>(
     schedule: &'a Schedule,
     now: Clock,
     current: Option<&str>,
+    preview_pending: bool,
 ) -> Option<&'a str> {
     let target = schedule.look_for(schedule.due(now));
-    (current != Some(target)).then_some(target)
+    (preview_pending || current != Some(target)).then_some(target)
 }
 
 /// The local wall-clock minute, from `date`: scootctl carries no time
@@ -355,13 +358,24 @@ pub fn run(look: &Look, action: &Action) -> Result<(), String> {
     }
 }
 
-fn emit(look: &Look, json: serde_json::Value, lines: &[String]) -> Result<(), String> {
+/// The reply: lines on stdout in human mode, the document in `--json`;
+/// notes go to stderr as `note:` lines, or into the document's `notes`.
+fn emit(
+    look: &Look,
+    mut json: serde_json::Value,
+    lines: &[String],
+    notes: &[String],
+) -> Result<(), String> {
     if look.json {
+        json["notes"] = serde_json::json!(notes);
         output::print_line(&serde_json::to_string_pretty(&json).unwrap_or_default())
             .map_err(|error| error.to_string())
     } else {
         for line in lines {
             output::print_line(line).map_err(|error| error.to_string())?;
+        }
+        for note in notes {
+            output::warn(format_args!("note: {note}"));
         }
         Ok(())
     }
@@ -379,21 +393,21 @@ fn run_on(look: &Look, schedule: &Schedule) -> Result<(), String> {
     let exe = std::env::current_exe()
         .map(|exe| stable_exe(&exe, std::env::var_os("PATH").as_deref()))
         .map_err(|error| format!("cannot find the scoot binary to put in the unit: {error}"))?;
-    let state = look
-        .state
-        .as_deref()
-        .map(|dir| {
-            std::path::absolute(dir)
-                .map_err(|error| format!("cannot resolve --state {}: {error}", dir.display()))
-        })
-        .transpose()?;
+    // The service runs in the user manager's environment, which need not
+    // hold this shell's `SCOOT_LOOK_STATE` or `XDG_STATE_HOME`: the
+    // resolved directory is written into the unit, so the timer swaps the
+    // state the sessions read.
+    let state = apply::resolve_state_dir(look.state.as_deref())?;
+    let state = std::path::absolute(&state)
+        .map_err(|error| format!("cannot resolve the state dir {}: {error}", state.display()))?;
     let plan = Plan {
         schedule: schedule.clone(),
         exe,
-        state,
+        state: Some(state),
     };
     let dir = unit_dir(&install::config_home_dir()?);
     let done = install(&dir, &plan, &CliSystemctl)?;
+    let mut notes = Vec::new();
     let mut lines = vec![format!(
         "auto switching on: {} from {}, {} from {} (local time)",
         schedule.light, schedule.light_from, schedule.dark, schedule.dark_from
@@ -406,9 +420,15 @@ fn run_on(look: &Look, schedule: &Schedule) -> Result<(), String> {
     if let Ok(Some(declared)) = sync::read_declared()
         && let Some(pinned) = declared.default
     {
-        lines.push(format!(
-            "note: `{pinned}` is the look your Nix configuration declares: the schedule swaps the live choice, and the declaration wins again only when you change it there"
+        notes.push(format!(
+            "`{pinned}` is the look your Nix configuration declares: the schedule swaps the live choice, and the declaration wins again only when you change it there"
         ));
+    }
+    if std::env::var_os("SCOOT_LOOKS_DIR").is_some_and(|dir| !dir.is_empty()) {
+        notes.push(
+            "SCOOT_LOOKS_DIR is set in this shell, but the timer runs in the user manager's environment and will not see it"
+                .to_owned(),
+        );
     }
     emit(
         look,
@@ -422,6 +442,7 @@ fn run_on(look: &Look, schedule: &Schedule) -> Result<(), String> {
             "unit_dir": dir,
         }),
         &lines,
+        &notes,
     )?;
     // Apply what is due now, or the screen stays wrong until the next
     // boundary. The install already stands if this fails.
@@ -443,11 +464,12 @@ fn run_off(look: &Look) -> Result<(), String> {
             dir.display()
         ));
     }
+    let mut notes = Vec::new();
     if out.manager_skipped {
-        lines.push("note: no systemd user manager answers: removed the files only".to_owned());
+        notes.push("no systemd user manager answers: removed the files only".to_owned());
     }
     for path in &out.left {
-        lines.push(format!("note: left {}: it is not ours", path.display()));
+        notes.push(format!("left {}: it is not ours", path.display()));
     }
     emit(
         look,
@@ -458,6 +480,7 @@ fn run_off(look: &Look) -> Result<(), String> {
             "manager_skipped": out.manager_skipped,
         }),
         &lines,
+        &notes,
     )
 }
 
@@ -465,6 +488,7 @@ fn run_status(look: &Look) -> Result<(), String> {
     let dir = unit_dir(&install::config_home_dir()?);
     let found = status(&dir, &CliSystemctl)?;
     let mut lines = Vec::new();
+    let mut notes = Vec::new();
     let mut doc = serde_json::json!({ "enabled": false });
     match &found.plan {
         None => lines.push("auto switching: off".to_owned()),
@@ -479,10 +503,9 @@ fn run_status(look: &Look) -> Result<(), String> {
             lines.push(format!("light: {} from {}", s.light, s.light_from));
             lines.push(format!("dark:  {} from {}", s.dark, s.dark_from));
             let now = local_clock().ok();
-            let current = match resolve_current(look) {
-                Some(name) => name,
-                None => "(none)".to_owned(),
-            };
+            // The state the timer swaps, not necessarily this shell's.
+            let state = plan.state.as_deref().or(look.state.as_deref());
+            let current = active_look(state).0.unwrap_or_else(|| "(none)".to_owned());
             if let Some(now) = now {
                 let side = s.due(now);
                 lines.push(format!(
@@ -493,8 +516,8 @@ fn run_status(look: &Look) -> Result<(), String> {
             }
             lines.push(format!("runs: {}", plan.exec_start().unwrap_or_default()));
             if !plan.exe.exists() {
-                lines.push(format!(
-                    "warning: {} is gone: run `scoot look auto` again to point the timer at the installed binary",
+                notes.push(format!(
+                    "{} is gone: run `scoot look auto` with the same arguments to point the timer at the installed binary",
                     plan.exe.display()
                 ));
             }
@@ -527,31 +550,33 @@ fn run_status(look: &Look) -> Result<(), String> {
                 "active": t.active, "enabled": t.enabled, "next": t.next
             });
         }
-        Some(Err(why)) => lines.push(format!("timer: unknown ({why})")),
+        Some(Err(why)) => notes.push(format!("the timer's state is unknown: {why}")),
         None => {}
     }
     if found.partial {
-        lines.push(
-            "warning: only one of the two unit files is present: run `scoot look auto` again"
+        notes.push(
+            "only one of the two unit files is present: run `scoot look auto` with the same arguments again"
                 .to_owned(),
         );
     }
     for path in &found.foreign {
-        lines.push(format!(
-            "note: {} is not ours and is left alone",
-            path.display()
-        ));
+        notes.push(format!("{} is not ours and is left alone", path.display()));
     }
-    emit(look, doc, &lines)
+    emit(look, doc, &lines, &notes)
 }
 
-/// The recorded active look's name, if any.
-fn resolve_current(look: &Look) -> Option<String> {
-    let dir = apply::resolve_state_dir(look.state.as_deref()).ok()?;
-    match read_record(&dir) {
+/// The recorded active look's name, if any, and whether a timed preview
+/// is pending in that state.
+fn active_look(state: Option<&Path>) -> (Option<String>, bool) {
+    let Ok(dir) = apply::resolve_state_dir(state) else {
+        return (None, false);
+    };
+    let name = match read_record(&dir) {
         RecordRead::Present(record) => Some(record.name),
         _ => None,
-    }
+    };
+    let preview = matches!(cycle::read_preview(&dir), cycle::PreviewRead::Present(_));
+    (name, preview)
 }
 
 /// What the service runs: apply the look due at this minute unless it is
@@ -559,8 +584,8 @@ fn resolve_current(look: &Look) -> Option<String> {
 /// `systemctl --user status` and the journal.
 fn run_fire(look: &Look, schedule: &Schedule) -> Result<(), String> {
     let now = local_clock()?;
-    let current = resolve_current(look);
-    let Some(target) = fire_target(schedule, now, current.as_deref()) else {
+    let (current, preview_pending) = active_look(look.state.as_deref());
+    let Some(target) = fire_target(schedule, now, current.as_deref(), preview_pending) else {
         return Ok(());
     };
     super::run_apply(

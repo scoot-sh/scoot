@@ -93,8 +93,8 @@ cross midnight (`22:00/06:00` is light overnight). `auto` applies the look
 that is due right now when you run it, so the screen matches the schedule
 at once, then the timer does the rest.
 
-- **Both looks must exist.** A name that is not in the catalog refuses
-  when you run `auto`, not at the first boundary. A look that is removed
+- **Both looks must exist.** A name that is not in the catalog your shell
+  sees refuses when you run `auto`, not at the first boundary. A look that is removed
   later makes that boundary's run fail; `systemctl --user status
   scoot-look-auto.service` and `journalctl --user -u scoot-look-auto`
   show the refusal.
@@ -110,7 +110,21 @@ at once, then the timer does the rest.
 - **Your own choices.** The schedule is a live choice like `apply`. A look
   you pick by hand stays until the next boundary, which applies the
   scheduled look again. A boundary does nothing when its look is already
-  active.
+  active, and it cancels a pending `--for` preview (keeping the scheduled
+  look) instead of leaving its revert to undo the swap.
+- **What the timer sees.** The service runs in the user manager's
+  environment (`systemctl --user show-environment`), not your shell's. The
+  state directory is resolved when you run `auto` and written into the
+  unit, so the timer swaps the state your sessions read. `PATH` is the
+  manager's: `date` and `dconf` must be on it, and without `dconf` the
+  swap leaves the toolkit keys (including `color-scheme`) alone, as it
+  does anywhere else. `SCOOT_LOOKS_DIR` is not carried over: `auto` notes
+  it when it is set here, since the timer would validate a different
+  catalog than the one it checked.
+- **Which logins it runs in.** The timer is wanted by `timers.target`, so it
+  runs in any login of that user, not only in a scoot session, and the swap
+  writes the dconf keys the toolkit step owns there too. Turn it off with
+  `--off` if you also use another desktop.
 - **Nix.** `programs.scoot.look` is the declared default; the schedule
   swaps the live choice, and the declaration wins again only when you
   change it there (the [`sync` rule](#scoot-look-sync)). `auto` prints a
@@ -120,10 +134,11 @@ at once, then the timer does the rest.
 - **`--sun` and `--follow-portal`** (sunset, or the desktop's own
   light/dark setting) are not available yet.
 
-What it creates, and all it creates: `scoot-look-auto.timer` and
-`scoot-look-auto.service` in `$XDG_CONFIG_HOME/systemd/user`
-(`~/.config/systemd/user`), each starting with a `# Managed by scoot look
-auto` line, and the timer's enable link. `--off` disables the timer, then
+What it creates: `scoot-look-auto.timer` and `scoot-look-auto.service`
+in `$XDG_CONFIG_HOME/systemd/user` (`~/.config/systemd/user`), each
+starting with a `# Managed by scoot look auto` line, and the timer's enable
+link. systemd keeps its own record of when the timer last ran, which
+`--off` leaves alone. `--off` disables the timer, then
 deletes the two files. A file with either name that does not carry the
 marker (a home-manager link into the store, a unit you wrote) is never
 overwritten or removed: `auto` refuses and names it, and `--off` leaves it
@@ -132,8 +147,8 @@ and the times, which passed the same checks as the command line, and
 nothing a look supplies. It starts the `scoot` found first on `PATH` that
 is the same file as the one you ran, so a profile link survives upgrades;
 otherwise the binary you ran. If that path disappears, bare `scoot look auto`
-warns, and running `auto` with the arguments again repairs the unit. `--state DIR`, when you pass
-it, is carried into the unit.
+warns, and running `auto` with the arguments again repairs the unit. `--state DIR` moves the state
+the unit swaps, as it does for every `scoot look` command.
 
 > **Symptom:** `no systemd user manager answers (...): `scoot look auto` runs
 > as a user timer and needs one`.

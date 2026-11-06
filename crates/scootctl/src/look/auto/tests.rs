@@ -194,14 +194,30 @@ fn every_minute_has_exactly_one_side_and_each_boundary_starts_its_own() {
 fn fire_skips_a_look_that_is_already_active() {
     let s = schedule("07:00", "19:00");
     assert_eq!(
-        fire_target(&s, clock("08:00"), Some("moonrise")),
+        fire_target(&s, clock("08:00"), Some("moonrise"), false),
         Some("dawn")
     );
-    assert_eq!(fire_target(&s, clock("08:00"), Some("dawn")), None);
-    assert_eq!(fire_target(&s, clock("08:00"), None), Some("dawn"));
+    assert_eq!(fire_target(&s, clock("08:00"), Some("dawn"), false), None);
+    assert_eq!(fire_target(&s, clock("08:00"), None, false), Some("dawn"));
     assert_eq!(
-        fire_target(&s, clock("20:00"), Some("dawn")),
+        fire_target(&s, clock("20:00"), Some("dawn"), false),
         Some("moonrise")
+    );
+}
+
+#[test]
+fn a_pending_preview_is_not_the_active_look() {
+    // `apply moonrise --for 20` at 18:59, the 19:00 boundary wants moonrise:
+    // the preview's reverter would put dawn back, so the boundary applies
+    // (and keeps) it even though it is the previewed look.
+    let s = schedule("07:00", "19:00");
+    assert_eq!(
+        fire_target(&s, clock("19:00"), Some("moonrise"), true),
+        Some("moonrise")
+    );
+    assert_eq!(
+        fire_target(&s, clock("19:00"), Some("moonrise"), false),
+        None
     );
 }
 
