@@ -1,14 +1,19 @@
 ---
 title: "Automate the Nix pnpm-deps hash bump for dependabot site PRs"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-05"
 ---
 
 # Automate the Nix pnpm-deps hash bump for dependabot site PRs
 
 Filed 2026-10-27. Serves **daily-drive** (a red docs-site build on every dependency bump blocks docs delivery; the fix is toil, not a decision).
+
+## Resolution
+
+Landed the helper shape, no bot commits (so no loop risk). `scripts/update-pnpm-deps-hash` blanks the pin, builds `.#docs-site.pnpmDeps`, reads `got: sha256-...`, and writes it back; it restores the file on any failure or signal, leaves a correct pin untouched, and refuses off Linux. The existing `docs-site` CI job is the check that fails when the lock and pin disagree; it now also prints an annotation naming the helper when the build fails with `hash mismatch`. `dev/pnpm-deps-hash.md` says when to run it. Verified on the dev VM: no-op on the current tree, repair of a corrupted hash, restore on SIGTERM mid-build.
 
 ## The gap
 

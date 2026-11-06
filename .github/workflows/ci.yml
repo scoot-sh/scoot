@@ -331,6 +331,10 @@ jobs:
                 # The same for the Stylix run (fetches two flakes and builds
                 # Stylix's palette generator; dev/research/scootbar-testing.md).
                 scripts/scootbar-unit-test.sh | scripts/scootbar-stylix-test.sh) ;;
+                # The pnpm hash helper: run by hand on a Linux box after a
+                # site lockfile change (dev/pnpm-deps-hash.md). Nothing in CI
+                # executes it; the docs-site job checks the pin it writes.
+                scripts/update-pnpm-deps-hash) ;;
                 # The Arch PKGBUILDs and their README: the Arch container
                 # workflow (arch.yml) owns them, so a change there alone
                 # runs nothing here.
@@ -682,7 +686,21 @@ jobs:
           git ls-files -z '*.nix' | xargs -0 nix fmt -- --check
 
       - name: nix build .#docs-site (builds the site, runs the llms, page-link, asset, snippet and mdx-twin gates)
-        run: nix build -L --no-link .#docs-site
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          nix build -L --no-link .#docs-site 2>&1 | tee "$RUNNER_TEMP/docs-site-build.log"
+
+      # A stale `pnpmDeps.hash` (site/pnpm-lock.yaml changed, the pin in
+      # nix/docs-site.nix did not) fails the build above with "hash
+      # mismatch"; say how to fix it instead of leaving that to the log.
+      - name: How to fix a stale pnpmDeps hash
+        if: ${{ failure() && steps.build.outcome == 'failure' }}
+        run: |
+          if grep -q 'hash mismatch' "$RUNNER_TEMP/docs-site-build.log"; then
+            echo "::error title=Stale pnpmDeps hash::site/pnpm-lock.yaml and the pin in nix/docs-site.nix disagree. On a Linux box run scripts/update-pnpm-deps-hash and commit nix/docs-site.nix (see dev/pnpm-deps-hash.md)."
+          fi
 
       # The installer served at scoot.sh/install.sh, against a fake release
       # tree (no network), with shellcheck from the pinned nixpkgs.
