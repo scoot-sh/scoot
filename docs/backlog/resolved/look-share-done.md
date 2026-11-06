@@ -50,7 +50,7 @@ Half shipped, half split, on purpose:
   - **Known gap:** Ctrl-C leaves the 0700 temp directory (no signal handler
     in `scootctl`; every other exit removes it).
 - **`lookPacks.<name>` split out** to
-  [`look-packs-flake`](look-packs-flake.md): `toEntry` takes one look
+  [`look-packs-flake`](look-packs-flake-done.md): `toEntry` takes one look
   directory per entry, a pack needs a new expansion branch plus
   `nix/tests.nix` cases and a NixOS evaluation to verify, which is its own
   change.

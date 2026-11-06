@@ -77,7 +77,7 @@ stated rule.
 | [`look-install`](../resolved/look-install-done.md) | low | daily-drive | `look-authoring` |
 | [`look-install-sh`](../resolved/look-install-sh-done.md) | medium | daily-drive | `look-apply-cli` |
 | [`look-share`](../resolved/look-share-done.md) | low | daily-drive | `look-install` |
-| [`look-packs-flake`](look-packs-flake.md) (later) | low | daily-drive | `look-share` |
+| [`look-packs-flake`](resolved/look-packs-flake-done.md) (later) | low | daily-drive | `look-share` |
 | [`look-user-targets`](look-user-targets.md) | medium | daily-drive | `look-install` |
 | [`look-auto-switch`](look-auto-switch.md) (later) | low | daily-drive | `look-toolkit-live` |
 

@@ -364,8 +364,9 @@ in
       ];
       description = ''
         The looks home-manager installs: shipped look names or paths to
-        source look directories, plus `stylix` when Stylix synthesis is
-        on. Default: every shipped look. A look with `extends`
+        source look directories, or look packs (a directory whose
+        subdirectories are looks, such as a flake's
+        `lookPacks.<name>`), plus `stylix` when Stylix synthesis is on. Default: every shipped look. A look with `extends`
         resolves its base through this same list, so list the base too.
       '';
     };

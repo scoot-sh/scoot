@@ -419,9 +419,10 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [Bundle the maintainer's vinyl-sunset image and retheme the look](./resolved/vinyl-sunset-image-done.md) (medium) — RESOLVED 2026-10-17
 - [install.sh `--look` installs the catalog and applies a look](./resolved/look-install-sh-done.md) (medium) — RESOLVED 2026-10-15
 - [install.sh: say clearly that `--system` adds the login-screen entry, and warn about a per-user copy](./resolved/install-sh-system-clarity-done.md) (medium) — RESOLVED 2026-10-17
-- [Later: flake `lookPacks` output for `programs.scoot.looks`](./core/look-packs-flake.md) (low, later)
+- [Later: flake `lookPacks` output for `programs.scoot.looks`](./resolved/look-packs-flake-done.md) (low, later)
 - [User and community look targets: render any app from a template](./core/look-user-targets.md) (medium)
 - [Later: opt-in automatic look switching](./core/look-auto-switch.md) (low, later)
+- [Later: accept context-bearing path strings in `programs.scoot.looks`](./core/look-packs-context-strings.md) (low)
 
 ### Found reviewing the shell-app extractions (2026-10-18)
 

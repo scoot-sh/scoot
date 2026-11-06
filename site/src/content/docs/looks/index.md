@@ -403,8 +403,8 @@ first).
 ## The Nix catalog
 
 `programs.scoot.looks` lists the catalog (default: every shipped
-look; add paths to your own source look directories beside the
-names); each look renders at build time and installs as
+look; add paths to your own source look directories, or a pack of
+them ([look packs](#look-packs)), beside the names); each look renders at build time and installs as
 `~/.local/share/scoot/looks/<name>` (sources) beside
 `~/.local/share/scoot/rendered/<name>` (renders).
 `programs.scoot.look` is the declared default (`ginger-night` with the
@@ -425,6 +425,84 @@ still carry in `look-nix-claims` beside the declared default, and
 On a NixOS-module-only machine the catalog installs system-wide, the
 default lands in `/etc/scoot/look-default`, and the session launcher
 runs `scoot look sync` at login.
+
+### Look packs
+
+A look pack is a directory whose subdirectories are source looks, each
+with a `look.toml`. List it in `programs.scoot.looks` and it expands to
+one catalog entry per look, in directory-name order. A flake shares a
+pack as its `lookPacks.<name>` output, a plain path:
+
+```nix title="flake.nix"
+# the sharing flake
+outputs = { self, ... }: {
+  lookPacks.default = ./looks;   # ./looks/dusk/look.toml, ./looks/dawn/look.toml
+};
+```
+
+```nix title="home.nix"
+# your configuration
+programs.scoot.looks = [
+  "ginger-night"
+  inputs.friend.lookPacks.default
+  ./my-looks/moonrise-green        # a single look directory still works
+];
+```
+
+scoot's own flake exports its shipped looks as `lookPacks.shipped`.
+
+`nix flake check` and `nix flake show` print `unknown flake output
+'lookPacks'` for a flake that exports one. Nix has no schema for the name;
+the warning is expected and harmless.
+
+A directory with a `look.toml` is one look; one without is a pack. Each
+look in a pack is checked like a single entry: the manifest must parse
+and carry a `name` of 1 to 32 characters from `a-z`, `0-9` and `-`. The
+manifest's `name`, not the directory name, is the catalog name.
+
+- Plain files (a `README.md`) and directories starting with `.` are
+  skipped.
+- A subdirectory without a `look.toml`, or a symlink, refuses the
+  evaluation, so a misnamed manifest or a link cannot make a look vanish
+  quietly.
+- A pack with no look refuses.
+- A name claimed by two different sources refuses when either comes
+  from a pack: two looks in one pack, a pack look against a shipped name
+  or against a path entry. The same directory listed beside the pack
+  that holds it is not a collision. Among entries that are not from
+  packs, the first listed still wins.
+
+Looks from a pack are declared looks like any path entry: they install
+without `scoot look install`'s `--trust` review, so a pack is as trusted
+as the flake input that supplies it. Pin the input.
+
+Entries are path values or `inputs.<name>.lookPacks.<pack>` attributes,
+which are path values. A string built from an input, such as
+`"${inputs.friend}/looks"` or `inputs.friend + "/looks"`, does not work:
+it carries store-path context and the evaluation refuses it.
+
+> **Symptom:** ``programs.scoot.looks: look name `twin` is declared twice
+> with different sources: /nix/store/...-source/dup/one and
+> /nix/store/...-source/dup/two (a look pack never shadows or is shadowed;
+> rename one look's `name`)``.
+> Two looks claim one name. Rename one look's `name` in its `look.toml`,
+> or drop one of the entries. You cannot edit a look in someone else's
+> flake, so two third-party packs that share a name, or a third-party look
+> named like a shipped one (`ginger-night`), cannot be combined: drop the
+> entry you want least, or fork the pack and rename the look.
+
+> **Symptom:** ``programs.scoot.looks: look pack /nix/store/...-source:
+> subdirectory `junk` is not a look (no look.toml)``.
+> Remove the directory from the pack, or add its `look.toml`.
+
+> **Symptom:** ``programs.scoot.looks: look pack /nix/store/...-source:
+> `link` is a symlink (a pack holds look directories, not links to them)``.
+> Replace the link with the directory it points to.
+
+> **Symptom:** ``programs.scoot.looks: /nix/store/...-source is neither a
+> look (no look.toml) nor a look pack (no subdirectory holds a look)``.
+> The path is not a look directory and holds no looks. Check that the
+> flake input and the `lookPacks` attribute name the directory you meant.
 
 ### `scoot look sync`
 
