@@ -19,6 +19,16 @@ use wayland_client::protocol::wl_shm::WlShm as HostShm;
 use wayland_client::protocol::wl_shm_pool::WlShmPool as HostShmPool;
 use wayland_client::protocol::wl_surface::WlSurface as HostSurface;
 use wayland_client::{Connection, Dispatch, QueueHandle};
+use wayland_protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gesture_hold_v1::{
+    self as hold, ZwpPointerGestureHoldV1,
+};
+use wayland_protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gesture_pinch_v1::{
+    self as pinch, ZwpPointerGesturePinchV1,
+};
+use wayland_protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gesture_swipe_v1::{
+    self as swipe, ZwpPointerGestureSwipeV1,
+};
+use wayland_protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gestures_v1::ZwpPointerGesturesV1;
 use wayland_protocols::xdg::shell::client::xdg_surface::{self, XdgSurface as HostXdgSurface};
 use wayland_protocols::xdg::shell::client::xdg_toplevel::{self, XdgToplevel as HostToplevel};
 use wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase as HostWmBase};
@@ -33,6 +43,7 @@ use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLi
 use super::State;
 #[cfg(feature = "gpu-scanout")]
 use super::nested::ParamsTag;
+use super::nested::gestures::HostGesture;
 use super::nested::{ConfigureAction, Host, configure_action};
 
 // Objects whose events this compositor has no use for at all: the registry
@@ -240,6 +251,17 @@ impl Dispatch<HostSeat, ()> for State {
         }
         if wants_pointer && host.pointer().is_none() {
             host.set_pointer(seat.get_pointer(qh, ()));
+            let client_gestures = state.client_gestures.is_some();
+            if let Some(host) = &mut state.host {
+                host.attach_gestures(client_gestures);
+            }
+        } else if !wants_pointer && host.pointer().is_some() {
+            // The pointer is gone and its `leave` may never come: end what
+            // it was doing as a `leave` does. A pointer that comes back is a
+            // new object, with new gesture objects.
+            state.host_pointer_lost();
+            state.end_floating_grab();
+            state.settle_floating_grab();
         }
     }
 }
@@ -462,11 +484,97 @@ impl Dispatch<HostPointer, ()> for State {
                 if let Some(host) = &mut state.host {
                     let _ = host.take_pending_axis();
                 }
+                state.host_pointer_left();
                 state.end_floating_grab();
                 state.settle_floating_grab();
             }
             _ => {}
         }
+    }
+}
+
+// The host's gesture objects (`nested/gestures.rs`): each event becomes a
+// `HostGesture` and goes to `State::host_gesture`, which keeps the
+// begin-decides-and-end-matches rule. The manager has no events.
+wayland_client::delegate_noop!(State: ignore ZwpPointerGesturesV1);
+
+impl Dispatch<ZwpPointerGestureSwipeV1, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &ZwpPointerGestureSwipeV1,
+        event: swipe::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        state.host_gesture(match event {
+            swipe::Event::Begin { time, fingers, .. } => HostGesture::SwipeBegin { fingers, time },
+            swipe::Event::Update { time, dx, dy } => HostGesture::SwipeUpdate { dx, dy, time },
+            swipe::Event::End {
+                time, cancelled, ..
+            } => HostGesture::SwipeEnd {
+                cancelled: cancelled != 0,
+                time,
+            },
+            _ => return,
+        });
+    }
+}
+
+impl Dispatch<ZwpPointerGesturePinchV1, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &ZwpPointerGesturePinchV1,
+        event: pinch::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        state.host_gesture(match event {
+            pinch::Event::Begin { time, fingers, .. } => HostGesture::PinchBegin { fingers, time },
+            pinch::Event::Update {
+                time,
+                dx,
+                dy,
+                scale,
+                rotation,
+            } => HostGesture::PinchUpdate {
+                dx,
+                dy,
+                scale,
+                rotation,
+                time,
+            },
+            pinch::Event::End {
+                time, cancelled, ..
+            } => HostGesture::PinchEnd {
+                cancelled: cancelled != 0,
+                time,
+            },
+            _ => return,
+        });
+    }
+}
+
+impl Dispatch<ZwpPointerGestureHoldV1, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &ZwpPointerGestureHoldV1,
+        event: hold::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        state.host_gesture(match event {
+            hold::Event::Begin { time, fingers, .. } => HostGesture::HoldBegin { fingers, time },
+            hold::Event::End {
+                time, cancelled, ..
+            } => HostGesture::HoldEnd {
+                cancelled: cancelled != 0,
+                time,
+            },
+            _ => return,
+        });
     }
 }
 

@@ -78,7 +78,7 @@ use smithay::wayland::pointer_gestures::PointerGesturesState;
 use crate::compositor::State;
 
 #[cfg(test)]
-mod tests;
+pub(in crate::compositor) mod tests;
 
 /// Advertises `zwp_pointer_gestures_v1` when `enabled`
 /// (`[gestures] client_gestures`). Called once from `compositor::run`.

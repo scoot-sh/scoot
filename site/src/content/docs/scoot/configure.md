@@ -278,6 +278,10 @@ pointer, and so does a swipe with a finger count other than `swipe_fingers`; a
 swipe that is scoot's never does (see
 [Touchpad gestures](./keybindings.md#touchpad-gestures)).
 
+In a `--nested` session `client_gestures` also decides what scoot asks its
+host for: pinch and hold only with it on, swipe always (see
+[Gestures in a nested session](./backends.md#gestures-in-a-nested-session)).
+
 ```toml
 [gestures]
 client_gestures = true
