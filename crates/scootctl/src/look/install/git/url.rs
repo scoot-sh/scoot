@@ -2,11 +2,14 @@
 //! that is not a plain `https://` or `ssh://` one.
 //!
 //! The split is textual and never touches the filesystem, so a directory
-//! cannot change what a word means:
+//! cannot change what a word means. The rules apply in this order:
 //!
-//! - a word containing `://` is a URL, always. Its scheme must be exactly
-//!   `https` or `ssh` (lowercase); `http`, `git`, `file`, `ftp` and the
-//!   rest refuse. It never falls through to the PATH branch;
+//! - a word starting with `/`, `./` or `../` is a path, whatever it
+//!   contains. No URL, remote shorthand or option starts that way, so this
+//!   is the one way to spell a local path that holds `://` or `:`;
+//! - otherwise a word containing `://` is a URL, always. Its scheme must be
+//!   exactly `https` or `ssh` (lowercase); `http`, `git`, `file`, `ftp` and
+//!   the rest refuse. It never falls through to the PATH branch;
 //! - a word with no `://` whose first `:` comes before its first `/` is a
 //!   git remote shorthand (`host:path`, `user@host:path`, `ext::cmd`,
 //!   `transport::addr`) and refuses, since git would run a remote helper
@@ -71,10 +74,13 @@ impl GitUrl {
 /// Sorts `word` into a path or a git URL, refusing every other shape.
 pub fn classify(word: &str) -> Result<Source, String> {
     if word.starts_with('-') {
+        let shown = printable(word, 40);
         return Err(format!(
-            "refused: `{}` looks like an option: spell a path starting with `-` as ./{word}",
-            printable(word, 40)
+            "refused: `{shown}` looks like an option: spell a path starting with `-` as ./{shown}"
         ));
+    }
+    if word.starts_with('/') || word.starts_with("./") || word.starts_with("../") {
+        return Ok(Source::Path);
     }
     if let Some((scheme, rest)) = word.split_once("://") {
         return check_url(word, scheme, rest).map(|()| Source::Git(GitUrl(word.to_owned())));
@@ -98,7 +104,7 @@ fn check_url(word: &str, scheme: &str, rest: &str) -> Result<(), String> {
     if scheme != "https" && scheme != "ssh" {
         return Err(format!(
             "refused: `{}://` is not installable: only https:// and ssh:// URLs install from git \
-             (a local path stays a path; ./a://b spells one containing `://`)",
+             (a local path starts with /, ./ or ../)",
             printable(scheme, 20)
         ));
     }

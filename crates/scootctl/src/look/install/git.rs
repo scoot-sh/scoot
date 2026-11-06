@@ -35,12 +35,15 @@
 //!   stores no credential: ssh uses the user's own agent and keys, and a
 //!   private `https://` repository does not install.
 //! - **Bounded.** The clone gets [`CLONE_SECS`] and the temp directory is
-//!   killed at [`SCRATCH_CAP_BYTES`], measured while git runs, so a
-//!   multi-gigabyte blob cannot fill the disk. Each blob read is bounded
+//!   stopped at [`SCRATCH_CAP_BYTES`], measured every 10 ms while git runs
+//!   and once more when it exits, so an oversized clone fails rather than
+//!   fills the disk, by at most one interval's writes (git itself is killed; the transport helpers it
+//!   started end when their pipes to it close). Each blob read is bounded
 //!   too, and git's own words reach the user only escaped and truncated.
 //!
-//! One gap: git runs in the terminal's foreground process group, so Ctrl-C
-//! stops it with scoot, but no destructor runs on a signal and the temp
+//! One gap: git runs in the terminal's foreground process group (it is
+//! deliberately not given its own, so the terminal's Ctrl-C reaches it),
+//! so Ctrl-C stops it with scoot, but no destructor runs on a signal and the temp
 //! directory (at most the cap, mode 0700, `scoot-look-clone-*` in
 //! `$TMPDIR`) stays until the user deletes it. Exit paths scoot controls
 //! (errors, timeouts, the size cap, success) always remove it.
@@ -312,6 +315,13 @@ impl Git {
         Ok(files)
     }
 
+    fn over_cap(&self) -> String {
+        format!(
+            "refused: the repository is larger than {} bytes and was stopped",
+            self.scratch_cap
+        )
+    }
+
     /// Runs git with `args` in the scratch directory: environment cleared
     /// to [`Git::env`], stdin closed, stdout to `stdout_to` (or nowhere),
     /// stderr to a file in the scratch directory (never a pipe, so a chatty
@@ -370,13 +380,15 @@ impl Git {
             if dir_exceeds(scratch.path(), self.scratch_cap) {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!(
-                    "refused: the repository is larger than {} bytes and was stopped",
-                    self.scratch_cap
-                ));
+                return Err(self.over_cap());
             }
             std::thread::sleep(POLL);
         };
+        // A run that finished inside one poll interval was never measured
+        // by the loop: the cap holds for it too.
+        if dir_exceeds(scratch.path(), self.scratch_cap) {
+            return Err(self.over_cap());
+        }
         if status.success() {
             return Ok(());
         }

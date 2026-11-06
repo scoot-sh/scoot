@@ -558,14 +558,14 @@ scoot look install ssh://git@example.org/me/my-look.git --trust
 Scoot decides from the text of the argument alone whether it is a URL or
 a path, and never looks at the filesystem to decide:
 
-- A word containing `://` is a URL, always. Only `https://` and `ssh://`
-  (lowercase) install; `http://`, `git://`, `file://`, `ftp://` and the
-  rest refuse. It is never reinterpreted as a path; write
-  `./name://x` for a local path that really contains `://`.
-- A word with no `://` whose first `:` comes before its first `/` is a
+- A word starting with `/`, `./` or `../` is a path, whatever it
+  contains. This is how to spell a local path that holds `://` or `:`.
+- Otherwise, a word containing `://` is a URL, always. Only `https://`
+  and `ssh://` (lowercase) install; `http://`, `git://`, `file://`,
+  `ftp://` and the rest refuse, and are never reinterpreted as paths.
+- Otherwise, a word whose first `:` comes before its first `/` is a
   git remote shorthand (`host:path`, `git@host:path`, `ext::command`)
-  and refuses. Use `ssh://git@host/path`. A local path with a colon
-  spells `./a:b`.
+  and refuses. Use `ssh://git@host/path`.
 - Anything else is a path.
 
 A URL is ASCII with no spaces or control characters, no query or
@@ -598,7 +598,8 @@ How the repository is read:
   credential helper. Only the `https` and `ssh` transports are allowed,
   redirects are not followed, prompts are off, and ssh runs with
   `BatchMode`. The clone is stopped after 120 seconds or when the
-  temporary directory passes 256 MiB.
+  temporary directory passes 256 MiB (checked every 10 ms and when git
+  exits).
 - Press Ctrl-C and git stops with scoot, but the temporary directory
   stays until you delete it. Every other exit removes it.
 

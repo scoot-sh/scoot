@@ -19,6 +19,11 @@ use crate::look::apply::ProdChecks;
 fn fixture_git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .current_dir(dir)
+        // Nothing inherited: a GIT_DIR or GIT_INDEX_FILE from an outer git
+        // (a hook-driven test run) must not aim fixture commits at it.
+        .env_clear()
+        .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+        .env("HOME", dir)
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_AUTHOR_NAME", "t")
@@ -440,6 +445,37 @@ fn a_clone_past_the_size_cap_is_killed() {
     let error = result.unwrap_err();
     assert!(error.contains("is larger than 1048576 bytes"), "{error}");
     assert!(started.elapsed() < Duration::from_secs(10));
+    assert_clean(&base);
+}
+
+#[test]
+fn a_real_git_clone_past_the_size_cap_fails_with_nothing_left() {
+    // Incompressible bytes (a seeded xorshift stream), so the pack really
+    // is about 3 MiB. Whether the poll loop or the post-exit check sees it
+    // first, the refusal is the same.
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    let blob: Vec<u8> = (0..3 * 1024 * 1024)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 32) as u8
+        })
+        .collect();
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let url = repo(root.path(), "heavy", &[("wallpaper.png", &blob)]);
+    let git = Git::for_test(
+        PathBuf::from("git"),
+        &["file"],
+        1 << 20,
+        Duration::from_secs(60),
+    );
+    let started = std::time::Instant::now();
+    let (result, base) = install(&git, &url, root.path(), false);
+    let error = result.unwrap_err();
+    assert!(error.contains("is larger than 1048576 bytes"), "{error}");
+    assert!(started.elapsed() < Duration::from_secs(20));
+    assert!(!root.path().join("installed-looks/heavy").exists());
     assert_clean(&base);
 }
 
