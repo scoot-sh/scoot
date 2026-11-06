@@ -55,8 +55,9 @@ Decisions the design did not settle:
 - **Snapshot at open.** The list is read once; a title change or a new
   window is not shown, and a window that closes stays in the list but is
   refused at pick time (`that window closed before it could be
-  activated`, exit 1), because a request on a closed handle is a protocol
-  error.
+  activated`, exit 1), because activating a window that is gone would
+  do nothing useful (the server keeps a closed handle alive until the client
+  destroys it, so this guard is conservative, not protocol-required).
 - **The pick is activated after the panel is gone** (the layer surface's
   exclusive keyboard is released first), on a second event queue of the
   same connection that holds the handles.

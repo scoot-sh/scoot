@@ -18,8 +18,8 @@
 //! are read when the pick is activated. A title that changes while the
 //! panel is open is not redrawn (a snapshot is the list the user
 //! opened), but a window that closes is known to be gone before
-//! `activate` is sent, because a request on a closed handle is a
-//! protocol error.
+//! `activate` is sent, so the pick is refused instead of sent to a
+//! window that no longer exists.
 //!
 //! The pick is activated after the panel is gone: the layer surface
 //! holds an exclusive keyboard, and a compositor may refuse to move
