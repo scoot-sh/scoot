@@ -311,6 +311,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [XWayland stalled-paste test failed once under cargo test](./resolved/xwayland-stalled-pastes-flake-done.md) — RESOLVED 2026-10-28: a test race (a sibling test's fork holds the read ends until exec, so the pipe has not hung up); the test now pastes until one is admitted, bounded at 5 s
 - [qemu-test phase 3e: `nh os switch` races the greeter's user manager shutdown](./testing/qemu-test-3e-activation-race.md) (low, filed 2026-10-29): scoot-iso#22's qemu-test failed once with a destructive-transaction error on the user units and passed on rerun of the same head
 - [Probe Sunshine/Moonlight on the M2](./testing/moonlight-sunshine-on-m2.md) (low, filed 2026-10-04): KMS capture + uinput may already stream a `--tty` session; Asahi's DCP is the open question
+- [Pin idle-notify activity on the pinch and hold paths](./testing/gesture-idle-notify-test.md) (low, filed 2026-11-06): the PR #946 review removed `announce_activity()` from the hold arm and every test still passed
 - [Run the scoot-session launcher harness in CI](./resolved/scoot-session-harness-in-ci-done.md) — RESOLVED 2026-10-05 (PR #453): `session-harness` CI job (sh + python3, ~20 s) with true activation semantics and the carried stale-graphical-target limitation pinned; the heal deliberately does not restart graphical-bound units
 
 ### Input
