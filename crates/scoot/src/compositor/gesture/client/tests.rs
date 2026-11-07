@@ -15,6 +15,9 @@ use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_pointer, wl_registry, wl_seat, wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{Connection, Dispatch, QueueHandle, WEnum};
+use wayland_protocols::ext::idle_notify::v1::client::{
+    ext_idle_notification_v1, ext_idle_notifier_v1,
+};
 use wayland_protocols::wp::pointer_gestures::zv1::client::{
     zwp_pointer_gesture_hold_v1, zwp_pointer_gesture_pinch_v1, zwp_pointer_gesture_swipe_v1,
     zwp_pointer_gestures_v1,
@@ -46,6 +49,10 @@ pub(in crate::compositor) enum Step {
     /// Destroy the mapped toplevel and its surface.
     Unmap,
     Report,
+    /// Watch the seat for `timeout_ms` of quiet (`ext_idle_notifier_v1`).
+    Watch {
+        timeout_ms: u32,
+    },
 }
 
 #[derive(Debug, Default)]
@@ -60,6 +67,10 @@ pub(in crate::compositor) struct Ack {
     pub(in crate::compositor) events: Vec<Ev>,
     /// `wl_pointer.frame` events since the last report.
     pub(in crate::compositor) frames: u32,
+    /// Cumulative idle-notify `idled` events.
+    pub(in crate::compositor) idled: u32,
+    /// Cumulative idle-notify `resumed` events.
+    pub(in crate::compositor) resumed: u32,
 }
 
 #[derive(Default)]
@@ -76,6 +87,9 @@ struct TestClient {
     inside: bool,
     events: Vec<Ev>,
     frames: u32,
+    idle_notifier: Option<ext_idle_notifier_v1::ExtIdleNotifierV1>,
+    idled: u32,
+    resumed: u32,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
@@ -106,6 +120,26 @@ impl Dispatch<wl_registry::WlRegistry, ()> for TestClient {
                 client.version = version;
                 client.gestures = Some(registry.bind(name, version.min(3), qh, ()));
             }
+            "ext_idle_notifier_v1" => {
+                client.idle_notifier = Some(registry.bind(name, version.min(2), qh, ()))
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ext_idle_notification_v1::ExtIdleNotificationV1, ()> for TestClient {
+    fn event(
+        client: &mut Self,
+        _: &ext_idle_notification_v1::ExtIdleNotificationV1,
+        event: ext_idle_notification_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        match event {
+            ext_idle_notification_v1::Event::Idled => client.idled += 1,
+            ext_idle_notification_v1::Event::Resumed => client.resumed += 1,
             _ => {}
         }
     }
@@ -256,6 +290,7 @@ impl Dispatch<xdg_toplevel::XdgToplevel, ()> for TestClient {
     }
 }
 
+wayland_client::delegate_noop!(TestClient: ignore ext_idle_notifier_v1::ExtIdleNotifierV1);
 wayland_client::delegate_noop!(TestClient: ignore wl_compositor::WlCompositor);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm::WlShm);
 wayland_client::delegate_noop!(TestClient: ignore wl_shm_pool::WlShmPool);
@@ -312,6 +347,7 @@ pub(in crate::compositor) fn run_client(
     let compositor = client.compositor.clone().ok_or("no wl_compositor")?;
     let wm_base = client.wm_base.clone().ok_or("no xdg_wm_base")?;
     let shm = client.shm.clone().ok_or("no wl_shm")?;
+    let mut watches = Vec::new();
     let mut mapped: Option<(
         wl_surface::WlSurface,
         xdg_surface::XdgSurface,
@@ -345,6 +381,15 @@ pub(in crate::compositor) fn run_client(
                 }
             }
             Step::Report => {}
+            Step::Watch { timeout_ms } => {
+                let notifier = client
+                    .idle_notifier
+                    .clone()
+                    .ok_or("no ext_idle_notifier_v1")?;
+                let seat = client.seat.clone().ok_or("no wl_seat")?;
+                // Held for the run: the watch ends with the object.
+                watches.push(notifier.get_idle_notification(timeout_ms, &seat, &qh, ()));
+            }
         }
         queue.roundtrip(&mut client).map_err(|e| e.to_string())?;
         acks.send(Ack {
@@ -353,6 +398,8 @@ pub(in crate::compositor) fn run_client(
             inside: client.inside,
             events: std::mem::take(&mut client.events),
             frames: std::mem::take(&mut client.frames),
+            idled: client.idled,
+            resumed: client.resumed,
         })
         .map_err(|e| e.to_string())?;
     }
@@ -438,6 +485,55 @@ fn with_the_global_a_pinch_or_hold_is_pointer_activity() {
     fixture.state.cursor_hide_deadline = None;
     fixture.state.gesture_pinch_begin(2, 1010);
     assert!(fixture.state.cursor_hide_deadline.is_some());
+}
+
+/// Polls the client until its cumulative `(idled, resumed)` satisfy `done`,
+/// failing at a deadline instead of hanging.
+fn wait_for_idle_counts(fixture: &mut Fixture, done: impl Fn(u32, u32) -> bool) -> (u32, u32) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let ack = fixture.run_on(0, Step::Report);
+        if done(ack.idled, ack.resumed) {
+            return (ack.idled, ack.resumed);
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out; saw idled={} resumed={}",
+            ack.idled,
+            ack.resumed
+        );
+    }
+}
+
+/// Lets the seat go idle under a watch, then runs `gesture`, which must
+/// resume it. A removed `announce_activity()` leaves the seat idle for the
+/// whole `QUIET` window, so no `resumed` arrives and this fails.
+fn assert_gesture_resumes_an_idle_seat(gesture: impl FnOnce(&mut crate::compositor::State)) {
+    const QUIET: std::time::Duration = std::time::Duration::from_millis(500);
+    let mut fixture = fixture(true, 1);
+    fixture.run_on(0, Step::Watch { timeout_ms: 50 });
+    wait_for_idle_counts(&mut fixture, |idled, _| idled >= 1);
+    let before = fixture.run_on(0, Step::Report).resumed;
+    assert_eq!(before, 0, "premise: nothing resumed the seat yet");
+
+    gesture(&mut fixture.state);
+
+    let deadline = std::time::Instant::now() + QUIET;
+    let mut resumed = 0;
+    while resumed == 0 && std::time::Instant::now() < deadline {
+        resumed = fixture.run_on(0, Step::Report).resumed;
+    }
+    assert!(resumed >= 1, "the gesture did not count as idle activity");
+}
+
+#[test]
+fn a_pinch_begin_is_idle_activity() {
+    assert_gesture_resumes_an_idle_seat(|state| state.gesture_pinch_begin(2, 1000));
+}
+
+#[test]
+fn a_hold_begin_is_idle_activity() {
+    assert_gesture_resumes_an_idle_seat(|state| state.gesture_hold_begin(2, 1000));
 }
 
 #[test]
