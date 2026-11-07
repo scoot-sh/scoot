@@ -79,7 +79,7 @@ stated rule.
 | [`look-share`](../resolved/look-share-done.md) | low | daily-drive | `look-install` |
 | [`look-packs-flake`](resolved/look-packs-flake-done.md) (later) | low | daily-drive | `look-share` |
 | [`look-user-targets`](look-user-targets.md) | medium | daily-drive | `look-install` |
-| [`look-auto-switch`](look-auto-switch.md) (later) | low | daily-drive | `look-toolkit-live` |
+| [`look-auto-switch`](../resolved/look-auto-switch-done.md) (later) | low | daily-drive | `look-toolkit-live` |
 
 **The minimum slice** is `look-format` → `look-shipped`, `look-layer-scoot`
 → `look-scoped-reload`, and `look-layer-scootbar` → `look-apply-cli`:

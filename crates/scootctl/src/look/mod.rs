@@ -193,7 +193,7 @@ pub const LOOK_USAGE: &str = "\
     look export NAME [--out FILE] [--json]
     look save NAME [--json]
     look wiring [--json]
-    look auto [--light NAME --dark NAME (--schedule HH:MM/HH:MM | --follow-portal) | --off] [--json]
+    look auto [--light NAME --dark NAME (--schedule HH:MM/HH:MM | --sun --latitude N --longitude E | --follow-portal) | --off] [--json]
 
     --state DIR takes the look state (default: $SCOOT_LOOK_STATE, then
     $XDG_STATE_HOME/scoot, then ~/.local/state/scoot); --socket PATH takes
@@ -481,19 +481,26 @@ COMMANDS:
                 installs a timer that applies A from 07:00 and B from 19:00
                 (the system's local time zone; a boundary missed while the
                 machine was off runs at the next start). `auto --light A
-                --dark B --follow-portal` installs a path unit on the dconf
+                --dark B --sun --latitude 51.5074 --longitude -0.1278`
+                applies A while the Sun is up there and B after it sets
+                (sunrise and sunset computed from the place, in decimal
+                degrees, north and east positive; no network, no time zone
+                to give; a polar day or night keeps the side it has). A
+                daily and login-time timer arms a one-shot timer for the
+                next sunrise or sunset, kept in $XDG_RUNTIME_DIR. `auto
+                --light A --dark B --follow-portal` installs a path unit on the dconf
                 database instead: when the desktop's light/dark setting
                 (`color-scheme`) disagrees with the active look's polarity,
                 it applies A (light) or B (dark); A must be a light look
                 and B a dark one. Either form applies what is due now;
                 naming a look that does not exist refuses at once. One
-                trigger at a time: setting up one removes the other. Bare
+                trigger at a time: setting up one removes the others. Bare
                 `auto` shows what is installed; `auto --off` disables the
                 trigger and removes the unit files it wrote
                 (`scoot-look-auto.service` and `.timer` or `.path` in
                 ~/.config/systemd/user), leaving any file it did not write.
                 Needs a systemd user manager (and `dconf` for
-                --follow-portal). Sunset triggers are not available yet
+                --follow-portal)
     wiring      check the one-time non-Nix setup the active look still
                 needs (foot include, mako include, wob command, fcitx5
                 theme link, Helix/btop/starship/nvim pointers, launcher flags,

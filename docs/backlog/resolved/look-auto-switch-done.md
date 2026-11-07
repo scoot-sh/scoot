@@ -1,10 +1,11 @@
 ---
 title: "Opt-in automatic look switching: a schedule, sunset, or the portal"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
 milestone: "later"
+resolved: "2026-11-07"
 ---
 
 # Opt-in automatic look switching: a schedule, sunset, or the portal
@@ -28,10 +29,10 @@ timer and a oneshot service (`crates/scootctl/src/look/auto/`). The
 ticket stays open for the remaining trigger, split out because it is
 its own design problem:
 
-- `--sun`: [`look-auto-sun`](look-auto-sun.md)
+- `--sun`: done, [`look-auto-sun`](../resolved/look-auto-sun-done.md)
 - `--follow-portal`: done, [`look-auto-follow-portal`](../resolved/look-auto-follow-portal-done.md)
 
-Resolve this ticket when `--sun` is done, or close it once it stands alone.
+`--sun` landed 2026-11-07 ([`look-auto-sun`](../resolved/look-auto-sun-done.md)): all three triggers are done.
 
 Decisions this ticket left open, settled by the first slice: the units are
 one timer with two `OnCalendar=` lines and one service that reads the wall

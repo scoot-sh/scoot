@@ -425,8 +425,9 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [install.sh: say clearly that `--system` adds the login-screen entry, and warn about a per-user copy](./resolved/install-sh-system-clarity-done.md) (medium) — RESOLVED 2026-10-17
 - [Later: flake `lookPacks` output for `programs.scoot.looks`](./resolved/look-packs-flake-done.md) (low, later)
 - [User and community look targets: render any app from a template](./core/look-user-targets.md) (medium)
-- [Later: opt-in automatic look switching](./core/look-auto-switch.md) (low, later)
-- [`look auto --sun`: switch looks at sunrise and sunset](./core/look-auto-sun.md) (low)
+- [Later: opt-in automatic look switching](./resolved/look-auto-switch-done.md) (low, later) — RESOLVED 2026-11-07: `--schedule`, `--follow-portal` and `--sun`
+- [`look auto --sun`: switch looks at sunrise and sunset](./resolved/look-auto-sun-done.md) (low) — RESOLVED 2026-11-07: the Sun's altitude from `--latitude`/`--longitude`, a daily timer arming a one-shot UTC timer for each boundary
+- [Nix: pass the night-light latitude and longitude to `look auto --sun`](./core/look-auto-sun-nix.md) (low)
 - [`look auto --follow-portal`: follow the desktop light/dark setting](./resolved/look-auto-follow-portal-done.md) (low) — RESOLVED 2026-11-07: a path unit on the dconf database, polarity-compared so one external flip is one swap
 - [Later: accept context-bearing path strings in `programs.scoot.looks`](./resolved/look-packs-context-strings-done.md) (low) — RESOLVED 2026-11-07
 

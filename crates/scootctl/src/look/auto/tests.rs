@@ -301,9 +301,8 @@ fn parse_refusals() {
         .is_err()
     );
     assert!(on(&["bogus"]).is_err());
-    // Not available yet, named as such.
-    let err = on(&["--sun"]).expect_err("not built");
-    assert!(err.to_string().contains("--sun is not available"), "{err}");
+    // `--sun` is a trigger like the others: it still needs both looks.
+    assert!(matches!(on(&["--sun"]), Err(Error::Missing(_))));
     // One trigger, and --follow-portal is a bare flag.
     let both = on(&[
         "--light",
@@ -538,18 +537,20 @@ fn the_timer_and_service_agree_on_the_boundaries() {
 // ---- lifecycle against a fake manager ----
 
 #[derive(Default)]
-struct Fake {
-    calls: RefCell<Vec<String>>,
-    down: bool,
-    fail_enable: bool,
-    fail_disable: bool,
+pub(super) struct Fake {
+    pub(super) calls: RefCell<Vec<String>>,
+    pub(super) down: bool,
+    pub(super) fail_enable: bool,
+    pub(super) fail_disable: bool,
+    /// `timer_state` answers `inactive`.
+    pub(super) timer_idle: bool,
 }
 
 impl Fake {
     fn log(&self, call: impl Into<String>) {
         self.calls.borrow_mut().push(call.into());
     }
-    fn calls(&self) -> Vec<String> {
+    pub(super) fn calls(&self) -> Vec<String> {
         self.calls.borrow().clone()
     }
 }
@@ -587,9 +588,19 @@ impl Systemctl for Fake {
             Ok(())
         }
     }
-    fn timer_state(&self, _unit: &str) -> Result<TimerState, String> {
+    fn stop(&self, unit: &str) -> Result<(), String> {
+        self.log(format!("stop {unit}"));
+        Ok(())
+    }
+    fn timer_state(&self, unit: &str) -> Result<TimerState, String> {
+        self.log(format!("state {unit}"));
         Ok(TimerState {
-            active: "active".into(),
+            active: if self.timer_idle {
+                "inactive"
+            } else {
+                "active"
+            }
+            .into(),
             enabled: "enabled".into(),
             next: "tomorrow".into(),
         })

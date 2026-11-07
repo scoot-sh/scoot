@@ -43,6 +43,7 @@ scoot look new my-look --from moonrise  # start a user look extending moonrise
 scoot look watch ./my-look             # validate and apply on every save
 scoot look preview my-look --capture   # screenshot the look into preview.png
 scoot look auto --light dawn --dark moonrise --schedule 07:00/19:00   # switch by the clock
+scoot look auto --light dawn --dark moonrise --sun --latitude 51.5074 --longitude -0.1278   # switch at sunrise and sunset
 scoot look auto --light dawn --dark moonrise --follow-portal            # follow the desktop's light/dark setting
 ```
 
@@ -82,17 +83,19 @@ systemd user unit that runs `scoot look apply` for you and exits. It needs
 a systemd user manager. Pick one trigger:
 
 - `--schedule` swaps at two times of day.
+- `--sun` swaps at sunrise and sunset, computed for a place you give.
 - `--follow-portal` swaps when the desktop's light/dark setting changes
   (a settings app, a quick toggle).
 
 ```sh
 scoot look auto --light dawn --dark moonrise --schedule 07:00/19:00
+scoot look auto --light dawn --dark moonrise --sun --latitude 51.5074 --longitude -0.1278
 scoot look auto --light dawn --dark moonrise --follow-portal
 scoot look auto                # show what is installed
 scoot look auto --off          # remove everything it created
 ```
 
-Setting up one trigger removes the other, so there is never both. Both
+Setting up one trigger removes the others, so there is never more than one. Both
 looks must exist: a name that is not in the catalog your shell sees
 refuses when you run `auto`, not at the first swap. A look that is removed
 later makes that run fail; `systemctl --user status scoot-look-auto.service`
@@ -121,6 +124,62 @@ at once, then the timer does the rest.
   scheduled look again. A boundary does nothing when its look is already
   active, and it cancels a pending `--for` preview (keeping the scheduled
   look) instead of leaving its revert to undo the swap.
+
+### At sunrise and sunset
+
+`--sun --latitude N --longitude E` applies `--light` while the Sun is up
+at that place and `--dark` after it sets. Both are required with `--sun`
+and are decimal degrees: latitude `-90` to `90` (north positive),
+longitude `-180` to `180` (east positive), written plainly (`51.5074`,
+`-0.1278`; no `+`, no exponent, no `N`/`W`). Write a negative longitude
+as `--longitude=-0.1278` or as a separate word; both work. `auto` applies
+the look that is due right now when you run it, then the timers do the
+rest.
+
+```sh
+scoot look auto --light dawn --dark moonrise --sun --latitude 40.7128 --longitude=-74.006
+scoot look auto            # shows the place, the side due now and the next boundary
+```
+
+- **Where the place comes from.** Only from these two flags, stored in
+  the unit like the `--schedule` times are. Nothing reads your Nix
+  `nightlight.latitude`/`longitude`, asks a location service or touches the
+  network. Pass the same numbers to both if you want the night-light and the
+  look to turn over together.
+- **What counts as sunrise.** The Sun's upper edge crosses the horizon,
+  with the usual allowance for atmospheric refraction: the convention
+  almanacs print. The position is calculated on the machine; it agrees with
+  the US Naval Observatory's published times to within a minute. Hills
+  and buildings on your real horizon are not modelled.
+- **Time zone.** None to give. The boundaries are computed in UTC and
+  armed in UTC, so daylight-saving changes and a changed time zone do not
+  move them.
+- **Polar day and night.** When the Sun neither rises nor sets within the
+  next 36 hours, nothing is armed and the side stays as it is: `--light`
+  through a polar day, `--dark` through a polar night. The daily run picks
+  up the first sunrise or sunset when it comes.
+- **How it works.** A systemd calendar cannot say "sunset", so two timers
+  cooperate. `scoot-look-auto.timer` wakes the service at 00:05 local time
+  every day and 30 seconds after the user manager starts (a login or a
+  reboot). Each run of the service computes the next sunrise or sunset,
+  writes a one-shot `scoot-look-auto-next.timer` for it, and applies the
+  look that is due now. When that timer fires, the same run happens and arms
+  the one after. The one-shot timer lives in
+  `$XDG_RUNTIME_DIR/systemd/user`, which systemd clears at logout and
+  reboot; the daily and login runs put it back.
+- **Suspend and shutdown.** The side is chosen from the Sun's position when
+  the service runs, never from which timer fired, so a boundary missed
+  while the machine slept is made up by the next run and any number of
+  catch-up runs agree. The daily timer is persistent, like `--schedule`'s.
+- **Cost.** A run with nothing to change reads the clock and the active
+  look, asks the manager whether the one-shot timer is still waiting, and
+  exits; the `systemctl` call is most of its time. It happens at most a few
+  times a day. An unchanged one-shot timer is not rewritten, so the manager
+  does not reload.
+- **Your own choices.** As for `--schedule`: a look you pick by hand stays
+  until the next boundary or daily run, which applies the look due then. A
+  run does nothing when its look is already active, and it cancels a pending
+  `--for` preview instead of leaving its revert to undo the swap.
 
 ### Following the desktop setting
 
@@ -173,7 +232,7 @@ once.
   times does not stop the path unit. The path unit's own limit (200 starts
   in two seconds) still applies.
 
-### Both triggers
+### Every trigger
 
 - **What the service sees.** The service runs in the user manager's
   environment (`systemctl --user show-environment`), not your shell's. The
@@ -194,16 +253,20 @@ once.
   declaration exists.
 - **Re-running** with the same arguments changes nothing. With new ones it
   rewrites the unit files and restarts the trigger.
-- **`--json`** prints a document with `enabled`, `trigger` (`schedule` or
-  `portal`), the two looks, the unit files written and the one replaced,
-  and `apply_error` when the swap on setup failed. When that swap does
-  swap, `apply` prints its own document first.
-- **`--sun`** (sunset) is not available yet.
+- **`--json`** prints a document with `enabled`, `trigger` (`schedule`,
+  `sun` or `portal`), the two looks, the unit files written and the one
+  replaced, and `apply_error` when the swap on setup failed. For `sun` it
+  adds `latitude` and `longitude`. When that swap does swap, `apply` prints
+  its own document first.
 
 What it creates in `$XDG_CONFIG_HOME/systemd/user` (`~/.config/systemd/user`;
 a relative `$XDG_CONFIG_HOME` is ignored, as systemd ignores it): the
 service `scoot-look-auto.service` and, for the trigger, either
-`scoot-look-auto.timer` or `scoot-look-auto.path`. Each starts with a
+`scoot-look-auto.timer` (`--schedule` and `--sun`) or `scoot-look-auto.path`.
+`--sun` also keeps `scoot-look-auto-next.timer` in
+`$XDG_RUNTIME_DIR/systemd/user`; it has the same marker, and the same
+rule: a file of that name that is not ours is never overwritten or removed.
+Setting up another trigger and `--off` stop and delete it. Each starts with a
 `# Managed by scoot look auto` line. The trigger's enable link goes in
 `timers.target.wants` or `paths.target.wants`. systemd keeps its own record
 of when the timer last ran, which `--off` leaves alone. `--off` disables the
@@ -211,7 +274,7 @@ trigger, then deletes the files. A file with one of those names that does
 not carry the marker (a home-manager link into the store, a unit you wrote)
 is never overwritten or removed: `auto` refuses and names it, and `--off`
 leaves it and says so. The service runs one hidden `scoot` command that
-carries the two names (and the times, for a schedule), which passed the same
+carries the two names (and the times for a schedule, the place for `--sun`), which passed the same
 checks as the command line, and nothing a look supplies. It starts the
 `scoot` found first on `PATH` that is the same file as the one you ran, so a
 profile link survives upgrades; otherwise the binary you ran. If that path
@@ -245,6 +308,26 @@ swaps, as it does for every `scoot look` command.
 > digits each): `7:5``.
 > Write both times with two digits each, such as `07:05`; `24:00` is not a
 > time, use `00:00`.
+
+> **Symptom:** `invalid --latitude (want decimal degrees from -90 to 90, like
+> 51.5074): `91``.
+> The latitude is first and the longitude second; a latitude past 90 usually
+> means they are swapped. Nothing was written. `--longitude` takes `-180` to
+> `180`, plain decimals only (`-0.1278`, not `0.1278W`).
+
+> **Symptom:** `XDG_RUNTIME_DIR is not set to an absolute path: --sun keeps
+> its next-boundary timer there`.
+> The shell you ran `auto` from is not part of a systemd user login (`su`,
+> `sudo`, a container). Nothing was written. Run it from a normal login
+> session.
+
+> **Symptom:** `--sun` is on, but the look changes at the wrong time.
+> `scoot look auto` prints the next sunrise or sunset it calculated in UTC;
+> compare with an almanac for your place. A latitude and longitude swapped,
+> or a west longitude written without its minus sign, moves the times by
+> hours. `journalctl --user -u scoot-look-auto` shows one `sun:` line per
+> run with the side it wanted and the next boundary it armed; `not armed:`
+> there says why a boundary was not scheduled.
 
 > **Symptom:** `` `moonrise` is a dark look: --follow-portal needs a light look there``.
 > The two names are the wrong way round, or the look's polarity is not what
@@ -973,7 +1056,7 @@ stderr. The shapes:
 | `target add` | `{"added": ..., "targets": [{`name`, `output`, `reload` ({`argv`, `timeout_secs`} or null), `template_file`, `template`}], "notes": [...]}` (`added` is false without `--trust`, which exits 1 after printing the review) |
 | `export` | `{"exported": ..., "tarball": ..., "files": [...], "notes": [...]}` |
 | `save` | `{"saved": ..., "dir": ..., "extends": ..., "tokens": [...], "notes": [...]}` |
-| `auto` | `{"enabled": ..., "light": ..., "dark": ..., "light_from": ..., "dark_from": ..., "due": ..., "active": ..., "exe": ..., "exe_exists": ..., "timer": {`active`, `enabled`, `next`}}` (off: `{"enabled": false}`; installing prints the `apply` document when a swap was needed, then `{"enabled": true, ..., "wrote": [...], "unit_dir": ..., "apply_error": null or the swap's error}`; `--off`: `{"enabled": false, "removed": [...], "left": [...], "manager_skipped": ...}`) |
+| `auto` | `{"enabled": ..., "trigger": "schedule"\|"sun"\|"portal", "light": ..., "dark": ..., "active": ..., "exe": ..., "exe_exists": ..., "timer": {`active`, `enabled`, `next`}}` plus `light_from`, `dark_from` and `due` (schedule), or `latitude`, `longitude`, `due`, `next_change` ({`kind` (`sunrise`\|`sunset`), `at_utc`, `unix`} or null) and `next_timer` ({`active`, `next`} or null) (sun), or `watch` and `color_scheme` (portal); off: `{"enabled": false}`; installing prints the `apply` document when a swap was needed, then `{"enabled": true, ..., "wrote": [...], "unit_dir": ..., "apply_error": null or the swap's error}`; `--off`: `{"enabled": false, "removed": [...], "next_timer_removed": ..., "left": [...], "manager_skipped": ...}` |
 | `wiring` | `{"active": {`name`, `rendered`, `generation`}, "items": [{`app`, `status`, `detail`}], "notes": [...]}` (`status` is `wired`, `missing`, `manual` or `absent`) |
 
 Two flags are internal: the compositor's own IPC child passes

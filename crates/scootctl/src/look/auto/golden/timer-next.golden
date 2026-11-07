@@ -1,0 +1,9 @@
+# Managed by scoot look auto. Rewritten by each run; `scoot look auto --off` removes it.
+[Unit]
+Description=scoot look: the next sunrise or sunset
+
+[Timer]
+OnCalendar=2023-11-14 22:13:20 UTC
+AccuracySec=1s
+RemainAfterElapse=no
+Unit=scoot-look-auto.service

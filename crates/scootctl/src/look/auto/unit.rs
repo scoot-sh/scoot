@@ -1,13 +1,14 @@
 //! The pure half of `scoot look auto`: the schedule grammar, which look
-//! is due at a wall-clock minute, and the two unit files (a trigger, which
-//! is a timer for `--schedule` or a path unit for `--follow-portal`, and
-//! the oneshot service it starts) with a strict reader for the service line
+//! is due at a wall-clock minute or when the sun is up, and the two unit
+//! files (a trigger, which is a timer for `--schedule` and `--sun` or a
+//! path unit for `--follow-portal`, and the oneshot service it starts) with a strict reader for the service line
 //! this module wrote. No I/O here, so golden files and hostile inputs pin
 //! it without a systemd.
 
 use std::path::{Path, PathBuf};
 
 use scoot_look::grammar::is_name;
+use scoot_look::sun::{self, Location};
 
 use crate::cli::Error;
 
@@ -183,11 +184,76 @@ impl Portal {
     }
 }
 
+/// `--sun`: the two looks and the place whose sunrise and sunset move
+/// between them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sun {
+    pub light: String,
+    pub dark: String,
+    pub place: Location,
+}
+
+impl Sun {
+    /// Validates the names the way [`Schedule::parse`] does, and the
+    /// coordinates as [`Location::parse`] reads them. A refusal is a usage
+    /// error: it needs no catalog and no systemd.
+    pub fn parse(light: &str, dark: &str, lat: &str, lon: &str) -> Result<Sun, Error> {
+        check_looks(light, dark)?;
+        let invalid = |what: &'static str, value: &str| Error::Invalid {
+            what,
+            value: value.to_owned(),
+        };
+        let degrees = |text: &str, limit: f64, what: &'static str| {
+            sun::parse_degrees(text)
+                .filter(|d| d.abs() <= limit)
+                .ok_or_else(|| invalid(what, text))
+        };
+        let lat = degrees(
+            lat,
+            90.0,
+            "--latitude (want decimal degrees from -90 to 90, like 51.5074)",
+        )?;
+        let lon = degrees(
+            lon,
+            180.0,
+            "--longitude (want decimal degrees from -180 to 180, like -0.1278)",
+        )?;
+        // Both are finite and in range by now, so this is always `Some`.
+        let place = Location::new(lat, lon)
+            .ok_or_else(|| invalid("--latitude and --longitude", "out of range"))?;
+        Ok(Sun {
+            light: light.to_owned(),
+            dark: dark.to_owned(),
+            place,
+        })
+    }
+
+    /// The side due at `unix` seconds UTC: light while the Sun is up.
+    pub fn due(&self, unix: i64) -> Side {
+        if sun::is_day(self.place, unix) {
+            Side::Light
+        } else {
+            Side::Dark
+        }
+    }
+
+    /// The look name for a side.
+    pub fn look_for(&self, side: Side) -> &str {
+        match side {
+            Side::Light => &self.light,
+            Side::Dark => &self.dark,
+        }
+    }
+}
+
 /// What makes the service run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Trigger {
     /// A systemd timer on two wall-clock boundaries.
     Schedule(Schedule),
+    /// A systemd timer that wakes daily and at login to arm a one-shot
+    /// timer for the next sunrise or sunset (see [`super::sun`]).
+    Sun(Sun),
     /// A path unit on the dconf database the desktop's setting lives in.
     Portal(Portal),
 }
@@ -196,6 +262,7 @@ impl Trigger {
     pub fn light(&self) -> &str {
         match self {
             Trigger::Schedule(s) => &s.light,
+            Trigger::Sun(s) => &s.light,
             Trigger::Portal(p) => &p.light,
         }
     }
@@ -203,6 +270,7 @@ impl Trigger {
     pub fn dark(&self) -> &str {
         match self {
             Trigger::Schedule(s) => &s.dark,
+            Trigger::Sun(s) => &s.dark,
             Trigger::Portal(p) => &p.dark,
         }
     }
@@ -211,7 +279,7 @@ impl Trigger {
     /// from the other mode must remove.
     pub fn unit(&self) -> (&'static str, &'static str) {
         match self {
-            Trigger::Schedule(_) => (TIMER, PATH),
+            Trigger::Schedule(_) | Trigger::Sun(_) => (TIMER, PATH),
             Trigger::Portal(_) => (PATH, TIMER),
         }
     }
@@ -341,6 +409,13 @@ impl Plan {
             Trigger::Schedule(s) => {
                 line.push_str(&format!(" --schedule {}/{}", s.light_from, s.dark_from));
             }
+            Trigger::Sun(s) => {
+                line.push_str(&format!(
+                    " --sun --latitude {} --longitude {}",
+                    s.place.latitude_text(),
+                    s.place.longitude_text()
+                ));
+            }
             Trigger::Portal(_) => line.push_str(" --follow-portal"),
         }
         Ok(line)
@@ -360,6 +435,7 @@ impl Plan {
     pub fn service(&self) -> Result<String, String> {
         let (what, limit) = match self.trigger {
             Trigger::Schedule(_) => ("the schedule says is due", ""),
+            Trigger::Sun(_) => ("the sun says is due", ""),
             Trigger::Portal(_) => (
                 "the desktop's light/dark setting asks for",
                 "StartLimitIntervalSec=0\n",
@@ -382,6 +458,7 @@ impl Plan {
     pub fn trigger_file(&self) -> Result<(&'static str, String), String> {
         match &self.trigger {
             Trigger::Schedule(s) => Ok((TIMER, timer_text(s))),
+            Trigger::Sun(_) => Ok((TIMER, sun_timer_text())),
             Trigger::Portal(_) => {
                 let watch = self.watch.as_deref().ok_or_else(|| {
                     "internal error: a path trigger with no file to watch".to_owned()
@@ -411,6 +488,33 @@ pub fn timer_text(s: &Schedule) -> String {
          [Install]\n\
          WantedBy=timers.target\n",
         s.light_from, s.dark_from, s.light_from, s.dark_from
+    )
+}
+
+/// The `--sun` trigger: a timer that cannot name a moving time, so it
+/// only wakes the service to arm the real one. The service run arms a
+/// one-shot timer for the next sunrise or sunset (see [`super::sun`]) and
+/// applies the look due now. This timer wakes it at 00:05 local (a day
+/// that began without the previous run, a polar stretch with no boundary
+/// to arm), `Persistent=true` so a day missed while the machine was off is
+/// made up at the next start, and 30 s after the user manager starts (the
+/// one-shot timer lives in `$XDG_RUNTIME_DIR` and is gone after a reboot
+/// or a logout).
+pub fn sun_timer_text() -> String {
+    format!(
+        "# {MARKER}. Do not edit: `scoot look auto --off` removes it, `scoot look auto` rewrites it.\n\
+         [Unit]\n\
+         Description=scoot look: arm the next sunrise or sunset switch\n\
+         \n\
+         [Timer]\n\
+         OnStartupSec=30s\n\
+         OnCalendar=*-*-* 00:05:00\n\
+         Persistent=true\n\
+         AccuracySec=1s\n\
+         Unit={SERVICE}\n\
+         \n\
+         [Install]\n\
+         WantedBy=timers.target\n"
     )
 }
 
@@ -520,6 +624,27 @@ pub fn read_service(text: &str) -> Result<Plan, String> {
             dark,
             "--follow-portal",
         ] => Trigger::Portal(Portal::parse(light, dark).map_err(|_| bad())?),
+        [
+            "",
+            FIRE_VERB,
+            "--light",
+            light,
+            "--dark",
+            dark,
+            "--sun",
+            "--latitude",
+            lat,
+            "--longitude",
+            lon,
+        ] => {
+            let sun = Sun::parse(light, dark, lat, lon).map_err(|_| bad())?;
+            // Only the spelling this module writes: a padded or
+            // over-precise number is a hand edit.
+            if sun.place.latitude_text() != *lat || sun.place.longitude_text() != *lon {
+                return Err(bad());
+            }
+            Trigger::Sun(sun)
+        }
         _ => return Err(bad()),
     };
     Ok(Plan {

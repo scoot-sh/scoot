@@ -62,6 +62,9 @@
 //! startup, the seed a private session copies at startup, and the lock
 //! every writer takes for the `scoot look apply` tool.
 //!
+//! [`sun`] is the solar position behind `scoot look auto --sun`: sunrise and
+//! sunset for a place and an instant, polar day and night included.
+//!
 //! The effectful checks live in the caller: fonts through their carrier,
 //! the wallpaper through `scootbg check-image`, the fragments through the
 //! apps' own strict parsers.
@@ -79,6 +82,7 @@ pub mod resolved;
 pub mod schema;
 pub mod state;
 pub mod static_leaves;
+pub mod sun;
 pub mod targets;
 
 pub use allowlist::{
