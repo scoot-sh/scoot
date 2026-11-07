@@ -1203,6 +1203,9 @@ let
     fallbackFont = null;
   };
   packNames = looks: map (e: e.name) (packLib.mkEntries looks);
+  # A store path as a string carrying context (a flake input's shape).
+  ctxPack = "${./test-looks}";
+  ctxPackEmpty = "${./test-look-packs/empty}";
   packRefused = looks: !(builtins.tryEval (builtins.deepSeq (packNames looks) true)).success;
 
   evalHomeStylix =
@@ -7101,9 +7104,7 @@ let
         ];
       true
     )
-    # A context-free absolute path string is a pack too (a string
-    # carrying store-path context is not accepted; see the backlog
-    # entry look-packs-context-strings).
+    # A context-free absolute path string is a pack too.
     (
       assert
         packNames [ (toString ./test-looks) ] == [
@@ -7111,6 +7112,49 @@ let
           "greeter-pine"
           "my-green"
         ];
+      true
+    )
+    # A string carrying store-path context (what `"${inputs.foo}/looks"`
+    # and `inputs.foo + "/looks"` give; a path interpolated into a
+    # string copies to the store and gives the same thing) is a pack,
+    # a single look and a source for the other readers, and keeps its
+    # context: that context is what makes the source a build input.
+    (
+      assert builtins.hasContext ctxPack;
+      assert
+        packNames [ ctxPack ] == [
+          "greeter-oak"
+          "greeter-pine"
+          "my-green"
+        ];
+      assert packNames [ "${ctxPack}/my-green" ] == [ "my-green" ];
+      assert packNames [ (ctxPack + "/my-green") ] == [ "my-green" ];
+      assert
+        packNames [
+          "ginger-night"
+          ctxPack
+          "${ctxPack}/my-green"
+        ] == [
+          "ginger-night"
+          "greeter-oak"
+          "greeter-pine"
+          "my-green"
+        ];
+      true
+    )
+    (
+      let
+        entry = builtins.head (packLib.mkEntries [ "${ctxPack}/my-green" ]);
+      in
+      assert builtins.hasContext entry.src;
+      assert builtins.elem (builtins.unsafeDiscardStringContext ctxPack) (
+        builtins.attrNames (builtins.getContext entry.src)
+      );
+      true
+    )
+    # The same refusals hold for a string with context.
+    (
+      assert packRefused [ "${ctxPackEmpty}" ];
       true
     )
     # Files and dot-directories in a pack are skipped.

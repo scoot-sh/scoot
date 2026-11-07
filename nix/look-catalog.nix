@@ -20,7 +20,8 @@
 # `rendered/<name>`. No derivations run at evaluation (sources read with
 # `builtins.fromTOML`, font carriers resolved with `lib.attrByPath`
 # against `pkgs`), and no import-from-derivation: every derivation input
-# is a source path or a package.
+# is a source path or a package (except a source given as a string that
+# refers to a derivation output that is not built yet).
 #
 # Takes `{ lib, pkgs, scootLook, fallbackUiPackage, fallbackFont }`:
 # `scootLook` is the `scoot-look` binary package (null skips nothing
@@ -49,10 +50,36 @@ let
 
   # The manifest of a source directory: parsed at evaluation, so a
   # malformed `look.toml` fails the evaluation naming the file — before
-  # anything builds, let alone starts a session. Stays a path value
-  # (`src + "/look.toml"`, never string concatenation: a
-  # string-concatenated absolute path is forbidden in pure evaluation).
+  # anything builds, let alone starts a session. `src` is a path value
+  # or a string with store-path context (see `asDirPath`), never a
+  # context-free string: that would be a string-concatenated absolute
+  # path, forbidden in pure evaluation.
   readManifest = src: builtins.fromTOML (builtins.readFile (src + "/look.toml"));
+
+  # A path-or-absolute-string entry as a source directory, or null for
+  # anything else (a shipped name, a wrong type). A path value stays
+  # one. A context-free absolute string becomes a path value
+  # (`/. + item`: only path values read in pure evaluation, and
+  # appending a string that refers to a store path is an error). A
+  # string carrying store-path context (`"${inputs.foo}/looks"`,
+  # `inputs.foo + "/looks"`) stays a string: its context is what makes
+  # the source a build input of the catalog and every render, and
+  # `readFile`, `readDir` and `pathExists` read it directly. Discarding
+  # the context instead would let a source that is not realized yet
+  # (a derivation output) fail with "access to absolute path ... is
+  # forbidden in pure evaluation mode" rather than build it, and would
+  # leave the entry out of the derivations' inputs until a path value
+  # re-added it. A string whose derivation is not built yet is built at
+  # evaluation (import from derivation); a flake input is already in
+  # the store, so it never is.
+  asDirPath =
+    item:
+    if builtins.isPath item then
+      item
+    else if builtins.isString item && lib.hasPrefix "/" item then
+      if builtins.hasContext item then item else /. + item
+    else
+      null;
 
   # One `looks` entry to `{ name, src, manifest }`: a shipped name, a
   # source directory (paths, or an absolute store path as a string —
@@ -63,13 +90,7 @@ let
   toEntry =
     item:
     let
-      asPath =
-        if builtins.isPath item then
-          item
-        else if builtins.isString item && lib.hasPrefix "/" item then
-          item
-        else
-          null;
+      asPath = asDirPath item;
     in
     if builtins.isString item && !(lib.hasPrefix "/" item) then
       if builtins.elem item shippedNames then
@@ -85,9 +106,7 @@ let
         throw "programs.scoot.looks: unknown shipped look `${item}` (shipped: ${lib.concatStringsSep ", " shippedNames}; a directory goes as a path, not a string)"
     else if asPath != null then
       let
-        # A path value, never a string: only path values (plus `+`)
-        # read in pure evaluation.
-        src = if builtins.isPath asPath then asPath else /. + asPath;
+        src = asPath;
         manifest = readManifest src;
         name = manifest.name or (throw "programs.scoot.looks: ${toString src}/look.toml names no `name`");
       in
@@ -105,19 +124,6 @@ let
     builtins.foldl' (
       acc: entry: if builtins.elem entry.name (map (done: done.name) acc) then acc else acc ++ [ entry ]
     ) [ ] entries;
-
-  # A path-or-absolute-string entry as a path value, or null for
-  # anything else (a shipped name, a wrong type). A string carrying
-  # store-path context cannot be appended to a path and throws here (and
-  # in `toEntry`); see docs/backlog/core/look-packs-context-strings.md.
-  asDirPath =
-    item:
-    if builtins.isPath item then
-      item
-    else if builtins.isString item && lib.hasPrefix "/" item then
-      /. + item
-    else
-      null;
 
   # A look *pack*: a directory whose subdirectories are source looks
   # (a flake's `lookPacks.<name>`). An entry is a pack when it is a

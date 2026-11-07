@@ -589,10 +589,14 @@ Looks from a pack are declared looks like any path entry: they install
 without `scoot look install`'s `--trust` review, so a pack is as trusted
 as the flake input that supplies it. Pin the input.
 
-Entries are path values or `inputs.<name>.lookPacks.<pack>` attributes,
-which are path values. A string built from an input, such as
-`"${inputs.friend}/looks"` or `inputs.friend + "/looks"`, does not work:
-it carries store-path context and the evaluation refuses it.
+An entry is a path value (`./looks`, `inputs.<name>.lookPacks.<pack>`)
+or an absolute string, so `"${inputs.friend}/looks"` and
+`inputs.friend + "/looks"` work too. A string that points into a store
+path stays a build input of the catalog. A flake input is already in the
+store. A derivation output that is not built yet is built during
+evaluation, which slows evaluation. It fails where import from derivation
+is disabled (`allow-import-from-derivation = false`, for example on
+Hydra).
 
 > **Symptom:** ``programs.scoot.looks: look name `twin` is declared twice
 > with different sources: /nix/store/...-source/dup/one and
