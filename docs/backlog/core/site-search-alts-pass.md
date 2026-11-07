@@ -33,6 +33,18 @@ the top queries must land on the right page.
    but no dimensions in the markup W48 read — the front page is
    frozen post-#720, so verify first, then decide).
 
+## Progress
+
+- Part 2, done 2026-11-07: the five previews in `scoot/theming.md` now
+  carry alts that describe each picture (checked against the images).
+  The hero image's `<img>` in the `index.md` frontmatter still has no
+  `width`/`height` (the file is 960x640). Left as is: the front page is
+  frozen post-#720, and with `.hero-art img { width: auto; max-height:
+  42vh }` at desktop widths the change could not be judged without a
+  browser. Add `width="960" height="640"` once it can be checked at
+  both widths.
+- Part 1 (search ranking in a real browser): still open.
+
 ## What to do
 
 Drive the built site in a real browser at desktop and phone widths,

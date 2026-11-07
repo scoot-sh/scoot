@@ -29,11 +29,11 @@ declaration only wins when it changes.
 
 | Look | Ring / background | Wallpaper | |
 |---|---|---|---|
-| [`ginger-night`](https://github.com/scoot-sh/scoot/tree/main/looks/ginger-night) | ginger `#FF9A30` on near-black `#0E0E0E` | ships (`fit` on the look's black, so the cat is never cropped) | ![ginger-night](../../../assets/ginger-night-preview.png) |
-| [`music-desk`](https://github.com/scoot-sh/scoot/tree/main/looks/music-desk) | blue `#3D579A` on paper `#FCFBFB` | ships | ![music-desk](../../../assets/music-desk-preview.png) |
-| [`radial-burst`](https://github.com/scoot-sh/scoot/tree/main/looks/radial-burst) | blue `#31a9e5` on plum `#241721` | ships | ![radial-burst](../../../assets/radial-burst-preview.png) |
-| [`moonrise`](https://github.com/scoot-sh/scoot/tree/main/looks/moonrise) | amber `#FF9A49` on slate navy `#2B3648` | ships | ![moonrise](../../../assets/moonrise-preview.png) |
-| [`vinyl-sunset`](https://github.com/scoot-sh/scoot/tree/main/looks/vinyl-sunset) | orange `#FE9949` on espresso `#270E0A` | ships | ![vinyl-sunset](../../../assets/vinyl-sunset-preview.png) |
+| [`ginger-night`](https://github.com/scoot-sh/scoot/tree/main/looks/ginger-night) | ginger `#FF9A30` on near-black `#0E0E0E` | ships (`fit` on the look's black, so the cat is never cropped) | ![The ginger-night look: a bar over two terminal columns on near-black, ginger borders, and an ASCII-art cat peeking in from the right edge](../../../assets/ginger-night-preview.png) |
+| [`music-desk`](https://github.com/scoot-sh/scoot/tree/main/looks/music-desk) | blue `#3D579A` on paper `#FCFBFB` | ships | ![The music-desk look: a bar over three translucent columns (fetch, editor, system monitor) on a pale paper desktop with faint line drawings of a guitar, headphones and a record, blue accents](../../../assets/music-desk-preview.png) |
+| [`radial-burst`](https://github.com/scoot-sh/scoot/tree/main/looks/radial-burst) | blue `#31a9e5` on plum `#241721` | ships | ![The radial-burst look: a bar and one translucent terminal on a dark plum background, a burst of yellow, magenta, purple and blue rays on the right, blue accents](../../../assets/radial-burst-preview.png) |
+| [`moonrise`](https://github.com/scoot-sh/scoot/tree/main/looks/moonrise) | amber `#FF9A49` on slate navy `#2B3648` | ships | ![The moonrise look: a bar over three slate-navy panels (fetch, system monitor, code editor) on a dusk wallpaper of dark trees and a large amber moon](../../../assets/moonrise-preview.png) |
+| [`vinyl-sunset`](https://github.com/scoot-sh/scoot/tree/main/looks/vinyl-sunset) | orange `#FE9949` on espresso `#270E0A` | ships | ![The vinyl-sunset look: a bar over two translucent terminals on an espresso-dark illustration of a desk by a window with a sunset over a bay, a turntable and a laptop](../../../assets/vinyl-sunset-preview.png) |
 
 Each look's tokens live in `looks/<name>/look.toml`, in the [look format](../reference/look-format.md). The manifest is the same on a Nix install and a plain binary install. A check validates and renders every look there and fails on a missing role.
 
