@@ -867,6 +867,39 @@ fn the_watchdog_stops_git_and_removes_the_directory_when_scoot_dies() {
     assert!(!dir.exists(), "the watchdog left {}", dir.display());
 }
 
+/// The runner, not just `Scratch`, must hand git's group to the watchdog:
+/// the unit above registers by hand and so cannot see the call deleted.
+/// Git leads its own group (its pid is its group id), so the first id
+/// registered is the stand-in's own pid, and the last is 0 (git is gone).
+#[test]
+fn the_runner_registers_gits_group_with_the_watchdog_then_clears_it() {
+    let root = tempfile::tempdir().expect("a scratch tree");
+    let pidfile = root.path().join("git.pid");
+    let bin = fake_git(
+        root.path(),
+        &format!("echo $$ > '{}'; exit 128", pidfile.display()),
+    );
+    let git = Git::for_test(bin, &["file"], 1 << 20, Duration::from_secs(30));
+    super::scratch::REGISTERED.with(|log| log.borrow_mut().clear());
+    let (result, base) = install(&git, "file:///x", root.path(), false);
+    assert!(result.is_err());
+    assert_clean(&base);
+    let pid = read_pid(&pidfile);
+    let registered = super::scratch::REGISTERED.with(|log| log.borrow().clone());
+    // Each git run registers its group, then 0; the failing clone is the
+    // only run that reaches the stand-in past `--version`.
+    assert!(
+        registered.contains(&pid),
+        "git {pid} was never registered with the watchdog: {registered:?}"
+    );
+    assert_eq!(registered.last(), Some(&0), "{registered:?}");
+    let at = registered.iter().position(|g| *g == pid).unwrap();
+    assert!(
+        registered[at + 1..].contains(&0),
+        "the group was not cleared after git exited: {registered:?}"
+    );
+}
+
 #[test]
 fn a_finished_git_is_not_signalled_by_the_watchdog() {
     use std::os::unix::process::CommandExt as _;

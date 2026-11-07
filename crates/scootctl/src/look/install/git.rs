@@ -425,6 +425,11 @@ impl Git {
                     format!("cannot run `{}`: {error}", self.bin.display())
                 }
             })?;
+        // Between `spawn` and this write a SIGKILL of scoot leaves git
+        // unregistered: the watchdog still removes the directory, but git
+        // runs on until it fails on the missing directory. The window is
+        // microseconds wide, and closing it needs an async-signal-safe
+        // write from the forked child, so it is accepted.
         scratch.register_group(child.id());
         let deadline = Instant::now() + timeout;
         let status = loop {
