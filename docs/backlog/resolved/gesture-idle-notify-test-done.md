@@ -1,9 +1,10 @@
 ---
 title: "Pin idle-notify activity on the pinch and hold paths"
-status: "open"
-area: "testing"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-06"
 ---
 
 # Pin idle-notify activity on the pinch and hold paths
@@ -31,3 +32,11 @@ begin and hold begin, and check that it fails with the call removed.
 
 The default-off path: it is already pinned by
 `the_global_is_absent_by_default`.
+
+## Resolution
+
+2026-11-06. `a_pinch_begin_is_idle_activity` and `a_hold_begin_is_idle_activity`
+in `compositor/gesture/client/tests.rs` bind `ext_idle_notifier_v1` in the
+gesture test client, wait for `idled`, drive the gesture, and require a
+`resumed`. Removing `announce_activity()` from `gesture_pinch_begin` or
+`gesture_hold_begin` makes the matching test fail.
