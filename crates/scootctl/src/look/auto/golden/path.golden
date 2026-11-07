@@ -1,0 +1,10 @@
+# Managed by scoot look auto. Do not edit: `scoot look auto --off` removes it, `scoot look auto` rewrites it.
+[Unit]
+Description=scoot look: follow the desktop's light/dark setting
+
+[Path]
+PathChanged=/home/me/.config/dconf/user
+Unit=scoot-look-auto.service
+
+[Install]
+WantedBy=paths.target

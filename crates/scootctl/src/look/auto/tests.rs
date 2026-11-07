@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 
 use super::systemctl::{Systemctl, TimerState, parse_show};
 use super::unit::{
-    Clock, MARKER, Plan, SERVICE, Schedule, Side, TIMER, quote_exe, quote_path, read_service,
+    Clock, MARKER, Plan, SERVICE, Schedule, Side, TIMER, Trigger, quote_exe, quote_path,
+    read_service,
 };
 use super::{
     Action, Slot, config_home_from, fire_target, inspect, install, parse, remove, stable_exe,
@@ -29,9 +30,10 @@ fn schedule(light_from: &str, dark_from: &str) -> Schedule {
 
 fn plan() -> Plan {
     Plan {
-        schedule: schedule("07:00", "19:30"),
+        trigger: Trigger::Schedule(schedule("07:00", "19:30")),
         exe: PathBuf::from("/usr/bin/scoot"),
         state: None,
+        watch: None,
     }
 }
 
@@ -244,7 +246,7 @@ fn parse_shapes() {
             ]),
             false
         ),
-        Ok(Action::On(schedule("07:00", "19:30")))
+        Ok(Action::On(Trigger::Schedule(schedule("07:00", "19:30"))))
     );
     // `=` spelling and any order.
     assert_eq!(
@@ -252,7 +254,7 @@ fn parse_shapes() {
             &words(&["--schedule=07:00/19:30", "--dark=moonrise", "--light=dawn"]),
             false
         ),
-        Ok(Action::On(schedule("07:00", "19:30")))
+        Ok(Action::On(Trigger::Schedule(schedule("07:00", "19:30"))))
     );
     assert_eq!(
         parse(
@@ -266,7 +268,7 @@ fn parse_shapes() {
             ]),
             true
         ),
-        Ok(Action::Fire(schedule("07:00", "19:30")))
+        Ok(Action::Fire(Trigger::Schedule(schedule("07:00", "19:30"))))
     );
 }
 
@@ -300,10 +302,39 @@ fn parse_refusals() {
     );
     assert!(on(&["bogus"]).is_err());
     // Not available yet, named as such.
-    for flag in ["--sun", "--follow-portal"] {
-        let err = on(&[flag]).expect_err("not built");
-        assert!(err.to_string().contains("--schedule only so far"), "{err}");
-    }
+    let err = on(&["--sun"]).expect_err("not built");
+    assert!(err.to_string().contains("--sun is not available"), "{err}");
+    // One trigger, and --follow-portal is a bare flag.
+    let both = on(&[
+        "--light",
+        "a",
+        "--dark",
+        "b",
+        "--schedule",
+        "07:00/19:00",
+        "--follow-portal",
+    ]);
+    assert!(both.unwrap_err().to_string().contains("one trigger"));
+    assert!(on(&["--light", "a", "--dark", "b", "--follow-portal=1"]).is_err());
+    assert!(
+        on(&[
+            "--light",
+            "a",
+            "--dark",
+            "b",
+            "--follow-portal",
+            "--follow-portal"
+        ])
+        .is_err()
+    );
+    assert!(on(&["--off", "--follow-portal"]).is_err());
+    assert!(matches!(
+        on(&["--light", "a", "--dark", "b"]),
+        Err(Error::Missing(_))
+    ));
+    assert!(matches!(on(&["--follow-portal"]), Err(Error::Missing(_))));
+    assert!(on(&["--light", "a", "--dark", "a", "--follow-portal"]).is_err());
+    assert!(on(&["--light", "A", "--dark", "b", "--follow-portal"]).is_err());
     // The hidden verb takes no --off and needs all three.
     assert!(parse(&words(&["--off"]), true).is_err());
     assert!(matches!(parse(&[], true), Err(Error::Missing(_))));
@@ -317,7 +348,10 @@ fn units_match_the_golden_files() {
         plan().service().unwrap(),
         include_str!("golden/service.golden")
     );
-    assert_eq!(plan().timer(), include_str!("golden/timer.golden"));
+    assert_eq!(
+        plan().trigger_file().unwrap().1,
+        include_str!("golden/timer.golden")
+    );
     let with_state = Plan {
         exe: PathBuf::from("/opt/my scoot/bin/scoot"),
         state: Some(PathBuf::from("/tmp/st%ate")),
@@ -482,12 +516,22 @@ fn the_service_reader_trusts_only_its_own_line() {
 #[test]
 fn the_timer_and_service_agree_on_the_boundaries() {
     let p = Plan {
-        schedule: schedule("00:00", "23:59"),
+        trigger: Trigger::Schedule(schedule("00:00", "23:59")),
         ..plan()
     };
-    assert!(p.timer().contains("OnCalendar=*-*-* 00:00:00\n"));
-    assert!(p.timer().contains("OnCalendar=*-*-* 23:59:00\n"));
-    assert!(p.timer().contains("Persistent=true\n"));
+    assert!(
+        p.trigger_file()
+            .unwrap()
+            .1
+            .contains("OnCalendar=*-*-* 00:00:00\n")
+    );
+    assert!(
+        p.trigger_file()
+            .unwrap()
+            .1
+            .contains("OnCalendar=*-*-* 23:59:00\n")
+    );
+    assert!(p.trigger_file().unwrap().1.contains("Persistent=true\n"));
     assert!(p.service().unwrap().contains("--schedule 00:00/23:59"));
 }
 
@@ -578,7 +622,7 @@ fn install_writes_both_files_then_reloads_enables_and_restarts() {
     assert_eq!(names(&dir), vec![SERVICE.to_owned(), TIMER.to_owned()]);
     assert_eq!(
         std::fs::read_to_string(dir.join(TIMER)).unwrap(),
-        plan().timer()
+        plan().trigger_file().unwrap().1
     );
     assert_eq!(
         std::fs::read_to_string(dir.join(SERVICE)).unwrap(),
@@ -622,7 +666,7 @@ fn a_changed_schedule_rewrites_and_restarts() {
     let (_root, dir) = unit_dir();
     install(&dir, &plan(), &Fake::default()).unwrap();
     let moved = Plan {
-        schedule: schedule("06:00", "18:00"),
+        trigger: Trigger::Schedule(schedule("06:00", "18:00")),
         ..plan()
     };
     let manager = Fake::default();
@@ -681,7 +725,7 @@ fn a_symlink_is_foreign_even_when_it_points_at_our_text() {
     let (root, dir) = unit_dir();
     std::fs::create_dir_all(&dir).unwrap();
     let store = root.path().join("store-file");
-    std::fs::write(&store, plan().timer()).unwrap();
+    std::fs::write(&store, plan().trigger_file().unwrap().1).unwrap();
     std::os::unix::fs::symlink(&store, dir.join(TIMER)).unwrap();
     assert_eq!(inspect(&dir.join(TIMER)).unwrap(), Slot::Foreign);
     assert!(install(&dir, &plan(), &Fake::default()).is_err());
@@ -785,12 +829,12 @@ fn off_that_cannot_disable_deletes_nothing() {
 fn status_reads_the_schedule_back() {
     let (_root, dir) = unit_dir();
     let off = status(&dir, &Fake::default()).unwrap();
-    assert!(off.plan.is_none() && off.timer.is_none() && !off.partial);
+    assert!(off.plan.is_none() && off.trigger.is_none() && !off.partial);
     install(&dir, &plan(), &Fake::default()).unwrap();
     let on = status(&dir, &Fake::default()).unwrap();
     assert_eq!(on.plan, Some(Ok(plan())));
     assert!(!on.partial);
-    assert_eq!(on.timer.unwrap().unwrap().active, "active");
+    assert_eq!(on.trigger.unwrap().1.unwrap().active, "active");
 }
 
 #[test]

@@ -358,6 +358,14 @@ fn apply_one_key(
         Some(live) if record.dconf_wrote.get(name).is_some_and(|w| *w == live) => {
             write_and_record(record, name, path, want, dconf, notes)
         }
+        // Someone else set it to what this look wants (the desktop's
+        // light/dark toggle, say). Nothing to write; the tool owns the key
+        // again, so the next apply of the other polarity writes it instead
+        // of finding it "set outside" and leaving the setting at odds with
+        // the look. Only this exact value: any other stays theirs.
+        Some(live) if live == want && record.dconf_wrote.contains_key(name) => {
+            record.dconf_wrote.insert(name.to_owned(), want.to_owned());
+        }
         // No record yet: adopt the key (the documented first-apply
         // exception), whatever the live value is. The original is saved
         // above, so `toolkit off` restores it.

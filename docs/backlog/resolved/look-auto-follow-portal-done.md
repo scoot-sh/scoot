@@ -1,9 +1,10 @@
 ---
 title: "look auto --follow-portal: follow the desktop's light/dark setting"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-07"
 ---
 
 # look auto --follow-portal: follow the desktop's light/dark setting
@@ -44,3 +45,34 @@ by any program, not only a `color-scheme` change.
 ## Not in this ticket
 
 `--sun` ([`look-auto-sun`](look-auto-sun.md)).
+
+## Landed (2026-11-07)
+
+`scoot look auto --light A --dark B --follow-portal`: a path unit
+(`scoot-look-auto.path`, `PathChanged=` on `<config>/dconf/user`) starting
+the same oneshot service the schedule uses, which now takes either trigger
+(`crates/scootctl/src/look/auto/`, the decision in `portal.rs`).
+
+- **Loop.** The run compares the setting's polarity with the active look's
+  (resolved through `extends`, not by name) and applies only on
+  disagreement, re-reading the setting after a swap because systemd drops
+  its watches while the service runs. Test: `portal_tests.rs`, the real
+  toolkit step against a scripted dconf, every write treated as a re-fire;
+  one external flip is one swap.
+- **A D11 change the loop test exposed.** `apply_one_key` left `color-scheme`
+  alone whenever it differed from what the tool last wrote, so after an
+  external flip a later manual apply of the other polarity did not write
+  it, and the next unrelated dconf write reverted the apply. A key whose
+  live value equals the look's wanted value, with a record, is now owned
+  again with no write (`toolkit.rs`).
+- **systemd 261.2 (`path.c`, and measured on a user manager).** A rename
+  over the watched file fires once per rename. A missing directory is
+  watched at the nearest existing ancestor and fires when the file appears
+  (the `PathChanged` existence check in `path_spec_check_good`);
+  `MakeDirectory=` is never set, since it would create the database path
+  as a directory. The default service start limit (5 per 10 s) put the path
+  unit into `failed` after five spaced writes, so the portal service sets
+  `StartLimitIntervalSec=0`.
+- **Not done.** The unit does not run at manager start (`PathChanged` has no
+  initial fire); `DCONF_PROFILE` other than the default is not followed;
+  settings kept outside dconf are not read.

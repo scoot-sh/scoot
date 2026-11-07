@@ -247,6 +247,31 @@ fn what_the_tool_wrote_is_owned_and_rewritten() {
 }
 
 #[test]
+fn a_key_someone_set_to_what_the_look_wants_is_owned_again() {
+    // The record says light, the desktop's toggle made it dark, and a dark
+    // look applies: nothing to write, but the record must now say dark, or
+    // the next light look would find the key "set outside" and leave the
+    // setting at odds with the look.
+    let mut live = HashMap::new();
+    live.insert(COLOR_SCHEME_KEY.to_owned(), PREFER_DARK.to_owned());
+    let dconf = FakeDconf {
+        live,
+        ..FakeDconf::default()
+    };
+    let mut state = record(None, &[("color-scheme", PREFER_LIGHT)], &[]);
+    let notes = apply_toolkit(&state_dir("reowned"), &mut state, &look(), &dconf);
+    assert!(dconf.wrote_to(COLOR_SCHEME_KEY).is_empty(), "no write");
+    assert_eq!(
+        state.dconf_wrote.get("color-scheme").map(String::as_str),
+        Some(PREFER_DARK)
+    );
+    assert!(
+        !notes.iter().any(|note| note.starts_with("color-scheme")),
+        "{notes:?}"
+    );
+}
+
+#[test]
 fn a_key_someone_else_changed_is_left_alone_and_named() {
     let mut live = HashMap::new();
     live.insert(COLOR_SCHEME_KEY.to_owned(), PREFER_LIGHT.to_owned());

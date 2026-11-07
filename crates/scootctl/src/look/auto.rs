@@ -1,13 +1,16 @@
-//! `scoot look auto`: opt-in light/dark switching on a schedule, run by a
-//! systemd user timer. No daemon: the timer starts a oneshot service that
-//! runs one hidden `scoot look _auto-fire` and exits.
+//! `scoot look auto`: opt-in light/dark switching, run by a systemd user
+//! unit. No daemon: a trigger starts a oneshot service that runs one hidden
+//! `scoot look _auto-fire` and exits. The trigger is a timer on two
+//! wall-clock boundaries (`--schedule`) or a path unit on the dconf
+//! database (`--follow-portal`, see [`portal`]); exactly one is installed,
+//! and installing one removes the other.
 //!
-//! What `auto` owns is two unit files in `<config>/systemd/user`
-//! (`scoot-look-auto.timer` and `.service`), each marked on line 1. A
-//! file there that does not carry the marker (a home-manager link into
-//! the store, a unit someone wrote) is never overwritten or removed.
-//! `auto --off` disables the timer, then removes exactly the files that
-//! carry the marker. The unit files are the only record of the schedule:
+//! What `auto` owns is up to three unit files in `<config>/systemd/user`
+//! (`scoot-look-auto.service`, plus `.timer` or `.path`), each marked on
+//! line 1. A file there that does not carry the marker (a home-manager link
+//! into the store, a unit someone wrote) is never overwritten or removed.
+//! `auto --off` disables the trigger, then removes exactly the files that
+//! carry the marker. The unit files are the only record of the settings:
 //! `auto` with no flags reads them back.
 //!
 //! One service for both boundaries, not one per look: after a suspend or
@@ -19,9 +22,9 @@
 //! the hidden verb, and words that passed the look-name and `HH:MM`
 //! grammars. Nothing a look supplies reaches it.
 //!
-//! Only `--schedule` exists so far. `--sun` and `--follow-portal` are
-//! filed in `docs/backlog/core/` and refuse here by name.
+//! `--sun` is filed in `docs/backlog/core/` and refuses here by name.
 
+pub mod portal;
 mod systemctl;
 pub mod unit;
 
@@ -32,10 +35,12 @@ use std::time::Duration;
 use scoot_look::state::{RecordRead, read_capped_follow, read_record, write_atomic};
 
 use super::bounded::run_bounded;
+use super::toolkit::{self, CliDconf, Dconf};
 use super::{Look, apply, cycle, discover, output, sync};
 use crate::cli::Error;
+use scoot_look::schema::Polarity;
 use systemctl::{CliSystemctl, Systemctl, TimerState};
-use unit::{Clock, Plan, SERVICE, Schedule, Side, TIMER};
+use unit::{Clock, PATH, Plan, Portal, SERVICE, Schedule, Side, TIMER, Trigger};
 
 /// What one `scoot look auto` invocation asks for.
 #[derive(Debug, PartialEq, Eq)]
@@ -44,19 +49,21 @@ pub enum Action {
     Status,
     /// `--off`: remove everything `auto` created.
     Off,
-    /// `--light A --dark B --schedule L/D`: install (or refresh) the timer.
-    On(Schedule),
-    /// The hidden `_auto-fire`: apply the look due now. What the service
-    /// runs.
-    Fire(Schedule),
+    /// `--light A --dark B` with `--schedule L/D` or `--follow-portal`:
+    /// install (or refresh) the trigger.
+    On(Trigger),
+    /// The hidden `_auto-fire`: apply the look due now (or the setting
+    /// asks for). What the service runs.
+    Fire(Trigger),
 }
 
 /// Parses the words after `auto` (or `_auto-fire`, which takes the same
-/// three flags and nothing else).
+/// flags except `--off`).
 pub fn parse(positionals: &[String], fire: bool) -> Result<Action, Error> {
     let mut light = None;
     let mut dark = None;
     let mut schedule = None;
+    let mut portal = false;
     let mut off = false;
     let mut words = positionals.iter();
     while let Some(word) = words.next() {
@@ -72,9 +79,16 @@ pub fn parse(positionals: &[String], fire: bool) -> Result<Action, Error> {
                 off = true;
                 continue;
             }
-            "--sun" | "--follow-portal" => {
+            "--follow-portal" if inline.is_none() => {
+                if portal {
+                    return Err(Error::Unknown(word.clone()));
+                }
+                portal = true;
+                continue;
+            }
+            "--sun" => {
                 return Err(Error::Invalid {
-                    what: "trigger (`scoot look auto` takes --schedule only so far; --sun and --follow-portal are not available yet)",
+                    what: "trigger (`scoot look auto` takes --schedule or --follow-portal; --sun is not available yet)",
                     value: word.clone(),
                 });
             }
@@ -90,7 +104,7 @@ pub fn parse(positionals: &[String], fire: bool) -> Result<Action, Error> {
             return Err(Error::Unknown(word.clone()));
         }
     }
-    let given = light.is_some() || dark.is_some() || schedule.is_some();
+    let given = light.is_some() || dark.is_some() || schedule.is_some() || portal;
     if off && given {
         return Err(Error::Invalid {
             what: "--off (it takes no other flag)",
@@ -105,12 +119,25 @@ pub fn parse(positionals: &[String], fire: bool) -> Result<Action, Error> {
     }
     let light = light.ok_or(Error::Missing("--light NAME"))?;
     let dark = dark.ok_or(Error::Missing("--dark NAME"))?;
-    let schedule = schedule.ok_or(Error::Missing("--schedule LIGHT_FROM/DARK_FROM"))?;
-    let schedule = Schedule::parse(&light, &dark, &schedule)?;
+    let trigger = match (schedule, portal) {
+        (Some(_), true) => {
+            return Err(Error::Invalid {
+                what: "--schedule and --follow-portal (one trigger at a time)",
+                value: positionals.join(" "),
+            });
+        }
+        (Some(schedule), false) => Trigger::Schedule(Schedule::parse(&light, &dark, &schedule)?),
+        (None, true) => Trigger::Portal(Portal::parse(&light, &dark)?),
+        (None, false) => {
+            return Err(Error::Missing(
+                "--schedule LIGHT_FROM/DARK_FROM or --follow-portal",
+            ));
+        }
+    };
     Ok(if fire {
-        Action::Fire(schedule)
+        Action::Fire(trigger)
     } else {
-        Action::On(schedule)
+        Action::On(trigger)
     })
 }
 
@@ -174,16 +201,20 @@ pub fn unit_dir(config_home: &Path) -> PathBuf {
 pub struct Installed {
     /// The unit files rewritten (empty on a byte-identical re-run).
     pub wrote: Vec<&'static str>,
+    /// The other mode's trigger, removed because this one replaces it.
+    pub replaced: Option<&'static str>,
 }
 
-/// Writes the pair and starts the timer. Order: ask the manager first
-/// (no manager, nothing written), refuse a foreign file before writing
-/// either, write the service then the timer, reload, enable, and restart
-/// only when something changed (so a re-run with the same arguments is a
-/// no-op the manager never sees).
+/// Writes the pair and starts the trigger. Order: ask the manager first
+/// (no manager, nothing written), refuse a foreign file in either slot we
+/// would write before writing any, retire the other mode's trigger, write
+/// the service then the trigger, reload, enable, and restart only when
+/// something changed (so a re-run with the same arguments is a no-op the
+/// manager never sees).
 pub fn install(dir: &Path, plan: &Plan, manager: &dyn Systemctl) -> Result<Installed, String> {
     manager.available()?;
-    let files = [(SERVICE, plan.service()?), (TIMER, plan.timer())];
+    let (trigger_name, text) = plan.trigger_file()?;
+    let files = [(SERVICE, plan.service()?), (trigger_name, text)];
     let mut stale = Vec::new();
     for (name, text) in &files {
         match inspect(&dir.join(name))? {
@@ -192,6 +223,18 @@ pub fn install(dir: &Path, plan: &Plan, manager: &dyn Systemctl) -> Result<Insta
             Slot::Ours(_) | Slot::Absent => stale.push(*name),
         }
     }
+    // The other mode's trigger would keep starting the service with the
+    // wrong expectations. Ours: disable it, then delete it. A foreign file
+    // in that slot is not ours to touch and is not a conflict either.
+    let (_, other) = plan.trigger.unit();
+    let replaced = match inspect(&dir.join(other))? {
+        Slot::Ours(_) => {
+            manager.disable_now(other)?;
+            remove_file(&dir.join(other))?;
+            Some(other)
+        }
+        Slot::Absent | Slot::Foreign => None,
+    };
     if !stale.is_empty() {
         std::fs::create_dir_all(dir)
             .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
@@ -201,14 +244,25 @@ pub fn install(dir: &Path, plan: &Plan, manager: &dyn Systemctl) -> Result<Insta
             write_atomic(dir, name, text.as_bytes())?;
         }
     }
-    if !stale.is_empty() {
+    if !stale.is_empty() || replaced.is_some() {
         manager.daemon_reload()?;
     }
-    manager.enable_now(TIMER)?;
+    manager.enable_now(trigger_name)?;
     if !stale.is_empty() {
-        manager.restart(TIMER)?;
+        manager.restart(trigger_name)?;
     }
-    Ok(Installed { wrote: stale })
+    Ok(Installed {
+        wrote: stale,
+        replaced,
+    })
+}
+
+fn remove_file(path: &Path) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("cannot remove {}: {error}", path.display())),
+    }
 }
 
 /// What `--off` did.
@@ -221,15 +275,15 @@ pub struct Removed {
     pub manager_skipped: bool,
 }
 
-/// Disables the timer, then deletes the marked files, then reloads, in
-/// that order (a deleted file would leave a dangling `timers.target.wants`
+/// Disables the triggers, then deletes the marked files, then reloads, in
+/// that order (a deleted file would leave a dangling `*.target.wants`
 /// link). Nothing installed is success with nothing removed. With no
 /// answering manager the files still go: there is nothing running to
-/// stop, and a leftover file would start a timer the next time a manager
+/// stop, and a leftover file would start a trigger the next time a manager
 /// appears.
 pub fn remove(dir: &Path, manager: &dyn Systemctl) -> Result<Removed, String> {
     let mut slots = Vec::new();
-    for name in [TIMER, SERVICE] {
+    for name in [TIMER, PATH, SERVICE] {
         slots.push((name, inspect(&dir.join(name))?));
     }
     let mut out = Removed::default();
@@ -248,23 +302,17 @@ pub fn remove(dir: &Path, manager: &dyn Systemctl) -> Result<Removed, String> {
     }
     let live = manager.available().is_ok();
     if live {
-        if ours.contains(&TIMER) {
-            manager.disable_now(TIMER)?;
+        for trigger in [TIMER, PATH] {
+            if ours.contains(&trigger) {
+                manager.disable_now(trigger)?;
+            }
         }
     } else {
         out.manager_skipped = true;
     }
     for name in ours {
-        match std::fs::remove_file(dir.join(name)) {
-            Ok(()) => out.removed.push(name),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "cannot remove {}: {error}",
-                    dir.join(name).display()
-                ));
-            }
-        }
+        remove_file(&dir.join(name))?;
+        out.removed.push(name);
     }
     if live {
         manager.daemon_reload()?;
@@ -277,39 +325,59 @@ pub fn remove(dir: &Path, manager: &dyn Systemctl) -> Result<Removed, String> {
 pub struct Status {
     /// `None`: no file of ours. `Some(Err)`: ours but unreadable.
     pub plan: Option<Result<Plan, String>>,
-    /// Only one of the two files is there (a hand-delete, a failed run).
+    /// The files of ours do not make one consistent install: a trigger
+    /// without its service or the reverse, both triggers, or the trigger
+    /// the service was written for missing.
     pub partial: bool,
     /// Foreign files in our slots.
     pub foreign: Vec<PathBuf>,
-    pub timer: Option<Result<TimerState, String>>,
+    /// The trigger unit of ours and what the manager says about it.
+    pub trigger: Option<(&'static str, Result<TimerState, String>)>,
 }
 
 pub fn status(dir: &Path, manager: &dyn Systemctl) -> Result<Status, String> {
     let service = inspect(&dir.join(SERVICE))?;
     let timer = inspect(&dir.join(TIMER))?;
-    let foreign: Vec<PathBuf> = [(SERVICE, &service), (TIMER, &timer)]
+    let path = inspect(&dir.join(PATH))?;
+    let foreign: Vec<PathBuf> = [(SERVICE, &service), (TIMER, &timer), (PATH, &path)]
         .iter()
         .filter(|(_, slot)| **slot == Slot::Foreign)
         .map(|(name, _)| dir.join(name))
         .collect();
-    let partial = matches!(
-        (&service, &timer),
-        (Slot::Ours(_), Slot::Absent | Slot::Foreign)
-            | (Slot::Absent | Slot::Foreign, Slot::Ours(_))
-    );
-    let plan = match &service {
+    let timer_ours = matches!(timer, Slot::Ours(_));
+    let path_ours = matches!(path, Slot::Ours(_));
+    let mut plan = match &service {
         Slot::Ours(text) => Some(unit::read_service(text)),
-        _ if timer != Slot::Absent && matches!(timer, Slot::Ours(_)) => {
-            Some(Err("the service file is missing".to_owned()))
-        }
+        _ if timer_ours || path_ours => Some(Err("the service file is missing".to_owned())),
         _ => None,
     };
-    let timer_state = matches!(timer, Slot::Ours(_)).then(|| manager.timer_state(TIMER));
+    // The unit the install is about: what the service was written for,
+    // else whichever trigger is there.
+    let expected = match &plan {
+        Some(Ok(plan)) => Some(plan.trigger.unit().0),
+        _ if timer_ours && !path_ours => Some(TIMER),
+        _ if path_ours && !timer_ours => Some(PATH),
+        _ => None,
+    };
+    if let (Some(Ok(plan)), Slot::Ours(text)) = (&mut plan, &path) {
+        plan.watch = unit::read_watch(text);
+    }
+    let partial = match (&service, expected) {
+        (Slot::Ours(_), Some(unit)) => {
+            let have = |name: &str| (name == TIMER && timer_ours) || (name == PATH && path_ours);
+            !have(unit) || (timer_ours && path_ours)
+        }
+        (Slot::Ours(_), None) => true,
+        (_, _) => timer_ours || path_ours,
+    };
+    let trigger = expected
+        .filter(|unit| (*unit == TIMER && timer_ours) || (*unit == PATH && path_ours))
+        .map(|unit| (unit, manager.timer_state(unit)));
     Ok(Status {
         plan,
         partial,
         foreign,
-        timer: timer_state,
+        trigger,
     })
 }
 
@@ -370,8 +438,9 @@ pub fn run(look: &Look, action: &Action) -> Result<(), String> {
     match action {
         Action::Status => run_status(look),
         Action::Off => run_off(look),
-        Action::On(schedule) => run_on(look, schedule),
-        Action::Fire(schedule) => run_fire(look, schedule),
+        Action::On(trigger) => run_on(look, trigger),
+        Action::Fire(Trigger::Schedule(schedule)) => run_fire(look, schedule),
+        Action::Fire(Trigger::Portal(portal)) => run_fire_portal(look, portal),
     }
 }
 
@@ -413,13 +482,39 @@ fn unit_exe(current: &Path, path_var: Option<&OsStr>) -> Result<PathBuf, String>
     Ok(exe)
 }
 
-fn run_on(look: &Look, schedule: &Schedule) -> Result<(), String> {
+fn run_on(look: &Look, trigger: &Trigger) -> Result<(), String> {
     // A look that is not in the catalog refuses now, not at the first
-    // boundary, when nobody is watching the journal.
+    // trigger, when nobody is watching the journal.
     let catalog = discover();
-    for name in [&schedule.light, &schedule.dark] {
+    for name in [trigger.light(), trigger.dark()] {
         if catalog.find(name).is_none() {
             return Err(apply::unknown_look(name, &catalog));
+        }
+    }
+    // A portal pair must be a light look and a dark look. With the sides
+    // swapped each run would apply the look that writes the opposite
+    // setting and undo the user's own toggle.
+    if matches!(trigger, Trigger::Portal(_)) {
+        let sources = catalog.sources();
+        for (name, want) in [
+            (trigger.light(), Polarity::Light),
+            (trigger.dark(), Polarity::Dark),
+        ] {
+            let merged = scoot_look::resolve(&sources, name)
+                .map_err(|error| format!("cannot resolve `{name}`: {error}"))?;
+            if merged.polarity != want {
+                return Err(format!(
+                    "`{name}` is a {} look: --follow-portal needs a {} look there",
+                    merged.polarity.as_str(),
+                    want.as_str()
+                ));
+            }
+        }
+        if !CliDconf::new().available() {
+            return Err(
+                "no `dconf` on PATH: --follow-portal reads the desktop's setting with it"
+                    .to_owned(),
+            );
         }
     }
     let current = std::env::current_exe()
@@ -427,58 +522,85 @@ fn run_on(look: &Look, schedule: &Schedule) -> Result<(), String> {
     let exe = unit_exe(&current, std::env::var_os("PATH").as_deref())?;
     // The service runs in the user manager's environment, which need not
     // hold this shell's `SCOOT_LOOK_STATE` or `XDG_STATE_HOME`: the
-    // resolved directory is written into the unit, so the timer swaps the
+    // resolved directory is written into the unit, so the trigger swaps the
     // state the sessions read.
     let state = apply::resolve_state_dir(look.state.as_deref())?;
     let state = std::path::absolute(&state)
         .map_err(|error| format!("cannot resolve the state dir {}: {error}", state.display()))?;
+    let config_home = user_config_home()?;
     let plan = Plan {
-        schedule: schedule.clone(),
+        trigger: trigger.clone(),
         exe,
         state: Some(state),
+        watch: matches!(trigger, Trigger::Portal(_)).then(|| portal::dconf_db(&config_home)),
     };
-    let dir = unit_dir(&user_config_home()?);
+    let dir = unit_dir(&config_home);
     let done = install(&dir, &plan, &CliSystemctl)?;
     let mut notes = Vec::new();
-    let mut lines = vec![format!(
-        "auto switching on: {} from {}, {} from {} (local time)",
-        schedule.light, schedule.light_from, schedule.dark, schedule.dark_from
-    )];
+    let mut lines = vec![match trigger {
+        Trigger::Schedule(s) => format!(
+            "auto switching on: {} from {}, {} from {} (local time)",
+            s.light, s.light_from, s.dark, s.dark_from
+        ),
+        Trigger::Portal(p) => format!(
+            "auto switching on: {} when the desktop is light, {} when it is dark",
+            p.light, p.dark
+        ),
+    }];
+    if let Some(watch) = &plan.watch {
+        lines.push(format!("watching {}", watch.display()));
+    }
     lines.push(if done.wrote.is_empty() {
         "units already up to date".to_owned()
     } else {
         format!("wrote {} in {}", done.wrote.join(", "), dir.display())
     });
+    if let Some(gone) = done.replaced {
+        lines.push(format!("removed {gone} (replaced by the new trigger)"));
+    }
     if let Ok(Some(declared)) = sync::read_declared()
         && let Some(pinned) = declared.default
     {
         notes.push(format!(
-            "`{pinned}` is the look your Nix configuration declares: the schedule swaps the live choice, and the declaration wins again only when you change it there"
+            "`{pinned}` is the look your Nix configuration declares: auto switching swaps the live choice, and the declaration wins again only when you change it there"
         ));
     }
     if std::env::var_os("SCOOT_LOOKS_DIR").is_some_and(|dir| !dir.is_empty()) {
         notes.push(
-            "SCOOT_LOOKS_DIR is set in this shell, but the timer runs in the user manager's environment and will not see it"
+            "SCOOT_LOOKS_DIR is set in this shell, but the service runs in the user manager's environment and will not see it"
                 .to_owned(),
         );
     }
-    let mut doc = serde_json::json!({
-        "enabled": true,
-        "light": schedule.light,
-        "dark": schedule.dark,
-        "light_from": schedule.light_from.to_string(),
-        "dark_from": schedule.dark_from.to_string(),
-        "wrote": done.wrote,
-        "unit_dir": dir,
-    });
+    let mut doc = match trigger {
+        Trigger::Schedule(s) => serde_json::json!({
+            "enabled": true,
+            "trigger": "schedule",
+            "light": s.light,
+            "dark": s.dark,
+            "light_from": s.light_from.to_string(),
+            "dark_from": s.dark_from.to_string(),
+        }),
+        Trigger::Portal(p) => serde_json::json!({
+            "enabled": true,
+            "trigger": "portal",
+            "light": p.light,
+            "dark": p.dark,
+            "watch": plan.watch,
+        }),
+    };
+    doc["wrote"] = serde_json::json!(done.wrote);
+    doc["replaced"] = serde_json::json!(done.replaced);
+    doc["unit_dir"] = serde_json::json!(dir);
     // Apply what is due now, or the screen stays wrong until the next
-    // boundary. The install already stands if this fails. Under `--json`
+    // trigger. The install already stands if this fails. Under `--json`
     // the swap runs first and its outcome rides in this document, so a
     // failed swap still leaves exactly one `auto` document on stdout.
     let swap = |look: &Look| {
-        run_fire(look, schedule).map_err(|error| {
-            format!("the timer is installed, but the look due now was not applied: {error}")
-        })
+        match trigger {
+            Trigger::Schedule(s) => run_fire(look, s),
+            Trigger::Portal(p) => run_fire_portal(look, p),
+        }
+        .map_err(|error| format!("the units are installed, but the look was not applied: {error}"))
     };
     if look.json {
         let swapped = swap(look);
@@ -537,64 +659,95 @@ fn run_status(look: &Look) -> Result<(), String> {
             doc = serde_json::json!({ "enabled": true, "error": why });
         }
         Some(Ok(plan)) => {
-            let s = &plan.schedule;
             lines.push("auto switching: on".to_owned());
-            lines.push(format!("light: {} from {}", s.light, s.light_from));
-            lines.push(format!("dark:  {} from {}", s.dark, s.dark_from));
-            let now = local_clock().ok();
-            // The state the timer swaps, not necessarily this shell's.
+            lines.push(format!("light: {}", plan.trigger.light()));
+            lines.push(format!("dark:  {}", plan.trigger.dark()));
+            // The state the service swaps, not necessarily this shell's.
             let state = plan.state.as_deref().or(look.state.as_deref());
             let current = active_look(state).0.unwrap_or_else(|| "(none)".to_owned());
-            if let Some(now) = now {
-                let side = s.due(now);
-                lines.push(format!(
-                    "due now ({now}): {} ({}); active: {current}",
-                    side_word(side),
-                    s.look_for(side)
-                ));
-            }
-            lines.push(format!("runs: {}", plan.exec_start().unwrap_or_default()));
-            if !plan.exe.exists() {
-                notes.push(format!(
-                    "{} is gone: run `scoot look auto` with the same arguments to point the timer at the installed binary",
-                    plan.exe.display()
-                ));
-            }
             doc = serde_json::json!({
                 "enabled": true,
-                "light": s.light,
-                "dark": s.dark,
-                "light_from": s.light_from.to_string(),
-                "dark_from": s.dark_from.to_string(),
-                "due": now.map(|n| side_word(s.due(n))),
+                "light": plan.trigger.light(),
+                "dark": plan.trigger.dark(),
                 "active": current,
                 "exe": plan.exe,
                 "exe_exists": plan.exe.exists(),
             });
+            match &plan.trigger {
+                Trigger::Schedule(s) => {
+                    lines[1] = format!("light: {} from {}", s.light, s.light_from);
+                    lines[2] = format!("dark:  {} from {}", s.dark, s.dark_from);
+                    let now = local_clock().ok();
+                    if let Some(now) = now {
+                        let side = s.due(now);
+                        lines.push(format!(
+                            "due now ({now}): {} ({}); active: {current}",
+                            side_word(side),
+                            s.look_for(side)
+                        ));
+                    }
+                    doc["trigger"] = serde_json::json!("schedule");
+                    doc["light_from"] = serde_json::json!(s.light_from.to_string());
+                    doc["dark_from"] = serde_json::json!(s.dark_from.to_string());
+                    doc["due"] = serde_json::json!(now.map(|n| side_word(s.due(n))));
+                }
+                Trigger::Portal(_) => {
+                    lines.push("follows: the desktop's light/dark setting".to_owned());
+                    if let Some(watch) = &plan.watch {
+                        lines.push(format!("watching: {}", watch.display()));
+                    }
+                    let setting = CliDconf::new()
+                        .read(toolkit::COLOR_SCHEME_KEY)
+                        .ok()
+                        .flatten();
+                    lines.push(format!(
+                        "color-scheme: {}; active: {current}",
+                        setting.as_deref().unwrap_or("(not set)")
+                    ));
+                    doc["trigger"] = serde_json::json!("portal");
+                    doc["watch"] = serde_json::json!(plan.watch);
+                    doc["color_scheme"] = serde_json::json!(setting);
+                }
+            }
+            lines.push(format!("runs: {}", plan.exec_start().unwrap_or_default()));
+            if !plan.exe.exists() {
+                notes.push(format!(
+                    "{} is gone: run `scoot look auto` with the same arguments to point the unit at the installed binary",
+                    plan.exe.display()
+                ));
+            }
         }
     }
-    match &found.timer {
-        Some(Ok(t)) => {
-            let next = if t.next.is_empty() { "none" } else { &t.next };
-            lines.push(format!(
-                "timer: {} ({}), next: {next}",
-                t.active,
-                if t.enabled.is_empty() {
+    if let Some((unit, state)) = &found.trigger {
+        match state {
+            Ok(t) => {
+                let enabled = if t.enabled.is_empty() {
                     "?"
                 } else {
                     &t.enabled
+                };
+                let mut line = format!("{unit}: {} ({enabled})", t.active);
+                if *unit == TIMER {
+                    let next = if t.next.is_empty() { "none" } else { &t.next };
+                    line.push_str(&format!(", next: {next}"));
                 }
-            ));
-            doc["timer"] = serde_json::json!({
-                "active": t.active, "enabled": t.enabled, "next": t.next
-            });
+                lines.push(line);
+                if t.active == "failed" {
+                    notes.push(format!(
+                        "{unit} has failed (a trigger limit, or its service could not start): \
+                         run `systemctl --user status {unit}`, then `scoot look auto` with the same arguments to start it again"
+                    ));
+                }
+                doc[if *unit == TIMER { "timer" } else { "path" }] = serde_json::json!({
+                    "active": t.active, "enabled": t.enabled, "next": t.next
+                });
+            }
+            Err(why) => notes.push(format!("the trigger's state is unknown: {why}")),
         }
-        Some(Err(why)) => notes.push(format!("the timer's state is unknown: {why}")),
-        None => {}
     }
     if found.partial {
         notes.push(
-            "only one of the two unit files is present: run `scoot look auto` with the same arguments again"
+            "the unit files do not make one install (a missing service or trigger, or both a timer and a path unit): run `scoot look auto` with the same arguments again"
                 .to_owned(),
         );
     }
@@ -641,5 +794,60 @@ fn run_fire(look: &Look, schedule: &Schedule) -> Result<(), String> {
     )
 }
 
+/// What the path service runs: apply the look the desktop's setting asks
+/// for unless the active look already has that polarity. Prints one line
+/// for the journal either way.
+fn run_fire_portal(look: &Look, portal: &Portal) -> Result<(), String> {
+    let mut session = RealSession {
+        look,
+        sources: None,
+    };
+    let out = portal::follow(portal, &CliDconf::new(), &mut session)?;
+    output::print_line(&format!("follow-portal: {}", out.note)).map_err(|error| error.to_string())
+}
+
+/// The world as the service sees it: the recorded state, the catalog (read
+/// only when the setting disagrees with something worth looking up), and
+/// the same swap `scoot look apply NAME` does.
+struct RealSession<'a> {
+    look: &'a Look,
+    sources: Option<std::collections::BTreeMap<String, (scoot_look::RawLook, scoot_look::Origin)>>,
+}
+
+impl RealSession<'_> {
+    fn polarity(&mut self, name: &str) -> Option<Polarity> {
+        let sources = self.sources.get_or_insert_with(|| discover().sources());
+        scoot_look::resolve(sources, name).ok().map(|m| m.polarity)
+    }
+}
+
+impl portal::Session for RealSession<'_> {
+    fn active_polarity(&mut self) -> Option<Polarity> {
+        let name = active_look(self.look.state.as_deref()).0?;
+        self.polarity(&name)
+    }
+
+    fn polarity_of(&mut self, look: &str) -> Option<Polarity> {
+        self.polarity(look)
+    }
+
+    fn apply(&mut self, look: &str) -> Result<(), String> {
+        super::run_apply(
+            self.look,
+            Some(look),
+            false,
+            false,
+            false,
+            false,
+            false,
+            None,
+            false,
+            None,
+        )
+    }
+}
+
+#[cfg(test)]
+mod portal_tests;
 #[cfg(test)]
 mod tests;

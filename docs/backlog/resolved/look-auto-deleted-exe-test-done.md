@@ -31,7 +31,7 @@ with the refusal removed.
 ## Not in this ticket
 
 The `--sun` and `--follow-portal` triggers (see `look-auto-sun.md` and
-`look-auto-follow-portal.md`).
+`look-auto-follow-portal-done.md`).
 
 ## RESOLVED
 
