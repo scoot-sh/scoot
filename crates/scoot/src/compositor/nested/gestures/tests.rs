@@ -165,6 +165,27 @@ fn the_plan_follows_the_host_version_and_the_client_global() {
 
 // ---- the whole path ----
 
+/// Keeps every thread of a test under a subscriber.
+///
+/// Not for the logs (nothing here reads them) but for tracing's callsite
+/// cache, which is process-global under `cargo test`: tracing-core computes
+/// a callsite's interest, once, from the dispatcher of the thread that hits
+/// it first whenever it counts at most one live dispatcher
+/// (`Dispatchers::has_just_one`). A thread with no subscriber makes that
+/// `never`, for every later thread in the process. A rig runs two compositors
+/// on two threads and neither is under `capture_logs`, so their first hit on
+/// a callsite another test asserts on (`lost the connection to the host
+/// compositor`, in `nested/tests.rs`) disabled it for that test, and it failed
+/// about 8 runs in 10. nextest, one process per test, cannot see it.
+fn scoped_logs() -> tracing::subscriber::DefaultGuard {
+    tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_writer(std::io::sink)
+            .with_max_level(tracing::Level::DEBUG)
+            .finish(),
+    )
+}
+
 const PATIENCE: Duration = Duration::from_secs(10);
 const CANVAS: i32 = 400;
 
@@ -179,6 +200,7 @@ fn host_thread(
     jobs: Receiver<HostJob>,
 ) -> JoinHandle<()> {
     thread::spawn(move || {
+        let _logs = scoped_logs();
         let mut host: Harness<(), ()> = Harness::headless(Appearance::default(), CANVAS);
         init_client_gestures(&mut host.state, offers_gestures);
         host.state
@@ -201,6 +223,8 @@ struct Rig {
     nested: Harness<Step, crate::compositor::gesture::client::tests::Ack>,
     jobs: Option<Sender<HostJob>>,
     thread: Option<JoinHandle<()>>,
+    /// Last, so it outlives everything above that may log while dropping.
+    _logs: tracing::subscriber::DefaultGuard,
 }
 
 impl Drop for Rig {
@@ -301,6 +325,7 @@ impl Rig {
     /// (`client_gestures` as given) with one mapped, painted client that
     /// the host pointer is on.
     fn new(host_offers: bool, client_gestures: bool) -> Self {
+        let logs = scoped_logs();
         let (server_end, client_end) = UnixStream::pair().expect("a socket pair");
         let (ready_tx, ready_rx) = channel();
         let (job_tx, job_rx) = channel();
@@ -316,6 +341,7 @@ impl Rig {
             nested,
             jobs: Some(job_tx),
             thread: Some(thread),
+            _logs: logs,
         };
 
         // The first configure builds the render target; a frame then maps
@@ -739,6 +765,15 @@ fn a_version_2_host_gets_no_hold_request_and_the_session_carries_on() {
     // nested side binds at most 2: from the client's end that is exactly an
     // older host. A `get_hold_gesture` on it would be a protocol error that
     // ends the connection, so the rest of the test only works if none is sent.
+    // Put back when the test ends: libtest may run a later test on this
+    // thread (`--test-threads=1`), and the cap is per thread.
+    struct Restore;
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            super::BIND_CAP.with(|cap| cap.set(3));
+        }
+    }
+    let _restore = Restore;
     super::BIND_CAP.with(|cap| cap.set(2));
     let mut rig = Rig::new(true, true);
     let host = rig.nested.state.host.as_ref().expect("a nested host");
