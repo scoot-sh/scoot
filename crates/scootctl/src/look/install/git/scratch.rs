@@ -33,6 +33,15 @@ struct Watchdog {
     stdin: Option<ChildStdin>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Every group id [`Scratch::register_group`] was given on this thread,
+    /// in order, so a test can see the runner's wiring without killing
+    /// anything. Per thread: parallel tests never see each other's calls.
+    pub static REGISTERED: std::cell::RefCell<Vec<u32>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
 impl Scratch {
     /// Creates `scoot-look-clone-<pid>-<nanos>-<n>` under `base` with mode
     /// 0700. `mkdir` fails on anything already there (a planted link
@@ -75,6 +84,8 @@ impl Scratch {
     /// Tells the watchdog which process group is running git now (0 for
     /// none). Best effort: without a watchdog this does nothing.
     pub fn register_group(&mut self, group: u32) {
+        #[cfg(test)]
+        REGISTERED.with(|log| log.borrow_mut().push(group));
         if let Some(stdin) = self.watchdog.as_mut().and_then(|w| w.stdin.as_mut()) {
             let _ = writeln!(stdin, "{group}");
         }
