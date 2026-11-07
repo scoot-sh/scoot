@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.20](https://github.com/scoot-sh/scoot/compare/v0.7.19...v0.7.20) - 2026-11-07
+
+### scoot
+
+- added: log what each --tty connector offers towards HDR, and what is missing ([#978](https://github.com/scoot-sh/scoot/pull/978))
+
 ## [0.7.19](https://github.com/scoot-sh/scoot/compare/v0.7.18...v0.7.19) - 2026-11-07
 
 ### scootbar
