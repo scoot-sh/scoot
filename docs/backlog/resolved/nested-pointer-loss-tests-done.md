@@ -1,9 +1,10 @@
 ---
 title: "Pin nested host-pointer re-announce and the floating-drag end on pointer loss"
-status: "open"
-area: "testing"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-07"
 ---
 
 # Pin nested host-pointer re-announce and the floating-drag end on pointer loss
@@ -38,3 +39,22 @@ releases it and ends a floating drag.
 ## Not in this ticket
 
 The real-touchpad check (item 1 of `pointer-gestures-followups.md`).
+
+## Resolution
+
+2026-11-07. Two rig tests in `nested/gestures/tests.rs`:
+`a_capabilities_re_announce_with_the_pointer_still_there_leaves_it_and_its_gestures_alone`
+(the host adds a touch device, which re-sends the capabilities with the
+pointer still set; the host pointer object, the gesture objects and a swipe
+open across it must all survive) fails with the second branch changed to
+`else if host.pointer().is_some()`, and
+`the_host_seat_losing_its_pointer_ends_a_floating_drag` (a Super-drag of a
+floating window, then the host seat removes its pointer) fails with
+`end_floating_grab`/`settle_floating_grab` deleted from that branch.
+
+One premise in the ticket was off: `gesture_pinch_begin` and
+`gesture_hold_begin` do forward a second begin unclosed, but Smithay's gesture
+object closes the old one `cancelled` (pinned by
+`a_begin_over_an_open_gesture_closes_the_old_one_cancelled`), so a client sees
+the same thing for all three. The wrong sentence was in `nested/gestures.rs`
+(not `gesture/client.rs`, which is accurate) and is corrected there.
