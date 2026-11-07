@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.21](https://github.com/scoot-sh/scoot/compare/v0.7.20...v0.7.21) - 2026-11-07
+
+### scootctl,scoot-look
+
+- added: look auto --follow-portal swaps when the desktop's light/dark setting flips ([#981](https://github.com/scoot-sh/scoot/pull/981))
+
 ## [0.7.20](https://github.com/scoot-sh/scoot/compare/v0.7.19...v0.7.20) - 2026-11-07
 
 ### scoot
