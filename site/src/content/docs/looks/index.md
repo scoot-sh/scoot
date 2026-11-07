@@ -43,6 +43,7 @@ scoot look new my-look --from moonrise  # start a user look extending moonrise
 scoot look watch ./my-look             # validate and apply on every save
 scoot look preview my-look --capture   # screenshot the look into preview.png
 scoot look auto --light dawn --dark moonrise --schedule 07:00/19:00   # switch by the clock
+scoot look auto --light dawn --dark moonrise --follow-portal            # follow the desktop's light/dark setting
 ```
 
 ## Cycle and preview
@@ -75,16 +76,29 @@ preview; bare `--keep` with no pending preview refuses.
 
 ## Switch automatically
 
-`scoot look auto` swaps between a light look and a dark look on a daily
-schedule. It is off until you turn it on, and there is no daemon: it
-installs a systemd user timer that runs `scoot look apply` for you and
-exits. It needs a systemd user manager.
+`scoot look auto` swaps between a light look and a dark look on its own.
+It is off until you turn it on, and there is no daemon: it installs a
+systemd user unit that runs `scoot look apply` for you and exits. It needs
+a systemd user manager. Pick one trigger:
+
+- `--schedule` swaps at two times of day.
+- `--follow-portal` swaps when the desktop's light/dark setting changes
+  (a settings app, a quick toggle).
 
 ```sh
 scoot look auto --light dawn --dark moonrise --schedule 07:00/19:00
+scoot look auto --light dawn --dark moonrise --follow-portal
 scoot look auto                # show what is installed
 scoot look auto --off          # remove everything it created
 ```
+
+Setting up one trigger removes the other, so there is never both. Both
+looks must exist: a name that is not in the catalog your shell sees
+refuses when you run `auto`, not at the first swap. A look that is removed
+later makes that run fail; `systemctl --user status scoot-look-auto.service`
+and `journalctl --user -u scoot-look-auto` show the refusal.
+
+### On a schedule
 
 `--schedule LIGHT_FROM/DARK_FROM` takes two times as `HH:MM`, `00:00` to
 `23:59`, two digits each, and they must differ. `dawn` is applied from
@@ -93,11 +107,6 @@ cross midnight (`22:00/06:00` is light overnight). `auto` applies the look
 that is due right now when you run it, so the screen matches the schedule
 at once, then the timer does the rest.
 
-- **Both looks must exist.** A name that is not in the catalog your shell
-  sees refuses when you run `auto`, not at the first boundary. A look that is removed
-  later makes that boundary's run fail; `systemctl --user status
-  scoot-look-auto.service` and `journalctl --user -u scoot-look-auto`
-  show the refusal.
 - **Time zone.** Times are the system's local time. The decision is made
   from the wall clock when the timer fires, so a clock change cannot leave
   the wrong look up past the next boundary. On the day a daylight-saving
@@ -112,47 +121,106 @@ at once, then the timer does the rest.
   scheduled look again. A boundary does nothing when its look is already
   active, and it cancels a pending `--for` preview (keeping the scheduled
   look) instead of leaving its revert to undo the swap.
-- **What the timer sees.** The service runs in the user manager's
+
+### Following the desktop setting
+
+`--follow-portal` watches the setting that GTK 4, libadwaita and
+`xdg-desktop-portal` read as `org.freedesktop.appearance color-scheme`: the
+dconf key `/org/gnome/desktop/interface/color-scheme`. `--light` must name
+a light look and `--dark` a dark one; `auto` refuses a pair the other way
+round. When the setting asks for dark and the active look is a light one,
+the service applies the `--dark` look, and the same the other way. `auto`
+runs that check once when you set it up, so the look matches the setting at
+once.
+
+- **It compares polarity, not names.** A look you applied by hand stays
+  while its polarity matches the setting, even when it is not one of the
+  two. If you apply a look of the other polarity by hand, `apply` writes
+  `color-scheme` to match, as it does everywhere else, and the setting
+  follows the look. With `scoot look toolkit off` or `apply --no-toolkit`
+  nothing writes the setting, so the next dconf write swaps the look back
+  to match it: change the desktop setting instead.
+- **Which values count.** `'prefer-dark'` is dark. `'prefer-light'` and
+  `'default'` are light (`'default'` is what GNOME's own settings write for
+  Light). Unset, or any other text, is no signal and nothing happens.
+- **When it runs.** systemd starts the service when the dconf database file
+  changes, and any program writing any dconf key changes it. Most runs
+  change nothing: they read the key and the active look, find the polarity
+  matching, and exit. That costs about 60 ms of wall time and 9 to 12 ms of
+  CPU, mostly starting the process and the `dconf` command. An unset or
+  unrecognised key exits before the look catalog is read. `apply` itself
+  writes the database (the toolkit step), which starts the service once
+  more; that run finds the polarity already matching and stops. After a
+  swap the service reads the setting again before it exits, because systemd
+  does not watch the file while the service runs. A flip in the instant
+  between that last read and systemd watching the file again is not seen
+  until the next dconf write.
+- **The watched file.** `$XDG_CONFIG_HOME/dconf/user` (`~/.config/dconf/user`),
+  the default dconf profile. If `~/.config/dconf` does not exist yet, the
+  path unit still installs: systemd watches the nearest directory that
+  exists and starts the service when the file appears. A different
+  `DCONF_PROFILE` is not followed.
+- **Not at login.** The unit does not run when the user manager starts, so
+  a change made while you were logged out is picked up at the next dconf
+  write, not at login. Run `scoot look auto` with the same arguments to
+  apply the current setting by hand.
+- **`dconf` on the `PATH`.** The service reads the key with the `dconf`
+  command, and it needs to be on the user manager's `PATH`. `auto` checks
+  your shell's `PATH` when you run it; a service that cannot find `dconf`
+  fails with `no dconf on PATH`.
+- **Start limits.** The service lifts systemd's default limit of five
+  starts in ten seconds, so a settings slider that writes the database many
+  times does not stop the path unit. The path unit's own limit (200 starts
+  in two seconds) still applies.
+
+### Both triggers
+
+- **What the service sees.** The service runs in the user manager's
   environment (`systemctl --user show-environment`), not your shell's. The
   state directory is resolved when you run `auto` and written into the
-  unit, so the timer swaps the state your sessions read. `PATH` is the
-  manager's: `date` and `dconf` must be on it, and without `dconf` the
-  swap leaves the toolkit keys (including `color-scheme`) alone, as it
-  does anywhere else. `SCOOT_LOOKS_DIR` is not carried over: `auto` notes
-  it when it is set here, since the timer would validate a different
-  catalog than the one it checked.
-- **Which logins it runs in.** The timer is wanted by `timers.target`, so it
-  runs in any login of that user, not only in a scoot session, and the swap
-  writes the dconf keys the toolkit step owns there too. Turn it off with
-  `--off` if you also use another desktop.
-- **Nix.** `programs.scoot.look` is the declared default; the schedule
-  swaps the live choice, and the declaration wins again only when you
-  change it there (the [`sync` rule](#scoot-look-sync)). `auto` prints a
-  note when a declaration exists.
+  unit, so it swaps the state your sessions read. `PATH` is the manager's:
+  `dconf` must be on it, and without `dconf` the swap leaves the toolkit
+  keys (including `color-scheme`) alone, as it does anywhere else; a
+  schedule also needs `date`. `SCOOT_LOOKS_DIR` is not carried over: `auto`
+  notes it when it is set here, since the service would validate a
+  different catalog than the one it checked.
+- **Which logins it runs in.** The unit is wanted by `timers.target` or
+  `paths.target`, so it runs in any login of that user, not only in a scoot
+  session, and the swap writes the dconf keys the toolkit step owns there
+  too. Turn it off with `--off` if you also use another desktop.
+- **Nix.** `programs.scoot.look` is the declared default; `auto` swaps the
+  live choice, and the declaration wins again only when you change it there
+  (the [`sync` rule](#scoot-look-sync)). `auto` prints a note when a
+  declaration exists.
 - **Re-running** with the same arguments changes nothing. With new ones it
-  rewrites the two unit files and restarts the timer.
-- **`--sun` and `--follow-portal`** (sunset, or the desktop's own
-  light/dark setting) are not available yet.
+  rewrites the unit files and restarts the trigger.
+- **`--json`** prints a document with `enabled`, `trigger` (`schedule` or
+  `portal`), the two looks, the unit files written and the one replaced,
+  and `apply_error` when the swap on setup failed. When that swap does
+  swap, `apply` prints its own document first.
+- **`--sun`** (sunset) is not available yet.
 
-What it creates: `scoot-look-auto.timer` and `scoot-look-auto.service`
-in `$XDG_CONFIG_HOME/systemd/user` (`~/.config/systemd/user`; a relative
-`$XDG_CONFIG_HOME` is ignored, as systemd ignores it), each
-starting with a `# Managed by scoot look auto` line, and the timer's enable
-link. systemd keeps its own record of when the timer last ran, which
-`--off` leaves alone. `--off` disables the timer, then
-deletes the two files. A file with either name that does not carry the
-marker (a home-manager link into the store, a unit you wrote) is never
-overwritten or removed: `auto` refuses and names it, and `--off` leaves it
-and says so. The service runs one hidden `scoot` command that carries the two names
-and the times, which passed the same checks as the command line, and
-nothing a look supplies. It starts the `scoot` found first on `PATH` that
-is the same file as the one you ran, so a profile link survives upgrades;
-otherwise the binary you ran. If that path disappears, bare `scoot look auto`
-warns, and running `auto` with the arguments again repairs the unit. `--state DIR` moves the state
-the unit swaps, as it does for every `scoot look` command.
+What it creates in `$XDG_CONFIG_HOME/systemd/user` (`~/.config/systemd/user`;
+a relative `$XDG_CONFIG_HOME` is ignored, as systemd ignores it): the
+service `scoot-look-auto.service` and, for the trigger, either
+`scoot-look-auto.timer` or `scoot-look-auto.path`. Each starts with a
+`# Managed by scoot look auto` line. The trigger's enable link goes in
+`timers.target.wants` or `paths.target.wants`. systemd keeps its own record
+of when the timer last ran, which `--off` leaves alone. `--off` disables the
+trigger, then deletes the files. A file with one of those names that does
+not carry the marker (a home-manager link into the store, a unit you wrote)
+is never overwritten or removed: `auto` refuses and names it, and `--off`
+leaves it and says so. The service runs one hidden `scoot` command that
+carries the two names (and the times, for a schedule), which passed the same
+checks as the command line, and nothing a look supplies. It starts the
+`scoot` found first on `PATH` that is the same file as the one you ran, so a
+profile link survives upgrades; otherwise the binary you ran. If that path
+disappears, bare `scoot look auto` warns, and running `auto` with the
+arguments again repairs the unit. `--state DIR` moves the state the unit
+swaps, as it does for every `scoot look` command.
 
 > **Symptom:** `no systemd user manager answers (...): `scoot look auto` runs
-> as a user timer and needs one`.
+> as a user timer or path unit and needs one`.
 > The session has no user manager (a container, or a login started without
 > systemd). Nothing was written. Apply looks with `scoot look apply`, or
 > run your own scheduler to call it.
@@ -165,7 +233,7 @@ the unit swaps, as it does for every `scoot look` command.
 > `%` and `;` are fine, and the state directory may hold any of them.)
 
 > **Symptom:** `.../scoot-look-auto.timer exists and was not written by
-> `scoot look auto``.
+> `scoot look auto`` (or `.path`, or `.service`).
 > Another file holds the name, often a link home-manager made. Move it
 > aside and run `auto` again.
 
@@ -178,10 +246,23 @@ the unit swaps, as it does for every `scoot look` command.
 > Write both times with two digits each, such as `07:05`; `24:00` is not a
 > time, use `00:00`.
 
+> **Symptom:** `` `moonrise` is a dark look: --follow-portal needs a light look there``.
+> The two names are the wrong way round, or the look's polarity is not what
+> you expect (`scoot look list` shows it). Nothing was written.
+
+> **Symptom:** `--follow-portal` is on, but changing the desktop setting
+> does nothing.
+> Check what the setting reads (`dconf read
+> /org/gnome/desktop/interface/color-scheme`; nothing printed means unset),
+> then `journalctl --user -u scoot-look-auto`: each run logs one
+> `follow-portal:` line saying why it did or did not swap. `no dconf on
+> PATH` means the user manager's `PATH` lacks `dconf`. A desktop that keeps
+> its appearance setting somewhere else (not dconf) is not followed.
+
 > **Symptom:** `auto` says on, but the look never changes.
-> `scoot look auto` shows the timer's state and the next run. A timer that
-> is not `active` was stopped; run `scoot look auto` with the same
-> arguments to start it again. With `--json`, the immediate swap runs first and prints
+> `scoot look auto` shows the trigger's state (and the next run, for a
+> timer). A trigger that is not `active` was stopped or failed; run
+> `scoot look auto` with the same arguments to start it again. With `--json`, the immediate swap runs first and prints
 > its own document (if it swapped), then the single `auto` document, which
 > carries `apply_error` when the swap failed.
 
@@ -383,8 +464,9 @@ new palette; running ones keep theirs.
 - `scoot look toolkit off` persists the skip in `look.json`. When the tool
   wrote what is still live, `off` restores each key from before the
   tool's first write and stops owning it; a key the tool never wrote,
-  one someone else changed since, one home-manager owns (see below),
-  or one that cannot be read is left alone. Either way the record
+  one someone else changed since (including a `color-scheme` you set
+  with the desktop's own light/dark toggle), one home-manager owns (see
+  below), or one that cannot be read is left alone. Either way the record
   clears, so turning back `on` adopts fresh on the next apply.
   `off` leaves the written files in place; only the keys are restored.
   `scoot look toolkit` shows the state.

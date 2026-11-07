@@ -17,7 +17,10 @@
 //!   the tool last wrote (kept in `look.json` per key), means the tool owns
 //!   the key: write the look's value and record it.
 //! - Anything else means someone else changed it (a settings app, a hand
-//!   `gsettings set`): leave it and name it in the reply.
+//!   `gsettings set`): leave it and name it in the reply. The exception
+//!   is `color-scheme` holding the polarity the look wants (the desktop's
+//!   own toggle already put it there): nothing is written, and the record
+//!   takes the live value so the next apply of the other polarity owns it.
 //! - The one exception is the first write with no record yet: the tool
 //!   adopts the key, whatever the live value is. On a non-Nix box there is
 //!   no Nix key-name list, so the first `apply` overwrites a value the user
@@ -65,6 +68,19 @@ pub const PREFER_LIGHT: &str = "'prefer-light'";
 /// only an explicit `toolkit off` skips every dconf write and file.
 pub fn toolkit_on(record: &Record) -> bool {
     record.toolkit.unwrap_or(true)
+}
+
+/// Which polarity a `color-scheme` value asks for: `Some(true)` dark,
+/// `Some(false)` light, `None` for unset-looking or unknown text.
+/// `'default'` reads light: it is what GNOME's Settings writes for Light
+/// (`prefer-light` is not offered there), and the portal reports it as no
+/// preference, which every toolkit renders light.
+pub fn color_scheme_is_dark(raw: &str) -> Option<bool> {
+    match raw.trim() {
+        PREFER_DARK => Some(true),
+        PREFER_LIGHT | "'default'" => Some(false),
+        _ => None,
+    }
 }
 
 /// The `color-scheme` value for a polarity: dark looks read dark.
@@ -358,6 +374,27 @@ fn apply_one_key(
         Some(live) if record.dconf_wrote.get(name).is_some_and(|w| *w == live) => {
             write_and_record(record, name, path, want, dconf, notes)
         }
+        // `color-scheme` only, and only the polarity (spelling aside):
+        // 1. live is what we adopted before, or has the polarity we last
+        //    wrote (a hand `gsettings set ... 'default'` over
+        //    'prefer-light'): ours to write, so the setting follows the look.
+        // 2. live has the polarity this look wants (the desktop's own
+        //    toggle, GNOME writes `'default'` for Light): nothing to write
+        //    and the user's value stands; it is remembered as adopted, not
+        //    as written, so `toolkit off` leaves it alone.
+        // Any other key, and a value of any other polarity, stays theirs.
+        Some(live) if name == "color-scheme" && owned_scheme(record, &live) => {
+            record.dconf_adopted.remove(name);
+            write_and_record(record, name, path, want, dconf, notes)
+        }
+        Some(live)
+            if name == "color-scheme"
+                && record.dconf_wrote.contains_key(name)
+                && color_scheme_is_dark(&live).is_some()
+                && color_scheme_is_dark(&live) == color_scheme_is_dark(want) =>
+        {
+            record.dconf_adopted.insert(name.to_owned(), live);
+        }
         // No record yet: adopt the key (the documented first-apply
         // exception), whatever the live value is. The original is saved
         // above, so `toolkit off` restores it.
@@ -373,6 +410,24 @@ fn apply_one_key(
             ));
         }
     }
+}
+
+/// Whether a live `color-scheme` is the tool's to write over: the value it
+/// adopted earlier, or one with the polarity of the value it wrote.
+fn owned_scheme(record: &Record, live: &str) -> bool {
+    if record
+        .dconf_adopted
+        .get("color-scheme")
+        .is_some_and(|a| a == live)
+    {
+        return true;
+    }
+    let live = color_scheme_is_dark(live);
+    live.is_some()
+        && record
+            .dconf_wrote
+            .get("color-scheme")
+            .is_some_and(|w| color_scheme_is_dark(w) == live)
 }
 
 /// Writes `want` and records it; a failed write is a note naming the key.
@@ -475,6 +530,7 @@ pub fn toolkit_off_with_claims(
     }
     record.dconf_wrote.clear();
     record.dconf_orig.clear();
+    record.dconf_adopted.clear();
     notes
 }
 

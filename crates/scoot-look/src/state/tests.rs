@@ -34,6 +34,7 @@ fn record(name: &str, rendered: &str, generation: u64) -> Record {
         toolkit: None,
         dconf_wrote: BTreeMap::new(),
         dconf_orig: BTreeMap::new(),
+        dconf_adopted: BTreeMap::new(),
     }
 }
 
