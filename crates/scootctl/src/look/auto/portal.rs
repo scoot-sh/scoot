@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 
 use scoot_look::schema::Polarity;
 
-use super::super::toolkit::{COLOR_SCHEME_KEY, Dconf, PREFER_DARK, PREFER_LIGHT};
+use super::super::toolkit::{COLOR_SCHEME_KEY, Dconf, color_scheme_is_dark};
 use super::unit::{Portal, Side};
 
 /// How many times one run re-reads the setting after a swap. A flip
@@ -46,11 +46,7 @@ pub fn dconf_db(config_home: &Path) -> PathBuf {
 /// which every toolkit renders light), so it reads light. Unset or any
 /// other text is no signal at all.
 pub fn parse_setting(raw: &str) -> Option<Side> {
-    match raw.trim() {
-        PREFER_DARK => Some(Side::Dark),
-        PREFER_LIGHT | "'default'" => Some(Side::Light),
-        _ => None,
-    }
+    color_scheme_is_dark(raw).map(|dark| if dark { Side::Dark } else { Side::Light })
 }
 
 fn polarity_of_side(side: Side) -> Polarity {

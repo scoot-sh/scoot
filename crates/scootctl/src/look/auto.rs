@@ -803,7 +803,10 @@ fn run_fire_portal(look: &Look, portal: &Portal) -> Result<(), String> {
         sources: None,
     };
     let out = portal::follow(portal, &CliDconf::new(), &mut session)?;
-    output::print_line(&format!("follow-portal: {}", out.note)).map_err(|error| error.to_string())
+    // Stderr, not stdout: under `auto --json` this run precedes the one
+    // document on stdout. The journal keeps both streams.
+    output::warn(format_args!("follow-portal: {}", out.note));
+    Ok(())
 }
 
 /// The world as the service sees it: the recorded state, the catalog (read

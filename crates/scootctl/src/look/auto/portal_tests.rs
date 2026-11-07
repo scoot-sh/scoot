@@ -664,6 +664,27 @@ fn a_manual_apply_of_the_other_polarity_is_not_reverted() {
 }
 
 #[test]
+fn a_manual_apply_after_the_gnome_light_flip_is_not_reverted() {
+    // GNOME's Light switch writes `'default'`, which neither matches what
+    // the tool wrote nor what a light look wants. The record must still
+    // take it, or the manual apply below leaves `color-scheme` at light and
+    // the next unrelated write reverts the apply.
+    let db = Db::default();
+    let mut world = World::new(&db);
+    world.apply_look("moonrise");
+    db.set_scheme("'default'");
+    settle(&mut world, &db, &portal());
+    assert_eq!(world.swaps, ["dawn"]);
+    world.apply_look("moonrise");
+    assert_eq!(db.scheme().as_deref(), Some(PREFER_DARK));
+    for _ in 0..5 {
+        follow(&portal(), &db, &mut world).unwrap();
+    }
+    assert_eq!(world.swaps, ["dawn"], "the manual choice stands");
+    assert_eq!(world.record.as_ref().unwrap().name, "moonrise");
+}
+
+#[test]
 fn a_look_of_the_right_polarity_that_is_not_in_the_pair_stays() {
     let db = Db::default();
     let mut world = World::new(&db);

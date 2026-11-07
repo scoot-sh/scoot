@@ -17,7 +17,10 @@
 //!   the tool last wrote (kept in `look.json` per key), means the tool owns
 //!   the key: write the look's value and record it.
 //! - Anything else means someone else changed it (a settings app, a hand
-//!   `gsettings set`): leave it and name it in the reply.
+//!   `gsettings set`): leave it and name it in the reply. The exception
+//!   is `color-scheme` holding the polarity the look wants (the desktop's
+//!   own toggle already put it there): nothing is written, and the record
+//!   takes the live value so the next apply of the other polarity owns it.
 //! - The one exception is the first write with no record yet: the tool
 //!   adopts the key, whatever the live value is. On a non-Nix box there is
 //!   no Nix key-name list, so the first `apply` overwrites a value the user
@@ -65,6 +68,19 @@ pub const PREFER_LIGHT: &str = "'prefer-light'";
 /// only an explicit `toolkit off` skips every dconf write and file.
 pub fn toolkit_on(record: &Record) -> bool {
     record.toolkit.unwrap_or(true)
+}
+
+/// Which polarity a `color-scheme` value asks for: `Some(true)` dark,
+/// `Some(false)` light, `None` for unset-looking or unknown text.
+/// `'default'` reads light: it is what GNOME's Settings writes for Light
+/// (`prefer-light` is not offered there), and the portal reports it as no
+/// preference, which every toolkit renders light.
+pub fn color_scheme_is_dark(raw: &str) -> Option<bool> {
+    match raw.trim() {
+        PREFER_DARK => Some(true),
+        PREFER_LIGHT | "'default'" => Some(false),
+        _ => None,
+    }
 }
 
 /// The `color-scheme` value for a polarity: dark looks read dark.
@@ -358,13 +374,21 @@ fn apply_one_key(
         Some(live) if record.dconf_wrote.get(name).is_some_and(|w| *w == live) => {
             write_and_record(record, name, path, want, dconf, notes)
         }
-        // Someone else set it to what this look wants (the desktop's
-        // light/dark toggle, say). Nothing to write; the tool owns the key
-        // again, so the next apply of the other polarity writes it instead
-        // of finding it "set outside" and leaving the setting at odds with
-        // the look. Only this exact value: any other stays theirs.
-        Some(live) if live == want && record.dconf_wrote.contains_key(name) => {
-            record.dconf_wrote.insert(name.to_owned(), want.to_owned());
+        // `color-scheme` only: someone else set it to the polarity this
+        // look wants (the desktop's light/dark toggle; GNOME writes
+        // `'default'` for Light). Nothing to write, and the user's own
+        // value stands, but the record takes it, so the next apply of the
+        // other polarity finds the live value equal to the record and
+        // writes `color-scheme` instead of leaving the setting at odds
+        // with the look. Any other key, and a value of the other polarity,
+        // stays theirs.
+        Some(live)
+            if name == "color-scheme"
+                && record.dconf_wrote.contains_key(name)
+                && color_scheme_is_dark(&live).is_some()
+                && color_scheme_is_dark(&live) == color_scheme_is_dark(want) =>
+        {
+            record.dconf_wrote.insert(name.to_owned(), live);
         }
         // No record yet: adopt the key (the documented first-apply
         // exception), whatever the live value is. The original is saved

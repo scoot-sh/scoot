@@ -168,7 +168,9 @@ pub struct Record {
     /// `cursor-size`, `font-name`): before writing again the tool reads
     /// the live value, and a value that is neither unset nor this one
     /// means someone else changed it, so the tool leaves it alone
-    /// (design D11).
+    /// (design D11). The one exception is `color-scheme`: a live value of
+    /// the polarity the look wants is recorded as it stands, without a
+    /// write.
     pub dconf_wrote: BTreeMap<String, String>,
     /// The live toolkit values before the tool's first write, by short
     /// key name: `""` means it was unset. Saved once, never overwritten,

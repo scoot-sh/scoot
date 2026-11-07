@@ -272,6 +272,83 @@ fn a_key_someone_set_to_what_the_look_wants_is_owned_again() {
 }
 
 #[test]
+fn the_gnome_light_value_counts_as_the_light_polarity_and_is_recorded_as_it_stands() {
+    // The record says dark, GNOME's Light switch wrote `'default'`, and a
+    // light look applies: no write, the user's value stands, and the record
+    // holds it, so a later dark look finds live == record and writes.
+    let light = {
+        let text = look_toml("dawn").replace("polarity = \"dark\"", "polarity = \"light\"");
+        let raw = scoot_look::parse_look_toml(text.as_bytes()).expect("parses");
+        let map = BTreeMap::from([("dawn".to_string(), (raw, Origin::Shipped))]);
+        scoot_look::resolve(&map, "dawn").expect("resolves")
+    };
+    let mut live = HashMap::new();
+    live.insert(COLOR_SCHEME_KEY.to_owned(), "'default'".to_owned());
+    let dconf = FakeDconf {
+        live,
+        ..FakeDconf::default()
+    };
+    let mut state = record(None, &[("color-scheme", PREFER_DARK)], &[]);
+    apply_toolkit(&state_dir("gnome-light"), &mut state, &light, &dconf);
+    assert!(dconf.wrote_to(COLOR_SCHEME_KEY).is_empty(), "no write");
+    assert_eq!(
+        state.dconf_wrote.get("color-scheme").map(String::as_str),
+        Some("'default'")
+    );
+    // A dark look then applies over the recorded `'default'`.
+    let mut dark_state = state.clone();
+    let notes = apply_toolkit(
+        &state_dir("gnome-light-2"),
+        &mut dark_state,
+        &look(),
+        &dconf,
+    );
+    assert_eq!(
+        dconf.wrote_to(COLOR_SCHEME_KEY),
+        vec![PREFER_DARK.to_owned()]
+    );
+    assert!(
+        !notes.iter().any(|n| n.starts_with("color-scheme is")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn only_color_scheme_is_re_owned_and_only_at_the_wanted_polarity() {
+    // A key other than color-scheme set to the wanted value stays theirs.
+    let mut live = HashMap::new();
+    live.insert(
+        "/org/gnome/desktop/interface/icon-theme".to_owned(),
+        "'Adwaita'".to_owned(),
+    );
+    let dconf = FakeDconf {
+        live,
+        ..FakeDconf::default()
+    };
+    let mut state = record(None, &[("icon-theme", "'Papirus'")], &[]);
+    apply_toolkit(&state_dir("only-scheme"), &mut state, &look(), &dconf);
+    assert_eq!(
+        state.dconf_wrote.get("icon-theme").map(String::as_str),
+        Some("'Papirus'"),
+        "unchanged: someone else's value"
+    );
+    // A color-scheme of the other polarity stays theirs too.
+    let mut live = HashMap::new();
+    live.insert(COLOR_SCHEME_KEY.to_owned(), PREFER_LIGHT.to_owned());
+    let dconf = FakeDconf {
+        live,
+        ..FakeDconf::default()
+    };
+    let mut state = record(None, &[("color-scheme", PREFER_DARK)], &[]);
+    apply_toolkit(&state_dir("only-scheme-2"), &mut state, &look(), &dconf);
+    assert_eq!(
+        state.dconf_wrote.get("color-scheme").map(String::as_str),
+        Some(PREFER_DARK)
+    );
+    assert!(dconf.wrote_to(COLOR_SCHEME_KEY).is_empty());
+}
+
+#[test]
 fn a_key_someone_else_changed_is_left_alone_and_named() {
     let mut live = HashMap::new();
     live.insert(COLOR_SCHEME_KEY.to_owned(), PREFER_LIGHT.to_owned());

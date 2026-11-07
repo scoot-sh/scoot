@@ -137,7 +137,9 @@ once.
   while its polarity matches the setting, even when it is not one of the
   two. If you apply a look of the other polarity by hand, `apply` writes
   `color-scheme` to match, as it does everywhere else, and the setting
-  follows the look.
+  follows the look. With `scoot look toolkit off` or `apply --no-toolkit`
+  nothing writes the setting, so the next dconf write swaps the look back
+  to match it: change the desktop setting instead.
 - **Which values count.** `'prefer-dark'` is dark. `'prefer-light'` and
   `'default'` are light (`'default'` is what GNOME's own settings write for
   Light). Unset, or any other text, is no signal and nothing happens.
@@ -145,8 +147,9 @@ once.
   changes, and any program writing any dconf key changes it. Nearly every
   run reads the key and exits without touching anything. `apply` itself
   writes the database (the toolkit step), which starts the service once
-  more; that run finds the polarity already matching and stops. A flip
-  while the service is running is re-read before it exits.
+  more; that run finds the polarity already matching and stops. After a
+  swap the service reads the setting again before it exits, because systemd
+  does not watch the file while the service runs.
 - **The watched file.** `$XDG_CONFIG_HOME/dconf/user` (`~/.config/dconf/user`),
   the default dconf profile. If `~/.config/dconf` does not exist yet, the
   path unit still installs: systemd watches the nearest directory that
