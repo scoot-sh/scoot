@@ -1,9 +1,10 @@
 ---
 title: "Pin the look auto vanished-executable refusal"
-status: "open"
-area: "testing"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-07"
 ---
 
 # Pin the look auto vanished-executable refusal
@@ -31,3 +32,15 @@ with the refusal removed.
 
 The `--sun` and `--follow-portal` triggers (see `look-auto-sun.md` and
 `look-auto-follow-portal.md`).
+
+## RESOLVED
+
+The check moved out of `run_on` into `unit_exe` (`look/auto.rs`), which
+takes the running binary and `PATH`, applies `stable_exe` and refuses a
+file that does not exist. `run_on` needs its result as the unit's
+executable, so the wiring cannot be dropped without losing the path.
+Three tests in `auto/tests.rs`: an existing file is accepted; a missing one
+is refused with the re-run advice; a `scoot (deleted)` path (what
+`current_exe()` reads on Linux after an upgrade) is refused. Mutation:
+`if false` fails the two refusal tests; `if exe.exists()` fails all three.
+No behavior change, so no real bug found.

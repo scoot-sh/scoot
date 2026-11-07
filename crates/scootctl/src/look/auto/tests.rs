@@ -11,7 +11,7 @@ use super::unit::{
 };
 use super::{
     Action, Slot, config_home_from, fire_target, inspect, install, parse, remove, stable_exe,
-    status,
+    status, unit_exe,
 };
 use crate::cli::Error;
 
@@ -843,6 +843,35 @@ fn another_scoot_on_path_does_not_replace_the_running_one() {
     let current = std::fs::canonicalize(here.join("scoot")).unwrap();
     assert_eq!(stable_exe(&current, Some(&path)), current);
     assert_eq!(stable_exe(&current, None), current);
+}
+
+#[test]
+fn an_executable_that_exists_is_accepted() {
+    let dir = tempfile::tempdir().unwrap();
+    let exe = dir.path().join("scoot");
+    std::fs::write(&exe, "x").unwrap();
+    assert_eq!(unit_exe(&exe, None), Ok(exe));
+}
+
+#[test]
+fn a_missing_executable_is_refused_with_the_rerun_advice() {
+    let dir = tempfile::tempdir().unwrap();
+    let exe = dir.path().join("scoot");
+    let message = unit_exe(&exe, None).unwrap_err();
+    assert!(message.contains(&exe.display().to_string()), "{message}");
+    assert!(message.contains("no longer exists"), "{message}");
+    assert!(message.contains("run `scoot look auto` again"), "{message}");
+}
+
+#[test]
+fn a_deleted_suffixed_executable_is_refused() {
+    // What `current_exe()` reads back on Linux after an upgrade replaced
+    // the running binary; the suffixed name is not a file.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("scoot"), "x").unwrap();
+    let exe = dir.path().join("scoot (deleted)");
+    let message = unit_exe(&exe, None).unwrap_err();
+    assert!(message.contains("scoot (deleted)"), "{message}");
 }
 
 #[test]
