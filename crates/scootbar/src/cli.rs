@@ -388,8 +388,10 @@ macro_rules! tray_help {
     scrolls; its actions (`activate N`, `secondary N`, `wheel-up N`,
     `wheel-down N`) take the item index. The bar owns the
     watcher name when free and hosts against whoever does otherwise.
-    Item menus are not built yet (no DBusMenu client). Nothing is shown where no item
-    is registered
+    A right click (or `menu N`) opens an item's menu in a popup: the bar reads
+    it over DBusMenu, a row click selects, a submenu row opens a level. Menu
+    icons are not drawn, and menus need the `popup` feature. Nothing is shown
+    where no item is registered.
 "
     };
 }
