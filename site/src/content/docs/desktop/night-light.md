@@ -93,6 +93,11 @@ programs.scoot.desktop = {
 };
 ```
 
+To switch the look itself at sunrise and sunset, run
+[`scoot look auto --sun`](../looks/index.md#at-sunrise-and-sunset). It
+takes its own `--latitude` and `--longitude`; it does not read
+`desktop.nightlight.latitude`, so type the same two numbers.
+
 Force tonight now (wlsunset only): `systemctl --user kill -s
 USR1 scoot-nightlight.service` cycles forced-day, forced-night,
 then back to the schedule. There is no keybind for it, because the

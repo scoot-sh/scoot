@@ -427,7 +427,7 @@ The bar's three children are in [scootbar's backlog](../scootbar/backlog/README.
 - [User and community look targets: render any app from a template](./core/look-user-targets.md) (medium)
 - [Later: opt-in automatic look switching](./resolved/look-auto-switch-done.md) (low, later) — RESOLVED 2026-11-07: `--schedule`, `--follow-portal` and `--sun`
 - [`look auto --sun`: switch looks at sunrise and sunset](./resolved/look-auto-sun-done.md) (low) — RESOLVED 2026-11-07: the Sun's altitude from `--latitude`/`--longitude`, a daily timer arming a one-shot UTC timer for each boundary
-- [Nix: pass the night-light latitude and longitude to `look auto --sun`](./core/look-auto-sun-nix.md) (low)
+- [Nix: pass the night-light latitude and longitude to `look auto --sun`](./resolved/look-auto-sun-nix-done.md) (low) — RESOLVED 2026-11-07: a note in the night-light page; no module declares the units
 - [`look auto --follow-portal`: follow the desktop light/dark setting](./resolved/look-auto-follow-portal-done.md) (low) — RESOLVED 2026-11-07: a path unit on the dconf database, polarity-compared so one external flip is one swap
 - [Later: accept context-bearing path strings in `programs.scoot.looks`](./resolved/look-packs-context-strings-done.md) (low) — RESOLVED 2026-11-07
 
