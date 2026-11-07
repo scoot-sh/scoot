@@ -19,18 +19,19 @@ the design has a home, not scheduled. Serves **daily-drive**, opt-in.
 user timers or a path unit, never a daemon; off by default; a swap's own
 `color-scheme` write must not loop back into `--follow-portal`.
 
-## Status (2026-11-06)
+## Status (2026-11-07)
 
-`--schedule` landed: `scoot look auto --light A --dark B --schedule
-HH:MM/HH:MM`, bare `auto` for status and `auto --off`, as one systemd user
+`--follow-portal` landed too (one trigger at a time; see the resolved
+`look-auto-follow-portal`). `--schedule` landed: `scoot look auto --light
+A --dark B --schedule HH:MM/HH:MM`, bare `auto` for status and `auto --off`, as one systemd user
 timer and a oneshot service (`crates/scootctl/src/look/auto/`). The
-ticket stays open for the other two triggers, split out because each is
+ticket stays open for the remaining trigger, split out because it is
 its own design problem:
 
 - `--sun`: [`look-auto-sun`](look-auto-sun.md)
-- `--follow-portal`: [`look-auto-follow-portal`](look-auto-follow-portal.md)
+- `--follow-portal`: done, [`look-auto-follow-portal`](../resolved/look-auto-follow-portal-done.md)
 
-Resolve this ticket when both are done, or close it once they stand alone.
+Resolve this ticket when `--sun` is done, or close it once it stands alone.
 
 Decisions this ticket left open, settled by the first slice: the units are
 one timer with two `OnCalendar=` lines and one service that reads the wall

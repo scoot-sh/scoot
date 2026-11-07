@@ -153,6 +153,22 @@ fn spec() -> Vec<SpecRow> {
                 ("--schedule", Some("07:00/19:00")),
             ]),
         ),
+        (
+            "auto",
+            vec![
+                "auto",
+                "--light",
+                "dawn",
+                "--dark",
+                "moonrise",
+                "--follow-portal",
+            ],
+            globals(vec![
+                ("--light", Some("dawn")),
+                ("--dark", Some("moonrise")),
+                ("--follow-portal", None),
+            ]),
+        ),
         ("auto", vec!["auto"], globals(vec![("--off", None)])),
     ]
 }

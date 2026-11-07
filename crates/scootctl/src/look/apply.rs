@@ -2781,6 +2781,10 @@ pub(crate) fn complete_swap(
             .as_ref()
             .map(|record| record.dconf_orig.clone())
             .unwrap_or_default(),
+        dconf_adopted: previous
+            .as_ref()
+            .map(|record| record.dconf_adopted.clone())
+            .unwrap_or_default(),
     };
     match &swap.target {
         SwapTarget::Point(_) => {
@@ -3363,6 +3367,10 @@ pub fn apply_with_live(
             .as_ref()
             .map(|record| record.dconf_orig.clone())
             .unwrap_or_default(),
+        dconf_adopted: previous
+            .as_ref()
+            .map(|record| record.dconf_adopted.clone())
+            .unwrap_or_default(),
     };
     write_record(state_dir, &record)
         .map_err(|error| refuse(format!("cannot record the choice: {error}")))?;
@@ -3682,6 +3690,7 @@ pub(crate) fn rollback(
                 toolkit: previous.toolkit,
                 dconf_wrote: previous.dconf_wrote.clone(),
                 dconf_orig: previous.dconf_orig.clone(),
+                dconf_adopted: previous.dconf_adopted.clone(),
             };
             if let Err(error) = write_record(state_dir, &restored) {
                 failure

@@ -21,6 +21,7 @@ fn record(name: &str, rendered: &std::path::Path) -> Record {
         toolkit: None,
         dconf_wrote: std::collections::BTreeMap::new(),
         dconf_orig: std::collections::BTreeMap::new(),
+        dconf_adopted: std::collections::BTreeMap::new(),
     }
 }
 

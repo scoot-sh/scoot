@@ -1,0 +1,8 @@
+# Managed by scoot look auto. Do not edit: `scoot look auto --off` removes it, `scoot look auto` rewrites it.
+[Unit]
+Description=scoot look: switch to the look the desktop's light/dark setting asks for
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart="/usr/bin/scoot" look _auto-fire --light dawn --dark moonrise --follow-portal

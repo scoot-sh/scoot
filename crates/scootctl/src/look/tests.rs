@@ -836,6 +836,19 @@ fn auto_parses_as_a_verb_and_the_fire_verb_is_hidden() {
             action: Action::Fire(_)
         })
     ));
+    assert!(matches!(
+        command(&[
+            "auto",
+            "--light",
+            "dawn",
+            "--dark",
+            "moonrise",
+            "--follow-portal"
+        ]),
+        Ok(Command::Auto {
+            action: Action::On(_)
+        })
+    ));
     // Not offered as a guess for a typo, like `_preview-revert`.
     assert!(!super::COMMANDS.contains(&"_auto-fire"));
     assert!(super::COMMANDS.contains(&"auto"));

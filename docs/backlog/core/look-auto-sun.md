@@ -41,4 +41,4 @@ all. A systemd `OnCalendar=` cannot say "sunset" either.
 
 ## Not in this ticket
 
-`--follow-portal` ([`look-auto-follow-portal`](look-auto-follow-portal.md)).
+`--follow-portal` ([`look-auto-follow-portal`](../resolved/look-auto-follow-portal-done.md)).

@@ -303,6 +303,7 @@ fn recorded_state(generation: u64) -> tempfile::TempDir {
             toolkit: None,
             dconf_wrote: Default::default(),
             dconf_orig: Default::default(),
+            dconf_adopted: Default::default(),
         },
     )
     .expect("a record");
