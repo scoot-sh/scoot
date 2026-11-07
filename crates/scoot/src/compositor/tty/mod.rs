@@ -40,6 +40,7 @@ mod ctm;
 mod dumb;
 mod flip_tracker;
 mod gpu;
+mod hdr_probe;
 mod head;
 pub(crate) mod hotplug;
 #[cfg(feature = "gpu-scanout")]
@@ -896,6 +897,11 @@ fn open_device(
 
     let (heads, tier, failures, trying) =
         build_heads(&mut drm, &drm_fd, connected, None, plan, request);
+    // Read-only HDR-readiness report, startup only (a VT-switch rebuild goes
+    // through `build_heads` directly and does not repeat it). Changes nothing.
+    for (head, _) in &heads {
+        hdr_probe::report(&drm, &head.name, head.connector, head.presenter.crtc());
+    }
     // Without the `gpu-scanout` feature there is no second tier to choose:
     // `render::resolve` has already turned `--renderer gpu` under `--tty`
     // into the CPU renderer with a warning naming the missing feature, and

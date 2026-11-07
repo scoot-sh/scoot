@@ -1,12 +1,23 @@
 ---
 title: "HDR readiness probe: report connector HDR capability, refuse HDR with reason"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-07"
 ---
 
 # HDR readiness probe: report connector HDR capability, refuse HDR with reason
+
+> Resolved 2026-11-07: `crates/scoot/src/compositor/tty/hdr_probe.rs`. A pure
+> `missing(&Snapshot)` over four facts (`HDR_OUTPUT_METADATA` present, a
+> `Colorspace` BT2020 value, `max bpc` top >= 10, a 2101010-family format on
+> the CRTC's primary plane) plus a thin live `read`; one `drm: hdr probe`
+> info line per driven head, from `open_device` only (a VT-switch rebuild does
+> not repeat it). Reference: `site/.../scoot/backends.md`. Not read: the
+> sink's EDID HDR block, so "nothing missing" means the driver exposes the
+> controls, not that the monitor does HDR. The "later `scoot msg outputs`"
+> item stays unbuilt.
 
 Filed 2026-10-11. Serves **daily-drive**: HDR setup starts with knowing
 what the connector can do; not needed for computer use.
