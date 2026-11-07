@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.19](https://github.com/scoot-sh/scoot/compare/v0.7.18...v0.7.19) - 2026-11-07
+
+### scootbar
+
+- fixed: tray help describes the item menus that shipped ([#975](https://github.com/scoot-sh/scoot/pull/975))
+
 ## [0.7.18](https://github.com/scoot-sh/scoot/compare/v0.7.17...v0.7.18) - 2026-11-07
 
 ### scoot
