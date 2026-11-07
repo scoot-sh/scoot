@@ -2,8 +2,8 @@
 //! tested on plain byte slices. A [`Canvas`] over an `XRGB8888` or
 //! premultiplied `ARGB8888` buffer (4 bytes a pixel, little-endian), with
 //! full-height span fills, glyph coverage blended over what is there, and the
-//! bar's rounded corners. This is the pure canvas
-//! `docs/scootbar/backlog/extract-scootui.md` would extract.
+//! bar's rounded corners. This is the pure canvas that
+//! `docs/scootbar/backlog/resolved/extract-scootui-done.md` extracted.
 
 use crate::color::Color;
 

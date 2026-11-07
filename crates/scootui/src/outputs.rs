@@ -8,9 +8,9 @@
 //! This is scootbg's per-output lifecycle (`crates/scootbg/src/outputs.rs`),
 //! reused rather than reinvented, and trimmed to what a bar needs: no
 //! wallpaper choices, no waiting replies, no `xdg_output`. It is the
-//! Wayland scaffolding `docs/scootbar/backlog/extract-scootui.md` names as
-//! the likely shared piece, so the two copies are kept close in shape;
-//! scootbg is not refactored here.
+//! Wayland scaffolding `docs/scootbar/backlog/resolved/extract-scootui-done.md`
+//! named as the likely shared piece, so the two copies are kept close in
+//! shape; scootbg is not refactored here.
 //!
 //! ## One output's life
 //!

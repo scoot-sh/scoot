@@ -30,12 +30,12 @@
 //! nothing once the first fill has sized them. [`Layout`] likewise keeps its
 //! rows, and painting writes into the popup's pooled buffer.
 //!
-//! ## Shaped for extraction
+//! ## Shaped for reuse
 //!
-//! Everything under here depends on the bar's pure drawing (`paint`, `text`,
+//! Everything under here depends on the pure drawing (`paint`, `text`,
 //! `theme`) and nothing else of the daemon, which is the seam
-//! `docs/scootbar/backlog/extract-scootui.md` would cut along. It is not
-//! extracted: that entry waits for a second binary to need it.
+//! `docs/scootbar/backlog/resolved/extract-scootui-done.md` cut along when it
+//! made this a shared crate.
 //!
 //! [`Module::popup`]: crate::modules::Module::popup
 //!
