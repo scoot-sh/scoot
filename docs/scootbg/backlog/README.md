@@ -152,6 +152,6 @@ full per-feature cycle.
 - [scale test flaked under full-suite load](resolved/scale-change-decode-flake-done.md) — RESOLVED 2026-10-29: the test holds the job in flight on a download it releases after the daemon reports the new scale
 - [Detached `cargo test` hangs the signal test: inherited `SIG_IGN`](resolved/signal-disposition-detached-tests-done.md) — RESOLVED 2026-10-08: harness resets HUP/INT/QUIT to default in spawned children (PR #540)
 - [Share tests hard-code 4K page rounding](resolved/scootbg-share-tests-page-size-done.md) — RESOLVED 2026-09-30: the tests take the host's page size (verified on the Asahi's 16 KiB pages)
-- [restore two-sizes screenshot flake on sway](sway-restore-two-sizes-flake.md)
+- [restore two-sizes screenshot flake on sway](resolved/sway-restore-two-sizes-flake-done.md) — RESOLVED 2026-11-07: the test waited on `query`, which says what the daemon committed; it now fences on a `set` reply (a sync after the commits) before it screencopies
 - [animated_oom tight-limit test failed once in a full-suite run](animated-oom-tight-limit-flake.md)
 - [apply_config_killed_mid_wait test took 57 s under load](resolved/apply-config-killed-mid-wait-slow-done.md) — RESOLVED 2026-11-02: one 64x64 output and an 800x600 noise PNG (was two default outputs and 4000x3000): ~1.3 s alone, ~1.7 s loaded, kill still lands mid-decode

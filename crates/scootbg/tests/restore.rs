@@ -601,6 +601,18 @@ fn an_image_set_as_the_daemon_starts_is_decoded_once() {
     }
 }
 
+/// Returns once the compositor has read everything the daemon committed
+/// before this call, which `shows` (and `query` generally) does not say: it
+/// reports what the daemon committed, not what sway has read. The reply to a
+/// `set` does say it: the daemon sends it only after a `wl_display.sync` that
+/// follows its commits has come back (`crate::waiters`). A mapping for a
+/// workspace that is not active changes nothing on screen, so it is a fence
+/// that leaves the restored wallpaper as it is (and red, not the blue under
+/// test, so a mapping that did land would fail the check, not pass it).
+fn compositor_has_the_commits(session: &Session) {
+    ok(session, &["set", RED, "--workspace", "fence"]);
+}
+
 /// A restored image on two outputs of different sizes (sway: 1280×720 and
 /// 1920×1080) is decoded once for both: their `configure`s come in one
 /// batch, so both sizes are asked of one render job (`crate::jobs` says
@@ -628,17 +640,19 @@ fn a_restore_on_outputs_of_two_sizes_decodes_once_on_sway() {
 
     let opens = Opens::watch(&picture);
     let mut daemon = session.daemon();
-    shows(
-        &session,
-        &[
-            (names[0].as_str(), image(&picture)),
-            (names[1].as_str(), image(&picture)),
-        ],
-    );
+    let want = [
+        (names[0].as_str(), image(&picture)),
+        (names[1].as_str(), image(&picture)),
+    ];
+    shows(&session, &want);
+    // `shows` is the daemon's own record of what it committed; sway may not
+    // have read those commits yet (see `compositor_has_the_commits`).
+    compositor_has_the_commits(&session);
+    shows(&session, &want);
     for name in &names {
         session
             .screencopy(name)
-            .assert_all([0, 0, 255], "restored on both");
+            .assert_all([0, 0, 255], &format!("restored on {name}"));
     }
     assert_eq!(opens.count(), 1, "one decode for both sizes");
     let stderr = stop(&session, &mut daemon);
