@@ -561,8 +561,11 @@ pixels. A Cargo feature (`tray`), on by default; the smallest build
   drawn in this version. Without the `popup` feature the DBusMenu half
   is refused saying so (`ContextMenu` still goes out). Ayatana items
   expose neither `Activate` nor `ContextMenu`, so a left click on one
-  does nothing, and their menus cannot open until themed icons land (no
-  span to open from).
+  does nothing; their menu opens with a right click (or `menu N`) like any
+  other. An item is drawn, and so can be clicked, only once it has an icon:
+  an item whose icon is a themed name that the `hicolor` lookup cannot
+  resolve (and that sent no pixmap) stays tracked but hidden, with no span
+  to open its menu from.
 - **`query`** reports `{ "watcher": "owner" | "host", "items": [{ "id",
   "title", "status", "shown" }] }` while any item is tracked, and nothing
   while none is.
