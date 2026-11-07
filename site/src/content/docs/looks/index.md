@@ -594,7 +594,9 @@ or an absolute string, so `"${inputs.friend}/looks"` and
 `inputs.friend + "/looks"` work too. A string that points into a store
 path stays a build input of the catalog. A flake input is already in the
 store. A derivation output that is not built yet is built during
-evaluation, which slows evaluation but works.
+evaluation, which slows evaluation. It fails where import from derivation
+is disabled (`allow-import-from-derivation = false`, for example on
+Hydra).
 
 > **Symptom:** ``programs.scoot.looks: look name `twin` is declared twice
 > with different sources: /nix/store/...-source/dup/one and

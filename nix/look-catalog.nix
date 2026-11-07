@@ -20,7 +20,8 @@
 # `rendered/<name>`. No derivations run at evaluation (sources read with
 # `builtins.fromTOML`, font carriers resolved with `lib.attrByPath`
 # against `pkgs`), and no import-from-derivation: every derivation input
-# is a source path or a package.
+# is a source path or a package (except a source given as a string that
+# refers to a derivation output that is not built yet).
 #
 # Takes `{ lib, pkgs, scootLook, fallbackUiPackage, fallbackFont }`:
 # `scootLook` is the `scoot-look` binary package (null skips nothing

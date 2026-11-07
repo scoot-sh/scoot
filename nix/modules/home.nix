@@ -18,7 +18,8 @@ let
 
   # The Nix side of the look catalog (sources, build-time renders): names
   # of shipped looks or paths to source look directories, read with
-  # `builtins.fromTOML` (no derivations, no import-from-derivation). Null
+  # `builtins.fromTOML` (no derivations, no import-from-derivation, except a source string
+  # that refers to an unbuilt derivation output). Null
   # `lookPackage` keeps the whole catalog side off (see the option).
   lookCatalogLib = import ../look-catalog.nix {
     inherit lib pkgs;
