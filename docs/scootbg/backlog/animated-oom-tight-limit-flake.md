@@ -23,3 +23,18 @@ If it fails again, keep the nextest output: the `animated_oom` assertions print 
 ## Not in this ticket
 
 Any other test.
+
+## Update 2026-11-07: still not reproduced, 500 runs; the test now says where it failed
+
+Measured on the 6-core aarch64 dev VM (nextest-built `animated_oom` binary, `SCOOTBG_REQUIRE_SCOOT=1`), none of these failed:
+
+- 60 runs beside 16 busy loops; 60 runs with test and 8 busy loops all pinned to one CPU (`taskset -c 0`);
+- 40 runs without `wait_for_saver_idle` (the pre-fix `VmSize` variance restored), idle, and 40 more beside 16 busy loops;
+- 120 runs, 12 in parallel, beside 16 busy loops, without the wait;
+- one full `-p scootbg -p scootbg-mem` nextest run beside 16 busy loops (690 passed, `animated_oom` among them);
+- the margin swept down from 32 MiB to 16, 8, 4, 2 and 1 MiB (5 runs each) and, pinned to one CPU beside 6 busy loops, 30 runs each at 1 and 2 MiB: all pass. So the test does not sit near a margin cliff: both refusals reuse the saver's freed stack and arena, and the 1 GiB canvas fails at any margin;
+- four overlapping `set`s (two with `--no-animate`), so the next decode thread starts as the previous one tears down, pinned to one CPU beside 6 busy loops, 30 runs each at 32, 4 and 1 MiB: all pass.
+
+A refused `set` records nothing (`daemon::images`: a trial changes nothing until it lands), so only the decode thread runs in the lowered window, never a second saver thread.
+
+The assertions now print the daemon's liveness or exit status, `VmSize` against the limit, its thread count and `scootbg.log` (`diagnosis` in `tests/animated_oom.rs`), which is what the next failure needs. This entry stays open until one does, or until a long enough clean record on CI says it was the already-fixed `VmSize` read.

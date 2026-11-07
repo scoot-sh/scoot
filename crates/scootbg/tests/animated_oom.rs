@@ -104,6 +104,30 @@ fn set_soft_limit(pid: u32, soft: Option<u64>, hard: Option<u64>) -> std::io::Re
     Ok(old.current)
 }
 
+/// What a failure needs to say where it happened: whether the daemon is
+/// alive (its exit status if not), its size and threads against the limit
+/// it was given, and its log. Built only when an assertion fails.
+fn diagnosis(session: &Session, daemon: &mut std::process::Child, limit: u64) -> String {
+    let pid = daemon.id();
+    let state = match daemon.try_wait() {
+        Ok(None) => format!(
+            "alive, {} (limit {limit}), {} threads",
+            std::fs::read_to_string(format!("/proc/{pid}/status"))
+                .ok()
+                .and_then(|status| status
+                    .lines()
+                    .find(|l| l.starts_with("VmSize:"))
+                    .map(str::to_owned))
+                .unwrap_or_default(),
+            std::fs::read_dir(format!("/proc/{pid}/task")).map_or(0, |tasks| tasks.count())
+        ),
+        Ok(Some(status)) => format!("exited: {status}"),
+        Err(error) => format!("unknown: {error}"),
+    };
+    let log = std::fs::read_to_string(session.daemon_log()).unwrap_or_default();
+    format!("daemon {state}; its log:\n{log}")
+}
+
 /// The daemon's soft address-space limit, lowered while this lives and
 /// put back on drop, so a failed assertion (a panic) still leaves a daemon
 /// that can be stopped and a limit that does not outlive the test.
@@ -181,14 +205,21 @@ fn animation_canvases_refuse_under_a_tight_limit() {
     ] {
         let refused = set(&args);
         let stderr = String::from_utf8_lossy(&refused.stderr).into_owned();
-        assert_eq!(refused.status.code(), Some(1), "{args:?}: {stderr}");
+        assert_eq!(
+            refused.status.code(),
+            Some(1),
+            "{args:?}: {stderr}\n{}",
+            diagnosis(&session, &mut daemon, limit)
+        );
         assert!(
             stderr.contains("out of memory") && stderr.contains("cannot allocate"),
-            "{args:?}: {stderr}"
+            "{args:?}: {stderr}\n{}",
+            diagnosis(&session, &mut daemon, limit)
         );
         assert!(
             daemon.try_wait().unwrap().is_none(),
-            "{args:?}: the daemon died"
+            "{args:?}: the daemon died\n{}",
+            diagnosis(&session, &mut daemon, limit)
         );
     }
     // Lifted before anything is asserted (and on a panic, by the guard),
@@ -199,9 +230,17 @@ fn animation_canvases_refuse_under_a_tight_limit() {
     let after = session.query()["outputs"][0].clone();
     assert_eq!(after["shows"], json!({"color": "#102030"}), "{after}");
     assert_eq!(after["draw_failed"], false, "{after}");
-    assert!(daemon.try_wait().unwrap().is_none(), "the daemon died");
+    assert!(
+        daemon.try_wait().unwrap().is_none(),
+        "the daemon died\n{}",
+        diagnosis(&session, &mut daemon, limit)
+    );
     let drawn = set(&[small.as_str()]);
-    assert!(drawn.status.success(), "{drawn:?}");
+    assert!(
+        drawn.status.success(),
+        "{drawn:?}\n{}",
+        diagnosis(&session, &mut daemon, limit)
+    );
     let now = session.query()["outputs"][0].clone();
     assert_eq!(now["draw_failed"], false, "{now}");
     assert_eq!(now["shows"]["mode"], "fill", "{now}");
