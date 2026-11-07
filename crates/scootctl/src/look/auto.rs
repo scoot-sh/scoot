@@ -398,6 +398,21 @@ fn emit(
     }
 }
 
+/// The executable to bake into the unit for the running binary `current`:
+/// `stable_exe`'s choice, refused when that file is gone. A binary replaced
+/// while running reads back as `.../scoot (deleted)`; baked into a unit it
+/// would never start.
+fn unit_exe(current: &Path, path_var: Option<&OsStr>) -> Result<PathBuf, String> {
+    let exe = stable_exe(current, path_var);
+    if !exe.exists() {
+        return Err(format!(
+            "the scoot binary {} no longer exists (replaced while running?): run `scoot look auto` again from the installed one",
+            exe.display()
+        ));
+    }
+    Ok(exe)
+}
+
 fn run_on(look: &Look, schedule: &Schedule) -> Result<(), String> {
     // A look that is not in the catalog refuses now, not at the first
     // boundary, when nobody is watching the journal.
@@ -407,17 +422,9 @@ fn run_on(look: &Look, schedule: &Schedule) -> Result<(), String> {
             return Err(apply::unknown_look(name, &catalog));
         }
     }
-    let exe = std::env::current_exe()
-        .map(|exe| stable_exe(&exe, std::env::var_os("PATH").as_deref()))
+    let current = std::env::current_exe()
         .map_err(|error| format!("cannot find the scoot binary to put in the unit: {error}"))?;
-    // A binary replaced while running reads back as `.../scoot (deleted)`:
-    // baked into a unit it would never start.
-    if !exe.exists() {
-        return Err(format!(
-            "the scoot binary {} no longer exists (replaced while running?): run `scoot look auto` again from the installed one",
-            exe.display()
-        ));
-    }
+    let exe = unit_exe(&current, std::env::var_os("PATH").as_deref())?;
     // The service runs in the user manager's environment, which need not
     // hold this shell's `SCOOT_LOOK_STATE` or `XDG_STATE_HOME`: the
     // resolved directory is written into the unit, so the timer swaps the
