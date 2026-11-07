@@ -1,9 +1,10 @@
 ---
 title: "Nix: pass the night-light latitude and longitude to look auto --sun"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-07"
 ---
 
 # Nix: pass the night-light latitude and longitude to look auto --sun
@@ -36,3 +37,13 @@ the service writes, so the module does not declare it.
 ## Not in this ticket
 
 Reading the wrapper script, a network lookup, or a location service.
+
+## Resolution
+
+Took the second option: a note in the night-light page
+(`site/src/content/docs/desktop/night-light.md`) says `look auto --sun` has
+its own `--latitude` and `--longitude` and does not read
+`desktop.nightlight.latitude`. No module declares the units: the CLI's
+own-if-marked rule would collide with a home-manager link, and the saving is
+two numbers typed once. Reopen if people ask for a declarative
+`programs.scoot.look.auto`.

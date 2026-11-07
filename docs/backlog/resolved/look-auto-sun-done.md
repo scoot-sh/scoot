@@ -55,7 +55,7 @@ items above:
    decimals, validated ranges, required with `--sun`) and the service line
    stores it, as `--schedule` stores its times. Held as whole micro-degrees
    so a `Plan` stays `Eq` and the text reads back exactly. The Nix wiring
-   is split out: [`look-auto-sun-nix`](../core/look-auto-sun-nix.md).
+   is split out: [`look-auto-sun-nix`](./look-auto-sun-nix-done.md).
 2. **Computation.** One function, the Sun's altitude (NOAA's low-precision
    position); sunrise and sunset are the instants it crosses -0.833 degrees,
    found by scanning a minute at a time and bisecting to the second. No
