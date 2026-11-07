@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.22](https://github.com/scoot-sh/scoot/compare/v0.7.21...v0.7.22) - 2026-11-07
+
+### scootctl,scoot-look
+
+- added: look auto --sun switches looks at sunrise and sunset ([#984](https://github.com/scoot-sh/scoot/pull/984))
+
 ## [0.7.21](https://github.com/scoot-sh/scoot/compare/v0.7.20...v0.7.21) - 2026-11-07
 
 ### scootctl,scoot-look
