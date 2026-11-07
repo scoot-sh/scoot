@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.18](https://github.com/scoot-sh/scoot/compare/v0.7.17...v0.7.18) - 2026-11-07
+
+### scoot
+
+- added: route a --nested host's pointer gestures to the gesture entry points ([#962](https://github.com/scoot-sh/scoot/pull/962))
+
 ## [0.7.17](https://github.com/scoot-sh/scoot/compare/v0.7.16...v0.7.17) - 2026-11-06
 
 ### scootctl
