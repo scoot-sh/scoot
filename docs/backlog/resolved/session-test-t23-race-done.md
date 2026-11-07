@@ -1,9 +1,10 @@
 ---
 title: "Session launcher harness T23 reads env-at-graphical before it exists"
-status: "open"
-area: "testing"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-06"
 ---
 
 # Session launcher harness T23 reads env-at-graphical before it exists
@@ -26,6 +27,16 @@ is written after the log line, so the read can run first.
 Wait for the file (a bounded loop like `wait_log`) before grepping it, or write
 it before the call is logged. Check the other tests that read files from
 `$HARNESS_STATE` right after a `wait_log` for the same ordering.
+
+## Resolution
+
+`wait_graphical` waits (bounded, ~10 s) for `env-at-graphical`, which the
+fake `systemctl` now publishes last and atomically (tmp + `mv`), after the
+`swayidle` state. T1, T3 and T23 call it after `wait_log`; they were the
+three tests reading that state straight after the log line. T10 pre-writes
+its files and never races. Proof: with a 0.3 s sleep injected into the fake
+between the logged call and its effects, the old harness fails
+deterministically (T1, then T3) and the fixed one passes 62/62.
 
 ## Not in this ticket
 

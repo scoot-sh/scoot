@@ -206,7 +206,12 @@ ALLENV
                         # gated on the display being in the manager already.
                         if env_has WAYLAND_DISPLAY; then
                             printf 'active' >"$S/swayidle"
-                            printf '%s' "$(cat "$S/env-manager")" >"$S/env-at-graphical"
+                            # Published last and atomically (tmp + mv): the
+                            # call was logged before any of this ran, so a
+                            # test waits on this file (wait_graphical) and
+                            # then sees swayidle and the whole snapshot.
+                            printf '%s' "$(cat "$S/env-manager")" >"$S/env-at-graphical.tmp"
+                            mv "$S/env-at-graphical.tmp" "$S/env-at-graphical"
                         else
                             printf 'skipped' >"$S/swayidle"
                         fi
@@ -525,6 +530,19 @@ wait_log() {
     done
     return 1
 }
+wait_graphical() {
+    # wait_graphical <tag> : the fake systemctl has finished the graphical
+    # target's activation (swayidle state + env-at-graphical snapshot), up
+    # to ~10 s. The calls.log line is written when the call STARTS, before
+    # either lands, so reading them straight after a wait_log races.
+    i=0
+    while [ "$i" -lt 100 ]; do
+        [ -f "$HARNESS_STATE/env-at-graphical" ] && return 0
+        "$REAL_SLEEP" 0.1
+        i=$((i + 1))
+    done
+    bad "$1: the graphical target never recorded its environment"
+}
 wait_stderr() {
     # wait_stderr <fixed-string> : the launcher's stderr says it, up to
     # ~10 s. Notes land after the call that triggers them, so asserting
@@ -569,6 +587,7 @@ kill_launcher() {
 new_test 1
 start_launcher
 wait_log "start scoot-session.target" || bad "T1: launcher never started scoot-session.target"
+wait_graphical "T1"
 i_scoped="$(call_index 'dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE')"
 [ -n "$i_scoped" ] || bad "T1: no scoped session import before the session start"
 i_session="$(call_index 'start scoot-session.target')"
@@ -622,6 +641,7 @@ set_state scoot.service active
 set_state scoot-session.target active
 start_launcher
 wait_log "start scoot-session.target" || bad "T3: healed login never reached the session target"
+wait_graphical "T3"
 grep -q -F "stop scoot-session.target" "$HARNESS_STATE/calls.log" \
     || bad "T3: stale clear did not stop the session target"
 i_stop="$(call_index 'stop scoot-session.target')"
@@ -1100,6 +1120,7 @@ new_test 23
 export FOREIGN_SOCKET=wayland-proxy-4242
 start_launcher
 wait_log "start scoot-session.target" || bad "T23: a foreign socket stopped the login"
+wait_graphical "T23"
 grep -q -F "found 2 new Wayland sockets" "$T/stderr.log" && bad "T23: the foreign socket counted as the compositor's"
 grep -q '^WAYLAND_DISPLAY=wayland-100$' "$HARNESS_STATE/env-at-graphical" \
     || bad "T23: the display was not the compositor's wayland-100"
