@@ -314,7 +314,7 @@ falsify. Read `flexwm` there as `scoot`.
 - [Pin idle-notify activity on the pinch and hold paths](./resolved/gesture-idle-notify-test-done.md) — RESOLVED 2026-11-06: a real `ext_idle_notifier_v1` client watches the seat; a pinch or hold begin must resume it, and both tests fail with `announce_activity()` removed
 - [Session launcher harness T23 reads env-at-graphical before it exists](./resolved/session-test-t23-race-done.md) — RESOLVED 2026-11-06 (`wait_graphical` gate plus an atomic publish in the fake systemctl; T1, T3 and T23)
 - [Pin the look auto vanished-executable refusal](./resolved/look-auto-deleted-exe-test-done.md) — RESOLVED 2026-11-07: the check is now `unit_exe`; a missing and a `(deleted)` path are refused, and both tests fail with the check removed
-- [Pin nested host-pointer re-announce and the floating-drag end on pointer loss](./testing/nested-pointer-loss-tests.md) (low, filed 2026-11-06): the PR #962 review made the seat handler tear the pointer down on every capabilities re-announce and all 83 nested tests still passed
+- [Pin nested host-pointer re-announce and the floating-drag end on pointer loss](./resolved/nested-pointer-loss-tests-done.md) — RESOLVED 2026-11-07: a host `add_touch` re-announces the seat with the pointer still set and the pointer, its gesture objects and an open swipe must survive; a removed host pointer must end a floating drag; each test fails with its branch mutated
 - [Run the scoot-session launcher harness in CI](./resolved/scoot-session-harness-in-ci-done.md) — RESOLVED 2026-10-05 (PR #453): `session-harness` CI job (sh + python3, ~20 s) with true activation semantics and the carried stale-graphical-target limitation pinned; the heal deliberately does not restart graphical-bound units
 
 ### Input

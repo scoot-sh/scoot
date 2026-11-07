@@ -55,13 +55,17 @@ when the host offers it, and handles the host's swipe, pinch and hold as
   dropped. When the host's pointer leaves the nested window, or the host seat
   loses its pointer, a gesture still open ends cancelled, so no window is
   left holding half of one. A pointer that comes back gets fresh gesture
-  objects.
+  objects. A host that re-announces its seat capabilities with the pointer
+  still present changes nothing.
 - **Units are the host's.** Swipe and pinch deltas arrive as the host sends
   them, not as libinput reports them, so `[gestures] sensitivity` may need
   its own value nested.
 
 Only the pointer under the host's window sends gestures: the host decides
 which of its windows gets them.
+
+A host seat that loses its pointer releases it, and a floating window being
+dragged with the pointer stops following it.
 
 > **Symptom:** a three-finger swipe does nothing in a nested session. The
 > host may not offer `zwp_pointer_gestures_v1` (`WAYLAND_DEBUG=1` shows

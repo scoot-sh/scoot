@@ -35,8 +35,10 @@
 //! or `end` with no `begin` before it never reaches an entry point, so a
 //! host that restarts a sequence, or an event in flight from an object being
 //! destroyed, cannot turn into an `update` for a gesture nobody began. A
-//! `begin` over an open one is passed through; the entry point closes the
-//! old gesture `cancelled` first, as it does on `--tty`.
+//! `begin` over an open one is passed through unclosed, as the libinput arms
+//! of `--tty` pass it; what closes the old gesture `cancelled` first is
+//! `gesture_swipe_begin` for a swipe and Smithay's gesture object for a
+//! pinch or hold (`gesture/client.rs`).
 //!
 //! A gesture the host never ends is cancelled here, not left open: when the
 //! host pointer goes away, and when it leaves scoot's window (a conformant

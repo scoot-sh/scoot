@@ -850,3 +850,123 @@ fn a_cancel_made_here_carries_the_hosts_clock() {
         }]
     );
 }
+
+// ---- the host seat's capabilities ----
+
+/// The id of the host `wl_pointer` the nested seat holds, which changes
+/// whenever the pointer is torn down and made again.
+fn host_pointer_id(rig: &Rig) -> Option<wayland_client::backend::ObjectId> {
+    use wayland_client::Proxy;
+    rig.nested
+        .state
+        .host
+        .as_ref()
+        .and_then(|h| h.pointer().map(|p| p.id()))
+}
+
+#[test]
+fn a_capabilities_re_announce_with_the_pointer_still_there_leaves_it_and_its_gestures_alone() {
+    // A host that re-sends `wl_seat.capabilities` (a touch device appearing
+    // does: the pointer is still set in the new mask) must not cost the
+    // nested session its pointer. Torn down and made again on every
+    // re-announce, the pointer would be a new object, and a gesture open
+    // across it would be cancelled.
+    let mut rig = Rig::new(true, true);
+    let pointer = host_pointer_id(&rig).expect("a host pointer");
+    let plan = rig
+        .nested
+        .state
+        .host
+        .as_ref()
+        .and_then(|h| h.gestures.plan_made());
+    assert!(plan.is_some(), "gesture objects were made");
+
+    rig.send([SwipeBegin {
+        fingers: 4,
+        time: 10,
+    }]);
+    let mut opened = Vec::new();
+    rig.until("the nested client to hear the begin", |rig| {
+        opened.extend(rig.nested.run_on(0, Step::Report).events);
+        !opened.is_empty()
+    });
+    assert_eq!(opened, vec![Ev::SwipeBegin(4)]);
+
+    // The re-announce, and the nested session's dispatch of it.
+    rig.host(|h| {
+        h.state.seat.add_touch();
+    });
+    for _ in 0..20 {
+        rig.nested.settle();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+
+    assert_eq!(
+        host_pointer_id(&rig),
+        Some(pointer),
+        "the pointer was replaced"
+    );
+    let host = rig.nested.state.host.as_ref().expect("a nested host");
+    assert_eq!(host.gestures.plan_made(), plan, "the gesture objects went");
+    // The gesture open across the re-announce is still open: it ends
+    // normally, and nothing cancelled it.
+    rig.send([SwipeEnd {
+        cancelled: false,
+        time: 11,
+    }]);
+    assert_eq!(rig.heard(), vec![Ev::SwipeEnd(false)]);
+}
+
+/// Starts a modifier drag of the nested session's one window, floating, with
+/// the host pointer on it. Answers the window.
+fn start_nested_drag(rig: &mut Rig) -> scoot_core::WindowId {
+    use smithay::backend::input::KeyState;
+    use smithay::input::keyboard::Keycode;
+
+    let id = *rig
+        .nested
+        .state
+        .windows
+        .keys()
+        .next()
+        .expect("the mapped window");
+    rig.nested
+        .state
+        .act(scoot_core::Action::SetFloating { id, floating: true });
+    rig.nested.settle();
+    rig.until("the host pointer to be on the floating window", |rig| {
+        let middle = rig.client_middle();
+        rig.point_host(middle, 0);
+        rig.point_host(middle, 1);
+        rig.nested.run_on(0, Step::Report).inside
+    });
+    // `KEY_LEFTMETA`: Super, the default floating modifier.
+    rig.nested
+        .state
+        .key(Keycode::new(125 + 8), KeyState::Pressed);
+    rig.nested
+        .state
+        .pointer_button(scoot_ipc::PointerButton::Left, true);
+    assert_eq!(
+        rig.nested.state.floating_grab_window(),
+        Some(id),
+        "the drag began"
+    );
+    id
+}
+
+#[test]
+fn the_host_seat_losing_its_pointer_ends_a_floating_drag() {
+    // The pointer is gone and its `leave` may never come, and with it the
+    // release that would end the drag: without this the window would follow
+    // a pointer that no longer exists.
+    let mut rig = Rig::new(true, true);
+    start_nested_drag(&mut rig);
+
+    rig.host(|h| h.state.seat.remove_pointer());
+    rig.until("the drag to end", |rig| {
+        rig.nested.state.floating_grab_window().is_none()
+    });
+    let host = rig.nested.state.host.as_ref().expect("a nested host");
+    assert!(host.pointer().is_none(), "the pointer was kept");
+}
