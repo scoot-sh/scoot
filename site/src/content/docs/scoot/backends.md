@@ -266,6 +266,39 @@ Prefer a stable `/dev/dri/by-path/...` alias over a `cardN` number.
 > Another compositor already holds the seat, and no choice of device gets
 > around a busy seat. To see what the seat has: `ls /dev/dri/card*`.
 
+## HDR readiness in the `--tty` startup log
+
+scoot has no HDR output: every output is 8-bit SDR on every tier. What
+`--tty` does is report, once at startup, what each driven connector
+would need for HDR, so the answer to "why is my HDR monitor in SDR" is in
+the log. The check only reads; it changes nothing on the display.
+
+Each driven connector gets one `drm: hdr probe` line at `info`:
+
+```text
+drm: hdr probe: HDR cannot turn on for this connector (output is 8-bit SDR)
+  connector=eDP-1 hdr_output_metadata=false colorspace=none max_bpc=none
+  ten_bit_plane=false
+  missing=no HDR_OUTPUT_METADATA property; no Colorspace property;
+  no max bpc property; primary plane lists no 10-bit format (XRGB2101010 family)
+```
+
+HDR output needs all four of these, and `missing` names each one the
+connector lacks:
+
+| Piece | Where it is read | Missing text |
+|---|---|---|
+| `HDR_OUTPUT_METADATA` | connector property | `no HDR_OUTPUT_METADATA property` |
+| BT.2020 `Colorspace` | connector enum property; `colorspace=` lists its values | `no Colorspace property`, or `Colorspace offers no BT2020 value` |
+| `max bpc` of at least 10 | connector range property; `max_bpc=` shows `min..max` | `no max bpc property`, or `max bpc tops out at N (needs 10)` |
+| a 10-bit format | the CRTC's primary plane (`XRGB2101010` family); `ten_bit_plane=` | `primary plane lists no 10-bit format (XRGB2101010 family)` |
+
+When nothing is missing the line says the connector exposes everything
+HDR output needs and that HDR stays off. The report is about the
+driver's controls, not the attached monitor: it does not read the EDID to
+check that the display declares HDR support. It runs at startup only, not
+again after a VT switch or hotplug, and not on `--nested` or `--headless`.
+
 ## Hotplug, VT switching, captures
 
 **Hotplug.** `--tty` watches udev and re-runs the device choice
