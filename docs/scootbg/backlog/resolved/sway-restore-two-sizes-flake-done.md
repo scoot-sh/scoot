@@ -67,8 +67,14 @@ Sites checked (every `screencopy` call in `crates/scootbg/tests`):
 - `share.rs` `sharing_survives_hotplug_on_sway`: the screencopy after "Plug one in"
   follows only `query_until` ("the new output shows the image"), the #974 shape.
   Passed at 300 ms (3 runs) and 1000 ms (3 runs).
-- `scale.rs`: every screencopy sits in a retry loop with a deadline, so a stale
-  frame is retried.
+- `scale.rs`: four of its five screencopies (around lines 516, 542, 606, 699) sit
+  in loops with a deadline, so a stale frame is retried. The fifth (around line
+  503) is a single shot right after `ok(set)` and a `sent()` assert, so it
+  follows a `set` reply, the fence.
+- `restore.rs` (around line 654): the #974 site itself, already fenced.
+- `share.rs`, the `kept` screencopy after "Unplug the first": it follows only
+  `configured(1)`, but that output's content has not changed since its earlier
+  screencopy, so it is not the #974 shape.
 - `hotplug.rs` has no screencopy. `lockscreen.rs` reads scootbg's own picture
   files (`wait_solid`, `is_solid`), not sway's output.
 
@@ -84,3 +90,8 @@ pre-fix shape) failed 1 of 3 at 300 ms, 0 of 3 at 100 ms and 2 of 3 at 1000 ms
 (`a_restore_on_outputs_of_two_sizes_decodes_once_on_sway`), on the 1-core
 aarch64 builder. The detector is weak at low delays, so a pass at 300 ms alone
 would mean little; the 1000 ms runs are the ones that carry weight.
+
+If either unfenced site (the `image.rs` last loop, the `share.rs` screencopy
+after "Plug one in") ever flakes, harden it with a retry until a deadline, as
+`scale.rs` does, not with a `set` fence: `share.rs` asserts exact pool and
+memfd-map counts that an extra mapping could disturb.
