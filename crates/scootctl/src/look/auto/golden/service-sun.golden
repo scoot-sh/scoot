@@ -1,0 +1,7 @@
+# Managed by scoot look auto. Do not edit: `scoot look auto --off` removes it, `scoot look auto` rewrites it.
+[Unit]
+Description=scoot look: switch to the look the sun says is due
+
+[Service]
+Type=oneshot
+ExecStart="/usr/bin/scoot" look _auto-fire --light dawn --dark moonrise --sun --latitude 51.5074 --longitude -0.1278

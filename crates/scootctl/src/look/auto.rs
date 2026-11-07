@@ -1,9 +1,10 @@
 //! `scoot look auto`: opt-in light/dark switching, run by a systemd user
 //! unit. No daemon: a trigger starts a oneshot service that runs one hidden
 //! `scoot look _auto-fire` and exits. The trigger is a timer on two
-//! wall-clock boundaries (`--schedule`) or a path unit on the dconf
-//! database (`--follow-portal`, see [`portal`]); exactly one is installed,
-//! and installing one removes the other.
+//! wall-clock boundaries (`--schedule`), a timer that arms a one-shot timer
+//! for each sunrise and sunset (`--sun`, see [`arm`]) or a path unit on the
+//! dconf database (`--follow-portal`, see [`portal`]); exactly one is
+//! installed, and installing one removes the others.
 //!
 //! What `auto` owns is up to three unit files in `<config>/systemd/user`
 //! (`scoot-look-auto.service`, plus `.timer` or `.path`), each marked on
@@ -22,8 +23,12 @@
 //! the hidden verb, and words that passed the look-name and `HH:MM`
 //! grammars. Nothing a look supplies reaches it.
 //!
-//! `--sun` is filed in `docs/backlog/core/` and refuses here by name.
+//! `--sun` needs a place, `--latitude` and `--longitude` in decimal degrees,
+//! which the service line carries like the `--schedule` times. The Sun's
+//! position is computed in `scoot_look::sun`; no network and no location
+//! service is asked.
 
+pub mod arm;
 pub mod portal;
 mod systemctl;
 pub mod unit;
@@ -39,8 +44,9 @@ use super::toolkit::{self, CliDconf, Dconf};
 use super::{Look, apply, cycle, discover, output, sync};
 use crate::cli::Error;
 use scoot_look::schema::Polarity;
+use scoot_look::sun::civil::on_calendar_utc;
 use systemctl::{CliSystemctl, Systemctl, TimerState};
-use unit::{Clock, PATH, Plan, Portal, SERVICE, Schedule, Side, TIMER, Trigger};
+use unit::{Clock, PATH, Plan, Portal, SERVICE, Schedule, Side, Sun, TIMER, Trigger};
 
 /// What one `scoot look auto` invocation asks for.
 #[derive(Debug, PartialEq, Eq)]
@@ -49,8 +55,9 @@ pub enum Action {
     Status,
     /// `--off`: remove everything `auto` created.
     Off,
-    /// `--light A --dark B` with `--schedule L/D` or `--follow-portal`:
-    /// install (or refresh) the trigger.
+    /// `--light A --dark B` with `--schedule L/D`, `--sun --latitude N
+    /// --longitude E` or `--follow-portal`: install (or refresh) the
+    /// trigger.
     On(Trigger),
     /// The hidden `_auto-fire`: apply the look due now (or the setting
     /// asks for). What the service runs.
@@ -63,7 +70,10 @@ pub fn parse(positionals: &[String], fire: bool) -> Result<Action, Error> {
     let mut light = None;
     let mut dark = None;
     let mut schedule = None;
+    let mut latitude = None;
+    let mut longitude = None;
     let mut portal = false;
+    let mut sun = false;
     let mut off = false;
     let mut words = positionals.iter();
     while let Some(word) = words.next() {
@@ -75,6 +85,8 @@ pub fn parse(positionals: &[String], fire: bool) -> Result<Action, Error> {
             "--light" => &mut light,
             "--dark" => &mut dark,
             "--schedule" => &mut schedule,
+            "--latitude" => &mut latitude,
+            "--longitude" => &mut longitude,
             "--off" if inline.is_none() && !fire => {
                 off = true;
                 continue;
@@ -86,25 +98,27 @@ pub fn parse(positionals: &[String], fire: bool) -> Result<Action, Error> {
                 portal = true;
                 continue;
             }
-            "--sun" => {
-                return Err(Error::Invalid {
-                    what: "trigger (`scoot look auto` takes --schedule or --follow-portal; --sun is not available yet)",
-                    value: word.clone(),
-                });
+            "--sun" if inline.is_none() => {
+                if sun {
+                    return Err(Error::Unknown(word.clone()));
+                }
+                sun = true;
+                continue;
             }
             _ => return Err(Error::Unknown(word.clone())),
         };
         let value = match inline {
             Some(value) => value,
             None => words.next().map(String::as_str).ok_or(Error::Missing(
-                "a value after --light, --dark or --schedule",
+                "a value after --light, --dark, --schedule, --latitude or --longitude",
             ))?,
         };
         if slot.replace(value.to_owned()).is_some() {
             return Err(Error::Unknown(word.clone()));
         }
     }
-    let given = light.is_some() || dark.is_some() || schedule.is_some() || portal;
+    let place = latitude.is_some() || longitude.is_some();
+    let given = light.is_some() || dark.is_some() || schedule.is_some() || portal || sun || place;
     if off && given {
         return Err(Error::Invalid {
             what: "--off (it takes no other flag)",
@@ -119,18 +133,30 @@ pub fn parse(positionals: &[String], fire: bool) -> Result<Action, Error> {
     }
     let light = light.ok_or(Error::Missing("--light NAME"))?;
     let dark = dark.ok_or(Error::Missing("--dark NAME"))?;
-    let trigger = match (schedule, portal) {
-        (Some(_), true) => {
-            return Err(Error::Invalid {
-                what: "--schedule and --follow-portal (one trigger at a time)",
-                value: positionals.join(" "),
-            });
+    let chosen = usize::from(schedule.is_some()) + usize::from(portal) + usize::from(sun);
+    if chosen > 1 {
+        return Err(Error::Invalid {
+            what: "--schedule, --sun and --follow-portal (one trigger at a time)",
+            value: positionals.join(" "),
+        });
+    }
+    if place && !sun {
+        return Err(Error::Invalid {
+            what: "--latitude and --longitude (they belong to --sun)",
+            value: positionals.join(" "),
+        });
+    }
+    let trigger = match (schedule, portal, sun) {
+        (Some(schedule), _, _) => Trigger::Schedule(Schedule::parse(&light, &dark, &schedule)?),
+        (None, true, _) => Trigger::Portal(Portal::parse(&light, &dark)?),
+        (None, false, true) => {
+            let latitude = latitude.ok_or(Error::Missing("--latitude DEGREES (with --sun)"))?;
+            let longitude = longitude.ok_or(Error::Missing("--longitude DEGREES (with --sun)"))?;
+            Trigger::Sun(Sun::parse(&light, &dark, &latitude, &longitude)?)
         }
-        (Some(schedule), false) => Trigger::Schedule(Schedule::parse(&light, &dark, &schedule)?),
-        (None, true) => Trigger::Portal(Portal::parse(&light, &dark)?),
-        (None, false) => {
+        (None, false, false) => {
             return Err(Error::Missing(
-                "--schedule LIGHT_FROM/DARK_FROM or --follow-portal",
+                "--schedule LIGHT_FROM/DARK_FROM, --sun --latitude N --longitude E or --follow-portal",
             ));
         }
     };
@@ -412,8 +438,30 @@ pub fn fire_target<'a>(
     current: Option<&str>,
     preview_pending: bool,
 ) -> Option<&'a str> {
-    let target = schedule.look_for(schedule.due(now));
+    needs_swap(
+        schedule.look_for(schedule.due(now)),
+        current,
+        preview_pending,
+    )
+}
+
+/// `target` when it must be applied: it is not the active look, or a timed
+/// preview is pending (see [`fire_target`]).
+fn needs_swap<'a>(
+    target: &'a str,
+    current: Option<&str>,
+    preview_pending: bool,
+) -> Option<&'a str> {
     (preview_pending || current != Some(target)).then_some(target)
+}
+
+/// The Unix time now, from the system clock. A clock set before 1970 reads
+/// as 1970 rather than panicking; `--sun` then computes for the epoch,
+/// which is wrong but harmless until the clock is fixed.
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
 }
 
 /// The local wall-clock minute, from `date`: scootctl carries no time
@@ -440,6 +488,7 @@ pub fn run(look: &Look, action: &Action) -> Result<(), String> {
         Action::Off => run_off(look),
         Action::On(trigger) => run_on(look, trigger),
         Action::Fire(Trigger::Schedule(schedule)) => run_fire(look, schedule),
+        Action::Fire(Trigger::Sun(sun)) => run_fire_sun(look, sun),
         Action::Fire(Trigger::Portal(portal)) => run_fire_portal(look, portal),
     }
 }
@@ -517,6 +566,14 @@ fn run_on(look: &Look, trigger: &Trigger) -> Result<(), String> {
             );
         }
     }
+    // `--sun` keeps its next-boundary timer in the runtime directory:
+    // learn now that there is none, before anything is written.
+    let runtime = arm::runtime_dir(std::env::var_os("XDG_RUNTIME_DIR").as_deref());
+    if matches!(trigger, Trigger::Sun(_))
+        && let Err(why) = &runtime
+    {
+        return Err(why.clone());
+    }
     let current = std::env::current_exe()
         .map_err(|error| format!("cannot find the scoot binary to put in the unit: {error}"))?;
     let exe = unit_exe(&current, std::env::var_os("PATH").as_deref())?;
@@ -536,11 +593,26 @@ fn run_on(look: &Look, trigger: &Trigger) -> Result<(), String> {
     };
     let dir = unit_dir(&config_home);
     let done = install(&dir, &plan, &CliSystemctl)?;
+    // Another trigger replaces `--sun`: its one-shot timer would keep
+    // starting the service on a stale boundary.
+    let mut retired = false;
+    if !matches!(trigger, Trigger::Sun(_))
+        && let Ok(runtime) = &runtime
+    {
+        retired = arm::retire(runtime, &CliSystemctl)?;
+    }
     let mut notes = Vec::new();
     let mut lines = vec![match trigger {
         Trigger::Schedule(s) => format!(
             "auto switching on: {} from {}, {} from {} (local time)",
             s.light, s.light_from, s.dark, s.dark_from
+        ),
+        Trigger::Sun(s) => format!(
+            "auto switching on: {} while the sun is up, {} after sunset (at {}, {})",
+            s.light,
+            s.dark,
+            s.place.latitude_text(),
+            s.place.longitude_text()
         ),
         Trigger::Portal(p) => format!(
             "auto switching on: {} when the desktop is light, {} when it is dark",
@@ -557,6 +629,12 @@ fn run_on(look: &Look, trigger: &Trigger) -> Result<(), String> {
     });
     if let Some(gone) = done.replaced {
         lines.push(format!("removed {gone} (replaced by the new trigger)"));
+    }
+    if retired {
+        lines.push(format!(
+            "removed {} (replaced by the new trigger)",
+            arm::NEXT_TIMER
+        ));
     }
     if let Ok(Some(declared)) = sync::read_declared()
         && let Some(pinned) = declared.default
@@ -580,6 +658,14 @@ fn run_on(look: &Look, trigger: &Trigger) -> Result<(), String> {
             "light_from": s.light_from.to_string(),
             "dark_from": s.dark_from.to_string(),
         }),
+        Trigger::Sun(s) => serde_json::json!({
+            "enabled": true,
+            "trigger": "sun",
+            "light": s.light,
+            "dark": s.dark,
+            "latitude": s.place.latitude(),
+            "longitude": s.place.longitude(),
+        }),
         Trigger::Portal(p) => serde_json::json!({
             "enabled": true,
             "trigger": "portal",
@@ -599,6 +685,7 @@ fn run_on(look: &Look, trigger: &Trigger) -> Result<(), String> {
     let swap = |look: &Look| {
         match trigger {
             Trigger::Schedule(s) => run_fire(look, s),
+            Trigger::Sun(s) => run_fire_sun(look, s),
             Trigger::Portal(p) => run_fire_portal(look, p),
         }
         .map_err(|error| format!("the units are installed, but the look was not applied: {error}"))
@@ -615,9 +702,15 @@ fn run_on(look: &Look, trigger: &Trigger) -> Result<(), String> {
 
 fn run_off(look: &Look) -> Result<(), String> {
     let dir = unit_dir(&user_config_home()?);
+    // The one-shot timer first: it would start the service after the
+    // service file is gone. No runtime directory means none was made.
+    let mut stopped = false;
+    if let Ok(runtime) = arm::runtime_dir(std::env::var_os("XDG_RUNTIME_DIR").as_deref()) {
+        stopped = arm::retire(&runtime, &CliSystemctl)?;
+    }
     let out = remove(&dir, &CliSystemctl)?;
     let mut lines = Vec::new();
-    if out.removed.is_empty() && out.left.is_empty() {
+    if out.removed.is_empty() && out.left.is_empty() && !stopped {
         lines.push("auto switching is off: nothing to remove".to_owned());
     } else if !out.removed.is_empty() {
         lines.push(format!(
@@ -630,6 +723,12 @@ fn run_off(look: &Look) -> Result<(), String> {
     if out.manager_skipped {
         notes.push("no systemd user manager answers: removed the files only".to_owned());
     }
+    if stopped {
+        lines.push(format!(
+            "removed {} (the next sunrise or sunset)",
+            arm::NEXT_TIMER
+        ));
+    }
     for path in &out.left {
         notes.push(format!("left {}: it is not ours", path.display()));
     }
@@ -638,6 +737,7 @@ fn run_off(look: &Look) -> Result<(), String> {
         serde_json::json!({
             "enabled": false,
             "removed": out.removed,
+            "next_timer_removed": stopped,
             "left": out.left,
             "manager_skipped": out.manager_skipped,
         }),
@@ -691,6 +791,55 @@ fn run_status(look: &Look) -> Result<(), String> {
                     doc["light_from"] = serde_json::json!(s.light_from.to_string());
                     doc["dark_from"] = serde_json::json!(s.dark_from.to_string());
                     doc["due"] = serde_json::json!(now.map(|n| side_word(s.due(n))));
+                }
+                Trigger::Sun(s) => {
+                    lines[1] = format!("light: {} while the sun is up", s.light);
+                    lines[2] = format!("dark:  {} after sunset", s.dark);
+                    lines.push(format!(
+                        "place: latitude {}, longitude {}",
+                        s.place.latitude_text(),
+                        s.place.longitude_text()
+                    ));
+                    let now = unix_now();
+                    let side = s.due(now);
+                    lines.push(format!(
+                        "due now: {} ({}); active: {current}",
+                        side_word(side),
+                        s.look_for(side)
+                    ));
+                    let change = scoot_look::sun::next_change(s.place, now, arm::HORIZON_SECS);
+                    let when = change.and_then(|c| on_calendar_utc(c.at));
+                    lines.push(match (&change, &when) {
+                        (Some(c), Some(when)) => {
+                            format!("next {}: {when}", if c.day { "sunrise" } else { "sunset" })
+                        }
+                        _ => "next sunrise or sunset: none in the next 36 hours".to_owned(),
+                    });
+                    let armed = arm::runtime_dir(std::env::var_os("XDG_RUNTIME_DIR").as_deref())
+                        .map(|dir| dir.join(arm::NEXT_TIMER).exists())
+                        .unwrap_or(false);
+                    let next_timer = armed
+                        .then(|| CliSystemctl.timer_state(arm::NEXT_TIMER).ok())
+                        .flatten();
+                    lines.push(match &next_timer {
+                        Some(t) if !t.next.is_empty() => {
+                            format!("{}: {}, next: {}", arm::NEXT_TIMER, t.active, t.next)
+                        }
+                        Some(t) => format!("{}: {}", arm::NEXT_TIMER, t.active),
+                        None => format!("{}: not armed", arm::NEXT_TIMER),
+                    });
+                    doc["trigger"] = serde_json::json!("sun");
+                    doc["latitude"] = serde_json::json!(s.place.latitude());
+                    doc["longitude"] = serde_json::json!(s.place.longitude());
+                    doc["due"] = serde_json::json!(side_word(side));
+                    doc["next_change"] = serde_json::json!(change.map(|c| serde_json::json!({
+                        "kind": if c.day { "sunrise" } else { "sunset" },
+                        "at_utc": when,
+                        "unix": c.at,
+                    })));
+                    doc["next_timer"] = serde_json::json!(next_timer.map(|t| serde_json::json!({
+                        "active": t.active, "next": t.next
+                    })));
                 }
                 Trigger::Portal(_) => {
                     lines.push("follows: the desktop's light/dark setting".to_owned());
@@ -795,6 +944,56 @@ fn run_fire(look: &Look, schedule: &Schedule) -> Result<(), String> {
     )
 }
 
+/// What the `--sun` service runs: arm the one-shot timer for the next
+/// sunrise or sunset, then apply the look the Sun's position asks for
+/// unless it is already active. Arming goes first so a failed swap cannot
+/// stop the next one from being scheduled. Prints one line for the journal.
+fn run_fire_sun(look: &Look, sun: &Sun) -> Result<(), String> {
+    let now = unix_now();
+    let armed = arm::runtime_dir(std::env::var_os("XDG_RUNTIME_DIR").as_deref())
+        .and_then(|dir| arm::arm(&dir, sun.place, now, &CliSystemctl));
+    let side = sun.due(now);
+    let (current, preview_pending) = active_look(look.state.as_deref());
+    let swap = match needs_swap(sun.look_for(side), current.as_deref(), preview_pending) {
+        Some(target) => super::run_apply(
+            look,
+            Some(target),
+            false,
+            false,
+            false,
+            false,
+            false,
+            None,
+            false,
+            None,
+        ),
+        None => Ok(()),
+    };
+    let next = match &armed {
+        Ok(arm::Armed::At { change, .. }) => format!(
+            "next {} at {}",
+            if change.day { "sunrise" } else { "sunset" },
+            on_calendar_utc(change.at).unwrap_or_default()
+        ),
+        Ok(arm::Armed::Idle) => "no sunrise or sunset in the next 36 hours".to_owned(),
+        Err(why) => format!("not armed: {why}"),
+    };
+    // Stderr, not stdout, for the same reason as `follow-portal`.
+    output::warn(format_args!(
+        "sun: {}, wants {}; {next}",
+        if side == Side::Light { "up" } else { "down" },
+        sun.look_for(side)
+    ));
+    match (swap, armed) {
+        (Err(why), Err(also)) => Err(format!("{why}; and the next boundary is not armed: {also}")),
+        (Err(why), Ok(_)) => Err(why),
+        (Ok(()), Err(why)) => Err(format!(
+            "the look is applied, but the next sunrise or sunset is not armed: {why}"
+        )),
+        (Ok(()), Ok(_)) => Ok(()),
+    }
+}
+
 /// What the path service runs: apply the look the desktop's setting asks
 /// for unless the active look already has that polarity. Prints one line
 /// for the journal either way.
@@ -853,5 +1052,7 @@ impl portal::Session for RealSession<'_> {
 
 #[cfg(test)]
 mod portal_tests;
+#[cfg(test)]
+mod sun_tests;
 #[cfg(test)]
 mod tests;

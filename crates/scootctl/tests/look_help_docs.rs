@@ -169,6 +169,28 @@ fn spec() -> Vec<SpecRow> {
                 ("--follow-portal", None),
             ]),
         ),
+        (
+            "auto",
+            vec![
+                "auto",
+                "--light",
+                "dawn",
+                "--dark",
+                "moonrise",
+                "--sun",
+                "--latitude",
+                "51.5074",
+                "--longitude",
+                "-0.1278",
+            ],
+            globals(vec![
+                ("--light", Some("dawn")),
+                ("--dark", Some("moonrise")),
+                ("--sun", None),
+                ("--latitude", Some("51.5074")),
+                ("--longitude", Some("-0.1278")),
+            ]),
+        ),
         ("auto", vec!["auto"], globals(vec![("--off", None)])),
     ]
 }

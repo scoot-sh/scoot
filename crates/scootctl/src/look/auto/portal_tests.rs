@@ -224,6 +224,10 @@ impl Systemctl for Fake {
         self.log(format!("disable {unit}"));
         Ok(())
     }
+    fn stop(&self, unit: &str) -> Result<(), String> {
+        self.log(format!("stop {unit}"));
+        Ok(())
+    }
     fn timer_state(&self, unit: &str) -> Result<TimerState, String> {
         self.log(format!("state {unit}"));
         Ok(TimerState {

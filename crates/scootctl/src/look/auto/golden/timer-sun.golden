@@ -1,0 +1,13 @@
+# Managed by scoot look auto. Do not edit: `scoot look auto --off` removes it, `scoot look auto` rewrites it.
+[Unit]
+Description=scoot look: arm the next sunrise or sunset switch
+
+[Timer]
+OnStartupSec=30s
+OnCalendar=*-*-* 00:05:00
+Persistent=true
+AccuracySec=1s
+Unit=scoot-look-auto.service
+
+[Install]
+WantedBy=timers.target

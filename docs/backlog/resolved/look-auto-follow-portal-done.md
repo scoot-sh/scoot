@@ -9,7 +9,7 @@ resolved: "2026-11-07"
 
 # look auto --follow-portal: follow the desktop's light/dark setting
 
-Filed 2026-11-06 from [`look-auto-switch`](look-auto-switch.md), which
+Filed 2026-11-06 from [`look-auto-switch`](look-auto-switch-done.md), which
 landed `--schedule` only. Serves **daily-drive**, opt-in.
 
 ## The gap
@@ -44,7 +44,7 @@ by any program, not only a `color-scheme` change.
 
 ## Not in this ticket
 
-`--sun` ([`look-auto-sun`](look-auto-sun.md)).
+`--sun` ([`look-auto-sun`](look-auto-sun-done.md)).
 
 ## Landed (2026-11-07)
 

@@ -34,6 +34,9 @@ pub trait Systemctl {
     fn restart(&self, unit: &str) -> Result<(), String>;
     /// `disable --now`: stops the timer and removes its link.
     fn disable_now(&self, unit: &str) -> Result<(), String>;
+    /// `stop`: for a timer that was never enabled (the one-shot sunrise
+    /// timer lives in the runtime directory with no `[Install]`).
+    fn stop(&self, unit: &str) -> Result<(), String>;
     fn timer_state(&self, unit: &str) -> Result<TimerState, String>;
 }
 
@@ -83,6 +86,10 @@ impl Systemctl for CliSystemctl {
 
     fn disable_now(&self, unit: &str) -> Result<(), String> {
         self.run(&["disable", "--now", unit]).map(drop)
+    }
+
+    fn stop(&self, unit: &str) -> Result<(), String> {
+        self.run(&["stop", unit]).map(drop)
     }
 
     fn timer_state(&self, unit: &str) -> Result<TimerState, String> {
