@@ -38,3 +38,5 @@ Measured on the 6-core aarch64 dev VM (nextest-built `animated_oom` binary, `SCO
 A refused `set` records nothing (`daemon::images`: a trial changes nothing until it lands), so only the decode thread runs in the lowered window, never a second saver thread.
 
 The assertions now print the daemon's liveness or exit status, `VmSize` against the limit, its thread count and `scootbg.log` (`diagnosis` in `tests/animated_oom.rs`), which is what the next failure needs. This entry stays open until one does, or until a long enough clean record on CI says it was the already-fixed `VmSize` read.
+
+A reviewer's hypothesis, not verified: if `std::thread::Builder::spawn` of the decode thread fails with `ENOMEM` under the lowered limit, `daemon/worker.rs` reports `cannot start a decoding thread: Cannot allocate memory (os error 12)` (exit 1, daemon still alive). The test's lowercase `cannot allocate` contains-check would miss that wording. The diagnosis output in `tests/animated_oom.rs` will show it on the next failure. If it recurs, the cheap hardening is to accept that refusal too, or to wait for the previous decode thread to end before the next `set`.
