@@ -168,15 +168,20 @@ pub struct Record {
     /// `cursor-size`, `font-name`): before writing again the tool reads
     /// the live value, and a value that is neither unset nor this one
     /// means someone else changed it, so the tool leaves it alone
-    /// (design D11). The one exception is `color-scheme`: a live value of
-    /// the polarity the look wants is recorded as it stands, without a
-    /// write.
+    /// (design D11).
     pub dconf_wrote: BTreeMap<String, String>,
     /// The live toolkit values before the tool's first write, by short
     /// key name: `""` means it was unset. Saved once, never overwritten,
     /// so `toolkit off` can restore them. Back-compatible: absent means
     /// "not saved" (an older record).
     pub dconf_orig: BTreeMap<String, String>,
+    /// `color-scheme` only: a value somebody else set (the desktop's own
+    /// light/dark toggle) that has the polarity the look wanted, so the
+    /// tool wrote nothing. It is the user's value, not the tool's:
+    /// `toolkit off` leaves it alone. The next apply treats it as owned
+    /// (it may write over it) so the setting follows a look of the other
+    /// polarity. Back-compatible: absent means none.
+    pub dconf_adopted: BTreeMap<String, String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -197,6 +202,8 @@ struct RawRecord {
     dconf: Option<BTreeMap<String, String>>,
     #[serde(default, rename = "dconf-orig")]
     dconf_orig: Option<BTreeMap<String, String>>,
+    #[serde(default, rename = "dconf-adopted")]
+    dconf_adopted: Option<BTreeMap<String, String>>,
     // Legacy single-key fields (before the toolkit step owned six keys):
     // folded into the maps on read, never written back.
     #[serde(default, rename = "color-scheme")]
@@ -315,7 +322,12 @@ fn validate_record(raw: RawRecord) -> Result<Record, String> {
     }
     let mut dconf_wrote = raw.dconf.unwrap_or_default();
     let mut dconf_orig = raw.dconf_orig.unwrap_or_default();
-    for (map, what) in [(&dconf_wrote, "dconf"), (&dconf_orig, "dconf-orig")] {
+    let dconf_adopted = raw.dconf_adopted.unwrap_or_default();
+    for (map, what) in [
+        (&dconf_wrote, "dconf"),
+        (&dconf_orig, "dconf-orig"),
+        (&dconf_adopted, "dconf-adopted"),
+    ] {
         for (key, value) in map {
             if !is_toolkit_key(key) {
                 return Err(format!(
@@ -351,6 +363,7 @@ fn validate_record(raw: RawRecord) -> Result<Record, String> {
         toolkit: raw.toolkit,
         dconf_wrote,
         dconf_orig,
+        dconf_adopted,
     })
 }
 
@@ -410,6 +423,18 @@ pub fn record_json(record: &Record) -> String {
             serde_json::Value::Object(
                 record
                     .dconf_orig
+                    .iter()
+                    .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
+                    .collect(),
+            ),
+        );
+    }
+    if !record.dconf_adopted.is_empty() {
+        out.insert(
+            "dconf-adopted".to_owned(),
+            serde_json::Value::Object(
+                record
+                    .dconf_adopted
                     .iter()
                     .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
                     .collect(),

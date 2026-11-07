@@ -95,6 +95,7 @@ fn record(toolkit: Option<bool>, wrote: &[(&str, &str)], orig: &[(&str, &str)]) 
             .iter()
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect(),
+        dconf_adopted: BTreeMap::new(),
     }
 }
 
@@ -247,11 +248,10 @@ fn what_the_tool_wrote_is_owned_and_rewritten() {
 }
 
 #[test]
-fn a_key_someone_set_to_what_the_look_wants_is_owned_again() {
+fn a_key_someone_set_to_what_the_look_wants_is_adopted_not_written() {
     // The record says light, the desktop's toggle made it dark, and a dark
-    // look applies: nothing to write, but the record must now say dark, or
-    // the next light look would find the key "set outside" and leave the
-    // setting at odds with the look.
+    // look applies: nothing to write. The value is the user's, so it is
+    // remembered as adopted and `dconf_wrote` still says what the tool wrote.
     let mut live = HashMap::new();
     live.insert(COLOR_SCHEME_KEY.to_owned(), PREFER_DARK.to_owned());
     let dconf = FakeDconf {
@@ -263,6 +263,10 @@ fn a_key_someone_set_to_what_the_look_wants_is_owned_again() {
     assert!(dconf.wrote_to(COLOR_SCHEME_KEY).is_empty(), "no write");
     assert_eq!(
         state.dconf_wrote.get("color-scheme").map(String::as_str),
+        Some(PREFER_LIGHT)
+    );
+    assert_eq!(
+        state.dconf_adopted.get("color-scheme").map(String::as_str),
         Some(PREFER_DARK)
     );
     assert!(
@@ -271,45 +275,81 @@ fn a_key_someone_set_to_what_the_look_wants_is_owned_again() {
     );
 }
 
-#[test]
-fn the_gnome_light_value_counts_as_the_light_polarity_and_is_recorded_as_it_stands() {
-    // The record says dark, GNOME's Light switch wrote `'default'`, and a
-    // light look applies: no write, the user's value stands, and the record
-    // holds it, so a later dark look finds live == record and writes.
-    let light = {
-        let text = look_toml("dawn").replace("polarity = \"dark\"", "polarity = \"light\"");
-        let raw = scoot_look::parse_look_toml(text.as_bytes()).expect("parses");
-        let map = BTreeMap::from([("dawn".to_string(), (raw, Origin::Shipped))]);
-        scoot_look::resolve(&map, "dawn").expect("resolves")
-    };
+fn light_look() -> ResolvedLook {
+    let text = look_toml("dawn").replace("polarity = \"dark\"", "polarity = \"light\"");
+    let raw = scoot_look::parse_look_toml(text.as_bytes()).expect("parses");
+    let map = BTreeMap::from([("dawn".to_string(), (raw, Origin::Shipped))]);
+    scoot_look::resolve(&map, "dawn").expect("resolves")
+}
+
+fn scheme_db(value: &str) -> FakeDconf {
     let mut live = HashMap::new();
-    live.insert(COLOR_SCHEME_KEY.to_owned(), "'default'".to_owned());
-    let dconf = FakeDconf {
+    live.insert(COLOR_SCHEME_KEY.to_owned(), value.to_owned());
+    FakeDconf {
         live,
         ..FakeDconf::default()
-    };
+    }
+}
+
+#[test]
+fn an_adopted_gnome_light_value_is_written_over_by_the_next_dark_apply() {
+    // Record dark, GNOME's Light switch wrote `'default'`, a light look
+    // applies (adopt, no write), then a dark look applies by hand.
+    let dconf = scheme_db("'default'");
     let mut state = record(None, &[("color-scheme", PREFER_DARK)], &[]);
-    apply_toolkit(&state_dir("gnome-light"), &mut state, &light, &dconf);
+    apply_toolkit(&state_dir("gnome-light"), &mut state, &light_look(), &dconf);
     assert!(dconf.wrote_to(COLOR_SCHEME_KEY).is_empty(), "no write");
     assert_eq!(
-        state.dconf_wrote.get("color-scheme").map(String::as_str),
+        state.dconf_adopted.get("color-scheme").map(String::as_str),
         Some("'default'")
     );
-    // A dark look then applies over the recorded `'default'`.
-    let mut dark_state = state.clone();
-    let notes = apply_toolkit(
-        &state_dir("gnome-light-2"),
-        &mut dark_state,
-        &look(),
-        &dconf,
-    );
+    let notes = apply_toolkit(&state_dir("gnome-light-2"), &mut state, &look(), &dconf);
     assert_eq!(
         dconf.wrote_to(COLOR_SCHEME_KEY),
         vec![PREFER_DARK.to_owned()]
     );
+    assert!(state.dconf_adopted.is_empty(), "owned again");
     assert!(
         !notes.iter().any(|n| n.starts_with("color-scheme is")),
         "{notes:?}"
+    );
+}
+
+#[test]
+fn toolkit_off_leaves_an_adopted_value_alone() {
+    // The reviewer's repro: dark recorded, the original was unset, the user
+    // picks Light in GNOME, a light look applies, then `toolkit off` must
+    // not reset the user's own Light choice to the pre-scoot original.
+    let dconf = scheme_db("'default'");
+    let mut state = record(
+        None,
+        &[("color-scheme", PREFER_DARK)],
+        &[("color-scheme", "")],
+    );
+    apply_toolkit(&state_dir("off-adopted"), &mut state, &light_look(), &dconf);
+    let notes = toolkit_off(&state_dir("off-adopted"), &mut state, &dconf);
+    assert!(
+        dconf
+            .wrote()
+            .iter()
+            .all(|(k, _)| !k.contains("color-scheme")),
+        "{:?}",
+        dconf.wrote()
+    );
+    assert!(notes.iter().any(|n| n.contains("left alone")), "{notes:?}");
+    assert!(state.dconf_adopted.is_empty() && state.dconf_wrote.is_empty());
+}
+
+#[test]
+fn a_hand_set_spelling_of_the_same_polarity_stays_ours_to_write() {
+    // Record light, live goes to `'default'` by hand with no swap, then a
+    // dark look applies: the same polarity, so the setting follows the look.
+    let dconf = scheme_db("'default'");
+    let mut state = record(None, &[("color-scheme", PREFER_LIGHT)], &[]);
+    apply_toolkit(&state_dir("same-pol"), &mut state, &look(), &dconf);
+    assert_eq!(
+        dconf.wrote_to(COLOR_SCHEME_KEY),
+        vec![PREFER_DARK.to_owned()]
     );
 }
 

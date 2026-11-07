@@ -554,6 +554,7 @@ impl<'a> World<'a> {
             toolkit: None,
             dconf_wrote: BTreeMap::new(),
             dconf_orig: BTreeMap::new(),
+            dconf_adopted: BTreeMap::new(),
         });
         record.name = name.to_owned();
         record.generation += 1;

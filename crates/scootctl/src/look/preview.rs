@@ -177,6 +177,7 @@ pub fn capture(
         toolkit: None,
         dconf_wrote: Default::default(),
         dconf_orig: Default::default(),
+        dconf_adopted: Default::default(),
     };
     write_record(&user_state, &record).map_err(|error| {
         format!(

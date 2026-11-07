@@ -144,12 +144,17 @@ once.
   `'default'` are light (`'default'` is what GNOME's own settings write for
   Light). Unset, or any other text, is no signal and nothing happens.
 - **When it runs.** systemd starts the service when the dconf database file
-  changes, and any program writing any dconf key changes it. Nearly every
-  run reads the key and exits without touching anything. `apply` itself
+  changes, and any program writing any dconf key changes it. Most runs
+  change nothing: they read the key and the active look, find the polarity
+  matching, and exit. That costs about 60 ms of wall time and 9 to 12 ms of
+  CPU, mostly starting the process and the `dconf` command. An unset or
+  unrecognised key exits before the look catalog is read. `apply` itself
   writes the database (the toolkit step), which starts the service once
   more; that run finds the polarity already matching and stops. After a
   swap the service reads the setting again before it exits, because systemd
-  does not watch the file while the service runs.
+  does not watch the file while the service runs. A flip in the instant
+  between that last read and systemd watching the file again is not seen
+  until the next dconf write.
 - **The watched file.** `$XDG_CONFIG_HOME/dconf/user` (`~/.config/dconf/user`),
   the default dconf profile. If `~/.config/dconf` does not exist yet, the
   path unit still installs: systemd watches the nearest directory that
@@ -189,8 +194,10 @@ once.
   declaration exists.
 - **Re-running** with the same arguments changes nothing. With new ones it
   rewrites the unit files and restarts the trigger.
-- **`--json`** prints one document with `enabled`, `trigger` (`schedule` or
-  `portal`), the two looks, the unit files written and the one replaced.
+- **`--json`** prints a document with `enabled`, `trigger` (`schedule` or
+  `portal`), the two looks, the unit files written and the one replaced,
+  and `apply_error` when the swap on setup failed. When that swap does
+  swap, `apply` prints its own document first.
 - **`--sun`** (sunset) is not available yet.
 
 What it creates in `$XDG_CONFIG_HOME/systemd/user` (`~/.config/systemd/user`;
@@ -457,8 +464,9 @@ new palette; running ones keep theirs.
 - `scoot look toolkit off` persists the skip in `look.json`. When the tool
   wrote what is still live, `off` restores each key from before the
   tool's first write and stops owning it; a key the tool never wrote,
-  one someone else changed since, one home-manager owns (see below),
-  or one that cannot be read is left alone. Either way the record
+  one someone else changed since (including a `color-scheme` you set
+  with the desktop's own light/dark toggle), one home-manager owns (see
+  below), or one that cannot be read is left alone. Either way the record
   clears, so turning back `on` adopts fresh on the next apply.
   `off` leaves the written files in place; only the keys are restored.
   `scoot look toolkit` shows the state.

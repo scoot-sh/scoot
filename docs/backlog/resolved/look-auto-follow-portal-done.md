@@ -62,9 +62,14 @@ the same oneshot service the schedule uses, which now takes either trigger
 - **A D11 change the loop test exposed.** `apply_one_key` left `color-scheme`
   alone whenever it differed from what the tool last wrote, so after an
   external flip a later manual apply of the other polarity did not write
-  it, and the next unrelated dconf write reverted the apply. A key whose
-  live value equals the look's wanted value, with a record, is now owned
-  again with no write (`toolkit.rs`).
+  it, and the next unrelated dconf write reverted the apply. Now, for
+  `color-scheme` only: a live value of the polarity the look wants is
+  recorded in a separate `dconf-adopted` map with no write, and a live value
+  that is adopted, or has the polarity of what the tool wrote (a hand
+  `'default'` over `'prefer-light'`), is the tool's to write over. The
+  adopted value is the user's: `toolkit off` ignores it, so it never
+  restores the pre-scoot original over the user's own choice (review
+  finding on the first cut, which had recorded it as written).
 - **systemd 261.2 (`path.c`, and measured on a user manager).** A rename
   over the watched file fires once per rename. A missing directory is
   watched at the nearest existing ancestor and fires when the file appears

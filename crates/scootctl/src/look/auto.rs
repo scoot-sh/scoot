@@ -593,8 +593,9 @@ fn run_on(look: &Look, trigger: &Trigger) -> Result<(), String> {
     doc["unit_dir"] = serde_json::json!(dir);
     // Apply what is due now, or the screen stays wrong until the next
     // trigger. The install already stands if this fails. Under `--json`
-    // the swap runs first and its outcome rides in this document, so a
-    // failed swap still leaves exactly one `auto` document on stdout.
+    // the swap runs first and its outcome rides in this document as
+    // `apply_error`. When the swap does swap, `apply` prints its own
+    // document before this one, so stdout then holds two.
     let swap = |look: &Look| {
         match trigger {
             Trigger::Schedule(s) => run_fire(look, s),
