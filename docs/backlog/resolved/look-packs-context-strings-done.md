@@ -1,9 +1,10 @@
 ---
 title: "Later: accept context-bearing path strings in programs.scoot.looks"
-status: "open"
-area: "core"
-priority: "low"
+status: "resolved"
+area: "resolved"
+priority: null
 blocked: null
+resolved: "2026-11-07"
 ---
 
 # Later: accept context-bearing path strings in programs.scoot.looks
@@ -38,3 +39,17 @@ docs say entries are path values or `inputs.<name>.lookPacks.<pack>`.
 ## Not in this ticket
 
 Widening the type beyond strings and paths.
+
+## Resolution (2026-11-07)
+
+Not `unsafeDiscardStringContext`. `asDirPath` keeps a string that carries
+store-path context as that string (context-free absolute strings still
+become `/. + item`), and `toEntry` now goes through `asDirPath`. The
+context is what makes the source a build input; discarding it would turn
+an unbuilt derivation output into a pure-evaluation "access to absolute
+path forbidden" error and drop the source from the derivations' inputs.
+`readFile`, `readDir` and `pathExists` read such a string directly, and a
+derivation output that is not built yet is built during evaluation
+(import from derivation), which is the cost of that case. Pinned in
+`nix/tests.nix` (`ctxPack`), documented in the Look packs section of the
+looks page.
