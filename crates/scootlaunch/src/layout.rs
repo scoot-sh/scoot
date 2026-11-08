@@ -374,6 +374,7 @@ impl Layout {
             width: field.width,
             row_height: field.height,
             em: self.em,
+            radius: self.radius,
         }
     }
 
@@ -390,6 +391,7 @@ impl Layout {
             width: clip.saturating_add(inset.saturating_mul(2)),
             row_height: self.row_h,
             em: self.em,
+            radius: self.radius,
         }
     }
 }

@@ -1718,6 +1718,7 @@ fn paint_dmenu(
         width: width.saturating_sub(inner.saturating_mul(2)),
         row_height: row_h,
         em,
+        radius: 0,
     };
     let metrics = text.metrics(em);
     let baseline = i64::from(top) + metrics.baseline(row_h);
@@ -1767,6 +1768,7 @@ fn paint_dmenu(
         width: width.saturating_sub(inner.saturating_mul(2)),
         row_height: row_h,
         em,
+        radius: 0,
     };
     paint_list(
         &mut canvas,
@@ -2770,6 +2772,8 @@ mod closed_tests;
 mod dmenu_staged_tests;
 #[cfg(test)]
 mod padding_tests;
+#[cfg(test)]
+mod round_tests;
 #[cfg(test)]
 mod shrink_tests;
 #[cfg(test)]

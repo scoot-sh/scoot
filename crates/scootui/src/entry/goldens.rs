@@ -99,6 +99,7 @@ fn entry_geo() -> Geometry {
         width: WIDTH - 16,
         row_height: ROW_H,
         em: EM,
+        radius: 0,
     }
 }
 
@@ -260,6 +261,7 @@ fn list_geo() -> Geometry {
         width: WIDTH - 16,
         row_height: ROW_H,
         em: EM,
+        radius: 0,
     }
 }
 
@@ -354,6 +356,7 @@ fn golden_selector_collapsed_and_expanded() {
         width: WIDTH - 16,
         row_height: ROW_H,
         em: EM,
+        radius: 0,
     };
     // Collapsed: one line with the choice.
     let height = 8 + ROW_H + 8;
@@ -422,6 +425,7 @@ fn the_list_draw_reads_only_its_visible_window() {
         width: WIDTH - 16,
         row_height: ROW_H,
         em: EM,
+        radius: 0,
     };
     paint_list(
         &mut canvas,
@@ -470,6 +474,7 @@ fn hostile_spans_and_tiny_canvases_never_panic_the_draw() {
         width: WIDTH - 16,
         row_height: ROW_H,
         em: EM,
+        radius: 0,
     };
     paint_list(
         &mut canvas,
@@ -489,6 +494,7 @@ fn hostile_spans_and_tiny_canvases_never_panic_the_draw() {
             width: 0,
             row_height: 0,
             em: EM,
+            radius: 0,
         };
         let mut entry = Entry::new(8);
         paint_entry(&mut canvas, &mut text, &theme, &entry, &flat, true, "");

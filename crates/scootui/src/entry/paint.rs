@@ -8,7 +8,8 @@
 //! apps theme through it; the defaults are Catppuccin Mocha-ish):
 //!
 //! - text, caret-side ink: `foreground`; placeholder and hints: `dim`;
-//! - caret bar and focus ring: `accent`, 2 device pixels;
+//! - caret bar and focus ring: `accent`, 2 device pixels (the ring and
+//!   the inverted chip follow [`Geometry::radius`]: square at 0);
 //! - select-all and the selected row: `accent` fill with `background` ink;
 //! - match-highlight spans: `hover` on plain rows; on the selected row
 //!   [`Theme::match_on_selection`] (legible `hover` when it contrasts
@@ -16,8 +17,10 @@
 
 use super::line::{Entry, MASK_CHAR, PasswordEntry};
 use super::list::{List, Selector};
+use crate::color::Color;
 use crate::paint::{Canvas, Span};
-use crate::text::Text;
+use crate::region::Rect;
+use crate::text::{Metrics, Text};
 use crate::theme::{SelectedMatch, Theme};
 
 /// Where a widget draws: top-left (`x`, `y`) in device pixels, `width`
@@ -29,6 +32,12 @@ pub struct Geometry {
     pub width: u32,
     pub row_height: u32,
     pub em: f32,
+    /// The corner radius of what the widget draws at its edge: the focus
+    /// ring, and the inverted match chip on the selected row. 0 is square
+    /// (the dmenu look); a caller drawing a rounded highlight behind the
+    /// rows passes the highlight's own radius, so the chip stays inside
+    /// it. Cut back to what the shape holds, as the other rounded paints.
+    pub radius: u32,
 }
 
 impl Geometry {
@@ -91,15 +100,8 @@ pub fn paint_entry(
     } else if entry.selected_all() {
         let line = entry.text();
         let wide = text.measure(None, line, geo.em);
-        canvas.fill_rect(
-            Span {
-                x: geo.text_x(),
-                width: wide,
-            },
-            geo.y,
-            geo.y.saturating_add(geo.row_height),
-            theme.accent,
-        );
+        let radius = text_box_radius(geo, text.metrics(geo.em));
+        fill_text_box(canvas, geo, radius, geo.text_x(), wide, geo.y, theme.accent);
         text.draw(
             canvas,
             None,
@@ -136,7 +138,7 @@ pub fn paint_entry(
         }
     }
     if focused {
-        focus_ring(canvas, theme, geo.x, geo.y, geo.width, geo.row_height);
+        focus_ring(canvas, theme, geo, geo.y, geo.row_height);
     }
 }
 
@@ -168,15 +170,8 @@ pub fn paint_password(
         let wide = (entry.char_len() as f32 * text.advance(MASK_CHAR, geo.em))
             .ceil()
             .max(0.0) as u32;
-        canvas.fill_rect(
-            Span {
-                x: geo.text_x(),
-                width: wide,
-            },
-            geo.y,
-            geo.y.saturating_add(geo.row_height),
-            theme.accent,
-        );
+        let radius = text_box_radius(geo, text.metrics(geo.em));
+        fill_text_box(canvas, geo, radius, geo.text_x(), wide, geo.y, theme.accent);
     }
     let advance = text.advance(MASK_CHAR, geo.em);
     let mut pen = geo.text_x() as f32;
@@ -213,7 +208,7 @@ pub fn paint_password(
         );
     }
     if focused {
-        focus_ring(canvas, theme, geo.x, geo.y, geo.width, geo.row_height);
+        focus_ring(canvas, theme, geo, geo.y, geo.row_height);
     }
 }
 
@@ -248,14 +243,7 @@ pub fn paint_list<'a, 'b>(
     if focused {
         let rows = list.visible_range().len() as u32;
         let tall = rows.saturating_mul(geo.row_height);
-        focus_ring(
-            canvas,
-            theme,
-            geo.x,
-            geo.y,
-            geo.width,
-            tall.max(geo.row_height),
-        );
+        focus_ring(canvas, theme, geo, geo.y, tall.max(geo.row_height));
     }
 }
 
@@ -305,7 +293,7 @@ pub fn paint_selector<'a, 'b>(
         }
     }
     if focused {
-        focus_ring(canvas, theme, geo.x, geo.y, geo.width, geo.row_height);
+        focus_ring(canvas, theme, geo, geo.y, geo.row_height);
     }
     if selector.is_expanded() {
         paint_rows(
@@ -378,6 +366,7 @@ fn paint_rows<'a, 'b>(
 ) {
     let clip = geo.clip();
     let metrics = text.metrics(geo.em);
+    let box_radius = text_box_radius(geo, metrics);
     let selected = list.selected();
     // Resolved once for the whole window: pure contrast math, no
     // allocation, so the per-row loop stays allocation-free.
@@ -448,12 +437,7 @@ fn paint_rows<'a, 'b>(
                 // `accent` over it. Same pair as the selected row's own
                 // text, so the highlight stays both visible and legible.
                 let wide = text.measure(None, body, geo.em);
-                canvas.fill_rect(
-                    Span { x: at, width: wide },
-                    y,
-                    y.saturating_add(geo.row_height),
-                    theme.background,
-                );
+                fill_text_box(canvas, geo, box_radius, at, wide, y, theme.background);
             }
             text.draw(
                 canvas,
@@ -469,10 +453,23 @@ fn paint_rows<'a, 'b>(
     }
 }
 
-/// A 2-device-pixel `accent` outline around (`x`, `y`, `width`,
-/// `height`): what Tab/Shift+Tab moves. Four clipped fills, so a
-/// widget at the canvas edge rings its visible sides without panic.
-fn focus_ring(canvas: &mut Canvas<'_>, theme: &Theme, x: u32, y: u32, width: u32, height: u32) {
+/// A 2-device-pixel `accent` outline around the widget's width and
+/// `height` rows from `y`: what Tab/Shift+Tab moves. Square (four clipped
+/// fills, so a widget at the canvas edge rings its visible sides without
+/// panic) unless [`Geometry::radius`] is set, then the rounded ring of
+/// [`Canvas::stroke_rounded`].
+fn focus_ring(canvas: &mut Canvas<'_>, theme: &Theme, geo: &Geometry, y: u32, height: u32) {
+    let (x, width) = (geo.x, geo.width);
+    if geo.radius > 0 {
+        let rect = Rect {
+            x,
+            y,
+            width,
+            height,
+        };
+        canvas.stroke_rounded(rect, geo.radius, 2, theme.accent);
+        return;
+    }
     let y1 = y.saturating_add(height);
     canvas.fill_rect(Span { x, width }, y, y.saturating_add(2), theme.accent);
     canvas.fill_rect(Span { x, width }, y1.saturating_sub(2), y1, theme.accent);
@@ -486,4 +483,59 @@ fn focus_ring(canvas: &mut Canvas<'_>, theme: &Theme, x: u32, y: u32, width: u32
         y1,
         theme.accent,
     );
+}
+
+/// The corner radius of a box behind text: [`Geometry::radius`], cut back
+/// so the corner arcs end above the line box, where no glyph reaches. A box
+/// as tall as the highlight with the highlight's full radius would shave
+/// the first letter's foot at the pill's corner; the room above and below
+/// the line is the most the arc may take. A square geometry stays square.
+pub(super) fn text_box_radius(geo: &Geometry, metrics: Metrics) -> u32 {
+    let line = (metrics.ascent - metrics.descent).max(0.0);
+    let room = ((geo.row_height as f32 - line) / 2.0).floor().max(0.0) as u32;
+    geo.radius.min(room)
+}
+
+/// A box behind text: the inverted chip behind a match span, and the
+/// select-all fill behind an entry's text. `wide` pixels from `at`, one
+/// row tall from `y`, kept inside the text's clip (a span running past
+/// the row's text end is cut there, never over the highlight's own
+/// corner) and rounded to `radius` ([`text_box_radius`]). Inside the
+/// highlight's or the ring's shape because the box is no taller and its
+/// arc is no wider than theirs, and it sits inside the clip, at least the
+/// highlight's `lead` from its ends.
+fn fill_text_box(
+    canvas: &mut Canvas<'_>,
+    geo: &Geometry,
+    radius: u32,
+    at: u32,
+    wide: u32,
+    y: u32,
+    color: Color,
+) {
+    let clip = geo.clip();
+    let from = at.max(clip.x);
+    let to = at.saturating_add(wide).min(clip.end());
+    if from >= to {
+        return;
+    }
+    if radius == 0 {
+        canvas.fill_rect(
+            Span {
+                x: from,
+                width: to - from,
+            },
+            y,
+            y.saturating_add(geo.row_height),
+            color,
+        );
+        return;
+    }
+    let rect = Rect {
+        x: from,
+        y,
+        width: to - from,
+        height: geo.row_height,
+    };
+    canvas.fill_rounded_gradient(rect, radius, color, color, 255);
 }

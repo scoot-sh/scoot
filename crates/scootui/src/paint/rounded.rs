@@ -121,6 +121,102 @@ impl Canvas<'_> {
         }
     }
 
+    /// Paints the outline of the rounded rectangle `rect` (clipped to the
+    /// canvas, corners of `radius` cut back to what the rectangle holds),
+    /// `width` pixels thick, in `color`, opaque: the pixels the outer
+    /// shape covers and the shape inset by `width` (corners of `radius -
+    /// width`, concentric with the outer's) does not, at the difference of
+    /// the two coverages. The straight sides are plain runs; only the
+    /// corner rows compute coverage. A `width` of half the rectangle or
+    /// more fills it. Premultiplied `ARGB8888` only. Allocates nothing.
+    pub fn stroke_rounded(&mut self, rect: Rect, radius: u32, width: u32, color: Color) {
+        if rect.width == 0 || rect.height == 0 || width == 0 {
+            return;
+        }
+        let radius = effective_radius(radius, rect.width, rect.height);
+        let width = width
+            .min(rect.width.div_ceil(2))
+            .min(rect.height.div_ceil(2));
+        let inner = Rect {
+            x: rect.x.saturating_add(width),
+            y: rect.y.saturating_add(width),
+            width: rect.width.saturating_sub(width.saturating_mul(2)),
+            height: rect.height.saturating_sub(width.saturating_mul(2)),
+        };
+        let inner_radius =
+            effective_radius(radius.saturating_sub(width), inner.width, inner.height);
+        let x_end = rect.x.saturating_add(rect.width).min(self.width());
+        let y_end = rect.y.saturating_add(rect.height).min(self.height());
+        if rect.x >= x_end {
+            return;
+        }
+        let right = rect.x.saturating_add(rect.width);
+        let clip = Span {
+            x: 0,
+            width: self.width(),
+        };
+        // The ring's coverage at one pixel: outer minus inner.
+        let ring = |x: u32, y: u32| {
+            let inside = inner.width > 0
+                && inner.height > 0
+                && x >= inner.x
+                && u64::from(x) < u64::from(inner.x) + u64::from(inner.width)
+                && y >= inner.y
+                && u64::from(y) < u64::from(inner.y) + u64::from(inner.height);
+            let hole = if inside {
+                rounded_coverage(x, y, inner, inner_radius)
+            } else {
+                0
+            };
+            rounded_coverage(x, y, rect, radius).saturating_sub(hole)
+        };
+        for y in rect.y..y_end {
+            let from_top = y - rect.y;
+            let from_bottom = rect.height - 1 - from_top;
+            let edge_row = from_top < width || from_bottom < width;
+            let corner_row = radius > 0 && (from_top < radius || from_bottom < radius);
+            if !corner_row {
+                // Straight rows: the whole row on the top and bottom
+                // sides, else the two side columns.
+                if edge_row {
+                    self.blend_run(rect.x, x_end, y, 255, color);
+                } else {
+                    self.blend_run(
+                        rect.x,
+                        rect.x.saturating_add(width).min(x_end),
+                        y,
+                        255,
+                        color,
+                    );
+                    self.blend_run(
+                        right.saturating_sub(width).max(rect.x).min(x_end),
+                        x_end,
+                        y,
+                        255,
+                        color,
+                    );
+                }
+                continue;
+            }
+            // A corner row: the two corner squares (at least `width`
+            // wide) per pixel, and between them the whole row on the
+            // top and bottom sides.
+            let zone = radius.max(width).min(rect.width.div_ceil(2));
+            let left_end = rect.x.saturating_add(zone).min(x_end);
+            let right_start = right.saturating_sub(zone).max(left_end).min(x_end);
+            for x in (rect.x..left_end).chain(right_start..x_end) {
+                match ring(x, y) {
+                    0 => {}
+                    255 => self.blend_run(x, x + 1, y, 255, color),
+                    coverage => self.blend(i64::from(x), i64::from(y), coverage, color, clip),
+                }
+            }
+            if edge_row {
+                self.blend_run(left_end, right_start, y, 255, color);
+            }
+        }
+    }
+
     /// One corner pixel: the fill's alpha times the circle's coverage,
     /// through one blend.
     fn blend_covered(&mut self, x: u32, y: u32, rect: Rect, radius: u32, alpha: u8, color: Color) {

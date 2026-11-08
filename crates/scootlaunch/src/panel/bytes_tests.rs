@@ -147,13 +147,19 @@ pub(super) fn fingerprint(scales: &[scootui::density::Scale], dmenu: bool) -> u6
 }
 
 /// The 1x draws: recorded on `4e8293664`, before depth and motion, and
-/// unchanged since (the fingerprint then covered the scaled draws too, so
-/// this is that value's 1x half, taken on the commit before the launcher
-/// followed the compositor's scale).
+/// unchanged until the search field's focus ring took the highlight's
+/// rounded corners (the fingerprint then covered the scaled draws too, so
+/// this is that value's 1x half). The square look and the dmenu draw,
+/// hashed alone, are byte-identical across that change; only the looks
+/// with a corner radius moved. The fingerprint types no query, so it draws
+/// no match chip: `round_tests` pins that.
 #[test]
 fn the_default_look_paints_the_bytes_it_always_did() {
     let hash = fingerprint(&[scootui::density::Scale::Integer(1)], true);
-    assert_eq!(hash, ONE_X, "recorded on 4e8293664");
+    assert_eq!(
+        hash, ONE_X,
+        "recorded on 4e8293664, re-recorded for the rounded focus ring"
+    );
 }
 
 /// The scaled draws, with the rows held to the scaled height: re-recorded
@@ -163,7 +169,9 @@ fn the_default_look_paints_the_bytes_it_always_did() {
 /// scale inside this pin draws the bytes it always did (exact multiply,
 /// no remainder), so the move is the fractional half alone: rows shifted
 /// down by the top remainder and 1 px width/height moves where the old
-/// `f64` round disagreed with the integer rule.
+/// `f64` round disagreed with the integer rule. Re-recorded again for the
+/// rounded focus ring (see the 1x pin: the square look is byte-identical
+/// across it).
 #[test]
 fn the_scaled_panel_paints_the_bytes_recorded_with_the_fit() {
     let hash = fingerprint(
@@ -176,5 +184,5 @@ fn the_scaled_panel_paints_the_bytes_recorded_with_the_fit() {
     assert_eq!(hash, SCALED, "recorded with the rows held to the height");
 }
 
-const ONE_X: u64 = 0x6226_31d1_2e84_8874;
-const SCALED: u64 = 0x219f_0ed0_9338_2d41;
+const ONE_X: u64 = 0x2f9a_9710_ca01_a184;
+const SCALED: u64 = 0xe70f_6eba_536c_a7c1;
