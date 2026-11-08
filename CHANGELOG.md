@@ -17,6 +17,12 @@ release, entries were dated.
 
 ## Unreleased
 
+## [0.7.24](https://github.com/scoot-sh/scoot/compare/v0.7.23...v0.7.24) - 2026-11-08
+
+### scootui,scootlaunch
+
+- added: round the search ring and the match chip like the selection pill ([#991](https://github.com/scoot-sh/scoot/pull/991))
+
 ## [0.7.22](https://github.com/scoot-sh/scoot/compare/v0.7.21...v0.7.22) - 2026-11-07
 
 ### scootctl,scoot-look
