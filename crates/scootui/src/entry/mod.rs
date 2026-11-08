@@ -53,6 +53,8 @@ mod paint;
 #[cfg(test)]
 mod goldens;
 #[cfg(test)]
+mod round_tests;
+#[cfg(test)]
 mod tests;
 
 pub use focus::FocusChain;

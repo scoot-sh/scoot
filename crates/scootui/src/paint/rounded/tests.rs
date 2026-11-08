@@ -338,3 +338,123 @@ fn the_corner_search_finds_each_boundary() {
     assert_eq!(from(5, 5, 0), 5, "an empty range");
     assert_eq!(first_where(9, 3, |_| true), 9, "a reversed range is empty");
 }
+
+/// The BGRA bytes a pixel of `color` holds once opaque.
+fn opaque(color: Color) -> [u8; 4] {
+    [color.b, color.g, color.r, 255]
+}
+
+/// An outline in the canvas: `rect` of `radius` stroked `width` wide in
+/// red on a canvas of zeroes.
+fn stroked(canvas_w: u32, canvas_h: u32, rect: Rect, radius: u32, width: u32) -> Vec<u8> {
+    let mut pixels = vec![0u8; (canvas_w * canvas_h * 4) as usize];
+    let mut canvas = Canvas::new(&mut pixels, canvas_w, canvas_h).unwrap();
+    canvas.stroke_rounded(rect, radius, width, RED);
+    pixels
+}
+
+#[test]
+fn a_stroke_with_square_corners_is_the_four_bar_ring() {
+    let pixels = stroked(20, 12, rect(2, 1, 16, 10), 0, 2);
+    // Every pixel of the 2-wide ring is the opaque color, and nothing
+    // inside or outside it is touched.
+    for y in 0..12 {
+        for x in 0..20 {
+            let on_ring = (2..18).contains(&x)
+                && (1..11).contains(&y)
+                && !((4..16).contains(&x) && (3..9).contains(&y));
+            let want = if on_ring { opaque(RED) } else { [0; 4] };
+            assert_eq!(pixel(&pixels, 20, x, y), want, "({x}, {y})");
+        }
+    }
+}
+
+#[test]
+fn a_rounded_stroke_leaves_the_cut_corner_and_the_inside_untouched() {
+    let pixels = stroked(40, 24, rect(2, 2, 36, 20), 8, 2);
+    // The corner square's outer pixel is cut; the straight sides are
+    // whole; the interior is not touched.
+    assert_eq!(pixel(&pixels, 40, 2, 2), [0; 4]);
+    assert_eq!(pixel(&pixels, 40, 37, 21), [0; 4]);
+    assert_eq!(pixel(&pixels, 40, 20, 2), opaque(RED));
+    assert_eq!(pixel(&pixels, 40, 20, 3), opaque(RED));
+    assert_eq!(pixel(&pixels, 40, 20, 4), [0; 4]);
+    assert_eq!(pixel(&pixels, 40, 2, 12), opaque(RED));
+    assert_eq!(pixel(&pixels, 40, 3, 12), opaque(RED));
+    assert_eq!(pixel(&pixels, 40, 4, 12), [0; 4]);
+    assert_eq!(pixel(&pixels, 40, 20, 12), [0; 4]);
+    // The corner arc blends: partial alpha somewhere along it.
+    let blended = (2..10)
+        .flat_map(|y| (2..10).map(move |x| (x, y)))
+        .any(|(x, y)| (1..255).contains(&pixel(&pixels, 40, x, y)[3]));
+    assert!(blended);
+}
+
+#[test]
+fn a_stroke_stays_inside_the_filled_shape_it_outlines() {
+    // Every ringed pixel is covered by the same rectangle filled, at
+    // every radius and width: the outline never leaves the shape.
+    for radius in [0, 1, 3, 8, 10, 30] {
+        for width in [1, 2, 3, 9] {
+            let r = rect(1, 1, 30, 20);
+            let ring = stroked(32, 22, r, radius, width);
+            let mut filled = vec![0u8; 32 * 22 * 4];
+            Canvas::new(&mut filled, 32, 22)
+                .unwrap()
+                .fill_rounded_gradient(r, radius, RED, RED, 255);
+            for y in 0..22 {
+                for x in 0..32 {
+                    let (ring_a, fill_a) = (pixel(&ring, 32, x, y)[3], pixel(&filled, 32, x, y)[3]);
+                    assert!(
+                        ring_a <= fill_a,
+                        "r{radius} w{width} ({x}, {y}): ring {ring_a} over fill {fill_a}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_stroke_as_thick_as_half_the_rectangle_fills_it() {
+    let r = rect(0, 0, 12, 8);
+    let ring = stroked(12, 8, r, 0, 100);
+    let mut filled = vec![0u8; 12 * 8 * 4];
+    Canvas::new(&mut filled, 12, 8)
+        .unwrap()
+        .fill_rounded_gradient(r, 0, RED, RED, 255);
+    assert_eq!(ring, filled);
+}
+
+#[test]
+fn a_stroke_off_the_canvas_or_empty_draws_nothing_and_does_not_panic() {
+    let mut pixels = vec![0u8; 10 * 6 * 4];
+    let mut canvas = Canvas::new(&mut pixels, 10, 6).unwrap();
+    // Empty rectangle, zero width, entirely off the canvas, and one at
+    // the edge of `u32`.
+    canvas.stroke_rounded(rect(1, 1, 0, 4), 3, 2, RED);
+    canvas.stroke_rounded(rect(1, 1, 4, 0), 3, 2, RED);
+    canvas.stroke_rounded(rect(1, 1, 4, 4), 3, 0, RED);
+    canvas.stroke_rounded(rect(50, 50, 8, 8), 3, 2, RED);
+    canvas.stroke_rounded(rect(u32::MAX - 3, 0, u32::MAX, u32::MAX), 100, 2, RED);
+    canvas.stroke_rounded(rect(0, u32::MAX - 3, 4, u32::MAX), u32::MAX, u32::MAX, RED);
+    assert!(pixels.iter().all(|byte| *byte == 0));
+}
+
+#[test]
+fn a_stroke_clipped_by_the_canvas_draws_its_visible_part() {
+    // A 20x12 outline on a 10x6 canvas: the top-left corner and the
+    // top and left sides show, with the same pixels as the unclipped one.
+    let r = rect(0, 0, 20, 12);
+    let clipped = stroked(10, 6, r, 5, 2);
+    let whole = stroked(20, 12, r, 5, 2);
+    for y in 0..6 {
+        for x in 0..10 {
+            assert_eq!(
+                pixel(&clipped, 10, x, y),
+                pixel(&whole, 20, x, y),
+                "({x}, {y})"
+            );
+        }
+    }
+}

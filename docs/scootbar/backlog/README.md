@@ -174,7 +174,7 @@ Shared foundation ([epic](resolved/extract-scootui-done.md)):
 - [The panel](resolved/launch-ui-done.md), [launching](launch-spawn.md), [icons](resolved/launch-icons-done.md)
 - [dmenu and run](launch-dmenu.md), [the agent interface](resolved/launch-agent-json-done.md)
 - [Nix, the look layer and the opt-in switch](resolved/launch-nix-done.md), [packaging and the site](resolved/launch-packaging-done.md), [flip the default](resolved/launch-default-flip-done.md); follow-ups: [first-open outlier](launch-first-open-outlier.md), [xdpw chooser live proof](launch-xdpw-chooser-live-proof.md); later, [windows mode](resolved/launch-windows-mode-done.md)
-- Review follow-ups (#803, #805): [click-outside](resolved/launch-click-outside-followups-done.md), [panel visuals](launch-panel-visual-followups.md)
+- Review follow-ups (#803, #805): [click-outside](resolved/launch-click-outside-followups-done.md), [panel visuals](resolved/launch-panel-visual-followups-done.md)
 
 [`scootgreet`: the login greeter](scootgreet.md) (epic):
 - [Baseline: measure ReGreet + cage](greet-baseline.md) (medium), then [the prototype: the go/no-go gate against a real greetd](greet-prototype.md) (medium)

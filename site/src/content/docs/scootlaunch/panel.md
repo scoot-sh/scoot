@@ -265,7 +265,7 @@ and is reported; a missing layer is the defaults with one warning.
 | Panel border | `focus` (default `accent`) |
 | Caret, entry focus ring | `accent` |
 | Row icons, tile fill | `accent` with `background` ink (tile letter) |
-| Corners | `radius`, for the panel and for the selection highlight (at most half a row) |
+| Corners | `radius`, for the panel, the selection highlight, the search field's focus ring and the inverted match chip (at most half a row) |
 | Size | `font-size` (the look's popup size) |
 | Spacing | derived from `font-size` and `radius`: no keys |
 | Shadow, fill | `shadow`, `fill` (see [Depth](#depth)) |
